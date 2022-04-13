@@ -160,7 +160,7 @@ void copy_range(variable_list& out, torch::autograd::IndexRange range, at::Array
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
-struct TORCH_API GenericPythonBackward : public torch::autograd::TraceableFunction {
+struct GenericPythonBackward : public torch::autograd::TraceableFunction {
   using TraceableFunction::TraceableFunction;
 
   variable_list apply(variable_list&& grads) override;
