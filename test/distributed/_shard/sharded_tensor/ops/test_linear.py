@@ -190,7 +190,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         for spec in generate_chunk_sharding_specs_for_test(0):
             fc1 = torch.nn.Linear(10, 10).cuda(self.rank)
             shard_parameter(fc1, "bias", spec)
-            with self.assertRaisesRegex(TypeError, 'bias needs to be torch.Tensor'):
+            with self.assertRaisesRegex(TypeError, 'weight needs to be ShardedTensor'):
                 fc1(torch.rand(10, 10).cuda(self.rank))
 
             fc2 = torch.nn.Linear(10, 10).cuda(self.rank)

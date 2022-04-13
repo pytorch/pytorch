@@ -782,18 +782,11 @@ class ShardedTensor(ShardedTensorInterface):
         """
         return self._local_shards
 
-    def is_pinned(self) -> bool:
+    def is_pinned(self) -> bool:  # type: ignore[override]
         """
         Returns True if the sharded tensor (each local shard) resides in pinned memory.
         """
         return self._metadata.tensor_properties.pin_memory
-
-    def is_contiguous(self) -> bool:
-        """
-        Returns True if the sharded tensor (each local shard) is contiguous in memory
-        in the order specified by memory format.
-        """
-        return self._metadata.tensor_properties.memory_format == torch.contiguous_format
 
     def _register_remote_shards(self, remote_shards: List[rpc.RRef[Shard]], rpc_rank: int):
         self._remote_shards[rpc_rank] = remote_shards
