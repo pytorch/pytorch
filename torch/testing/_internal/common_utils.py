@@ -1999,6 +1999,7 @@ class TestCase(expecttest.TestCase):
         return crow_indices.to(device=device)
 
     def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype, layout=torch.sparse_csr):
+        # TODO: rename genSparseCSRTensor to genSparseCompressedTensor
         from operator import mul
         from functools import reduce
         sparse_dim = 2
@@ -2026,9 +2027,9 @@ class TestCase(expecttest.TestCase):
         crow_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
         col_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
 
-        return torch.sparse_csr_tensor(crow_indices,
-                                       col_indices,
-                                       values, size=size, dtype=dtype, layout=layout, device=device)
+        return torch.sparse_compressed_tensor(crow_indices,
+                                              col_indices,
+                                              values, size=size, dtype=dtype, layout=layout, device=device)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have

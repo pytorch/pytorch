@@ -281,6 +281,35 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     unsorted_function_hints: Dict[str, List[str]] = collections.defaultdict(list)
+
+    for n, n1, n2 in [('csr', 'crow', 'col'), ('csc', 'ccol', 'row'),
+                      ('bsr', 'crow', 'col'), ('bsc', 'ccol', 'row')]:
+        unsorted_function_hints.update({
+            f'sparse_{n}_tensor' : [f'def sparse_{n}_tensor({n1}_indices: Union[Tensor, List],'
+                                    f'{n2}_indices: Union[Tensor, List],'
+                                    ' values: Union[Tensor, List], size: Optional[_size]=None,'
+                                    ' *, dtype: Optional[_dtype]=None,'
+                                    ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
+            f'_sparse_{n}_tensor_unsafe': [f'def _sparse_{n}_tensor_unsafe({n1}_indices: Union[Tensor, List],'
+                                           f'{n2}_indices: Union[Tensor, List],'
+                                           ' values: Union[Tensor, List], size: List[int],'
+                                           ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
+                                           ' requires_grad: bool = False) -> Tensor: ...'],
+        })
+
+    unsorted_function_hints.update({
+        f'sparse_compressed_tensor' : ['def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],'
+                                    'plain_indices: Union[Tensor, List],'
+                                    ' values: Union[Tensor, List], size: Optional[_size]=None,'
+                                    ' *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,'
+                                    ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
+        '_sparse_compressed_tensor_unsafe': ['def _sparse_compressed_tensor_unsafe(comp_indices: Union[Tensor, List],'
+                                             'plain_indices: Union[Tensor, List],'
+                                             ' values: Union[Tensor, List], size: List[int],'
+                                             ' dtype: Optional[_dtype] = None, layout: Optional[_layout] = None, device: Optional[_device] = None,'
+                                             ' requires_grad: bool = False) -> Tensor: ...'],
+    })
+
     unsorted_function_hints.update({
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
@@ -305,18 +334,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
                               ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
-        'sparse_csr_tensor' : ['def sparse_csr_tensor(crow_indices: Union[Tensor, List],'
-                               'col_indices: Union[Tensor, List],'
-                               ' values: Union[Tensor, List], size: Optional[_size]=None,'
-                               ' *, dtype: Optional[_dtype]=None, layout: _layout=None,'
-                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
         '_sparse_coo_tensor_unsafe': ['def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],'
-                                      ' dtype: Optional[_dtype] = None, layout: _layout=None, device: Optional[_device] = None,'
-                                      ' requires_grad: bool = False) -> Tensor: ...'],
-        '_sparse_csr_tensor_unsafe': ['def _sparse_csr_tensor_unsafe(crow_indices: Union[Tensor, List],'
-                                      'col_indices: Union[Tensor, List],'
-                                      ' values: Union[Tensor, List], size: List[int],'
-                                      ' dtype: Optional[_dtype] = None, layout: _layout=None, device: Optional[_device] = None,'
+                                      ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
                                       ' requires_grad: bool = False) -> Tensor: ...'],
         'range': ['def range(start: Number, end: Number,'
                   ' step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
