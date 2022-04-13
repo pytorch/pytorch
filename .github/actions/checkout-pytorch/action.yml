@@ -6,6 +6,10 @@ inputs:
   no-sudo:
     description: If set to any value, don't use sudo to clean the workspace
     required: false
+  submodules:
+    description: Works as stated in actions/checkout, but the default value is recursive
+    required: false
+    default: recursive
 
 runs:
   using: composite
@@ -29,4 +33,4 @@ runs:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         # deep clone, to allow use of git merge-base
         fetch-depth: 0
-        submodules: recursive
+        submodules: ${{ inputs.submodules }}
