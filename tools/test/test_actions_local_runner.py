@@ -47,16 +47,6 @@ if sys.version_info >= (3, 8):
 
     class TestEndToEnd(unittest.TestCase):
         expected = [
-            "cmakelint: Run cmakelint",
-            "quick-checks: Ensure no direct cub include",
-            "quick-checks: Ensure no unqualified type ignore",
-            "quick-checks: Ensure no unqualified noqa",
-            "quick-checks: Ensure canonical include",
-            "quick-checks: Ensure no non-breaking spaces",
-            "quick-checks: Ensure no tabs",
-            "flake8",
-            "quick-checks: Ensure correct trailing newlines",
-            "quick-checks: Ensure no trailing spaces",
             "shellcheck: Regenerate workflows",
             "shellcheck: Assert that regenerating the workflows didn't change them",
             "shellcheck: Extract scripts from GitHub Actions workflows",
@@ -73,8 +63,6 @@ if sys.version_info >= (3, 8):
             for line in self.expected:
                 self.assertIn(line, stdout)
 
-            self.assertIn("mypy", stdout)
-
         def test_quicklint(self):
             cmd = ["make", "quicklint", "-j", str(multiprocessing.cpu_count())]
             proc = subprocess.run(
@@ -84,9 +72,6 @@ if sys.version_info >= (3, 8):
 
             for line in self.expected:
                 self.assertIn(line, stdout)
-
-            # TODO: See https://github.com/pytorch/pytorch/issues/57967
-            self.assertIn("mypy (skipped typestub generation)", stdout)
 
     class TestQuicklint(unittest.IsolatedAsyncioTestCase):
         test_files = [
@@ -145,7 +130,7 @@ if sys.version_info >= (3, 8):
                 await actions_local_runner.ShellCheck(self.test_sh_files, True).run()
 
             self.assertIn("SC2148: Tips depend on target shell", f.getvalue())
-            self.assertIn("SC2283: Remove spaces around = to assign", f.getvalue())
+            self.assertIn("SC1068: Don't put spaces around the = in assignments", f.getvalue())
 
         async def test_mypy(self):
             self.maxDiff = None

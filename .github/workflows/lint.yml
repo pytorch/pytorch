@@ -42,8 +42,8 @@ jobs:
         run: |
           lintrunner -vv --force-color
           echo ""
-          echo "\e[1m\e[36mYou can reproduce these results locally by running \`lintrunner\`.\e[0m"
-          echo "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+          echo -e "\e[1m\e[36mYou can reproduce these results locally by running \`lintrunner\`.\e[0m"
+          echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
 
       - name: Store annotations
         # Don't run on forked pull requests
@@ -256,6 +256,7 @@ jobs:
           set -eux
           python3 -mpip install -r requirements.txt
           python3 -mpip install boto3==1.16.34
+          make setup_lint
       - name: Test tools
         run: |
           python3 -m unittest discover -vs tools/test -p 'test_*.py'
