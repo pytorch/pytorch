@@ -21,7 +21,7 @@ inline bool is_innnermost_dim(
   maybe_wrap_dims(dims, ndim);
   std::sort(dims.begin(), dims.end(), std::greater<int64_t>());
   bool is_innermost = dims.empty() || dims[0] == ndim - 1;
-  for (int i = 1; i < dims.size(); ++i) {
+  for (size_t i = 1; i < dims.size(); ++i) {
     is_innermost = is_innermost && (dims[i] == dims[i-1] - 1);
   }
   return is_innermost;
@@ -175,7 +175,7 @@ Tensor& mean_out_quantized_cpu(
 // qstd
 inline bool is_std_inner_dim_fast_path(
     const Tensor& self,
-    optional<IntArrayRef> dim,
+    OptionalIntArrayRef dim,
     optional<int64_t> unbiased) {
   // Do not enter fast path if there are too few elements
   IntArrayRef dims = dim.has_value() ? dim.value() : IntArrayRef();
@@ -195,7 +195,7 @@ inline bool is_std_inner_dim_fast_path(
 
 Tensor& std_out_quantized_cpu(
     const Tensor& self,
-    optional<IntArrayRef> dim,
+    OptionalIntArrayRef dim,
     optional<int64_t> unbiased,
     bool keepdim,
     Tensor& result) {
@@ -219,7 +219,7 @@ Tensor& std_out_quantized_cpu(
 
 Tensor std_quantized_cpu(
     const Tensor& self,
-    optional<IntArrayRef> dim,
+    OptionalIntArrayRef dim,
     optional<int64_t> unbiased,
     bool keepdim) {
   Tensor result;
