@@ -489,3 +489,10 @@ def compute_cosine_similarity(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     x = x.reshape(1, -1)
     y = y.reshape(1, -1)
     return torch.nn.functional.cosine_similarity(x, y)
+
+def op_type_supports_shadowing(node: Node) -> bool:
+    if node.op == 'call_function':
+        if node.target in (torch.add, torch.mul):
+            # shadowing for ops with two inputs is not implemented yet
+            return False
+    return True
