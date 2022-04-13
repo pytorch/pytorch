@@ -7,6 +7,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
+#include <torch/csrc/jit/mobile/import_export_common.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
@@ -16,7 +17,6 @@
 
 #if defined(ENABLE_FLATBUFFER)
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
-#include <torch/csrc/jit/mobile/import_export_common.h>
 #endif // defined(ENABLE_FLATBUFFER)
 
 #include <exception>
@@ -182,7 +182,7 @@ std::map<std::string, at::Tensor> load_parameters_from_zip(
   return map;
 }
 
-#if defined(ENABLE_FLATBUFFER)
+} // namespace
 
 /**
  * Extracts the parameter map stored in @p module. Expects a layout
@@ -237,10 +237,6 @@ std::map<std::string, at::Tensor> mobile_module_to_parameter_map(
       mobile::internal::kSavedParametersAttributeName,
       "' in deserialized mobile::Module");
 }
-
-#endif // defined(ENABLE_FLATBUFFER)
-
-} // namespace
 
 std::map<std::string, at::Tensor> _load_parameters(
     std::istream& in,
