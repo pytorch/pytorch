@@ -1,8 +1,20 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/TensorTopK.h>
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
+
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cuda/Sort.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/sort_native.h>
+#include <ATen/ops/topk_native.h>
+#endif
 
 namespace at {
 namespace native {
