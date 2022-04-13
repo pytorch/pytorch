@@ -85,7 +85,7 @@ include_patterns = [
     'test/test_complex.py',
     'test/test_datapipe.py',
     'test/test_futures.py',
-    'test/test_numpy_interop.py',
+    # 'test/test_numpy_interop.py',
     'test/test_torch.py',
     'test/test_type_hints.py',
     'test/test_type_info.py',
@@ -103,6 +103,9 @@ exclude_patterns = [
     'torch/ao/quantization/fx/convert.py',
     'torch/ao/quantization/_dbr/function_fusion.py',
     'test/test_datapipe.py',
+    'caffe2/contrib/fakelowp/test/test_batchmatmul_nnpi_fp16.py',
+    'test/test_numpy_interop.py',
+    'torch/torch_version.py',
 ]
 command = [
     'python3',
