@@ -308,9 +308,6 @@ at::Tensor PackedLinearWeightCudnn::apply_impl(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
-  TORCH_CHECK(act.dim() <= max_num_input_dim, "Number of dimensions for input tensor exeeds ", max_num_input_dim,
-  "; Increase max_num_input_dim in aten/src/ATen/native/quantized/cudnn/Linear.cpp to a larger value, if necessary, and recompile.");
-
   std::vector<int64_t> original_output_shape{act.sizes().vec()}; // 2D
   original_output_shape.back() = orig_weight.size(0); // output channels
   // cudnn expects tensors to be at least 3D. we will prepend a dummy dimension for quantized_output

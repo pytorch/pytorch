@@ -342,6 +342,8 @@ The `expecttest` and `hypothesis` libraries must be installed to run the tests. 
 an optional dependency, and `pytest` may help run tests more selectively.
 All these packages can be installed with `conda` or `pip`.
 
+**Weird note:** In our CI (Continuous Integration) jobs, we actually run the tests from the `test` folder and **not** the root of the repo, since there are various dependencies we set up for CI that expects the tests to be run from the test folder. As such, there may be some inconsistencies between local testing and CI testing--if you observe an inconsistency, please [file an issue](https://github.com/pytorch/pytorch/issues/new/choose).
+
 ### Better local unit tests with `pytest`
 
 We don't officially support `pytest`, but it works well with our
