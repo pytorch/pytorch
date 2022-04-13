@@ -6,7 +6,7 @@
 
 namespace at {
 class Tensor;
-struct TensorIterator;
+class TensorBase;
 struct TensorIteratorBase;
 }
 
@@ -52,6 +52,7 @@ DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
 DECLARE_DISPATCH(unary_fn, log2_stub);
 DECLARE_DISPATCH(unary_fn, special_ndtri_stub);
+DECLARE_DISPATCH(unary_fn, special_log_ndtr_stub);
 DECLARE_DISPATCH(unary_fn, neg_stub);
 
 DECLARE_DISPATCH(unary_fn, reciprocal_stub);
@@ -73,14 +74,14 @@ DECLARE_DISPATCH(unary_fn, trunc_stub);
 DECLARE_DISPATCH(unary_fn, lgamma_stub);
 
 // NB: these are actually defined in Distribution
-DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, c10::optional<Generator>), bernoulli_tensor_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const double, c10::optional<Generator>), bernoulli_scalar_stub);
+DECLARE_DISPATCH(void(*)(const TensorBase&, const TensorBase&, c10::optional<Generator>), bernoulli_tensor_stub);
+DECLARE_DISPATCH(void(*)(const TensorBase&, const double, c10::optional<Generator>), bernoulli_scalar_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), cauchy_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, c10::optional<Generator>), exponential_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, c10::optional<Generator>), geometric_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), log_normal_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), uniform_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const double, const double, c10::optional<Generator>), normal_stub);
+DECLARE_DISPATCH(void(*)(const TensorBase&, const double, const double, c10::optional<Generator>), normal_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const uint64_t, const int64_t, c10::optional<Generator>), random_from_to_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, c10::optional<Generator>), random_full_64_bits_range_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, c10::optional<Generator>), random_stub);

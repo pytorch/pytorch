@@ -5,7 +5,7 @@ from torch.nn.modules.module import _addindent
 from torch.package import PackageImporter, PackageExporter
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional, Set
-from .graph import Graph, _is_from_torch, _custom_builtins, PythonCode
+from .graph import Graph, _PyTreeCodeGen, _is_from_torch, _custom_builtins, PythonCode
 from ._compatibility import compatibility
 from torch.package import Importer, sys_importer
 import copy
@@ -570,9 +570,9 @@ class {module_name}(torch.nn.Module):
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
-        if self._graph._pytree_info is not None:
-            self._in_spec = self._graph._pytree_info.in_spec
-            self._out_spec = self._graph._pytree_info.out_spec
+        if isinstance(self._graph._codegen, _PyTreeCodeGen):
+            self._in_spec = self._graph._codegen.pytree_info.in_spec
+            self._out_spec = self._graph._codegen.pytree_info.out_spec
         python_code = self._graph.python_code(root_module='self')
         self._code = python_code.src
 
@@ -619,7 +619,7 @@ class {module_name}(torch.nn.Module):
                 if cls_call is not None:
                     return cls_call(self, *args, **kwargs)
                 else:
-                    return super(type(self), self).__call__(*args, **kwargs)
+                    return super(cls, self).__call__(*args, **kwargs)
             except Exception as e:
                 assert e.__traceback__
                 topmost_framesummary: traceback.FrameSummary = \
@@ -627,7 +627,9 @@ class {module_name}(torch.nn.Module):
                 if "eval_with_key" in topmost_framesummary.filename:
                     print(generate_error_message(topmost_framesummary),
                           file=sys.stderr)
-                raise e.with_traceback(None)
+                    raise e.with_traceback(None)
+                else:
+                    raise e
 
         cls.__call__ = wrapped_call
 

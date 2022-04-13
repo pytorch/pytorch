@@ -215,14 +215,14 @@ def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, *
 
     module_inputs = [
         ModuleInput(constructor_input=FunctionInput(2, 3, 4),
-                    forward_input=FunctionInput(make_input(shape=(8, 2)), make_input(shape=(8, 3))),
+                    forward_input=FunctionInput(make_input((8, 2)), make_input((8, 3))),
                     reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2)),
         ModuleInput(constructor_input=FunctionInput(2, 3, 4, bias=False),
-                    forward_input=FunctionInput(make_input(shape=(8, 2)), make_input(shape=(8, 3))),
+                    forward_input=FunctionInput(make_input((8, 2)), make_input((8, 3))),
                     desc='no_bias',
                     reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2, bias=False)),
         ModuleInput(constructor_input=FunctionInput(2, 3, 4),
-                    forward_input=FunctionInput(make_input(shape=(2)), make_input(shape=(3))),
+                    forward_input=FunctionInput(make_input((2)), make_input((3))),
                     desc='no_batch_dim',
                     reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1.view(1, -1), x2.view(1, -1))),
     ]
@@ -420,7 +420,7 @@ def generate_regression_criterion_inputs(make_input):
     return [
         ModuleInput(
             constructor_input=FunctionInput(reduction=reduction),
-            forward_input=FunctionInput(make_input(shape=(4, )), make_input(shape=4,)),
+            forward_input=FunctionInput(make_input((4, )), make_input(4,)),
             reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True),
             desc='no_batch_dim_{}'.format(reduction)
         ) for reduction in ['none', 'mean', 'sum']]
@@ -431,7 +431,7 @@ def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, 
 
     return [
         ModuleInput(constructor_input=FunctionInput(kernel_size=2),
-                    forward_input=FunctionInput(make_input(shape=(3, 6))),
+                    forward_input=FunctionInput(make_input((3, 6))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
 
@@ -441,7 +441,7 @@ def module_inputs_torch_nn_AdaptiveAvgPool2d(module_info, device, dtype, require
 
     return [
         ModuleInput(constructor_input=FunctionInput(3,),
-                    forward_input=FunctionInput(make_input(shape=(1, 3, 5, 6))),
+                    forward_input=FunctionInput(make_input((1, 3, 5, 6))),
                     desc='single')]
 
 
@@ -450,7 +450,7 @@ def module_inputs_torch_nn_BatchNorm2d(module_info, device, dtype, requires_grad
 
     return [
         ModuleInput(constructor_input=FunctionInput(3,),
-                    forward_input=FunctionInput(make_input(shape=(2, 3, 6, 6))))]
+                    forward_input=FunctionInput(make_input((2, 3, 6, 6))))]
 
 
 def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad, **kwargs):
@@ -458,7 +458,7 @@ def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad
 
     return [
         ModuleInput(constructor_input=FunctionInput(3,),
-                    forward_input=FunctionInput(make_input(shape=(2, 3, 4, 4, 4))))]
+                    forward_input=FunctionInput(make_input((2, 3, 4, 4, 4))))]
 
 
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **kwargs):
@@ -474,7 +474,7 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **k
         ModuleInput(constructor_input=(FunctionInput(C_out, kernel_size, **conv_kwargs) if lazy else
                                        FunctionInput(C_in, C_out, kernel_size, **conv_kwargs)),
                     forward_input=FunctionInput(make_input(
-                        shape=(input_batch_shape if with_batch else input_no_batch_shape))),
+                        input_batch_shape if with_batch else input_no_batch_shape)),
                     desc=('' if with_batch else 'no_batch_dim'),
                     reference_fn=(None if with_batch else no_batch_dim_reference_fn))
         for with_batch, conv_kwargs in itertools.product([True, False], conv_kwargs_list)
@@ -486,17 +486,17 @@ def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwar
 
     return [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=(3, 2, 5))),
+                    forward_input=FunctionInput(make_input((3, 2, 5))),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1))),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=())),
+                    forward_input=FunctionInput(make_input(())),
                     desc='scalar'),
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input(shape=(3,))),
+                    forward_input=FunctionInput(make_input((3,))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=(2, 3, 2, 5))),
+                    forward_input=FunctionInput(make_input((2, 3, 2, 5))),
                     desc='4d_input')]
 
 
@@ -505,14 +505,14 @@ def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwa
 
     return [
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=(3, 2, 5))),
+                    forward_input=FunctionInput(make_input((3, 2, 5))),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2. * ((.5 * i).exp() - 1))),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=())),
+                    forward_input=FunctionInput(make_input(())),
                     reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1)),
                     desc='scalar'),
         ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                    forward_input=FunctionInput(make_input(shape=(3,))),
+                    forward_input=FunctionInput(make_input((3,))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
 
@@ -537,12 +537,12 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
 
     return [
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input(shape=(2, 3, 4)),
-                                                make_input(shape=(2, 3, 4))),
+                    forward_input=FunctionInput(make_input((2, 3, 4)),
+                                                make_input((2, 3, 4))),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * sum((a - b).abs().sum()
                                                                          for a, b in zip(i, t))),
         ModuleInput(constructor_input=FunctionInput(),
-                    forward_input=FunctionInput(make_input(shape=()), make_input(shape=())),
+                    forward_input=FunctionInput(make_input(()), make_input(())),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
                     desc='scalar')] + generate_regression_criterion_inputs(make_input)
 
@@ -558,23 +558,23 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
     for reduction in reductions:
         samples.append(
             ModuleInput(constructor_input=FunctionInput(reduction=reduction),
-                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
         samples.append(
-            ModuleInput(constructor_input=FunctionInput(reduction=reduction, weight=make_weight(shape=(9,))),
-                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, weight=make_weight((9,))),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
         samples.append(
             ModuleInput(constructor_input=FunctionInput(reduction=reduction, label_smoothing=0.5),
-                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
         samples.append(
             ModuleInput(constructor_input=FunctionInput(reduction=reduction, label_smoothing=0.5,
-                                                        weight=make_weight(shape=(9,))),
-                        forward_input=FunctionInput(make_input(shape=(9,)), make_target(shape=(), low=0, high=9)),
+                                                        weight=make_weight((9,))),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
 
@@ -587,13 +587,13 @@ def module_inputs_torch_nn_Hardswish(module_info, device, dtype, requires_grad, 
     return [
         ModuleInput(
             constructor_input=FunctionInput(),
-            forward_input=FunctionInput(make_input(shape=4)),
+            forward_input=FunctionInput(make_input(4)),
             reference_fn=no_batch_dim_reference_fn,
             desc='no_batch_dim',
         ),
         ModuleInput(
             constructor_input=FunctionInput(),
-            forward_input=FunctionInput(make_input(shape=(2, 3, 2, 5))),
+            forward_input=FunctionInput(make_input((2, 3, 2, 5))),
             desc='4d_input')
     ]
 
@@ -604,15 +604,15 @@ def module_inputs_torch_nn_MaxPool2d(module_info, device, dtype, requires_grad, 
     return [
         ModuleInput(
             constructor_input=FunctionInput((3, 3), (2, 2), (1, 1)),
-            forward_input=FunctionInput(make_input(shape=((3, 7, 7)))),
+            forward_input=FunctionInput(make_input(((3, 7, 7)))),
             desc='3d_input'),
         ModuleInput(
             constructor_input=FunctionInput((3, 3), (2, 2), (1, 1)),
-            forward_input=FunctionInput(make_input(shape=(1, 3, 7, 7))),
+            forward_input=FunctionInput(make_input((1, 3, 7, 7))),
             desc='4d_input'),
         ModuleInput(
             constructor_input=FunctionInput((3, 3), (2, 2), (1, 1), return_indices=True),
-            forward_input=FunctionInput(make_input(shape=(1, 3, 7, 7))),
+            forward_input=FunctionInput(make_input((1, 3, 7, 7))),
             desc='return_indices'),
     ]
 
@@ -623,12 +623,12 @@ def module_inputs_torch_nn_Sigmoid(module_info, device, dtype, requires_grad, **
     return [
         ModuleInput(
             constructor_input=FunctionInput(),
-            forward_input=FunctionInput(make_input(shape=(2, 3, 4, 5))),
+            forward_input=FunctionInput(make_input((2, 3, 4, 5))),
             desc='channels_last_mem_format'
         ),
         ModuleInput(
             constructor_input=FunctionInput(),
-            forward_input=FunctionInput(make_input(shape=(2, 3, 3, 4, 5))),
+            forward_input=FunctionInput(make_input((2, 3, 3, 4, 5))),
             desc='channels_last_3d_mem_format'
         )
     ]
@@ -641,14 +641,14 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
         ModuleInput(
             constructor_input=FunctionInput(4, 2, 16, 0.0),
             forward_input=FunctionInput(
-                make_input(shape=(2, 3, 4))
+                make_input((2, 3, 4))
             ),
             desc='relu_activation'
         ),
         ModuleInput(
             constructor_input=FunctionInput(4, 2, 8, 0.0, F.gelu),
             forward_input=FunctionInput(
-                make_input(shape=(2, 3, 4))
+                make_input((2, 3, 4))
             ),
             desc='gelu_activation'
         ), ]
@@ -662,7 +662,7 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
                                                 dropout=0.0, batch_first=True, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
+                    make_input((3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
                                      batch_first=True, kwargs_to_batchify={'src_key_padding_mask': 0}),
@@ -673,7 +673,7 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
             ModuleInput(
                 constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=False, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
+                    make_input((3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
                                      batch_first=False, kwargs_to_batchify={'src_key_padding_mask': 0}),
@@ -690,14 +690,14 @@ def module_inputs_torch_nn_TransformerDecoderLayer(module_info, device, dtype, r
         ModuleInput(
             constructor_input=FunctionInput(4, 2, 16, 0.0),
             forward_input=FunctionInput(
-                make_input(shape=(2, 3, 4)), make_input(shape=(2, 3, 4))
+                make_input((2, 3, 4)), make_input((2, 3, 4))
             ),
             desc='relu_activation'
         ),
         ModuleInput(
             constructor_input=FunctionInput(4, 2, 8, 0.0, F.gelu),
             forward_input=FunctionInput(
-                make_input(shape=(2, 3, 4)), make_input(shape=(2, 3, 4))
+                make_input((2, 3, 4)), make_input((2, 3, 4))
             ),
             desc='gelu_activation'
         ), ]
@@ -714,7 +714,7 @@ def module_inputs_torch_nn_TransformerDecoderLayer(module_info, device, dtype, r
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
                                                 dropout=0.0, batch_first=True, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
+                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=memory_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
@@ -727,7 +727,7 @@ def module_inputs_torch_nn_TransformerDecoderLayer(module_info, device, dtype, r
             ModuleInput(
                 constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=False, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
+                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, memory_mask=memory_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=memory_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
@@ -755,7 +755,7 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
                                                 num_encoder_layers=1, num_decoder_layers=1,
                                                 dropout=0.0, batch_first=True, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
+                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,
@@ -770,7 +770,7 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
                                                 num_encoder_layers=1, num_decoder_layers=1,
                                                 dropout=0.0, batch_first=False, norm_first=norm_first),
                 forward_input=FunctionInput(
-                    make_input(shape=(3, 4)), make_input(shape=(3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
+                    make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
                 ),
                 reference_fn=partial(no_batch_dim_reference_fn,

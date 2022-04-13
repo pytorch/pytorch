@@ -52,10 +52,13 @@ struct TORCH_API ViewInfo {
     kSelect,
     kAsStrided,
     kDiagonal,
+    kSqueeze,
+    kUnsqueeze,
   };
 
   ViewInfo() = default;
   ViewInfo(Type view_type, Shape shape, Shape source_shape);
+  ViewInfo(Type view_type, Shape shape, Shape source_shape, int64_t sqi);
   ViewInfo(
       Type view_type,
       Shape source_shape,
@@ -92,6 +95,8 @@ struct TORCH_API ViewInfo {
   c10::optional<AsStridedInfo> as_strided;
   // Information used for diagonal views.
   c10::optional<DiagonalInfo> diagonal;
+  // Squeeze/Unsqueeze Index
+  int64_t squeeze_index;
 };
 
 // When a "view" (capture by reference) is taken on a node, an Alias object is
