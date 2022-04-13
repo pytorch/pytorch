@@ -114,7 +114,7 @@ namespace native {
 
 DEFINE_DISPATCH(qr_orthogonalization_stub);
 
-Tensor& qr_orthogonalization_out(const Tensor& self, const float epsilon, Tensor& out){
+Tensor& qr_orthogonalization_out(const Tensor& self, const double epsilon, Tensor& out){
     TORCH_CHECK(self.is_contiguous(), "Input must be contiguous")
     TORCH_CHECK(self.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
     TORCH_CHECK(out.is_contiguous(), "Output tensor must be contiguous")
@@ -135,7 +135,7 @@ Tensor qr_orthogonalization(const Tensor& self, const double epsilon){
     return out;
 }
 
-Tensor qr_orthogonalization_(Tensor& self, const double epsilon){
+Tensor& qr_orthogonalization_(Tensor& self, const double epsilon){
     TORCH_CHECK(self.is_contiguous(), "Input must be contiguous")
     TORCH_CHECK(self.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
 

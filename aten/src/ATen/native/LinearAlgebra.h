@@ -14,7 +14,7 @@ struct Tensor;
 
 namespace at { namespace native {
 
-using qr_orthogonalization_fn = void(*)( Tensor&, Tensor&, Tensor&);
+using qr_orthogonalization_fn = void(*)(Tensor&, Tensor&, Tensor&);
 DECLARE_DISPATCH(qr_orthogonalization_fn, qr_orthogonalization_stub);
 
 using addr_fn = void (*)(TensorIterator &, const Scalar& beta, const Scalar& alpha);
