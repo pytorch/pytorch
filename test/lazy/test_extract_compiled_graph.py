@@ -13,6 +13,7 @@ import inspect
 from torch import fx
 import re
 from contextlib import contextmanager
+import copy
 
 class ModuleConstScale(nn.Module):
     def __init__(self):
@@ -82,6 +83,14 @@ class ModuleReturnDupTensor(nn.Module):
         c = a + b
         return a - b, c, a + 1, c
 
+class ModuleInplaceUpdate(nn.Module):
+    def __init__(self):
+        super(ModuleInplaceUpdate, self).__init__()
+
+    def forward(self, a, b):
+        a.sub_(b)
+        return b - 1, b + 1
+
 @contextmanager
 def force_fallback_ctx_mgr(fallback_op):
     oldconfig = config.get_force_fallback()
@@ -145,12 +154,21 @@ def verify_reusing_compiled_graph(mod, exception_msg_pattern, ncase=10):
     failed_index = []
     for i in range(ncase):
         rand_args = gen_rand_args(mod)
+        rand_args_copy = copy.deepcopy(rand_args)
         expected = mod(*rand_args)
-        actual = optimized_mod(*rand_args)
+        actual = optimized_mod(*rand_args_copy)
 
         if not allclose(expected, actual):
             print(f"Incorrect results. expected {expected}, actual {actual}")
             failed_index.append(i)
+            continue
+
+        # make sure arguments match after calling the model forward method to handle inplace
+        # updates.
+        if not allclose(rand_args, rand_args_copy):
+            print(f"Incorrect updated arguments. expected {rand_args}, actual {rand_args_copy}")
+            failed_index.append(i)
+            continue
 
     if len(failed_index) > 0:
         raise RuntimeError(f"Failed {len(failed_index)}/{ncase} cases")
@@ -174,3 +192,4 @@ class OptimizeTest(unittest.TestCase):
     test_addcmul = maketest(ModuleAddcmul)
     test_return_multi = maketest(ModuleReturnMulti)
     test_return_dup_tensor = maketest(ModuleReturnDupTensor)
+    test_inplace_update = maketest(ModuleInplaceUpdate)
