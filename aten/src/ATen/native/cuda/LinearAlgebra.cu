@@ -108,12 +108,10 @@ __global__ void q_loop(scalar_t *Q, scalar_t *vs, const uint n, const uint m){
 }
 
 template <int BLOCK_THREADS, typename scalar_t> 
-void qr_main(const Tensor& A, Tensor& Q, Tensor& vs, const uint m, const uint n, const float epsilon){
+void qr_main(const Tensor& R, Tensor& Q, Tensor& vs, const uint m, const uint n){
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
     int barriers[m];
-    Tensor R = A.clone();
-    R.diagonal().add_((scalar_t) epsilon);
     
     reflections<BLOCK_THREADS, scalar_t><<<m, BLOCK_THREADS, 0, stream>>>(
         R.data_ptr<scalar_t>(), 
@@ -133,18 +131,18 @@ void qr_main(const Tensor& A, Tensor& Q, Tensor& vs, const uint m, const uint n,
     );
 }
 
-void qr_orthogonalization_cuda_impl(const Tensor& A, Tensor& out, Tensor& vs, const float epsilon){
-    const uint m = A.size(0);
-    const uint n = A.size(1);
+void qr_orthogonalization_cuda_impl(Tensor& R, Tensor& out, Tensor& vs){
+    const uint m = R.size(0);
+    const uint n = R.size(1);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
-    A.scalar_type(), "qr_orthogonalization", ([&] {
+    R.scalar_type(), "qr_orthogonalization", ([&] {
       if (n < 512)
-          qr_main<256, scalar_t>(A, out, vs, m, n, epsilon);
+          qr_main<256, scalar_t>(R, out, vs, m, n);
       else if (n < 1024)
-          qr_main<512, scalar_t>(A, out, vs, m, n, epsilon);
+          qr_main<512, scalar_t>(R, out, vs, m, n);
       else
-          qr_main<1024, scalar_t>(A, out, vs, m, n, epsilon);
+          qr_main<1024, scalar_t>(R, out, vs, m, n);
     })
     );
     

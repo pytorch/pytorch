@@ -114,18 +114,17 @@ namespace native {
 
 DEFINE_DISPATCH(qr_orthogonalization_stub);
 
-Tensor& qr_orthogonalization_out(const Tensor& self, const double epsilon, Tensor& out){
+Tensor& qr_orthogonalization_out(const Tensor& self, const float epsilon, Tensor& out){
     TORCH_CHECK(self.is_contiguous(), "Input must be contiguous")
     TORCH_CHECK(self.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
     TORCH_CHECK(out.is_contiguous(), "Output tensor must be contiguous")
     TORCH_CHECK(self.sizes() == out.sizes(), "Output and input tensors must have same sizes.");
-
-    const uint m = self.size(0);
-    const uint n = self.size(1);
         
     Tensor vs = at::zeros_like(self);
+    Tensor R = self.clone();
+    R.diagonal().add_(epsilon);
 
-    qr_orthogonalization_stub(self.device().type(), self, out, vs, epsilon);
+    qr_orthogonalization_stub(self.device().type(), R, out, vs);
 
     return out;
 }
@@ -134,6 +133,17 @@ Tensor qr_orthogonalization(const Tensor& self, const double epsilon){
     Tensor out = at::empty(self.sizes(), self.options());
     qr_orthogonalization_out(self, epsilon, out);
     return out;
+}
+
+Tensor qr_orthogonalization_(Tensor& self, const double epsilon){
+    TORCH_CHECK(self.is_contiguous(), "Input must be contiguous")
+    TORCH_CHECK(self.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
+
+    Tensor vs = at::zeros_like(self);
+    self.diagonal().add_(epsilon);
+
+    qr_orthogonalization_stub(self.device().type(), self, self, vs);
+    return self;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
