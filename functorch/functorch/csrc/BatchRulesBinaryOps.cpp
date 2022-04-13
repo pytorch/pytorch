@@ -396,6 +396,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_SCALAR_2(mul, Tensor, Scalar);
   BINARY_POINTWISE(nextafter);
   BINARY_SCALAR_3(pow, Tensor_Tensor, Tensor_Scalar, Scalar);
+  POINTWISE_BOXED2(pow_, Scalar);
   BINARY_POINTWISE(polar);
   POINTWISE_BOXED(polygamma);
   BINARY_SCALAR_2(sub, Tensor, Scalar);
