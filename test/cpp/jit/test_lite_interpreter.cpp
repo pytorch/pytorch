@@ -599,7 +599,7 @@ void runAndCheckTorchScriptModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
     const std::vector<IValue>& expect_result_list,
-    const int64_t expect_version) {
+    const uint64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
   AT_ASSERT(actual_version == expect_version);
 
@@ -616,7 +616,7 @@ void runAndCheckBytecodeModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
     const std::vector<IValue>& expect_result_list,
-    const int64_t expect_version) {
+    const uint64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
   AT_ASSERT(actual_version == expect_version);
 
@@ -634,13 +634,14 @@ void backportAllVersionCheck(
     std::stringstream& test_model_file_stream,
     std::vector<IValue>& input_data,
     std::vector<IValue>& expect_result_list,
-    const int64_t expect_from_version) {
+    const uint64_t expect_from_version) {
   auto from_version = _get_model_bytecode_version(test_model_file_stream);
   AT_ASSERT(from_version == expect_from_version);
+  AT_ASSERT(from_version > 0);
 
   // Backport script_module_v5.ptl to an older version
   constexpr int64_t minimum_to_version = 4;
-  int64_t current_to_version = from_version - 1;
+  auto current_to_version = from_version - 1;
 
   // Verify all candidate to_version work as expected. All backport to version
   // larger than minimum_to_version should success.
@@ -656,12 +657,14 @@ void backportAllVersionCheck(
 
     // Check backport model version
     auto backport_version = _get_model_bytecode_version(oss);
+    backport_version = _get_model_bytecode_version(oss);
     AT_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect
     // result
     runAndCheckBytecodeModel(
         oss, input_data, expect_result_list, current_to_version);
+    oss.seekg(0, oss.beg);
     runAndCheckTorchScriptModel(
         oss, input_data, expect_result_list, current_to_version);
 
@@ -715,7 +718,15 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   torch::jit::Module module_freeze = freeze(module);
 
   std::stringstream input_model_stream;
+#if defined(ENABLE_FLATBUFFER)
+  module_freeze._save_for_mobile(
+      input_model_stream,
+      /*extra_files=*/{},
+      /*save_mobile_debug_info=*/false,
+      /*use_flatbuffer=*/true);
+#else
   module_freeze._save_for_mobile(input_model_stream);
+#endif
   std::vector<IValue> input_data =
       std::vector<IValue>({torch::ones({1, 1, 28, 28})});
   std::vector<IValue> expect_result_list;
@@ -1185,7 +1196,6 @@ TEST(RunTimeTest, ParseOperator) {
       function.get());
   parseOperators(
       std::move(*c10::ivalue::Tuple::create(operators)).elements(),
-      model_version,
       1,
       function.get());
   const size_t rsize = 5;
@@ -1568,7 +1578,6 @@ TEST(RunTimeTest, RuntimeCall) {
       foo.get());
   parseOperators(
       std::move(*c10::ivalue::Tuple::create(operatorsFoo)).elements(),
-      model_version,
       1,
       foo.get());
   parseConstants(
@@ -1585,7 +1594,6 @@ TEST(RunTimeTest, RuntimeCall) {
       call.get());
   parseOperators(
       std::move(*c10::ivalue::Tuple::create(operatorsCall)).elements(),
-      model_version,
       1,
       call.get());
   parseConstants(
@@ -2089,10 +2097,7 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
     if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
       for (const auto& op : byteCodeFunctionWithOperator.operators) {
         byteCodeFunctionWithOperator.function.append_operator(
-            op.name,
-            op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
+            op.name, op.overload_name, op.num_specified_args);
       }
     }
     upgrader_functions.push_back(byteCodeFunctionWithOperator.function);
