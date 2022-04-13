@@ -298,15 +298,16 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         })
 
     unsorted_function_hints.update({
-        f'sparse_compressed_tensor' : ['def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],'
-                                    'plain_indices: Union[Tensor, List],'
-                                    ' values: Union[Tensor, List], size: Optional[_size]=None,'
-                                    ' *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,'
-                                    ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
+        'sparse_compressed_tensor' : ['def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],'
+                                      'plain_indices: Union[Tensor, List],'
+                                      ' values: Union[Tensor, List], size: Optional[_size]=None,'
+                                      ' *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,'
+                                      ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
         '_sparse_compressed_tensor_unsafe': ['def _sparse_compressed_tensor_unsafe(comp_indices: Union[Tensor, List],'
                                              'plain_indices: Union[Tensor, List],'
                                              ' values: Union[Tensor, List], size: List[int],'
-                                             ' dtype: Optional[_dtype] = None, layout: Optional[_layout] = None, device: Optional[_device] = None,'
+                                             ' dtype: Optional[_dtype] = None, layout: Optional[_layout] = None,'
+                                             ' device: Optional[_device] = None,'
                                              ' requires_grad: bool = False) -> Tensor: ...'],
     })
 

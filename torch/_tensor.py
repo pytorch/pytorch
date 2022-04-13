@@ -285,7 +285,7 @@ class Tensor(torch._C._TensorBase):
             else:
                 raise NotImplementedError(
                     'sparse csr tensor __reduce_ex__ for layout `%s`' % (self.layout))
-            return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
+            return (torch._utils._rebuild_sparse_compressed_tensor, args_sparse_csr)
         elif self.data_ptr() == 0 and type(self) is not torch.Tensor:
             arg_wrapper_subclass = (
                 type(self),
