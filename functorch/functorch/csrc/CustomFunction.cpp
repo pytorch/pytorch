@@ -1,3 +1,4 @@
+#ifndef _WIN32
 #include <functorch/csrc/CustomFunction.h>
 #include <ATen/ATen.h>
 #include <torch/csrc/autograd/function.h>
@@ -288,3 +289,4 @@ void initDispatchBindings(PyObject* module) {
 
 
 }} // at::functorch
+#endif // #ifndef _WIN32

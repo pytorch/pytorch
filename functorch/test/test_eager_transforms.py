@@ -16,6 +16,7 @@ import warnings
 import math
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
+from torch.testing._internal.common_utils import IS_WINDOWS
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
 
@@ -1998,6 +1999,7 @@ class TestJvp(TestCase):
 
 
 class TestCustomFunction(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "Prototype of custom_vjp doesn't link on windows")
     @onlyCPU
     def test_basic(self, device):
         called_impl = False
