@@ -118,8 +118,10 @@ def get_extensions():
 
 class BuildExtension_(BuildExtension):
     def build_extensions(self, *args, **kwargs):
-        if '-Wstrict-prototypes' in self.compiler.compiler_so:
-            self.compiler.compiler_so.remove('-Wstrict-prototypes')
+        # It turns out for windows this isn't populated?
+        if hasattr(self.compiler, 'compiler_so'):
+            if '-Wstrict-prototypes' in self.compiler.compiler_so:
+                self.compiler.compiler_so.remove('-Wstrict-prototypes')
         super().build_extensions(*args, **kwargs)
 
 
