@@ -1,5 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_sparse_csr_tensor_unsafe.h>
+#endif
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
