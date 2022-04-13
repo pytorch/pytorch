@@ -301,8 +301,7 @@ int LoadBalancer::acquire() {
   size_t minusers = SIZE_MAX;
   int minIdx = 0;
   for (size_t i = 0; i < n_; ++i, ++last) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (last >= n_) {
+    if (last >= static_cast<int>(n_)) {
       last = 0;
     }
     uint64_t prev = 0;
