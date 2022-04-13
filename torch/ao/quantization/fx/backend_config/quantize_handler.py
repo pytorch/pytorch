@@ -12,7 +12,8 @@ def get_quantize_handler_cls(
         dtype_configs,
         num_tensor_args_to_observation_type,
         overwrite_output_fake_quantizer,
-        overwrite_output_observer):
+        overwrite_output_observer,
+        input_output_observed):
 
     class ConfigurableQuantizeHandler(QuantizeHandler):
         def __init__(
@@ -31,6 +32,7 @@ def get_quantize_handler_cls(
             self.dtype_configs = dtype_configs
             self.overwrite_output_fake_quantizer = overwrite_output_fake_quantizer
             self.overwrite_output_observer = overwrite_output_observer
+            self.input_output_observed_ = input_output_observed
 
         def is_general_tensor_value_op(self) -> bool:
             return self.observation_type == ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT
@@ -56,6 +58,10 @@ def get_quantize_handler_cls(
                 if act_dtype == torch.quint8 and self.overwrite_output_observer is not None:
                     return self.overwrite_output_observer
             return qconfig.activation
+
+        # This is temporary, and will be removed soon
+        def input_output_observed(self):
+            return self.input_output_observed_
 
 
     return ConfigurableQuantizeHandler
