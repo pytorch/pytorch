@@ -1760,7 +1760,7 @@ class TestFrozenOptimizations(JitTestCase):
 
             # add with different dtype
             test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
-                             add_tensor=torch.rand(1).to(torch.int), expect_success=False)
+                             add_tensor=torch.tensor([2]).to(torch.int), expect_success=True)
 
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat(self):
