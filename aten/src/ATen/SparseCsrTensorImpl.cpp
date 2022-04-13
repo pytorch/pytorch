@@ -1,12 +1,14 @@
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseCsrTensorImpl.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/native/Resize.h>
 
 namespace at {
+
 namespace {
 DeviceType SparseCsrTensorSetToDeviceType(DispatchKeySet key_set) {
   if (key_set.has(DispatchKey::SparseCsrCPU)) {
@@ -17,18 +19,6 @@ DeviceType SparseCsrTensorSetToDeviceType(DispatchKeySet key_set) {
     TORCH_CHECK(false,
         "Cannot construct SparseCsrTensor with non-sparse tensor type ID ",
         key_set);
-  }
-}
-
-std::string SparseCsrTensorLayoutToSTRING(Layout layout) {
-  switch (layout) {
-  case kSparseCsr: return "CSR";
-  case kSparseCsc: return "CSC";
-  case kSparseBsr: return "BSR";
-  case kSparseBsc: return "BSC";
-  default:
-    TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
-    return "";
   }
 }
 } // namespace
@@ -74,7 +64,9 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
       values_(std::move(values)),
       layout_(layout) {
   // https://pytorch.org/blog/pytorch-feature-classification-changes/#beta
-  TORCH_WARN_ONCE("Sparse ", SparseCsrTensorLayoutToSTRING(layout_), " tensor support is in beta state.");
+  TORCH_WARN_ONCE("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensor support is in beta state.",
+                  "If you miss a functionality in the sparse tensor support, please submit a feature request "
+                  "to https://github.com/pytorch/pytorch/issues.");
   set_storage_access_should_throw();
   is_non_overlapping_and_dense_ = false;
   set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
@@ -85,11 +77,14 @@ const char* SparseCsrTensorImpl::tensorimpl_type_name() const {
 }
 
 void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
-  TORCH_CHECK((layout_ == kSparseCsr || layout_ == kSparseBsr), "resize_: layout ", layout_, " is not yet supported");  // TODO
-  auto row_index = size.size() - ((layout_ == kSparseCsr || layout_ == kSparseBsr) ? 2 : 1);
-  auto col_index = size.size() - ((layout_ == kSparseCsr || layout_ == kSparseBsr) ? 1 : 2);
-  auto rows = size[row_index];
-  auto cols = size[col_index];
+  // TODO: check how nnz is defined for block tensors? Is it the
+  // number of blocks or the number of blocks times the numel per
+  // block?
+  TORCH_CHECK(layout_ == kSparseCsr, "resize_: layout ", layout_, " is not yet supported"); // TODO
+  int row_dim = at::sparse_csr::rowDimension(layout_, size);
+  int col_dim = at::sparse_csr::columnDimension(layout_, size);
+  auto rows = size[row_dim];
+  auto cols = size[col_dim];
   auto old_crow_indices_size = crow_indices_.size(-1);
 
   auto new_crow_indices_size = DimVector(size.slice(0, size.size() - 2));
@@ -149,19 +144,19 @@ void SparseCsrTensorImpl::set_member_tensors(
 }
 
 IntArrayRef SparseCsrTensorImpl::strides() const {
-  TORCH_CHECK(false, "Sparse ", SparseCsrTensorLayoutToSTRING(layout_)," tensors do not have strides.");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have strides.");
 }
 int64_t SparseCsrTensorImpl::stride(int64_t d) const {
-  TORCH_CHECK(false, "Sparse ", SparseCsrTensorLayoutToSTRING(layout_), " tensors do not have strides.");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have strides.");
 }
 void SparseCsrTensorImpl::set_size(int64_t dim, int64_t new_size) {
-  TORCH_CHECK(false, "Sparse ", SparseCsrTensorLayoutToSTRING(layout_), " tensors do not have set_size.");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_size.");
 }
 void SparseCsrTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
-  TORCH_CHECK(false, "Sparse ", SparseCsrTensorLayoutToSTRING(layout_), " tensors do not have set_stride.");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_stride.");
 }
 void SparseCsrTensorImpl::set_storage_offset(int64_t storage_offset) {
-  TORCH_CHECK(false, "Sparse ", SparseCsrTensorLayoutToSTRING(layout_), " tensors do not have set_storage_offset.");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_storage_offset.");
 }
 
 } // namespace at
