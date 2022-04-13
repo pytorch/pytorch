@@ -155,6 +155,9 @@ class TransformerWithSharedParams(nn.Module):
     def run_backward(self, loss):
         loss.backward()
 
+    def get_ignored_modules(self):
+        return [self.transformer]
+
 
 class NestedWrappedModule(nn.Module):
     def __init__(self, group, wrap_fsdp, *args, wrap_everything=False, fsdp_init_mode=FSDPInitMode.CUDA_AFTER, **kwargs):
@@ -607,26 +610,24 @@ class FSDPTest(MultiProcessTestCase):
             )
 
     def _get_wrapped_model(
-        self, group, cuda_first=False, config=None, **model_kwargs,
+        self, group, cuda_first=False, ignore_modules=False, config=None,
+        **model_kwargs,
     ) -> FullyShardedDataParallel:
         if config is None:
             config = {}
         move_to_cuda = not (
             "cpu_offload" in config and config["cpu_offload"].offload_params
         )
-        if cuda_first:
-            transformer = TransformerWithSharedParams(group, **model_kwargs)
-            if move_to_cuda:
-                transformer = transformer.cuda()
-            model = FullyShardedDataParallel(transformer, group, **config)
-        else:
-            model = FullyShardedDataParallel(
-                TransformerWithSharedParams(group, **model_kwargs),
-                group,
-                **config,
-            )
-            if move_to_cuda:
-                model = model.cuda()
+        transformer = TransformerWithSharedParams(group, **model_kwargs)
+        if cuda_first and move_to_cuda:
+            transformer = transformer.cuda()
+        if ignore_modules:
+            assert "ignored_modules" not in config, \
+                "Do not pass in `ignored_modules` via `config`"
+            config["ignored_modules"] = transformer.get_ignored_modules()
+        model = FullyShardedDataParallel(transformer, group, **config)
+        if not cuda_first and move_to_cuda:
+            model = model.cuda()
         return model
 
     def _get_nonwrapped_model(
