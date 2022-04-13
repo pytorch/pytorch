@@ -32,6 +32,15 @@ def define_targets(rules):
         tools = ["//tools/setup_helpers:gen_version_header"],
     )
 
+# These lists are temporarily living in and exported from the shared
+# structure so that an internal build that lives under a different
+# root can access them. These could technically live in a separate
+# file in the same directory but that would require extra work to
+# ensure that file is synced to both Meta internal repositories and
+# GitHub. This problem will go away when the targets downstream of
+# generate-code that use these lists are moved into the shared
+# structure as well.
+
 # In the open-source build, these are generated into
 # torch/csrc/autograd/generated
 GENERATED_AUTOGRAD_H = [
