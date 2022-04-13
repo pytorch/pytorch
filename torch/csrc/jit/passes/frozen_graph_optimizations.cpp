@@ -16,7 +16,6 @@ void OptimizeFrozenGraph(
     std::shared_ptr<Graph>& graph,
     bool optimize_numerics) {
   removeDropout(graph);
-  HoistCommonExpression(graph);
   FrozenConcatLinear(graph);
   // run a couple times to capture Conv -> Mul -> Add etc
   if (optimize_numerics) {
