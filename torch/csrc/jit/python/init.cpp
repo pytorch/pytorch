@@ -235,11 +235,6 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
-          "_jit_pass_common_expression_hoisting",
-          [](std::shared_ptr<Graph>& g) {
-            return HoistCommonExpression(g); // overload resolution
-          })
-      .def(
           "_jit_pass_fuse_quantized_add_relu",
           [](std::shared_ptr<Graph>& g) {
             return FuseQuantizedAddRelu(g); // overload resolution
