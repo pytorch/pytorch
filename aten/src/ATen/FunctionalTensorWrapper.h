@@ -37,7 +37,6 @@ namespace at {
 //
 // See Note [Functionalization: Alias Removal] for details on the aliasing machinery.
 // See Note [Functionalization: Mutation Removal] for details on mutation removal.
-
 struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   explicit FunctionalTensorWrapper(const Tensor& value);
   // Additional constructor to create a FunctionalTensorWrapper directly from an underlying tensor that was created from a view.
@@ -124,7 +123,9 @@ TORCH_API bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list
 TORCH_API bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list);
 
 TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
+TORCH_API c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor);
 TORCH_API c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list);
+TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list);
 TORCH_API TensorList to_functional_tensor(const TensorList& t_list);
 
