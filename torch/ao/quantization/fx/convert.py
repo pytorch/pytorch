@@ -52,10 +52,6 @@ from .utils import (
     graph_module_from_producer_nodes,
     WEIGHT_INDEX_DICT,
 )
-from .quantization_patterns import (
-    QuantizeHandler,
-)
-from .quantization_types import Pattern
 
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
@@ -65,8 +61,7 @@ from .lower_to_fbgemm import lower_to_fbgemm
 
 def restore_state(
         observed: torch.nn.Module
-) -> Tuple[Dict[Pattern, QuantizeHandler],
-           Dict[str, Tuple[str, type]],
+) -> Tuple[Dict[str, Tuple[str, type]],
            Dict[str, Any],
            Set[str]]:
     assert is_observed_module(observed), \
@@ -74,9 +69,8 @@ def restore_state(
     prepare_custom_config_dict: Dict[str, Any] = \
         observed._prepare_custom_config_dict  # type: ignore[assignment]
     node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
-    patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
     observed_node_names: Set[str] = observed._observed_node_names  # type: ignore[assignment]
-    return patterns, node_name_to_scope, prepare_custom_config_dict, observed_node_names
+    return node_name_to_scope, prepare_custom_config_dict, observed_node_names
 
 def has_none_qconfig(node: Argument, qconfig_map: Dict[str, QConfigAny]) -> bool:
     """ Check if a node has a qconfig of None, i.e. user requested to not quantize
@@ -542,7 +536,7 @@ def convert(
     """
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
-    patterns, node_name_to_scope, prepare_custom_config_dict, observed_node_names = restore_state(model)
+    node_name_to_scope, prepare_custom_config_dict, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
     # TODO this should be removed now that gpu support for quantization is being supported.
