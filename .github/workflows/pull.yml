@@ -135,6 +135,13 @@ jobs:
           { config: "noarch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
+  linux-bionic-cuda11_3-py3_7-clang9-build:
+    name: linux-bionic-cuda11.3-py3.7-clang9
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda11.3-py3.7-clang9
+      docker-image-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
+
   linux-vulkan-bionic-py3_7-clang9-build:
     name: linux-vulkan-bionic-py3.7-clang9
     uses: ./.github/workflows/_linux-build.yml
