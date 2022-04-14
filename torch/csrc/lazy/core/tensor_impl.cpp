@@ -1,5 +1,6 @@
 #include <torch/csrc/lazy/core/tensor_impl.h>
 
+#include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
@@ -189,10 +190,6 @@ bool LTCTensorImpl::is_contiguous(c10::MemoryFormat _unused) const {
   // Only check that the storage is already contiguous.
   CHECK(is_contiguous_) << "Non-contiguous storage for lazy tensor";
   return true;
-}
-
-const at::Storage& LTCTensorImpl::storage() const {
-  TORCH_CHECK(false, "Lazy tensors do not have storage");
 }
 
 #endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
