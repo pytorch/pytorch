@@ -16394,6 +16394,12 @@ class TestNNDeviceType(NNTestCase):
                     rtol = None
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
+    def _slow_masked_softmax(self, input, mask):
+        exp = torch.exp(input)
+        exp = exp * mask
+        s = exp.sum(dim=3, keepdim=True).expand(exp.size())
+        return exp / s
+
     def test_masked_softmax(self, device):
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for (B, num_heads, L) in sizes:
@@ -16407,12 +16413,18 @@ class TestNNDeviceType(NNTestCase):
             mask = ~mask
             mask = mask.float()
 
-            def slow_masked_softmax(input, mask):
-                exp = torch.exp(input)
-                exp = exp * mask
-                s = exp.sum(dim=3, keepdim=True).expand(exp.size())
-                return exp / s
-            pt_res = slow_masked_softmax(input, mask)
+            pt_res = self._slow_masked_softmax(input, mask)
+            self.assertEqual(pt_res, native_res, exact_dtype=True)
+
+    def test_masked_softmax_all_masked(self, device):
+        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+        for (B, num_heads, L) in sizes:
+            input = torch.randn((B, num_heads, L, L), device=device)
+            mask = torch.ones_like(input, device=device, dtype=torch.bool)
+            native_res = torch._masked_softmax(input, mask)
+            mask = ~mask
+            mask = mask.float()
+            pt_res = self._slow_masked_softmax(input, mask)
             self.assertEqual(pt_res, native_res, exact_dtype=True)
 
     @onlyCUDA
@@ -16431,12 +16443,7 @@ class TestNNDeviceType(NNTestCase):
         mask = ~mask
         mask = mask.float()
 
-        def slow_masked_softmax(input, mask):
-            exp = torch.exp(input)
-            exp = exp * mask
-            s = exp.sum(dim=3, keepdim=True).expand(exp.size())
-            return exp / s
-        pt_res = slow_masked_softmax(input, mask)
+        pt_res = self._slow_masked_softmax(input, mask)
         self.assertEqual(pt_res, native_res, exact_dtype=True)
 
     # Test fails on Vg20
