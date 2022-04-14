@@ -241,7 +241,7 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   return result;
 }
 
-Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
+Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, double eps) {
   /*
    * cosine_similarity(x1, x2) = <x1, x2> / (||x1|| * ||x2||)
    * 
@@ -271,16 +271,15 @@ Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double
    * 3. Makes sure |cosing_similarity(x1, x2)| <= 1.0.
    * 
    */
-  //auto common_size = at::infer_size_dimvector(x1.sizes(), x2.sizes());
-  //auto commonDtype = at::result_type(x1, x2);
-  //TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
-  //Tensor x1_ = x1.to(commonDtype).expand(common_size);
-  //Tensor x2_ = x2.to(commonDtype).expand(common_size);
-  auto commonDtype = at::result_type(x1, x2);
+  auto commonDtype = at::result_type(x1_, x2_);
   TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
 
-  auto x1_squared_norm = at::pow(x1, 2).sum(dim, true);
-  auto x2_squared_norm = at::pow(x2, 2).sum(dim, true);
+  auto common_size = at::infer_size_dimvector(x1_.sizes(), x2_.sizes());
+  auto x1 = x1_.to(commonDtype).expand(common_size);
+  auto x2 = x2_.to(commonDtype).expand(common_size);
+
+  auto x1_squared_norm = at::pow(x1, 2).sum(dim, /*keepdim=*/true);
+  auto x2_squared_norm = at::pow(x2, 2).sum(dim, /*keepdim=*/true);
 
   {
     at::NoGradGuard guard;
