@@ -2625,14 +2625,14 @@ class IrParser {
                   "aten::amax/amin cannot be fused with dynamic keepdim");
 
               TensorView* out = nullptr;
-              if (node->kind() ==
-                  c10::Symbol::fromQualString("aten::amax")) {
+              if (node->kind() == c10::Symbol::fromQualString("aten::amax")) {
                 out = max(self->as<TensorView>(), dims, keepdim.value());
-              } else if (node->kind() ==
-                  c10::Symbol::fromQualString("aten::amin")) {
+              } else if (
+                  node->kind() == c10::Symbol::fromQualString("aten::amin")) {
                 out = min(self->as<TensorView>(), dims, keepdim.value());
               } else {
-                TORCH_INTERNAL_ASSERT(false, "unrecognized operation in aten::amax/amin");
+                TORCH_INTERNAL_ASSERT(
+                    false, "unrecognized operation in aten::amax/amin");
               }
               value_map.emplace(node->output()->unique(), out);
             },
