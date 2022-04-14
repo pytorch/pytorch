@@ -1359,87 +1359,85 @@ void qmaxpool_2d_nhwc_kernel(
     scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
 
-    // Loop over N
-    for (const auto b : c10::irange(qx.size(0))) {
-      // Loop over H
-      auto* i_p =
-          reinterpret_cast<scalar_t::underlying*>(idata + b * iW * iH * iC);
-      for (const auto row : c10::irange(oH)) {
-        // Loop over W
-        for (const auto col : c10::irange(oW)) {
-          // Pointer to output data for this specific N,H,W position
-          auto* o_p = reinterpret_cast<scalar_t::underlying*>(
-              odata + b * oH * oW * iC + row * oW * iC + col * iC);
+    int64_t nBatch = qx.size(0);
+    at::parallel_for(0, nBatch * oH * oW, 0, [&](int64_t begin, int64_t end) {
+      int64_t b{0}, row{0}, col{0};
+      data_index_init(begin, b, nBatch, row, oH, col, oW);
 
-          // Loop over reduction block
-          int64_t h_start = row * sH - pH;
-          int64_t w_start = col * sW - pW;
-          int64_t h_end = std::min(h_start + (kH - 1) * dH + 1, iH);
-          int64_t w_end = std::min(w_start + (kW - 1) * dW + 1, iW);
-          while (h_start < 0)
-            h_start += dH;
-          while (w_start < 0)
-            w_start += dW;
+      for (const auto i : c10::irange(begin, end)) {
+        auto* i_p = reinterpret_cast<scalar_t::underlying*>(idata + b * iW * iH * iC);
+        auto* o_p = reinterpret_cast<scalar_t::underlying*>(odata + i * iC);
 
-          int64_t c = 0;
+        // Loop over reduction block
+        int64_t h_start = row * sH - pH;
+        int64_t w_start = col * sW - pW;
+        int64_t h_end = std::min(h_start + (kH - 1) * dH + 1, iH);
+        int64_t w_end = std::min(w_start + (kW - 1) * dW + 1, iW);
+        while (h_start < 0)
+          h_start += dH;
+        while (w_start < 0)
+          w_start += dW;
 
-          // Interleaved vector loop 4x
-          constexpr auto vec_width = Vectorized<scalar_t>::size();
-          for (; c + 4 * vec_width <= iC; c += 4 * vec_width) {
-            Vectorized<scalar_t> acc{
-                scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-            Vectorized<scalar_t> accs[4] = {acc, acc, acc, acc};
-            int64_t tcntr = 0;
-            int64_t x, y;
-            for (y = h_start; y < h_end; y += dH) {
-              for (x = w_start; x < w_end; x += dW) {
-                for (const auto i : c10::irange(4)) {
-                  tcntr = y * iW + x;
-                  auto vals = Vectorized<scalar_t>::loadu(
-                      i_p + tcntr * iC + c + Vectorized<scalar_t>::size() * i);
-                  accs[i] = vec::maximum(accs[i], vals);
-                }
-              } // for x
-            } // for y
-            for (const auto i : c10::irange(4)) {
-              accs[i].store(o_p + c + Vectorized<scalar_t>::size() * i);
-            }
-          } // for c
+        int64_t c = 0;
 
-          // Vector loop
-          for (; c + vec_width <= iC; c += vec_width) {
-            Vectorized<scalar_t> acc{
-                scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
-            int64_t tcntr = 0;
-            int64_t x, y;
-            for (y = h_start; y < h_end; y += dH) {
-              for (x = w_start; x < w_end; x += dW) {
+        // Interleaved vector loop 4x
+        constexpr auto vec_width = Vectorized<scalar_t>::size();
+        for (; c + 4 * vec_width <= iC; c += 4 * vec_width) {
+          Vectorized<scalar_t> acc{
+              scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+          Vectorized<scalar_t> accs[4] = {acc, acc, acc, acc};
+          int64_t tcntr = 0;
+          int64_t x, y;
+          for (y = h_start; y < h_end; y += dH) {
+            for (x = w_start; x < w_end; x += dW) {
+              for (const auto i : c10::irange(4)) {
                 tcntr = y * iW + x;
-                auto vals = Vectorized<scalar_t>::loadu(i_p + tcntr * iC + c);
-                acc = vec::maximum(acc, vals);
-              } // for x
-            } // for y
-            acc.store(o_p + c);
-          } // for c
+                auto vals = Vectorized<scalar_t>::loadu(
+                    i_p + tcntr * iC + c + Vectorized<scalar_t>::size() * i);
+                accs[i] = vec::maximum(accs[i], vals);
+              }
+            } // for x
+          } // for y
+          for (const auto i : c10::irange(4)) {
+            accs[i].store(o_p + c + Vectorized<scalar_t>::size() * i);
+          }
+        } // for c
 
-          for (; c < iC; ++c) {
-            auto max_val = std::numeric_limits<scalar_t::underlying>::lowest();
-            int64_t tcntr = 0;
-            int64_t x, y;
-            for (y = h_start; y < h_end; y += dH) {
-              for (x = w_start; x < w_end; x += dW) {
-                tcntr = y * iW + x;
-                auto val = *(i_p + tcntr * iC + c);
-                max_val = std::max(max_val, val);
-              } // for x
-            } // for y
+        // Vector loop
+        for (; c + vec_width <= iC; c += vec_width) {
+          Vectorized<scalar_t> acc{
+              scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
+          int64_t tcntr = 0;
+          int64_t x, y;
+          for (y = h_start; y < h_end; y += dH) {
+            for (x = w_start; x < w_end; x += dW) {
+              tcntr = y * iW + x;
+              auto vals = Vectorized<scalar_t>::loadu(i_p + tcntr * iC + c);
+              acc = vec::maximum(acc, vals);
+            } // for x
+          } // for y
+          acc.store(o_p + c);
+        } // for c
 
-            o_p[c] = max_val;
-          } // for c
-        } // for col
-      } // for row
-    } // for b
+        for (; c < iC; ++c) {
+          auto max_val = std::numeric_limits<scalar_t::underlying>::lowest();
+          int64_t tcntr = 0;
+          int64_t x, y;
+          for (y = h_start; y < h_end; y += dH) {
+            for (x = w_start; x < w_end; x += dW) {
+              tcntr = y * iW + x;
+              auto val = *(i_p + tcntr * iC + c);
+              max_val = std::max(max_val, val);
+            } // for x
+          } // for y
+
+          o_p[c] = max_val;
+        } // for c
+
+        data_index_step(b, nBatch, row, oH, col, oW);
+      }
+    });
   });
 }
 
