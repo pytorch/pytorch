@@ -5,6 +5,7 @@ import itertools
 import traceback
 import warnings
 from contextlib import contextmanager
+import warnings
 from dataclasses import dataclass
 from enum import Enum, auto
 from math import inf
@@ -464,6 +465,21 @@ class FullyShardedDataParallel(nn.Module):
             avoid sharding specific parameters when using an
             ``auto_wrap_policy`` or if parameters' sharding is not managed by
             FSDP. (Default: ``None``)
+        param_init_fns: (Optional[Union[Callable, Dict[torch.nn.Module, Callable]]]):
+            A ``Callable[torch.nn.Module]`` or a ``Dict[torch.nn.Module, Callable]`` that
+            specifies how modules that are currently on the meta device should be initialized
+            onto a actual device. Note that if this argument is passed in, it is assumed that
+            the corresponding module is currently on the meta device. If this argument is a
+            ``Callable``, the same ``Callable`` is applied to initialize all meta modules, and
+            different initialization functions are supported via passing in a ``Dict`` mapping
+            the module to the respective initialization function. Note that this
+            initialization function is applied before doing any FSDP sharding
+            logic, so if a module is not going to be wrapped with FSDP, FSDP
+            will not initialize this module onto a compute device. For example,
+            if wrapping with ``auto_wrap_policy``, if a particular module ends
+            up not contained in any FSDP instance, it will not be initialized
+            with this function by FSDP, and the user is responsible for this
+            initialization.
     """
 
     def __init__(
@@ -476,6 +492,7 @@ class FullyShardedDataParallel(nn.Module):
         backward_prefetch: Optional[BackwardPrefetch] = None,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
+        param_init_fns: Optional[Union[Callable, Dict[torch.nn.Module, Callable]]]=None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -517,11 +534,35 @@ class FullyShardedDataParallel(nn.Module):
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
                 mixed_precision=mixed_precision,
+                param_init_fns=param_init_fns,
             )
 
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
+
+        # We assume that the module is initialized on the meta device
+        # if the user has specified param_init_fns. TODO: investigate
+        # a way to more robustly determine if the module is on the meta
+        # device or not.
+        is_meta_module = param_init_fns is not None
+        if is_meta_module:
+            # Initialize parameters according to the user lambda.
+            if isinstance(param_init_fns, dict):
+                # As an example, this will call something like
+                # module.reset_parameters() to initialize the parameters
+                # on CPU / GPU.
+                module_fn = param_init_fns[module]
+                assert callable(module_fn), (
+                    f"Expected {module_fn} to be callable, but got type {type(param_init_fns)}"
+                )
+                param_init_fns[module](module)
+            else:
+                assert callable(param_init_fns), (
+                    f"Expected {param_init_fns} to be callable, but got {type(param_init_fns)}"
+                )
+                param_init_fns(module)
+
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
