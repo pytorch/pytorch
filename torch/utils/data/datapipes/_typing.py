@@ -351,11 +351,17 @@ def hook_iterator(namespace, profile_name):
             return self
 
         def __next__(self):
+            # TODO: Add try-except to in-place reduce traceback from the Exception
+            # See: https://github.com/pytorch/data/issues/284
             with context():
                 return next(self.iterator)
 
+        def __getattr__(self, name):
+            return getattr(self.iterator, name)
+
     func = namespace['__iter__']
 
+    # ``__iter__`` of IterDataPipe is a generator function
     if inspect.isgeneratorfunction(func):
         @functools.wraps(func)
         def wrap_generator(*args, **kwargs):
@@ -372,6 +378,7 @@ def hook_iterator(namespace, profile_name):
 
         namespace['__iter__'] = wrap_generator
     else:
+        # IterDataPipe is an iterator with both ``__iter__`` and ``__next__``
         if '__next__' in namespace:
             next_func = namespace['__next__']
 
@@ -381,8 +388,8 @@ def hook_iterator(namespace, profile_name):
                     return next_func(*args, **kwargs)
 
             namespace['__next__'] = wrap_next
+        # ``__iter__`` of IterDataPipe returns an iterator other than self
         else:
-            # have the __iter__ but not __next__ like what _ChildDataPipe did.
             @functools.wraps(func)
             def wrap_iter(*args, **kwargs):
                 iter_ret = func(*args, **kwargs)

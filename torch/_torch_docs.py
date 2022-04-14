@@ -8980,7 +8980,9 @@ for _ctor in [torch.sparse_csr_tensor, torch.sparse_csc_tensor,
                     bsr='BSR (Block Compressed Sparse Row)',
                     bsc='BSC (Block Compressed Sparse Column)',
                     compressed='CSR, CSC, BSR, or BSC')[_cname],
-        layout_arg=dict(compressed='layout=None, ').get(_cname, ''),
+        kwargs=('dtype=None, layout=None, device=None, requires_grad=False'
+                if _cname == 'compressed' else
+                'dtype=None, device=None, requires_grad=False'),
         example_layout_arg=dict(compressed=', layout=torch.sparse_csr').get(_cname, ''),
         example_layout=dict(compressed='csr').get(_cname, _cname),
         example_cprefix=dict(compressed='crow').get(_cname, 'c' + _cdimname[:3]),
@@ -8991,7 +8993,7 @@ layout (:class:`torch.layout`, required): the desired layout of returned Tensor.
 
     add_docstr(_ctor,
                r"""
-{ctor_name}({cprefix}_indices, {pprefix}_indices, values, size=None, *, dtype=None, {layout_arg}device=None, requires_grad=False) -> Tensor
+{ctor_name}({cprefix}_indices, {pprefix}_indices, values, size=None, *, {kwargs}) -> Tensor
 
 Constructs a :ref:`sparse tensor in {ltitle} <sparse-csr-docs>` with specified
 values at the given :attr:`{cprefix}_indices` and :attr:`{pprefix}_indices`. Sparse matrix multiplication operations
