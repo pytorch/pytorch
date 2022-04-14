@@ -419,7 +419,7 @@ Tensor csr_to_sparse_csr(const Tensor& self) {
 
 Tensor coo_to_sparse_csr(const Tensor& self) {
   TORCH_CHECK(
-      self.dim() == 2,  // TODO: support batched CSR
+      self.dim() == 2,
       "Only 2D tensors can be converted to the CSR format but got shape: ",
       self.sizes());
   auto coalesced_self = self.coalesce();

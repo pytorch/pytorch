@@ -110,7 +110,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       at::Tensor crow_indices,
       at::Tensor col_indices,
       at::Tensor values,
-      Layout layout);
+      at::Layout layout);
 
   const char* tensorimpl_type_name() const override;
 
