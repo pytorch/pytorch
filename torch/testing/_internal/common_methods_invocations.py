@@ -1604,7 +1604,10 @@ def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad, *, variant=None, **kwargs):
+    if variant is not None and variant not in ('subgradient_at_zero',):
+        raise ValueError(f"Unsupported variant, expected variant to be 'subgradient_at_zero' but got: {variant}")
+
     test_sizes = [
         (S,),
         (0,),
@@ -1628,12 +1631,13 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad, **kwargs):
         is_matrix_norm = len(test_size) == 2
 
         for keepdim in [False, True]:
-            inputs.append(SampleInput(
-                make_tensor(
-                    test_size, dtype=dtype, device=device, low=None, high=None,
-                    requires_grad=requires_grad),
-                kwargs=dict(
-                    keepdim=keepdim)))
+            if not variant == 'subgradient_at_zero':
+                inputs.append(SampleInput(
+                    make_tensor(
+                        test_size, dtype=dtype, device=device, low=None, high=None,
+                        requires_grad=requires_grad),
+                    kwargs=dict(
+                        keepdim=keepdim)))
 
             if not (is_vector_norm or is_matrix_norm):
                 continue
@@ -1641,26 +1645,34 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad, **kwargs):
             ords = vector_ords if is_vector_norm else matrix_ords
 
             for ord in ords:
-
-                inputs.append(SampleInput(
-                    make_tensor(
-                        test_size, dtype=dtype, device=device,
-                        low=None, high=None,
-                        requires_grad=requires_grad),
-                    args=(ord,),
-                    kwargs=dict(
-                        keepdim=keepdim)))
-
-                if ord in ['nuc', 'fro']:
+                if variant == 'subgradient_at_zero':
+                    inputs.append(SampleInput(
+                        torch.zeros(
+                            test_size, dtype=dtype, device=device,
+                            requires_grad=requires_grad),
+                        args=(ord,),
+                        kwargs=dict(keepdim=keepdim)))
+                else:
                     inputs.append(SampleInput(
                         make_tensor(
                             test_size, dtype=dtype, device=device,
                             low=None, high=None,
                             requires_grad=requires_grad),
+                        args=(ord,),
                         kwargs=dict(
-                            ord=ord,
-                            keepdim=keepdim,
-                            dim=(0, 1))))
+                            keepdim=keepdim)))
+
+                    if ord in ['nuc', 'fro']:
+                        inputs.append(SampleInput(
+                            make_tensor(
+                                test_size, dtype=dtype, device=device,
+                                low=None, high=None,
+                                requires_grad=requires_grad),
+                            kwargs=dict(
+                                ord=ord,
+                                keepdim=keepdim,
+                                dim=(0, 1))))
+
         return inputs
 
 def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):
@@ -10323,6 +10335,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
            )),
+    # NB: linalg.norm has two variants so that different skips can be used for different sample inputs
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -10335,6 +10348,25 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+           )),
+    OpInfo('linalg.norm',
+           op=torch.linalg.norm,
+           variant_test_name='subgradients_at_zero',
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           sample_inputs_func=partial(sample_inputs_linalg_norm, variant='subgradient_at_zero'),
+           aten_name='linalg_norm',
+           skips=(
+               # Copied from above
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+
+               # [NEW] Skips specifically for sample inputs at zero
+               # norm's vjp/jvp are not well-conditioned near zero
+               DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_gradgrad'),
            )),
     OpInfo('linalg.matrix_norm',
            aten_name='linalg_matrix_norm',
