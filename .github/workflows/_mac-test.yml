@@ -53,6 +53,11 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
+      - name: Checkout the rest of history and master
+        env:
+          HASH: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.sha }}
+        run: git fetch --no-tags --prune --no-recurse-submodules origin --unshallow "${HASH}" master
+
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:

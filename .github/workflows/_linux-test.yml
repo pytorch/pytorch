@@ -15,6 +15,11 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      needs-viable-strict:
+        required: false
+        type: boolean
+        default: false
+        description: checks out viable/strict
 
 env:
   IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
@@ -33,6 +38,15 @@ jobs:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - name: Checkout viable/strict
+        if: ${{ inputs.needs-viable-strict }}
+        run: git fetch --no-tags --prune --no-recurse-submodules origin viable/strict
+
+      - name: Checkout the rest of history and master
+        env:
+          HASH: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.sha }}
+        run: git fetch --no-tags --prune --no-recurse-submodules origin --unshallow "${HASH}" master
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -164,7 +178,7 @@ jobs:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
           retention-days: 14
           if-no-files-found: ignore
-          path:
+          path: 
             ./**/core.[1-9]*
 
       - name: Upload test statistics
