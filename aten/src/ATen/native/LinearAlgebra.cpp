@@ -1223,7 +1223,7 @@ static void addmm_impl_cpu_(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
   // Apply BLAS routine
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
         at::native::cpublas::gemm(
@@ -1428,6 +1428,20 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
   Tensor& self_or_result = const_cast<Tensor&>(self_or_result_);
+  CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
+
+  auto checkOnCPU = [](const Tensor& t, CheckedFrom c) {
+    TORCH_CHECK(
+        !t.is_cuda(),
+        "Expect tensor to have CPU backend, but got tensor with ",
+        toString(t.options().backend()),
+        " Backend (while checking arguments for ",
+        c);
+  };
+
+  checkOnCPU(self_or_result, c);
+  checkOnCPU(batch1, c);
+  checkOnCPU(batch2, c);
 
   const auto batch1_sizes = batch1.sizes();
   const auto batch2_sizes = batch2.sizes();
@@ -1464,15 +1478,16 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, batch1.scalar_type(), "bmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, batch1.scalar_type(), "bmm", [&] {
           baddbmm_cpu_kernel<scalar_t, true>(self_or_result, batch1, batch2, beta, alpha);
         });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, batch1.scalar_type(), "baddbmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, batch1.scalar_type(), "baddbmm", [&] {
           baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
         });
     }
   } else if (at::hasMKL() && ((
+            self_or_result.scalar_type() != kHalf &&
             self_or_result.scalar_type() != kBFloat16 &&
             at::native::is_floating_point(self_or_result)) ||
             at::native::is_complex(self_or_result))

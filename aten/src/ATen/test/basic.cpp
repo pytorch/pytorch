@@ -41,9 +41,7 @@ void TestOnesAndDot(DeprecatedTypeProperties& type) {
   Tensor b = ones({3, 4}, type);
   ASSERT_EQ_RESOLVED((b + b).sum().item<double>(), 24);
   ASSERT_EQ_RESOLVED(b.numel(), 12);
-  if (type.backend() != Backend::CPU || type.scalarType() != kHalf) {
-    ASSERT_EQ_RESOLVED(b.view(-1).dot(b.view(-1)).item<double>(), 12);
-  }
+  ASSERT_EQ_RESOLVED(b.view(-1).dot(b.view(-1)).item<double>(), 12);
 }
 
 void TestSort(DeprecatedTypeProperties& type) {
