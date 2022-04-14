@@ -360,8 +360,7 @@ def static_dispatch(
     elif f.has_composite_implicit_autograd_kernel:
         fallback = f'return at::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs_str});'
     else:
-        fallback = f"""TORCH_CHECK(false, "Static dispatch does not support {name} for \
-{','.join([str(index.dispatch_key)for index in backend_indices])}, dispatch key: ", _dk);"""
+        fallback = f"""TORCH_CHECK(false, "Static dispatch does not support {name} for dispatch key: ", _dk);"""
 
     return f"""
     {connector.join(stmts)}
@@ -1431,6 +1430,9 @@ def gen_headers(
             else static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True, skip_dpkey_include=True),
         'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(
             target=Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx), native_functions)),
+        'tensor_method_definitions': list(mapMaybe(ComputeTensorMethod(
+            target=Target.DEFINITION, static_dispatch_backend_indices=static_dispatch_idx), native_functions)) if len(static_dispatch_idx)==0
+            else [],
     })
 
     cpu_fm.write('RedispatchFunctions.h', lambda: {
@@ -1672,9 +1674,10 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
 
     core_fm.write('TensorMethods.cpp', lambda: {
         'static_dispatch_ops_headers':
-            ["#include <ATen/core/dispatch/DispatchKeyExtractor.h>"],
-        'tensor_method_definitions': list(mapMaybe(ComputeTensorMethod(
-            target=Target.DEFINITION, static_dispatch_backend_indices=static_dispatch_idx), native_functions)),
+            [] if len(static_dispatch_idx)==0 else ["#include <ATen/core/dispatch/DispatchKeyExtractor.h>"],
+        'tensor_method_definitions':
+            [] if len(static_dispatch_idx)==0 else list(mapMaybe(ComputeTensorMethod(
+            target=Target.DEFINITION, static_dispatch_backend_indices=static_dispatch_idx),native_functions)),
     })
 
     core_fm.write('ATenOpList.cpp', lambda: {
