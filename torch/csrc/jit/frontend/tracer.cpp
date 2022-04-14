@@ -917,6 +917,27 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   return size_var;
 }
 
+autograd::Variable getNumelOf(const autograd::Variable& var) {
+  auto& tracing_state = getTracingState();
+  auto& graph = tracing_state->graph;
+
+  Variable numel_var;
+  {
+    // Make sure this scalar to tensor isn't traced!
+    at::AutoDispatchBelowADInplaceOrView guard;
+    numel_var = scalar_to_tensor(at::Scalar(var.numel()));
+  }
+  auto* value = getValueTrace(var);
+  auto* node = graph->insertNode(graph->create(Symbol::aten("numel"), {value}));
+  recordSourceLocation(node);
+  node->output()->setType(jit::IntType::get());
+
+  auto ten =
+      graph->insertNode(graph->createNumToTensor(node->output()))->output();
+  setValueTrace(numel_var, ten);
+  return numel_var;
+}
+
 void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
   auto& state = getTracingState();
   if (state && state->force_outplace == false) {
