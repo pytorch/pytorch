@@ -227,11 +227,10 @@ struct TORCH_API CompilationUnit {
           // Tombstone the method in the compilation unit.
           // Don't erase because the dict_
           auto it = dict_.find(method->qualname());
-          if (it != dict_.end()) {
-            functions_[it->second] = nullptr;
-            // Erase in our big lookup table
-            dict_.erase(it);
-          }
+          TORCH_INTERNAL_ASSERT(it != dict_.end());
+          functions_[it->second] = nullptr;
+          // Erase in our big lookup table
+          dict_.erase(it);
         }
         // Classes can have multiple pointers to the same hook,
         // need to make sure to not delete it twice
