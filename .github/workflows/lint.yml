@@ -42,7 +42,7 @@ jobs:
       - name: Run lintrunner on PR files
         if: github.event_name == 'pull_request'
         run: |
-          MERGE_BASE=${ git merge-base HEAD "${GITHUB_BASE_REF}" }
+          MERGE_BASE=$(git merge-base HEAD "${GITHUB_BASE_REF}")
           lintrunner -vv --force-color --revision "${MERGE_BASE}"
           echo ""
           echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
