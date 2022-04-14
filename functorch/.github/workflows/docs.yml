@@ -72,7 +72,7 @@ jobs:
           git log -3
 
       - name: Commit and push to gh-pages
-        uses: github-actions-x/commit@v2.8
+        uses: github-actions-x/commit@v2.9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           push-branch: 'gh-pages'
