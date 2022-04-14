@@ -831,18 +831,15 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the cudnn add and add_relu op
     (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
-                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
-                   "after it is built by default")
+    # @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    # @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    #                "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+    #                "after it is built by default")
     def test_qadd_relu_cudnn(self):
         dtype = torch.qint8
         add_relu = torch.ops.quantized.add_relu
         add = torch.ops.quantized.add
 
-        # NB: This is a strange size so that we exercise both the vectorized
-        # implementation (64-element chunks at at time) as well as the scalar
-        # implementation
         A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
         B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
         scale_A = 2.5
