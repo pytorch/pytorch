@@ -254,7 +254,7 @@ def static_dispatch_extra_headers(
     else:
         maybe_inl = ''
     inl_func_headers = [f'#include <ATen/{dispatch_key}Functions{maybe_inl}.h>'
-            for dispatch_key in static_dispatch_keys(backends)]
+                        for dispatch_key in static_dispatch_keys(backends)]
     if skip_dpkey_include:
         # See Note [Avoiding Include Cycles In Static Dispatch]
         return inl_func_headers
@@ -309,8 +309,9 @@ def static_dispatch(
     elif len(keys) == 0:
         return generate_static_dispatch(f, cpp_sig, method=method, backend_index=backend_indices[0])
     else:
-        return f'TORCH_CHECK(false, "Static dispatch does not support backends \
-                {backend_indices} with multiple kernels");'
+        return f"""TORCH_CHECK(false, "Static dispatch does not support {f.func.name.unambiguous_name()} for\
+{', '.join([str(index.dispatch_key)for index in backend_indices])} as they have with multiple \
+kernels {', '.join([str(k.get_kernel(f)) for k in keys])} ");"""
 
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
@@ -1371,6 +1372,9 @@ def gen_headers(
             else static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True, skip_dpkey_include=True),
         'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(
             target=Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx), native_functions)),
+        'tensor_method_definitions': list(mapMaybe(ComputeTensorMethod(
+            target=Target.DEFINITION, static_dispatch_backend_indices=static_dispatch_idx), native_functions)) if len(static_dispatch_idx)==0
+            else [],
     })
 
     cpu_fm.write('RedispatchFunctions.h', lambda: {
@@ -1612,9 +1616,10 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
 
     core_fm.write('TensorMethods.cpp', lambda: {
         'static_dispatch_ops_headers':
-            ["#include <ATen/core/dispatch/DispatchKeyExtractor.h>"],
-        'tensor_method_definitions': list(mapMaybe(ComputeTensorMethod(
-            target=Target.DEFINITION, static_dispatch_backend_indices=static_dispatch_idx), native_functions)),
+            [] if len(static_dispatch_idx)==0 else ["#include <ATen/core/dispatch/DispatchKeyExtractor.h>"],
+        'tensor_method_definitions':
+            [] if len(static_dispatch_idx)==0 else list(mapMaybe(ComputeTensorMethod(
+            target=Target.DEFINITION, static_dispatch_backend_indices=static_dispatch_idx),native_functions)),
     })
 
     core_fm.write('ATenOpList.cpp', lambda: {
