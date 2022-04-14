@@ -140,7 +140,7 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
     return Xq, loss
 
 class TestQuantizedTensor(TestCase):
-    def test_qtensor_to_memory_format(self):
+    def test_per_tensor_qtensor_to_memory_format(self):
         n = np.random.randint(1, 10)
         c = np.random.randint(2, 10)
         h = np.random.randint(2, 10)
@@ -172,9 +172,17 @@ class TestQuantizedTensor(TestCase):
         qx_nhwc_using_contiguous = qx.contiguous(memory_format=torch.channels_last)
         self.assertNotEqual(qx_nhwc_using_to.stride(), qx_nhwc_using_contiguous.stride())
 
-        # now check per channel quantized tensor
+    def test_per_channel_qtensor_to_memory_format(self):
+        n = np.random.randint(1, 10)
+        c = np.random.randint(2, 10)
+        h = np.random.randint(2, 10)
+        w = np.random.randint(2, 10)
         x = torch.rand(n, c, h, w)
         x_nhwc = x.to(memory_format=torch.channels_last)
+        scale = np.random.uniform(0.1, 1.0)
+        zero_point = np.random.randint(0.0, 10)
+        qints = [torch.qint8, torch.quint8, torch.qint32]
+        dtype = qints[np.random.randint(0, len(qints))]
         for axis in range(x.ndim):
             scales = torch.rand(x.size(axis)) + 0.00001
             zero_points = torch.randint(low=0, high=10, size=(x.size(axis), ))
