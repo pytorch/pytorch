@@ -669,7 +669,7 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
@@ -690,6 +690,13 @@ Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alp
   } else {
     return get_out_like(self);
   }
+}
+Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return maybe_add_maybe_sub(self, other, alpha);
+}
+
+Tensor sub_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return maybe_add_maybe_sub(self, other, -alpha);
 }
 
 // multiply, alias for mul

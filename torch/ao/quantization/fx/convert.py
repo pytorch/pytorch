@@ -16,7 +16,6 @@ from ..utils import (
     get_qparam_dict,
     _parent_name,
     get_swapped_custom_module_class,
-    get_quant_type,
 )
 from ..qconfig import (
     QConfigAny,
@@ -30,9 +29,15 @@ from .qconfig_utils import (
     generate_qconfig_map,
     compare_prepare_convert_qconfig_dict,
     update_qconfig_for_fusion,
+    is_qconfig_supported_by_dtype_configs,
 )
-from ..quantization_mappings import DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS
-from .backend_config.utils import get_quantized_reference_module_mapping
+from .backend_config.utils import (
+    get_root_module_to_quantized_reference_module,
+    get_pattern_to_dtype_configs,
+    get_fused_module_classes,
+    get_qat_module_classes,
+)
+from .backend_config import get_native_backend_config_dict
 from .graph_module import (
     QuantizedGraphModule,
     is_observed_module,
@@ -47,11 +52,6 @@ from .utils import (
     graph_module_from_producer_nodes,
     WEIGHT_INDEX_DICT,
 )
-from .quantization_patterns import (
-    QuantizeHandler,
-)
-from .quantization_types import Pattern
-from ..quant_type import QuantType
 
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
@@ -59,55 +59,9 @@ from torch.ao.quantization.quantize import (
 )
 from .lower_to_fbgemm import lower_to_fbgemm
 
-# these are tuples so that they can work with isinstance(module, tuple_of_classes)
-FUSED_MODULE_CLASSES = (
-    torch.nn.intrinsic.LinearReLU,
-    torch.nn.intrinsic.LinearBn1d,
-    torch.nn.intrinsic.ConvReLU1d,
-    torch.nn.intrinsic.ConvReLU2d,
-    torch.nn.intrinsic.ConvReLU3d,
-)
-
-FLOAT_WEIGHTED_MODULE_CLASSES = (
-    torch.nn.Linear,
-    torch.nn.Conv1d,
-    torch.nn.Conv2d,
-    torch.nn.Conv3d,
-)
-
-QAT_MODULE_CLASSES = (
-    torch.nn.qat.Linear,
-    torch.nn.qat.Conv2d,
-    torch.nn.qat.Conv3d,
-    torch.nn.intrinsic.qat.LinearReLU,
-    torch.nn.intrinsic.qat.LinearBn1d,
-    torch.nn.intrinsic.qat.ConvBn1d,
-    torch.nn.intrinsic.qat.ConvBnReLU1d,
-    torch.nn.intrinsic.qat.ConvReLU1d,
-    torch.nn.intrinsic.qat.ConvBn2d,
-    torch.nn.intrinsic.qat.ConvBnReLU2d,
-    torch.nn.intrinsic.qat.ConvReLU2d,
-    torch.nn.intrinsic.qat.ConvBn3d,
-    torch.nn.intrinsic.qat.ConvBnReLU3d,
-    torch.nn.intrinsic.qat.ConvReLU3d
-)
-
-WEIGHT_ONLY_MODULE_CLASSES = (
-    torch.nn.Embedding,
-    torch.nn.EmbeddingBag,
-)
-
-DYNAMIC_MODULE_CLASSES = (
-    torch.nn.GRUCell,
-    torch.nn.LSTMCell,
-    torch.nn.RNNCell,
-    torch.nn.LSTM,
-)
-
 def restore_state(
         observed: torch.nn.Module
-) -> Tuple[Dict[Pattern, QuantizeHandler],
-           Dict[str, Tuple[str, type]],
+) -> Tuple[Dict[str, Tuple[str, type]],
            Dict[str, Any],
            Set[str]]:
     assert is_observed_module(observed), \
@@ -115,9 +69,8 @@ def restore_state(
     prepare_custom_config_dict: Dict[str, Any] = \
         observed._prepare_custom_config_dict  # type: ignore[assignment]
     node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
-    patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
     observed_node_names: Set[str] = observed._observed_node_names  # type: ignore[assignment]
-    return patterns, node_name_to_scope, prepare_custom_config_dict, observed_node_names
+    return node_name_to_scope, prepare_custom_config_dict, observed_node_names
 
 def has_none_qconfig(node: Argument, qconfig_map: Dict[str, QConfigAny]) -> bool:
     """ Check if a node has a qconfig of None, i.e. user requested to not quantize
@@ -386,8 +339,8 @@ def convert_weighted_module(
         node: Node,
         modules: Dict[str, torch.nn.Module],
         observed_node_names: Set[str],
-        quantized_reference_module_mapping: Dict[Callable, Any],
-        qconfig_map: Dict[str, QConfigAny]):
+        qconfig_map: Dict[str, QConfigAny],
+        backend_config_dict: Dict[str, Any]):
     """ Convert a weighted module to reference quantized module in the model
     If the QConfig of a QAT module is not set, the module will still be converted to
     a float module.
@@ -397,46 +350,37 @@ def convert_weighted_module(
       - modules: named_module of original model
       - observed_node_names: names for the set of observed fx node, we can skip
         this conversion if the node is not observed
-      - quantized_reference_module_mapping: module mapping from floating point module class
-        to quantized reference module class, e.g. nn.Conv2d to nn.quantized._reference.Conv2d
     """
     original_module = modules[str(node.target)]
-    float_module = original_module
+    qconfig: QConfigAny = original_module.qconfig  # type: ignore[assignment]
     weight_post_process = None
+    qat_module_classes = get_qat_module_classes(backend_config_dict)
 
     if isinstance(
             original_module,
-            QAT_MODULE_CLASSES):
+            qat_module_classes):
         # Converting qat module to a float module, we need to attch
         # weight fake_quant to the module, weight fake_quant is assumed to be run during
         # QAT so we don't need to run it again here
-        float_module = original_module.to_float()  # type: ignore[operator]
+        weight_post_process = original_module.weight_fake_quant
+        original_module = original_module.to_float()  # type: ignore[operator]
         # change qat module to float module
         parent_name, name = _parent_name(node.target)
-        setattr(modules[parent_name], name, float_module)
-        weight_post_process = original_module.weight_fake_quant
+        setattr(modules[parent_name], name, original_module)
 
-    qconfig = original_module.qconfig
     is_observed = node.name in observed_node_names
     # If a qconfig is not defined for this node, then skip converting to a reference module
     if qconfig is None or has_none_qconfig(node, qconfig_map) or not is_observed:
         return
 
+    # skip converting to reference quantized module if the qconfig is not supported
+    pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config_dict)
+    dtype_configs = pattern_to_dtype_configs.get(type(original_module), [])
+    if not is_qconfig_supported_by_dtype_configs(qconfig, dtype_configs):
+        return
+
     # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
     is_weight_quantized = weight_is_quantized(qconfig)
-    quant_type = get_quant_type(qconfig)
-
-    # skip reference module swapping for embedding when quantization mode does not
-    # match
-    # TODO: we need a more systematic way to handle this after we migrate to use
-    # backend_config_dict everywhere
-    if isinstance(original_module, WEIGHT_ONLY_MODULE_CLASSES) and \
-       quant_type != QuantType.WEIGHT_ONLY:
-        return
-
-    if isinstance(original_module, DYNAMIC_MODULE_CLASSES) and \
-       quant_type != QuantType.DYNAMIC:
-        return
 
     # the condition for swapping the module to reference quantized module is:
     # weights need to be quantized
@@ -444,12 +388,13 @@ def convert_weighted_module(
         return
 
     fused_module = None
+    float_module = original_module
     # extract the inidividual float_module and fused module
-    if isinstance(float_module, torch.nn.intrinsic._FusedModule):
+    if isinstance(original_module, torch.nn.intrinsic._FusedModule):
         fused_module = float_module
         float_module = fused_module[0]  # type: ignore[index]
 
-    # TODO: expose this through backend_config_dict
+    # TODO: move this to the reference quantized module
     # weight_qparams or weight_qparams dict
     wq_or_wq_dict = {}
     if isinstance(float_module, torch.nn.RNNCellBase):
@@ -470,8 +415,8 @@ def convert_weighted_module(
             if hasattr(float_module, wn) and wn.startswith("weight"):
                 weight = getattr(float_module, wn)
                 weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
-                if weight_post_process.dtype == torch.qint8:
-                    weight_post_process(weight)
+                if weight_post_process.dtype == torch.qint8:  # type: ignore[union-attr]
+                    weight_post_process(weight)  # type: ignore[operator, misc]
                 wq_or_wq_dict[wn] = get_qparam_dict(weight_post_process)
     else:
         # weight_post_process is None means the original module is not a QAT module
@@ -486,11 +431,14 @@ def convert_weighted_module(
         wq_or_wq_dict = get_qparam_dict(weight_post_process)
 
     # We use the same reference module for all modes of quantization: static, dynamic, weight_only
-    ref_qmodule_cls = quantized_reference_module_mapping.get(type(float_module), None)
+    # root_module_to_quantized_reference_module: module mapping from root (floating point) module class
+    # to quantized reference module class, e.g. nn.Conv2d to nn.quantized._reference.Conv2d
+    root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config_dict)
+    ref_qmodule_cls = root_module_to_quantized_reference_module.get(type(float_module), None)
     assert ref_qmodule_cls is not None, f"No reference quantized module class configured for {type(float_module)}"
     ref_qmodule = ref_qmodule_cls.from_float(float_module, wq_or_wq_dict)  # type: ignore[attr-defined]
     if fused_module is not None:
-        fused_module[0] = ref_qmodule
+        fused_module[0] = ref_qmodule  # type: ignore[operator]
     else:
         parent_name, name = _parent_name(node.target)
         setattr(modules[parent_name], name, ref_qmodule)
@@ -588,7 +536,7 @@ def convert(
     """
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
-    patterns, node_name_to_scope, prepare_custom_config_dict, observed_node_names = restore_state(model)
+    node_name_to_scope, prepare_custom_config_dict, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
     # TODO this should be removed now that gpu support for quantization is being supported.
@@ -617,9 +565,7 @@ def convert(
         modules_copy = copy.deepcopy(modules)
         convert_dict_to_ordered_dict(convert_qconfig_dict)
         if model._is_qat:
-            additional_qat_module_mapping = prepare_custom_config_dict.get(
-                "additional_qat_module_mapping", {})
-            convert_qconfig_dict = update_qconfig_for_qat(convert_qconfig_dict, additional_qat_module_mapping)
+            convert_qconfig_dict = update_qconfig_for_qat(convert_qconfig_dict, {})
         convert_qconfig_dict = update_qconfig_for_fusion(model, convert_qconfig_dict)
 
         compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)  # type: ignore[arg-type]
@@ -729,11 +675,12 @@ def convert(
         "output_quantized_idxs", [])
 
     if backend_config_dict is None:
-        quantized_reference_module_mapping = copy.deepcopy(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS)
-    else:
-        quantized_reference_module_mapping = get_quantized_reference_module_mapping(backend_config_dict)
+        backend_config_dict = get_native_backend_config_dict()
+    root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config_dict)
     # convert tuples so that it can work with isinstance(module, tuple_of_classes)
-    weighted_module_classes = tuple(quantized_reference_module_mapping.keys())
+    root_module_classes = tuple(root_module_to_quantized_reference_module.keys())
+    qat_module_classes = get_qat_module_classes(backend_config_dict)
+    fused_module_classes = get_fused_module_classes(backend_config_dict)
     statically_quantized_custom_module_nodes: Set[Node] = set()
 
     for node in list(model.graph.nodes):
@@ -780,14 +727,14 @@ def convert(
                 convert_standalone_module(
                     node, modules, model, is_reference, backend_config_dict)
             elif type(modules[node.target]) in set(
-                    weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
+                    root_module_classes).union(qat_module_classes).union(fused_module_classes):
                 # extra check for fused module classes to make sure they are fused module classes
                 # of target modules
-                if type(modules[node.target]) in FUSED_MODULE_CLASSES and \
-                   type(modules[node.target][0]) not in FLOAT_WEIGHTED_MODULE_CLASSES:
+                if type(modules[node.target]) in fused_module_classes and \
+                   type(modules[node.target][0]) not in root_module_classes:
                     continue
                 convert_weighted_module(
-                    node, modules, observed_node_names, quantized_reference_module_mapping, qconfig_map)
+                    node, modules, observed_node_names, qconfig_map, backend_config_dict)
             elif type(modules[node.target]) in custom_module_classes:
                 convert_custom_module(
                     node, model.graph, modules, custom_module_class_mapping,

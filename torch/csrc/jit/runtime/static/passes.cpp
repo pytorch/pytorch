@@ -226,6 +226,33 @@ C10_UNUSED void ClipRangesToGatherToOffsets(
   fuse.runOnGraph(graph);
 }
 
+C10_UNUSED void ToLengthsToOffsets(std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
+        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy, %memoryformat)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
+        return (%y1))IR";
+  std::string fused_pattern = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
+        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %includelastoffset, %dtype)
+        return (%y0))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy):
+        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
+        return (%y1))IR";
+  std::string fused_pattern2 = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy):
+        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %includelastoffset, %dtype)
+        return (%y0))IR";
+  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
+  fuse.runOnGraph(graph);
+}
+
 C10_UNUSED
 void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
@@ -335,6 +362,8 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 
     ClipRangesToGatherToOffsets(graph);
   }
+
+  ToLengthsToOffsets(graph);
 #endif
 }
 
@@ -777,7 +806,8 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
           "fb::gather_ranges_to_dense_v2",
           "static_runtime::fused_gather_ranges_to_dense_v2"),
       OP_PAIR(
-          "fb::split_and_squeeze", "static_runtime::fused_split_and_squeeze")};
+          "fb::split_and_squeeze",
+          "static_runtime::fused_split_and_squeeze_copy")};
 
   // replacement contains (old_node, new_node, list_unpack_node)
   std::vector<std::tuple<Node*, Node*, Node*>> replacement;
@@ -1101,7 +1131,8 @@ void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
       continue;
     }
     auto* split_and_squeeze_node = graph->create(
-        c10::Symbol::fromQualString("static_runtime::fused_split_and_squeeze"),
+        c10::Symbol::fromQualString(
+            "static_runtime::fused_split_and_squeeze_copy"),
         num_outputs);
     split_and_squeeze_node->addInput(node->input(0));
     split_and_squeeze_node->addInput(node->input(1));
