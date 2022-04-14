@@ -49,7 +49,7 @@ def generate_code(ninja_global: Optional[str] = None,
     for d in (autograd_gen_dir, python_install_dir):
         if not os.path.exists(d):
             os.makedirs(d)
-    autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd/")
+    autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
