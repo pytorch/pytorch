@@ -133,6 +133,43 @@ class TestRecordFunction(TestCase):
         self.assertTrue(has_iter)
         self.assertTrue(has_mux)
 
+    def test_datapipe_delegation_with_profiler(self):
+        class IDPIterator(torch.utils.data.IterDataPipe):
+            def __init__(self):
+                self.data = list(range(10))
+                self._idx = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self._idx >= 10:
+                    self._idx = 0
+                    raise StopIteration
+                self._idx += 1
+                return self.data[self._idx - 1]
+
+            def get_value(self, idx):
+                return self.data[idx]
+
+        dp1 = IDPIterator()
+        self.assertEqual(5, dp1.get_value(5))
+        it_dp1 = iter(dp1)
+        self.assertEqual(5, it_dp1.get_value(5))
+        self.assertEqual(list(range(10)), list(it_dp1))
+
+        class IDPDelegator(torch.utils.data.IterDataPipe):
+            def __init__(self, datapipe):
+                self.datapipe = datapipe
+
+            def __iter__(self):
+                return iter(self.datapipe)
+
+        dp2 = IDPDelegator(dp1)
+        it_dp2 = iter(dp2)
+        self.assertEqual(5, it_dp2.get_value(5))
+        self.assertEqual(list(range(10)), list(it_dp2))
+
     def test_datapipe_with_record_function_fork(self):
         with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
             input_dp = dp.iter.IterableWrapper(range(10))
