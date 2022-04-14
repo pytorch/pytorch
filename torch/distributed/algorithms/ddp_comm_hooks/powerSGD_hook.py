@@ -1,6 +1,7 @@
 from collections import defaultdict
 import logging
 import math
+from typing import Dict, List
 
 import numpy as np
 import torch
@@ -238,9 +239,9 @@ class PowerSGDState(object):
         self.rng = np.random.RandomState(random_seed)
         # Since there is only a single state instance for all the input buckets,
         # need to maintain a dictionary that maps each bucket index to the local error.
-        self.error_dict = {}
-        self.p_memory_dict = {}
-        self.q_memory_dict = {}
+        self.error_dict: Dict[int, torch.Tensor] = {}
+        self.p_memory_dict: Dict[int, torch.Tensor] = {}
+        self.q_memory_dict: Dict[int, torch.Tensor] = {}
         # Iteration/step in the training loop.
         self.iter = 0
         # Compression stats accumulators
