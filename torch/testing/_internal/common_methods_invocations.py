@@ -11058,7 +11058,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_forward_ad=True,
-           supports_out=False),
+           supports_out=True),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     # https://github.com/pytorch/pytorch/issues/68752
