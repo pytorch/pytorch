@@ -696,15 +696,6 @@ struct LocalDomainSorter {
       }
     }
 
-    if (concrete_id_dependencies_.find(concrete_id_1) !=
-        concrete_id_dependencies_.end()) {
-      const auto& dependencies_1 = concrete_id_dependencies_.at(concrete_id_1);
-      // if id1 depends on id0 it means id0 is inside id1, so id1 < id0
-      if (dependencies_1.count(concrete_id_0)) {
-        return false;
-      }
-    }
-
     return false;
   }
 

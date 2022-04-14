@@ -163,15 +163,6 @@ struct LocalDomainSorter {
     auto concrete_id_1 =
         GpuLower::current()->caParallelMap().getConcreteMappedID(id1);
 
-    if (concrete_id_dependencies_.find(concrete_id_0) !=
-        concrete_id_dependencies_.end()) {
-      const auto& dependencies_0 = concrete_id_dependencies_.at(concrete_id_0);
-      // if id0 depends on id1 it means id1 is outside id0, so id1 < id0
-      if (dependencies_0.count(concrete_id_1)) {
-        return false;
-      }
-    }
-
     if (concrete_id_dependencies_.find(concrete_id_1) !=
         concrete_id_dependencies_.end()) {
       const auto& dependencies_1 = concrete_id_dependencies_.at(concrete_id_1);
