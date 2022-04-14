@@ -10,10 +10,21 @@ import sys
 import time
 from enum import Enum
 from pathlib import Path
+from sysconfig import get_paths as gp
 from typing import Any, List, NamedTuple, Optional, Pattern
 
-
+# PyTorch directory root
+result = subprocess.run(
+    ["git", "rev-parse", "--show-toplevel"],
+    stdout=subprocess.PIPE,
+    check=True,
+)
+PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
 IS_WINDOWS: bool = os.name == "nt"
+
+# Returns '/usr/local/include/python<version number>'
+def get_python_include_dir() -> str:
+    return gp()["include"]
 
 
 def eprint(*args: Any, **kwargs: Any) -> None:
@@ -81,6 +92,7 @@ severities = {
     "warning": LintSeverity.WARNING,
 }
 
+
 def clang_search_dirs() -> List[str]:
     # Compilers are ordered based on fallback preference
     # We pick the first one that is available on the system
@@ -116,8 +128,13 @@ def clang_search_dirs() -> List[str]:
 
     return search_paths
 
+
 include_args = []
-include_dir = ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs()
+include_dir = [
+    "/usr/lib/llvm-11/include/openmp",
+    get_python_include_dir(),
+    os.path.join(PYTORCH_ROOT, "third_party/pybind11/include"),
+] + clang_search_dirs()
 for dir in include_dir:
     include_args += ["--extra-arg", f"-I{dir}"]
 
@@ -142,9 +159,7 @@ def check_file(
                 name="command-failed",
                 original=None,
                 replacement=None,
-                description=(
-                    f"Failed due to {err.__class__.__name__}:\n{err}"
-                ),
+                description=(f"Failed due to {err.__class__.__name__}:\n{err}"),
             )
         ]
     lint_messages = []
@@ -190,8 +205,10 @@ def main() -> None:
     parser.add_argument(
         "--build_dir",
         required=True,
-        help=("Where the compile_commands.json file is located. "
-              "Gets passed to clang-tidy -p"),
+        help=(
+            "Where the compile_commands.json file is located. "
+            "Gets passed to clang-tidy -p"
+        ),
     )
     parser.add_argument(
         "--verbose",
