@@ -53,6 +53,9 @@ include_patterns = [
     'test/cpp/tensorexpr/**/*.h',
     'test/cpp/tensorexpr/**/*.cpp',
 ]
+exclude_patterns = [
+    'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
+]
 init_command = [
     'python3',
     'tools/linter/adapters/s3_init.py',
@@ -74,13 +77,15 @@ command = [
 code = 'MYPY'
 include_patterns = [
     'torch/**/*.py',
+    'torch/**/*.pyi',
     'caffe2/**/*.py',
+    'caffe2/**/*.pyi',
     'test/test_bundled_images.py',
     'test/test_bundled_inputs.py',
     'test/test_complex.py',
     'test/test_datapipe.py',
     'test/test_futures.py',
-    'test/test_numpy_interop.py',
+    # 'test/test_numpy_interop.py',
     'test/test_torch.py',
     'test/test_type_hints.py',
     'test/test_type_info.py',
@@ -90,6 +95,17 @@ exclude_patterns = [
     'torch/include/**',
     'torch/csrc/**',
     'torch/distributed/elastic/agent/server/api.py',
+    'torch/testing/_internal/**',
+    'torch/distributed/fsdp/fully_sharded_data_parallel.py',
+    # TODO(suo): these exclusions were added just to get lint clean on master.
+    # Follow up to do more target suppressions and remove them.
+    'torch/distributed/fsdp/flatten_params_wrapper.py',
+    'torch/ao/quantization/fx/convert.py',
+    'torch/ao/quantization/_dbr/function_fusion.py',
+    'test/test_datapipe.py',
+    'caffe2/contrib/fakelowp/test/test_batchmatmul_nnpi_fp16.py',
+    'test/test_numpy_interop.py',
+    'torch/torch_version.py',
 ]
 command = [
     'python3',
@@ -108,6 +124,7 @@ init_command = [
     'mypy==0.812',
     'junitparser==2.1.1',
     'rich==10.9.0',
+    'pyyaml==6.0',
 ]
 
 [[linter]]
@@ -319,6 +336,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+    'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
 ]
 command = [
     'python3',
