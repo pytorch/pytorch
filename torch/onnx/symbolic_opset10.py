@@ -298,14 +298,20 @@ def embedding_bag(g,
                                           "please use opset 11 or higher.")
 
 
-@parse_args("v", "t", "i", "i", "i")
+@parse_args("v", "v", "v", "i", "i")
 def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128, quant_max=127):
-    if quant_min not in [0, -128] or quant_max not in [127, 255]:
+    if (quant_min, quant_max) not in [(0, 255), (-128, 127)]:
         raise RuntimeError(
-            "ONNX defines [0, 255] for quint8 and [-128, 127] for qint8, got [{}, {}]".format(quant_min, quant_max))
+            "For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
+            "Got ({}, {})".format(quant_min, quant_max))
+    scale = sym_help._maybe_get_scalar(scale)
+    if scale is None:
+        sym_help._onnx_opset_unsupported_detailed("fake_quantize_per_tensor_affine", 10, 13, "Non-constant scale not supported")
     scale = scale.float().data  # Avoid exporter generating double type
-    zero_point_dtype = torch.int8 if quant_min == -128 else torch.uint8
-    zero_point = torch.tensor(zero_point, dtype=zero_point_dtype)  # ONNX requires zero_point to be tensor
+    if quant_min == 0:
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
+    else:
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
     return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
 
 
