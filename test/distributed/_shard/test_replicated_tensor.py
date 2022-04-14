@@ -278,7 +278,7 @@ class TestReplicatedTensor(ShardedTensorTestBase):
             self.assertIsInstance(out, ReplicatedTensor)
 
         # Test with context manager.
-        from torch.nn.parallel.replicated_tensor_ddp_utils import _ddp_replicated_tensor
+        from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
         with _ddp_replicated_tensor(False):
             for _ in range(5):
                 with _ddp_replicated_tensor(True):

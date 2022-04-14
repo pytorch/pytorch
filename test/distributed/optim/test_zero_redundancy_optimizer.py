@@ -1358,7 +1358,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
         # Disable DDP + ReplicatedTensor since ZeroRedundancyOptimizer
         # modifies the model parameters in place.
-        from torch.nn.parallel.replicated_tensor_ddp_utils import _ddp_replicated_tensor
+        from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
         with _ddp_replicated_tensor(False):
             self._test_ddp_zero_overlap(
                 device, hook_constructor, gradient_as_bucket_view, static_graph,

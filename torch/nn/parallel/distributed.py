@@ -32,7 +32,7 @@ from torch._utils import _get_device_index
 
 from ..modules import Module
 from ._functions import _get_stream
-from .replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
+from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
 from .scatter_gather import gather, is_namedtuple, scatter_kwargs
 
 
@@ -656,7 +656,7 @@ class DistributedDataParallel(Module, Joinable):
         # Create a module with ReplicatedTensor without copying tensors. Avoid
         # registering '_replicated_tensor_module' as a submodule by directly
         # adding to self.__dict__.
-        from .replicated_tensor_ddp_interop import _replicate_module
+        from ._replicated_tensor_ddp_interop import _replicate_module
         self.__dict__['_replicated_tensor_module'] = _replicate_module(self.module, self.process_group)
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
