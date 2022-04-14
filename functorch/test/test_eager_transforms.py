@@ -31,7 +31,9 @@ from functorch._src.make_functional import (
 )
 from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad
 from functorch.experimental import functionalize
-from functorch._src.custom_function import custom_vjp
+
+if not IS_WINDOWS:
+    from functorch._src.custom_function import custom_vjp
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -1098,7 +1100,7 @@ class TestVmapOfGrad(TestCase):
         result = vmap(partial(grad(compute_loss), weights))(data, targets)
         for r, e in zip(result, expected):
             # TODO: Check if the rtol is a problem
-            self.assertEqual(r, e, atol=0, rtol=1e-4)
+            self.assertEqual(r, e, atol=0, rtol=1e-3)
 
     def test_log_softmax(self, device):
         x = torch.randn(3, 5, device=device)
