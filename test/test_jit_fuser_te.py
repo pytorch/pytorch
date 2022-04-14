@@ -2341,6 +2341,34 @@ class TestTEFuser(JitTestCase):
         scr(x)
         self.assertLastGraphAllFused()
 
+    def test_with_strict_fusion(self):
+
+        def success(x):
+            with torch.jit.strict_fusion():
+                return x + x + x
+
+        scripted = self.checkScript(success, (torch.rand([4]),))
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_not("aten::add").check("prim::TensorExprGroup").run(g)
+
+        def foo(x):
+            with torch.jit.strict_fusion():
+                return x + x + torch.rand([4]) +  3
+
+        with self.assertRaises(Exception) as error_out:
+            foo_s = torch.jit.script(foo)
+            foo_s(torch.rand([4]))
+            foo_s(torch.rand([4]))
+        fc = FileCheck().check("Found unfused operators")
+        fc.check("aten::rand(int[] size")
+        fc.check("torch.rand([4]").run(str(error_out.exception))
+
+        with warnings.catch_warnings(record=True) as warns:
+            foo(torch.rand([4]))
+
+        FileCheck().check("Only works in script mode").run(str(warns[0]))
+
+
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False
 

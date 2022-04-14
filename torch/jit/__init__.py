@@ -2,6 +2,8 @@ import torch._C
 
 from contextlib import contextmanager
 from typing import Iterator
+import warnings
+from typing import Any
 
 from torch.utils import set_module
 
@@ -202,3 +204,21 @@ def _hide_source_ranges() -> Iterator[None]:
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
+
+class strict_fusion(object):
+    """
+    This class errors if fusion does not occur. It does not yet
+    interact with autodiff.
+    # TODO: add to docs after initial review/follow ups
+    """
+
+    def __init__(self):
+        if not torch._jit_internal.is_scripting():
+            warnings.warn("Only works in script mode")
+        pass
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, type: Any, value: Any, tb: Any) -> bool:
+        return True
