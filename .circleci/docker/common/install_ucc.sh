@@ -4,12 +4,11 @@ set -ex
 
 function install_ucx() {
   set -ex
-  sudo apt-get update
-  sudo apt-get install -y libtool
   git clone --recursive https://github.com/openucx/ucx.git
   pushd ucx
   git checkout ${UCX_COMMIT}
   git submodule update --init --recursive
+
   ./autogen.sh
   ./configure --prefix=$UCX_HOME      \
       --enable-mt                     \
@@ -18,6 +17,7 @@ function install_ucx() {
       --enable-stats
   time make -j
   sudo make install
+
   popd
   rm -rf ucx
 }
@@ -28,10 +28,12 @@ function install_ucc() {
   pushd ucc
   git checkout ${UCC_COMMIT}
   git submodule update --init --recursive
+
   ./autogen.sh
   ./configure --prefix=$UCC_HOME --with-ucx=$UCX_HOME --with-nccl=no
   time make -j
   sudo make install
+
   popd
   rm -rf ucc
 }
