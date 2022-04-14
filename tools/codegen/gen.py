@@ -304,8 +304,9 @@ def static_dispatch(
     elif len(keys) == 0:
         return generate_static_dispatch(f, cpp_sig, method=method, backend_index=backend_indices[0])
     else:
-        return f'TORCH_CHECK(false, "Static dispatch does not support backends \
-                {backend_indices} with multiple kernels");'
+        return f"""TORCH_CHECK(false, "Static dispatch does not support {f.func.name.unambiguous_name()} for\
+{', '.join([str(index.dispatch_key)for index in backend_indices])} as they have with multiple \
+kernels {', '.join([str(k.get_kernel(f)) for k in keys])} ");"""
 
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
