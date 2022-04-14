@@ -350,15 +350,8 @@ void ts_eager_fallback(
           // torch.cat() with an empty list In that case, we shouldn't have any
           // tensors to schlep across devices anyway.
           if (tgt_device) {
-            const at::Tensor& out = returns[idx].toTensor();
-            at::Tensor lazy_out = torch::lazy::to_lazy_tensor(
-              out,
-              out.options(),
-              *tgt_device,
-              /*non_blocking=*/false,
-              /*functionalize_output=*/false);
             (*stack)[returns_begin + idx] =
-                c10::IValue(std::move(lazy_out));
+                c10::IValue(returns[idx].toTensor().to(*tgt_device));
           }
         }
       }

@@ -56,6 +56,8 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
       crow_indices_(std::move(crow_indices)),
       col_indices_(std::move(col_indices)),
       values_(std::move(values)) {
+  // https://pytorch.org/blog/pytorch-feature-classification-changes/#beta
+  TORCH_WARN_ONCE("Sparse CSR tensor support is in beta state.");
   set_storage_access_should_throw();
   is_non_overlapping_and_dense_ = false;
   set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
