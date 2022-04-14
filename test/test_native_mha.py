@@ -90,7 +90,7 @@ class TestMHADeviceType(TestCase):
             )
 
     def _test_multihead_attention_impl(
-        self, device, dtype, mode, use_nt, use_padding=False
+        self, device, dtype, mode, use_nt, need_weights, average_attn_weights, use_padding=False
     ):
         embed_dim = 64
         num_heads = 4
@@ -125,6 +125,7 @@ class TestMHADeviceType(TestCase):
         pt.out_proj.weight = proj.weight
         pt.out_proj.bias = proj.bias
 
+        # XXX: loop, test 3 relevant configurations of need_weights/average_attn_weights!
         class NativeMHA(torch.nn.Module):
             def __init__(self, embed_dim, num_heads, qkv, proj):
                 super().__init__()
@@ -145,8 +146,8 @@ class TestMHADeviceType(TestCase):
                     self.proj.weight,
                     self.proj.bias,
                     key_padding_mask,
-                    need_weights=True,
-                    average_attn_weights=False,
+                    need_weights=need_weights,
+                    average_attn_weights=average_attn_weights,
                 )
 
         npt = NativeMHA(
@@ -161,8 +162,8 @@ class TestMHADeviceType(TestCase):
             q,
             k,
             v,
-            need_weights=True,
-            average_attn_weights=False,
+            need_weights=need_weights,
+            average_attn_weights=average_attn_weights,
             key_padding_mask=mask if use_padding else None,
         )
         if use_nt:
@@ -191,16 +192,24 @@ class TestMHADeviceType(TestCase):
             ypt[0][-1] = torch.zeros_like(ypt[0][-1], device=device, dtype=dtype)
             ynpt[0][-1] = torch.zeros_like(ynpt[0][-1], device=device, dtype=dtype)
             # Zero the last row of each TxT weight matrix
-            for nh in range(num_heads):
-                weight_pt[0][nh][-1] = torch.zeros_like(weight_pt[0][nh][-1], device=device, dtype=dtype)
-                weight_npt[0][nh][-1] = torch.zeros_like(weight_npt[0][nh][-1], device=device, dtype=dtype)
+            if need_weights:
+                if average_attn_weights:
+                    weight_pt[0][-1] = torch.zeros_like(weight_pt[0][-1], device=device, dtype=dtype)
+                    weight_npt[0][-1] = torch.zeros_like(weight_npt[0][-1], device=device, dtype=dtype)
+                else:
+                    for nh in range(num_heads):
+                        weight_pt[0][nh][-1] = torch.zeros_like(weight_pt[0][nh][-1], device=device, dtype=dtype)
+                        weight_npt[0][nh][-1] = torch.zeros_like(weight_npt[0][nh][-1], device=device, dtype=dtype)
 
         if dtype == torch.half:
             torch.testing.assert_close(ypt, ynpt, atol=1e-3, rtol=1e-3)
         else:
             torch.testing.assert_close(ypt, ynpt)
 
-        torch.testing.assert_close(weight_pt, weight_npt)
+        if need_weights:
+            torch.testing.assert_close(weight_pt, weight_npt)
+        else:
+            self.assertEqual(weight_pt, weight_npt)
 
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
@@ -209,13 +218,17 @@ class TestMHADeviceType(TestCase):
     def test_native_multihead_self_attention(self, device, dtype):
         for use_padding in (False, True):
             for use_nt in (False, True):
-                self._test_multihead_attention_impl(
-                    device,
-                    dtype,
-                    "self",
-                    use_nt=use_nt,
-                    use_padding=use_padding,
-                )
+                for need_weights in (False, True):
+                    for average_attn_weights in (False, True):
+                        self._test_multihead_attention_impl(
+                            device,
+                            dtype,
+                            "self",
+                            use_nt=use_nt,
+                            use_padding=use_padding,
+                            need_weights=need_weights,
+                            average_attn_weights=average_attn_weights,
+                        )
 
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
@@ -223,7 +236,12 @@ class TestMHADeviceType(TestCase):
     @torch.inference_mode()
     def test_native_multihead_encoder_decoder_attention(self, device, dtype):
         self._test_multihead_attention_impl(
-            device, dtype, "encdec", use_nt=False
+            device,
+            dtype,
+            "encdec",
+            use_nt=False,
+            need_weights=False,
+            average_attn_weights=False,
         )
 
     @dtypesIfCUDA(torch.float, torch.half)
@@ -232,7 +250,12 @@ class TestMHADeviceType(TestCase):
     @torch.inference_mode()
     def test_native_multihead_attention(self, device, dtype):
         self._test_multihead_attention_impl(
-            device, dtype, "generic", use_nt=False
+            device,
+            dtype,
+            "generic",
+            use_nt=False,
+            need_weights=False,
+            average_attn_weights=False,
         )
 
 

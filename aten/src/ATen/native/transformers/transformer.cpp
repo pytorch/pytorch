@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
@@ -72,9 +71,11 @@ Tensor transformer_encoder_layer_forward(
     const Tensor& ffn_weight_2,
     const Tensor& ffn_bias_2,
     const c10::optional<Tensor>& mask) {
-  const Tensor& check_for_empty = src.is_nested() ? get_nested_tensor_impl(src)->get_buffer() : src;
-  if (check_for_empty.numel() == 0) {
-    return at::empty_like(src);
+  {
+    const Tensor& check_for_empty = src.is_nested() ? get_nested_tensor_impl(src)->get_buffer() : src;
+    if (check_for_empty.numel() == 0) {
+      return at::empty_like(src);
+    }
   }
   TORCH_CHECK(!norm_first, "norm_first is not supported yet");
   const bool use_nested_tensor = src.is_nested();

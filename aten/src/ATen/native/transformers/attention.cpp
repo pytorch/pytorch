@@ -21,15 +21,7 @@ namespace {
 
 Tensor gemm_nt(const Tensor& self, const Tensor& other) {
   if (self.is_nested()) {
-    auto matmul_result = NestedTensor_matmul(self, other.t());
-    if (other.is_cuda()) {
-      // transform_bias_rescale_qkv has a fused kernel for CUDA that adds
-      // padding.
-      return matmul_result;
-    } else {
-      // TODO: would fusion help for CPU too?
-      return NestedTensor_to_padded_tensor(matmul_result, 0);
-    }
+    return NestedTensor_matmul(self, other.t());
   } else {
     return at::native::matmul(self, other.t());
   }
@@ -247,7 +239,6 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
   TORCH_CHECK(_3D % 3 == 0);
   const auto dim_per_head = D / num_head;
   auto q_k_v = at::empty({3, B, num_head, T, dim_per_head}, qkv_->options());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(q_k_v.is_contiguous());
 
   const auto qkv_contig = qkv_->expect_contiguous();
   const auto qkv_bias_contig = qkv_bias.expect_contiguous();

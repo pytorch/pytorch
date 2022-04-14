@@ -275,6 +275,7 @@ class TransformerEncoderLayer(Module):
     - norm_first is False (this restriction may be loosened in the future)
     - activation is one of: "relu", "gelu", torch.functional.relu, or torch.functional.gelu
     - at most one of src_mask and src_key_padding_mask is passed
+    - if src is a NestedTensor, neither src_mask nor src_key_padding_mask is passed
     - the two LayerNorm instances have a consistent eps value (this will naturally be the
       case unless the caller has manually modified one without modifying the other)
 
@@ -359,13 +360,12 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
-        # REVIEW: do we want to add an explicit opt-out here beyond training mode?
-        # REVIEW: is there a better way to detect _qkv_same_embed_dim?
-
         if (torch.is_inference_mode_enabled() and not self.norm_first and not self.training and
             self.self_attn.batch_first and src.dim() == 3 and self.self_attn._qkv_same_embed_dim and
             self.activation_relu_or_gelu and self.norm1.eps == self.norm2.eps and
-            (src_mask is None or src_key_padding_mask is None)):
+            ((src_mask is None and src_key_padding_mask is None)
+             if src.is_nested
+             else (src_mask is None or src_key_padding_mask is None))):
             tensor_args = (
                 src,
                 self.self_attn.in_proj_weight,

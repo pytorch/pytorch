@@ -13003,7 +13003,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqualTypeString(output, input)
 
     def _test_module_empty_input(self, module, inp, check_size=True, inference=False):
-        inp.requires_grad_(True)
+        if not inference:
+            inp.requires_grad_(True)
         out = module(inp)
         gO = torch.rand_like(out)
         if not inference:
@@ -14581,6 +14582,11 @@ class TestNNDeviceType(NNTestCase):
                     encoder_layer = encoder_layer.eval()
                     with torch.inference_mode():
                         self._test_module_empty_input(encoder_layer, input, check_size=False, inference=True)
+                    if batch_first:
+                        with torch.inference_mode():
+                            with self.assertRaisesRegex(
+                                    AssertionError, 'query should be unbatched 2D or batched 3D tensor but received 1-D query tensor'):
+                                self._test_module_empty_input(encoder_layer, torch.nested_tensor([]), check_size=False, inference=True)
                 else:
                     self._test_module_empty_input(encoder_layer, input, check_size=False)
 
