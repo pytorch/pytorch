@@ -1459,7 +1459,8 @@ class TestQuantizeEagerONNXExport(JitTestCase):
             model = torch.jit.load(buf)
             f = io.BytesIO()
             torch.onnx.export(model, input, f, input_names=input_names,
-                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                              opset_version=9)
         onnx_model = export_to_onnx(model, data, input_names)
 
     @skipIfNoFBGEMM

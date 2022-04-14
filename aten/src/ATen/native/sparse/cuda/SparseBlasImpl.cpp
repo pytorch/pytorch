@@ -806,19 +806,23 @@ void spgemm(
 } // anonymous namespace
 
 void addmm_out_sparse_csr(
-    const at::sparse_csr::SparseCsrTensor& mat1,
+    const Tensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  if (mat2.layout() == kStrided && result.layout() == kStrided) {
+  if (mat1.is_sparse_csr() && mat2.layout() == kStrided && result.layout() == kStrided) {
     return spmm(mat1, mat2, beta, alpha, result);
-  } else if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
-    return spgemm(mat1, mat2, beta, alpha, result);
-  } else {
-    TORCH_CHECK(false, "addmm: computation on CUDA is not implemented for ",
-                result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
   }
+  if (mat1.layout() == kStrided && mat2.is_sparse_csr() && result.layout() == kStrided) {
+    // TODO: We can use cuSPARSE's transposition flags once we have CSC support.
+    return spmm(mat2.transpose(0, 1), mat1.transpose(0, 1), beta, alpha, result.transpose(0, 1));
+  }
+  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
+    return spgemm(mat1, mat2, beta, alpha, result);
+  }
+  TORCH_CHECK(false, "addmm: computation on CUDA is not implemented for ",
+              result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
 }
 
 /*
@@ -978,6 +982,24 @@ void add_out_sparse_csr(
   auto B_col_indices_ptr = B_col_indices.data_ptr<int>();
   auto C_col_indices_ptr = C_col_indices.data_ptr<int>();
 
+  // Windows compilers don't support nested macros
+  // so we need this lambda outside of the
+  // AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES
+  auto fix_nnz = [
+#if AT_ROCM_ENABLED()
+                     &C_crow_indices,
+                     &m
+#endif
+  ](int nnz) -> int {
+// For some reason POINTER_MODE_HOST is not working here
+// Let's extract manually the nnz from the C_crow_indices
+#if AT_ROCM_ENABLED()
+    return std::max({nnz, C_crow_indices.narrow(-1, m, 1).item<int>()});
+#else
+    return nnz;
+#endif
+  };
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       C.scalar_type(), "add_out_sparse_csr_cuda_impl", [&] {
         auto beta_ = beta.to<scalar_t>();
@@ -1037,6 +1059,8 @@ void add_out_sparse_csr(
             C_crow_indices_ptr,
             &nnzC,
             work_data.get());
+
+        nnzC = fix_nnz(nnzC);
 
         // Resize result using nnz information from cusparse
         col_indices_and_values_resize_(C, nnzC);

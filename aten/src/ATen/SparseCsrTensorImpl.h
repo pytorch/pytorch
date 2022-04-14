@@ -43,7 +43,13 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   const Tensor& crow_indices() const { return crow_indices_; }
   const Tensor& col_indices() const { return col_indices_; }
   const Tensor& values() const { return values_; }
-  int nnz() { return values_.size(0); }
+  int nnz() { return col_indices_.size(-1); }
+
+  IntArrayRef strides() const override;
+  int64_t stride(int64_t d) const override;
+  void set_size(int64_t dim, int64_t new_size) override;
+  void set_stride(int64_t dim, int64_t new_stride) override;
+  void set_storage_offset(int64_t storage_offset) override;
 
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
@@ -90,6 +96,8 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       at::Tensor crow_indices,
       at::Tensor col_indices,
       at::Tensor values);
+
+  const char* tensorimpl_type_name() const override;
 
   /**
    * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)

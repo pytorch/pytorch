@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #if defined(ENABLE_FLATBUFFER)
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #endif
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
@@ -797,9 +798,13 @@ void save_mobile_module_to(
     const ExtraFilesMap& extra_files,
     bool save_mobile_debug_info,
     const std::function<size_t(const void*, size_t)>& writer_func) {
+  ExtraFilesMap jitFiles;
   CompilationOptions options = getOptionsFromGlobal();
+  std::vector<IValue> constants;
+  jitModuleToPythonCodeAndConstants(module, &jitFiles, &constants);
   mobile::Module mod = jitModuleToMobile(module, options);
-  auto buffer = save_mobile_module_to_bytes(mod, extra_files);
+  auto buffer =
+      save_mobile_module_to_bytes(mod, extra_files, jitFiles, constants);
   writer_func(reinterpret_cast<void*>(buffer.data()), buffer.size());
 }
 #endif
