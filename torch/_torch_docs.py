@@ -4615,6 +4615,7 @@ Example::
                       tensor([0.0000, 0.5000, 1.0000])))
 
 """)
+torch.histogramdd.__module__ = "torch"
 
 add_docstr(torch.hypot,
            r"""
