@@ -6,8 +6,6 @@ import torch.distributed as dist
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
 from torch.distributed.fsdp.flatten_params_wrapper import FlatParameter
 
-OPTIM_TARGET_RANK = 0  # rank on which to save full optimizer state
-
 class ConsolidatedOptimState:
     """
     This holds the consolidated optimizer state on the target rank. Positive-
@@ -36,6 +34,7 @@ def _unflatten_optim_state(
     fsdp_module,
     flat_param: FlatParameter,
     flat_param_state: Dict[str, Any],
+    to_save: bool,
 ) -> List[Dict[str, Any]]:
     """
     Unflattens the optimizer state, consisting of the "state" part and the
@@ -50,6 +49,7 @@ def _unflatten_optim_state(
         flat_param (FlatParameter): The flattened parameter.
         flat_param_state (Dict[str, Any]): Entry for the flattened parameter
             in the "state" part of the optimizer state dict.
+        to_save (bool): Whether to save the state on this rank.
 
     Returns:
         List[Dict[str, Any]]: A :class:`list` holding the entries in the
@@ -62,9 +62,8 @@ def _unflatten_optim_state(
     assert sum(p is flat_param for p in fsdp_module.params) == 1, \
         "`fsdp_module` must own `flat_param`"
     consolidated_state = _communicate_optim_state(
-        fsdp_module, flat_param, flat_param_state,
+        fsdp_module, flat_param, flat_param_state, to_save,
     )
-    to_save = fsdp_module.rank == OPTIM_TARGET_RANK
     unflat_param_state = _unflatten_communicated_optim_state(
         fsdp_module,
         flat_param,
@@ -77,6 +76,7 @@ def _communicate_optim_state(
     fsdp_module,
     flat_param: FlatParameter,
     flat_param_state: Dict[str, Any],
+    to_save: bool,
 ) -> ConsolidatedOptimState:
     """
     Communicates the optimizer state for a flattened parameter ``flat_param``
@@ -91,6 +91,7 @@ def _communicate_optim_state(
         flat_param (FlatParameter): The flattened parameter.
         flat_param_state (Dict[str, Any]): The entry in the "state" part of the
             optimizer state dict corresponding to the flattened parameter.
+        to_save (bool): Whether to save the state on this rank.
 
     Returns:
         ConsolidatedOptimState: Consolidated optimizer state for
@@ -109,7 +110,6 @@ def _communicate_optim_state(
     process_group = fsdp_module.process_group
 
     tensor_buffer = None  # initialize lazily in case it is not needed
-    to_save = fsdp_module.rank == OPTIM_TARGET_RANK
     for state_name, value in flat_param_state.items():
         # Positive-dimension tensor state: communicate across ranks
         if torch.is_tensor(value) and value.dim() > 0:

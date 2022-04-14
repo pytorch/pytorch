@@ -440,15 +440,8 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
       auto min_size = getFusionGroupInlining() ? 2 : 1;
       bool dyn_shapes = getCurrentBehavior(remaining_bailout_depth) ==
           FusionBehavior::DYNAMIC;
-      FuseTensorExprs(graph, min_size, /*composed_op*/ false, dyn_shapes);
-      GRAPH_DEBUG(
-          "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
-
-      // Wipe tensor type info from the IR
-      RemoveTensorTypeSpecializations(graph);
-      GRAPH_DEBUG(
-          "After RemoveTensorTypeSpecializations, before customPostPasses\n",
-          *graph);
+      FuseTensorExprs(graph, min_size, /* composed op*/ false, dyn_shapes);
+      GRAPH_DEBUG("After Fusion, before customPostPasses\n", *graph);
     } else {
       // Rewrite subgraphs with many MMs into expressions that batch them.
       BatchMM(graph);
@@ -463,9 +456,13 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
+    GRAPH_DEBUG(
+        "After customPostPasses, before RemoveTensorTypeSpecializations \n",
+        *graph);
+    RemoveTensorTypeSpecializations(graph);
+    GRAPH_DEBUG("After RemoveTensorTypeSpecializations\n", *graph);
   }
-  GRAPH_DEBUG(
-      "After customPostPasses (end of runNoGradOptimizations)\n", *graph);
+  GRAPH_DEBUG("End of runNoGradOptimizations\n");
 }
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
