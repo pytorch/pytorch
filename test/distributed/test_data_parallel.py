@@ -11,7 +11,7 @@ import torch
 from torch import nn
 from torch.cuda.amp import autocast
 import torch.nn.parallel as dp
-from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA, tf32_is_not_fp32
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck
@@ -792,6 +792,7 @@ class TestDataParallelDeviceType(TestCase):
         net = nn.DataParallel(l)
         out = net(i)
         self.assertEqual(out.get_device(), 0)
+        rtol = 0.006 if (dtype == torch.float and tf32_is_not_fp32() and torch.backends.cuda.matmul.allow_tf32) else 0
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @onlyCUDA
@@ -812,6 +813,7 @@ class TestDataParallelDeviceType(TestCase):
         n = nn.DataParallel(Net())
         out = n(input=i)
         self.assertEqual(out.get_device(), 0)
+        rtol = 0.006 if (dtype == torch.float and tf32_is_not_fp32() and torch.backends.cuda.matmul.allow_tf32) else 0
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @onlyCUDA
@@ -832,6 +834,7 @@ class TestDataParallelDeviceType(TestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': []})
         self.assertEqual(out.get_device(), 0)
+        rtol = 0.006 if (dtype == torch.float and tf32_is_not_fp32() and torch.backends.cuda.matmul.allow_tf32) else 0
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @onlyCUDA
@@ -852,6 +855,7 @@ class TestDataParallelDeviceType(TestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': {}})
         self.assertEqual(out.get_device(), 0)
+        rtol = 0.006 if (dtype == torch.float and tf32_is_not_fp32() and torch.backends.cuda.matmul.allow_tf32) else 0
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @onlyCUDA
@@ -872,6 +876,7 @@ class TestDataParallelDeviceType(TestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': ()})
         self.assertEqual(out.get_device(), 0)
+        rtol = 0.006 if (dtype == torch.float and tf32_is_not_fp32() and torch.backends.cuda.matmul.allow_tf32) else 0
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
 

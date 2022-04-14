@@ -13965,7 +13965,7 @@ class TestNNDeviceType(NNTestCase):
             atol = 0.05 if ("cuda" in device and
                             dtype == torch.float and
                             tf32_is_not_fp32() and
-                            torch.backends.matmul.allow_tf32) else 5e-6
+                            torch.backends.cuda.matmul.allow_tf32) else 5e-6
             self.assertEqual(actual, expected, rtol=2e-5, atol=atol)
 
         # Global dtype for this test suite is torch.double
