@@ -178,8 +178,7 @@ jobs:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
           retention-days: 14
           if-no-files-found: ignore
-          path: 
-            ./**/core.[1-9]*
+          path: ./**/core.[1-9]*
 
       - name: Upload test statistics
         if: always()
