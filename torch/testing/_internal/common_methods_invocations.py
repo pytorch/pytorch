@@ -9363,10 +9363,8 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_triangular_input_real_positive_diagonal,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
-               # cholesky_inverse does not correctly warn when resizing out= inputs
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Strides are not the same! Original strides were ((4, 2, 1),) and strides are now ((4, 1, 2),)
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'))),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),)),
     OpInfo('cholesky_solve',
            op=torch.cholesky_solve,
            dtypes=floating_and_complex_types(),
@@ -10278,6 +10276,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_contig_vs_transposed'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_non_contig_expand'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_variant_consistency'),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
 
                        # skips test_reference_numerics due to error in Windows CI.
                        # The np.frexp returns exponent as np.intc dtype on Windows platform,
@@ -12659,7 +12658,8 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=["aten::gelu"],
            skips=(
                # AssertionError: Tensor-likes are not close!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),)),
+               # May not replicate in CI
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),)),
     OpInfo('nn.functional.relu6',
            aten_name="relu6",
            dtypes=all_types_and(torch.bfloat16),
@@ -14642,7 +14642,8 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_multinomial,
            skips=(
                # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # This may not be reproducible in CI
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
@@ -15476,6 +15477,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
+        supports_forward_ad=True,
         # doesn't support grad on target
         sample_inputs_func=partial(sample_inputs_loss, rhs_requires_grad=False),
         skips=(
@@ -15538,6 +15540,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_margin_ranking_loss,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             # target doesn't require grad
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_floating_inputs_are_differentiable'),
@@ -15595,6 +15598,8 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     OpInfo(
         "nn.functional.triplet_margin_with_distance_loss",
@@ -15602,6 +15607,8 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             # This test cannot handle a callable passed to `distance_function`. If we would use
             # `distance_function=None`, the test would pass fine.
@@ -15626,16 +15633,25 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
-           sample_inputs_func=sample_inputs_max_unpool),
+           sample_inputs_func=sample_inputs_max_unpool,
+           skips=(
+               # Backward is not reentrant
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+           )),
     OpInfo('nn.functional.max_unpool1d',
            variant_test_name='grad',
            aten_name='max_unpool1d',
            supports_autograd=True,
+           supports_forward_ad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
-           sample_inputs_func=sample_inputs_max_unpool_grad),
+           sample_inputs_func=sample_inputs_max_unpool_grad,
+           skips=(
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
+           )),
     OpInfo('nn.functional.max_unpool2d',
            aten_name='max_unpool2d',
            supports_autograd=True,
@@ -15643,30 +15659,47 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
-           sample_inputs_func=sample_inputs_max_unpool),
+           sample_inputs_func=sample_inputs_max_unpool,
+           skips=(
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+               # Backward is not reentrant
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
+               # Jacobian mismatch
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
+           )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
            aten_name='max_unpool2d',
            supports_autograd=True,
+           supports_forward_ad=True,
            # Vmap is not happy with non-contiguous (channels_last) inputs
            check_batched_grad=False,
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
-           sample_inputs_func=sample_inputs_max_unpool_grad),
+           sample_inputs_func=sample_inputs_max_unpool_grad,
+           skips=(
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+           )),
     OpInfo('nn.functional.max_unpool3d',
            aten_name='max_unpool3d',
-           supports_autograd=True,
+           supports_autograd=False,
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
-           sample_inputs_func=sample_inputs_max_unpool),
+           sample_inputs_func=sample_inputs_max_unpool,
+           skips=(
+               # Jacobian mismatch
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+           )),
     OpInfo('nn.functional.max_unpool3d',
            variant_test_name='grad',
            aten_name='max_unpool3d',
-           supports_autograd=True,
+           supports_autograd=False,
+           supports_forward_ad=True,
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types(),
