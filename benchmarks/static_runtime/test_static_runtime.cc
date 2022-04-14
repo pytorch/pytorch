@@ -2039,7 +2039,7 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
         %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
         %output = quantized::linear_dynamic_fp16(%input, %packed_params)
         %ret = aten::clone(%output, %bias)
-        return (%output)
+        return (%ret)
   )IR";
   at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
   at::Tensor input = torch::randn({3, 2}, torch::kFloat);
@@ -2060,7 +2060,7 @@ TEST(StaticRuntime, QuantizedLinearReluDynamicFp16) {
         %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
         %output = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
         %ret = aten::clone(%output, %bias)
-        return (%output)
+        return (%ret)
   )IR";
   at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
   at::Tensor input = torch::randn({3, 2}, torch::kFloat);
