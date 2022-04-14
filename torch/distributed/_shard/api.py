@@ -231,26 +231,40 @@ def shard_module(
             the default process group will be used.
     """
     for mod_prefix, mod in module.named_modules():
-        # memo is used to avoid duplicate params between modules, this logic
-        # is mostly copied from the module._named_members(), with adaptions
-        # to handle parameter sharding.
-        memo = set()
-        # check if specified module parameters for sharding
-        param_keys = list(mod._parameters.keys())
-        for k in param_keys:
-            v = mod._parameters[k]
-            name = mod_prefix + ('.' if mod_prefix else '') + k
-            if v is None or v in memo:
-                continue
-            memo.add(v)
-            if name in plan.plan:
-                shard_parameter(
-                    mod,
-                    k,
-                    plan.plan[name],
-                    src_rank=src_rank,
-                    process_group=process_group
-                )
+        # create a list from the dict keys, because we are mutating the
+        # parameters on the fly, we need to use a separate list instead.
+        if mod_prefix in plan.plan:
+            # Specified Sharder for the current module
+            sharder = plan.plan[mod_prefix]
+            if not isinstance(sharder, Sharder):
+                raise TypeError(f"Sharding a module {mod_prefix}, requires passing in a {type(Sharder)}, "
+                                f"but found {type(sharder)}")
+
+            sharded_module = sharder.shard(mod)
+
+            # swap the sharded module with original module
+
+        else:
+            # memo is used to avoid duplicate params between modules, this logic
+            # is mostly copied from the module._named_members(), with adaptions
+            # to handle parameter sharding.
+            memo = set()
+            # check if specified module parameters for sharding
+            param_keys = list(mod._parameters.keys())
+            for k in param_keys:
+                v = mod._parameters[k]
+                name = mod_prefix + ('.' if mod_prefix else '') + k
+                if v is None or v in memo:
+                    continue
+                memo.add(v)
+                if name in plan.plan:
+                    shard_parameter(
+                        mod,
+                        k,
+                        plan.plan[name],
+                        src_rank=src_rank,
+                        process_group=process_group
+                    )
 
         # reshard output if there's an entry in `reshard_output` for this module
         if plan.output_plan is not None and mod_prefix in plan.output_plan:

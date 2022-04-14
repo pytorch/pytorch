@@ -5,13 +5,13 @@ import copy
 
 import torch
 import torch.nn as nn
-import torch.distributed._shard.sharded_tensor as sharded_tensor
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch.distributed._shard import shard_module, _shard_tensor
+from torch.distributed._shard import shard_module
 from torch.distributed._shard.sharding_plan import ShardingPlan
+from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
@@ -34,26 +34,9 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-# Example ShardingPlanner that chunks every parameter in the module
-# to all available devices defined.
-class ChunkAllShardingPlanner(ShardingPlanner):
-    dim = 0
-    devices = []
-
-    def __init__(self, chunk_dim=0, device_count=0):
-        self.dim = chunk_dim
-        self.devices = [f"rank:{i}/cuda:{i}" for i in range(device_count)]
-
-    def build_plan(self, module: nn.Module) -> ShardingPlan:
-        named_params = module.named_parameters()
-        plan = {}
-        for name, param in named_params:
-            plan[name] = ChunkShardingSpec(self.dim, placements=self.devices)
-
-        return ShardingPlan(plan=plan)
 
 
-class TestShardingPlan(ShardedTensorTestBase):
+class TestCustomSharder(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
@@ -98,18 +81,3 @@ class TestShardingPlan(ShardedTensorTestBase):
 
             # verify and make sure local and sharded output matches
             self.assertEqual(local_output, sharded_output)
-
-
-    @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_nccl()
-    def test_reshard_sharding_plan(self):
-        colwise_sharding_spec = generate_chunk_sharding_specs_for_test(0)[0]
-        rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)[0]
-        sharding_plan = ShardingPlan(plan={
-            "fc1.weight": colwise_sharding_spec,
-            "fc2.weight": rowwise_sharding_spec,
-        })
-        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).cuda(
-            self.rank
-        )
