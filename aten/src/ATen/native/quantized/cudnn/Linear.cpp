@@ -54,6 +54,7 @@ struct CacheKey {
   uint8_t output_alignment;
   // default to -1 when no bias
   int8_t bias_alignment;
+  bool kReluFused;
 };
 void setLinearParams(
     LinearParams* params, const at::Tensor& input, const at::Tensor& weight,
@@ -129,6 +130,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   } else {
     key.bias_alignment = -1;
   }
+  key.kReluFused = kReluFused;
   // the matmul operation is input * transpose(weight), so we will work with the transposed weight
   auto weight_transposed = transpose(orig_weight, 0, 1);
   // cudnn expects tensors to be at least 3D. weight_transposed is currently 2D. we will create a 3D view
