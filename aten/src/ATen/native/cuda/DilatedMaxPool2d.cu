@@ -208,15 +208,9 @@ __global__ void max_pool_backward_nchw(const scalar_t* top_diff,
 
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-<<<<<<< HEAD
-__global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_diff,
-                                    const int64_t* top_mask, const int nbatch, const int64_t channels,
-                                    const int64_t height, const int64_t width, const int pooled_height,
-=======
 __global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
                                     const int64_t* top_mask, const int nbatch, const int64_t channels,
                                     const int64_t height, const int64_t width, const int pooled_height,
->>>>>>> upstream/master
                                     const int pooled_width, const int kernel_h, const int kernel_w,
                                     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
                                     const int dilation_h, const int dilation_w,
