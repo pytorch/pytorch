@@ -18,6 +18,8 @@ jobs:
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
 
       - name: Install lintrunner
         run: pip install lintrunner==0.5.*
