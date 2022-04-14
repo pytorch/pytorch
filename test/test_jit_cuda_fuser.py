@@ -4393,6 +4393,38 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(prof.events().table().find("fallback"), -1)
         torch._C._jit_set_nvfuser_guard_mode(old_guard)
 
+    # TODO: generalize this
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    def test_inf_quick_patch(self):
+        inputs = [torch.tensor([-float('inf'), float('inf'), 4.0], device="cuda"),
+                  torch.tensor([1.0, float('inf'), 4.0], device="cuda"),
+                  torch.tensor([-float('inf'), -1.5, 4.0], device="cuda"),
+                  torch.tensor([1.0, -3.0, float('nan')], device="cuda"),
+                  torch.tensor([-float('inf'), -float('inf'), -float('inf')], device="cuda"),
+                  torch.tensor([float('inf'), float('inf'), float('inf')], device="cuda"),
+                  torch.tensor([float('nan'), float('nan'), float('nan')], device="cuda")]
+
+        def fn_amax(x):
+            return x.amax(dim=0)
+
+        def fn_amin(x):
+            return x.amin(dim=0)
+
+        def fn_add_nan(x):
+            return x.relu() + float('nan')
+
+        def fn_add(x):
+            return x + 1.0
+
+        with nvfuser_singleton_fusion(True):
+            for t in [fn_amax, fn_amin, fn_add, fn_add_nan]:
+                for x in inputs:
+                    t_jit = torch.jit.script(t)
+                    self._run_helper(t_jit, t, x)
+
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
