@@ -45,7 +45,7 @@ if __name__ == "__main__":
                 "Package {package_name} did not have a version specified. "
                 "Please specify a version to product a consistent linting experience."
             )
-    pip_args = ["pip3", "install"]
+    pip_args = ["pip3", "install", "--user"]
     pip_args.extend(args.packages)
 
     dry_run = args.dry_run == "1"

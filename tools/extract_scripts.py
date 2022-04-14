@@ -58,7 +58,7 @@ def main() -> None:
     gha_expressions_found = False
 
     for p in Path('.github/workflows').iterdir():
-        with open(p, "rb") as f:
+        with open(p) as f:
             workflow = yaml.safe_load(f)
 
         for job_name, job in workflow['jobs'].items():
