@@ -754,6 +754,28 @@ at::Tensor conv1d(
   return is_batched ? output : output.squeeze(0);
 }
 
+at::Tensor& conv1d_out(
+    const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups, Tensor& output_) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  Tensor input;
+  bool is_batched;
+  std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 1, "conv1d");
+  if (at::isComplexType(input_.scalar_type())) {
+    output_ = complex_convolution(input, weight, bias, stride, padding, dilation, {0}, groups);
+  } else {
+    output_ = at::convolution(input, weight, bias, stride, padding, dilation, false, {0}, groups);
+  }
+
+  if (!is_batched) {
+    output_ = output_.squeeze(0);
+  }
+  return output_;
+}
+
 at::Tensor conv2d(
     const Tensor& input_, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {

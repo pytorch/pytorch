@@ -1351,6 +1351,8 @@
 - func: conv1d.padding(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, str padding="valid", int[1] dilation=1, int groups=1) -> Tensor
   cpp_no_default_args: ['bias', 'stride', 'padding']
 
+- func: conv1d.out(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: conv2d.padding(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, str padding="valid", int[2] dilation=1, int groups=1) -> Tensor
   cpp_no_default_args: ['bias', 'stride', 'padding']
 
