@@ -11576,6 +11576,12 @@ op_db: List[OpInfo] = [
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_correctness",
             ),
+            # RuntimeError: expected int at position 0, but got: Tensor
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestNNCOpInfo",
+                "test_nnc_correctness",
+            ),
             # The Weight tensor requires_grad = False
             DecorateInfo(
                 unittest.skip("Skipped!"),
