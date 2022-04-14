@@ -229,7 +229,6 @@ class StateDictType(Enum):
     SHARDED_STATE_DICT = auto()
 
 
-_seq = 0
 
 class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
@@ -363,9 +362,6 @@ class FullyShardedDataParallel(nn.Module):
         # if auto_wrap_policy is specified, submodules should not be
         # already wrapped, otherwise we'd attempt to double wrap them resulting
         # in errors.
-        global _seq
-        _seq += 1
-        self.my_seq = _seq
         if auto_wrap_policy is not None:
             self._check_wrapped(
                 module,
@@ -456,17 +452,9 @@ class FullyShardedDataParallel(nn.Module):
             if param not in ignored_params and not isinstance(param, FlatParameter):
                 params.append(param)
 
-        #num_params = sum(p.numel() for p in params)
-        #print(f"Attempting to flatten {num_params} params")
-        try:
-            self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
-                module, param_list=params
-            )
-        except Exception as e:
-            num_params = sum(p.numel() for p in params)
-            raise ValueError(f" {self.my_seq}, is_meta={is_meta_module} : Error when wrapping {num_params} params: {str(e)}")
-        #num_params = sum(p.numel() for p in params)
-        #self._rank0_print(f"Successfully wrapped {num_params} params {self.my_seq}")
+        self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
+            module, param_list=params
+        )
         assert getattr(self, FSDP_WRAPPED_MODULE) is self._fsdp_wrapped_module
         del module  # free original module in case it helps garbage collection
         if self._fsdp_wrapped_module.flat_param is not None:
