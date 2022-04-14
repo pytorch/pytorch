@@ -53,13 +53,19 @@ void fillSliceWithIndex(const Tensor& t, int dim) {
 // more than 1024/2048 elements along the selected dimension.
 // Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
 void sort_cuda_kernel(
-    const TensorBase& self,
-    const TensorBase& values,
-    const TensorBase& indices,
+    const TensorBase& self_base,
+    const TensorBase& values_base,
+    const TensorBase& indices_base,
     int64_t dim,
     bool descending,
     bool stable) {
   // this algorithm is always stable
+
+  // Converting TensorBase into Tensor.
+  // We will need Tensor's methods from this point onwards.
+  const Tensor& self = *OptionalTensorRef(self_base);
+  const Tensor& values = *OptionalTensorRef(values_base);
+  const Tensor& indices = *OptionalTensorRef(indices_base);
 
   TORCH_CHECK(self.sizes()[dim] <= std::numeric_limits<int>::max(),
     "The dimension being sorted can not have more than INT_MAX elements.");
