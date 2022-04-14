@@ -268,6 +268,11 @@ Tensor qnnpack_avg_pool2d(
       input.ndimension() == 4,
       "qnnpack_avg_pool2d(): Expected input to be 4-dimensional: got ",
       input.ndimension());
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+                "qnnpack_avg_pool2d(): Expected input data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(input.scalar_type()));
 
   int64_t batch_size = input.size(0);
   int64_t inC = input.size(1);

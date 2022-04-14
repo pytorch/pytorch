@@ -12,6 +12,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/pybind.h>
@@ -356,7 +357,7 @@ void PythonTracer::start(size_t max_threads) {
     }
 
     // Register the tracer in each thread.
-    for (size_t i = 0; i < thread_states.size(); i++) {
+    for (const auto i : c10::irange(thread_states.size())) {
         PyThreadState* thread_state = thread_states[i];
         PyThreadState_Swap(thread_state);
 
@@ -641,7 +642,7 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
     }
 
     // Link parents to children.
-    for (int i = 0; i < results.size(); i++) {
+    for (const auto i : c10::irange(results.size())) {
         out[i]->parent_ = event_id_map.at(results[i].parent_id_);
     }
     return out;

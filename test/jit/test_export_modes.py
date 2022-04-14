@@ -79,10 +79,12 @@ class TestExportModes(JitTestCase):
         x = torch.rand(3, 4)
         y = torch.rand(3, 4)
         torch.onnx.export_to_pretty_string(
-            ModelWithAtenNotONNXOp(), (x, y), None,
+            ModelWithAtenNotONNXOp(), (x, y),
             add_node_names=False,
             do_constant_folding=False,
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
+            # support for linalg.qr was added in later op set versions.
+            opset_version=9)
 
     # torch.fmod is using to test ONNX_ATEN.
     # If you plan to remove fmod from aten, or found this test failed.
@@ -95,7 +97,7 @@ class TestExportModes(JitTestCase):
         x = torch.randn(3, 4, dtype=torch.float32)
         y = torch.randn(3, 4, dtype=torch.float32)
         torch.onnx.export_to_pretty_string(
-            ModelWithAtenFmod(), (x, y), None,
+            ModelWithAtenFmod(), (x, y),
             add_node_names=False,
             do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN)

@@ -56,6 +56,13 @@ function and does not have any attributes or Parameters.
 """
 set_module(ScriptFunction, "torch.jit")
 
+# Throws an error if a jit function is pickled.
+# Helps to avoid Python crashes for Python versions 3.9.5 + when protocol 0 or 1 is given as an argument.
+def _reduce(cls):
+    raise pickle.PickleError("ScriptFunction cannot be pickled")
+
+ScriptFunction.__reduce__ = _reduce  # type: ignore[assignment]
+
 
 if _enabled:
     Attribute = collections.namedtuple("Attribute", ["value", "type"])
@@ -886,6 +893,7 @@ if _enabled:
         "double",
         "half",
         "state_dict",
+        "_state_dict_impl",
         "_save_to_state_dict",
         "load_state_dict",
         "_load_from_state_dict",
@@ -1300,6 +1308,10 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         if hasattr(obj, "__script_if_tracing_wrapper"):
             obj = obj.__original_fn
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+
+        # some functions are explicitly marked as not supported in script mode
+        if hasattr(obj, "__script_unsupported"):
+            raise RuntimeError("TorchScript error: " + obj.__script_unsupported)
 
         _check_directly_compile_overloaded(obj)
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)

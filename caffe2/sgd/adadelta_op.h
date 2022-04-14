@@ -1,4 +1,5 @@
 #include "caffe2/core/operator.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -18,7 +19,7 @@ void AdadeltaUpdate(
     float* nh,
     float* nd,
     Context* /*context*/) {
-  for (int i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = g[i];
     float di = d[i];
     float hi = nh[i] = decay * h[i] + (1.0f - decay) * gi * gi;
@@ -120,7 +121,7 @@ class SparseAdadeltaOp final : public Operator<Context> {
     }
 
     auto block_size = Input(GRAD).numel() / n;
-    for (int i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       auto idx = indices[i];
       if (block_size == 1) {
         float gi = gradIn[i];

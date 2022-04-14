@@ -15,12 +15,12 @@ import contextlib
 import copy
 import numbers
 import warnings
+import inspect
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
-from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode, CheckerError
+from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, SymbolicContext, TrainingMode, CheckerError
 from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
 from typing import List, Tuple, Union
-
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
@@ -98,22 +98,29 @@ def disable_apex_o2_state_dict_hook(model):
                     module._state_dict_hooks[k] = v
 
 @contextlib.contextmanager
-def exporter_context(model, mode):
+def setup_onnx_logging(verbose):
+    is_originally_enabled = torch.onnx.is_onnx_log_enabled()
+    if is_originally_enabled or verbose:
+        torch.onnx.enable_log()
+    try:
+        yield
+    finally:
+        if not is_originally_enabled:
+            torch.onnx.disable_log()
+
+@contextlib.contextmanager
+def exporter_context(model, mode, verbose):
     with select_model_mode_for_export(model, mode) as mode_ctx, \
-            disable_apex_o2_state_dict_hook(model) as apex_ctx:
-        yield (mode_ctx, apex_ctx)
+            disable_apex_o2_state_dict_hook(model) as apex_ctx, \
+            setup_onnx_logging(verbose) as log_ctx:
+        yield (mode_ctx, apex_ctx, log_ctx)
 
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
-           input_names=None, output_names=None, operator_export_type=None,
+           input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
            opset_version=None, do_constant_folding=True, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
            export_modules_as_functions=False):
-    if operator_export_type is None:
-        if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
-            operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
-        else:
-            operator_export_type = OperatorExportTypes.ONNX
 
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
@@ -205,10 +212,13 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_onnx_remove_print(graph)
     torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
-    if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        torch.onnx.symbolic_helper._quantized_ops.clear()
-        # Unpack quantized weights for conv and linear ops and insert into graph.
-        torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
+    # Caffe2-specific optimization
+    is_caffe2_aten_fallback = (operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and
+                               torch.onnx._CAFFE2_ATEN_FALLBACK)
+    torch.onnx.symbolic_helper._quantized_ops.clear()
+    # Unpack quantized weights for conv and linear ops and insert into graph.
+    torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict, is_caffe2_aten_fallback)
+    if is_caffe2_aten_fallback:
         # Insert permutes before and after each conv op to ensure correct order.
         torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
 
@@ -334,7 +344,6 @@ def _decide_constant_folding(do_constant_folding, operator_export_type, training
 
 
 def _decide_input_format(model, args):
-    import inspect
     try:
         sig = inspect.signature(model.forward)
         ordered_list_keys = list(sig.parameters.keys())
@@ -474,6 +483,42 @@ def _get_example_outputs(model, args):
     return example_outputs
 
 
+_qtype_vtype_map = {torch.quint8: torch.uint8, torch.qint8: torch.int8, torch.qint32: torch.int32, torch.quint4x2: torch.int8}
+
+
+def unpack_quantized_tensor(value):
+    if isinstance(value, torch.Tensor) and value.dtype in _qtype_vtype_map:
+        q_value_dequantize = value.dequantize()
+        q_scale = torch.tensor(value.q_scale(), dtype=torch.double)
+        q_zero_point = torch.tensor(value.q_zero_point(), dtype=torch.int64)
+        q_value = q_value_dequantize / q_scale + q_zero_point
+        q_value = q_value.to(dtype=_qtype_vtype_map[value.dtype])
+        return q_value, q_scale, q_zero_point
+    else:
+        return (value,)
+
+
+def _assign_onnx_node_name(graph, node_names):
+    r"""Takes in ONNX graph, and mapping from torch._C.Node to node name in exported ONNX ModelProto.
+
+    Returns:
+      graph (torch._C.Graph): A TorchScript IR Graph with ONNX nodes, where each torch._C.Node gets its name
+        in exported ONNX ModelProto assigned as attribute ``onnx_name``.
+    """
+    def n_fn(n, b_fn, node_names):
+        for b in n.blocks():
+            b_fn(b, node_names)
+        if n in node_names:
+            n.s_("onnx_name", node_names[n])
+
+    def b_fn(b, node_names):
+        for n in b.nodes():
+            n_fn(n, b_fn, node_names)
+
+    b_fn(graph, node_names)
+    return graph
+
+
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
@@ -500,15 +545,22 @@ def _model_to_graph(model, args, verbose=False,
 
     params_dict = _get_named_param_dict(graph, params)
 
-    graph = _optimize_graph(graph, operator_export_type,
-                            _disable_torch_constant_prop=_disable_torch_constant_prop,
-                            fixed_batch_size=fixed_batch_size, params_dict=params_dict,
-                            dynamic_axes=dynamic_axes, input_names=input_names,
-                            module=module)
+    try:
+        graph = _optimize_graph(graph, operator_export_type,
+                                _disable_torch_constant_prop=_disable_torch_constant_prop,
+                                fixed_batch_size=fixed_batch_size, params_dict=params_dict,
+                                dynamic_axes=dynamic_axes, input_names=input_names,
+                                module=module)
+    except Exception as e:
+        torch.onnx.log("Torch IR graph at exception: ", graph)
+        raise
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         example_outputs = _get_example_outputs(model, args)
-        out_vars, desc = torch.jit._flatten(tuple(example_outputs))
+        example_outputs_final = ()
+        for example_output in example_outputs:
+            example_outputs_final += unpack_quantized_tensor(example_output)
+        out_vars, desc = torch.jit._flatten(example_outputs_final)
         torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
     else:
         flatten_args, _ = torch._C._jit_flatten(args)
@@ -532,7 +584,8 @@ def _model_to_graph(model, args, verbose=False,
     if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
-    if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
+    from torch.onnx.symbolic_helper import _constant_folding_opset_versions
+    if do_constant_folding and _export_onnx_opset_version in _constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
@@ -547,37 +600,21 @@ def _model_to_graph(model, args, verbose=False,
     if _export_onnx_opset_version < 9:
         torch._C._jit_pass_onnx_cast_all_constant_to_floating(graph)
 
-    if verbose:
-        print(graph)
-
     params_dict = torch._C._jit_pass_filter_non_tensor_arguments(params_dict)
     torch._C._jit_decay_packed_param_input_types(graph)
+
+    # If output names lack a proper name and are identified only by their unique
+    # give them a legible name for debugging purposes
+    _apply_friendly_debug_names(graph, params_dict)
 
     return graph, params_dict, torch_out
 
 
-def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
+def export_to_pretty_string(model, args, export_params=True, verbose=False, training=None,
                             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                             export_type=ExportTypes.PROTOBUF_FILE, google_printer=False, opset_version=None,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
                             do_constant_folding=True, dynamic_axes=None):
-    if f is not None:
-        warnings.warn("'f' is deprecated and ignored. It will be removed in the next PyTorch release.")
-    return _export_to_pretty_string(model, args, f, export_params, verbose, training,
-                                    input_names, output_names, operator_export_type,
-                                    export_type, google_printer, opset_version,
-                                    do_constant_folding=do_constant_folding,
-                                    add_node_names=add_node_names,
-                                    keep_initializers_as_inputs=keep_initializers_as_inputs,
-                                    custom_opsets=custom_opsets, dynamic_axes=dynamic_axes)
-
-
-def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
-                             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
-                             export_type=ExportTypes.PROTOBUF_FILE, google_printer=False, opset_version=None,
-                             do_constant_folding=True, keep_initializers_as_inputs=None,
-                             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-                             onnx_shape_inference=True, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -587,8 +624,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
     from torch.onnx.symbolic_helper import _set_onnx_shape_inference
-    _set_onnx_shape_inference(onnx_shape_inference)
-    with exporter_context(model, training):
+    _set_onnx_shape_inference(True)
+    with exporter_context(model, training, verbose):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
                                                          opset_version)
@@ -598,7 +635,6 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
                                                         val_do_constant_folding,
-                                                        fixed_batch_size=fixed_batch_size,
                                                         training=training, dynamic_axes=dynamic_axes)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
@@ -627,7 +663,7 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
     # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
     operator_export_type = OperatorExportTypes.ONNX_FALLTHROUGH
-    with exporter_context(model, training):
+    with exporter_context(model, training, False):
         args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(
             model, args,
@@ -635,7 +671,7 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
             # as-is rather than cause a failure.
             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
     unsupported_ops = list()
-    supported_namespaces = ("onnx", "prim")
+    supported_namespaces = ("onnx", "prim", "quantized")
     for node in graph.nodes():
         if node.kind().split(":")[0] not in supported_namespaces:
             unsupported_ops.append(node.kind())
@@ -646,6 +682,29 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         trace_module_map = {_m : torch.typename(type(_m)) for _m in model.modules()}
         torch.jit._trace._trace_module_map = trace_module_map
         return trace_module_map
+
+    def __register_attribute_hook():
+        attr_name = "_onnx_attrs"
+
+        def _track_module_attributes_forward_pre_hook(module, input):
+            setattr(module, attr_name, _get_module_attributes(module))
+
+        def _track_module_attributes_forward_hook(module, input, output):
+            tracing_state = torch._C._get_tracing_state()
+            if not tracing_state:
+                return
+
+            graph = tracing_state.graph()
+            onnx_attrs = {}
+            if hasattr(module, attr_name):
+                onnx_attrs = getattr(module, attr_name)
+                delattr(module, attr_name)
+
+            torch._C._jit_pass_onnx_track_scope_attributes(graph, onnx_attrs)
+
+        for m in model.modules():
+            m.register_forward_hook(_track_module_attributes_forward_hook)
+            m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
 
     if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
         trace_module_map = __setup_trace_module_map()
@@ -663,18 +722,34 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         export_modules_as_functions = module_typenames
     else:
         export_modules_as_functions = None
+
+    if export_modules_as_functions:
+        __register_attribute_hook()
+
     return export_modules_as_functions
 
 def _reset_trace_module_map():
     torch.jit._trace._trace_module_map = None
+    torch._C._jit_pass_onnx_clear_scope_records()
+
+def _get_module_attributes(module):
+    from typing import get_type_hints
+    annotations = get_type_hints(type(module))
+    base_m_annotations = get_type_hints(torch.nn.Module)
+    [annotations.pop(k, None) for k in base_m_annotations]
+    return {k : getattr(module, k) for k in annotations}
 
 def _export(model, args, f, export_params=True, verbose=False, training=None,
-            input_names=None, output_names=None, operator_export_type=None,
+            input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, opset_version=None,
             do_constant_folding=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             onnx_shape_inference=True, export_modules_as_functions=False):
 
+    if export_modules_as_functions and opset_version < 15:
+        raise ValueError("`export_modules_as_functions` is not supported for `opset_version` < 15."
+                         "This is because `opset_version` < 15 implies IR version < 8, which means "
+                         "no local function support. ")
     export_modules_as_functions = _setup_trace_module_map(model, export_modules_as_functions)
 
     if isinstance(model, torch.nn.DataParallel):
@@ -694,7 +769,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         if opset_version is None:
             opset_version = _default_onnx_opset_version
         if not operator_export_type:
-            if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
+            if torch.onnx._CAFFE2_ATEN_FALLBACK:
                 operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
             else:
                 operator_export_type = OperatorExportTypes.ONNX
@@ -707,7 +782,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         # (to preserve whatever the original training mode was.)
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
-        with exporter_context(model, training):
+        with exporter_context(model, training, verbose):
             val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                              operator_export_type,
                                                              opset_version)
@@ -739,20 +814,24 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
 
             torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
             node_attr_to_name = {}  # type: ignore[var-annotated]
-            if export_modules_as_functions is not None:
+            if export_modules_as_functions:
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
                     graph, export_modules_as_functions, list(params_dict.keys()))
+            params_dict = torch._C._jit_pass_onnx_deduplicate_initializers(
+                graph, params_dict, getattr(model, "training", False))
             if export_params:
-                proto, export_map, val_use_external_data_format = graph._export_onnx(
+                proto, export_map, val_use_external_data_format, node_names = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
                     val_add_node_names, model_file_location, node_attr_to_name)
             else:
-                proto, export_map, val_use_external_data_format = graph._export_onnx(
+                proto, export_map, val_use_external_data_format, node_names = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
                     not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     model_file_location, node_attr_to_name)
+            if verbose:
+                torch.onnx.log("Exported graph: ", _assign_onnx_node_name(graph, node_names))
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
@@ -791,14 +870,27 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             # string in memory.
             if (operator_export_type is OperatorExportTypes.ONNX) and (not val_use_external_data_format):
                 try:
-                    _check_onnx_proto(proto)
+                    _check_onnx_proto(proto, full_check=True)
                 except RuntimeError as e:
                     raise CheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
         _reset_trace_module_map()
+
     return torch_out
+
+
+def _apply_friendly_debug_names(graph, params):
+    for n in graph.nodes():
+        for v in n.inputs():
+            old_name = v.debugName()
+            if old_name != str(v.unique()):
+                continue
+            new_name = f"{n.kind()}_{v.unique()}"
+            v.setDebugName(new_name)
+            if old_name in params:
+                params[new_name] = params.pop(old_name)
 
 
 def _set_input_and_output_names(graph, input_names, output_names):
@@ -1008,6 +1100,19 @@ def _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_t
     return sym_registry.get_registered_op(op_name, domain, opset_version)
 
 
+def _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
+    import torch.onnx.symbolic_registry as sym_registry
+    is_exportable_aten_op = sym_registry.is_registered_op(op_name, "", opset_version)
+    is_onnx_aten_export = operator_export_type == OperatorExportTypes.ONNX_ATEN
+    is_aten_fallback_export = operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK
+    return is_onnx_aten_export or (not is_exportable_aten_op and is_aten_fallback_export)
+
+
+def _need_symbolic_context(symbolic_fn):
+    # Check if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`
+    params = list(inspect.signature(symbolic_fn).parameters.values())
+    return params and issubclass(params[0].annotation, SymbolicContext)
+
 def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into
     # the new graph
@@ -1018,8 +1123,10 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
 
         sym_registry.register_version("", opset_version)
 
-        # Quantized op symbolics are registered for opset 9 only.
-        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and opset_version == 9:
+        # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
+        is_caffe2_aten_fallback = (operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and
+                                   torch.onnx._CAFFE2_ATEN_FALLBACK)
+        if is_caffe2_aten_fallback and opset_version == 9:
             import torch.onnx.symbolic_caffe2
             torch.onnx.symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
@@ -1030,168 +1137,37 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         else:
             ns_op_name = n.kind()
         ns, op_name = ns_op_name.split("::")
-        if ns == "onnx":
-            if op_name == "Placeholder":
-                return torch._C._jit_onnx_convert_pattern_from_subblock(block, n, env)
-            else:
-                # Use the original node directly
-                attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
-                return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())
 
-        elif ns == "aten":
-            is_exportable_aten_op = sym_registry.is_registered_op(op_name, "", opset_version)
-            is_onnx_aten_export = operator_export_type == OperatorExportTypes.ONNX_ATEN
-            is_aten_fallback_export = operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK
-            if is_onnx_aten_export or (not is_exportable_aten_op and is_aten_fallback_export):
-                # Direct ATen export requested
-                attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
-                outputs = n.outputsSize()
-                attrs["outputs"] = outputs
-                return _graph_at(g, op_name, *inputs, aten=True, **attrs)
-            else:
-                # Export it regularly
-                domain = ""
-                symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
-                if symbolic_fn is None:
-                    return None
-                attrs = {k: n[k] for k in n.attributeNames()}
-                return symbolic_fn(g, *inputs, **attrs)
-
-        elif ns == "prim":
-            if op_name == "Constant" and not n.mustBeNone():
-                if n.kindOf("value") == "t":
-                    return g.op("Constant", value_t=n["value"])
-                if n.kindOf("value") == "s":
-                    return g.op("Constant", value_s=n["value"])
-                elif n.output().type().isSubtypeOf(ListType.ofInts()) or n.output().type().isSubtypeOf(ListType.ofFloats()):
-                    vals = n.output().toIValue()
-                    value = torch.stack([torch.tensor(v) for v in vals]) if len(vals) else []
-                    return g.op("Constant", value_t=value)
-                elif n.output().type().kind() == "DeviceObjType":
-                    return None
-                else:
-                    raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
-                        n.kindOf("value")))
-            elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack" or op_name == "Uninitialized":
-                # None is not an ONNX operator; keep it as None
-                # Let the exporter handle and finally eliminate these ops
-                # ListConstruct and ListUnpack will be erased in the ONNX peephole pass
-                # Uninitialized will be erased during shape/type inference
-                return None
-            elif op_name == "device" and n.output().type().kind() == "DeviceObjType":
-                return None
-            elif op_name == "Loop" or op_name == "If":
-                static_if = (op_name == "If" and inputs[0].node().kind() == "onnx::Constant")
-                is_sub_block = False
-                if static_if:
-                    # Fold static if
-                    #
-                    # The torch IR
-                    # graph(%embedding_matrix.1 : Float(10, 15, strides=[15, 1], requires_grad=0, device=cpu),
-                    #    %input.1 : Long(6, strides=[1], requires_grad=0, device=cpu), ...
-                    # %65 : Bool(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-                    # %21 : Long(device=cpu) = aten::eq(%20, %64)
-                    # %22 : Long(device=cpu) = prim::If(%21)
-                    #     block0():
-                    #     %23 : Long(device=cpu) = aten::is_floating_point(%input.1)
-                    #     -> (%23)
-                    #     block1():
-                    #     -> (%65)
-                    # %input.53 : Tensor, %weight : Tensor = prim::If(%22)
-                    #     block0():
-                    #     -> (%embedding_matrix.1, %input.1)
-                    #     block1():
-                    #     -> (%input.1, %embedding_matrix.1)
-                    # %26 : int[] = aten::size(%input.53)
-                    #
-                    # The converted ONNX graph
-                    # %10 : Bool(device=cpu) = onnx::Constant[value={0}]()
-                    # %14 : Bool(device=cpu) = onnx::Equal(%13, %8)
-                    # %15 : Bool(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
-                    # %16 : Long(1, strides=[1], device=cpu) = onnx::Shape(%input.1)
-                    input_flag = inputs[0].node()['value'].tolist()
-                    const_value = all(input_flag) if isinstance(input_flag, list) else bool(input_flag)
-                    block_idx = 0 if const_value else 1
-                    current_b = list(n.blocks())[block_idx]
-                    is_sub_block = True
-                    env = torch._C._jit_pass_onnx_block(current_b, block, operator_export_type, env,
-                                                        is_sub_block)
-                    if_output_list = list(n.outputs())
-                    current_b_list = list(current_b.outputs())
-
-                    final_b_list = []
-                    for idx in range(len(if_output_list)):
-                        if current_b_list[idx] not in env:
-                            raise RuntimeError("The sub block ATen output " + current_b_list[idx] + " is not in env.")
-                        onnx_b = env[current_b_list[idx]]
-                        final_b_list.append(onnx_b)
-                    return final_b_list
-                else:
-                    new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())
-                    new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
-                    for b in n.blocks():
-                        new_block = new_node.addBlock()
-                        # Copy input metadata to subblock
-                        #
-                        # If format:
-                        #   prim::If(cond)
-                        #     block0()
-                        #     block1()
-                        #
-                        # Loop format:
-                        #   prim::Loop(iter, cond, input_1, ..., input_n)
-                        #     block0(iter, input_1, ..., input_n)
-                        #
-                        # For `If` node, there is nothing to copy.
-                        # For `Loop` node, copy metadata for `iter`, `input_1`, ..., `input_n`.
-                        for i, b_in in enumerate(b.inputs()):
-                            if i == 0 and i < len(inputs):
-                                b_in.setType(inputs[i].type())
-                            if i > 0 and (i + 1) < len(inputs):
-                                b_in.setType(inputs[i + 1].type())
-                        torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env,
-                                                      is_sub_block)
-                    new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
-                    # Process Loop and If after subblock is converted.
-                    from torch.onnx.symbolic_helper import _onnx_shape_inference
-                    if _onnx_shape_inference:
-                        torch._C._jit_pass_onnx_node_shape_type_inference(new_node, _params_dict, opset_version)
-                    return new_op_outputs
-            else:
-                symbolic_fn = _find_symbolic_in_registry("prim", op_name, opset_version,
-                                                         operator_export_type)
-                if symbolic_fn is None:
-                    return None
-                attrs = {k: n[k] for k in n.attributeNames()}
-                # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1408006
-                # PythonOp symbolic need access the node to resolve the name conflict,
-                # this is inconsistent with regular op symbolic.
-                if op_name == "PythonOp":
-                    inputs = (n, *inputs)
-                return symbolic_fn(g, *inputs, **attrs)
-
-        elif ns == "quantized":
+        domain = ns
+        if ns == "aten":
             domain = ""
-            if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
-                domain = "caffe2"
-            symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
-            if symbolic_fn is None:
-                return None
-            attrs = {k: n[k] for k in n.attributeNames()}
-            return symbolic_fn(g, *inputs, **attrs)
+        elif ns == "quantized" and is_caffe2_aten_fallback:
+            domain = "caffe2"
 
-        # custom ops
-        elif sym_registry.is_registered_version(ns, opset_version):
-            domain = ns
+        if sym_registry.is_registered_op(op_name, domain, opset_version):
             symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
-            if symbolic_fn is None:
-                return None
             attrs = {k: n[k] for k in n.attributeNames()}
+            if _need_symbolic_context(symbolic_fn):
+                ctx = SymbolicContext(_params_dict, env, n, block)
+                return symbolic_fn(ctx, g, *inputs, **attrs)
+            # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1408006
+            # PythonOp symbolic need access to the node to resolve the name conflict,
+            # this is inconsistent with regular op symbolic.
+            if op_name == "PythonOp":
+                inputs = (n, *inputs)
             return symbolic_fn(g, *inputs, **attrs)
+        elif ns == "onnx":
+            # Clone node to trigger ONNX shape inference
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+            return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())
+        elif _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
+            # Direct ATen export requested
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+            outputs = n.outputsSize()
+            attrs["outputs"] = outputs
+            return g.at(op_name, *inputs, aten=True, **attrs)
         else:
-            raise RuntimeError("ONNX export failed on an operator with unrecognized namespace {}::{}. "
-                               "If you are trying to export a custom operator, make sure you registered "
-                               "it with the right domain and version.".format(ns, op_name))
+            raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
         if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
@@ -1204,8 +1180,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
 
 
 # Generate an ONNX ATen op node.
-def _graph_at(g, opname, *args, **kwargs):
-    return g.op("ATen", *args, operator_s=opname, **kwargs)
+def _aten_op(g, operator, *args, overload_name="", **kwargs):
+    return g.op("ATen", *args, operator_s=operator, overload_name_s=overload_name, **kwargs)
 
 
 # This helper function can create either constant tensor or constant scalar.
@@ -1339,7 +1315,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
 
 
 torch._C.Graph.op = _graph_op  # type: ignore[attr-defined]
-torch._C.Graph.at = _graph_at  # type: ignore[attr-defined]
+torch._C.Graph.at = _aten_op  # type: ignore[attr-defined]
 torch._C.Block.op = _block_op  # type: ignore[attr-defined]
 torch._C.Graph.constant = _graph_constant  # type: ignore[attr-defined]
-torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc]
+torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc, assignment]

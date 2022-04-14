@@ -37,7 +37,7 @@ class GatherFused8BitRowwiseOp : public Operator<Context> {
     const Index* idxs = indices.template data<Index>();
     auto out = output->template mutable_data<float>();
 
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       auto idx = idxs[i];
       CAFFE_ENFORCE(
           0 <= idx && idx < data.size(0),

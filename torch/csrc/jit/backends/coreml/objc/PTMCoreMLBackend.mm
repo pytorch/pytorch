@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/coreml/cpp/context.h>
 #include <torch/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.h>
 #include <torch/script.h>
 
@@ -135,7 +136,7 @@ struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
         inputs_(inputs),
         outputs_(outputs),
         config_(config) {}
-  c10::List<torch::Tensor> execute(c10::impl::GenericList inputs) {
+  c10::List<torch::Tensor> execute(const c10::impl::GenericList& inputs) {
     std::vector<PTMCoreMLFeatureSpecs> inputSpecs;
     std::vector<PTMCoreMLFeatureSpecs> outputSpecs;
     int inputSpecIndex = 0;
@@ -143,7 +144,7 @@ struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
     for (int i = 0; i < inputs.size(); ++i) {
       auto val = inputs.get(i);
       if (val.isTuple()) {
-        auto tuples = val.toTupleRef().elements();
+        auto& tuples = val.toTupleRef().elements();
         for (auto& ival : tuples) {
           TORCH_CHECK(ival.isTensor());
           auto tensor = ival.toTensor();
@@ -242,25 +243,26 @@ class API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLBackend
     return c10::impl::toList(outputs);
   }
   bool is_available() override {
-#if !defined(__APPLE__)
-    return false;
-#elif TARGET_OS_IPHONE
-    if ([UIDevice currentDevice].systemVersion.floatValue > 14.0) {
-      return true;
-    }
-#elif TARGET_OS_MAC
-    NSOperatingSystemVersion supportedVer = {10, 13, 0};
-    if ([[NSProcessInfo processInfo]
-            isOperatingSystemAtLeastVersion:supportedVer]) {
-      return true;
-    }
-#endif
-    return false;
+    return [PTMCoreMLExecutor isAvailable];
+  }
+};
+
+struct API_AVAILABLE(ios(11.0), macos(10.13)) ContextImpl
+    : public ContextInterface {
+  bool isCoreMLAvailable() const override {
+    return [PTMCoreMLExecutor isAvailable];
+  }
+  void setModelCacheDirectory(std::string dir) override {
+    [PTMCoreMLExecutor
+        setModelCacheDirectory:[NSString stringWithCString:dir.c_str()]];
   }
 };
 
 API_AVAILABLE(ios(11.0), macos(10.13))
 static auto cls = torch::jit::backend<CoreMLBackend>("coreml");
+
+API_AVAILABLE(ios(11.0), macos(10.13))
+static BackendRegistrar g_coreml_backend(new ContextImpl());
 
 } // namespace
 }

@@ -13,8 +13,8 @@
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
@@ -51,7 +51,7 @@ public:
   template <int64_t mask>
   static Vectorized<c10::complex<float>> blend(const Vectorized<c10::complex<float>>& a, const Vectorized<c10::complex<float>>& b) {
      // convert c10::complex<V> index mask to V index mask: xy -> xxyy
-    // NOLINTNEXTLINE(clang-diagnostic-warning)
+    static_assert(mask > -1 && mask < 16, "Unexpected mask range");
     switch (mask) {
       case 0:
         return a;
@@ -83,6 +83,7 @@ public:
         return _mm256_blend_ps(a.values, b.values, 0xF3); //b0000 1101 = b1111 0011
       case 14:
         return _mm256_blend_ps(a.values, b.values, 0xFC); //b0000 1110 = b1111 1100
+      default: break;
     }
     return b;
   }
@@ -122,7 +123,7 @@ public:
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (auto i = 0; i < 2*size(); ++i) {
+    for (const auto i : c10::irange(2*size())) {
       tmp_values[i] = 0.0;
     }
     std::memcpy(
@@ -247,7 +248,7 @@ public:
     return map(std::acos);
   }
   Vectorized<c10::complex<float>> atan() const;
-  Vectorized<c10::complex<float>> atan2(const Vectorized<c10::complex<float>> &b) const {
+  Vectorized<c10::complex<float>> atan2(const Vectorized<c10::complex<float>>& /*b*/) const {
     AT_ERROR("not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> erf() const {
@@ -288,20 +289,20 @@ public:
   Vectorized<c10::complex<float>> floor() const {
     return _mm256_floor_ps(values);
   }
-  Vectorized<c10::complex<float>> hypot(const Vectorized<c10::complex<float>> &b) const {
+  Vectorized<c10::complex<float>> hypot(const Vectorized<c10::complex<float>>& /*b*/) const {
     AT_ERROR("not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> igamma(const Vectorized<c10::complex<float>> &x) const {
+  Vectorized<c10::complex<float>> igamma(const Vectorized<c10::complex<float>>& /*x*/) const {
     AT_ERROR("not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> igammac(const Vectorized<c10::complex<float>> &x) const {
+  Vectorized<c10::complex<float>> igammac(const Vectorized<c10::complex<float>>& /*x*/) const {
     AT_ERROR("not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> neg() const {
     auto zero = _mm256_setzero_ps();
     return _mm256_sub_ps(zero, values);
   }
-  Vectorized<c10::complex<float>> nextafter(const Vectorized<c10::complex<float>> &b) const {
+  Vectorized<c10::complex<float>> nextafter(const Vectorized<c10::complex<float>>& /*b*/) const {
     AT_ERROR("not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> round() const {
@@ -342,31 +343,31 @@ public:
   Vectorized<c10::complex<float>> operator!=(const Vectorized<c10::complex<float>>& other) const {
     return _mm256_cmp_ps(values, other.values, _CMP_NEQ_UQ);
   }
-  Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator<=(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator<=(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator>(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator>(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator>=(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator>=(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<c10::complex<float>> eq(const Vectorized<c10::complex<float>>& other) const;
   Vectorized<c10::complex<float>> ne(const Vectorized<c10::complex<float>>& other) const;
-  Vectorized<c10::complex<float>> lt(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> lt(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> le(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> le(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> gt(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> gt(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> ge(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> ge(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 };
@@ -410,7 +411,7 @@ template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c1
 }
 
 // reciprocal. Implement this here so we can use multiplication.
-Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::reciprocal() const {
+inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::reciprocal() const {
   //re + im*i = (a + bi)  / (c + di)
   //re = (ac + bd)/abs_2() = c/abs_2()
   //im = (bc - ad)/abs_2() = d/abs_2()
@@ -419,7 +420,7 @@ Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::reciprocal() co
   return _mm256_div_ps(c_d, abs_2_());
 }
 
-Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::atan() const {
+inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::atan() const {
   // atan(x) = i/2 * ln((i + z)/(i - z))
   const __m256 i = _mm256_setr_ps(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
   const Vectorized i_half = _mm256_setr_ps(0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5);
@@ -467,12 +468,12 @@ Vectorized<c10::complex<float>> inline operator^(const Vectorized<c10::complex<f
   return _mm256_xor_ps(a, b);
 }
 
-Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::eq(
+inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::eq(
     const Vectorized<c10::complex<float>>& other) const {
   return (*this == other) & Vectorized<c10::complex<float>>(_mm256_set1_ps(1.0f));
 }
 
-Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::ne(
+inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::ne(
     const Vectorized<c10::complex<float>>& other) const {
   return (*this != other) & Vectorized<c10::complex<float>>(_mm256_set1_ps(1.0f));
 }

@@ -48,22 +48,23 @@ static void upsample_nearest3d_out_frame(
     return;
   }
 
-  for (int64_t d2 = 0; d2 < output_depth; ++d2) {
+  for (const auto d2 : c10::irange(output_depth)) {
     const int64_t d1 =
           nn_compute_source_index_fn(depth_scale, d2, input_depth);
 
-    for (int64_t h2 = 0; h2 < output_height; ++h2) {
+    for (const auto h2 : c10::irange(output_height)) {
       const int64_t h1 =
           nn_compute_source_index_fn(height_scale, h2, input_height);
 
-      for (int64_t w2 = 0; w2 < output_width; ++w2) {
+      for (const auto w2 : c10::irange(output_width)) {
         const int64_t w1 =
             nn_compute_source_index_fn(width_scale, w2, input_width);
 
         const auto* pos1 = &i_p[d1 * input_height * input_width + h1 * input_width + w1];
         auto* pos2 = &o_p[d2 * output_height * output_width + h2 * output_width + w2];
 
-        for (int64_t c = 0; c < channels; ++c) {
+        for (const auto c : c10::irange(channels)) {
+          (void)c; //Suppress unused variable warning
           pos2[0] = pos1[0];
           pos1 += input_depth * input_height * input_width;
           pos2 += output_depth * output_height * output_width;
@@ -101,14 +102,14 @@ static void upsample_nearest3d_out_frame_nhwc(
       return;
     }
 
-    for (int64_t d2 = 0; d2 < output_depth; ++d2) {
+    for (const auto d2 : c10::irange(output_depth)) {
       const int64_t d1 =
           nn_compute_source_index_fn(depth_scale, d2, input_depth);
-      for (int64_t h2 = 0; h2 < output_height; ++h2) {
+      for (const auto h2 : c10::irange(output_height)) {
         const int64_t h1 =
             nn_compute_source_index_fn(height_scale, h2, input_height);
 
-        for (int64_t w2 = 0; w2 < output_width; ++w2) {
+        for (const auto w2 : c10::irange(output_width)) {
           const int64_t w1 =
               nn_compute_source_index_fn(width_scale, w2, input_width);
 
@@ -231,7 +232,7 @@ Tensor _upsample_nearest_exact3d_quantized_cpu(
 
 Tensor upsample_nearest3d_quantized_cpu(
     const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_d = get_scale_value(scale_factors, 0);
@@ -242,7 +243,7 @@ Tensor upsample_nearest3d_quantized_cpu(
 
 Tensor _upsample_nearest_exact3d_quantized_cpu(
     const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_d = get_scale_value(scale_factors, 0);

@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/c10d/quantization/quantization.h>
 #include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
+#include <torch/library.h>
 
 namespace torch {
 namespace distributed {
@@ -87,6 +88,17 @@ at::Tensor _bfloat16_to_float_cpu(const at::Tensor& input) {
       output.data_ptr<float>());
 
   return output;
+}
+
+
+TORCH_LIBRARY(quantization, m) {
+    m.def("_Bfloat16QuantizedToFloat(Tensor input) -> Tensor");
+    m.def("_FloatToBfloat16Quantized(Tensor input) -> Tensor");
+}
+
+TORCH_LIBRARY_IMPL(quantization, CPU, m) {
+    m.impl("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cpu);
+    m.impl("_FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
 }
 
 } // namespace quantization

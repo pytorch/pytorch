@@ -1,12 +1,16 @@
 #pragma once
 
+#include <ATen/core/DimVector.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
+#include <ATen/core/custom_class.h>
 #include <ATen/core/ivalue_to.h>
+#include <ATen/core/jit_type_base.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 #include <typeindex>
 
 namespace torch {
@@ -27,7 +31,6 @@ struct IValue;
 struct ClassType;
 struct Type;
 class RRefInterface;
-using TypePtr = std::shared_ptr<Type>;
 
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
@@ -89,7 +92,24 @@ struct OptionalArray {
     return *this;
   }
 
+  // Used when saving an argument for the backwards pass.
+  OptionalArray& operator=(c10::OptionalArrayRef<T> ref) {
+    if (ref) {
+      list = std::vector<T>(ref->begin(), ref->end());
+    } else {
+      list = nullopt;
+    }
+    return *this;
+  }
+
   operator c10::optional<c10::ArrayRef<T>>() {
+    if (!list) {
+      return nullopt;
+    }
+    return *list;
+  }
+
+  operator c10::OptionalArrayRef<T>() {
     if (!list) {
       return nullopt;
     }
@@ -124,6 +144,7 @@ struct Capsule {
   _(Double)                  \
   _(ComplexDouble)           \
   _(Int)                     \
+  _(SymInt)   \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -282,6 +303,39 @@ struct TORCH_API IValue final {
       const IValue& lhs,
       const IValue& rhs);
 
+private:
+  static bool isAliasOf(const at::Tensor& a, const at::Tensor& b) {
+    if (a.is_sparse()) {
+      return isAliasOf(a._values(), b) || isAliasOf(a._indices(), b);
+    }
+    if (b.is_sparse()) {
+      return isAliasOf(a, b._values()) || isAliasOf(a, b._indices());
+    }
+    if (a.is_sparse_csr()) {
+      return isAliasOf(a.values(), b) ||
+             isAliasOf(a.crow_indices(), b) ||
+             isAliasOf(a.col_indices(), b);
+    }
+    if (b.is_sparse_csr()) {
+      return isAliasOf(a, b.values()) ||
+             isAliasOf(a, b.crow_indices()) ||
+             isAliasOf(a, b.col_indices());
+    }
+
+    // Opaque tensors such as the ones constructed by the MKL-DNN backend
+    // don't have storage so we just compare their TensorImpls.
+    // TODO: Find way to expose alias info for opaque tensors.
+    if (!a.has_storage() || !b.has_storage()) {
+      return a.unsafeGetTensorImpl() == b.unsafeGetTensorImpl();
+    }
+
+    return a.is_alias_of(b);
+  }
+
+  template <typename T>
+  bool isListOf() const;
+
+public:
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
     if (this->tag != rhs.tag) {
@@ -291,16 +345,7 @@ struct TORCH_API IValue final {
 
     // Tensors should be compared based on internal storage
     if (this->isTensor()) {
-      const auto& thisTensor = this->toTensor();
-      const auto& rhsTensor = rhs.toTensor();
-      // mkldnn tensors dont have views or storage, so we compare
-      // based on tensor impl. //TODO: find a way to use mkldnn storage
-      if (thisTensor.is_mkldnn() || rhsTensor.is_mkldnn()) {
-        return thisTensor.unsafeGetTensorImpl() ==
-            rhsTensor.unsafeGetTensorImpl();
-      }
-
-      return thisTensor.is_alias_of(rhsTensor);
+      return isAliasOf(this->toTensor(), rhs.toTensor());
     }
 
     if (!this->is_intrusive_ptr) {
@@ -361,7 +406,7 @@ struct TORCH_API IValue final {
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
-  IValue(at::Tensor t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
+  IValue(at::TensorBase t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
     new (&payload.as_tensor) at::Tensor(std::move(t));
   }
   bool isTensor() const {
@@ -516,6 +561,18 @@ struct TORCH_API IValue final {
     payload.u.as_int = i;
   }
 
+  IValue(c10::SymInt i) : tag(Tag::SymInt), is_intrusive_ptr(false) {
+    payload.u.as_int = i.data();
+  }
+
+  bool isSymInt() const {
+    return Tag::SymInt == tag;
+  }
+
+  c10::SymInt toSymInt() const {
+    return c10::SymInt(payload.u.as_int);
+  }
+
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
 
@@ -552,6 +609,7 @@ struct TORCH_API IValue final {
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
+  at::DimVector toDimVector() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
@@ -638,6 +696,8 @@ struct TORCH_API IValue final {
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  IValue(c10::OptionalArrayRef<T> v);
   IValue(c10::nullopt_t);
 
   // ClassType
@@ -647,7 +707,7 @@ struct TORCH_API IValue final {
   }
   c10::intrusive_ptr<ivalue::Object> toObject() &&;
   c10::intrusive_ptr<ivalue::Object> toObject() const&;
-  const ivalue::Object& toObjectRef() const;
+  ivalue::Object& toObjectRef() const;
 
   torch::jit::Module toModule() const;
   bool isModule() const;
@@ -868,21 +928,35 @@ struct TORCH_API IValue final {
     }
   }
 
+  template <typename T = c10::PlatformType>
   TypePtr type() const;
 
   // Detect aliased tensors.
   struct HashAliasedIValue {
+    size_t hashTensor(const at::Tensor& ten) const {
+      if (ten.is_sparse()) {
+        // COO sparse tensors have a "values" tensor and an "indices" tensor
+        // so this will detect overlap of sparse tensors that share a values
+        // tensor, but not sparse tensors that share an indices tensor.
+        return hashTensor(ten._values());
+      } else if (ten.is_sparse_csr()) {
+        // COO sparse tensors have a "values" tensor and an "indices" tensor
+        // so this will detect overlap of sparse tensors that share a values
+        // tensor, but not sparse tensors that share an indices tensor.
+        return hashTensor(ten.values());
+      }  else if (!ten.has_storage()) {
+        // Opaque tensors such as the ones constructed by the MKL-DNN backend
+        // don't have storage so we just use their TensorImpls.
+        // TODO: Find way to expose alias info for opaque tensors.
+        return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
+      } else {
+        return reinterpret_cast<size_t>(
+            ten.storage().unsafeGetStorageImpl());
+      }
+    }
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        if (val.toTensor().is_mkldnn()) {
-          // MKLDNN tensors dont have storage and dont create views
-          // or aliasing so we can just use Tensor pointer, TODO: find way
-          // to use mkldnn storage
-          return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
-        } else {
-          return reinterpret_cast<size_t>(
-              val.toTensor().storage().unsafeGetStorageImpl());
-        }
+        return hashTensor(val.toTensor());
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.
@@ -1013,6 +1087,9 @@ struct TORCH_API IValue final {
       payload.u = p.u;
     }
   }
+
+  template <typename T>
+  struct TagType {};
 
   friend MaybeOwnedTraits<IValue>;
 
@@ -1145,10 +1222,10 @@ struct TORCH_API WeakIValue final {
 struct TORCH_API StrongTypePtr {
   StrongTypePtr(
       std::shared_ptr<torch::jit::CompilationUnit> cu,
-      std::shared_ptr<Type> type);
+      TypePtr type);
 
   std::shared_ptr<torch::jit::CompilationUnit> cu_;
-  std::shared_ptr<Type> type_;
+  TypePtr type_;
 };
 
 // [Constant Object Weak CompilationUnit Reference]
@@ -1159,10 +1236,10 @@ struct TORCH_API StrongTypePtr {
 struct TORCH_API WeakTypePtr {
   WeakTypePtr(
       std::weak_ptr<torch::jit::CompilationUnit> cu,
-      std::shared_ptr<Type> type);
+      TypePtr type);
 
   std::weak_ptr<torch::jit::CompilationUnit> cu_;
-  std::shared_ptr<Type> type_;
+  TypePtr type_;
 };
 
 // internal build errors with std::variant :/
@@ -1222,29 +1299,6 @@ struct TORCH_API WeakOrStrongTypePtr {
 };
 
 
-TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>&
-getCustomClassTypeMap();
-
-template <typename T>
-c10::ClassTypePtr getCustomClassTypeImpl() {
-  auto& tmap = c10::getCustomClassTypeMap();
-  auto res = tmap.find(std::type_index(typeid(T)));
-  TORCH_CHECK(res != tmap.end(), "Can't find class id in custom class type map", "");
-  return res->second;
-}
-
-template <typename T>
-const c10::ClassTypePtr& getCustomClassType() {
-  // Classes are never unregistered from getCustomClassTypeMap and the
-  // hash lookup can be a hot path, so just cache.
-  // For the same reason, it's fine If this ends up getting duplicated across
-  // DSO boundaries for whatever reason.
-  static c10::ClassTypePtr cache = getCustomClassTypeImpl<T>();
-  return cache;
-}
-
-TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
-getClassConverter();
 } // namespace c10
 
-#include <ATen/core/ivalue_inl.h>
+#include <ATen/core/ivalue_inl.h>  // IWYU pragma: keep

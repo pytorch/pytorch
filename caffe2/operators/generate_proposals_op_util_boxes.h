@@ -294,7 +294,7 @@ EArrXXt<typename Derived::Scalar> clip_boxes_rotated(
 
   EArrXXt<typename Derived::Scalar> ret(boxes.rows(), boxes.cols());
   ret = boxes;
-  for (int i = 0; i < upright_boxes.rows(); ++i) {
+  for (const auto i : c10::irange(upright_boxes.rows())) {
     ret.row(indices[i]) = upright_boxes.row(i);
   }
   return ret;

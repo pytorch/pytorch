@@ -4,6 +4,7 @@ import argparse
 import copy
 from datetime import datetime
 from distutils.util import strtobool
+from distutils.version import LooseVersion
 import functools
 import os
 import pathlib
@@ -91,20 +92,18 @@ TESTS = discover_tests(
         'onnx',
         'package',  # executed by test_package.py
         'quantization',  # executed by test_quantization.py
+        'autograd',  # executed by test_autograd.py
     ],
     blocklisted_tests=[
         'test_bundled_images',
         'test_cpp_extensions_aot',
         'test_determination',
-        'test_gen_backend_stubs',
         'test_jit_fuser',
         'test_jit_simple',
         'test_jit_string',
         'test_kernel_launch_checks',
         'test_metal',
         'test_nnapi',
-        'test_python_dispatch',
-        'test_functionalization',
         'test_segment_reductions',
         'test_static_runtime',
         'test_throughput_benchmark',
@@ -133,6 +132,7 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
+        "test_deploy",
     ]
 )
 
@@ -168,6 +168,7 @@ USE_PYTEST_LIST = [
     "test_typing",
     "distributed/elastic/events/lib_test",
     "distributed/elastic/agent/server/test/api_test",
+    "test_deploy",
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -199,11 +200,21 @@ WINDOWS_BLOCKLIST = [
     "distributed/pipeline/sync/test_worker",
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
-    "distributed/_sharded_tensor/test_sharded_tensor",
-    "distributed/_sharded_tensor/ops/test_embedding",
-    "distributed/_sharded_tensor/ops/test_embedding_bag",
-    "distributed/_sharded_tensor/ops/test_init",
-    "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharded_tensor/test_megatron_prototype",
+    "distributed/_shard/sharded_tensor/test_sharded_tensor",
+    "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
+    "distributed/_shard/sharded_tensor/test_partial_tensor",
+    "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
+    "distributed/_shard/sharded_tensor/ops/test_embedding",
+    "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
+    "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
+    "distributed/_shard/sharded_tensor/ops/test_init",
+    "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_tensor/ops/test_math_ops",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_replicated_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -211,13 +222,21 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "distributed/_sharded_tensor/test_sharded_tensor",
-    "distributed/_sharded_tensor/ops/test_embedding",
-    "distributed/_sharded_tensor/ops/test_embedding_bag",
-    "distributed/_sharded_tensor/ops/test_init",
-    "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_tensor/test_megatron_prototype",
+    "distributed/_shard/sharded_tensor/test_sharded_tensor",
+    "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
+    "distributed/_shard/sharded_tensor/test_partial_tensor",
+    "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
+    "distributed/_shard/sharded_tensor/ops/test_embedding",
+    "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
+    "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
+    "distributed/_shard/sharded_tensor/ops/test_init",
+    "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_tensor/ops/test_math_ops",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_replicated_tensor",
     "test_determination",
-    "test_multiprocessing",
     "test_jit_legacy",
     "test_type_hints",
     "test_openmp",
@@ -244,6 +263,8 @@ CORE_TEST_LIST = [
     "test_modules",
     "test_nn",
     "test_ops",
+    "test_ops_gradients",
+    "test_ops_jit",
     "test_torch"
 ]
 
@@ -293,67 +314,17 @@ ENABLE_PR_HISTORY_REORDERING = bool(
 )
 
 JIT_EXECUTOR_TESTS = [
-    "test_jit_cuda_fuser",
     "test_jit_profiling",
     "test_jit_legacy",
     "test_jit_fuser_legacy",
 ]
 
-DISTRIBUTED_TESTS = [
-    "distributed/test_data_parallel",
-    "distributed/test_launcher",
-    "distributed/nn/jit/test_instantiator",
-    "distributed/rpc/test_faulty_agent",
-    "distributed/rpc/test_tensorpipe_agent",
-    "distributed/rpc/cuda/test_tensorpipe_agent",
-    "distributed/test_c10d_common",
-    "distributed/test_c10d_gloo",
-    "distributed/test_c10d_nccl",
-    "distributed/test_c10d_spawn_gloo",
-    "distributed/test_c10d_spawn_nccl",
-    "distributed/test_store",
-    "distributed/test_pg_wrapper",
-    "distributed/algorithms/test_join",
-    "distributed/test_distributed_spawn",
-    "distributed/pipeline/sync/skip/test_api",
-    "distributed/pipeline/sync/skip/test_gpipe",
-    "distributed/pipeline/sync/skip/test_inspect_skip_layout",
-    "distributed/pipeline/sync/skip/test_leak",
-    "distributed/pipeline/sync/skip/test_portal",
-    "distributed/pipeline/sync/skip/test_stash_pop",
-    "distributed/pipeline/sync/skip/test_tracker",
-    "distributed/pipeline/sync/skip/test_verify_skippables",
-    "distributed/pipeline/sync/test_balance",
-    "distributed/pipeline/sync/test_bugs",
-    "distributed/pipeline/sync/test_checkpoint",
-    "distributed/pipeline/sync/test_copy",
-    "distributed/pipeline/sync/test_deferred_batch_norm",
-    "distributed/pipeline/sync/test_dependency",
-    "distributed/pipeline/sync/test_inplace",
-    "distributed/pipeline/sync/test_microbatch",
-    "distributed/pipeline/sync/test_phony",
-    "distributed/pipeline/sync/test_pipe",
-    "distributed/pipeline/sync/test_pipeline",
-    "distributed/pipeline/sync/test_stream",
-    "distributed/pipeline/sync/test_transparency",
-    "distributed/pipeline/sync/test_worker",
-    "distributed/optim/test_zero_redundancy_optimizer",
-    "distributed/elastic/timer/api_test",
-    "distributed/elastic/timer/local_timer_example",
-    "distributed/elastic/timer/local_timer_test",
-    "distributed/elastic/events/lib_test",
-    "distributed/elastic/metrics/api_test",
-    "distributed/elastic/utils/logging_test",
-    "distributed/elastic/utils/util_test",
-    "distributed/elastic/utils/distributed_test",
-    "distributed/elastic/multiprocessing/api_test",
-    "distributed/_sharding_spec/test_sharding_spec",
-    "distributed/_sharded_tensor/test_sharded_tensor",
-    "distributed/_sharded_tensor/ops/test_embedding",
-    "distributed/_sharded_tensor/ops/test_embedding_bag",
-    "distributed/_sharded_tensor/ops/test_init",
-    "distributed/_sharded_tensor/ops/test_linear",
-] + [test for test in TESTS if test.startswith("distributed/fsdp")]
+DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
+
+TESTS_REQUIRING_LAPACK = [
+    "distributions/test_constraints",
+    "distributions/test_distributions",
+]
 
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
 # options.run_specified_test_cases is enabled.
@@ -619,8 +590,15 @@ CUSTOM_HANDLERS = {
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/test_c10d_nccl": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_gloo": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_common": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_spawn_gloo": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_spawn_nccl": get_run_test_with_subprocess_fn(),
+    "distributed/test_store": get_run_test_with_subprocess_fn(),
+    "distributed/test_pg_wrapper": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/test_faulty_agent": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
 }
-
 
 def parse_test_module(test):
     return test.split(".")[0]
@@ -724,10 +702,11 @@ def parse_args():
         action="store_true",
         help="always run blocklisted windows tests",
     )
-    parser.add_argument(
-        "--determine-from",
-        help="File of affected source filenames to determine which tests to run.",
-    )
+    # NS: Disable target determination until it can be made more reliable
+    # parser.add_argument(
+    #     "--determine-from",
+    #     help="File of affected source filenames to determine which tests to run.",
+    # )
     parser.add_argument(
         "--continue-through-error",
         action="store_true",
@@ -789,6 +768,11 @@ def parse_args():
         "modules. Note: regardless of this option, we will only run the specified test cases "
         " within a specified test module. For unspecified test modules with the bring-to-front "
         "option, all test cases will be run, as one may expect.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only list the test that will run.",
     )
     return parser.parse_args()
 
@@ -890,6 +874,10 @@ def get_selected_tests(options):
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
+    # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
+    if torch.version.cuda is not None and LooseVersion(torch.version.cuda) == "11.6":
+        options.exclude.extend(["distributions/test_constraints"])
+
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
     if sys.platform == "win32" and not options.ignore_win_blocklist:
@@ -900,6 +888,13 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("cpp_extensions_jit")
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
+
+        # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
+        # This below code should be removed once this issue is solved
+        if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.5":
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
 
         selected_tests = exclude_tests(WINDOWS_BLOCKLIST, selected_tests, "on Windows")
 
@@ -922,6 +917,16 @@ def get_selected_tests(options):
         selected_tests = get_shard_based_on_S3(
             which_shard, num_shards, selected_tests, TEST_TIMES_FILE
         )
+
+    # skip all distributed tests if distributed package is not available.
+    if not dist.is_available():
+        selected_tests = exclude_tests(DISTRIBUTED_TESTS, selected_tests,
+                                       "PyTorch is built without distributed support.")
+
+    # skip tests that require LAPACK when it's not available
+    if not torch._C.has_lapack:
+        selected_tests = exclude_tests(TESTS_REQUIRING_LAPACK, selected_tests,
+                                       "PyTorch is built without LAPACK support.")
 
     return selected_tests
 
@@ -974,7 +979,10 @@ def main():
     selected_tests = get_selected_tests(options)
 
     if options.verbose:
-        print_to_stderr("Selected tests: {}".format(", ".join(selected_tests)))
+        print_to_stderr("Selected tests:\n {}".format("\n ".join(selected_tests)))
+
+    if options.dry_run:
+        return
 
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])

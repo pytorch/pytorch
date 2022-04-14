@@ -1,12 +1,18 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Generator.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/Distributions.h>
-#include <ATen/native/TensorFactories.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
 
 #include <ATen/native/UnaryOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 #include <cmath>
 #include <limits>
@@ -25,22 +31,22 @@ static void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma,
   templates::cpu::cauchy_kernel(iter, median, sigma, generator);
 }
 
-void bernoulli_tensor_kernel(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p_, generator);
 }
 
-void bernoulli_scalar_kernel_default(Tensor& self, double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel_default(const TensorBase &self, double p, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
 }
 
 #if !AT_MKL_ENABLED()
-void bernoulli_scalar_kernel(Tensor& self, double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Generator> gen) {
   bernoulli_scalar_kernel_default(self, p, gen);
 }
 #else
-void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Generator> gen) {
   if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     int64_t seed;
@@ -87,7 +93,7 @@ void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> ge
 
       // copy_ if using buffer and non contiguous
       if (!contig) {
-        self.copy_(tmp_int_tensor);
+        OptionalTensorRef(self)->copy_(tmp_int_tensor);
       }
     });
   } else {
@@ -117,7 +123,7 @@ void uniform_kernel(TensorIteratorBase& iter, double from, double to, c10::optio
   templates::cpu::uniform_kernel(iter, from, to, generator);
 }
 
-void normal_kernel(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+void normal_kernel(const TensorBase &self, double mean, double std, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::normal_kernel(self, mean, std, generator);
 }
@@ -151,7 +157,7 @@ REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 #ifdef CPU_CAPABILITY_AVX512
 // normal_stub isn't being dispatched to AVX512 because it exposes
 // flakiness in test_sgd of test/test_optim.py
-REGISTER_NO_AVX512_DISPATCH(normal_stub, void(*)(Tensor&, const double, const double, c10::optional<Generator>));
+REGISTER_NO_AVX512_DISPATCH(normal_stub);
 #else
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
 #endif

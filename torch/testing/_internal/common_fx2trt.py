@@ -1,17 +1,19 @@
 import unittest
 from typing import Callable, List, Tuple
 
+import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
 import torch
 import torch.fx
-import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
-from torch.fx.experimental.fx2trt.fx2trt import (
-    create_inputs_from_specs,
+from fx2trt_oss.fx import (
     TRTInterpreter,
     InputTensorSpec,
     TRTModule,
 )
+from fx2trt_oss.fx.passes.pass_utils import chain_passes
+from fx2trt_oss.fx.utils import LowerPrecision
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
+from torch.testing._internal.common_utils import TestCase
 
 
 def fetch_attr(mod, target):
@@ -36,11 +38,12 @@ def fetch_attr(mod, target):
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "Skip because CUDA is not available")
-class TRTTestCase(unittest.TestCase):
+class TRTTestCase(TestCase):
     def setUp(self):
+        super().setUp()
         torch.manual_seed(3)
 
-    def run_test(self, mod, inputs, expected_ops, unexpected_ops, interpreter, rtol, atol):
+    def run_test(self, mod, inputs, expected_ops, unexpected_ops, interpreter, rtol, atol, precision=LowerPrecision.FP32):
         with torch.no_grad():
             cuda_inputs = []
             for i in inputs:
@@ -52,7 +55,7 @@ class TRTTestCase(unittest.TestCase):
             if unexpected_ops:
                 self.assert_unexpected_op(mod, unexpected_ops)
 
-            interpreter_result = interpreter.run(fp16_mode=False)
+            interpreter_result = interpreter.run(lower_precision=precision)
             trt_mod = TRTModule(
                 interpreter_result.engine,
                 interpreter_result.input_names,
@@ -65,8 +68,10 @@ class TRTTestCase(unittest.TestCase):
             if isinstance(outputs, torch.Tensor):
                 ref_outputs = [ref_outputs]
                 outputs = [outputs]
-
             for out, ref in zip(outputs, ref_outputs):
+                if not isinstance(ref, torch.Tensor):
+                    ref = torch.tensor([ref])
+                ref = ref.cpu()  # to_dtype test has cases with gpu output
                 torch.testing.assert_allclose(out.cpu(), ref, rtol=rtol, atol=atol)
 
     def run_test_custom_compare_results(
@@ -99,7 +104,7 @@ class TRTTestCase(unittest.TestCase):
             if len(expected_ops):
                 self.assert_has_op(mod, expected_ops)
 
-            interpreter_result = interpreter.run(fp16_mode=fp16_mode)
+            interpreter_result = interpreter.run(lower_precision=LowerPrecision.FP16 if fp16_mode else LowerPrecision.FP32)
             trt_mod = TRTModule(
                 interpreter_result.engine,
                 interpreter_result.input_names,
@@ -124,7 +129,7 @@ class TRTTestCase(unittest.TestCase):
                     cuda_inputs.append(i.cuda())
 
                 mod.eval()
-                interpreter.run(fp16_mode=False)
+                interpreter.run(lower_precision=LowerPrecision.FP32)
 
     def assert_has_op(self, mod, ops):
         ops_in_mod = set()
@@ -138,7 +143,6 @@ class TRTTestCase(unittest.TestCase):
         self.assertTrue(
             ops_in_mod >= ops, f"expected ops {ops}, actuall ops {ops_in_mod}"
         )
-
 
     def assert_unexpected_op(self, mod, ops):
         for node in mod.graph.nodes:
@@ -192,13 +196,14 @@ class AccTestCase(TRTTestCase):
         test_implicit_batch_dim=True,
         rtol=1e-03,
         atol=1e-03,
+        precision=LowerPrecision.FP32,
     ):
         mod.eval()
         mod = acc_tracer.trace(mod, inputs)
 
         if apply_passes is not None:
-            for p in apply_passes:
-                mod = p(mod)
+            pass_tracer = chain_passes(*apply_passes)
+            mod = pass_tracer(mod, inputs)
 
         if test_implicit_batch_dim:
             interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
@@ -208,7 +213,7 @@ class AccTestCase(TRTTestCase):
             interp = TRTInterpreter(
                 mod, InputTensorSpec.from_tensors(inputs), explicit_batch_dimension=True
             )
-            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol, precision)
 
     def run_test_with_assert_error(
         self,
@@ -241,7 +246,7 @@ class AccTestCase(TRTTestCase):
         atol=1e-03,
     ):
         mod.eval()
-        inputs = create_inputs_from_specs(input_specs)
+        inputs = InputTensorSpec.create_inputs_from_specs(input_specs)
         mod = acc_tracer.trace(mod, inputs)
         interp = TRTInterpreter(mod, input_specs, explicit_batch_dimension=True)
         super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)

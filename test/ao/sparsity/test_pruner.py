@@ -251,7 +251,7 @@ class TestBasePruner(TestCase):
                 assert module.parametrizations.weight[0].pruned_outputs == pruned_set
 
     def _test_constructor_on_device(self, model, device):
-        self.assertRaisesRegex(TypeError, 'with abstract methods update_mask',
+        self.assertRaisesRegex(TypeError, 'BasePruner .* update_mask',
                                BasePruner)
         model1 = copy.deepcopy(model).to(device)
         pruner = SimplePruner(None)

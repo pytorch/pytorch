@@ -341,21 +341,23 @@ TEST(ListTest_IValueBasedList, whenMoveAssigningList_thenNewIsCorrect) {
   EXPECT_EQ("4", list2.get(1));
 }
 
-TEST(ListTest_IValueBasedList, whenMoveConstructingList_thenOldIsEmpty) {
+TEST(ListTest_IValueBasedList, whenMoveConstructingList_thenOldIsUnchanged) {
   List<string> list1({"3", "4"});
 
   List<string> list2(std::move(list1));
-  // NOLINTNEXTLINE(bugprone-use-after-move)
-  EXPECT_TRUE(list1.empty());
+  EXPECT_EQ(2, list1.size());
+  EXPECT_EQ("3", list1.get(0));
+  EXPECT_EQ("4", list1.get(1));
 }
 
-TEST(ListTest_IValueBasedList, whenMoveAssigningList_thenOldIsEmpty) {
+TEST(ListTest_IValueBasedList, whenMoveAssigningList_thenOldIsUnchanged) {
   List<string> list1({"3", "4"});
 
   List<string> list2;
   list2 = std::move(list1);
-  // NOLINTNEXTLINE(bugprone-use-after-move)
-  EXPECT_TRUE(list1.empty());
+  EXPECT_EQ(2, list1.size());
+  EXPECT_EQ("3", list1.get(0));
+  EXPECT_EQ("4", list1.get(1));
 }
 
 TEST(ListTest_IValueBasedList, givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
@@ -887,21 +889,23 @@ TEST(ListTest_NonIValueBasedList, whenMoveAssigningList_thenNewIsCorrect) {
   EXPECT_EQ(4, list2.get(1));
 }
 
-TEST(ListTest_NonIValueBasedList, whenMoveConstructingList_thenOldIsEmpty) {
+TEST(ListTest_NonIValueBasedList, whenMoveConstructingList_thenOldIsUnchanged) {
   List<int64_t> list1({3, 4});
 
   List<int64_t> list2(std::move(list1));
-  // NOLINTNEXTLINE(bugprone-use-after-move)
-  EXPECT_TRUE(list1.empty());
+  EXPECT_EQ(2, list1.size());
+  EXPECT_EQ(3, list1.get(0));
+  EXPECT_EQ(4, list1.get(1));
 }
 
-TEST(ListTest_NonIValueBasedList, whenMoveAssigningList_thenOldIsEmpty) {
+TEST(ListTest_NonIValueBasedList, whenMoveAssigningList_thenOldIsUnchanged) {
   List<int64_t> list1({3, 4});
 
   List<int64_t> list2;
   list2 = std::move(list1);
-  // NOLINTNEXTLINE(bugprone-use-after-move)
-  EXPECT_TRUE(list1.empty());
+  EXPECT_EQ(2, list1.size());
+  EXPECT_EQ(3, list1.get(0));
+  EXPECT_EQ(4, list1.get(1));
 }
 
 TEST(ListTest_NonIValueBasedList, givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {

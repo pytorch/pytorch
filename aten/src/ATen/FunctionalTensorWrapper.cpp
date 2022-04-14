@@ -130,15 +130,7 @@ void FunctionalTensorWrapper::commit_update() {
   generation_ = storage_impl->generation();
 }
 
-bool FunctionalTensorWrapper::is_aliased() const {
-  // Two FunctionalTensorWrapper objects are aliased if they share storage.
-  // That means that we can check if a given FunctionalTensorWrapper is aliased
-  // by checking the reference count on its storage.
-  return storage_.use_count() > 1;
-}
-
 bool FunctionalTensorWrapper::is_up_to_date() const {
-  if (!is_aliased()) return true;
   auto alias_generation = functional_storage_impl()->generation();
   return generation_ == alias_generation;
 }
@@ -328,6 +320,57 @@ void sync(const c10::List<c10::optional<Tensor>> t_list) {
   for (const auto i : c10::irange(t_list.size())) {
     sync(t_list[i]);
   }
+}
+
+bool isFunctionalTensor(const at::Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
+}
+
+bool isFunctionalTensor(const c10::optional<Tensor>& t) {
+  if (t.has_value()) {
+    return isFunctionalTensor(*t);
+  } else {
+    return false;
+  }
+}
+
+bool isFunctionalTensor(const c10::List<Tensor>& t_list) {
+  if (t_list.size() == 0) return false;
+  bool any_functional = isFunctionalTensor(t_list[0]);
+  for (const auto i : c10::irange(1, t_list.size())) {
+    auto curr_functional = isFunctionalTensor(t_list[i]);
+    TORCH_INTERNAL_ASSERT(
+         curr_functional == any_functional,
+        "Functionalization encountered a list of tensors where some are functional",
+        "and some are not, which is not currently unsupported.");
+  }
+  return any_functional;
+}
+
+bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
+  if (t_list.size() == 0) return false;
+  bool any_functional = isFunctionalTensor(t_list[0]);
+  for (const auto i : c10::irange(1, t_list.size())) {
+    auto curr_functional = isFunctionalTensor(t_list[i]);
+    TORCH_INTERNAL_ASSERT(
+         curr_functional == any_functional,
+        "Functionalization encountered a list of tensors where some are functional",
+        "and some are not, which is not currently unsupported.");
+  }
+  return any_functional;
+}
+
+bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list) {
+  if (t_list.size() == 0) return false;
+  bool any_functional = isFunctionalTensor(t_list[0]);
+  for (const auto i : c10::irange(1, t_list.size())) {
+    auto curr_functional = isFunctionalTensor(t_list[i]);
+    TORCH_INTERNAL_ASSERT(
+         curr_functional == any_functional,
+        "Functionalization encountered a list of tensors where some are functional",
+        "and some are not, which is not currently unsupported.");
+  }
+  return any_functional;
 }
 
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {

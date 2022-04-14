@@ -323,6 +323,13 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
             jvp (tuple of Tensors or Tensor): result of the dot product with
             the same shape as the output.
 
+    Note:
+        ``autograd.functional.jvp`` computes the jvp by using the backward of
+        the backward (sometimes called the double backwards trick). This is not
+        the most performant way of computing the jvp. Please consider using
+        `functorch's jvp <https://github.com/pytorch/functorch#jvp>`_
+        or the :ref:`low-level forward-mode AD API <forward-mode-ad>` instead.
+
     Example:
 
         >>> def exp_reducer(x):
@@ -345,10 +352,6 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         (tensor([2.2399, 2.5005]),
          tensor([5., 5.]))
 
-    Note:
-        The jvp is currently computed by using the backward of the backward
-        (sometimes called the double backwards trick) as we don't have support
-        for forward mode AD in PyTorch at the moment.
     """
 
     with torch.enable_grad():
@@ -413,11 +416,12 @@ def _construct_standard_basis_for(tensors: Tuple[torch.Tensor, ...], tensor_nume
     assert len(tensors) == len(tensor_numels)
     assert len(tensors) > 0
     total_numel = sum(tensor_numels)
-    diag_start_indices = (0, *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind())
     chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
                    for tensor, tensor_numel in zip(tensors, tensor_numels))
-    for chunk, diag_start_idx in zip(chunks, diag_start_indices):
+    diag_start_idx = 0
+    for chunk, numel in zip(chunks, tensor_numels):
         chunk.diagonal(diag_start_idx).fill_(1)
+        diag_start_idx -= numel
     return chunks
 
 
@@ -494,8 +498,11 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
             independent of it. If ``False``, we return a Tensor of zeros as the
             jacobian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
-        vectorize (bool, optional): This feature is experimental, please use at
-            your own risk. When computing the jacobian, usually we invoke
+        vectorize (bool, optional): This feature is experimental.
+            Please consider using
+            `functorch's jacrev or jacfwd <https://github.com/pytorch/functorch#what-are-the-transforms>`_
+            instead if you are looking for something less experimental and more performant.
+            When computing the jacobian, usually we invoke
             ``autograd.grad`` once per row of the jacobian. If this flag is
             ``True``, we perform only a single ``autograd.grad`` call with
             ``batched_grad=True`` which uses the vmap prototype feature.
@@ -701,8 +708,11 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, out
             such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
             hessian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
-        vectorize (bool, optional): This feature is experimental, please use at
-            your own risk. When computing the hessian, usually we invoke
+        vectorize (bool, optional): This feature is experimental.
+            Please consider using
+            `functorch <https://github.com/pytorch/functorch#what-are-the-transforms>`_
+            instead if you are looking for something less experimental and more performant.
+            When computing the hessian, usually we invoke
             ``autograd.grad`` once per row of the hessian. If this flag is
             ``True``, we use the vmap prototype feature as the backend to
             vectorize calls to ``autograd.grad`` so we only invoke it once

@@ -14,12 +14,37 @@ from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, Bas
                                      tensorGeometryT, scalarTypeT, SpecialArgName,
                                      OptionalCType, stringT)
 from tools.codegen.api import cpp
-from tools.codegen.gen import parse_native_yaml
+from tools.codegen.gen import parse_native_yaml, get_grouped_by_view_native_functions
 from tools.codegen.context import with_native_function
-from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type
-from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader
+from tools.codegen.model import (
+    FunctionSchema, NativeFunction, Variant, Type,
+    NativeFunctionsViewGroup, OperatorName
+)
+from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader, concatMap
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
+
+# This function directly adds derivative entries for {view}_copy variants of each view op.
+# Since every {view} and {view}_copy op shares the same derivative formula,
+# we generate them here instead of duplicating them in the yaml.
+# See Note [Codegen'd {view}_copy Operators]
+def add_view_copy_derivatives(
+    infos: List[DifferentiabilityInfo],
+    view_groups: List[NativeFunctionsViewGroup]
+) -> List[DifferentiabilityInfo]:
+    # Get the map from each view op's name to its corresponding view group
+    view_name_to_group: Dict[OperatorName, NativeFunctionsViewGroup] = {
+        g.view.func.name: g for g in view_groups}
+
+    view_copy_differentiability_infos = []
+    for info in infos:
+        maybe_view_group = view_name_to_group.get(info.func.func.name, None)
+        if maybe_view_group is not None and maybe_view_group.view_copy is not None:
+            view_copy_info = info.create_view_copy_from_view_derivative(maybe_view_group)
+            if view_copy_info is not None:
+                view_copy_differentiability_infos.append(view_copy_info)
+
+    return view_copy_differentiability_infos
 
 def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
     # Do some caching as this is a deterministic function
@@ -30,7 +55,16 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
         with open(derivatives_yaml_path, 'r') as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
-        functions = parse_native_yaml(native_yaml_path).native_functions
+        funcs = parse_native_yaml(native_yaml_path).native_functions
+        # From the parsed native functions, separate out the (generated) view_copy functions,
+        # so we can generate derivatives for them separately.
+        native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)
+        native_functions_without_view_copies = concatMap(
+            # We need to pull out the view_inplace ops too, since they might have their own derivative entries.
+            lambda g: [g] if isinstance(g, NativeFunction) else list(g.functions(include_copy=False)),
+            native_functions_with_view_groups
+        )
+        view_groups = [g for g in native_functions_with_view_groups if isinstance(g, NativeFunctionsViewGroup)]
 
         # What's the difference between function schema v.s. signature?
         # function schema is the complete declaration including mutability annotation / default value and etc.
@@ -38,7 +72,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
         # that are semantically related.
         functions_by_signature: Dict[FunctionSchema, List[NativeFunction]] = defaultdict(list)
         functions_by_schema: Dict[str, NativeFunction] = dict()
-        for function in functions:
+        for function in native_functions_without_view_copies:
             functions_by_signature[function.func.signature()].append(function)
             assert str(function.func) not in functions_by_schema
             functions_by_schema[str(function.func)] = function
@@ -50,6 +84,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
         infos = [
             create_differentiability_info(defn, functions_by_signature, functions_by_schema, op_counter)
             for defn in definitions]
+        infos += add_view_copy_derivatives(infos, view_groups)
 
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos
 
@@ -92,29 +127,33 @@ def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...
     )
 
 def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str, ...]) -> ForwardDerivative:
-    assert len(names) == 1, "Forward derivatives can define gradients for only one output at a time"
-    var_name = names[0]
-    var_type: Optional[Type] = None
+    var_names = names
+    var_types: Optional[Tuple[Type, ...]] = None
     for r in f.func.returns:
-        if r.name == var_name:
-            var_type = r.type
-            break
-    # Handle default return names
-    if var_type is None:
-        if var_name == "result":
-            assert len(f.func.returns) == 1
-            var_type = f.func.returns[0].type
-        else:
-            res = re.findall(r"^result(\d+)$", var_name)
-            if len(res) == 1:
-                arg_idx = int(res[0])
-                var_type = f.func.returns[arg_idx].type
+        if r.name in var_names:
+            if var_types is None:
+                var_types = tuple()
+            var_types = var_types + (r.type,)
 
-    assert var_type is not None, "No matching output for forward derivative definition"
+    # Handle default return names
+    if var_types is None:
+        if var_names == ("result",):
+            assert len(f.func.returns) == 1
+            var_types = (f.func.returns[0].type,)
+        else:
+            for var_name in var_names:
+                res = re.findall(r"^result(\d+)$", var_name)
+                if len(res) == 1:
+                    if var_types is None:
+                        var_types = tuple()
+                    arg_idx = int(res[0])
+                    var_types = var_types + (f.func.returns[arg_idx].type,)
+
+    assert var_types is not None, "No matching output for forward derivative definition"
     return ForwardDerivative(
         formula=formula,
-        var_name=var_name,
-        var_type=var_type,
+        var_names=var_names,
+        var_types=var_types,
         required_inputs_fw_grad=None,
         required_inputs_primal=None,
         required_original_self_value=False,
@@ -155,7 +194,8 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
-            if (not len(args_with_derivatives) == 1) or len(forward_derivatives) > 1:
+            if ((not len(args_with_derivatives) == 1) or len(forward_derivatives) > 1
+               or len(forward_derivatives[0].var_names) > 1):
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
                                    "forward definition of gradient as element_wise but this only "
                                    "works for functions with a single differentiable input and a "
@@ -200,7 +240,7 @@ def postprocess_forward_derivatives(
             required_inputs_tangent = tuple(all_arg_names)
             formula = fw_formula
         elif formula == "auto_linear":
-            if len(forward_derivatives) > 1:
+            if len(forward_derivatives) > 1 or len(forward_derivatives[0].var_names) > 1:
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
                                    "forward definition of gradient as linear but this only works "
                                    "for functions with a single differentiable output.")
@@ -243,8 +283,8 @@ def postprocess_forward_derivatives(
 
         updated_derivatives.append(ForwardDerivative(
             formula=formula,
-            var_name=defn.var_name,
-            var_type=defn.var_type,
+            var_names=defn.var_names,
+            var_types=defn.var_types,
             required_inputs_fw_grad=required_inputs_tangent,
             required_inputs_primal=required_inputs_primal,
             required_original_self_value=False,
@@ -253,14 +293,12 @@ def postprocess_forward_derivatives(
     return updated_derivatives
 
 def is_forward_derivative_definition(all_arg_names: List[str], names: Tuple[str, ...]) -> bool:
-    if len(names) > 1:
-        # Forward definition are always for a single output at a time
-        return False
-    name = names[0]
-    if name not in all_arg_names:
-        return True
-    else:
-        return False
+    for name in names:
+        if name not in all_arg_names:
+            return True
+        else:
+            return False
+    raise RuntimeError("Expected `names` to be non-empty")
 
 def create_differentiability_info(
     defn: Dict[Any, Any],
@@ -342,7 +380,7 @@ def create_differentiability_info(
         args_with_derivatives_set: Set[str] = set()
 
         all_arg_names = [a.name for a in cpp_arguments(f)]
-
+        all_ret_names = [r.name for r in f.func.returns]  # only used for the assert below
         # output_differentiability is captured from the enclosed
         # scope. Don't modify it.
         #
@@ -366,6 +404,11 @@ def create_differentiability_info(
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
+
+            for name in names:
+                assert not (name in all_arg_names and name in all_ret_names), (
+                    f"While processing the derivative formula for '{f.func.name}' wrt '{name}', "
+                    f"expected '{name}' to not be both an input arg and named return. ")
 
             if is_forward_derivative_definition(all_arg_names, names):
                 forward_derivatives.append(create_forward_derivative(f, formula, names))
@@ -502,6 +545,12 @@ def saved_variables(
         (r'{}.sizes\(\)', {
             'suffix': '_sizes',
             'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
+        }),
+        # replace self->sizes() with self_sizes_opt
+        (r'{}->sizes\(\)', {
+            'suffix': '_sizes_opt',
+            'nctype': lambda name: NamedCType(name, OptionalCType(BaseCType(intArrayRefT))),
+            'expr': lambda name: f'{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt',
         }),
         # replace self.options() with self_options
         (r'{}.options\(\)', {

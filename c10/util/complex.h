@@ -8,6 +8,14 @@
 #include <thrust/complex.h>
 #endif
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wfloat-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wfloat-conversion")
+#endif
+
 namespace c10 {
 
 // c10::complex is an implementation of complex numbers that aims
@@ -507,7 +515,7 @@ namespace c10_internal {
 template <typename T>
 C10_HOST_DEVICE constexpr thrust::complex<T>
 cuda101bug_cast_c10_complex_to_thrust_complex(const c10::complex<T>& x) {
-#if defined(CUDA_VERSION) && (CUDA_VERSION < 10200)
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 10020)
   // This is to circumvent a CUDA compilation bug. See
   // https://github.com/pytorch/pytorch/pull/38941 . When the bug is fixed, we
   // should do static_cast directly.
@@ -595,9 +603,11 @@ C10_HOST_DEVICE complex<T> polar(const T& r, const T& theta = T()) {
 
 } // namespace c10
 
+C10_CLANG_DIAGNOSTIC_POP()
+
 #define C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
 // math functions are included in a separate file
-#include <c10/util/complex_math.h>
+#include <c10/util/complex_math.h> // IWYU pragma: keep
 // utilities for complex types
-#include <c10/util/complex_utils.h>
+#include <c10/util/complex_utils.h> // IWYU pragma: keep
 #undef C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H

@@ -7,7 +7,7 @@ import torch
 from torch.cuda.amp import autocast
 
 from test_pytorch_common import disableScriptTest, skipIfUnsupportedMinOpsetVersion
-from test_pytorch_common import skipIfNoCuda
+from test_pytorch_common import skipIfNoCuda, skipIfNoBFloat16Cuda
 
 from test_pytorch_onnx_onnxruntime import TestONNXRuntime
 
@@ -84,6 +84,35 @@ class TestONNXRuntime_cuda(unittest.TestCase):
         input = torch.randn(3, 3, device=torch.device("cuda"))
         model = amp.initialize(LinearModel(), opt_level="O2")
         self.run_test(model, input)
+
+    # ONNX supports bfloat16 for opsets >= 13
+    # Add, Sub and Mul ops don't support bfloat16 cpu in onnxruntime.
+    @skipIfUnsupportedMinOpsetVersion(13)
+    @skipIfNoBFloat16Cuda
+    def test_arithmetic_bfp16(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ones(3, 4, dtype=torch.bfloat16, device=torch.device("cuda"))
+                x = x.type_as(y)
+                return torch.mul(torch.add(x, y), torch.sub(x, y)).to(dtype=torch.float16)
+
+        x = torch.ones(3, 4, requires_grad=True, dtype=torch.float16, device=torch.device("cuda"))
+        self.run_test(MyModule(), x, rtol=1e-3, atol=1e-5)
+
+    @skipIfNoCuda
+    def test_deduplicate_initializers_diff_devices(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.ones(2, 3, device=torch.device("cpu")))
+                self.b = torch.nn.Parameter(torch.ones(3, device=torch.device("cuda")))
+
+            def forward(self, x, y):
+                return torch.matmul(self.w, x), y + self.b
+
+        x = torch.randn(3, 3, device=torch.device("cpu"))
+        y = torch.randn(3, 3, device=torch.device("cuda"))
+        self.run_test(Model(), (x, y))
 
 TestONNXRuntime_cuda.setUp = TestONNXRuntime.setUp
 TestONNXRuntime_cuda.run_test = TestONNXRuntime.run_test

@@ -80,8 +80,6 @@ __global__ void ROIPoolBackward(
     const int nthreads,
     const T* top_diff,
     const int* argmax_data,
-    const int num_rois,
-    const T spatial_scale,
     const int channels,
     const int height,
     const int width,
@@ -91,10 +89,10 @@ __global__ void ROIPoolBackward(
     const T* bottom_rois) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // (n, c, ph, pw) is an element in the pooled output
-    int pw = index % pooled_width;
-    int ph = (index / pooled_width) % pooled_height;
-    int c = (index / pooled_width / pooled_height) % channels;
-    int n = index / pooled_width / pooled_height / channels;
+    const int pw = index % pooled_width;
+    const int ph = (index / pooled_width) % pooled_height;
+    const int c = (index / pooled_width / pooled_height) % channels;
+    const int n = index / pooled_width / pooled_height / channels;
 
     const T* offset_bottom_rois = bottom_rois + n * 5;
     int roi_batch_ind = offset_bottom_rois[0];
@@ -184,8 +182,6 @@ C10_EXPORT bool RoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
             dY.numel(),
             dY.data<float>(),
             A.data<int>(),
-            R.dim32(0),
-            spatial_scale_,
             X.dim32(1),
             X.dim32(2),
             X.dim32(3),

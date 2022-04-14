@@ -52,6 +52,7 @@ class TORCH_API FileStore : public Store {
   int numWorkers_;
   const std::string cleanupKey_;
   const std::string regularPrefix_;
+  const std::string deletePrefix_;
 
   std::unordered_map<std::string, std::vector<uint8_t>> cache_;
 

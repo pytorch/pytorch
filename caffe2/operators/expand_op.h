@@ -7,6 +7,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -95,7 +96,7 @@ class ExpandGradientOp final : public Operator<Context> {
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
     std::vector<int> axes;
     const int offset = ndim - X.dim();
-    for (int i = 0; i < ndim; i++) {
+    for (const auto i : c10::irange(ndim)) {
       if (i < offset || dX_dims[i - offset] == 1) {
         axes.push_back(i);
       }

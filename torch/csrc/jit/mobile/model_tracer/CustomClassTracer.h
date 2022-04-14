@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/record_function.h>
+#include <c10/util/Synchronized.h>
 #include <map>
 #include <set>
 #include <string>
@@ -27,20 +28,8 @@ struct CustomClassTracer final {
    */
   typedef std::set<std::string> custom_classes_type;
 
-  CustomClassTracer() {
-    auto recorder_cb = [](const at::RecordFunction& fn)
-        -> std::unique_ptr<at::ObserverContext> {
-      std::string name = fn.name().str();
-      getLoadedClasses().insert(name);
-      return nullptr;
-    };
-
-    handle_ =
-        at::addGlobalCallback(at::RecordFunctionCallback(recorder_cb)
-                                  .scopes({at::RecordScope::CUSTOM_CLASS}));
-  }
-
-  static custom_classes_type& getLoadedClasses();
+  CustomClassTracer();
+  static c10::Synchronized<custom_classes_type>& getLoadedClasses();
 
   ~CustomClassTracer() {
     at::removeCallback(handle_);

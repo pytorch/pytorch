@@ -1,6 +1,12 @@
-build --copt=--std=c++14
+build --cxxopt=--std=c++14
 build --copt=-I.
+# Bazel does not support including its cc_library targets as system
+# headers. We work around this for generated code
+# (e.g. c10/macros/cmake_macros.h) by making the generated directory a
+# system include path.
 build --copt=-isystem --copt bazel-out/k8-fastbuild/bin
+build --copt=-isystem --copt bazel-out/darwin-fastbuild/bin
+build --experimental_ui_max_stdouterr_bytes=2048576
 
 # Configuration to disable tty features for environments like CI
 build:no-tty --curses no
@@ -11,3 +17,11 @@ build:no-tty --show_progress_rate_limit 10
 build:gpu --define=cuda=true
 # define a separate build folder for faster switching between configs
 build:gpu --platform_suffix=-gpu
+# See the note on the config-less build for details about why we are
+# doing this. We must also do it for the "-gpu" platform suffix.
+build --copt=-isystem --copt=bazel-out/k8-fastbuild-gpu/bin
+# rules_cuda configuration
+build:gpu --@rules_cuda//cuda:enable_cuda
+build:gpu --@rules_cuda//cuda:cuda_targets=sm_52
+build:gpu --@rules_cuda//cuda:compiler=nvcc
+build:gpu --repo_env=CUDA_PATH=/usr/local/cuda

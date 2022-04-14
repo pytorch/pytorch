@@ -1,16 +1,23 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Histogram.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/sum.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
+
 #include <algorithm>
-#include <mutex>
 #include <numeric>
-#include <tuple>
 #include <functional>
-#include <ATen/TensorIndexing.h>
 
 namespace at { namespace native {
 
@@ -80,7 +87,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
 
     const int64_t D = input.size(1);
     TORCH_INTERNAL_ASSERT(int64_t(bin_edges.size()) == D);
-    for (int64_t dim = 0; dim < D; dim++) {
+    for (const auto dim : c10::irange(D)) {
         TORCH_INTERNAL_ASSERT(bin_edges[dim].is_contiguous());
         TORCH_INTERNAL_ASSERT(hist.size(dim) + 1 == bin_edges[dim].numel());
     }
@@ -103,7 +110,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
     std::vector<int64_t> num_bin_edges(D);
     std::vector<input_t> leftmost_edge(D), rightmost_edge(D);
 
-    for (int64_t dim = 0; dim < D; dim++) {
+    for (const auto dim : c10::irange(D)) {
         bin_seq[dim] = bin_edges[dim].data_ptr<input_t>();
         num_bin_edges[dim] = bin_edges[dim].numel();
         leftmost_edge[dim] = bin_seq[dim][0];
@@ -113,24 +120,32 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
     int64_t GRAIN_SIZE = std::max(int64_t(1), HISTOGRAM_GRAIN_SIZE / D);
 
     /* Parallelizes processing of input using at::parallel_for.
-     * Each thread accumulates a local result for some range of the input in hist_local
-     * before locking hist_mutex and adding its accumulated results to the hist tensor.
+     * Each thread accumulates a local result into their own slice of
+     * thread_histograms which get summed together at the end.
      */
-    std::mutex hist_mutex;
+    const auto num_threads = at::get_num_threads();
+    const auto hist_sizes = hist.sizes();
+    DimVector thread_hist_sizes(hist_sizes.size() + 1);
+    thread_hist_sizes[0] = num_threads;
+    std::copy(hist_sizes.begin(), hist_sizes.end(),
+              thread_hist_sizes.begin() + 1);
+    Tensor thread_histograms = at::zeros(thread_hist_sizes, hist.dtype());
+    TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
+
     at::parallel_for(0, N, GRAIN_SIZE, [&](int64_t start, int64_t end) {
-        // Allocates a tensor for the thread's local results
-        Tensor hist_local = at::zeros(hist.sizes(), hist.dtype());
-        TORCH_INTERNAL_ASSERT(hist_local.is_contiguous());
+        const auto tid = at::get_thread_num();
+        auto hist_strides = thread_histograms.strides();
+        input_t *hist_local_data = thread_histograms.data_ptr<input_t>();
 
-        input_t *hist_local_data = hist_local.data_ptr<input_t>();
-
-        const auto hist_strides = hist_local.strides();
+        // View only this thread's local results
+        hist_local_data += hist_strides[0] * tid;
+        hist_strides = hist_strides.slice(1);
 
         for (const auto i : c10::irange(start, end)) {
             bool skip_elt = false;
             int64_t hist_index = 0;
 
-            for (int64_t dim = 0; dim < D; dim++) {
+            for (const auto dim : c10::irange(D)) {
                 const input_t elt = accessor_in[i][dim];
 
                 // Skips elements which fall outside the specified bins
@@ -183,12 +198,9 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
                 hist_local_data[hist_index] += wt;
             }
         }
-
-
-        // Locks and updates the common output
-        const std::lock_guard<std::mutex> lock(hist_mutex);
-        hist.add_(hist_local);
     });
+
+    at::sum_out(hist, thread_histograms, /*dim=*/{0});
 }
 
 /* Some pre- and post- processing steps for the main algorithm.
@@ -210,7 +222,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
             : c10::optional<Tensor>();
 
     std::vector<Tensor> bin_edges_contig(bin_edges.size());
-    for (size_t dim = 0; dim < bin_edges_contig.size(); dim++) {
+    for (const auto dim : c10::irange(bin_edges_contig.size())) {
         bin_edges_contig[dim] = bin_edges[dim].contiguous();
     }
 
@@ -229,7 +241,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
          /* For each dimension, divides each bin's value
           * by the bin's length in that dimension.
           */
-        for (int64_t dim = 0; dim < N; dim++) {
+        for (const auto dim : c10::irange(N)) {
             const auto bin_lengths = bin_edges[dim].diff();
 
             // Used to reshape bin_lengths to align with the corresponding dimension of hist.

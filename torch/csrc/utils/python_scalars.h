@@ -20,7 +20,7 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
       break;
     case at::kFloat: *(float*)data = (float)THPUtils_unpackDouble(obj); break;
     case at::kDouble: *(double*)data = THPUtils_unpackDouble(obj); break;
-    case at::kComplexHalf: *(c10::complex<at::Half>*)data = (c10::complex<at::Half>)THPUtils_unpackComplexDouble(obj); break;
+    case at::kComplexHalf: *(c10::complex<at::Half>*)data = (c10::complex<at::Half>)static_cast<c10::complex<float>>(THPUtils_unpackComplexDouble(obj)); break;
     case at::kComplexFloat: *(c10::complex<float>*)data = (c10::complex<float>)THPUtils_unpackComplexDouble(obj); break;
     case at::kComplexDouble: *(c10::complex<double>*)data = THPUtils_unpackComplexDouble(obj); break;
     case at::kBool: *(bool*)data = THPUtils_unpackNumberAsBool(obj); break;

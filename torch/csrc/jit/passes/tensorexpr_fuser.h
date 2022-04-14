@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <memory>
 
 namespace torch {
@@ -10,23 +10,25 @@ namespace jit {
 struct Graph;
 
 // Run TensorExpressions-based fuser.
-//
-// If shape checks are disabled it is the responsibilty of
-// the caller to ensure that the resultant subgraph is correctly
-// annotated with shapes by the time "getOperation" is called
-// on the node.
+// If add_composed_op is true, creates a single operation that
+// performs both the runtime check that types align
+// and then the dispatch to the kernel/unoptimized graph
 TORCH_API void FuseTensorExprs(
     std::shared_ptr<Graph>& graph,
     size_t min_group_size = 2,
-    bool disable_shape_checks = false);
+    bool add_composed_op = false,
+    bool fuse_to_dynamic_shapes = false);
 
 TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();
+TORCH_API void setTensorExprDynamicShapeFusionEnabled(bool val);
+TORCH_API bool tensorExprDynamicShapeFusionEnabled();
 TORCH_API bool setTexprReductionsEnabled(bool value);
 TORCH_API bool texprReductionsEnabled();
 
 TORCH_API void RemoveProfileNodesAndSpecializeTypes(
     std::shared_ptr<Graph>& graph);
+TORCH_API bool hasTensorTypeSpecialization(Value* v);
 TORCH_API void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph);
 TORCH_API void removeTensorTypeSpecializations(Block* block);
 
@@ -58,8 +60,18 @@ TORCH_API bool usedOnlyInSize(Value* v);
 TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);
 
 namespace tensorexpr {
-TORCH_API const OperatorSet& supported_eltwise_set();
 TORCH_API bool isSupported(Node* node);
+
+/// Get the modifiable custom operator set object.
+///
+/// For static shapes, if a custom operator has been added to the custom
+/// operator set, it will be pulled into the NNC fusion group. But it doesn't
+/// work with dynamic shapes unless explicitly register the shape function via
+/// `torch::jit::RegisterShapeComputeGraphForSchema` for the custom operator.
+///
+/// @return Reference of the custome operator set
+///
+TORCH_API OperatorSet& getCustomOperatorSet();
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

@@ -22,11 +22,11 @@ Tensor make_feature_noise(const Tensor& input) {
     (void)i; //Suppress unused variable warning
     sizes.push_back(1);
   }
-  return at::empty(sizes, input.options());
+  return input.new_empty(sizes);
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return (input.is_cuda() || input.is_xpu()) && p > 0 && p < 1 && input.numel() > 0;
+  return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure

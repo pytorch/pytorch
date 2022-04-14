@@ -8,6 +8,13 @@ set -ex
 # Save the SCRIPT_DIR absolute path in case later we chdir (as occurs in the gpu perf test)
 SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
+if [[ "${BUILD_ENVIRONMENT}" == *linux* ]]; then
+  # TODO: Remove this once nvidia package repos are back online
+  # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
+  # shellcheck disable=SC2046
+  sudo sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
+fi
+
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
@@ -95,11 +102,13 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
     # Report sccache stats for easier debugging
     sccache --zero-stats
     function sccache_epilogue() {
+      echo "::group::Sccache Compilation Log"
       echo '=================== sccache compilation log ==================='
       python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
       echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
       sccache --show-stats
       sccache --stop-server || true
+      echo "::endgroup::"
     }
 
     if [[ "${JOB_BASE_NAME}" == *-build ]]; then
@@ -141,7 +150,7 @@ fi
 # Linux bionic cannot find conda mkl with cmake 3.10, so we need a cmake from conda.
 # Alternatively we could point cmake to the right place
 # export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-if [[ "$BUILD_ENVIRONMENT" == *xla-linux-bionic* ]] || \
+if [[ "${TEST_CONFIG:-}" == *xla* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *centos* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *linux-bionic* ]]; then
   if ! which conda; then

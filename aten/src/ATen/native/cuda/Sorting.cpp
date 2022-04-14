@@ -1,12 +1,27 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/Sorting.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/NamedTensorUtils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/NamedTensor.h>
+#include <ATen/Context.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
+
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/full.h>
+#include <ATen/ops/kthvalue_native.h>
+#include <ATen/ops/median_native.h>
+#include <ATen/ops/nanmedian_native.h>
+#include <ATen/ops/where.h>
+#endif
 
 namespace at {
 namespace native {
@@ -21,9 +36,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cuda(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
-  zero_numel_check_dims(self, dim, "kth_value()");
+  zero_numel_check_dims(self, dim, "kthvalue()");
 
-  TORCH_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
+  TORCH_CHECK(k >= 1 && k <= slicesize,
+              "kthvalue(): selected number k out of range for dimension ", dim);
 
   at::assert_no_overlap(self, values);
 

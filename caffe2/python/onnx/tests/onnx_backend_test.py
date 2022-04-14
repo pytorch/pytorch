@@ -160,11 +160,16 @@ backend_test.exclude('(test_add_uint8_.*'  # uint8 dtype added
                      ')')
 
 # Unsupported ops in opset 15
-backend_test.exclude('(test_bernoulli_*'
-                     '|test_castlike_*'
-                     '|test_optional_*'
-                     '|test_shape_end_*'
-                     '|test_shape_start_*'
+backend_test.exclude('(test_bernoulli_.*'
+                     '|test_castlike_.*'
+                     '|test_optional_.*'
+                     '|test_shape_end_.*'
+                     '|test_shape_start_.*'
+                     ')')
+
+# Unsupported ops in opset 16
+backend_test.exclude('(test_gridsample_.*'
+                     '|test_spacetodepth_.*'
                      ')')
 
 # Skip vgg to speed up CI

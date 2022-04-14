@@ -95,9 +95,6 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 
  private:
   const char* tensorimpl_type_name() const override;
-  // Returns true if this FunctionalTensorWrapper is aliased with any other FunctionalTensorWrapper objects.
-  // During a functionalization pass, if we have `b = a.view()`, then a and b should both report as aliased.
-  bool is_aliased() const;
   void set_constructor_metadata();
   functionalization::FunctionalStorageImpl* functional_storage_impl() const;
 
@@ -120,9 +117,11 @@ TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(const Tenso
   return functional_impl;
 }
 
-TORCH_API inline bool isFunctionalTensor(const at::Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
-}
+TORCH_API bool isFunctionalTensor(const at::Tensor& tensor);
+TORCH_API bool isFunctionalTensor(const c10::optional<Tensor>& t);
+TORCH_API bool isFunctionalTensor(const c10::List<Tensor>& t_list);
+TORCH_API bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list);
+TORCH_API bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list);
 
 TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
 TORCH_API c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list);

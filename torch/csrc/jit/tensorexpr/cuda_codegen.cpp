@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
 
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
@@ -103,6 +103,10 @@ void CudaAnalysis::visit(AllocatePtr v) {
     p = p->get_parent();
   }
   throw std::runtime_error("Global alloc not supported yet");
+}
+
+void CudaAnalysis::visit(PlacementAllocatePtr v) {
+  throw std::runtime_error("Memory reuse not supported yet");
 }
 
 void CudaAnalysis::visit(ForPtr v) {
@@ -1020,6 +1024,51 @@ void CudaCodeGen::Initialize() {
     thread_block_size_ = -1;
   }
 
+  // Build an LLVM based eval expression for the extents
+  block_extents_eval_.reserve(block_extents.size());
+  std::vector<BufferArg> extents_buffer_args;
+
+  // We need to extract the args that are used in the thread and block extents
+  // from bufferArgs and only use those for the `ExprEval` below. Without this,
+  // bufferArgs might contain arbitrary types that are not handled by LLVM and
+  // hence would result in an error.
+  std::unordered_set<VarPtr> vars_in_extents;
+  for (const auto& be : block_extents) {
+    auto v = VarFinder::find(be);
+    vars_in_extents.insert(v.begin(), v.end());
+  }
+  for (const auto& te : thread_extents) {
+    auto v = VarFinder::find(te);
+    vars_in_extents.insert(v.begin(), v.end());
+  }
+  for (const size_t i : c10::irange(buffer_args.size())) {
+    if (vars_in_extents.count(buffer_args[i].var())) {
+      extents_buffer_args.push_back(buffer_args[i]);
+      arg_pos_in_extents_.push_back(true);
+    } else {
+      arg_pos_in_extents_.push_back(false);
+    }
+  }
+  for (const auto& be : block_extents) {
+#ifdef TORCH_ENABLE_LLVM
+    block_extents_eval_.emplace_back(
+        ExprEval<LLVMCodeGen>(ExprHandle(be), extents_buffer_args));
+#else
+    block_extents_eval_.emplace_back(
+        ExprEval<SimpleIREvaluator>(ExprHandle(be), extents_buffer_args));
+#endif
+  }
+  thread_extents_eval_.reserve(thread_extents.size());
+  for (const auto& te : thread_extents) {
+#ifdef TORCH_ENABLE_LLVM
+    thread_extents_eval_.emplace_back(
+        ExprEval<LLVMCodeGen>(ExprHandle(te), extents_buffer_args));
+#else
+    thread_extents_eval_.emplace_back(
+        ExprEval<SimpleIREvaluator>(ExprHandle(te), extents_buffer_args));
+#endif
+  }
+
   GRAPH_DEBUG(
       "Fused TE CUDA kernel:\n",
       oss_.str(),
@@ -1108,23 +1157,37 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   // evaluate all the block/thread extents into values
   // TODO: eventually, codegen these calculations and make them part of the
   // module.
+  std::vector<void*> extent_args;
+  size_t raw_args_size = raw_args.size();
+  extent_args.reserve(raw_args_size);
+  for (size_t i = 0; i < raw_args_size; ++i) {
+    if (arg_pos_in_extents_[i]) {
+      extent_args.push_back(raw_args[i]);
+    }
+  }
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (gpu_block_extents[i]->isConstant()) {
-      gpu_block_extents_v[i] = immediateAs<int>(gpu_block_extents[i]);
+      gpu_block_extents_v[i] = immediateAs<int64_t>(gpu_block_extents[i]);
       continue;
     }
-    ExprEval<SimpleIREvaluator> eval(
-        ExprHandle(gpu_block_extents[i]), buffer_args);
-    gpu_block_extents_v[i] = eval.value<int>(raw_args);
+    {
+      // invocation of block_extents_eval_ isn't thread safe and this function
+      // may be invoked by multiple threads
+      std::lock_guard<std::mutex> guard(eval_lock_);
+      gpu_block_extents_v[i] =
+          block_extents_eval_[i].value<int64_t>(extent_args);
+    }
   }
   for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
     if (gpu_thread_extents[i]->isConstant()) {
-      gpu_thread_extents_v[i] = immediateAs<int>(gpu_thread_extents[i]);
+      gpu_thread_extents_v[i] = immediateAs<int64_t>(gpu_thread_extents[i]);
       continue;
     }
-    ExprEval<SimpleIREvaluator> eval(
-        ExprHandle(gpu_thread_extents[i]), buffer_args);
-    gpu_thread_extents_v[i] = eval.value<int>(raw_args);
+    {
+      std::lock_guard<std::mutex> guard(eval_lock_);
+      gpu_thread_extents_v[i] =
+          thread_extents_eval_[i].value<int64_t>(extent_args);
+    }
   }
 
   // Skip launching the kernel if there are no elements to process.

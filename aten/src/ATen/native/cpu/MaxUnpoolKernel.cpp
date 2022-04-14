@@ -1,8 +1,9 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/cpu/MaxUnpoolKernel.h>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
@@ -149,7 +150,7 @@ void cpu_max_unpool_channels_last(
   if (optional_error_index) {
     AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
         " (output volumes are of size ", output_height,
-        "x", output_width);
+        "x", output_width, ")");
   }
 
   if (!output_.is_contiguous(memory_format)) {

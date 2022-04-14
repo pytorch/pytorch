@@ -8,6 +8,7 @@
 #include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 
 #include <thrust/tuple.h>
 
@@ -348,6 +349,21 @@ inline int can_vectorize_up_to(array_t pointers) {
   // We need to get the type for each argument of `func_t`, this can only
   // be done at compile time.
   detail::static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
+  return result;
+}
+
+// jitted version of the above
+// See Note [Jiterator], this relies on the assumptions enumerated there
+template<typename result_type, typename common_type, int arity, typename array_t>
+inline int jitted_can_vectorize_up_to(array_t pointers) {
+  // Deals with output
+  int result = can_vectorize_up_to<result_type>(pointers[0]);
+
+  // Incorporates input(s)
+  for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
+    result = std::min<int>(result, can_vectorize_up_to<common_type>(pointers[i]));
+  }
+
   return result;
 }
 
