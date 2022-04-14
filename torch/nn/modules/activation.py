@@ -896,6 +896,25 @@ class MultiheadAttention(Module):
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
+    forward() will use a special optimized implementation if all of the following
+    conditions are met:
+    - self attention is being computed (i.e., query, key, and value are the same tensor.
+      This restriction will be loosened in the future.)
+    - training is disabled (using .eval())
+    - dropout is 0
+    - add_bias_kv is False
+    - add_zero_attn is False
+    - batch_first is True and the input is batched
+    - kdim and vdim are equal to embed_dim
+    - at most one of key_padding_mask and attn_mask is used
+    - neither key_padding_mask nor attn_mask is passed (this restriction will be loosened)
+
+    If the optimized implementation is in use, a NestedTensor can be
+    passed to more represent padding more efficiently than using a
+    padding mask. In this case, a NestedTensor will be returned, and
+    an additional speedup proportional to the fraction of the input
+    that is padding can be expected.
+
     Args:
         embed_dim: Total dimension of the model.
         num_heads: Number of parallel attention heads. Note that ``embed_dim`` will be split
@@ -914,6 +933,7 @@ class MultiheadAttention(Module):
 
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
+
     """
     __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
@@ -1037,6 +1057,38 @@ class MultiheadAttention(Module):
             `batch_first` argument is ignored for unbatched inputs.
         """
         is_batched = query.dim() == 3
+        # TODO: unblock mask support for fast path and update the docstring accordingly
+        if (is_batched and not self.training and self.batch_first and
+            self.bias_k is None and self.bias_v is None and
+            self.dropout == 0 and not self.add_zero_attn and
+            self._qkv_same_embed_dim and key_padding_mask is None and
+            attn_mask is None and query is key and key is value):
+            tensor_args = (
+                query,
+                key,
+                value,
+                self.in_proj_weight,
+                self.in_proj_bias,
+                self.out_proj.weight,
+                self.out_proj.bias,
+            )
+            if (not torch.overrides.has_torch_function(tensor_args) and
+                # We have to use a list comprehension here because
+                # Torchscript doesn't support generator expressions.
+                all([x.is_cuda or 'cpu' in str(x.device) for x in tensor_args])):
+                return torch.ops.nativetransformers._native_multi_head_attention(
+                    query,
+                    key,
+                    value,
+                    self.embed_dim,
+                    self.num_heads,
+                    self.in_proj_weight,
+                    self.in_proj_bias,
+                    self.out_proj.weight,
+                    self.out_proj.bias,
+                    key_padding_mask if key_padding_mask is not None else attn_mask,
+                    need_weights,
+                    average_attn_weights)
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property
             if key is value:

@@ -267,6 +267,19 @@ class TransformerEncoderLayer(Module):
     Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
     in a different way during application.
 
+    forward() will use a special optimized implementation if all of the following
+    conditions are met:
+    - All conditions for the fast path of torch.nn.MultiheadAttention
+    - norm_first is False (this restriction may be loosened in the future)
+    - activation is one of "relu", "gelu", torch.functional.relu, or torch.functional.gelu
+    - neither src_mask nor src_key_padding_mask is passed (this restriction will be loosened)
+
+    If the optimized implementation is in use, a NestedTensor can be
+    passed to represent padding more efficiently than using a padding
+    mask. In this case, a NestedTensor will be returned, and an
+    additional speedup proportional to the fraction of the input that
+    is padding can be expected.
+
     Args:
         d_model: the number of expected features in the input (required).
         nhead: the number of heads in the multiheadattention models (required).
@@ -313,16 +326,22 @@ class TransformerEncoderLayer(Module):
 
         # Legacy string support for activation function.
         if isinstance(activation, str):
-            self.activation = _get_activation_fn(activation)
-        else:
-            self.activation = activation
+            activation = _get_activation_fn(activation)
 
+        if activation is F.relu:
+            self.activation_relu_or_gelu = 1
+        elif activation is F.gelu:
+            self.activation_relu_or_gelu = 2
+        else:
+            self.activation_relu_or_gelu = 0
+        self.activation = activation
     def __setstate__(self, state):
         if 'activation' not in state:
             state['activation'] = F.relu
         super(TransformerEncoderLayer, self).__setstate__(state)
 
-    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None,
+                src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -336,6 +355,51 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
+        # REVIEW: do we want to add an explicit opt-out here beyond training mode?
+        # REVIEW: is there a better way to detect _qkv_same_embed_dim?
+
+        if (not self.norm_first and not self.training and
+            self.self_attn.batch_first and src.dim() == 3 and self.self_attn._qkv_same_embed_dim and
+            self.activation_relu_or_gelu and self.norm1.eps == self.norm2.eps and
+            # TODO: unblock mask support for fast path
+            (src_mask is None and src_key_padding_mask is None)):
+            tensor_args = (
+                src,
+                self.self_attn.in_proj_weight,
+                self.self_attn.in_proj_bias,
+                self.self_attn.out_proj.weight,
+                self.self_attn.out_proj.bias,
+                self.norm1.weight,
+                self.norm1.bias,
+                self.norm2.weight,
+                self.norm2.bias,
+                self.linear1.weight,
+                self.linear1.bias,
+                self.linear2.weight,
+                self.linear2.bias,
+            )
+            if not torch.overrides.has_torch_function(tensor_args) and all([x.is_cuda or 'cpu' in str(x.device) for x in tensor_args]):
+                return torch.ops.nativetransformers._transformer_encoder_layer_forward(
+                    src,
+                    self.self_attn.embed_dim,
+                    self.self_attn.num_heads,
+                    self.self_attn.in_proj_weight,
+                    self.self_attn.in_proj_bias,
+                    self.self_attn.out_proj.weight,
+                    self.self_attn.out_proj.bias,
+                    self.activation_relu_or_gelu == 2,
+                    False, # norm_first, currently not supported
+                    self.norm1.eps,
+                    self.norm1.weight,
+                    self.norm1.bias,
+                    self.norm2.weight,
+                    self.norm2.bias,
+                    self.linear1.weight,
+                    self.linear1.bias,
+                    self.linear2.weight,
+                    self.linear2.bias,
+                    src_mask if src_mask is not None else src_key_padding_mask,
+            )
         x = src
         if self.norm_first:
             x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)

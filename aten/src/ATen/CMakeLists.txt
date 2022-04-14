@@ -105,6 +105,7 @@ file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
 file(GLOB native_nested_cpp "native/nested/*.cpp")
+file(GLOB native_transformer_cpp "native/transformers/*.cpp")
 
 file(GLOB native_h "native/*.h")
 file(GLOB native_ao_sparse_h
@@ -162,6 +163,7 @@ else()
     all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
     ${native_ao_sparse_cpp} ${native_sparse_cpp} ${native_nested_cpp}
     ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
+    ${native_transformer_cpp}
     ${native_utils_cpp} ${native_xnnpack} ${generated_sources} ${core_generated_sources}
     ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
   )
