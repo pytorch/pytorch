@@ -52,7 +52,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
 
-  Layout layout_impl() const {
+  Layout layout_impl() const override {
     return layout_;
   }
   void set_layout(Layout layout) {
