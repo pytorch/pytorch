@@ -508,7 +508,6 @@ void testReduceScatter(const std::string& path, int rank, int size) {
 void testProcessGroupNCCLHealthCheckFailHelper(const std::string& path, bool timeout) {
   // simulate world_size > 1 here via threads.
   const int worldSize = 4;
-  std::mutex m;
   std::unordered_set<uint64_t> nums;
   auto runTest = [&](int i) {
     NCCLTest test(path, worldSize, std::chrono::milliseconds(3000));
