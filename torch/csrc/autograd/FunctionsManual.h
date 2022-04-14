@@ -494,7 +494,6 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
 
 Tensor _to_copy_backward(const Tensor &grad, const c10::TensorOptions &self_options);
 
-
 } // namespace details
 } // namespace generated
 } // namespace autograd

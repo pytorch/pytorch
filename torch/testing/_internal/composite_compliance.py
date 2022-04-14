@@ -127,7 +127,9 @@ class CompositeCompliantTensor(torch.Tensor):
             # Why clone? Because sometimes OpInfo shares inputs between tests...
             r.elem = elem.detach().clone()
         else:
-            r.elem = elem
+            # We don't propagate conjugate bits to r, so elem can't be a conjugate view
+            r.elem = elem.resolve_conj().resolve_neg()
+
         return r
 
     def __repr__(self):
