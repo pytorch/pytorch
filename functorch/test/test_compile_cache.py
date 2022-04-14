@@ -1,7 +1,8 @@
 import torch
 
 import functorch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
+import unittest
 
 from functorch.compile import aot_function, nop
 
@@ -184,6 +185,7 @@ class TestCompileCache(TestCase):
             assert total_recomps == 2
 
 
+@unittest.skipIf(IS_WINDOWS, 'test broken on windows')
 class TestCompileCacheStaticArgs(TestCase):
     def check(self, a, b, aot_autograd_fn, fn):
         a_clone = a.clone().detach().requires_grad_(True)
