@@ -219,7 +219,6 @@ void ts_eager_fallback(
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       tensor_args.push_back(ivalue.toTensor());
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!at::functionalization::impl::isFunctionalTensor(tensor_args.back()));
       tensor_args_indices.push_back(idx);
     } else if (ivalue.isTensorList()) {
       // Note: we copy each TensorList argument to eager individually out of
