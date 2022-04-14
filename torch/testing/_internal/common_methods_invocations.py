@@ -463,7 +463,7 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 #   The exception to this is if reference testing is sufficient, or if
 #   the operation belongs to an OpInfo subclass that has more exhaustive
 #   operator testing. Elementwise unary and elementwise binary operators,
-#   in particular, typically don't require additional testing beyond
+#   in particular, usually don't require additional testing beyond
 #   writing an Opinfo.
 #
 #
