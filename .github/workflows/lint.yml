@@ -36,12 +36,15 @@ jobs:
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
       - name: Run lintrunner on all files
-        # if: github.event_name == 'push'
+        if: github.event_name == 'push'
         run: lintrunner -vv --paths-cmd='git grep -Il .' --force-color
 
       - name: Run lintrunner on PR files
         if: github.event_name == 'pull_request'
         run: |
+          git show
+          git status
+          git log
           lintrunner -vv --force-color
           echo ""
           echo -e "\e[1m\e[36mYou can reproduce these results locally by running \`lintrunner\`.\e[0m"
