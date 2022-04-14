@@ -42,12 +42,10 @@ jobs:
       - name: Run lintrunner on PR files
         if: github.event_name == 'pull_request'
         run: |
-          git show
-          git status
-          git log
-          lintrunner -vv --force-color
+          MERGE_BASE=${ git merge-base HEAD "${GITHUB_BASE_REF}" }
+          lintrunner -vv --force-color --revision "${MERGE_BASE}"
           echo ""
-          echo -e "\e[1m\e[36mYou can reproduce these results locally by running \`lintrunner\`.\e[0m"
+          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
           echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
 
       - name: Store annotations
