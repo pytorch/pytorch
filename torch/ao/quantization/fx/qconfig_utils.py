@@ -217,9 +217,6 @@ def check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict: Option
                                                "float_to_observed_custom_module_class",
                                                "non_traceable_module_name",
                                                "non_traceable_module_class",
-                                               "additional_fuser_method_mapping",
-                                               "additional_qat__module_mapping",
-                                               "additional_quant_pattern",
                                                "input_quantized_idxs",
                                                "output_quantized_idxs",
                                                "preserved_attributes"}
@@ -237,8 +234,7 @@ def check_is_valid_convert_custom_config_dict(convert_custom_config_dict: Option
     if not convert_custom_config_dict:
         return
 
-    convert_custom_config_dict_allowed_keys = {"additional_object_mapping",
-                                               "observed_to_quantized_custom_module_class",
+    convert_custom_config_dict_allowed_keys = {"observed_to_quantized_custom_module_class",
                                                "preserved_attributes"}
     check_is_valid_config_dict(convert_custom_config_dict,
                                convert_custom_config_dict_allowed_keys, "convert_custom_config_dict")
@@ -253,8 +249,7 @@ def check_is_valid_fuse_custom_config_dict(fuse_custom_config_dict: Optional[Dic
     if not fuse_custom_config_dict:
         return
 
-    fuse_custom_config_dict_allowed_keys = {"additional_fuser_method_mapping",
-                                            "preserved_attributes"}
+    fuse_custom_config_dict_allowed_keys = {"preserved_attributes"}
     check_is_valid_config_dict(fuse_custom_config_dict, fuse_custom_config_dict_allowed_keys, "fuse_custom_config_dict")
 
 
