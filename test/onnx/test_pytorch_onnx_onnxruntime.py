@@ -6531,9 +6531,6 @@ class _TestONNXRuntime:
         offset = torch.tensor([0, 2, 5, 6])
         self.run_test(model, (input, offset))
 
-    @disableScriptTest()  # error in propagate as assign input shape
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_embedding_bag_with_offset(self):
         model = torch.nn.EmbeddingBag(10, 5, mode="max")
         input = torch.randint(10, (7, 5))
         self.run_test(model, (input))

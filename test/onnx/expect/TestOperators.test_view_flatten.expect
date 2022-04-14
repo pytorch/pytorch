@@ -3,113 +3,21 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "onnx::Shape_0"
-    output: "onnx::ReduceProd_2"
-    name: "Shape_0"
-    op_type: "Shape"
-  }
-  node {
-    input: "onnx::ReduceProd_2"
-    output: "onnx::Div_3"
-    name: "ReduceProd_1"
-    op_type: "ReduceProd"
-    attribute {
-      name: "keepdims"
-      i: 0
-      type: INT
-    }
-  }
-  node {
-    output: "onnx::Div_4"
-    name: "Constant_2"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        data_type: 7
-        raw_data: "\001\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "onnx::Div_3"
-    input: "onnx::Div_4"
-    output: "onnx::Cast_5"
-    name: "Div_3"
-    op_type: "Div"
-  }
-  node {
-    input: "onnx::Cast_5"
-    output: "onnx::Cast_6"
-    name: "Cast_4"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 7
-      type: INT
-    }
-  }
-  node {
-    input: "onnx::Cast_6"
-    output: "onnx::Unsqueeze_7"
-    name: "Cast_5"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 7
-      type: INT
-    }
-  }
-  node {
-    output: "onnx::Unsqueeze_10"
-    name: "Constant_6"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 1
-        data_type: 7
-        raw_data: "\000\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
-    input: "onnx::Unsqueeze_7"
-    input: "onnx::Unsqueeze_10"
-    output: "onnx::Concat_11"
-    name: "Unsqueeze_7"
-    op_type: "Unsqueeze"
-  }
-  node {
-    input: "onnx::Concat_14"
-    input: "onnx::Concat_11"
-    output: "onnx::Reshape_12"
-    name: "Concat_8"
-    op_type: "Concat"
-    attribute {
-      name: "axis"
-      i: 0
-      type: INT
-    }
-  }
-  node {
-    input: "onnx::Shape_0"
-    input: "onnx::Reshape_12"
-    output: "13"
-    name: "Reshape_9"
+    input: "onnx::Reshape_0"
+    input: "onnx::Reshape_11"
+    output: "8"
+    name: "Reshape_0"
     op_type: "Reshape"
   }
   name: "torch_jit"
   initializer {
-    dims: 1
+    dims: 2
     data_type: 7
-    name: "onnx::Concat_14"
-    raw_data: "\001\000\000\000\000\000\000\000"
+    name: "onnx::Reshape_11"
+    raw_data: "\001\000\000\000\000\000\000\000\030\000\000\000\000\000\000\000"
   }
   input {
-    name: "onnx::Shape_0"
+    name: "onnx::Reshape_0"
     type {
       tensor_type {
         elem_type: 1
@@ -131,16 +39,16 @@ graph {
     }
   }
   output {
-    name: "13"
+    name: "8"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
-            dim_param: "Reshape13_dim_0"
+            dim_value: 1
           }
           dim {
-            dim_param: "Reshape13_dim_1"
+            dim_value: 24
           }
         }
       }
