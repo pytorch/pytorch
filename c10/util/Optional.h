@@ -12,7 +12,7 @@
 // C10
 // - Move file to `c10` namespace.
 // - Remove macro use in line 478 because the nvcc device compiler cannot handle
-// it it.
+// it.
 // - Revise constructor logic so that it is 1) consistent with c++ 17 standard
 // documented here in (8):
 // https://en.cppreference.com/w/cpp/utility/optional/optional, and 2) able to

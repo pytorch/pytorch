@@ -1,9 +1,9 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cpu/MaxUnpoolKernel.h>
-#include <ATen/ATen.h>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 

@@ -15,8 +15,7 @@ Select::Select(
           OpKind(at::aten::select),
           {input},
           [&]() {
-            return MakeSelectShape(
-                GetShapeFromTsValue(input), dim, start, end, stride);
+            return MakeSelectShape(input.shape(), dim, start, end, stride);
           },
           /*num_outputs=*/1,
           MHash(dim, start, end, stride)),

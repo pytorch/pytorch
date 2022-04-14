@@ -32,6 +32,19 @@ std::string generate_code(
     bool vectorized=false,
     int vec_size=0);
 
+std::string generate_reduction_code(
+    int nOutputs,
+    const std::string& func,
+    const std::string& name,
+    const int vt0,
+    const std::string& f_inputs_type,
+    const std::string& reduction_accum_type,
+    const std::string& result_type,
+    bool contiguous,
+    bool vectorized,
+    int vec_size,
+    int max_threads_codegen);
+
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name);
@@ -39,8 +52,9 @@ NvrtcFunction jit_pwise_function(
 void launch_jitted_pwise_function(
     NvrtcFunction function,
     void* args[],
-    const int nBlocks,
-    const int kBlockSize);
+    const dim3 nBlocks,
+    const dim3 kBlockSize,
+    const int smem=0);
 
 template <typename T>
 struct delayed_false : std::false_type {
@@ -53,7 +67,7 @@ struct delayed_false : std::false_type {
 template <typename T>
 inline std::string typeName() {
   // we can't use static_assert(false) directly as the
-  // program will be not compile even if the template is not
+  // program will be not compiled even if the template is not
   // instantiated, so we use `delayed_false`
   // to make sure compiler doesn't eagerly raise
   // fail this assertion.
@@ -76,10 +90,6 @@ template <> inline std::string typeName<c10::complex<float>>(){
 }
 template <> inline std::string typeName<c10::complex<double>>(){
     return "std::complex<double>";
-}
-template <> inline std::string typeName<c10::complex<c10::Half>>(){
-    TORCH_INTERNAL_ASSERT(false, "torch.complex32 is not supported");
-    return "std::complex<at::Half>";
 }
 template <> inline std::string typeName<at::Half>(){
     return "at::Half";

@@ -1,6 +1,6 @@
 import copy
 import warnings
-from torch.utils.data import MapDataPipe
+from torch.utils.data.datapipes.datapipe import MapDataPipe
 
 
 class SequenceWrapperMapDataPipe(MapDataPipe):
@@ -16,6 +16,15 @@ class SequenceWrapperMapDataPipe(MapDataPipe):
       that data pipeline doesn't contain any in-place operations over
       the iterable instance, in order to prevent data inconsistency
       across iterations.
+
+    Example:
+        >>> from torchdata.datapipes.map import SequenceWrapper
+        >>> dp = SequenceWrapper(range(10))
+        >>> list(dp)
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        >>> dp = SequenceWrapper({'a': 100, 'b': 200, 'c': 300, 'd': 400})
+        >>> dp['a']
+        100
     """
     def __init__(self, sequence, deepcopy=True):
         if deepcopy:

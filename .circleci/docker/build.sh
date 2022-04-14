@@ -40,6 +40,12 @@ function extract_all_from_image_name() {
   done
 }
 
+# Use the same pre-built XLA test image from PyTorch/XLA
+if [[ "$image" == *xla* ]]; then
+  echo "Using pre-built XLA test image..."
+  exit 0
+fi
+
 if [[ "$image" == *-xenial* ]]; then
   UBUNTU_VERSION=16.04
 elif [[ "$image" == *-artful* ]]; then
@@ -84,7 +90,7 @@ case "$image" in
     ;;
   pytorch-linux-xenial-py3.7-gcc5.4)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
+    CMAKE_VERSION=3.12.4  # To make sure XNNPACK is enabled for the BACKWARDS_COMPAT_TEST used with this image
     GCC_VERSION=5
     PROTOBUF=yes
     DB=yes
@@ -116,17 +122,6 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.1
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
   pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
     CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
     CUDNN_VERSION=8
@@ -139,8 +134,31 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
+  pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9)
+    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
+    CUDNN_VERSION=8
+    TENSORRT_VERSION=8.0.1.6
+    ANACONDA_PYTHON_VERSION=3.7
+    CMAKE_VERSION=3.10.3
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
   pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7)
     CUDA_VERSION=11.5.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.7
+    CMAKE_VERSION=3.10.3
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.6.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.7
     CMAKE_VERSION=3.10.3
@@ -227,24 +245,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-cuda11.0-cudnn8-py3.7-gcc9)
-    CUDA_VERSION=11.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.9
-    ;;
-  pytorch-linux-bionic-rocm4.3.1-py3.7)
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=4.3.1
-    ;;
   pytorch-linux-bionic-rocm4.5-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
@@ -252,6 +252,14 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=4.5.2
+    ;;
+  pytorch-linux-bionic-rocm5.0-py3.7)
+    ANACONDA_PYTHON_VERSION=3.7
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=5.0
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -298,6 +306,13 @@ fi
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
+#when using cudnn version 8 install it separately from cuda
+if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
+  IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
+  if [[ ${CUDNN_VERSION} == 8 ]]; then
+    IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
+  fi
+fi
 
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
@@ -336,6 +351,7 @@ docker build \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
+       --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

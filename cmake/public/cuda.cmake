@@ -38,6 +38,12 @@ endif()
 
 # Enable CUDA language support
 set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
+# Pass clang as host compiler, which according to the docs
+# Must be done before CUDA language is enabled, see  mast be done before
+# see https://cmake.org/cmake/help/v3.15/variable/CMAKE_CUDA_HOST_COMPILER.html
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+  set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}")
+endif()
 enable_language(CUDA)
 set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
@@ -318,15 +324,9 @@ if(CAFFE2_USE_CUDNN)
     TARGET caffe2::cudnn-private PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
-    if(USE_WHOLE_CUDNN)
-      set_property(
-        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
-        "-Wl,--whole-archive,\"${CUDNN_LIBRARY_PATH}\" -Wl,--no-whole-archive")
-    else()
-      set_property(
-        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDNN_LIBRARY_PATH})
-    endif()
+    set_property(
+      TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
+      ${CUDNN_LIBRARY_PATH})
     set_property(
       TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
       "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)

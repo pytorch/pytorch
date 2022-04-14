@@ -77,6 +77,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
+  rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
 
   # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
@@ -100,7 +101,7 @@ fi
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Suppress vptr violations arising from multiple copies of pybind11
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true:detect_odr_violation=0
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
@@ -274,6 +275,14 @@ test_libtorch() {
     else
       "$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
+
+    # Run Lazy Tensor cpp tests
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+      LTC_TS_CUDA=1 "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
+    else
+      "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
+    fi
+
     python test/cpp/jit/tests_setup.py shutdown
     # Wait for background download to finish
     wait
@@ -306,7 +315,7 @@ test_vulkan() {
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    "$TORCH_TEST_DIR"/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
   fi
 }
 
@@ -441,6 +450,8 @@ test_xla() {
 # nightly version.
 test_forward_backward_compatibility() {
   set -x
+  # create a dummy ts model at this version
+  python test/create_dummy_torchscript_model.py /tmp/model_new.pt
   pushd test/forward_backward_compatibility
   python -m venv venv
   # shellcheck disable=SC1091
@@ -448,10 +459,21 @@ test_forward_backward_compatibility() {
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
+  # FC: verify newmodel can be load with old code.
+  if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
+      echo "FC check failed: new model cannot be load in old code"
+      return 1
+  fi
+  python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
   rm -r venv
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
+  # BC: verify old model can be load with new code
+  if ! python ../load_torchscript_model.py /tmp/model_old.pt; then
+      echo "BC check failed: old model cannot be load in new code"
+      return 1
+  fi
   popd
   set +x
   assert_git_not_dirty
@@ -518,7 +540,7 @@ test_torch_deploy() {
   ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
   ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
   "$TORCH_BIN_DIR"/test_deploy
-  "$TORCH_BIN_DIR"/test_api --gtest_filter='IMethodTest.*'
+  "$TORCH_BIN_DIR"/test_deploy_gpu
   assert_git_not_dirty
 }
 
@@ -530,8 +552,9 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-
-if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *deploy* ]]; then
+  test_torch_deploy
+elif [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
@@ -544,9 +567,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.1*-test1* ]]; then
-    test_torch_deploy
-  fi
   test_without_numpy
   install_torchvision
   test_python_shard 1
@@ -563,12 +583,15 @@ elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-  test_vulkan
+  # TODO: re-enable vulkan test
+  echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
   test_distributed
   test_rpc
+elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
+  test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 else

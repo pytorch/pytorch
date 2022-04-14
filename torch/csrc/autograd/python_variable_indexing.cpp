@@ -4,7 +4,6 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -88,7 +87,7 @@ static inline Variable sequenceToVariable(c10::TensorOptions options, PyObject* 
   return torch::utils::indexing_tensor_from_data(options, kLong, c10::nullopt, seq);
 }
 
-static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
+inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
   if (THPVariable_Check(value)) {
     return THPVariable_Unpack(value);
   }

@@ -3,19 +3,9 @@ import fnmatch
 import warnings
 
 from io import IOBase
-from typing import Iterable, List, Tuple, Union
+from typing import Iterable, List, Tuple, Union, Optional
 
-try:
-    import dill
-
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    DILL_AVAILABLE = True
-except ImportError:
-    DILL_AVAILABLE = False
+from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 
 def check_lambda_fn(fn):
@@ -78,7 +68,7 @@ def get_file_pathnames_from_root(
                 dirs.sort()
 
 
-def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
+def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str, encoding: Optional[str] = None):
     if not isinstance(pathnames, Iterable):
         pathnames = [pathnames, ]
 
@@ -89,7 +79,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
         if not isinstance(pathname, str):
             raise TypeError("Expected string type for pathname, but got {}"
                             .format(type(pathname)))
-        yield pathname, StreamWrapper(open(pathname, mode))
+        yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
 
 
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
@@ -106,12 +96,36 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
         )
 
 
-def deprecation_warning(name, new_name: str = ""):
-    new_name_statement = ""
-    if new_name:
-        new_name_statement = f" Please use {new_name} instead."
-    warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`." +
-                  new_name_statement, DeprecationWarning)
+def deprecation_warning(
+    old_class_name: str,
+    *,
+    deprecation_version: str,
+    removal_version: str,
+    old_functional_name: str = "",
+    new_class_name: str = "",
+    new_functional_name: str = "",
+) -> None:
+    msg = f"`{old_class_name}()`"
+    if old_functional_name:
+        msg = f"{msg} and its functional API `.{old_functional_name}()` are"
+    else:
+        msg = f"{msg} is"
+    msg = (
+        f"{msg} deprecated since {deprecation_version} and will be removed in {removal_version}. "
+        f"See https://github.com/pytorch/data/issues/163 for details."
+    )
+
+    if new_class_name or new_functional_name:
+        msg = f"{msg} Please use"
+        if new_class_name:
+            msg = f"{msg} `{new_class_name}()`"
+        if new_class_name and new_functional_name:
+            msg = f"{msg} or"
+        if new_functional_name:
+            msg = f"{msg} `.{new_functional_name}()`"
+        msg = f"{msg} instead."
+
+    warnings.warn(msg, FutureWarning)
 
 
 class StreamWrapper:

@@ -12,7 +12,9 @@
 #include <c10d/NCCLUtils.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
+#include <c10d/UCCForNCCL.hpp>
 
+#include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Stream.h>
@@ -372,7 +374,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
       ncclUniqueId* ncclID,
-      OpType opType,
+      bool isSingleP2POp,
       const std::string& devicesKey,
       int p2pRank);
 
@@ -623,6 +625,11 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
   // Counting for the sequential number of NCCL collective call.
   uint64_t seq_{0};
+
+#ifdef USE_NCCL_WITH_UCC
+  // ProcessGroupUCC shared library handle
+  static std::shared_ptr<at::DynamicLibrary> uccLib_;
+#endif
 };
 
 } // namespace c10d

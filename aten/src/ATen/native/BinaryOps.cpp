@@ -232,10 +232,9 @@ CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge);
 
 namespace native {
 
-DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(add_clamp_stub);
-DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
+DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(div_true_stub);
 DEFINE_DISPATCH(div_floor_stub);
 DEFINE_DISPATCH(div_trunc_stub);
@@ -277,17 +276,10 @@ DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
 
-TORCH_IMPL_FUNC(add_out) (
-  const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
-) {
-  add_stub(device_type(), *this, alpha);
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
-}
-
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
 ) {
-  sub_stub(device_type(), *this, alpha);
+  add_stub(device_type(), *this, -alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
 
@@ -626,6 +618,11 @@ Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
 }
 
+Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
+  self.values().mul_(other);
+  return self;
+}
+
 Device correct_out_device(const Tensor& self, const Tensor& other) {
   if (self.device() == at::kCPU){
       return other.device();
@@ -672,7 +669,7 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
@@ -693,6 +690,13 @@ Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alp
   } else {
     return get_out_like(self);
   }
+}
+Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return maybe_add_maybe_sub(self, other, alpha);
+}
+
+Tensor sub_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return maybe_add_maybe_sub(self, other, -alpha);
 }
 
 // multiply, alias for mul

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
+import os
+import re
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from typing import cast, Any, Dict, Iterator, List, Optional, Tuple, Union
-import os
-import re
 
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")
@@ -30,9 +31,9 @@ def fuzzy_list_to_dict(items: List[Tuple[str, str]]) -> Dict[str, List[str]]:
 
 
 def _check_output(items: List[str], encoding: str = "utf-8") -> str:
-    from subprocess import check_output, CalledProcessError
+    from subprocess import check_output, CalledProcessError, STDOUT
     try:
-        return check_output(items).decode(encoding)
+        return check_output(items, stderr=STDOUT).decode(encoding)
     except CalledProcessError as e:
         msg = f"Command `{' '.join(e.cmd)}` returned non-zero exit code {e.returncode}"
         stdout = e.stdout.decode(encoding) if e.stdout is not None else ""
@@ -127,7 +128,15 @@ class GitRepo:
         return self._run_git("symbolic-ref", "--short", "HEAD").strip()
 
     def checkout(self, branch: str) -> None:
-        self._run_git('checkout', branch)
+        self._run_git("checkout", branch)
+
+    def fetch(self, ref: Optional[str] = None, branch: Optional[str] = None) -> None:
+        if branch is None and ref is None:
+            self._run_git("fetch", self.remote)
+        elif branch is None:
+            self._run_git("fetch", self.remote, ref)
+        else:
+            self._run_git("fetch", self.remote, f"{ref}:{branch}")
 
     def show_ref(self, name: str) -> str:
         refs = self._run_git('show-ref', '-s', name).strip().split('\n')
@@ -185,8 +194,15 @@ class GitRepo:
                 while len(from_values) > 0 and len(to_values) > 0:
                     frc = self.get_commit(from_values.pop())
                     toc = self.get_commit(to_values.pop())
+                    # FRC branch might have PR number added to the title
                     if frc.title != toc.title or frc.author_date != toc.author_date:
-                        raise RuntimeError(f"Unexpected differences between {frc} and {toc}")
+                        # HACK: Same commit were merged, reverted and landed again
+                        # which creates a tracking problem
+                        if (
+                            "pytorch/pytorch" not in self.remote_url() or
+                            frc.commit_hash != "0a6a1b27a464ba5be5f587cce2ee12ab8c504dbf"
+                        ):
+                            raise RuntimeError(f"Unexpected differences between {frc} and {toc}")
                     from_commits.remove(frc.commit_hash)
                     to_commits.remove(toc.commit_hash)
                 continue
@@ -209,11 +225,19 @@ class GitRepo:
             self.cherry_pick(commit)
         self.checkout(orig_branch)
 
-    def push(self, branch: str, dry_run: bool) -> None:
-        if dry_run:
-            self._run_git("push", "--dry-run", self.remote, branch)
-        else:
-            self._run_git("push", self.remote, branch)
+    def push(self, branch: str, dry_run: bool, retry: int = 3) -> None:
+        for cnt in range(retry):
+            try:
+                if dry_run:
+                    self._run_git("push", "--dry-run", self.remote, branch)
+                else:
+                    self._run_git("push", self.remote, branch)
+            except RuntimeError as e:
+                # Check if push were rejected because branch is stale
+                if len(e.args) == 0 or re.search(r"\[rejected\].+\(fetch first\)\n", e.args[0]) is None:
+                    raise
+                self.fetch()
+                self._run_git("rebase", f"{self.remote}/{branch}")
 
     def head_hash(self) -> str:
         return self._run_git("show-ref", "--hash", "HEAD").strip()
@@ -235,6 +259,12 @@ class GitRepo:
 
     def amend_commit_message(self, msg: str) -> None:
         self._run_git("commit", "--amend", "-m", msg)
+
+
+def clone_repo(username: str, password: str, org: str, project: str) -> GitRepo:
+    path = tempfile.mkdtemp()
+    _check_output(['git', 'clone', f'https://{username}:{password}@github.com/{org}/{project}', path]).strip()
+    return GitRepo(path=path)
 
 
 class PeekableIterator(Iterator[str]):

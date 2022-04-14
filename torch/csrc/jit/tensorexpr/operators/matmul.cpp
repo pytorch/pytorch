@@ -38,12 +38,12 @@ Tensor computeMatmul(
   if (total_size && total_size->value() < 1000) {
     return Reduce(
         "nnc_matmul",
-        {{size_a[0], "M"}, {size_b[1], "N"}},
+        {size_a[0], size_b[1]},
         Sum(),
         [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
           return Load::make(a, {m, k}) * Load::make(b, {k, n});
         },
-        {{size_a[1], "K"}});
+        {size_a[1]});
   } else {
     return Tensor(
         ResultBuf.node(),

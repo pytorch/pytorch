@@ -43,7 +43,6 @@ inline bool variable_excluded_from_dispatch() {
   // Please read the comment in `VariableFallbackKernel.cpp` about the background of this change.
   return true;
 #else
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd));
   return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
 #endif
 }
@@ -142,6 +141,8 @@ class TORCH_API TensorBase {
   const TensorBase& fill_(const c10::Scalar& scalar) const;
   const TensorBase& zero_() const;
 
+  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
   }
@@ -155,15 +156,17 @@ class TORCH_API TensorBase {
   }
 
   int64_t size(int64_t dim) const {
+    const auto sizes = this->sizes();
+    const auto ndim = static_cast<int64_t>(sizes.size());
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
-    return sizes()[dim];
+    return sizes[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
   }
 
   int64_t stride(int64_t dim) const {
+    const auto strides = this->strides();
+    const auto ndim = static_cast<int64_t>(strides.size());
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
-    return strides()[dim];
+    return strides[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
   }
 
   TensorImpl * unsafeGetTensorImpl() const {
@@ -369,6 +372,12 @@ class TORCH_API TensorBase {
     return impl_->is_cuda();
   }
 
+  /// Returns if a `Tensor` has IPU backend.
+  bool is_ipu() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_ipu();
+  }
+
   /// Returns if a `Tensor` has XPU backend.
   bool is_xpu() const {
     // NB: this is not a native function to avoid dispatching overhead.
@@ -459,6 +468,11 @@ class TORCH_API TensorBase {
   /// Returns if a `Tensor` is an inference tensor.
   bool is_inference() const {
     return impl_->is_inference();
+  }
+
+  // Returns if a `Tensor` is a NestedTensor.
+  bool is_nested() const {
+    return impl_->is_nested();
   }
 
   /// If a tensor is a quantized tensor, returns its quantizer
@@ -865,7 +879,7 @@ struct MaybeOwnedTraits<at::TensorBase> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
   }
 };

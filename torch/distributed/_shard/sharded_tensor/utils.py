@@ -1,18 +1,17 @@
 import collections.abc
+import copy
 from contextlib import contextmanager
 from typing import Optional, List, Sequence
 
 import torch
 from torch.distributed import distributed_c10d
 from torch.distributed import rpc
-from torch.distributed._shard.sharding_spec import (
-    ShardMetadata,
-)
 from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata,
 )
 
+from torch.distributed._shard.metadata import ShardMetadata
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
 
@@ -92,9 +91,9 @@ def _validate_output_tensor_for_gather(
             "on non-destination ranks."
         )
 
-def _flatten_tensor_size(size) -> List[int]:
+def _flatten_tensor_size(size) -> torch.Size:
     """
-    Checks if tensor size is valid, then flatten/return the list of ints.
+    Checks if tensor size is valid, then flatten/return a torch.Size object.
     """
     if len(size) == 1 and isinstance(size[0], collections.abc.Sequence):
         dims = list(*size)
@@ -105,7 +104,7 @@ def _flatten_tensor_size(size) -> List[int]:
         if not isinstance(dim, int):
             raise TypeError(f'size has to be a sequence of ints, found: {dims}')
 
-    return dims
+    return torch.Size(dims)
 
 def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
     if is_local:
@@ -125,7 +124,7 @@ def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
 
 def build_metadata_from_local_shards(
     local_shards: List[Shard],
-    global_size: List[int],
+    global_size: torch.Size,
     current_rank: int,
     pg: distributed_c10d.ProcessGroup
 ) -> ShardedTensorMetadata:
@@ -184,7 +183,7 @@ def build_metadata_from_local_shards(
 
     local_sharded_tensor_metadata = ShardedTensorMetadata(
         shards_metadata=local_shard_metadatas,
-        size=torch.Size(global_size),
+        size=global_size,
         tensor_properties=local_tensor_properties)
 
     return local_sharded_tensor_metadata
@@ -199,7 +198,7 @@ def build_global_metadata(gathered_metadatas: Sequence[Optional[ShardedTensorMet
             continue
 
         if global_sharded_tensor_metadata is None:
-            global_sharded_tensor_metadata = rank_metadata
+            global_sharded_tensor_metadata = copy.deepcopy(rank_metadata)
             global_metadata_rank = rank
         else:
             _raise_if_mismatch(global_sharded_tensor_metadata.size,

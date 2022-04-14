@@ -278,17 +278,10 @@ void initTensorExprBindings(PyObject* module) {
         self->set_src_value(value.node());
       });
 
-  py::class_<DimArg>(te, "DimArg")
-      .def(py::init<const ExprHandle&>())
-      .def(py::init<const ExprHandle&, const std::string&>());
-  py::implicitly_convertible<ExprHandle, DimArg>();
-  py::implicitly_convertible<int32_t, DimArg>();
-  py::implicitly_convertible<int64_t, DimArg>();
-
   te.def(
       "Compute",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          py::function func) {
         if (dim_args.size() == 1) {
           return Compute(func_name, dim_args, [&func](const VarHandle& a) {
@@ -329,7 +322,7 @@ void initTensorExprBindings(PyObject* module) {
   te.def(
       "Compute2",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          py::function func) {
         return Compute(
             func_name, dim_args, [&func](const std::vector<VarHandle>& dims) {
@@ -348,10 +341,10 @@ void initTensorExprBindings(PyObject* module) {
   te.def(
       "Reduce",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          const Reducer& reducer,
          Tensor buffer,
-         const std::vector<DimArg>& reduce_args) {
+         const std::vector<ExprHandle>& reduce_args) {
         return Reduce(func_name, dim_args, reducer, buffer, reduce_args);
       },
       py::return_value_policy::reference);
@@ -359,34 +352,34 @@ void initTensorExprBindings(PyObject* module) {
   te.def(
       "Reduce",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          const Reducer& reducer,
          const BufHandle& buffer,
-         const std::vector<DimArg>& reduce_args) {
+         const std::vector<ExprHandle>& reduce_args) {
         return Reduce(func_name, dim_args, reducer, buffer, reduce_args);
       },
       py::return_value_policy::reference);
   te.def(
       "Reduce",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          const Reducer& reducer,
          const std::function<ExprHandle(const std::vector<VarHandle>&)>&
              body_func,
-         const std::vector<DimArg>& reduce_args) {
+         const std::vector<ExprHandle>& reduce_args) {
         return Reduce(func_name, dim_args, reducer, body_func, reduce_args);
       },
       py::return_value_policy::reference);
   te.def(
       "Reduce",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          const Reducer& reducer,
          const std::function<ExprHandle(const std::vector<VarHandle>&)>&
              init_func,
          const std::function<ExprHandle(const std::vector<VarHandle>&)>&
              body_func,
-         const std::vector<DimArg>& reduce_args) {
+         const std::vector<ExprHandle>& reduce_args) {
         return Reduce(func_name, dim_args, reducer, body_func, reduce_args);
       },
       py::return_value_policy::reference);

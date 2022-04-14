@@ -54,9 +54,9 @@ Features described in this documentation are classified by release status:
    tensors
    tensor_attributes
    tensor_view
+   torch.amp <amp>
    torch.autograd <autograd>
    cuda
-   torch.cuda.amp <amp>
    torch.backends <backends>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
@@ -84,6 +84,7 @@ Features described in this documentation are classified by release status:
    quantization
    rpc
    torch.random <random>
+   nested
    sparse
    storage
    torch.testing <testing>
@@ -99,7 +100,7 @@ Features described in this documentation are classified by release status:
    type_info
    named_tensor
    name_inference
-   torch.__config__ <__config__>
+   torch.__config__ <config_mod>
 
 .. toctree::
    :maxdepth: 1

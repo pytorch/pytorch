@@ -702,6 +702,17 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
+            "prim::IfThenElse(bool cond, Any(a) x, Any(b) y) -> Any(a|b)"),
+        [](Stack& stack) {
+          const auto cond = stack[stack.size() - 3].toBool();
+          stack[stack.size() - 3] =
+              std::move(stack[stack.size() - (cond ? 2 : 1)]);
+          stack.pop_back();
+          stack.pop_back();
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
             "aten::eq.enum(AnyEnumType a, AnyEnumType b) -> bool"),
         [](Stack& stack) {
           IValue x = pop(stack);
@@ -2250,6 +2261,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_ipu(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_ipu());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_quantized(Tensor a) -> bool"),
         [](Stack& stack) {
           at::Tensor a;
@@ -2271,6 +2290,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           at::Tensor a;
           pop(stack, a);
           push(stack, a.is_ort());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_nested(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_nested());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
