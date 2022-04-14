@@ -111,6 +111,40 @@ $2 = torch._ops.aten.add.Tensor($1, tensor([[1., 1.],
 $3 = torch._ops.aten.view_copy.default($2, [4, 2])
 $4 = torch._ops.aten.mul.Tensor($3, $3)""")
 
+    def test_simple_out(self):
+        def f(x):
+            # simple test: 1 view op, 1 inplace op
+            tmp = torch.ones(4, 2)
+            y = x.view(4, 2)
+            z = torch.empty(4, 2)
+            torch.add(y, tmp, out=z)
+            w = z * z
+            return w
+        self.assert_functionalization(f, torch.ones(4, 2))
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.view_copy.default($0, [4, 2])
+$2 = torch._ops.aten.add.Tensor($1, tensor([[1., 1.],
+        [1., 1.],
+        [1., 1.],
+        [1., 1.]]))
+$3 = torch._ops.aten.mul.Tensor($2, $2)""")
+
+    def test_multi_out(self):
+        def f(x):
+            # aminmax.out returns a tuple of tensors.
+            # functionalization should properly handle the tuple.
+            out_min = torch.empty(4)
+            out_max = torch.empty(4)
+            torch.aminmax(x, dim=0, out=(out_max, out_min))
+            return out_max
+        self.assert_functionalization(f, torch.arange(8, dtype=torch.float32))
+        logs = self.get_logs(f, torch.arange(8, dtype=torch.float32))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1, $2 = torch._ops.aten.aminmax.default($0, dim=0)""")
+
     def test_inplace_on_non_view(self):
         def f(x):
             # test for the case where we functionalize an inplace op on the other tensor - not a view.
