@@ -274,7 +274,7 @@ TEST(MemDependency, BoundSubtractMultiDim) {
     if (x.size() != y.size()) {
       return false;
     }
-    for (auto i = 0; i < x.size(); ++i) {
+    for (auto i = 0U; i < x.size(); ++i) {
       if (!indexBoundsEquals(x[i], y[i])) {
         return false;
       }
@@ -338,7 +338,7 @@ TEST(MemDependency, BoundSubtractMultiDimSymbolic) {
     if (x.size() != y.size()) {
       return false;
     }
-    for (auto i = 0; i < x.size(); ++i) {
+    for (auto i = 0U; i < x.size(); ++i) {
       if (!indexBoundsEquals(x[i], y[i])) {
         return false;
       }

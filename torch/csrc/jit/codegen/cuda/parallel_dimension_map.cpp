@@ -43,28 +43,22 @@ void ParallelDimensionMap::build(Fusion* fusion) {
 }
 
 void ParallelDimensionMap::registerConstantExtent(IterDomain* id) {
-  ExpressionEvaluator ee(id->fusion());
-  auto extent_int = ee.evaluate(id->extent());
-  if (!extent_int.has_value()) {
+  if (!id->extent()->isConstScalar()) {
     // Nothing to do if not constant
     return;
   }
 
+  ExpressionEvaluator ee(id->fusion());
+  auto extent_int = ee.evaluate(id->extent());
+  TORCH_INTERNAL_ASSERT(
+      extent_int.has_value(),
+      "Extent of ",
+      id->toString(),
+      " should have been constant, but could not be evaluated at compile time.");
+
   auto const_extent = extent_int.value();
 
-  // Ignore if this is derived from a size-1 domain as it is likely a
-  // size-1 broadcast domain and that does not represent the actual
-  // dimension even if it's constant. Being size-1 may not always mean
-  // it's a broadcast domain, but it'd be safe to assume it is mostly
-  // the case. If it is not a broadcast, ignoring this domain does not
-  // impact the correctness.
-  auto extent_inputs = InputsOf::output(id->fusion(), id->extent());
-  if (std::any_of(extent_inputs.begin(), extent_inputs.end(), [](Val* input) {
-        return input->isOneInt();
-      })) {
-    return;
-  }
-
+  // Uses index map
   auto concrete_id = getCAMappedConcreteDomain(id);
 
   auto existing_it = constant_extent_map_.find(id);
@@ -106,14 +100,13 @@ void ParallelDimensionMap::populateDimensionMapWithSingleCASet(
   auto it = constant_extent_map_.find(id);
 
   if (it != constant_extent_map_.end()) {
-    if (it->second.size() == 1) {
-      dim_map_.insert({pt, IrBuilder::create<Int>(*(it->second.begin()))});
-      exact_types_.insert(pt);
-    } else {
-      // Multiple constant dimensions found; Use the corresponding
-      // symbolic parallel dim
-      dim_map_.insert({pt, NamedScalar::getParallelDim(pt)});
-    }
+    TORCH_INTERNAL_ASSERT(
+        it->second.size() == 1,
+        "Only one value found mapped to parallel type ",
+        stringifyThread(pt),
+        " yet its bound to multiple extents.");
+    dim_map_.insert({pt, IrBuilder::create<Int>(*(it->second.begin()))});
+    exact_types_.insert(pt);
   } else {
     // Prefer to use blockDim/gridDim if not constant
     dim_map_.insert({pt, NamedScalar::getParallelDim(pt)});
@@ -200,7 +193,9 @@ void ParallelDimensionMap::adjustMappingsForWarpPadding() {
   // non-exact.
 
   auto& warp_info = gpu_lower->getWarpPaddedParallelInfo();
-  if (!warp_info.is_tidx_padded) {
+  // TIDx isn't really padded if there isn't a warp reduction (this could
+  // change)
+  if (!(warp_info.is_tidx_padded && warp_info.has_warp_reduction)) {
     return;
   }
 
@@ -218,11 +213,24 @@ void ParallelDimensionMap::adjustMappingsForWarpPadding() {
         return;
       }
     }
+    // If tidx is strictly defined as blockDim.x then it must be set to a
+    // multiple of the warp and can be considered exact
+    bool tidx_def_trivial = true;
+    for (auto entry : concrete_dom_map_.at(tidx_pt)) {
+      if (!entry->isA<NamedScalar>() ||
+          !entry->as<NamedScalar>()->sameAs(
+              NamedScalar::getParallelDim(tidx_pt))) {
+        tidx_def_trivial = false;
+      }
+    }
+    if (tidx_def_trivial) {
+      return;
+    }
   }
 
   // TIDx is padded to a multiple of warp. If it's known to be a
   // single warp, use the constant warp size as the dimension of
-  // TIDx. Otherwise, jsut use blockDim.x.
+  // TIDx. Otherwise, just use blockDim.x.
   if (warp_info.is_tidx_single_warp) {
     dim_map_.at(ParallelType::TIDx) = IrBuilder::create<Int>(warp_size);
   } else {
@@ -292,6 +300,13 @@ bool ParallelDimensionMap::equalDim(Val* dim1, Val* dim2) {
   // If both are BinaryOp or UnaryOp, check their inputs. Since these
   // Vals are IterDomain extents, UnaryOp should not occur, but
   // checking shouldn't be harmful.
+  // TODO:
+  //   We might be able to replace this with dim1->toInlineString() ==
+  //   dim2->toInlineString()
+  //   If we want this less conservative we could make an "exact map" which
+  //   could be another mode in compute at that maps all iter domains, but not
+  //   concretized broadcast axes and only forwards through non-concretized
+  //   broadcast axes.
   if ((dim1_def->isA<BinaryOp>() && dim2_def->isA<BinaryOp>() &&
        (dim1_def->as<BinaryOp>()->getBinaryOpType() ==
         dim2_def->as<BinaryOp>()->getBinaryOpType())) ||

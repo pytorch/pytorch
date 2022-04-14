@@ -310,8 +310,9 @@ bool guardDifferentiableGraph(Node* dnode) {
 }
 
 void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
-  GRAPH_DEBUG(
-      "Before LowerGradOf (beginning of runNooptPassPipeline)\n", *graph);
+  GRAPH_DEBUG("Before Inliner (beginning of runNooptPassPipeline)\n", *graph);
+  Inline(*graph);
+  GRAPH_DEBUG("After Inline, Before NoGrad\n", *graph);
   LowerGradOf(*graph);
   GRAPH_DEBUG("After LowerGradOf, before RemoveExpands\n", *graph);
   RemoveExpands(graph);
@@ -328,22 +329,8 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
       "Before InsertGuards (beginning of runPreAutodiffPassPipeline)\n",
       *graph);
 
-  if (tensorExprFuserEnabled() || RegisterCudaFuseGraph::isRegistered()) {
-    // With TE fuser or nvfuser, we don't generate bailouts
-    LowerGradOf(*graph);
-    GRAPH_DEBUG("After LowerGradOf, before specializeAutogradZero\n", *graph);
-  } else {
-    InsertGuards(graph);
-    GRAPH_DEBUG("After InsertGuards, before LowerGradOf\n", *graph);
-    LowerGradOf(*graph);
-    GRAPH_DEBUG("After LowerGradOf, before EliminateRedundantGuards\n", *graph);
-    EliminateRedundantGuards(graph);
-    GRAPH_DEBUG(
-        "After EliminateRedundantGuards, before InsertBailOuts\n", *graph);
-    InsertBailOuts(graph);
-    GRAPH_DEBUG(
-        "After InsertBailOuts, before specializeAutogradZero\n", *graph);
-  }
+  LowerGradOf(*graph);
+  GRAPH_DEBUG("After LowerGradOf, before specializeAutogradZero\n", *graph);
 
   specializeAutogradZero(graph);
   GRAPH_DEBUG("After specializeAutogradZero\n", *graph);
@@ -453,15 +440,8 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
       auto min_size = getFusionGroupInlining() ? 2 : 1;
       bool dyn_shapes = getCurrentBehavior(remaining_bailout_depth) ==
           FusionBehavior::DYNAMIC;
-      FuseTensorExprs(graph, min_size, /*composed_op*/ false, dyn_shapes);
-      GRAPH_DEBUG(
-          "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
-
-      // Wipe tensor type info from the IR
-      RemoveTensorTypeSpecializations(graph);
-      GRAPH_DEBUG(
-          "After RemoveTensorTypeSpecializations, before customPostPasses\n",
-          *graph);
+      FuseTensorExprs(graph, min_size, /* composed op*/ false, dyn_shapes);
+      GRAPH_DEBUG("After Fusion, before customPostPasses\n", *graph);
     } else {
       // Rewrite subgraphs with many MMs into expressions that batch them.
       BatchMM(graph);
@@ -472,12 +452,17 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     }
 
     // Run custom post-fusion passes
+    // e.g. NVFuser
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
+    GRAPH_DEBUG(
+        "After customPostPasses, before RemoveTensorTypeSpecializations \n",
+        *graph);
+    RemoveTensorTypeSpecializations(graph);
+    GRAPH_DEBUG("After RemoveTensorTypeSpecializations\n", *graph);
   }
-  GRAPH_DEBUG(
-      "After customPostPasses (end of runNoGradOptimizations)\n", *graph);
+  GRAPH_DEBUG("End of runNoGradOptimizations\n");
 }
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
@@ -608,13 +593,23 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
   fusion_strategy_ = getFusionStrategy();
 }
 
+size_t ProfilingGraphExecutorImpl::getInstantiatedBailoutDepth() {
+  // Initialize bailout_depth from command-line flag.
+  size_t depth = 0;
+  for (const auto& pair : fusion_strategy_) {
+    depth += pair.second;
+  }
+  return depth;
+}
+
 const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     Stack& stack,
-    size_t remaining_bailout_depth) {
+    c10::optional<size_t> remaining_bailout_depth) {
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
+  // TODO: instantiate simple executor when getProfilingMode() is false
   // no opt mode
-  if (!getGraphExecutorOptimize()) {
+  if (!getGraphExecutorOptimize() || !getProfilingMode()) {
     if (!fallback_plan_) {
       auto copy = graph->copy();
       GRAPH_DEBUG(
@@ -634,7 +629,11 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   // getPlanFor(remaining_bailout_depth) is corrected and persisted by the Code
   // object in interpreter.
   if (!remaining_bailout_depth_.has_value() || !tensorExprFuserEnabled()) {
-    remaining_bailout_depth_ = remaining_bailout_depth;
+    if (remaining_bailout_depth.has_value()) {
+      remaining_bailout_depth_ = *remaining_bailout_depth;
+    } else {
+      remaining_bailout_depth_ = getInstantiatedBailoutDepth();
+    }
   }
 
   // simple executor
@@ -682,14 +681,13 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   replaceFallbackGraphWithFallbackFunction(copy->block());
   runFinalOptimizations(copy);
   GRAPH_DUMP("Optimized Graph: ", copy);
-  optimized_plan_ =
-      ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
+  optimized_plan_ = ExecutionPlan(copy, function_name_);
   return *optimized_plan_;
 }
 
 const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
     Stack& stack,
-    size_t remaining_bailout_depth) {
+    c10::optional<size_t> remaining_bailout_depth) {
   std::lock_guard<std::mutex> lock(compile_mutex);
 
   // IMPORTANT: This is a hot path of calling a torchscript function. Try not to
@@ -697,7 +695,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
   if (optimized_plan_) {
     return *optimized_plan_;
   }
-
+  // if depth is not set, use
   return getOptimizedPlanFor(stack, remaining_bailout_depth);
 }
 

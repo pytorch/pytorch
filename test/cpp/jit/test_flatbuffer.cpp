@@ -19,10 +19,12 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <unordered_set>
 // Tests go in torch::jit
@@ -137,6 +139,22 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
+#if defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+TEST(FlatbufferTest, FlatbufferBackPortTest) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, false, true);
+
+  std::stringstream oss;
+  bool backPortSuccess = _backport_for_mobile(ss, oss, 5);
+  ASSERT_TRUE(backPortSuccess);
+}
+#endif // defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+
 TEST(FlatbufferTest, ExtraFiles) {
   const auto script = R"JIT(
     def forward(self):
@@ -153,16 +171,30 @@ TEST(FlatbufferTest, ExtraFiles) {
   extra_files["metadata.json"] = "abc";
   extra_files["mobile_info.json"] = "{\"key\": 23}";
 
+  std::unordered_map<std::string, std::string> loaded_extra_files;
+#if defined ENABLE_FLATBUFFER
+  std::stringstream ss;
+  module->_save_for_mobile(ss, extra_files, true, /*use_flatbuffer=*/true);
+
+  loaded_extra_files["metadata.json"] = "";
+  auto mobile_module = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+
+  // load it twice using the same stream
+  auto mobile_module2 = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+#else
   CompilationOptions options;
   mobile::Module bc = jitModuleToMobile(*module, options);
   auto buff = save_mobile_module_to_bytes(bc, extra_files);
 
-  std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";
   auto* flatbuffer_module =
       mobile::serialization::GetMutableModule(buff.data());
 
   parseExtraFiles(flatbuffer_module, loaded_extra_files);
+#endif
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
@@ -234,6 +266,23 @@ TEST(FlatbufferTest, Inline) {
   output = bc2.get_method("foo3")(inputs2);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
+
+#if defined ENABLE_FLATBUFFER
+TEST(FlatbufferTest, GetByteCodeVersion) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor):
+      return input + 1
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, false, /*use_flatbuffer=*/true);
+  auto version = _get_model_bytecode_version(ss);
+  AT_ASSERT(version == caffe2::serialize::kProducedBytecodeVersion);
+  ss.seekg(0, ss.beg);
+  auto version_again = _get_model_bytecode_version(ss);
+  AT_ASSERT(version == version_again);
+}
+#endif
 
 TEST(FlatbufferTest, Tuple) {
   Module m("m");
@@ -1146,6 +1195,7 @@ Module jitModuleFromBuffer(void* data) {
       mobilem._ivalue(), files, constants, 8);
 }
 
+#if defined(ENABLE_FLATBUFFER)
 TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
@@ -1158,19 +1208,19 @@ TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
   inputs.emplace_back(at::Scalar(2.0));
   auto ref = m.forward(inputs);
 
-  auto data = save_jit_module_to_bytes(m);
-  Module m2 = jitModuleFromBuffer(data.data());
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, false, /*use_fatbuffer=*/true);
+  auto mm = _load_for_mobile(ss);
+  auto m2 = load(ss);
+
   auto res = m2.forward(inputs);
+  auto resm = mm.forward(inputs);
 
   auto resd = res.toTensor();
   auto refd = ref.toTensor();
+  auto resmd = resm.toTensor();
   ASSERT_TRUE(resd.equal(refd));
-
-  mobile::Module m3 = parse_mobile_module(data.data(), data.size());
-  res = m3.forward(inputs);
-  resd = res.toTensor();
-  refd = ref.toTensor();
-  ASSERT_TRUE(resd.equal(refd));
+  ASSERT_TRUE(resmd.equal(refd));
 }
 
 TEST(TestSourceFlatbuffer, CheckAttrAccess) {
@@ -1237,6 +1287,7 @@ TEST(TestSourceFlatbuffer,
     AT_ASSERT(resd == refd);
   }
 }
+#endif
 
 } // namespace jit
 } // namespace torch

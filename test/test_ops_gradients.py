@@ -1,4 +1,4 @@
-# Owner(s): ["high priority"]
+# Owner(s): ["module: unknown"]
 
 from functools import partial, wraps
 import torch
@@ -148,7 +148,7 @@ class TestGradients(TestCase):
         if op.supports_fwgrad_bwgrad:
             self._check_helper(device, dtype, op, op.get_op(), "fwgrad_bwgrad")
         else:
-            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            err_msg = r"Trying to use forward AD with .* that does not support it"
             hint_msg = ("Running forward-over-backward gradgrad for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_fwgrad_bwgrad=True.")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
@@ -189,7 +189,7 @@ class TestGradients(TestCase):
         if op.supports_forward_ad:
             call_grad_test_helper()
         else:
-            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            err_msg = r"Trying to use forward AD with .* that does not support it"
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):

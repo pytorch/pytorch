@@ -43,7 +43,9 @@ def gen_registration_headers(
     elif per_operator_headers:
         headers += [
             "#include <ATen/ops/empty.h>",
-            "#include <ATen/ops/empty_strided.h>"]
+            "#include <ATen/ops/empty_strided.h>",
+            "#include <ATen/ops/_copy_from_and_resize.h>",
+            "#include <ATen/ops/_copy_from.h>"]
     else:
         headers.append("#include <ATen/Functions.h>")
 
@@ -60,30 +62,15 @@ def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
         dispatch = str(backend_index.dispatch_key).lower()
         empty_impl = f"at::detail::empty_{dispatch}"
         empty_strided_impl = f"at::detail::empty_strided_{dispatch}"
-        runtime_empty_supported_check = ""
-    elif backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+    elif backend_index.dispatch_key in (
+            DispatchKey.CompositeExplicitAutograd, DispatchKey.QuantizedCPU, DispatchKey.QuantizedCUDA):
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
-        runtime_empty_supported_check = """\
-  if (!c10::detail::backend_supports_empty_operator(options)) {{
-    // The main purpose of this CompositeExplicitAutograd kernel is to provide
-    // a "free" implementation of out-of-place operators.
-    // If a backend hasn't implemented an out-of-place op but has implemented
-    // the out= variant, then this kernel will call their out= variant.
-    // It does that by using at::empty() to create the tensor to pass to the out= variant though,
-    // so this "default" kernel doesn't actually handle backends that don't support at::empty
-    // (e.g. quantized backends).
-    // Returning an undefined tensor here allows us to reach the out= kernel and give a better error.
-    // Longer term, this could be better fixed by https://github.com/pytorch/pytorch/issues/52680
-    return at::Tensor();
-  }}
-"""
     else:
         return []
 
     return [f"""
 Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
-  {runtime_empty_supported_check}
   if (strides.empty()) {{
       return {empty_impl}(sizes, {empty_options});
   }} else {{
@@ -191,6 +178,10 @@ class RegisterDispatchKey:
     # all of the existing kernel signatures scattered across aten/src/ATen/native.
     class_method_name: Optional[str]
 
+    # Only set to true in lightweight dispatch. If lightweight dispatch is enabled we are registering
+    # operators into JIT op registry, thus we need to avoid generating code to register into the dispatcher.
+    skip_dispatcher_op_registration: bool
+
     @staticmethod
     def gen_device_check(type: DeviceCheckType, args: List[Argument], method_name: str) -> str:
         if type == DeviceCheckType.NoCheck:
@@ -282,6 +273,7 @@ class RegisterDispatchKey:
             self.rocm,
             self.cpp_namespace,
             self.class_method_name,
+            self.skip_dispatcher_op_registration,
             g
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
@@ -376,7 +368,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
                 device_guard = "// DeviceGuard omitted"  # default
                 if f.device_guard and self.backend_index.device_guard:
-                    has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
+                    has_tensor_options = any(isinstance(a, TensorOptionsArguments) for a in f.func.arguments.non_out)
                     if has_tensor_options:
                         # kernel is creating a tensor
                         device_guard = """
@@ -416,7 +408,7 @@ namespace {{
 """
 
             elif self.target is Target.REGISTRATION:
-                if f.manual_kernel_registration:
+                if f.manual_kernel_registration or self.skip_dispatcher_op_registration:
                     return None
                 else:
                     payload = f"TORCH_FN({name})"

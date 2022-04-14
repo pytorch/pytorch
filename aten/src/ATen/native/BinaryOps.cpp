@@ -618,6 +618,11 @@ Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
 }
 
+Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
+  self.values().mul_(other);
+  return self;
+}
+
 Device correct_out_device(const Tensor& self, const Tensor& other) {
   if (self.device() == at::kCPU){
       return other.device();
@@ -664,7 +669,7 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   }
 }
 
-Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
@@ -685,6 +690,13 @@ Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alp
   } else {
     return get_out_like(self);
   }
+}
+Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return maybe_add_maybe_sub(self, other, alpha);
+}
+
+Tensor sub_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return maybe_add_maybe_sub(self, other, -alpha);
 }
 
 // multiply, alias for mul

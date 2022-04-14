@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/native/vulkan/ops/Gru.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
@@ -66,7 +65,7 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
 }
 
 
-static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vector<int64_t> in, int i) {
+static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vector<int64_t> in, unsigned i) {
   // generate all permutations of a given dims
   if (i == in.size()) {
     out.push_back(in);
