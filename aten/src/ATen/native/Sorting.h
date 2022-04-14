@@ -18,7 +18,7 @@ enum class QUANTILE_INTERPOLATION_MODE : uint8_t {
   NEAREST
 };
 
-using sort_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, int64_t, bool, bool);
+using sort_fn = void(*)(const TensorBase&, const TensorBase&, const TensorBase&, int64_t, bool, bool);
 using topk_fn = void(*)(const TensorBase&, const TensorBase&, const TensorBase&, int64_t, int64_t, bool, bool);
 
 DECLARE_DISPATCH(sort_fn, sort_stub);

@@ -84,13 +84,12 @@ struct KeyValueCompDesc {
 };
 
 static void sort_kernel(
-    const Tensor& self,
-    const Tensor& values,
-    const Tensor& indices,
+    const TensorBase& self,
+    const TensorBase& values,
+    const TensorBase& indices,
     int64_t dim,
     bool descending,
     bool stable) {
-  values.copy_(self);
   dim = maybe_wrap_dim(dim, values.dim());
   _fill_indices(indices, dim);
   _dim_apply(

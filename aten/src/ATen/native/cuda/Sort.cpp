@@ -53,9 +53,9 @@ void fillSliceWithIndex(const Tensor& t, int dim) {
 // more than 1024/2048 elements along the selected dimension.
 // Otherwise, we do an inplace bitonic sort (see sortKeyValueInplace).
 void sort_cuda_kernel(
-    const Tensor& self,
-    const Tensor& values,
-    const Tensor& indices,
+    const TensorBase& self,
+    const TensorBase& values,
+    const TensorBase& indices,
     int64_t dim,
     bool descending,
     bool stable) {
