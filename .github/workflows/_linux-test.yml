@@ -41,6 +41,7 @@ jobs:
         with:
           needs-viable-strict: ${{ inputs.needs-viable-strict }}
           needs-history-and-master: true
+          submodules: false
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux

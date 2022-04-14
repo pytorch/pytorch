@@ -54,6 +54,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           needs-history-and-master: true
+          submodules: false
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts

@@ -41,6 +41,7 @@ jobs:
         with:
           no-sudo: true
           needs-history-and-master: true
+          submodules: false
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
