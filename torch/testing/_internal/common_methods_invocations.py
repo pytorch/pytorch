@@ -10341,6 +10341,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_norm,
+           supports_forward_ad=True,
+           # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+           # Could not allocate memory to change Tensor SizesAndStrides!
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
            aten_name='linalg_norm',
            skips=(
                # Pre-existing condition; Needs to be fixed
@@ -10348,6 +10353,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            dtypes=[torch.complex128]),
            )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
@@ -10356,6 +10363,11 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            sample_inputs_func=partial(sample_inputs_linalg_norm, variant='subgradient_at_zero'),
            aten_name='linalg_norm',
+           supports_forward_ad=True,
+           # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+           # Could not allocate memory to change Tensor SizesAndStrides!
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
            skips=(
                # Copied from above
                # Pre-existing condition; Needs to be fixed
@@ -10367,6 +10379,7 @@ op_db: List[OpInfo] = [
                # [NEW] Skips specifically for sample inputs at zero
                # norm's vjp/jvp are not well-conditioned near zero
                DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_gradgrad'),
+               DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_fwgrad_bwgrad')
            )),
     OpInfo('linalg.matrix_norm',
            aten_name='linalg_matrix_norm',
@@ -10408,7 +10421,16 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_vector_norm,
-           aten_name='linalg_vector_norm'),
+           aten_name='linalg_vector_norm',
+           supports_forward_ad=True,
+           # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
+           # got: Could not allocate memory to change Tensor SizesAndStrides!
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            dtypes=[torch.complex128]),
+           )),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, None),
@@ -11090,7 +11112,13 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.normalize',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_normalize),
+           sample_inputs_func=sample_inputs_normalize,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            dtypes=[torch.complex128]),
+           )),
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
            dtypes=all_types_and(torch.bool),
@@ -12422,6 +12450,11 @@ op_db: List[OpInfo] = [
            op=torch.dist,
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            supports_out=False,
+           supports_forward_ad=True,
+           # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+           # Could not allocate memory to change Tensor SizesAndStrides!
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_dist),
     OpInfo('outer',
            op=torch.outer,
@@ -15120,6 +15153,8 @@ op_db: List[OpInfo] = [
         "norm",
         sample_inputs_func=sample_inputs_norm,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
             # of dtype torch.float32 into an out= with dtype torch.long
@@ -15129,6 +15164,8 @@ op_db: List[OpInfo] = [
                 "test_out",
                 device_type="meta",
             ),
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                         dtypes=[torch.complex128]),
         ),
     ),
     OpInfo('norm',
@@ -15136,6 +15173,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_norm_nuc,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            check_batched_gradgrad=False,
+           # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
+           # got: Could not allocate memory to change Tensor SizesAndStrides!
            check_batched_forward_grad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -15158,6 +15197,11 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_norm_fro,
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
+           # got: Could not allocate memory to change Tensor SizesAndStrides!
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
@@ -15173,6 +15217,8 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_norm_inf,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         backward_dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             # https://github.com/pytorch/pytorch/issues/67517
             DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_noncontiguous_samples"),
@@ -15191,6 +15237,8 @@ op_db: List[OpInfo] = [
                 device_type="cpu",
                 dtypes=(torch.complex128,),
             ),
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                         dtypes=[torch.complex128]),
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
             # of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(
@@ -15902,6 +15950,8 @@ op_db: List[OpInfo] = [
             # keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_masked_norm,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
@@ -16031,6 +16081,8 @@ op_db: List[OpInfo] = [
                          device_type='cpu', dtypes=[torch.half]),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False),
     OpInfo(
         "nn.functional.ctc_loss",
@@ -16191,6 +16243,8 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_pairwise_distance,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -16198,6 +16252,8 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 dtypes=(torch.float32, torch.complex64),
             ),
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                         dtypes=[torch.complex128]),
         ),
     ),
     OpInfo(
