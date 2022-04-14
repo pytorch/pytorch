@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import base64
 import json
 import os
 import re
@@ -603,22 +604,33 @@ class MergeRule:
     mandatory_checks_name: Optional[List[str]]
 
 
-def read_merge_rules(repo: GitRepo) -> List[MergeRule]:
+def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
     from pathlib import Path
-    rules_path = Path(repo.repo_dir) / ".github" / "merge_rules.json"
-    if not rules_path.exists():
-        print(f"{rules_path} does not exist, returning empty rules")
-        return []
-    with open(rules_path) as fp:
-        rc = json.load(fp, object_hook=lambda x: MergeRule(**x))
-    return cast(List[MergeRule], rc)
+
+    repo_relative_rules_path = Path(".github") / "merge_rules.json"
+    if repo is None:
+        json_data = _fetch_url(
+            f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
+            headers={'Accept': 'application/vnd.github.v3+json'},
+            reader=json.load,
+        )
+        content = base64.b64decode(json_data["content"])
+        return cast(List[MergeRule], json.loads(content, object_hook=lambda x: MergeRule(**x)))
+    else:
+        rules_path = Path(repo.repo_dir) / repo_relative_rules_path
+        if not rules_path.exists():
+            print(f"{rules_path} does not exist, returning empty rules")
+            return []
+        with open(rules_path) as fp:
+            rc = json.load(fp, object_hook=lambda x: MergeRule(**x))
+        return cast(List[MergeRule], rc)
 
 
-def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo, force: bool = False) -> MergeRule:
+def find_matching_merge_rule(pr: GitHubPR, repo: Optional[GitRepo] = None, force: bool = False) -> MergeRule:
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
-    rules = read_merge_rules(repo)
+    rules = read_merge_rules(repo, pr.org, pr.project)
     reject_reason = f"PR {pr.pr_num} does not match merge rules"
     #  Used to determine best rejection reason
     # Score 0 to 10K - how many files rule matched
