@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+from collections import OrderedDict
 import random
 import sys
 import unittest
@@ -58,7 +59,7 @@ class TestUtils(TestCase):
         data.append({"key1": get_a_tensor(), "key2": {1: get_a_tensor()}, "key3": 3})
         data.insert(0, set(["x", get_a_tensor(), get_a_tensor()]))
         data.append(([1], get_a_tensor(), (1), [get_a_tensor()], set((1, 2))))
-        od = dict()
+        od = OrderedDict()
         od["k"] = "value"
         data.append(od)
 
