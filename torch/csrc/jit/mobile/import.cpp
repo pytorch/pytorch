@@ -319,6 +319,23 @@ void BytecodeDeserializer::parseMethods(
     model_version = vals[0].toInt();
     method_i_start = 1;
   }
+  TORCH_WARN(
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+      model_version < caffe2::serialize::kMaxSupportedBytecodeVersion,
+      "The current model bytecode version is ",
+      model_version,
+      " while the latest bytecode version is ",
+      caffe2::serialize::kProducedBytecodeVersion,
+      ". Please update the model with followng logic: "
+      "import torch"
+      "from torch.jit.mobile import _get_model_bytecode_version"
+      "old_model_path = ${old_model.ptl}"
+      "new_model_path = ${new_model.ptl}"
+      "jit_model = torch.jit.load(old_model_path) # Load full jit model"
+      "jit_model._save_for_lite_interpreter(new_model_path) # Save model for mobile"
+      "mobile_m = _load_for_lite_interpreter(new_model_path) # Verify the model can be loaded"
+      "bytecode_version = _get_model_bytecode_version(new_model_path) # Get bytecode version from the new model"
+      "print('bytecode version is: ', bytecode_version)");
   TORCH_CHECK(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
