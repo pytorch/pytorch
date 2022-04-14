@@ -191,6 +191,10 @@ if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
   fi
 fi
 
+if [[ -n "${UCX_COMMIT}" ]] && [[ -n "${UCC_COMMIT}" ]]; then
+  export USE_NCCL_WITH_UCC=1
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
 
