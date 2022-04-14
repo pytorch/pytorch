@@ -20,7 +20,7 @@ inline SparseCsrTensorImpl* get_sparse_csr_impl(const SparseCsrTensor& self) {
   default:
     AT_ASSERTM(
                false,
-               "_internal_get_SparseCsrTensorImpl: not a sparse CSR|CSC|BSR|BSC tensor");
+               "_internal_get_SparseCsrTensorImpl: expected sparse compressed tensor layout but got ", self.layout());
   }
   return static_cast<SparseCsrTensorImpl*>(self.unsafeGetTensorImpl());
 }

@@ -221,8 +221,9 @@ SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor
   // constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  DispatchKey dispatch_key;
   Layout layout = options.layout();
+  TORCH_INTERNAL_ASSERT(layout == kSparseCsr);
+  DispatchKey dispatch_key;
   TORCH_CHECK_NOT_IMPLEMENTED(
     options.device().type() == kCPU || options.device().type() == kCUDA,
     "Could not run 'sparse_compressed_tensor' from the '", options.device(), "' device.)");
@@ -234,7 +235,7 @@ SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   }
 
   return detail::make_tensor<SparseCsrTensorImpl>(
-    DispatchKeySet(dispatch_key), layout, options.dtype());
+      DispatchKeySet(dispatch_key), layout, options.dtype());
 }
 
 template <Layout expected_layout>
