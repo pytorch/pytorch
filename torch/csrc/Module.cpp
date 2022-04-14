@@ -49,6 +49,7 @@
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/pytree_bindings.h>
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
@@ -837,6 +838,7 @@ PyObject* initModule() {
   torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::crash_handler::initCrashHandlerBindings(module);
+  torch::pytree::init_bindings(module);
   torch::autograd::initReturnTypes(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
