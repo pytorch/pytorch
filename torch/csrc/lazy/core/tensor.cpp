@@ -1,7 +1,7 @@
-#include <c10/util/irange.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
-#include <torch/csrc/lazy/core/config.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
@@ -66,22 +66,24 @@ LazyTensorPtr LazyTensor::Create(std::shared_ptr<Data> data) {
 }
 
 LazyTensor::LazyTensor(const at::Tensor& tensor, const BackendDevice& device)
-    : data_(std::make_shared<Data>(tensor, device)) {}
+    : LazyTensor(std::make_shared<Data>(tensor, device)) {}
 
 LazyTensor::LazyTensor(BackendDataPtr handle)
-    : data_(std::make_shared<Data>(handle, handle->device())) {}
+    : LazyTensor(std::make_shared<Data>(handle, handle->device())) {}
 
 LazyTensor::LazyTensor(Value ir_value, const BackendDevice& device)
-    : data_(std::make_shared<Data>(std::move(ir_value), device)) {
+    : LazyTensor(std::make_shared<Data>(std::move(ir_value), device)) {
   TryLimitGraphSize();
 }
 
 LazyTensor::LazyTensor(
     std::shared_ptr<LazyView> view,
     const BackendDevice& device)
-    : data_(std::make_shared<Data>(std::move(view), device)) {}
+    : LazyTensor(std::make_shared<Data>(std::move(view), device)) {}
 
-LazyTensor::LazyTensor(std::shared_ptr<Data> data) : data_(std::move(data)) {}
+LazyTensor::LazyTensor(std::shared_ptr<Data> data)
+  : data_(std::move(data))
+  , storage_(c10::Storage({}, 0, c10::DataPtr(nullptr, backendDeviceToAtenDevice(data_->device)))) {}
 
 LazyTensor::Data* LazyTensor::data() const {
   TORCH_CHECK(data_ != nullptr, "Trying to access a null cursor");
@@ -348,7 +350,9 @@ std::shared_ptr<LazyView> LazyTensor::CreateView(ViewInfo view_info) const {
 }
 
 LazyTensorPtr LazyTensor::CreateViewTensor(ViewInfo view_info) const {
-  return Create(CreateView(std::move(view_info)), GetDevice());
+  auto new_tensor = Create(CreateView(std::move(view_info)), GetDevice());
+  new_tensor->storage_ = Storage();
+  return new_tensor;
 }
 
 at::Tensor LazyTensor::ToTensor(bool detached) {

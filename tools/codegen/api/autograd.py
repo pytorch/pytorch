@@ -56,13 +56,13 @@ class ForwardDerivative:
     # replaced by the automatically generated formula.
     formula: str
 
-    # Name of the output argument for which this formula calculates forward
+    # Name of the output arguments for which this formula calculates forward
     # derivatives
-    var_name: str
+    var_names: Tuple[str, ...]
 
-    # Type of the output argument for which this formula calculates forward
+    # Type of the output arguments for which this formula calculates forward
     # derivatives
-    var_type: Type
+    var_types: Tuple[Type, ...]
 
     # Inputs for which the forward derivatives are required for this formula
     required_inputs_fw_grad: Optional[Tuple[str, ...]]
@@ -411,8 +411,8 @@ def match_differentiability_info(
 
                 forward_derivatives = [ForwardDerivative(
                     formula=formula,
-                    var_name="self",
-                    var_type=fw_info.var_type,
+                    var_names=("self",),
+                    var_types=fw_info.var_types,
                     required_inputs_fw_grad=fw_info.required_inputs_fw_grad,
                     required_inputs_primal=required_primals,
                     required_original_self_value=required_original_self_value,

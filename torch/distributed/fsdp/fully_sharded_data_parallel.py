@@ -389,6 +389,9 @@ class FullyShardedDataParallel(nn.Module):
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
 
+        # Enum to indicate if we're in the forward/backward pass, idle, etc.
+        self.training_state = TrainingState_.IDLE
+
         # setting two factors to avoid underflow and overflow
         self.gradient_predivide_factor: float = self._get_gradient_predivide_factor(
             self.world_size
@@ -440,9 +443,6 @@ class FullyShardedDataParallel(nn.Module):
         # Flag indicating if we require gradient reduction in the backward
         # pass (set to `False` in the `no_sync()` context manager)
         self._require_backward_grad_sync: bool = True
-
-        # Enum to indicate if we're in the forward/backward pass, idle, etc.
-        self.training_state = TrainingState_.IDLE
 
         self._state_dict_type = StateDictType.FULL_STATE_DICT
 
@@ -1739,8 +1739,7 @@ class FullyShardedDataParallel(nn.Module):
         remove all occurrences of the FSDP-specific flattened buffer prefix
         when inside the :meth:`_summon_full_params` context manager.
         """
-        in_summon_full_params = getattr(self, "training_state", None) == \
-            TrainingState_.SUMMON_FULL_PARAMS
+        in_summon_full_params = self.training_state == TrainingState_.SUMMON_FULL_PARAMS
         for buffer_name, buffer in super().named_buffers(*args, **kwargs):
             if in_summon_full_params:
                 # Remove any instances of the FSDP-specific prefix; there can
@@ -1759,8 +1758,7 @@ class FullyShardedDataParallel(nn.Module):
         when inside the :meth:`_summon_full_params` context manager.
         """
         # Determine which logic to use based on the context at call time
-        in_summon_full_params = getattr(self, "training_state", None) == \
-            TrainingState_.SUMMON_FULL_PARAMS
+        in_summon_full_params = self.training_state == TrainingState_.SUMMON_FULL_PARAMS
         for param_name, param in super().named_parameters(*args, **kwargs):
             if in_summon_full_params:
                 # Remove any instances of the FSDP-specific prefix; there can
