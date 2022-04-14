@@ -9,6 +9,7 @@
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/fake_quant_affine.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
 #include <cmath>
@@ -1795,9 +1796,6 @@ void _qavg_pool_nhwc_kernel(
   int istrideH = strideW * inputWidth;
   int istrideD = istrideH * inputHeight;
   int istrideB = istrideD * inputDepth;
-  int ostrideH = strideW * outputWidth;
-  int ostrideD = ostrideH * outputHeight;
-  int ostrideB = ostrideD * outputDepth;
 
   // lift these operations outside the loop to reduce access overheads
   float input_scale = qx.q_scale();
@@ -1807,85 +1805,81 @@ void _qavg_pool_nhwc_kernel(
   int64_t divisor_override_factor =
       divisor_override.has_value() ? divisor_override.value() : 0;
 
-  at::parallel_for(0, nBatch, 0, [&](int64_t batch_start, int64_t batch_end) {
-    for (int64_t b = batch_start; b < batch_end; ++b) {
-      auto* i_p =
-          reinterpret_cast<typename T::underlying*>(idata + b * istrideB);
-      for (int od = 0; od < outputDepth; od++) {
-        for (int oh = 0; oh < outputHeight; oh++) {
-          for (int ow = 0; ow < outputWidth; ow++) {
-            auto* o_p = reinterpret_cast<typename T::underlying*>(
-                odata + b * ostrideB + od * ostrideD + oh * ostrideH +
-                ow * strideW);
-            int dstart = od * dD - padD;
-            int hstart = oh * dH - padH;
-            int wstart = ow * dW - padW;
+  at::parallel_for(0, nBatch * outputDepth * outputHeight * outputWidth, 0, [&](int64_t begin, int64_t end) {
+    int64_t b{0}, od{0}, oh{0}, ow{0};
+    data_index_init(begin, b, nBatch, od, outputDepth, oh, outputHeight, ow, outputWidth);
 
-            int dend = std::min(dstart + kD, (int)inputDepth + padD);
-            int hend = std::min(hstart + kH, (int)inputHeight + padH);
-            int wend = std::min(wstart + kW, (int)inputWidth + padW);
-            int pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
+    for (const auto i : c10::irange(begin, end)) {
+      auto* i_p = reinterpret_cast<typename T::underlying*>(idata + b * istrideB);
+      auto* o_p = reinterpret_cast<typename T::underlying*>(odata + i * strideW);
+      int dstart = od * dD - padD;
+      int hstart = oh * dH - padH;
+      int wstart = ow * dW - padW;
 
-            dstart = std::max(dstart, 0);
-            hstart = std::max(hstart, 0);
-            wstart = std::max(wstart, 0);
-            dend = std::min(dend, (int)inputDepth);
-            hend = std::min(hend, (int)inputHeight);
-            wend = std::min(wend, (int)inputWidth);
+      int dend = std::min(dstart + kD, (int)inputDepth + padD);
+      int hend = std::min(hstart + kH, (int)inputHeight + padH);
+      int wend = std::min(wstart + kW, (int)inputWidth + padW);
+      int pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
 
-            int size = (dend - dstart) * (hend - hstart) * (wend - wstart);
-            int divide_size = count_include_pad ? pool_size : size;
-            int divide_factor =
-                divisor_override_factor ? divisor_override_factor : divide_size;
-            float multiplier = input_scale / output_scale  / divide_factor;
-            int input_zero_point_m_size = -input_zero_point * size;
+      dstart = std::max(dstart, 0);
+      hstart = std::max(hstart, 0);
+      wstart = std::max(wstart, 0);
+      dend = std::min(dend, (int)inputDepth);
+      hend = std::min(hend, (int)inputHeight);
+      wend = std::min(wend, (int)inputWidth);
 
-            int c_start = 0;
+      int size = (dend - dstart) * (hend - hstart) * (wend - wstart);
+      int divide_size = count_include_pad ? pool_size : size;
+      int divide_factor =
+          divisor_override_factor ? divisor_override_factor : divide_size;
+      float multiplier = input_scale / output_scale  / divide_factor;
+      int input_zero_point_m_size = -input_zero_point * size;
 
-            // For int8 quantization, we implicitly use int32 as accumulation
-            // Or else, it will go to the slow path
-            // TODO: support 16bit, 32bit, and etc.
-            do_avg_pool_nhwc_on_AVX_n<T>(
-                i_p,
-                o_p,
-                c_start,
-                input_zero_point_m_size,
-                output_zero_point,
-                multiplier,
-                dstart,
-                dend,
-                hstart,
-                hend,
-                wstart,
-                wend,
-                inputDepth,
-                inputHeight,
-                inputWidth,
-                nInputPlane);
+      int c_start = 0;
 
-            // 1) The following loop handles the remaining channels
-            // 2) It also handles the Non-AVX2 path
-            for (int c = c_start; c < nInputPlane; ++c) {
-              int32_t acc_int32 = input_zero_point_m_size;
-              for (int64_t id = dstart; id < dend; id++) {
-                for (int64_t ih = hstart; ih < hend; ih++) {
-                  for (int64_t iw = wstart; iw < wend; iw++) {
-                    auto val =
-                        *(i_p + id * istrideD + ih * istrideH + iw * strideW +
-                          c * strideC);
-                    acc_int32 += val;
-                  }
-                }
-              }
-              double acc_fp = acc_int32 * 1.0;
-              // clamp
-              o_p[c] = at::native::quantize_val<T>(
-                            1.0f / multiplier, output_zero_point, acc_fp)
-                            .val_;
-            } // c
-          } // ow
-        } // oh
-      } // od
+      // For int8 quantization, we implicitly use int32 as accumulation
+      // Or else, it will go to the slow path
+      // TODO: support 16bit, 32bit, and etc.
+      do_avg_pool_nhwc_on_AVX_n<T>(
+          i_p,
+          o_p,
+          c_start,
+          input_zero_point_m_size,
+          output_zero_point,
+          multiplier,
+          dstart,
+          dend,
+          hstart,
+          hend,
+          wstart,
+          wend,
+          inputDepth,
+          inputHeight,
+          inputWidth,
+          nInputPlane);
+
+      // 1) The following loop handles the remaining channels
+      // 2) It also handles the Non-AVX2 path
+      for (const auto c: c10::irange(c_start, nInputPlane)) {
+        int32_t acc_int32 = input_zero_point_m_size;
+        for (const auto id : c10::irange(dstart, dend)) {
+          for (const auto ih : c10::irange(hstart, hend)) {
+            for (const auto iw : c10::irange(wstart, wend)) {
+              auto val =
+                  *(i_p + id * istrideD + ih * istrideH + iw * strideW +
+                  c * strideC);
+              acc_int32 += val;
+            }
+          }
+       }
+       double acc_fp = acc_int32 * 1.0;
+       // clamp
+       o_p[c] = at::native::quantize_val<T>(
+           1.0f / multiplier, output_zero_point, acc_fp)
+           .val_;
+      } // c
+
+      data_index_step(b, nBatch, od, outputDepth, oh, outputHeight, ow, outputWidth);
     }
   });
 }
