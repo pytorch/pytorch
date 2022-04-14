@@ -113,7 +113,15 @@ OverlapKind overlaps(const IndexBounds& a, const IndexBounds& b) {
   return overlap;
 }
 
-std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
+std::vector<Bound> subtractBound(Bound a, Bound b) {
+  OverlapKind overlap = boundOverlap(a, b);
+  if (overlap == NoOverlap) {
+    return {a};
+  }
+  if (overlap == ContainedOrEqual) {
+    return {};
+  }
+
   // The bounds must overlap.
   std::vector<Bound> res;
 
@@ -170,18 +178,6 @@ std::vector<Bound> subtractBound(Bound a, Bound b, OverlapKind overlap) {
   return res;
 }
 
-std::vector<Bound> subtractBound(Bound a, Bound b) {
-  OverlapKind overlap = boundOverlap(a, b);
-  if (overlap == NoOverlap) {
-    return {a};
-  }
-  if (overlap == ContainedOrEqual) {
-    return {};
-  }
-
-  return subtractBound(a, b, overlap);
-}
-
 std::vector<IndexBounds> subtractIndicesBounds(
     const IndexBounds& A,
     const IndexBounds& B,
@@ -225,8 +221,14 @@ std::vector<IndexBounds> subtractIndicesBounds(
         remaining = A[i];
       } else {
         auto remainingSlices = subtractBound(remaining, slice);
-        TORCH_INTERNAL_ASSERT(remainingSlices.size() == 1, buildErrorMessage());
-        remaining = remainingSlices[0];
+        // In some cases, we might end up with empty remainingSlices due to the
+        // optimization done in subtraction while handling diff expressions
+        // that have a single variable in `subtractBound()`.
+        if (!remainingSlices.empty()) {
+          TORCH_INTERNAL_ASSERT(
+              remainingSlices.size() == 1, buildErrorMessage());
+          remaining = remainingSlices[0];
+        }
       }
     }
 
