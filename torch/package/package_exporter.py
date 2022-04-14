@@ -147,6 +147,12 @@ class PackagingError(Exception):
                 if error_context is not None:
                     message.write(f"      Context: {error_context}\n")
 
+        troubleshooting_str = (
+            "We offer tools to help you figure out why modules were included as a dependency\n"
+            "to help you figure out if they are actually needed here:\n"
+            "https://pytorch.org/docs/stable/package.html#see-why-a-given-module-was-included-as-a-dependency.\n"
+        )
+        message.write(troubleshooting_str)
         # Save the dependency graph so that tooling can get at it.
         self.dependency_graph = dependency_graph
         super().__init__(message.getvalue())

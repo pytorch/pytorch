@@ -161,6 +161,8 @@ return a DOT-formatted graph showing all the dependency paths between ``src`` an
 
 If you would just like to see the whole dependency graph of your :class:`PackageExporter`, you can use :meth:`PackageExporter.dependency_graph_string`.
 
+If you would like to find a dependency path for each broken module in a packaging error you can use :meth:`package.analyze.find_first_use_of_broken_modules`
+
 
 Include arbitrary resources with my package and access them later?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
