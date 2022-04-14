@@ -268,10 +268,8 @@ def _default_root_node_getter(node_pattern):
         node_pattern = node_pattern[-1]
     return node_pattern
 
-# TODO: remove observed_op, looks like it's not used
 def insert_observer(
     node: Node,
-    observed_op: Node,
     observer: ObserverBase,
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
@@ -581,7 +579,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
         if existing_obs_node is None:
             new_obs_node = insert_observer(
-                arg, node, new_obs_mod, model, modules, graph)
+                arg, new_obs_mod, model, modules, graph)
             # override this arg to be the observed arg
             new_arg = new_obs_node
         else:
@@ -682,7 +680,7 @@ def maybe_insert_input_equalization_observers_for_node(
 
         new_eq_obs_mod = act_eq_process_ctr()
         new_eq_obs_node = insert_observer(
-            arg, node, new_eq_obs_mod, model, modules, graph)
+            arg, new_eq_obs_mod, model, modules, graph)
 
         new_args.append(new_eq_obs_node)
 
@@ -737,7 +735,7 @@ def maybe_insert_output_observer_for_node(
                 matched_pattern,
                 is_qat)
         observer = act_post_process_ctr()
-        new_obs = insert_observer(node, node, observer, model, modules, graph)
+        new_obs = insert_observer(node, observer, model, modules, graph)
         return new_obs
     else:
         return None
@@ -809,7 +807,7 @@ def maybe_insert_observers_before_graph_output(
                     'Quantizing the output node without a qconfig is not supported'
                 observer_mod = qconfig.activation()
                 observer_node = insert_observer(
-                    maybe_node, maybe_node, observer_mod, model, modules, graph)
+                    maybe_node, observer_mod, model, modules, graph)
                 return observer_node
             else:
                 return maybe_node
@@ -1329,14 +1327,12 @@ def save_state(
     observed: GraphModule,
     qconfig_map: Dict[str, QConfigAny],
     node_name_to_scope: Dict[str, Tuple[str, type]],
-    patterns: Dict[Pattern, QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
     equalization_qconfig_map: Dict[str, Any],
     qconfig_dict: Dict[str, Dict[Any, Any]],
     is_qat: bool,
     observed_node_names: Set[str],
 ) -> None:
-    observed._patterns = patterns  # type: ignore[assignment]
     observed._qconfig_map = qconfig_map  # type: ignore[assignment]
     observed._prepare_custom_config_dict = \
         prepare_custom_config_dict  # type: ignore[assignment]
@@ -1481,7 +1477,7 @@ def prepare(
         observed_node_names,
         is_qat)
 
-    save_state(model, qconfig_map, node_name_to_scope, patterns,
+    save_state(model, qconfig_map, node_name_to_scope,
                prepare_custom_config_dict, equalization_qconfig_map, qconfig_dict, is_qat, observed_node_names)
 
     preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
