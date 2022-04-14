@@ -1783,6 +1783,16 @@ def amin(g, self, dim, keepdim):
     return g.op("ReduceMin", self, axes_i=dim, keepdims_i=keepdim)
 
 
+@parse_args("v", "v", "i")
+def aminmax(g, self, dim, keepdim):
+    reduce_kwargs = {"keepdims_i": keepdim}
+    if not sym_help._is_none(dim):
+        dim = sym_help._get_const(dim, "i", "dim")
+        reduce_kwargs["axes_i"] = [dim]
+
+    return g.op("ReduceMin", self, **reduce_kwargs), g.op("ReduceMax", self, **reduce_kwargs)
+
+
 def exp(g, self):
     return g.op("Exp", self)
 

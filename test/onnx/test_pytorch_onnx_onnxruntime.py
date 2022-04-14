@@ -4370,6 +4370,15 @@ class _TestONNXRuntime:
         x = torch.randn(4, 4)
         self.run_test(model, x)
 
+    def test_aminmax(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.aminmax(x, dim=1, keepdim=True), torch.aminmax(x, keepdim=False)
+
+        model = Model()
+        x = torch.randn(3, 4)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_end(self):
         class ArangeScript(torch.jit.ScriptModule):
