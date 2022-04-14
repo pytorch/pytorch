@@ -41,7 +41,6 @@ inline Layout layout_from_backend(Backend backend) {
       TORCH_CHECK(
           false,
           "Cannot map Backend SparseCsrCPU|SparseCsrCUDA to a unique layout.");
-      return Layout::SparseCsr;
     default:
       return Layout::Strided;
   }
@@ -55,14 +54,14 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "Sparse";
     case at::kSparseCsr:
       return stream << "SparseCsr";
-    case at::kMkldnn:
-      return stream << "Mkldnn";
     case at::kSparseCsc:
       return stream << "SparseCsc";
     case at::kSparseBsr:
       return stream << "SparseBsr";
     case at::kSparseBsc:
       return stream << "SparseBsc";
+    case at::kMkldnn:
+      return stream << "Mkldnn";
     case at::kDummyLayout:
       return stream << "DummyLayout";
     default:
