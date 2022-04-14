@@ -1621,11 +1621,39 @@ static int THPVariable_subclass_traverse(
   return 0;
 }
 
+void THPVariable_finalize(PyObject* self) {
+  const auto& tensor = THPVariable_Unpack(self);
+  // Check if there are other C++ owners
+  if (tensor.use_count() <= 1) {
+    return;
+  }
+  // There are other C++ owners of the tensor.  Flip ownership
+  // so that C++ owns this Python object, and cancel deallocation.
+  TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->owns_pyobj());
+
+  tensor.unsafeGetTensorImpl()->set_owns_pyobj(true);
+
+  // Resurrect the Python object.  This is a supported operation in
+  // finalizers
+  Py_INCREF(self);
+
+  // Flip THPVariable to be non-owning
+  // (near use-after-free miss here: fresh MaybeOwned is created breaking
+  // reference on Tensor in struct BEFORE we overwrite the old one)
+  self->cdata = MaybeOwned<Variable>::borrowed(tensor);
+
+  // NB: At this point, tensor *could* be dead (e.g., some other C++ thread
+  // decrefed it.)  At this point, it is probably waiting on the GIL to
+  // deallocate the Python object and will kill self, BUT NOT YET.
+  return;
+}
+
 int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs) {
   if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
     return -1;
   }
   ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPVariable_subclass_dealloc;
+  ((PyTypeObject*)cls)->tp_finalize = (destructor)THPVariable_finalize;
   ((PyTypeObject*)cls)->tp_traverse =
       (traverseproc)THPVariable_subclass_traverse;
   return 0;
