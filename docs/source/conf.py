@@ -261,8 +261,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2019, Torch Contributors'
-author = 'Torch Contributors'
+copyright = '2022, PyTorch Contributors'
+author = 'PyTorch Contributors'
 torch_version = str(torch.__version__)
 
 # The version info for the project you're documenting, acts as replacement for

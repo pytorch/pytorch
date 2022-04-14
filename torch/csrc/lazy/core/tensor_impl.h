@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <c10/core/Storage.h>
 #include <c10/core/TensorImpl.h>
 
 #include <torch/csrc/lazy/core/tensor.h>
@@ -44,8 +43,8 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   int64_t numel() const override;
 
   bool is_contiguous(at::MemoryFormat memory_format) const override;
-  const at::Storage& storage() const override;
-  bool has_storage() const override { return false; }
+  const at::Storage& storage() const override { return tensor_->Storage(); }
+  bool has_storage() const override { return tensor_->Storage(); }
 #endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 
  private:
