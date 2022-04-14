@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #if defined(ENABLE_FLATBUFFER)
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #endif
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
