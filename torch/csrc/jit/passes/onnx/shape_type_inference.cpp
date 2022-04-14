@@ -2023,20 +2023,26 @@ void ONNXShapeTypeInference(
   }
 
   SpecialPostProcess(n);
-
+  
   for (auto output: n->outputs()) {
-    if (generated_shape.count(outputs_map[output->debugName()]) > 0) {
+    if ((n->kind() == ::c10::onnx::Shape || n->kind() == ::c10::onnx::Gather) && generated_shape.count(outputs_map[output->debugName()]) > 0) {
       auto shape_data = generated_shape.find(outputs_map[output->debugName()])->second;
       std::vector<::c10::ShapeSymbol> final_shape;
       int rank = shape_data.dim_size();
-      final_shape.reserve(rank);
-      for (int i = 0; i < rank; ++i) {
-        final_shape.emplace_back(ONNXDimToShapeSymbol(shape_data.dim(i), symbol_map));
+      if (rank > 0) {
+        final_shape.reserve(rank);
+        for (int i = 0; i < rank; ++i) {
+          final_shape.emplace_back(ONNXDimToShapeSymbol(shape_data.dim(i), symbol_map));
+        }
+        c10::SymbolicShape shape_value(final_shape);
+        ConstantValueMap::SetShapeValue(output->debugName(), shape_value);
+        onnx::TensorShapeProto shape_data_copy = shape_data;
+        if (generated_shape.count(output->debugName()) > 0) {
+          generated_shape.erase(output->debugName());
+        }
+        generated_shape[output->debugName()] = shape_data_copy;
+        generated_shape.erase(outputs_map[output->debugName()]);
       }
-      c10::SymbolicShape shape_value(final_shape);
-      ConstantValueMap::SetShapeValue(output->debugName(), shape_value);
-      generated_shape[output->debugName()] = shape_data;
-      generated_shape.erase(outputs_map[output->debugName()]);
     }
   }
   ConstantValueMap::SetGeneratedShape(generated_shape);
@@ -2052,7 +2058,7 @@ void ONNXShapeTypeInference(
   }
   UpdateReliable(n);
 
-  // For the node type that does nott have ComputeConstant logic, it may have
+  // For the node type that does not have ComputeConstant logic, it may have
   // reliable shape but its shape is not in ConstantValueMap. So we need this
   // logic to update ConstantValueMap.
   for (auto node_output : n->outputs()) {
