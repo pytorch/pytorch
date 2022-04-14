@@ -63,6 +63,8 @@ TORCH_API void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph);
 
 TORCH_API void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph);
 
+TORCH_API void EliminateNoOpSlice(std::shared_ptr<Graph>& graph);
+
 TORCH_API void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
