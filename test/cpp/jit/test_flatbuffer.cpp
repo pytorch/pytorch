@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
@@ -1221,7 +1222,6 @@ TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
   ASSERT_TRUE(resd.equal(refd));
   ASSERT_TRUE(resmd.equal(refd));
 }
-#endif
 
 TEST(TestSourceFlatbuffer, CheckAttrAccess) {
   Module m("m");
@@ -1287,6 +1287,7 @@ TEST(TestSourceFlatbuffer,
     AT_ASSERT(resd == refd);
   }
 }
+#endif
 
 } // namespace jit
 } // namespace torch

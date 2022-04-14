@@ -339,8 +339,13 @@ auto handle_torch_function_no_python_arg_parser(
   return ret.release().ptr();
 }
 
-auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject* {
-  py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
+auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name, const char* func_name_override) -> PyObject* {
+  py::object torch_api_function = PyObject_FastGetAttrString(
+    torch_api,
+    (char*)(
+      func_name_override ? func_name_override : r.get_func_name().c_str()
+    )
+  );
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::object ret;
   py::tuple args_ = combine_self_args(self, args);
@@ -354,9 +359,9 @@ auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObje
   return handle_torch_function_no_python_arg_parser(r.signature.overloaded_args, args_.ptr(), kwargs, r.get_func_name().c_str(), torch_api_function.ptr(), module_name);
 }
 
-auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name, const char* func_name_override) -> PyObject*
 {
-  return handle_torch_function(r, nullptr, args, kwargs, torch_api, module_name);
+  return handle_torch_function(r, nullptr, args, kwargs, torch_api, module_name, func_name_override);
 }
 
 auto handle_torch_function_indexing(PyObject* self, PyObject* index, PyObject* val) -> PyObject* {

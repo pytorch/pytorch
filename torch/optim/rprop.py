@@ -26,6 +26,7 @@ class Rprop(Optimizer):
             &\hspace{10mm}  \textbf{else if}  \:  g^i_{prev} g^i_t < 0                           \\
             &\hspace{15mm}  \eta^i_t \leftarrow \mathrm{max}(\eta^i_{t-1} \eta_{-},
                 \Gamma_{min})                                                                    \\
+            &\hspace{15mm}  g^i_t \leftarrow 0                                                   \\
             &\hspace{10mm}  \textbf{else}  \:                                                    \\
             &\hspace{15mm}  \eta^i_t \leftarrow \eta^i_{t-1}                                     \\
             &\hspace{5mm}\theta_t \leftarrow \theta_{t-1}- \eta_t \mathrm{sign}(g_t)             \\
