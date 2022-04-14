@@ -1996,7 +1996,11 @@ void ONNXShapeTypeInference(
 
       // infer shape
       try {
-        onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, generated_shape);
+        if (n->kind() == ::c10::onnx::Shape || n->kind() == ::c10::onnx::Gather) {
+          onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, generated_shape);
+        } else {
+          onnx::shape_inference::InferShapes(*model_proto);
+        }
         UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
       } catch (std::runtime_error& ex) {
         // TODO: include this as warning once we have a more consolidated
@@ -2025,7 +2029,7 @@ void ONNXShapeTypeInference(
   SpecialPostProcess(n);
   
   for (auto output: n->outputs()) {
-    if ((n->kind() == ::c10::onnx::Shape || n->kind() == ::c10::onnx::Gather) && generated_shape.count(outputs_map[output->debugName()]) > 0) {
+    if (generated_shape.count(outputs_map[output->debugName()]) > 0) {
       auto shape_data = generated_shape.find(outputs_map[output->debugName()])->second;
       std::vector<::c10::ShapeSymbol> final_shape;
       int rank = shape_data.dim_size();
@@ -2036,9 +2040,6 @@ void ONNXShapeTypeInference(
       c10::SymbolicShape shape_value(final_shape);
       ConstantValueMap::SetShapeValue(output->debugName(), shape_value);
       onnx::TensorShapeProto shape_data_copy = shape_data;
-      if (generated_shape.count(output->debugName()) > 0) {
-        generated_shape.erase(output->debugName());
-      }
       generated_shape[output->debugName()] = shape_data_copy;
       generated_shape.erase(outputs_map[output->debugName()]);
     }
