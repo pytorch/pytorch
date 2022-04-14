@@ -1,9 +1,9 @@
 import torch
 from typing import Dict, Callable, Any, Optional
-from .observation_type import ObservationType
-from ..quantization_patterns import QuantizeHandler
-from ..quantization_types import Pattern, NodePattern
-from ...utils import (
+from torch.ao.quantization.backend_config.observation_type import ObservationType
+from .quantization_patterns import QuantizeHandler
+from torch.ao.quantization.quantization_types import Pattern, NodePattern
+from torch.ao.quantization.utils import (
     activation_dtype,
 )
 

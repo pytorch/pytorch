@@ -15,11 +15,11 @@ from .pattern_utils import (
     sorted_patterns_dict,
 )
 
-from .backend_config.utils import get_fusion_pattern_to_fuse_handler_cls
-from .backend_config.utils import get_fuser_method_mapping
-from .backend_config.utils import get_fusion_pattern_to_root_node_getter
-from .backend_config.utils import get_fusion_pattern_to_extra_inputs_getter
-from .backend_config import get_native_backend_config_dict
+from ..backend_config.utils import get_fuser_method_mapping
+from ..backend_config.utils import get_fusion_pattern_to_root_node_getter
+from ..backend_config.utils import get_fusion_pattern_to_extra_inputs_getter
+from ..backend_config import get_native_backend_config_dict
+from .backend_config_utils import get_fusion_pattern_to_fuse_handler_cls
 
 from .fusion_patterns import *  # noqa: F401,F403
 

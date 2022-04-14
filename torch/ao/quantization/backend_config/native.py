@@ -9,12 +9,12 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
-from ...observer import (
+from ..observer import (
     default_affine_fixed_qparams_observer,
     default_symmetric_fixed_qparams_observer,
 )
-from ...fake_quantize import FixedQParamsFakeQuantize
-from ...fuser_method_mappings import (
+from ..fake_quantize import FixedQParamsFakeQuantize
+from ..fuser_method_mappings import (
     reverse_sequential_wrapper2,
     reverse2,
     reverse3,
