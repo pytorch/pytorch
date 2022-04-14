@@ -7840,8 +7840,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA: unfold
-    QuantizedCPU, QuantizedCUDA: unfold
+    CompositeExplicitAutograd: unfold
 
 - func: unfold_backward(Tensor grad_in, int[] input_sizes, int dim, int size, int step) -> Tensor
   variants: function

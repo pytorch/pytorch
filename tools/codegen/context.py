@@ -24,6 +24,7 @@ F2 = TypeVar(
     'F2',
     NativeFunction,
     Optional[NativeFunction],
+    bool,
 )
 
 @contextlib.contextmanager
@@ -79,17 +80,7 @@ def with_native_function_and_index(func: Callable[[F, BackendIndex], T]) -> Call
             return func(f, backend_index)
     return wrapper
 
-# Convenience decorator for functions that explicitly take in a BackendIndex,
-# instead of indirectly taking one in as a closure
-def with_native_function_and_selector_and_index(
-    func: Callable[[SelectiveBuilder, F, BackendIndex], T]
-) -> Callable[[SelectiveBuilder, F, BackendIndex], T]:
-    @functools.wraps(func)
-    def wrapper(selector: SelectiveBuilder, f: F, backend_index: BackendIndex) -> T:
-        with native_function_manager(f):
-            return func(selector, f, backend_index)
-    return wrapper
-
+# Convenience decorator for functions that explicitly take in a Dict of BackendIndices
 def with_native_function_and_indices(
         func: Callable[[F, Dict[DispatchKey, BackendIndex]], T]
 ) -> Callable[[F, Dict[DispatchKey, BackendIndex]], T]:
