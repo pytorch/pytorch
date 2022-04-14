@@ -25,7 +25,7 @@ DeviceType SparseCsrTensorSetToDeviceType(DispatchKeySet key_set) {
 
 SparseCsrTensorImpl::SparseCsrTensorImpl(
     at::DispatchKeySet key_set,
-    Layout layout,
+    at::Layout layout,
     const caffe2::TypeMeta data_type)
     : SparseCsrTensorImpl(
           key_set,
@@ -57,7 +57,7 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
     at::Tensor crow_indices,
     at::Tensor col_indices,
     at::Tensor values,
-    Layout layout)
+    at::Layout layout)
     : TensorImpl(key_set, data_type, values.device()),
       crow_indices_(std::move(crow_indices)),
       col_indices_(std::move(col_indices)),
