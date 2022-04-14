@@ -15753,6 +15753,12 @@ op_db: List[OpInfo] = [
         supports_out=False,
         gradcheck_fast_mode=False,
         decorators=(
+            # RuntimeError: expected int at position 0, but got: Tensor
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness",
+            ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
                 "TestJit",
