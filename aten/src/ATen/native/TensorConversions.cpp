@@ -437,21 +437,4 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
       coalesced_self.device());
 }
 
-Tensor to_meta(const Tensor& tensor) {
-  auto out = at::native::empty_strided_meta(tensor.sizes(), tensor.strides(), \
-/*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
-/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
-  // needs to handle wrapped numbers, so dtype promotion works properly.
-  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-    out.unsafeGetTensorImpl()->set_wrapped_number(true);
-  }
-  return out;
-}
-c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor) {
-  if (tensor.has_value()) {
-    return to_meta(*tensor);
-  }
-  return c10::nullopt;
-}
-
 }} // namespace at::native
