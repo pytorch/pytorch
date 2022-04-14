@@ -53,6 +53,7 @@ shellcheck:
 
 setup_lint:
 	$(PIP) install lintrunner
+	lintrunner init
 	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
 		--job 'shellcheck' --step 'Install Jinja2' --no-quiet
 
