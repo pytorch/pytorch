@@ -81,9 +81,8 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
-    const scalar_t* const bottom_data, const int num, const int64_t channels,
-    const int64_t height, const int64_t width, const int pooled_height,
     const scalar_t* const bottom_data, const int64_t channels,
+    const int64_t height, const int64_t width, const int pooled_height,
     scalar_t* const top_data, const int divisor_override,
     const bool count_include_pad, const bool use_divisor) {
     const int c = index % channels;
