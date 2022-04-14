@@ -348,8 +348,10 @@ def _str_intern(inp):
         suffixes.append('nnz=' + str(self._nnz()))
         if not has_default_dtype:
             suffixes.append('dtype=' + str(self.dtype))
-        cdimname = {torch.sparse_csr: 'row', torch.sparse_csc: 'column', torch.sparse_bsr: 'row', torch.sparse_bsc: 'column'}[self.layout]
-        pdimname = {torch.sparse_csc: 'row', torch.sparse_csr: 'column', torch.sparse_bsc: 'row', torch.sparse_bsr: 'column'}[self.layout]
+        cdimname = {torch.sparse_csr: 'row', torch.sparse_csc: 'column',
+                    torch.sparse_bsr: 'row', torch.sparse_bsc: 'column'}[self.layout]
+        pdimname = {torch.sparse_csc: 'row', torch.sparse_csr: 'column',
+                    torch.sparse_bsc: 'row', torch.sparse_bsr: 'column'}[self.layout]
         crow_indices_prefix = f'c{cdimname[:3]}_indices=tensor('
         crow_indices = self.crow_indices().detach()
         crow_indices_str = _tensor_str(crow_indices, indent + len(crow_indices_prefix))
