@@ -9,6 +9,7 @@
 #include <ATen/NamedTensorUtils.h>
 
 #include <c10/core/TensorOptions.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -148,7 +149,7 @@ void host_softmax(
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size,
-      [&](int64_t begin, int64_t end) {
+      [&](int64_t begin, int64_t end) __ubsan_ignore_float_divide_by_zero__ {
         for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / inner_size;
           int64_t inner_idx = i % inner_size;
