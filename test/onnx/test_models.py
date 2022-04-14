@@ -46,15 +46,15 @@ BATCH_SIZE = 2
 
 
 class TestModels(TestCase):
+    opset_version = 9  # Caffe2 doesn't support the default.
     keep_initializers_as_inputs = False
-    from torch.onnx.symbolic_helper import _export_onnx_opset_version
-    opset_version = _export_onnx_opset_version
 
     def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7):
         with torch.onnx.select_model_mode_for_export(model, None):
             graph = torch.onnx.utils._trace(model, inputs, OperatorExportTypes.ONNX)
             torch._C._jit_pass_lint(graph)
-            verify(model, inputs, backend, rtol=rtol, atol=atol)
+            verify(model, inputs, backend, rtol=rtol, atol=atol,
+                   opset_version=self.opset_version)
 
     def test_ops(self):
         x = Variable(

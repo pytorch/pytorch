@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, gradcheck, gradgradcheck, first_sample)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, OpDTypes, skipCUDAIfRocm)
+    (instantiate_device_type_tests, ops, OpDTypes)
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -113,7 +113,6 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Complex autograd not supported.")
 
     # Tests that gradients are computed correctly
-    @skipCUDAIfRocm
     @_gradcheck_ops(op_db)
     def test_fn_grad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
@@ -149,7 +148,7 @@ class TestGradients(TestCase):
         if op.supports_fwgrad_bwgrad:
             self._check_helper(device, dtype, op, op.get_op(), "fwgrad_bwgrad")
         else:
-            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            err_msg = r"Trying to use forward AD with .* that does not support it"
             hint_msg = ("Running forward-over-backward gradgrad for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_fwgrad_bwgrad=True.")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
@@ -190,7 +189,7 @@ class TestGradients(TestCase):
         if op.supports_forward_ad:
             call_grad_test_helper()
         else:
-            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            err_msg = r"Trying to use forward AD with .* that does not support it"
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):

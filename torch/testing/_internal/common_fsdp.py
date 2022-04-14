@@ -31,13 +31,13 @@ class FSDPInitMode(Enum):
     CUDA_NEVER = 3
 
 def _get_full_detached_param(fsdp_model: FullyShardedDataParallel):
-    with fsdp_model.summon_full_params():
+    with FullyShardedDataParallel.summon_full_params(fsdp_model):
         params = list(p.clone().detach_() for p in fsdp_model.parameters())
 
     return params
 
 def _zero_model(fsdp_model: FullyShardedDataParallel):
-    with fsdp_model.summon_full_params():
+    with FullyShardedDataParallel.summon_full_params(fsdp_model):
         for param in fsdp_model.parameters():
             with torch.no_grad():
                 param.zero_()
@@ -50,11 +50,16 @@ def _get_state_dict(model, cpu_offload=False, half=False):
 
     return model.state_dict()
 
+def subtest_name(test_name_mapping, *args):
+    return '_'.join(
+        [test_name_mapping[str(s)] if s is not None else "none" for s in args]
+    )
+
 # get full params of a model recursively. Note that if CPU offloading, it will
 # also automatically move the parameters to GPU, due to _rebuild_full_params
 # call.
 def get_full_params(model, recurse=True):
-    with model.summon_full_params(recurse=recurse):
+    with FullyShardedDataParallel.summon_full_params(model, recurse=recurse):
         return deepcopy(list(model.parameters()))
 
 def _maybe_cuda(model, move_to_cuda):
@@ -150,6 +155,9 @@ class TransformerWithSharedParams(nn.Module):
     def run_backward(self, loss):
         loss.backward()
 
+    def get_ignored_modules(self):
+        return [self.transformer]
+
 
 class NestedWrappedModule(nn.Module):
     def __init__(self, group, wrap_fsdp, *args, wrap_everything=False, fsdp_init_mode=FSDPInitMode.CUDA_AFTER, **kwargs):
@@ -244,6 +252,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         cpu_offload=None,
         backward_prefetch=None,
         sharding_strategy=None,
+        mixed_precision=None,
         **kwargs
     ):
         super().__init__(
@@ -254,6 +263,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
                 sharding_strategy=sharding_strategy,
+                mixed_precision=mixed_precision,
             ),
             **kwargs
         )
@@ -414,6 +424,7 @@ class FSDPTest(MultiProcessTestCase):
         clip_norm=0.3,
         norm_type=None,
         save_model=False,
+        mixed_precision=None
     ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
@@ -426,6 +437,11 @@ class FSDPTest(MultiProcessTestCase):
             with torch.cuda.amp.autocast(enabled=autocast):
                 # Inputs always cuda regardless of cpu offloading, or model.device
                 input = model.module.get_input(torch.device("cuda"))
+                if mixed_precision and not isinstance(model, FullyShardedDataParallel):
+                    if isinstance(input, torch.Tensor):
+                        input = input.half()
+                    else:
+                        input = tuple(x.half() for x in input)
                 output = model(*input)
                 # Post-forward, if CPU offloading model param should be on CPU.
                 if cpu_offload_params and isinstance(model, FullyShardedDataParallel):
@@ -435,10 +451,17 @@ class FSDPTest(MultiProcessTestCase):
                         self.assertEqual(p.device, torch.device("cpu"))
 
                 loss = model.module.get_loss(input, output).to(model_device)
-            assert (
-                loss.dtype == torch.float32
-            ), "loss data type should be float32, as the original \
-                 parameter data type is float32."
+            if not mixed_precision:
+                assert (
+                    loss.dtype == torch.float32
+                ), "loss data type should be float32, as the original \
+                    parameter data type is float32."
+            else:
+                # FSDP loss is fp16, DDP AMP loss is fp32
+                if isinstance(model, FullyShardedDataParallel):
+                    self.assertEqual(loss.dtype, mixed_precision.param_dtype)
+                else:
+                    self.assertEqual(loss.dtype, torch.float32)
             model.module.run_backward(loss)
             if norm_type is not None:
                 if isinstance(model, FullyShardedDataParallel):
@@ -484,6 +507,7 @@ class FSDPTest(MultiProcessTestCase):
         cpu_offload=CPUOffload(),
         backward_prefetch=None,
         sharding_strategy=None,
+        mixed_precision=None,
         save_model=True,
         clip_norm=0.3,
         norm_type=None,
@@ -502,7 +526,8 @@ class FSDPTest(MultiProcessTestCase):
 
         # DDP training
         ref_loss = self._train_for_several_steps(
-            model, num_steps, autocast=False, lr=lr, fsdp_cpu_offload=cpu_offload
+            model, num_steps, autocast=mixed_precision is not None, lr=lr,
+            fsdp_cpu_offload=cpu_offload, mixed_precision=mixed_precision,
         )
         ref_full_params = list(model.parameters())
 
@@ -515,6 +540,7 @@ class FSDPTest(MultiProcessTestCase):
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
                 sharding_strategy=sharding_strategy,
+                mixed_precision=mixed_precision,
             )
         except Exception as e:
             raise ValueError(f"model_Init_fn {model_init_fn} got error {str(e)}")
@@ -525,6 +551,7 @@ class FSDPTest(MultiProcessTestCase):
             cpu_offload=cpu_offload,
             backward_prefetch=backward_prefetch,
             sharding_strategy=sharding_strategy,
+            mixed_precision=mixed_precision,
         )
         # Call model.cuda() after init FSDP if specified.
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
@@ -548,6 +575,7 @@ class FSDPTest(MultiProcessTestCase):
             shard_loss = self._train_for_several_steps(
                 model, num_steps, autocast=False, lr=lr,
                 fsdp_cpu_offload=cpu_offload, save_model=save_model,
+                mixed_precision=mixed_precision,
             )
         # We only check for errors in the case we have the following setup:
         # model = FSDP(model, cpu_offload=True)
@@ -569,34 +597,37 @@ class FSDPTest(MultiProcessTestCase):
         if cpu_offload.offload_params:
             shard_loss = shard_loss.cuda()
         torch.testing.assert_allclose(ref_loss, shard_loss)
-        self.assertEqual(
-            ref_full_params,
-            shard_full_params,
-            exact_device=True,
-            msg="FullyShardedDataParallel didn't match PyTorch DDP",
-        )
+        # Note that we don't do parameter check when testing mixed precision,
+        # as FSDP will bring the full param back to fp32 but we did model.half()
+        # for DDP so they wouldn't be equal. Further, DDP + model.half() would
+        # run optimizer in reduced precision versus FSDP's full precision.
+        if not mixed_precision:
+            self.assertEqual(
+                ref_full_params,
+                shard_full_params,
+                exact_device=True,
+                msg="FullyShardedDataParallel didn't match PyTorch DDP",
+            )
 
     def _get_wrapped_model(
-        self, group, cuda_first=False, config=None, **model_kwargs,
+        self, group, cuda_first=False, ignore_modules=False, config=None,
+        **model_kwargs,
     ) -> FullyShardedDataParallel:
         if config is None:
             config = {}
         move_to_cuda = not (
             "cpu_offload" in config and config["cpu_offload"].offload_params
         )
-        if cuda_first:
-            transformer = TransformerWithSharedParams(group, **model_kwargs)
-            if move_to_cuda:
-                transformer = transformer.cuda()
-            model = FullyShardedDataParallel(transformer, group, **config)
-        else:
-            model = FullyShardedDataParallel(
-                TransformerWithSharedParams(group, **model_kwargs),
-                group,
-                **config,
-            )
-            if move_to_cuda:
-                model = model.cuda()
+        transformer = TransformerWithSharedParams(group, **model_kwargs)
+        if cuda_first and move_to_cuda:
+            transformer = transformer.cuda()
+        if ignore_modules:
+            assert "ignored_modules" not in config, \
+                "Do not pass in `ignored_modules` via `config`"
+            config["ignored_modules"] = transformer.get_ignored_modules()
+        model = FullyShardedDataParallel(transformer, group, **config)
+        if not cuda_first and move_to_cuda:
+            model = model.cuda()
         return model
 
     def _get_nonwrapped_model(
