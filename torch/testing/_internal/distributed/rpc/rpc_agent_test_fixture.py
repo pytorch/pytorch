@@ -7,7 +7,7 @@ import torch.testing._internal.dist_utils
 class RpcAgentTestFixture(ABC):
     @property
     def world_size(self) -> int:
-        return 2
+        return 4
 
     @property
     def init_method(self):

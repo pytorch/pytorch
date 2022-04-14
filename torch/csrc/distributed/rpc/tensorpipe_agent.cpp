@@ -398,8 +398,8 @@ TensorPipeAgent::TensorPipeAgent(
           std::move(cb),
           std::chrono::milliseconds(
               (long)(opts.rpcTimeoutSeconds * kSecToMsConversion))),
-      store_(store),
       isStaticGroup_(worldSize.has_value()),
+      store_(store),
       opts_(std::move(opts)),
       reverseDeviceMaps_(std::move(reverseDeviceMaps)),
       devices_(std::move(devices)),
@@ -1087,6 +1087,8 @@ void TensorPipeAgent::join(bool shutdown) {
       // local worker ActiveCallCount is 0 at this point and we will shutdown
       // (any future calls will be dropped)
       if (!isStaticGroup_) {
+        // Remove this agents worker info from store
+        removeCurrentName(rankToNameStore_, workerInfo_.id_, workerInfo_.name_);
         if (shutdown) {
           shuttingDown_ = true;
         }
@@ -1215,7 +1217,7 @@ void TensorPipeAgent::updateGroupMembership(
     const WorkerInfo& workerInfo,
     const std::vector<c10::Device> devices,
     const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
-    bool isJoin = true) {
+    bool isJoin) {
   std::string name = workerInfo.name_;
   worker_id_t id = workerInfo.id_;
   // Rank with workerInfo is joining the group, update internal mappings
@@ -1246,12 +1248,24 @@ void TensorPipeAgent::updateGroupMembership(
   }
   // TODO: Rank with workerInfo is leaving, update internal mappings
   else {
-    std::cout << "is leaving" << std::endl;
     workerIdToInfo_.erase(id);
     workerNameToInfo_.erase(name);
     workerNameToURL_.erase(name);
 
-    // TODO: test for
+    for (const auto& it : reverseDeviceMaps_) {
+      if (reverseDeviceMaps.find(it.first) == reverseDeviceMaps.end()) {
+        reverseDeviceMaps_.erase(it.first);
+      }
+    }
+
+    auto iter = devices_.begin();
+    while (iter != devices_.end()) {
+      if (std::find(devices.begin(), devices.end(), *iter) == devices.end()) {
+        iter = devices_.erase(iter);
+      } else {
+        iter++;
+      }
+    }
   }
 }
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {

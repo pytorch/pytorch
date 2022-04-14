@@ -5,7 +5,7 @@ from typing import Dict, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
-from torch.distributed.rpc.utils import group_membership_management
+from torch.distributed.rpc.utils import group_membership_management, update_group_membership
 
 from . import api
 from . import constants as rpc_constants
@@ -255,11 +255,6 @@ def _create_reverse_mapping(my_name, all_names, all_device_maps):
             }
     return reverse_device_maps
 
-def _update_group_membership(worker_info, my_devices, reverse_device_map):
-    agent = api._get_current_rpc_agent()
-    ret = agent._update_group_membership(worker_info, my_devices, reverse_device_map, True)
-    return ret
-
 def _get_device_infos():
     agent = api._get_current_rpc_agent()
     opts = agent._get_backend_options()
@@ -272,7 +267,6 @@ def _set_devices_and_reverse_device_map(agent):
     my_worker_info = agent.get_worker_info()
     my_name = my_worker_info.name
     all_worker_infos = agent.get_worker_infos()
-
     # One round to get device_maps of all workers and construct reverse device maps
     all_device_counts, all_device_maps, all_devices, all_names = {}, {}, {}, []
     for worker_info in all_worker_infos:
@@ -295,7 +289,7 @@ def _set_devices_and_reverse_device_map(agent):
     for worker_name in all_names:
         # Set device list for each worker
         all_devices[worker_name] = _create_device_list(all_devices[worker_name], all_device_maps[worker_name], reverse_device_maps)
-        api.rpc_sync(worker_name, _update_group_membership, args=(my_worker_info, all_devices[worker_name], reverse_device_maps))
+        api.rpc_sync(worker_name, update_group_membership, args=(my_worker_info, all_devices[worker_name], reverse_device_maps, True))
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
     from . import TensorPipeRpcBackendOptions
@@ -365,7 +359,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         return agent
     # initialization for dynamic rpc (ranks can join and leave)
     else:
-        with utils.group_membership_management(store, name):
+        with group_membership_management(store, name, True):
             # Construct TPAgent with empty reverse_device_map and devices
             # these properties will be updated after initialization
             agent = TensorPipeAgent(
@@ -380,12 +374,12 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             api._init_rpc_states(agent)
 
             try:
-                # TODO: Notify all workers in group this rank has joined and set devices and reverse_device_map
+                # Notify all workers in group this rank has joined and set devices and reverse_device_map
                 # This is a synchronous operation that completes once all existing ranks are updated
-                _set_devices_and_reverse_device_map(agent, rank, rpc_backend_options.device_maps)
+                _set_devices_and_reverse_device_map(agent)
                 pass
             except Exception:
-                # api.shutdown()
+                api.shutdown()
                 raise
             return agent
 
