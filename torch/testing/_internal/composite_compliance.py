@@ -128,8 +128,10 @@ class CompositeCompliantTensor(torch.Tensor):
             r.elem = elem.detach().clone()
         else:
             # We don't propagate conjugate bits to r, so elem can't be a conjugate view
-            r.elem = elem.resolve_conj().resolve_neg()
+            r.elem = elem
 
+        torch._C._set_conj(r, r.elem.is_conj())
+        torch._C._set_neg(r, r.elem.is_neg())
         return r
 
     def __repr__(self):
