@@ -4456,6 +4456,20 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(prof.events().table().find("fallback"), -1)
         torch._C._jit_set_nvfuser_guard_mode(old_guard)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_clamp_reversed_bound(self):
+        x = torch.tensor([1., -float('inf'), 2., float('inf'), float('nan')], device="cuda")
+
+        def t(x):
+            return x.clamp(min=1., max=0.5)
+
+        with nvfuser_singleton_fusion(True):
+            jit_t = torch.jit.script(t)
+            self._run_helper(jit_t, t, x)
+
+
 class TestPassManagerCudaFuser(JitTestCase):
     def setUp(self):
         super().setUp()
