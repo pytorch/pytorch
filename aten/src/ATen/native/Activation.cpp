@@ -625,7 +625,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
       strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
       return t.as_strided(sizes, strides);
     }
-    return t;
+    return t.as_strided(sizes, strides);
   };
   Tensor w;
   if (self.scalar_type() == ScalarType::BFloat16) {
@@ -678,7 +678,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
       strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
       return t.as_strided(sizes, strides);
     }
-    return t;
+    return t.as_strided(sizes, strides);
   };
   Tensor w;
   if (self.scalar_type() == ScalarType::BFloat16) {
