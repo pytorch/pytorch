@@ -2237,65 +2237,66 @@ void q_batch_norm_kernel(
     auto scale_neg_zp_premul = fake_scale * in_zp_vec.neg();
     auto out_zero_point_v = Vec(scalar_t(out_zero_point));
     const auto lanes = static_cast<int64_t>(Vec::float_num_vecs() * kVLen);
-    for (const auto i : c10::irange(outer_size)) {
-      auto* X_ptr = reinterpret_cast<typename scalar_t::underlying*>(X + i * C);
-      auto* Y_ptr = reinterpret_cast<typename scalar_t::underlying*>(Y + i * C);
-      int64_t ch = 0;
+    at::parallel_for(0, outer_size, 0, [&](int64_t begin, int64_t end) {
+      for (const auto i : c10::irange(begin, end)) {
+        auto* X_ptr = reinterpret_cast<typename scalar_t::underlying*>(X + i * C);
+        auto* Y_ptr = reinterpret_cast<typename scalar_t::underlying*>(Y + i * C);
+        int64_t ch = 0;
 
-      for(; ch + lanes <= C; ch += lanes ) {
-        do_bn_compute<scalar_t>(
-          X_ptr + ch,
-          Y_ptr + ch,
-          fake_scale,
-          in_zp_vec,
-          scale_neg_zp_premul,
-          out_zero_point,
-          out_zero_point_v,
-          alpha + ch,
-          beta + ch,
-          Vec::float_num_vecs(),
-          ReluFused,
-          kVLen
-        );
-      }
-
-      // for channel between 8 and 32, still use 32 width for performance
-      // Benchmark shows it is faster than doing 8 channels each time
-      int64_t elem_size = C - ch;
-      if ((lanes == 32) && elem_size >= kVLen) {
-        int64_t vec_num = elem_size / kVLen;
-        std::vector<typename scalar_t::underlying> buf_in(lanes);
-        memcpy(buf_in.data(), X_ptr + ch, vec_num * kVLen); // 3 cycles
-        do_bn_compute<scalar_t>(
-          buf_in.data(),
-          Y_ptr + ch,
-          fake_scale,
-          in_zp_vec,
-          scale_neg_zp_premul,
-          out_zero_point,
-          out_zero_point_v,
-          alpha + ch,
-          beta + ch,
-          vec_num,
-          ReluFused,
-          kVLen
-        );
-        ch += vec_num * kVLen;
-      }
-      // for channels less than 8
-      for (; ch < C; ++ch) {
-        long quantized_down = out_zero_point +
-            lrintf(alpha[ch] * (X_ptr[ch] - in_zero_point) +
-                        beta[ch]);
-        if (ReluFused) { // static if
-          quantized_down = std::max<long>(quantized_down, out_zero_point);
+        for(; ch + lanes <= C; ch += lanes) {
+          do_bn_compute<scalar_t>(
+            X_ptr + ch,
+            Y_ptr + ch,
+            fake_scale,
+            in_zp_vec,
+            scale_neg_zp_premul,
+            out_zero_point,
+            out_zero_point_v,
+            alpha + ch,
+            beta + ch,
+            Vec::float_num_vecs(),
+            ReluFused,
+            kVLen
+          );
         }
-        Y_ptr[ch] = std::min<long>(
-            std::max<long>(quantized_down, minimum), maximum);
-      }
-    }
-});
 
+        // for channel between 8 and 32, still use 32 width for performance
+        // Benchmark shows it is faster than doing 8 channels each time
+        int64_t elem_size = C - ch;
+        if ((lanes == 32) && elem_size >= kVLen) {
+          int64_t vec_num = elem_size / kVLen;
+          std::vector<typename scalar_t::underlying> buf_in(lanes);
+          memcpy(buf_in.data(), X_ptr + ch, vec_num * kVLen); // 3 cycles
+          do_bn_compute<scalar_t>(
+            buf_in.data(),
+            Y_ptr + ch,
+            fake_scale,
+            in_zp_vec,
+            scale_neg_zp_premul,
+            out_zero_point,
+            out_zero_point_v,
+            alpha + ch,
+            beta + ch,
+            vec_num,
+            ReluFused,
+            kVLen
+          );
+          ch += vec_num * kVLen;
+        }
+        // for channels less than 8
+        for (; ch < C; ++ch) {
+          long quantized_down = out_zero_point +
+              lrintf(alpha[ch] * (X_ptr[ch] - in_zero_point) +
+                          beta[ch]);
+          if (ReluFused) { // static if
+            quantized_down = std::max<long>(quantized_down, out_zero_point);
+          }
+          Y_ptr[ch] = std::min<long>(
+              std::max<long>(quantized_down, minimum), maximum);
+        }
+      }
+    });
+  });
 }
 
 void _fake_quantize_tensor_helper(
