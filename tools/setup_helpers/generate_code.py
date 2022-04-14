@@ -53,7 +53,7 @@ def generate_code(ninja_global: Optional[str] = None,
     runfiles_dir = os.environ.get("RUNFILES_DIR", None)
     data_dir = os.path.join(runfiles_dir, 'pytorch') if runfiles_dir else ''
     tools_jit_templates = os.path.join(data_dir, 'tools', 'jit', 'templates')
-    autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd/")
+    autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
