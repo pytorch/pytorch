@@ -17,6 +17,9 @@ if [ -n "${IN_CI}" ]; then
   pip_install "unittest-xml-reporting<=3.2.0,>=2.0.0"
 fi
 
+TORCH_UCC_LIBRARY_PATH=$(install_torch_ucc | tail -n 1)
+export TORCH_UCC_LIBRARY_PATH
+
 # Disabling tests to see if they solve timeout issues; see https://github.com/pytorch/pytorch/issues/70015
 # python tools/download_mnist.py --quiet -d test/cpp/api/mnist
 # OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api

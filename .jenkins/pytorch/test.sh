@@ -588,6 +588,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
+  TORCH_UCC_LIBRARY_PATH=$(install_torch_ucc | tail -n 1)
+  export TORCH_UCC_LIBRARY_PATH
+
   test_distributed
   test_rpc
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then

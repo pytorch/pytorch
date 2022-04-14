@@ -78,6 +78,9 @@ fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
 
+ucx_commit=v1.12.x
+ucc_commit=d25ddbb7f9e0c687ef28fadeb4b585f51b9836d8
+
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
@@ -133,6 +136,8 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
+    UCX_COMMIT=${ucx_commit}
+    UCC_COMMIT=${ucc_commit}
     ;;
   pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9)
     CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
@@ -156,6 +161,8 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
+    UCX_COMMIT=${ucx_commit}
+    UCC_COMMIT=${ucc_commit}
     ;;
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
     CUDA_VERSION=11.6.0
@@ -348,6 +355,8 @@ docker build \
        --build-arg "SWIFTSHADER=${SWIFTSHADER}" \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
+       --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
+       --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
