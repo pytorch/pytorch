@@ -12169,6 +12169,7 @@ op_db: List[OpInfo] = [
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+ and SM53+
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,))
            ),
            supports_forward_ad=False,
            supports_out=False),
@@ -14825,11 +14826,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
            skips=(
-               # Expected RuntimeError when doing an unsafe cast from a result
-               #   of dtype torch.float32 into an out= with dtype torch.long
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-               # TODO: see https://github.com/pytorch/pytorch/issues/64709
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
@@ -15751,6 +15747,12 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_correctness",
+            ),
+            # RuntimeError: expected int at position 0, but got: Tensor
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestNNCOpInfo",
+                "test_nnc_correctness",
             ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
