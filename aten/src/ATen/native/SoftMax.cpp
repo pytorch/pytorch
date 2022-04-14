@@ -418,6 +418,11 @@ Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarTyp
   return result;
 }
 
+Tensor& softmax_out(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype, Tensor& output_) {
+  Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
+  return at::_softmax_out(output_, converted, dim_, false);
+}
+
 // special_softmax, alias for softmax
 Tensor special_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
   return at::softmax(input_, dim_, dtype);
@@ -444,6 +449,11 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<Scala
   }();
   namedinference::propagate_names(result, input_);
   return result;
+}
+
+Tensor& log_softmax_out(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype, Tensor& output_) {
+  Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
+  return at::_log_softmax_out(output_, converted, dim_, false);
 }
 
 Tensor special_log_softmax(const Tensor& input, const int64_t dim, c10::optional<ScalarType> dtype) {
