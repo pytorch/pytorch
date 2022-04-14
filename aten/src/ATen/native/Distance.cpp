@@ -6,8 +6,6 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 
-#include <torch/torch.h>
-
 namespace at { namespace native {
 
 DEFINE_DISPATCH(pdist_forward_stub);
