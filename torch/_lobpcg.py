@@ -940,19 +940,9 @@ class LOBPCG(object):
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
-        # Rt := R^T
-        Rt = torch.cholesky((SBS * d_row) * d_col, upper=False)
-        # Ri = d @ R.inverse(), so to avoid explicit inverse we do
-        # Ri = ((d @ R.inverse())^T)^T
-        #    = (Rt.inverse() @ d))^T, where (Rt.inverse() @ d)
-        # is replaces with the system of matrix equations.
-        return (
-            torch.triangular_solve(
-                d_row.diag_embed(),
-                Rt,
-                upper=False
-            ).solution
-        ).transpose(-1, -2)
+        # TODO use torch.linalg.cholesky_solve once it is implemented
+        R = torch.linalg.cholesky((SBS * d_row) * d_col, upper=True)
+        return torch.linalg.solve_triangular(R, d_row.diag_embed(), upper=True, left=False)
 
     def _get_svqb(self,
                   U: Tensor,     # Tensor
