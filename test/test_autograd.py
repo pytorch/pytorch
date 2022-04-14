@@ -6679,9 +6679,10 @@ class TestAutogradForwardMode(TestCase):
                 if func.overloadpacket == torch.ops.aten.alias:
                     counter[0] += 1
 
-                    # Make sure autograd is not disabled here
-                    foo = torch.rand(1, requires_grad=True)
-                    self.assertIsNotNone(foo.exp().grad_fn)
+                    # Make sure we can re-enable autograd here
+                    with torch.overrides.enable_reentrant_dispatch():
+                        foo = torch.rand(1, requires_grad=True)
+                        self.assertIsNotNone(foo.exp().grad_fn)
 
                 with no_dispatch():
                     return func(*args, **kwargs)

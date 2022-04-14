@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/record_function.h>
+#include <ATen/core/PythonFallbackKernel.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -319,6 +320,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
+
+  py::class_<at::impl::RestorePythonTLSSnapshot>(_C_m, "_RestorePythonTLSSnapshot")
+      .def(py::init<>());
 
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")

@@ -27,6 +27,7 @@ import functools
 import types
 import warnings
 from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator
+import contextlib
 
 import torch
 from torch._C import (
@@ -43,6 +44,7 @@ __all__ = [
     "is_tensor_like",
     "is_tensor_method_or_property",
     "wrap_torch_function",
+    "enable_reentrant_dispatch",
 ]
 
 @functools.lru_cache(None)
@@ -1877,3 +1879,10 @@ def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
         yield mode
     finally:
         _set_torch_function_mode(old)
+
+class enable_reentrant_dispatch():
+    def __enter__(self):
+        self._raii_guard = torch._C._RestorePythonTLSSnapshot()
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        del self._raii_guard

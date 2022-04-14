@@ -1,4 +1,5 @@
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/PythonFallbackKernel.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/util/DeadlockDetection.h>
@@ -1844,6 +1845,7 @@ void concrete_dispatch_fn(
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
   pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
 
   // Setup the arguments expected for the detach call
   std::vector<py::handle> overloaded_args;
