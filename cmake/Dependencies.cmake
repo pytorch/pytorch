@@ -1309,7 +1309,7 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${PYTORCH_RCCL_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
 
     # Note [rocblas & rocfft cmake bug]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1772,9 +1772,6 @@ if(NOT INTERN_BUILD_MOBILE)
       if(BUILD_CAFFE2_OPS)
         set(CAFFE2_USE_MKLDNN ON)
         list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkldnn)
-        if(NOT WIN32 AND NOT APPLE)
-          list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::dnnl_graph)
-        endif()
       endif(BUILD_CAFFE2_OPS)
     else()
       message(WARNING "MKLDNN could not be found.")

@@ -1,0 +1,10 @@
+py_library(
+    name = "autograd",
+    srcs = glob(["*.py"]),
+    data = glob([
+        "*.yaml",
+        "templates/*",
+    ]),
+    visibility = ["//:__subpackages__"],
+    deps = ["//tools/codegen"],
+)

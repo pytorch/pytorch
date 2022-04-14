@@ -8,7 +8,7 @@ import torch.onnx.symbolic_helper as sym_help
 import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType, quantized_args
-from torch.onnx.symbolic_opset9 import expand, unused, mul
+from torch.onnx.symbolic_opset9 import expand, unused, mul, op_with_optional_float_cast
 from torch.onnx.symbolic_opset9 import linalg_vector_norm as lvn
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
@@ -28,7 +28,7 @@ def hardtanh(g, self, min_val, max_val):
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     min_val = g.op("Constant", value_t=torch.tensor(min_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
     max_val = g.op("Constant", value_t=torch.tensor(max_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
-    return g.op("Clip", self, min_val, max_val)
+    return op_with_optional_float_cast(g, "Clip", self, min_val, max_val, opset_before=12)
 
 
 def clamp(g, self, min, max):
@@ -50,7 +50,7 @@ def clamp(g, self, min, max):
         return clamp_min(g, self, min)
     else:
         if sym_help._get_tensor_rank(min) == 0 and sym_help._get_tensor_rank(max) == 0:
-            return g.op("Clip", self, min, max)
+            return op_with_optional_float_cast(g, "Clip", self, min, max, opset_before=12)
         else:
             return clamp_max(g, clamp_min(g, self, min), max)
 
@@ -61,9 +61,9 @@ def clamp_min(g, self, min):
     min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
     if sym_help._get_tensor_rank(min) == 0:
         max = unused(g)
-        return g.op("Clip", self, min, max)
+        return op_with_optional_float_cast(g, "Clip", self, min, max, opset_before=12)
     else:
-        return g.op("Max", self, min)
+        return op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
 @parse_args("v", "v")
@@ -72,13 +72,13 @@ def clamp_max(g, self, max):
     max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
     if sym_help._get_tensor_rank(max) == 0:
         min = unused(g)
-        return g.op("Clip", self, min, max)
+        return op_with_optional_float_cast(g, "Clip", self, min, max, opset_before=12)
     else:
-        return g.op("Min", self, max)
+        return op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
 
 
 def relu6(g, input):
-    relu = g.op("Relu", input)
+    relu = op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     dtype = input.type().scalarType()
     if dtype is None:
         dtype = ScalarType.FLOAT
@@ -801,6 +801,8 @@ def narrow(g, input, dim, start, length):
 @parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = sym_help._get_tensor_rank(input)
+    if dim == 1:
+        return input
     # use ONNX's Flatten operator for cases where the output shape is 2D
     if start_dim == 1:
         if (end_dim == -1 or (dim is not None and end_dim == dim - 1)):

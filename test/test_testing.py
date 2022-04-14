@@ -22,14 +22,13 @@ from torch.testing._internal.common_device_type import \
      deviceCountAtLeast, ops, expectedFailureMeta)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_modules import modules, module_db
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
     # Ensure that assertEqual handles numpy arrays properly
-    @dtypes(*(get_all_dtypes(include_half=True, include_bfloat16=False,
-                             include_bool=True, include_complex=True)))
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half))
     def test_assertEqual_numpy(self, device, dtype):
         S = 10
         test_sizes = [
@@ -278,6 +277,11 @@ class TestTesting(TestCase):
         for size in (tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)):
             check(size, None, None, False, False)
             check(size, 2, 4, True, True)
+
+    def test_make_tensor_complex32(self, device):
+        # verify that we can generate torch.complex32 tensor
+        t = make_tensor((1, 2, 3), dtype=torch.complex32, device=device)
+        self.assertEqual(t.dtype, torch.complex32)
 
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.

@@ -1,4 +1,3 @@
-import abc
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -14,6 +13,7 @@ from .sharding_spec import (
 from .sharding_plan import (
     ShardingPlan
 )
+from .replicated_tensor import ReplicatedTensor
 
 def _shard_tensor(
     tensor: torch.Tensor, sharding_spec: ShardingSpec, src_rank=0, process_group=None
@@ -127,6 +127,23 @@ def shard_parameter(
     setattr(module, param_name, st)
 
 
+def _replicate_tensor(tensor: torch.Tensor, process_group=None) -> ReplicatedTensor:
+    """
+    Given a :class:`torch.Tensor`, mark it as a ReplicatedTensor where all
+    ranks have the same value.
+
+    Args:
+        tensor (:class:`torch.Tensor`): the tensor to be marked as replicated.
+    Keyword args:
+        process_group (ProcessGroup, optional): The process group to replicate on.
+            If None, the default process group will be used.
+    Returns:
+        A :class:`ReplicatedTensor` from the given tensor.
+
+    """
+    return ReplicatedTensor(tensor, process_group=process_group)
+
+
 def _reshard_output(
         module: torch.nn.Module,
         resharding_spec: ShardingSpec) -> torch.nn.Module:
@@ -181,27 +198,11 @@ def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
     module.register_forward_hook(hook_func)
     return module
 
-class ShardedModuleSwapper(abc.ABC):
-    @abc.abstractmethod
-    def process(self, module: nn.Module) -> nn.Module:
-        """
-        Processes a module and if needed swaps it with a custom sharded
-        Implementation. Should return ``None`` if no swapping should be
-        performed.
 
-        The Sharder would produce ShardedTensors for the module based on
-        ShardingPlan, and then call the ShardedModuleSwapper. The passed
-        in module would consist of ShardedTensors and a common way to
-        perform module swapping would be to use the state_dict of the passed
-        in module and apply it to the new sharded module via its
-        load_state_dict method.
-        """
-        pass
 
 def shard_module(
     module: nn.Module,
     plan: ShardingPlan,
-    sharded_module_swapper: ShardedModuleSwapper = None,
     src_rank=0,
     process_group=None
 ):
@@ -222,8 +223,6 @@ def shard_module(
             each parameter.
 
     Keyword args:
-        sharded_module_swapper (:class:`torch.distributed._shard.ShardModuleSwapper`, optional):
-            Implementation of ShardedModuleSwapper for module swapping.
          src_rank (int, optional): The source rank which is used as the ground truth of
             the data for the module that would be sharded and scattered across the rest
             of the ranks.
@@ -231,16 +230,12 @@ def shard_module(
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
     """
-    if sharded_module_swapper is not None:
-        raise NotImplementedError("custom module swapping not implemented yet!")
-
     for mod_prefix, mod in module.named_modules():
         # memo is used to avoid duplicate params between modules, this logic
         # is mostly copied from the module._named_members(), with adaptions
         # to handle parameter sharding.
         memo = set()
-        # create a list from the dict keys, because we are mutating the
-        # parameters on the fly, we need to use a separate list instead.
+        # check if specified module parameters for sharding
         param_keys = list(mod._parameters.keys())
         for k in param_keys:
             v = mod._parameters[k]

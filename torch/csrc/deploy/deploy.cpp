@@ -217,6 +217,11 @@ using dlopen_t = void* (*)(const char*, int);
 // function.
 static dlopen_t find_real_dlopen() {
   void* libc = dlopen("libdl.so.2", RTLD_NOLOAD | RTLD_LAZY | RTLD_LOCAL);
+  // libdl is gone on some newer systems.
+  if (!libc) {
+    // libc.so won't open with dlopen because it's a linker script.
+    libc = dlopen("libc.so.6", RTLD_NOLOAD | RTLD_LAZY | RTLD_LOCAL);
+  }
   TORCH_INTERNAL_ASSERT(libc);
   auto dlopen_ = (dlopen_t)dlsym(libc, "dlopen");
   TORCH_INTERNAL_ASSERT(dlopen_);
@@ -296,8 +301,7 @@ int LoadBalancer::acquire() {
   size_t minusers = SIZE_MAX;
   int minIdx = 0;
   for (size_t i = 0; i < n_; ++i, ++last) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (last >= n_) {
+    if (last >= static_cast<int>(n_)) {
       last = 0;
     }
     uint64_t prev = 0;

@@ -79,6 +79,7 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   void handle(const Bool*) final;
   void handle(const Double*) final;
   void handle(const Int*) final;
+  void handle(const ComplexDouble*) final;
   void handle(const NamedScalar*) final;
 
   void handle(const UnaryOp*) final;
@@ -86,10 +87,12 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   void handle(const TernaryOp*) final;
   void handle(const ReductionOp*) final;
   void handle(const WelfordOp*) final;
+  void handle(const MmaOp*) final;
   void handle(const BroadcastOp*) final;
   void handle(const TransposeOp*) final;
   void handle(const ShiftOp*) final;
   void handle(const GatherOp*) final;
+  void handle(const ViewDtypeOp*) final;
   void handle(const ViewOp*) final;
 
   void handle(const kir::Predicate*) final;
@@ -101,9 +104,11 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   void handle(const kir::ForLoop*) final;
   void handle(const kir::IfThenElse*) final;
   void handle(const kir::Allocate*) final;
-  void handle(const kir::Sync*) final;
+  void handle(const kir::BlockSync*) final;
+  void handle(const kir::GridSync*) final;
   void handle(const kir::InitMagicZero*) final;
   void handle(const kir::UpdateMagicZero*) final;
+  void handle(const kir::AllocateFusedReduction*) final;
 
   // IR math printer overrides these to prevent them from printing, keep
   // override

@@ -42,21 +42,33 @@ GENERATED_CPP = [
     "autograd/generated/python_variable_methods.cpp",
 ]
 
+# This is duplicated in caffe2/CMakeLists.txt for now and not yet used in buck
+GENERATED_LAZY_TS_CPP = [
+    "lazy/generated/LazyNativeFunctions.cpp",
+    "lazy/generated/RegisterAutogradLazy.cpp",
+    "lazy/generated/RegisterLazy.cpp",
+]
+
 # NVFuser runtime library
 libtorch_nvfuser_runtime_sources = [
+    "torch/csrc/jit/codegen/cuda/runtime/array.cu",
     "torch/csrc/jit/codegen/cuda/runtime/bf16_support.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_sync_default.cu",
     "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
     "torch/csrc/jit/codegen/cuda/runtime/fp16_support.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/fused_reduction.cu",
     "torch/csrc/jit/codegen/cuda/runtime/grid_broadcast.cu",
     "torch/csrc/jit/codegen/cuda/runtime/grid_reduction.cu",
     "torch/csrc/jit/codegen/cuda/runtime/grid_sync.cu",
     "torch/csrc/jit/codegen/cuda/runtime/helpers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/index_utils.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/tensorcore.cu",
     "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/tuple.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/type_traits.cu",
     "torch/csrc/jit/codegen/cuda/runtime/welford.cu",
     "torch/csrc/jit/codegen/cuda/runtime/warp.cu",
     "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
@@ -240,6 +252,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/constant_propagation.cpp",
     "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
+    "torch/csrc/jit/passes/cuda_graph_fuser.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/eliminate_no_ops.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
@@ -293,6 +306,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/integer_value_refinement.cpp",
     "torch/csrc/jit/passes/replacement_of_old_operators.cpp",
     "torch/csrc/jit/passes/symbolic_shape_analysis.cpp",
+    "torch/csrc/jit/passes/symbolic_shape_cache.cpp",
     "torch/csrc/jit/passes/symbolic_shape_runtime_fusion.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
     "torch/csrc/jit/passes/update_differentiable_graph_requires_grad.cpp",
@@ -321,11 +335,14 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/runtime/interpreter/preprocess_graph.cpp",
     "torch/csrc/jit/runtime/interpreter.cpp",
     "torch/csrc/jit/runtime/logging.cpp",
+    "torch/csrc/jit/runtime/simple_graph_executor_impl.cpp",
     "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp",
     "torch/csrc/jit/runtime/profiling_record.cpp",
     "torch/csrc/jit/runtime/script_profile.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
     "torch/csrc/jit/runtime/symbolic_shape_registry.cpp",
+    "torch/csrc/jit/runtime/decomposition_registry.cpp",
+    "torch/csrc/jit/runtime/decomposition_registry_util.cpp",
     "torch/csrc/jit/runtime/symbolic_shape_registry_util.cpp",
     "torch/csrc/jit/runtime/jit_trace.cpp",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
@@ -404,6 +421,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/debug_util.cpp",
+    "torch/csrc/lazy/core/dynamic_ir.cpp",
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/helpers.cpp",
     "torch/csrc/lazy/core/ir.cpp",
@@ -434,6 +452,9 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/view_ops/unsqueeze.cpp",
     "torch/csrc/lazy/core/view_ops/select_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/view.cpp",
+    # We should better segment the sources, but for now there are actually dependencies
+    # from some core files on some of these ts_backend files
+    # so we continue to build these parts of ts_backend in all build configs
     "torch/csrc/lazy/ts_backend/config.cpp",
     "torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/cast.cpp",
@@ -442,6 +463,20 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
+]
+
+# We can't build all of the ts backend under certain build configurations, e.g. mobile,
+# since it depends on things like autograd, meta functions, which may be disabled
+lazy_tensor_ts_sources = [
+    "torch/csrc/lazy/ts_backend/ops/batch_norm_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ts_autograd_functions.cpp",
+    "torch/csrc/lazy/ts_backend/ts_backend_impl.cpp",
+    "torch/csrc/lazy/ts_backend/ts_lowering_context.cpp",
+    "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
+    "torch/csrc/lazy/ts_backend/ts_node_lowering.cpp",
+    "torch/csrc/lazy/ts_backend/tensor_aten_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ts_eager_fallback.cpp",
 ]
 
 lazy_tensor_core_python_sources = [
@@ -629,7 +664,18 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
 ]
 
 def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
-    return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
+    enable_flatbuffer = bool(native.read_config("fbcode", "caffe2_enable_flatbuffer", None))
+    flatbuffer_serializer_sources = [
+        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
+        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
+    ]
+    if enable_flatbuffer:
+        return (
+            libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources +
+            flatbuffer_serializer_sources
+        )
+    else:
+        return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
 
 libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
@@ -641,6 +687,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/compute_at.cpp",
     "torch/csrc/jit/codegen/cuda/compute_at_map.cpp",
     "torch/csrc/jit/codegen/cuda/codegen.cpp",
+    "torch/csrc/jit/codegen/cuda/contiguity.cpp",
     "torch/csrc/jit/codegen/cuda/dispatch.cpp",
     "torch/csrc/jit/codegen/cuda/expr_evaluator.cpp",
     "torch/csrc/jit/codegen/cuda/executor.cpp",
@@ -671,8 +718,10 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_allocation.cpp",
     "torch/csrc/jit/codegen/cuda/lower_double_buffer.cpp",
     "torch/csrc/jit/codegen/cuda/lower_expr_sort.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_fused_reduction.cpp",
     "torch/csrc/jit/codegen/cuda/lower_fusion_simplifier.cpp",
     "torch/csrc/jit/codegen/cuda/lower_index.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_index_hoist.cpp",
     "torch/csrc/jit/codegen/cuda/lower_insert_syncs.cpp",
     "torch/csrc/jit/codegen/cuda/lower_loops.cpp",
     "torch/csrc/jit/codegen/cuda/lower_magic_zero.cpp",
@@ -680,6 +729,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_predicate.cpp",
     "torch/csrc/jit/codegen/cuda/lower_replace_size.cpp",
     "torch/csrc/jit/codegen/cuda/lower_shift.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_sync_information.cpp",
     "torch/csrc/jit/codegen/cuda/lower_thread_predicate.cpp",
     "torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.cpp",
     "torch/csrc/jit/codegen/cuda/lower_trivial_reductions.cpp",
@@ -718,6 +768,8 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/transform_view.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/codegen/cuda/utils.cpp",
+    "torch/csrc/jit/codegen/cuda/mma_type.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/mma_utils.cpp",
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
@@ -984,6 +1036,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/ParallelNativeTBB.cpp",
     "aten/src/ATen/ParallelOpenMP.cpp",
     "aten/src/ATen/ParallelThreadPoolNative.cpp",
+    "aten/src/ATen/PythonTorchFunctionTLS.cpp",
     "aten/src/ATen/ScalarOps.cpp",
     "aten/src/ATen/SequenceNumber.cpp",
     "aten/src/ATen/SparseTensorImpl.cpp",
@@ -1182,6 +1235,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qreduction.cpp",
     "aten/src/ATen/native/quantized/cpu/qrelu.cpp",
     "aten/src/ATen/native/quantized/cpu/qsigmoid.cpp",
+    "aten/src/ATen/native/quantized/cpu/qsoftmax.cpp",
     "aten/src/ATen/native/quantized/cpu/qsort.cpp",
     "aten/src/ATen/native/quantized/cpu/qtanh.cpp",
     "aten/src/ATen/native/quantized/cpu/qthreshold.cpp",
@@ -1198,7 +1252,9 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/fake_quant_per_channel_affine.cpp",
     "aten/src/ATen/native/quantized/fake_quant_per_tensor_affine.cpp",
     "aten/src/ATen/native/quantized/library.cpp",
+    "aten/src/ATen/native/quantized/cpu/ruy_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/xnnpack_utils.cpp",
+    "aten/src/ATen/native/quantized/qlinear_unpack.cpp",
     "aten/src/ATen/quantized/QTensorImpl.cpp",
     "aten/src/ATen/quantized/Quantizer.cpp",
     "aten/src/ATen/native/Activation.cpp",
@@ -1218,7 +1274,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/CPUBlas.cpp",
     "aten/src/ATen/native/ChanelShuffle.cpp",
     "aten/src/ATen/native/Col2Im.cpp",
-    "aten/src/ATen/native/ConstantPadNd.cpp",
+    "aten/src/ATen/native/PadNd.cpp",
     "aten/src/ATen/native/Convolution.cpp",
     "aten/src/ATen/native/ConvolutionMM2d.cpp",
     "aten/src/ATen/native/ConvolutionMM3d.cpp",

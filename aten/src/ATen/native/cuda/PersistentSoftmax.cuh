@@ -126,7 +126,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                 if (!is_transformer_mask) {
                     idx += i*element_count;
                 }
-                if (mask[idx]) {
+                if (!mask[idx]) {
                     max_value[i] = (is_meaningful_max && max_value[i] > elements[i][it]) ? max_value[i] : elements[i][it];
                     is_meaningful_max = true;
                 }
@@ -160,7 +160,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                     idx += i*element_count;
                 }
 
-                if (mask[idx]) {
+                if (!mask[idx]) {
                     if (is_log_softmax) {
                         sum[i] += std::exp(elements[i][it] - max_value[i]);
                     } else {
@@ -188,7 +188,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                     if (!is_transformer_mask) {
                         idx += i*element_count;
                     }
-                    if (!mask[idx]) {
+                    if (mask[idx]) {
                         dst[i*element_count+it*WARP_SIZE] = 0;
                         continue;
                     }

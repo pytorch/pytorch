@@ -1,10 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/max_unpool2d_native.h>
+#include <ATen/ops/max_unpool2d_backward_native.h>
+#include <ATen/ops/max_unpool3d_native.h>
+#include <ATen/ops/max_unpool3d_backward_native.h>
+
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#endif
 
 namespace at {
 namespace native {

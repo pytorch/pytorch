@@ -482,6 +482,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
 
     The moving average min/max is computed as follows
 
@@ -518,6 +519,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         reduce_range=False,
         quant_min=None,
         quant_max=None,
+        eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
         self.averaging_constant = averaging_constant
@@ -527,6 +529,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             reduce_range=reduce_range,
             quant_min=quant_min,
             quant_max=quant_max,
+            eps=eps,
             **kwargs
         )
 
@@ -564,6 +567,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.ao.quantization.observer.MinMaxObserver`, with the difference
@@ -585,6 +589,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
+        eps=torch.finfo(torch.float32).eps,
     ) -> None:
         super(PerChannelMinMaxObserver, self).__init__(
             dtype=dtype,
@@ -593,6 +598,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
             quant_min=quant_min,
             quant_max=quant_max,
             factory_kwargs=factory_kwargs,
+            eps=eps,
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.ch_axis = ch_axis
@@ -746,6 +752,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.ao.quantization.observer.MovingAverageMinMaxObserver`, with the
@@ -765,6 +772,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         reduce_range=False,
         quant_min=None,
         quant_max=None,
+        eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
@@ -774,6 +782,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
             reduce_range=reduce_range,
             quant_min=quant_min,
             quant_max=quant_max,
+            eps=eps,
             **kwargs
         )
         self.averaging_constant = averaging_constant

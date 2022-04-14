@@ -1,4 +1,5 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -8,6 +9,18 @@
 #include <ATen/Dispatch.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cat_native.h>
+#include <ATen/ops/cat_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/narrow.h>
+#endif
 
 namespace at {
 namespace native {
@@ -140,19 +153,19 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
   // Next, let's initialize the size, stride arrays for the output Tensor.
   if (memory_format == c10::MemoryFormat::Contiguous) {
     for (int i = 0; i < nDims; ++i) {
-      outputParam.tensorSize[i] = at::native::size(out, i);
+      outputParam.tensorSize[i] = out.size(i);
       outputParam.tensorStride[i] = out.stride(i);
     }
   } else if (memory_format == c10::MemoryFormat::ChannelsLast || memory_format == c10::MemoryFormat::ChannelsLast3d) {
     // permute the semantics of dims from NCHW to NHWC so that the input
     // tensor is now contiguous
-    outputParam.tensorSize[0] = at::native::size(out, 0);
+    outputParam.tensorSize[0] = out.size(0);
     outputParam.tensorStride[0] = out.stride(0);
     for (int i = 1; i < nDims - 1; ++i) {
-      outputParam.tensorSize[i] = at::native::size(out, i + 1);
+      outputParam.tensorSize[i] = out.size(i + 1);
       outputParam.tensorStride[i] = out.stride(i + 1);
     }
-    outputParam.tensorSize[nDims - 1] = at::native::size(out, 1);
+    outputParam.tensorSize[nDims - 1] = out.size(1);
     outputParam.tensorStride[nDims - 1] = out.stride(1);
   } else {
     TORCH_CHECK(false, "unsupported memory format");
@@ -172,7 +185,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
       // There is a legacy case where a 1-D empty tensor can be concat with
       // high-dimensional tensor
       if (inputs[i+batchCounter].numel() > 0) {
-        dimSize = at::native::size(inputs[i+batchCounter], dimension);
+        dimSize = inputs[i+batchCounter].size(dimension);
       }
       catMetaData.input[batchCounter] = inputs[i+batchCounter].data_ptr<scalar_t>();
       catMetaData.offset[batchCounter] = offset;
@@ -276,7 +289,7 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
   // (i.e. other empty sizes are not skipped).
   // FIXME: warn if this is the case
   auto should_skip = [](const Tensor &t) {
-    return t.dim() == 1 && at::native::size(t, 0) == 0;
+    return t.dim() == 1 && t.size(0) == 0;
   };
 
   const Tensor *notSkippedTensor = NULL;  // non-owning reference
@@ -338,7 +351,7 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
       continue;
     }
     check_cat_shape_except_dim(*notSkippedTensor, tensor, dimension, i);
-    cat_dim_size += at::native::size(tensor, dimension);
+    cat_dim_size += tensor.size(dimension);
   }
 
   // Compute the size of the result
@@ -393,8 +406,8 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
       allContiguous &&
       all32BitIndexable &&
       allSameType) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-          at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+          kComplexHalf, kHalf, kBool, kBFloat16,
           out.scalar_type(), "cat_cuda", [&]() {
         parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE, 1>(out, inputs, dimension, nDims, memory_format);
       });
@@ -405,8 +418,8 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
       all32BitIndexable &&
       allSameType &&
       memory_format == c10::MemoryFormat::Contiguous) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-          at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+          kComplexHalf, kHalf, kBool, kBFloat16,
           out.scalar_type(), "cat_cuda", [&]() {
         parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(out, inputs, dimension, nDims, memory_format);
       });
@@ -415,7 +428,7 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
     for (int j = 0; j < inputs.size(); j++)
     {
       if (should_skip(inputs[j])) continue;
-      int64_t dimSize = at::native::size(inputs[j], dimension);
+      int64_t dimSize = inputs[j].size(dimension);
       Tensor nt = at::narrow(out, dimension, offset, dimSize);
       copy_(nt, inputs[j]);
       offset += dimSize;
