@@ -651,6 +651,45 @@ void spmm(
 #endif // !AT_USE_CUSPARSE_GENERIC_API()
 }
 
+void spmm_wrapper(
+    const at::sparse_csr::SparseCsrTensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+
+// Cusparse CSR SPMM, starting from cuda 11.6 update 1 (cusparse 11.7.2), has some functionality issue when sparse matrix A is being broadcasted,
+//   by setting both strides to 0 in cusparseCsrSetStridedBatch call.
+// We are using a temporary workaround here to do the batched SPMM on every single matrix separately.
+#if CUSPARSE_VERSION < 11702
+  return spmm(mat1, mat2, beta, alpha, result);
+#else
+  if (mat1.dim() == 2) {
+    return spmm(mat1, mat2, beta, alpha, result);
+  } else {
+    auto sparse_dim = mat1.dim();
+    TORCH_INTERNAL_ASSERT(sparse_dim > 2);
+
+    if (mat1.crow_indices().dim() >= 2 || mat1.values().dim() >= 2 ||
+        mat1.col_indices().dim() >= 2) {
+      // cuSPARSE ignores the strides and uses only the first batch, see #68711
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Support for batched CSR indices and values is not implemented.");
+    }
+
+    auto mat1_copy = mat1.clone();
+    static_cast<SparseCsrTensorImpl*>(mat1_copy.unsafeGetTensorImpl())->
+      set_sizes_contiguous(mat1_copy.sizes().slice(sparse_dim - 2));
+
+    int batch_count = at::native::cuda_int_cast(at::native::batchCount(mat1), "batch_count");
+    for (int i = 0; i < batch_count; i++) {
+      spmm(mat1_copy, mat2[i], beta, alpha, result[i]);
+    }
+  }
+#endif
+}
+
 void spgemm(
     const at::sparse_csr::SparseCsrTensor& A,
     const at::sparse_csr::SparseCsrTensor& B,
@@ -812,11 +851,11 @@ void addmm_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result) {
   if (mat1.is_sparse_csr() && mat2.layout() == kStrided && result.layout() == kStrided) {
-    return spmm(mat1, mat2, beta, alpha, result);
+    return spmm_wrapper(mat1, mat2, beta, alpha, result);
   }
   if (mat1.layout() == kStrided && mat2.is_sparse_csr() && result.layout() == kStrided) {
     // TODO: We can use cuSPARSE's transposition flags once we have CSC support.
-    return spmm(mat2.transpose(0, 1), mat1.transpose(0, 1), beta, alpha, result.transpose(0, 1));
+    return spmm_wrapper(mat2.transpose(0, 1), mat1.transpose(0, 1), beta, alpha, result.transpose(0, 1));
   }
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
     return spgemm(mat1, mat2, beta, alpha, result);
