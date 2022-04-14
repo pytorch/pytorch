@@ -12400,7 +12400,7 @@ op_db: List[OpInfo] = [
         ],
         skips=(
             # Resized a non-empty tensor but did not warn about it.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='cpu'),
         ),
     ),
     UnaryUfuncInfo(
