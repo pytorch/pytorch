@@ -12394,7 +12394,7 @@ def add_test(test, decorator=None):
             add(cuda_test_name + '_fp32', with_tf32_off)
 
             def with_tf32_on(self, test=test, kwargs=kwargs):
-                with tf32_on(self, test.tf32_precision):
+                with tf32_on(self, test.tf32_precision, test.tf32_rtol):
                     test.test_cuda(self, dtype=torch.float, **kwargs)
 
             add(cuda_test_name + '_tf32', with_tf32_on)
@@ -13962,7 +13962,11 @@ class TestNNDeviceType(NNTestCase):
             if mode == 'same':
                 actual = actual[:5, :5, :10]
 
-            self.assertEqual(actual, expected, rtol=2e-5, atol=5e-6)
+            atol = 0.05 if ("cuda" in device and
+                            dtype == torch.float and
+                            tf32_is_not_fp32() and
+                            torch.backends.matmul.allow_tf32) else 5e-6
+            self.assertEqual(actual, expected, rtol=2e-5, atol=atol)
 
         # Global dtype for this test suite is torch.double
         # This leads to change in type-promotion

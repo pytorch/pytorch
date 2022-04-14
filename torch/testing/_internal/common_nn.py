@@ -2207,6 +2207,7 @@ new_module_tests = [
         cudnn=True,
         with_tf32=True,
         tf32_precision=0.005,
+        tf32_rtol=0.0008,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -2235,6 +2236,7 @@ new_module_tests = [
         check_with_long_tensor=True,
         with_tf32=True,
         tf32_precision=0.005,
+        tf32_rtol=0.08,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -2247,6 +2249,7 @@ new_module_tests = [
         check_with_long_tensor=True,
         with_tf32=True,
         tf32_precision=0.005,
+        tf32_rtol=0.009,
     ),
     dict(
         fullname='ConvTranspose2d_groups',
@@ -4185,6 +4188,7 @@ new_module_tests = [
         desc='relu_activation',
         with_tf32=True,
         tf32_precision=0.1,
+        tf32_rtol=0.006,
         # TODO(#50743): figure out the error
         # RuntimeError: The size of tensor a (6) must match the size of tensor b (4)
         # at non-singleton dimension 2
@@ -4244,6 +4248,7 @@ new_module_tests = [
         desc='multilayer_coder',
         with_tf32=True,
         tf32_precision=0.01,
+        tf32_rtol=0.004,
     ),
     dict(
         module_name='Linear',
@@ -6125,6 +6130,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.skip_half = kwargs.get('skip_half', False)
         self.with_tf32 = kwargs.get('with_tf32', False)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
+        self.tf32_rtol = kwargs.get('tf32_rtol', 0.)
         self.test_cpu = kwargs.get('test_cpu', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)

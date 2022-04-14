@@ -62,6 +62,8 @@ def tf32_is_not_fp32():
     return True
 
 
+# Warning: tf32_off should not be nested inside a tf32_on context, because it doesn't
+# save and restore self.precision or self.rtol_maybe_tf32.
 @contextlib.contextmanager
 def tf32_off():
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
@@ -121,13 +123,13 @@ def tf32_on(self, tf32_precision=1e-5, tf32_rtol=None):
 # if device is specified, it will check if device is cuda
 # if dtype is specified, it will check if dtype is float32 or complex64
 # tf32 and fp32 are different only when all the three checks pass
-def tf32_on_and_off(tf32_precision=1e-5):
+def tf32_on_and_off(tf32_precision=1e-5, tf32_rtol=None):
     def with_tf32_disabled(self, function_call):
         with tf32_off():
             function_call()
 
     def with_tf32_enabled(self, function_call):
-        with tf32_on(self, tf32_precision):
+        with tf32_on(self, tf32_precision, tf32_rtol=tf32_rtol):
             function_call()
 
     def wrapper(f):
