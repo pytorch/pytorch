@@ -352,13 +352,21 @@ If this causes problems in your program, consider upstreaming the out-of-place o
         functional_call_str = \
             f"tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});"
 
-    mutable_input_post_processing = '\n'.join([
-        f"""
+    if f.func.is_out_fn():
+        mutable_input_post_processing = '\n'.join([
+            f"""
+      auto {a.name}_functional = at::functionalization::impl::unsafeGetFunctionalWrapper({a.name});
+      {a.name}_functional->replace_({'std::get<' + str(i) + '>(tmp_output)' if len(f.func.returns) > 1 else 'tmp_output'});
+      {a.name}_functional->commit_update();"""
+            for (i, a) in enumerate(f.func.arguments.out) if a.annotation and a.annotation.is_write and a.type.is_tensor_like()])
+    else:
+        mutable_input_post_processing = '\n'.join([
+            f"""
       auto {a.name}_functional = at::functionalization::impl::unsafeGetFunctionalWrapper({a.name});
       {a.name}_functional->replace_(tmp_output);
       {a.name}_functional->commit_update();"""
-        for a in f.func.arguments.flat_non_out
-        if a.annotation and a.annotation.is_write and a.type.is_tensor_like()])
+            for a in f.func.arguments.flat_all
+            if a.annotation and a.annotation.is_write and a.type.is_tensor_like()])
 
     return f"""
     {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{

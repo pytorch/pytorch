@@ -168,7 +168,7 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
 
   /*
     Test guard behaves correctly at runtime and symbolic shapes are computed
-    correctly. As we don't have have TE Kernel support for dynamic shapes we're
+    correctly. As we don't have TE Kernel support for dynamic shapes we're
     going to return all of the computed runtime symbolic dimensions as outputs
     of the graph on guard success, and return None on guard failure
   */
