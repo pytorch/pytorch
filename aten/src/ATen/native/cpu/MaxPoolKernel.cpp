@@ -69,8 +69,17 @@ void cpu_max_pool(
           // microsoft compilers do not have an overload for fpclassify that accepts an integral
           // type: https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/fpclassify?view=msvc-170
           // resulting in failures in CIs that use MS compilers when compiling std::isnan(integral variable)
-          // So we use false directly here instead of calling std::isnan when val is an integer
-          if ((val > maxval) || (std::is_integral<accscalar_t>::value ? false : std::isnan(val))) {
+          // To remedy that, we neglect compilation of std::isnan when accscalar_t is an integral type
+          // TODO: change c10::guts::if_constexpr to if constexpr when C++17 is available
+          auto maybe_eval_rhs = [](accscalar_t val) {
+            bool res{false};
+            c10::guts::if_constexpr<std::is_integral<accscalar_t>::value> (
+              [&res] () { res = false; }, // if integral type
+              [&res, val] () { res = std::isnan(val); }  // if not integral type
+            );
+            return res;
+          };
+          if ((val > maxval) || maybe_eval_rhs(val)) {
             maxval = val;
             maxindex = index;
           }
@@ -190,12 +199,20 @@ void cpu_max_pool_channels_last(
             scalar_t val = in[d2];
             int64_t maxindex = ind[d2];
             scalar_t maxval = out[d2];
-
             // microsoft compilers do not have an overload for fpclassify that accepts an integral
             // type: https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/fpclassify?view=msvc-170
             // resulting in failures in CIs that use MS compilers when compiling std::isnan(integral variable)
-            // So we use false directly here instead of calling std::isnan when val is an integer
-            bool mask = (val > maxval) || (std::is_integral<scalar_t>::value ? false : std::isnan(val));
+            // To remedy that, we neglect compilation of std::isnan when accscalar_t is an integral type
+            // TODO: change c10::guts::if_constexpr to if constexpr when C++17 is available
+            auto maybe_eval_rhs = [](scalar_t val) {
+              bool res{false};
+              c10::guts::if_constexpr<std::is_integral<scalar_t>::value> (
+                [&res] () { res = false; }, // if integral type
+                [&res, val] () { res = std::isnan(val); }  // if not integral type
+              );
+              return res;
+            };
+            bool mask = (val > maxval) || maybe_eval_rhs(val);
             out[d2] = mask ? val : maxval;
             ind[d2] = mask ? index : maxindex;
           }
