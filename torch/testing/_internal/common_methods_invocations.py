@@ -11570,6 +11570,12 @@ op_db: List[OpInfo] = [
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         sample_inputs_func=sample_inputs_binary_cross_entropy_with_logits,
         skips=(
+            # RuntimeError: expected int at position 0, but got: Tensor
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness",
+            ),
             # The Weight tensor requires_grad = False
             DecorateInfo(
                 unittest.skip("Skipped!"),
