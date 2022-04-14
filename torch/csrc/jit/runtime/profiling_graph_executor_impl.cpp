@@ -456,7 +456,9 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
-    GRAPH_DEBUG("After customPostPasses, before RemoveTensorTypeSpecializations \n", *graph);
+    GRAPH_DEBUG(
+        "After customPostPasses, before RemoveTensorTypeSpecializations \n",
+        *graph);
     RemoveTensorTypeSpecializations(graph);
     GRAPH_DEBUG("After RemoveTensorTypeSpecializations\n", *graph);
   }

@@ -176,6 +176,9 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
   value_ = other;
+  // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
+  // We need to propagate that metadata mutation to the wrapper (new size).
+  set_sizes_and_strides(value_.sizes(), value_.strides());
 }
 
 

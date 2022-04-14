@@ -113,10 +113,10 @@ $4 = torch._ops.aten.mul.Tensor($3, $3)""")
 
     def test_simple_out(self):
         def f(x):
-            # simple test: 1 view op, 1 inplace op
             tmp = torch.ones(4, 2)
             y = x.view(4, 2)
-            z = torch.empty(4, 2)
+            # the out= tensor will get resized, since it has size=0 to start.
+            z = torch.empty(())
             torch.add(y, tmp, out=z)
             w = z * z
             return w
