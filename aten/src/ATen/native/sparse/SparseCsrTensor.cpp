@@ -41,8 +41,8 @@ using namespace at::sparse_csr;
 namespace {
 } // end anonymous namespace
 
-void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, c10::optional<Layout> layout_) {
-  Layout layout = layout_.value_or(kDummyLayout);
+void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, c10::Layout layout) {
+
   const std::string layout_name = at::sparse_csr::layoutToString(layout, /*upper=*/ true);
   const std::string compressed_indices_name = compressedIndicesName(layout);
   const std::string plain_indices_name = plainIndicesName(layout);
@@ -193,17 +193,21 @@ void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, c
       ") must be CPU or CUDA");
 }
 
+void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, c10::optional<Layout> layout_) {
+   _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout_.value_or(kDummyLayout));
+}
+
 void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
-  _validate_sparse_compressed_tensor_args(crow_indices, col_indices, values, size, kSparseCsr);
+  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseCsr);
 }
 void _validate_sparse_csc_tensor_args(const Tensor& ccol_indices, const Tensor& row_indices, const Tensor& values, IntArrayRef size) {
-  _validate_sparse_compressed_tensor_args(ccol_indices, row_indices, values, size, kSparseCsc);
+  _validate_sparse_compressed_tensor_args_worker(ccol_indices, row_indices, values, size, kSparseCsc);
 }
 void _validate_sparse_bsr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
-  _validate_sparse_compressed_tensor_args(crow_indices, col_indices, values, size, kSparseBsr);
+  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseBsr);
 }
 void _validate_sparse_bsc_tensor_args(const Tensor& ccol_indices, const Tensor& row_indices, const Tensor& values, IntArrayRef size) {
-  _validate_sparse_compressed_tensor_args(ccol_indices, row_indices, values, size, kSparseBsc);
+  _validate_sparse_compressed_tensor_args_worker(ccol_indices, row_indices, values, size, kSparseBsc);
 }
 
 // Construction of CSR tensors.
