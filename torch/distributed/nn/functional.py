@@ -286,16 +286,16 @@ class _AllGather(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        if dist.get_backend(group=ctx.group) is dist.Backend.GLOO:
-            # As gloo backend doesn't support ReduceScatter, we use AlltoAll with .sum()
+        if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
+            rank = dist.get_rank()
+            gx = torch.empty_like(grad_outputs[rank])
+            _Reduce_Scatter.apply(dist.ReduceOp.SUM, ctx.group, gx, *grad_outputs)
+        else:
+            # As many backends doesn't support ReduceScatter, we use AlltoAll with .sum()
             # to emulate the ReduceScatter behavior
             tensor_list = [torch.empty_like(tensor) for tensor in grad_outputs]
             gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
             gx = torch.sum(torch.stack(gxs), dim=0)
-        else:
-            rank = dist.get_rank()
-            gx = torch.empty_like(grad_outputs[rank])
-            _Reduce_Scatter.apply(dist.ReduceOp.SUM, ctx.group, gx, *grad_outputs)
         return (None, gx)
 
 
