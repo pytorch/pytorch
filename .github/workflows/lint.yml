@@ -60,7 +60,7 @@ jobs:
           architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/please-ignore
         with:
           submodules: false
       - name: Clean PyTorch checkout
@@ -107,7 +107,7 @@ jobs:
           architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/please-ignore
         with:
           submodules: false
       - name: Install requirements
@@ -150,7 +150,7 @@ jobs:
         uses: actions/setup-node@v2
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/please-ignore
         with:
           submodules: false
       - name: Install markdown-toc
@@ -192,7 +192,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/please-ignore
         with:
           submodules: false
           needs-history-and-master: true
@@ -229,7 +229,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/please-ignore
         with:
           submodules: false
       - name: Install torch

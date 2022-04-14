@@ -18,7 +18,7 @@ jobs:
         run: echo "${TRIGGERING_WORKFLOW}"
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/please-ignore
 
       - run: |
           pip3 install requests==2.26

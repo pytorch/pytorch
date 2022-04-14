@@ -6,8 +6,8 @@ on:
       # Trigger on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      - 'ciflow/trunk/*'
-      - 'ciflow/android/*'
+      - "ciflow/trunk/*"
+      - "ciflow/android/*"
     branches:
       - master
       - main
@@ -23,7 +23,6 @@ defaults:
     shell: bash -e -l {0}
 
 jobs:
-
   build-and-test:
     runs-on: ubuntu-latest
     env:
@@ -52,7 +51,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/please-ignore
 
       - name: Build PyTorch Android
         run: |
