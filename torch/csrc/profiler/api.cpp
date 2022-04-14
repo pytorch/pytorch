@@ -40,29 +40,22 @@ ProfilerConfig ProfilerConfig::fromIValue(
       ivalues.get(ProfilerIValueIdx::PROFILE_MEMORY).toBool());
 }
 
-namespace {
-ProfilerThreadLocalStateBase* getProfilerTLSState() {
-  return static_cast<ProfilerThreadLocalStateBase*>(
-    c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
-}
-} // namespace
-
 bool profilerEnabled() {
-  auto state_ptr = getProfilerTLSState();
+  auto state_ptr = ProfilerThreadLocalStateBase::getTLS();
   return state_ptr &&
       state_ptr->config().state !=
       torch::profiler::impl::ProfilerState::Disabled;
 }
 
 TORCH_API ActiveProfilerType profilerType() {
-  auto state_ptr = getProfilerTLSState();
+  auto state_ptr = ProfilerThreadLocalStateBase::getTLS();
   return state_ptr == nullptr
       ? ActiveProfilerType::NONE
       : state_ptr->profilerType();
 }
 
 torch::profiler::impl::ProfilerConfig getProfilerConfig() {
-  auto state_ptr = getProfilerTLSState();
+  auto state_ptr = ProfilerThreadLocalStateBase::getTLS();
   TORCH_CHECK(
       state_ptr,
       "Tried to access profiler config, but profiler is not enabled!");

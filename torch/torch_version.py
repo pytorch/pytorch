@@ -1,12 +1,40 @@
-from typing import Iterable, Union
-
-from pkg_resources import packaging  # type: ignore[attr-defined]
-
-Version = packaging.version.Version
-InvalidVersion = packaging.version.InvalidVersion
-
+from typing import Any, Iterable
 from .version import __version__ as internal_version
 
+class _LazyImport:
+    """Wraps around classes lazy imported from packaging.version
+    Output of the function v in following snippets are identical:
+       from packaging.version import Version
+       def v():
+           return Version('1.2.3')
+    and
+       Version = _LazyImport('Version')
+       def v():
+           return Version('1.2.3')
+    The difference here is that in later example imports
+    do not happen until v is called
+    """
+    def __init__(self, cls_name: str) -> None:
+        self._cls_name = cls_name
+
+    def get_cls(self):
+        try:
+            import packaging.version  # type: ignore[import]
+        except ImportError:
+            # If packaging isn't installed, try and use the vendored copy
+            # in pkg_resources
+            from pkg_resources import packaging  # type: ignore[attr-defined]
+        return getattr(packaging.version, self._cls_name)
+
+    def __call__(self, *args, **kwargs):
+        return self.get_cls()(*args, **kwargs)
+
+    def __instancecheck__(self, obj):
+        return isinstance(obj, self.get_cls())
+
+
+Version = _LazyImport("Version")
+InvalidVersion = _LazyImport("InvalidVersion")
 
 class TorchVersion(str):
     """A string with magic powers to compare to both Version and iterables!
@@ -26,8 +54,8 @@ class TorchVersion(str):
             TorchVersion('1.10.0a') > '1.2.1'
     """
     # fully qualified type names here to appease mypy
-    def _convert_to_version(self, inp: Union[packaging.version.Version, str, Iterable]) -> packaging.version.Version:
-        if isinstance(inp, Version):
+    def _convert_to_version(self, inp: Any) -> Any:
+        if isinstance(inp, Version.get_cls()):
             return inp
         elif isinstance(inp, str):
             return Version(inp)
@@ -42,44 +70,18 @@ class TorchVersion(str):
         else:
             raise InvalidVersion(inp)
 
-    def __gt__(self, cmp):
+    def _cmp_wrapper(self, cmp: Any, method: str) -> bool:
         try:
-            return Version(self).__gt__(self._convert_to_version(cmp))
-        except InvalidVersion:
+            return getattr(Version(self), method)(self._convert_to_version(cmp))
+        except BaseException as e:
+            if not isinstance(e, InvalidVersion.get_cls()):
+                raise
             # Fall back to regular string comparison if dealing with an invalid
             # version like 'parrot'
-            return super().__gt__(cmp)
+            return getattr(super(), method)(cmp)
 
-    def __lt__(self, cmp):
-        try:
-            return Version(self).__lt__(self._convert_to_version(cmp))
-        except InvalidVersion:
-            # Fall back to regular string comparison if dealing with an invalid
-            # version like 'parrot'
-            return super().__lt__(cmp)
 
-    def __eq__(self, cmp):
-        try:
-            return Version(self).__eq__(self._convert_to_version(cmp))
-        except InvalidVersion:
-            # Fall back to regular string comparison if dealing with an invalid
-            # version like 'parrot'
-            return super().__eq__(cmp)
-
-    def __ge__(self, cmp):
-        try:
-            return Version(self).__ge__(self._convert_to_version(cmp))
-        except InvalidVersion:
-            # Fall back to regular string comparison if dealing with an invalid
-            # version like 'parrot'
-            return super().__ge__(cmp)
-
-    def __le__(self, cmp):
-        try:
-            return Version(self).__le__(self._convert_to_version(cmp))
-        except InvalidVersion:
-            # Fall back to regular string comparison if dealing with an invalid
-            # version like 'parrot'
-            return super().__le__(cmp)
+for cmp_method in ["__gt__", "__lt__", "__eq__", "__ge__", "__le__"]:
+    setattr(TorchVersion, cmp_method, lambda x, y, method=cmp_method: x._cmp_wrapper(y, method))
 
 __version__ = TorchVersion(internal_version)

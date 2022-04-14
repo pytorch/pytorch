@@ -23,7 +23,6 @@ WORKFLOWS_TO_CHECK = [
     # "scheduled-ci",
     # "debuggable-scheduled-ci",
     # "slow-gradcheck-scheduled-ci",
-    # "ecr_gc",
     # "promote",
 ]
 

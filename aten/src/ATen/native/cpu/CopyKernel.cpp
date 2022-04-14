@@ -72,7 +72,7 @@ void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires
   }
 }
 
-void copy_kernel(TensorIterator& iter, bool non_blocking) {
+void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
   ScalarType dtype = iter.dtype(0);
   const bool requires_conj = (
       isComplexType(dtype) && (iter.tensor_base(0).is_conj() != iter.tensor_base(1).is_conj()));
@@ -81,9 +81,9 @@ void copy_kernel(TensorIterator& iter, bool non_blocking) {
   if (dtype == iter.dtype(1)) {
     copy_same_dtype(iter, requires_conj, requires_neg);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
       using dest_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
         // Note (@zasdfgbnm):
         //
         // The code below can not be simplified as

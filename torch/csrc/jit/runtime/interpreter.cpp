@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/instruction.h>
@@ -174,7 +175,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void callFunction(
       Function& f,
       Stack& stack,
-      size_t bailOut = GraphExecutor::getDefaultNumBailOuts(),
+      c10::optional<size_t> bailOut = c10::nullopt,
       bool next = true) {
     bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
       enterFrame(code, stack.size() - code.num_inputs());
@@ -634,16 +635,88 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             isinstance(stack, types);
           }
             INST_NEXT;
+          case INST(TUPLE_INDEX): {
+            INST_GUARD;
+            tupleIndex(stack);
+          }
+            INST_NEXT;
+          case INST(RAISE_EXCEPTION): {
+            INST_GUARD;
+            raiseExceptionWithMessage(stack);
+          }
+            INST_NEXT;
+          case INST(UNCHECKED_CAST): {
+            INST_GUARD;
+            noop(stack);
+          }
+            INST_NEXT;
+          case INST(__IS__): {
+            INST_GUARD;
+            is(stack);
+          }
+            INST_NEXT;
+          case INST(UN_INITIALIZED): {
+            INST_GUARD;
+            unInitialized(stack);
+          }
+            INST_NEXT;
+          case INST(__ISNOT__): {
+            INST_GUARD;
+            isNot(stack);
+          }
+            INST_NEXT;
+          case INST(FORMAT): {
+            INST_GUARD;
+            format(stack, inst.X);
+          }
+            INST_NEXT;
+          case INST(DEVICE): {
+            INST_GUARD;
+            device(stack);
+          }
+            INST_NEXT;
+          case INST(DTYPE): {
+            INST_GUARD;
+            dtype(stack);
+          }
+            INST_NEXT;
+          case INST(DIM): {
+            INST_GUARD;
+            dim(stack);
+          }
+            INST_NEXT;
+          case INST(__NOT__): {
+            INST_GUARD;
+            _not(stack);
+          }
+            INST_NEXT;
+          case INST(DICT_INDEX): {
+            INST_GUARD;
+            dictIndex(stack);
+          }
+            INST_NEXT;
+          case INST(TO_LIST): {
+            INST_GUARD;
+            toList(stack);
+          }
+            INST_NEXT;
+          case INST(NUM_TO_TENSOR): {
+            INST_GUARD;
+            numToTensorScalar(stack);
+          }
+            INST_NEXT;
+          case INST(IS_CUDA): {
+            INST_GUARD;
+            isCuda(stack);
+          }
+            INST_NEXT;
           case INST(FORK): {
             INST_GUARD;
             // Move inputs to a separate stack
             auto& forked_fn =
                 toGraphFunction(*frame.function->function_table_[inst.X]);
             InterpreterState forked_interpreter(
-                forked_fn.get_executor()
-                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code,
-                taskLauncher_);
+                forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
@@ -714,10 +787,19 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         }
         throw;
       }
-      bool is_jit_exception = dynamic_cast<JITException*>(&e);
+      auto* jit_exception = dynamic_cast<JITException*>(&e);
       // Janky af.  See https://github.com/pytorch/pytorch/issues/54612
       auto* not_implemented_error = dynamic_cast<c10::NotImplementedError*>(&e);
-      handleError(ExceptionMessage(e), is_jit_exception, not_implemented_error);
+
+      c10::optional<std::string> python_class_name;
+      if (jit_exception) {
+        python_class_name = jit_exception->getPythonClassName();
+      }
+      handleError(
+          ExceptionMessage(e),
+          (bool)jit_exception,
+          not_implemented_error,
+          python_class_name);
       return false;
     }
   }
@@ -736,15 +818,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void handleError(
       const ExceptionMessage& msg,
       bool is_jit_exception,
-      c10::NotImplementedError* not_implemented_error) {
+      c10::NotImplementedError* not_implemented_error,
+      c10::optional<std::string> python_class_name) {
     std::ostringstream ss;
+    std::string class_name =
+        python_class_name ? *python_class_name : "RuntimeError";
     ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
-    ss << "RuntimeError: " << msg << "\n";
+    ss << class_name << ": " << msg << "\n";
     if (future_) {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
-      throw JITException(ss.str());
+      throw JITException(ss.str(), python_class_name);
     } else if (not_implemented_error) {
       throw c10::NotImplementedError(
           ss.str(),
@@ -971,12 +1056,14 @@ MobileCode::MobileCode(
     std::string function_name,
     bool emit_default_input_instructions,
     bool support_default_args_before_out,
+    bool emit_promoted_ops,
     size_t remaining_bailout_depth)
     : Code(new interpreter::MobileCodeImpl(
           graph,
           std::move(function_name),
           emit_default_input_instructions,
           support_default_args_before_out,
+          emit_promoted_ops,
           remaining_bailout_depth)) {}
 
 MobileCode::~MobileCode() = default;

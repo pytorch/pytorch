@@ -31,7 +31,8 @@ enum class C10_API_ENUM ProfilerState {
 enum class C10_API_ENUM ActiveProfilerType {
   NONE = 0,
   LEGACY,
-  KINETO
+  KINETO,
+  NVTX
 };
 
 struct TORCH_API ProfilerConfig {
@@ -69,6 +70,11 @@ struct TORCH_API ProfilerThreadLocalStateBase
   explicit ProfilerThreadLocalStateBase(const ProfilerConfig& config)
       : c10::MemoryReportingInfoBase(), config_(config) {}
   ~ProfilerThreadLocalStateBase() override = default;
+
+  static ProfilerThreadLocalStateBase* getTLS() {
+    return static_cast<ProfilerThreadLocalStateBase*>(
+        c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
+  }
 
   const ProfilerConfig& config() const {
     return config_;

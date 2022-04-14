@@ -112,7 +112,7 @@ def default_collate(batch):
             >>> default_collate(['a', 'b', 'c'])
             ['a', 'b', 'c']
             >>> # Example with `Map` inside the batch:
-            >>> default_collate([{'A': 0, 'B': 1}, {'A': 100, 'B': 100}]
+            >>> default_collate([{'A': 0, 'B': 1}, {'A': 100, 'B': 100}])
             {'A': tensor([  0, 100]), 'B': tensor([  1, 100])}
             >>> # Example with `NamedTuple` inside the batch:
             >>> Point = namedtuple('Point', ['x', 'y'])
@@ -134,7 +134,7 @@ def default_collate(batch):
             # shared memory tensor to avoid an extra copy
             numel = sum(x.numel() for x in batch)
             storage = elem.storage()._new_shared(numel)
-            out = elem.new(storage)
+            out = elem.new(storage).resize_(len(batch), *list(elem.size()))
         return torch.stack(batch, 0, out=out)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':

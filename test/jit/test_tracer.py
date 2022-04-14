@@ -377,6 +377,17 @@ class TestTracer(JitTestCase):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def test_trace_numel(self):
+        def fn(x):
+            return x.numel()
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(4, 5, 6)
+
+        traced_fn = torch.jit.trace(fn, x)
+        self.assertEqual(traced_fn(y), fn(y))
+        self.assertEqual(traced_fn(x), fn(x))
+
     def do_trace_arange(self, requires_grad):
         def arange(x):
             return torch.arange(x.shape[0])
@@ -1118,7 +1129,7 @@ class TestTracer(JitTestCase):
                 return torch.matmul(x, w).detach()
 
         torch.onnx.export_to_pretty_string(
-            Mod(), (torch.rand(3, 4), torch.rand(4, 5)), None)
+            Mod(), (torch.rand(3, 4), torch.rand(4, 5)))
 
     def test_trace_slice_full_dim(self):
         def foo(x):
