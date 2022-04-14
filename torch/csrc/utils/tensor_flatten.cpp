@@ -7,6 +7,7 @@ namespace torch { namespace utils {
 
 using namespace at;
 
+
 std::vector<TensorGroup> take_tensors(
     TensorList tensors,
     size_t size_limit,
@@ -18,7 +19,7 @@ std::vector<TensorGroup> take_tensors(
   size_t cur_group_size = 0;
 
   for (const auto & tensor : tensors) {
-    size_t tensor_size;
+    size_t tensor_size = 0;
     if (tensor.is_sparse()) {
       const auto& indices = tensor._indices();
       const auto& values = tensor._values();
@@ -28,7 +29,7 @@ std::vector<TensorGroup> take_tensors(
       tensor_size = tensor.numel() * tensor.element_size();
     }
 
-    auto& type_group = groups[tensor.type().id()];
+    auto& type_group = groups[type_id(tensor)];
     type_group.tensors.push_back(tensor);
 
     if (fine_grained) {
@@ -54,7 +55,7 @@ std::vector<TensorGroup> take_tensors(
   // End case. Look for any remaining groups and return them.
   for (auto& entry : groups) {
     auto& group = entry.second;
-    if (!fine_grained && group.size == 0) {
+    if (group.tensors.empty()) {
       continue;
     }
     results.emplace_back(std::move(group));
@@ -64,17 +65,17 @@ std::vector<TensorGroup> take_tensors(
 
 void reorder_tensors_like(std::vector<Tensor>& tensors, TensorList order) {
   AT_ASSERT(tensors.size() == order.size());
-  std::unordered_map<at::DeprecatedTypeProperties*, std::vector<size_t>> type_indices;
+  std::unordered_map<size_t, std::vector<size_t>> type_id_to_indices;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
-    type_indices[&tensors[i].type()].push_back(i);
+    type_id_to_indices[type_id(tensors[i])].push_back(i);
 
-  std::unordered_map<at::DeprecatedTypeProperties*, size_t> type_used;
+  std::unordered_map<size_t, size_t> type_id_to_type_used;
   std::vector<Tensor> ordered_tensors;
   ordered_tensors.reserve(tensors.size());
   for (auto & tmpl_tensor : order) {
-    auto * type = &tmpl_tensor.type();
-    auto & indices = type_indices[type];
-    auto & used = type_used[type];
+    size_t tmpl_type_id = type_id(tmpl_tensor);
+    auto & indices = type_id_to_indices[tmpl_type_id];
+    auto & used = type_id_to_type_used[tmpl_type_id];
     ordered_tensors.push_back(tensors[indices[used++]]);
   }
   std::swap(tensors, ordered_tensors);
@@ -93,8 +94,8 @@ at::Tensor get_values(const at::Tensor& t) {
 }
 
 std::pair<at::Tensor, at::Tensor> flatten_sparse_tensors(at::TensorList tensors) {
-  auto flat_indices = flatten_dense_tensors(fmap(tensors, &get_indices));
-  auto flat_values = flatten_dense_tensors(fmap(tensors, &get_values));
+  auto flat_indices = utils::flatten_dense_tensors(fmap(tensors, &get_indices));
+  auto flat_values = utils::flatten_dense_tensors(fmap(tensors, &get_values));
   return std::make_pair(flat_indices, flat_values);
 }
 
@@ -103,8 +104,8 @@ std::vector<at::Tensor> unflatten_sparse_tensors(
         at::TensorList tensors) {
   if (tensors.size() == 0) return {};
 
-  auto indices = unflatten_dense_tensors(flat_indices, fmap(tensors, &get_indices));
-  auto values = unflatten_dense_tensors(flat_values, fmap(tensors, &get_values));
+  auto indices = utils::unflatten_dense_tensors(flat_indices, fmap(tensors, &get_indices));
+  auto values = utils::unflatten_dense_tensors(flat_values, fmap(tensors, &get_values));
 
   std::vector<at::Tensor> outputs;
   outputs.reserve(tensors.size());

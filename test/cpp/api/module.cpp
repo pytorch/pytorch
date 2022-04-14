@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -35,12 +36,14 @@ TEST_F(ModuleTest, ZeroGrad) {
   auto loss = module(weight).sum();
   loss.backward();
   for (auto& parameter : module->parameters()) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto grad = parameter.grad();
     ASSERT_TRUE(grad.defined());
     ASSERT_NE(grad.sum().item<float>(), 0);
   }
   module->zero_grad();
   for (auto& parameter : module->parameters()) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto grad = parameter.grad();
     ASSERT_TRUE(grad.defined());
     ASSERT_EQ(grad.sum().item<float>(), 0);
@@ -69,6 +72,11 @@ TEST_F(ModuleTest, ZeroGradWithUndefined) {
   ASSERT_FALSE(module.y.grad().defined());
 
   ASSERT_EQ(module.x.grad().sum().item<float>(), 0);
+
+  module.zero_grad(true); // set_to_none = true
+
+  ASSERT_FALSE(module.x.grad().defined());
+  ASSERT_FALSE(module.y.grad().defined());
 }
 
 TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {
@@ -148,8 +156,7 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
     ASSERT_EQ(model.parameters().size(), 0);
   }
   {
-    std::stringstream buffer;
-    CerrRedirect cerr_redirect(buffer.rdbuf());
+    WarningCapture warnings;
 
     TestModel model;
     model.register_parameter("undefined_tensor", torch::Tensor());
@@ -157,7 +164,7 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
 
     ASSERT_EQ(
       count_substr_occurrences(
-        buffer.str(),
+        warnings.str(),
         "Ignoring the `requires_grad=true` function parameter"
       ),
     1);
@@ -365,12 +372,15 @@ TEST_F(ModuleTest, CallingCloneOnModuleThatDoesOverrideCloneDoesNotThrow) {
     }
   };
   Cloneable module;
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_NO_THROW({ module.clone(); });
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TestDistinctParametersModule
     : public Cloneable<TestDistinctParametersModule> {
   TestDistinctParametersModule() {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     reset();
   }
   void reset() override {
@@ -451,8 +461,10 @@ TEST_F(ModuleTest, CloneCreatesDistinctParametersExplicitDevice_MultiCUDA) {
 }
 
 TEST_F(ModuleTest, ClonePreservesExternalReferences) {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       reset();
     }
     void reset() override {
@@ -481,8 +493,10 @@ TEST_F(ModuleTest, ClonePreservesExternalReferences) {
 }
 
 TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       reset();
     }
     void reset() override {
@@ -492,8 +506,10 @@ TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
     torch::Tensor weight;
     int value = 0;
   };
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct NestedModule : public Cloneable<NestedModule> {
     NestedModule() {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       reset();
     }
     void reset() override {
@@ -521,8 +537,10 @@ TEST_F(ModuleTest, CloneCopiesTheValuesOfVariablesOfSubmodules) {
 }
 
 TEST_F(ModuleTest, CloneToDevicePreservesTheDeviceOfParameters_CUDA) {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       reset();
     }
     void reset() override {
@@ -555,8 +573,10 @@ TEST_F(ModuleTest, CloneToDevicePreservesTheDeviceOfParameters_CUDA) {
 TEST_F(
     ModuleTest,
     CloningToAParticularDevicePlacesAllParametersThere_MultiCUDA) {
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
+      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       reset();
     }
     void reset() override {
@@ -685,7 +705,7 @@ TEST_F(ModuleTest, ModulesReturnsExpectedSubmodulesForFlatModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model.ptr(), model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].get(), expected[i].get());
   }
@@ -698,7 +718,7 @@ TEST_F(ModuleTest, ModulesExcludesSelfWhenIncludeSelfSetToFalse) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].get(), expected[i].get());
   }
@@ -711,7 +731,7 @@ TEST_F(ModuleTest, NamedModulesReturnsExpectedNamedSubmodulesForFlatModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model.ptr(), model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].key(), i ? std::to_string(i - 1) : std::string());
     ASSERT_EQ(modules[i].value().get(), expected[i].get());
@@ -726,7 +746,7 @@ TEST_F(ModuleTest, NamedModulesExcludesSelfWhenIncludeSelfSetToFalse) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].key(), std::to_string(i));
     ASSERT_EQ(modules[i].value().get(), expected[i].get());
@@ -739,7 +759,7 @@ TEST_F(ModuleTest, ChildrenReturnsExpectedSubmodulesForFlatModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].get(), expected[i].get());
   }
@@ -755,7 +775,7 @@ TEST_F(ModuleTest, NamedChildrenReturnsExpectedNamedSubmodulesForFlatModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> expected = {
       model[0], model[1], model[2]};
   ASSERT_EQ(modules.size(), expected.size());
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     // Assert pointer equality.
     ASSERT_EQ(modules[i].key(), std::to_string(i));
     ASSERT_EQ(modules[i].value().get(), expected[i].get());
@@ -803,7 +823,7 @@ TEST_F(ModuleTest, NamedBuffersReturnsExpectedTensorsForFlatModel) {
 struct TestContainer : torch::nn::Module {
   TestContainer(int64_t number, std::vector<TestContainer> modules = {})
       : tensor(torch::tensor(number)) {
-    for (size_t i = 0; i < modules.size(); ++i) {
+    for (const auto i : c10::irange(modules.size())) {
       register_module(
           std::to_string(i),
           std::make_shared<TestContainer>(std::move(modules[i])));
@@ -847,7 +867,7 @@ TEST_F(ModuleTest, ModulesReturnsExpectedSubmodulesForDeepModel) {
   std::vector<std::shared_ptr<torch::nn::Module>> modules = model->modules();
 
   ASSERT_EQ(modules.size(), 10);
-  for (size_t i = 0; i < modules.size(); ++i) {
+  for (const auto i : c10::irange(modules.size())) {
     ASSERT_EQ(get_test_container_item(modules[i]), i);
   }
 }
@@ -860,7 +880,7 @@ TEST_F(ModuleTest, NamedModulesReturnsExpectedNamedSubmodulesForDeepModel) {
 
   ASSERT_EQ(modules.size(), expected.size());
 
-  for (size_t i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     ASSERT_EQ(modules[i].key(), expected[i].first);
     ASSERT_EQ(get_test_container_item(modules[i].value()), expected[i].second);
   }
@@ -978,10 +998,12 @@ TEST_F(ModuleTest, ThrowsWhenAttemptingtoGetTopLevelModuleAsSharedPtr) {
   }
   {
     TestModule module(1);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_NO_THROW(module.modules(/*include_self=*/false));
   }
   {
     auto module = std::make_shared<TestModule>(1);
+    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_NO_THROW(module->modules());
   }
 }

@@ -29,4 +29,6 @@ int c10_cuda_private_test() {
   return 2;
 }
 
-}}} // namespace c10::cuda::impl
+} // namespace impl
+} // namespace cuda
+} // namespace c10

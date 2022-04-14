@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import argparse
 import sys
@@ -450,7 +450,7 @@ for o in options:
     args.append("    const " + InType + "* input,")
     args.append("    const " + IndexType + "* indices,")
     if opts.use_offsets:
-        args.append("    const int64_t* offsets,")
+        args.append("    const " + IndexType + "* offsets,")
     else:
         args.append("    const int* lengths,")
     args.append("    const float* weights,")
@@ -493,7 +493,13 @@ for o in options:
     for is_weight_positional in ["false", "true"]:
         code.append("bool " + fn_base + "_" + is_weight_positional + suffix + "(")
         code += args
-        code.append("  return " + fn_base + suffix + "<" + is_weight_positional + ">(")
+        # Resolve the Lint warnings: Limit of 80 characters in one line.
+        extra_space = "\n      "
+        ret_string = "  return " + fn_base + suffix + "<" + is_weight_positional + ">("
+        if len(ret_string) <= 80:
+            code.append(ret_string)
+        else:
+            code.append("  return " + fn_base + suffix + "<" + extra_space + is_weight_positional + ">(")
         code.append("      block_size,")
         code.append("      output_size,")
         code.append("      index_size,")

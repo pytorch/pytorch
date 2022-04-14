@@ -8,28 +8,22 @@
 
 namespace at { namespace native {
 
-// Custom allocator using c10 CPU allocator for `ideep::tensor`
-struct AllocForMKLDNN {
-  static char* malloc(size_t size) {
-    auto allocator = c10::GetAllocator(c10::DeviceType::CPU);
-    return (char*)allocator->raw_allocate(size);
-  }
-
-  static void free(void* p) {
-    auto allocator = c10::GetAllocator(c10::DeviceType::CPU);
-    allocator->raw_deallocate(p);
-  }
-};
+// Mapping ScalarType to ideep tensor data_type
+TORCH_API ideep::tensor::data_type get_mkldnn_dtype(ScalarType type);
 
 // Construct aten MKL-DNN tensor given an ideep tensor
-Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options);
+TORCH_API Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dtype, c10::optional<Device> device);
 
 // Retrieve `ideep::tensor` from MKL-DNN tensor
-ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
+TORCH_API ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 
 // Construct an `ideep::tensor` "view" from dense tensor, note the
 // ideep::tensor will share the underlying buffer
-ideep::tensor itensor_view_from_dense(const Tensor& tensor);
+TORCH_API ideep::tensor itensor_view_from_dense(const Tensor& tensor);
+
+// Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN tensor.
+TORCH_API ideep::tensor itensor_from_tensor(const Tensor& tensor);
+
 }}
 
 #endif // AT_MKLDNN_ENABLED

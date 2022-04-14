@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
 #include <c10/util/C++17.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
@@ -9,7 +10,13 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
+#include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
@@ -20,8 +27,10 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
+#include <torch/csrc/distributed/rpc/unpickled_python_call.h>
+#include <torch/csrc/distributed/rpc/unpickled_python_remote_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/python_ivalue.h>
 
 namespace torch {
 namespace distributed {
@@ -29,313 +38,303 @@ namespace rpc {
 
 using namespace torch::distributed::autograd;
 
-std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
+namespace {
+
+std::unique_ptr<RpcCommandBase> deserializePythonRpcCommandReference(
     RpcCommandBase& rpc,
-    MessageType messageType,
-    int64_t messageId) const {
-  auto wrap = [messageId](Message m) {
-    m.setId(messageId);
-    return std::make_shared<FutureMessage>(std::move(m));
-  };
-
-  // TODO: RpcCommandBase should have an abstract execute() method that we can
-  // call here instead of having another switch statement here. Even better we
-  // could have abstract classes RpcRequest and RpcResp which inherit from
-  // RpcCommandBase and RpcRequest declares the abstract method execute() that
-  // we can call here. RpcResponse could have an abstract method to convert it
-  // to a python object.
+    const MessageType& messageType) {
   switch (messageType) {
-    case MessageType::SCRIPT_CALL: {
-      auto& scriptCall = static_cast<ScriptCall&>(rpc);
-
-      // scriptCall is only alive within this block, use reference to avoid copy
-      auto& stack = scriptCall.stackRef();
-      if (scriptCall.hasOp()) {
-        scriptCall.op()->getOperation()(stack);
-      } else {
-        PythonRpcHandler::getInstance()
-            .jitCompilationUnit()
-            ->get_function(scriptCall.qualifiedName())
-            .run(stack);
-      }
-
-      TORCH_INTERNAL_ASSERT(
-          stack.size() == 1,
-          "Return value of a builtin operator or a "
-          "TorchScript function should be a single IValue, got a vector of "
-          "size ",
-          stack.size());
-
-      return wrap(std::move(ScriptResp(std::move(stack.front()))).toMessage());
-    }
     case MessageType::PYTHON_CALL: {
-      auto& pyCall = static_cast<PythonCall&>(rpc);
-      std::vector<torch::Tensor> responseTensorTable;
-      auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
-          pyCall.pickledPayload(), pyCall.tensors(), responseTensorTable);
-      return wrap(
-          std::move(
-              PythonResp(std::move(payload), std::move(responseTensorTable)))
-              .toMessage());
-    }
-    case MessageType::SCRIPT_REMOTE_CALL: {
-      auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
-      auto& ctx = RRefContext::getInstance();
-
-      TypePtr returnType;
-      if (scriptRemoteCall.hasOp()) {
-        returnType = scriptRemoteCall.op()->schema().returns()[0].type();
-      } else {
-        returnType = PythonRpcHandler::getInstance()
-                         .jitCompilationUnit()
-                         ->get_function(scriptRemoteCall.qualifiedName())
-                         .getSchema()
-                         .returns()
-                         .at(0)
-                         .type();
-      }
-
-      auto ownerRRef =
-          ctx.getOrCreateOwnerRRef(scriptRemoteCall.retRRefId(), returnType);
-
-      // TODO: make this asynchronous
-      // scriptRemoteCall is only alive within this block, use reference to
-      // avoid copy
-      auto& stack = scriptRemoteCall.stackRef();
-      if (scriptRemoteCall.hasOp()) {
-        scriptRemoteCall.op()->getOperation()(stack);
-      } else {
-        PythonRpcHandler::getInstance()
-            .jitCompilationUnit()
-            ->get_function(scriptRemoteCall.qualifiedName())
-            .run(stack);
-      }
-
-      TORCH_INTERNAL_ASSERT(
-          stack.size() == 1,
-          "Return value of a builtin operator or a "
-          "TorchScript function should be a single IValue, got a vector of "
-          "size ",
-          stack.size());
-
-      ownerRRef->setValue(std::move(stack.front()));
-      ctx.addForkOfOwner(
-          scriptRemoteCall.retRRefId(), scriptRemoteCall.retForkId());
-      return wrap(
-          RemoteRet(scriptRemoteCall.retRRefId(), scriptRemoteCall.retForkId())
-              .toMessage());
+      auto& pc = static_cast<PythonCall&>(rpc);
+      return std::make_unique<UnpickledPythonCall>(
+          pc.serializedPyObj(), pc.isAsyncExecution());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
-
-      auto rrefId = RRefId::fromIValue(prc.retRRefId());
-      auto forkId = ForkId::fromIValue(prc.retForkId());
-      auto& ctx = RRefContext::getInstance();
-
-      auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
-
-      IValue py_ivalue = jit::toIValue(
-          PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()),
-          PyObjectType::get());
-
-      ownerRRef->setValue(std::move(py_ivalue));
-
-      if (rrefId != forkId) {
-        // Caller is a user and callee is the owner, add fork
-        //
-        // NB: rrefId == forkId is true if and only if calling remote to self.
-        // In that case both the caller and the callee will access the
-        // OwnerRRef. Hence, on the callee side (here), it should not call
-        // addForkOfOwner as it is not a fork. To allow callee to distinguish
-        // when this request is sent to self, the caller will set forkId using
-        // rrefId (OwnerRRef does not have a forkId anyway).
-        ctx.addForkOfOwner(rrefId, forkId);
-      }
-      return wrap(RemoteRet(rrefId, forkId).toMessage());
-    }
-    case MessageType::SCRIPT_RREF_FETCH_CALL: {
-      auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
-      auto& ctx = RRefContext::getInstance();
-      std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
-      if (rref->hasValue()) { // optional fast-path
-        return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
-      }
-      auto whenValueSet = rref->getFuture();
-      auto responseFuture = std::make_shared<FutureMessage>();
-
-      // Our response is satisfied when the rpcs come back.
-      whenValueSet->addCallback(
-          [responseFuture, messageId, rref](
-              const rpc::Message& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
-            if (!error) {
-              Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
-              m.setId(messageId);
-              responseFuture->markCompleted(std::move(m));
-            } else {
-              responseFuture->setError(error->what());
-            }
-          });
-      return responseFuture;
-    }
-    case MessageType::PYTHON_RREF_FETCH_CALL: {
-      auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
-      auto& ctx = RRefContext::getInstance();
-      std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
-      if (rref->hasValue()) { // optional fast-path
-        SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
-            jit::toPyObject(rref->getValue()));
-        return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
-      }
-
-      auto whenValueSet = rref->getFuture();
-      auto responseFuture = std::make_shared<FutureMessage>();
-
-      // Our response is satisfied when the rpcs come back.
-      whenValueSet->addCallback(
-          [responseFuture, messageId, rref](
-              const rpc::Message& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
-            if (!error) {
-              SerializedPyObj result =
-                  PythonRpcHandler::getInstance().serialize(
-                      jit::toPyObject(rref->getValue()));
-              Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
-              m.setId(messageId);
-              responseFuture->markCompleted(std::move(m));
-            } else {
-              responseFuture->setError(error->what());
-            }
-          });
-      return responseFuture;
-    }
-    case MessageType::RREF_USER_DELETE: {
-      auto& rud = static_cast<RRefUserDelete&>(rpc);
-      auto& ctx = RRefContext::getInstance();
-      ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
-      return wrap(std::move(RRefAck()).toMessage());
-    }
-    case MessageType::RREF_CHILD_ACCEPT: {
-      auto& rca = static_cast<RRefChildAccept&>(rpc);
-      auto& ctx = RRefContext::getInstance();
-      ctx.delPendingChild(rca.forkId());
-      return wrap(std::move(RRefAck()).toMessage());
-    }
-    case MessageType::RREF_FORK_REQUEST: {
-      auto& rfr = static_cast<RRefForkRequest&>(rpc);
-      auto& ctx = RRefContext::getInstance();
-      ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
-      return wrap(RRefAck().toMessage());
+      return std::make_unique<UnpickledPythonRemoteCall>(
+          prc.serializedPyObj(),
+          prc.retRRefId(),
+          prc.retForkId(),
+          prc.isAsyncExecution());
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
-      auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
-
-      // Attach 'recv' autograd function.
-      auto autogradContext = addRecvRpcBackward(
-          rpcWithAutograd.autogradMetadata(),
-          rpcWithAutograd.tensors(),
-          rpcWithAutograd.fromWorkerId());
-      // For this recv thread on server side, before processRpc(),
-      // set current_context_id_ to be context_id passed from client.
-      // In this way, if there is nested rpc call in python rpc call, original
-      // context_id from client can be passed in the chain calls.
-      auto& autogradContainer = DistAutogradContainer::getInstance();
-      TORCH_INTERNAL_ASSERT(
-          autogradContext != nullptr,
-          "autogradContext is nullptr, FORWARD_AUTOGRAD_REQ should always get "
-          "or create valid autogradContext in addRecvRpcBackward.");
-      autogradContainer.setCurrentContextId(autogradContext->contextId());
-
-      // Process the original RPC.
-      auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-      // Kick off processing for the nested future and get a Future<T> to the
-      // result.
-      auto wrappedRpcResponseFuture = processRpc(
-          rpcWithAutograd.wrappedRpc(), wrappedMessageType, messageId);
-
-      // Make an overall future for the wrapped response.
-      auto responseFuture = std::make_shared<rpc::FutureMessage>();
-      auto fromWorkerId = rpcWithAutograd.fromWorkerId();
-      // The original future needs to be marked as completed when the wrapped
-      // one completes, with the autograd context information wrapped.
-      wrappedRpcResponseFuture->addCallback(
-          [responseFuture, messageId, fromWorkerId, wrappedRpcResponseFuture](
-              const Message& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
-            if (error) {
-              // Propagate error to responseFuture if we had one.
-              responseFuture->setError(error->what());
-            } else {
-              auto msg = getMessageWithAutograd(
-                  fromWorkerId,
-                  std::move(*wrappedRpcResponseFuture).moveValue(),
-                  MessageType::FORWARD_AUTOGRAD_RESP);
-              msg.setId(messageId);
-              responseFuture->markCompleted(std::move(msg));
-            }
-          });
-      return responseFuture;
+      // Deserialize the wrapped RPC if it contains Python UDF
+      auto& rwa = static_cast<RpcWithAutograd&>(rpc);
+      auto& wrappedRpc = rwa.wrappedRpc();
+      auto pythonRpc = deserializePythonRpcCommandReference(
+          wrappedRpc, rwa.wrappedMessageType());
+      if (pythonRpc) {
+        rwa.setWrappedRpc(std::move(pythonRpc));
+      }
+      return nullptr;
     }
-    case MessageType::BACKWARD_AUTOGRAD_REQ: {
-      auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
-      const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
-
-      // Retrieve the appropriate autograd context.
-      auto autogradContext =
-          DistAutogradContainer::getInstance().retrieveContext(
-              autogradMetadata.autogradContextId);
-
-      // Lookup the appropriate 'send' function to enqueue.
-      std::shared_ptr<SendRpcBackward> sendFunction =
-          autogradContext->retrieveSendFunction(
-              autogradMetadata.autogradMessageId);
-
-      // Attach the gradients to the send function.
-      sendFunction->setGrads(gradientsCall.getGrads());
-
-      auto responseFuture = std::make_shared<rpc::FutureMessage>();
-
-      // Now execute the autograd graph using the "distributed engine."
-      auto execFuture = DistEngine::getInstance().executeSendFunctionAsync(
-          autogradContext, sendFunction);
-
-      // Our response is satisfied when the rpcs come back.
-      execFuture->addCallback(
-          [responseFuture, messageId](
-              const Message& /* unused */,
-              const c10::optional<utils::FutureError>& error) {
-            if (!error) {
-              Message m = std::move(PropagateGradientsResp()).toMessage();
-              m.setId(messageId);
-              responseFuture->markCompleted(std::move(m));
-            } else {
-              responseFuture->setError(error->what());
-            }
-          });
-      return responseFuture;
-    };
-    case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
-      auto& cleanupContextReq = static_cast<CleanupAutogradContextReq&>(rpc);
-      auto cleanupContextId = cleanupContextReq.getContextId();
-      // release the context if it still exists on this thread. We need to
-      // check if it exists since it may have been deleted by an in-flight
-      // RPC. This can create nested RPCs if there are other nodes that get
-      // notified to clean up their context.
-      DistAutogradContainer::getInstance().releaseContextIfPresent(
-          cleanupContextId);
-      return wrap(std::move(CleanupAutogradContextResp()).toMessage());
+    case MessageType::RUN_WITH_PROFILING_REQ: {
+      // Deserialize wrapped RPC if it contains python call
+      auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
+      auto& wrappedRpc = rpcWithProfilingReq.wrappedRpc();
+      auto pythonRpc = deserializePythonRpcCommandReference(
+          wrappedRpc, rpcWithProfilingReq.wrappedMessageType());
+      if (pythonRpc) {
+        rpcWithProfilingReq.setWrappedRpc(std::move(pythonRpc));
+      }
+      return nullptr;
     }
     default: {
-      TORCH_INTERNAL_ASSERT(
-          false, "Request type ", messageType, " not supported.");
+      return nullptr;
     }
   }
 }
 
-std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
-    Message& request) const {
-  std::unique_ptr<RpcCommandBase> rpc = deserializeRequest(request);
-  return processRpc(*rpc, request.type(), request.id());
+SerializedPyObj serializePyObject(IValue value) {
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  // Need this GIL to guard jit::toPyObj and destruct its returned
+  // py::object
+  py::gil_scoped_acquire acquire;
+  try {
+    return pythonRpcHandler.serialize(jit::toPyObject(value));
+  } catch (py::error_already_set& e) {
+    // py::error_already_set requires GIL to destruct, take special care.
+    auto err = std::runtime_error(e.what());
+    e.restore();
+    PyErr_Clear();
+    throw err;
+  }
+}
+
+} // anonymous namespace
+
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runPythonFunction(
+    const py::object& function,
+    std::vector<c10::Stream> streams,
+    bool isAsyncExecution) const {
+  c10::MultiStreamGuard guard(streams);
+  auto& pythonRpcHandler = PythonRpcHandler::getInstance();
+  py::gil_scoped_acquire acquire;
+
+  py::object result;
+  try {
+    result = pythonRpcHandler.runPythonUdf(function);
+  } catch (py::error_already_set& e) {
+    // py::error_already_set requires GIL to destruct, take special care.
+    auto future =
+        asFuture(std::make_exception_ptr(std::runtime_error(e.what())));
+    e.restore();
+    PyErr_Clear();
+    return future;
+  } catch (std::exception& e) {
+    return asFuture(std::current_exception());
+  }
+
+  // After sync exection or failed async execution return the value as-is.
+  if (pythonRpcHandler.isRemoteException(result) || !isAsyncExecution) {
+    return asFuture(
+        c10::ivalue::ConcretePyObjectHolder::create(result),
+        at::PyObjectType::get());
+  }
+
+  try {
+    return result.cast<jit::PythonFutureWrapper&>().fut;
+  } catch (const py::cast_error& e) {
+    auto type = result.get_type();
+    auto errMsg = c10::str(
+        e.what(),
+        ". Functions decorated with @rpc.async_function must return a "
+        "torch.futures.Future object, but got ",
+        type.attr("__module__").cast<std::string>(),
+        ".",
+        type.attr("__qualname__").cast<std::string>());
+    return asFuture(std::make_exception_ptr(std::runtime_error(errMsg)));
+  }
+}
+
+std::unique_ptr<RpcCommandBase> RequestCallbackImpl::
+    deserializePythonRpcCommand(
+        std::unique_ptr<RpcCommandBase> rpc,
+        const MessageType& messageType) const {
+  auto pythonRpc = deserializePythonRpcCommandReference(*rpc, messageType);
+  return pythonRpc ? std::move(pythonRpc) : std::move(rpc);
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptCall(
+    RpcCommandBase& rpc,
+    std::vector<c10::Stream> streams) const {
+  auto& scriptCall = static_cast<ScriptCall&>(rpc);
+
+  c10::intrusive_ptr<JitFuture> future;
+  if (scriptCall.hasOp()) {
+    future = runJitOperator(
+        *scriptCall.op(), scriptCall.stackRef(), std::move(streams));
+  } else {
+    future = runJitFunction(
+        scriptCall.qualifiedName(),
+        scriptCall.stackRef(),
+        std::move(streams),
+        scriptCall.isAsyncExecution());
+  }
+
+  return future->then(
+      [](JitFuture& jitFuture) {
+        return withStorages(ScriptResp(jitFuture.value()).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
+    RpcCommandBase& rpc,
+    std::vector<c10::Stream> streams) const {
+  auto& upc = static_cast<UnpickledPythonCall&>(rpc);
+  auto future = runPythonFunction(
+      upc.pythonUdf(), std::move(streams), upc.isAsyncExecution());
+
+  return future->then(
+      [](JitFuture& future) {
+        return withStorages(
+            PythonResp(serializePyObject(future.value())).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptRemoteCall(
+    RpcCommandBase& rpc,
+    std::vector<c10::Stream> streams) const {
+  auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
+
+  c10::intrusive_ptr<JitFuture> future;
+  if (scriptRemoteCall.hasOp()) {
+    future = runJitOperator(
+        *scriptRemoteCall.op(),
+        scriptRemoteCall.stackRef(),
+        std::move(streams));
+  } else {
+    future = runJitFunction(
+        scriptRemoteCall.qualifiedName(),
+        scriptRemoteCall.stackRef(),
+        std::move(streams),
+        scriptRemoteCall.isAsyncExecution());
+  }
+
+  return assignOwnerRRef(
+      scriptRemoteCall.retRRefId(),
+      scriptRemoteCall.retForkId(),
+      std::move(future));
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRemoteCall(
+    RpcCommandBase& rpc,
+    std::vector<c10::Stream> streams) const {
+  auto& uprc = static_cast<UnpickledPythonRemoteCall&>(rpc);
+  auto future = runPythonFunction(
+      uprc.pythonUdf(), std::move(streams), uprc.isAsyncExecution());
+
+  return assignOwnerRRef(uprc.rrefId(), uprc.forkId(), std::move(future));
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRRefFetchCall(
+    RpcCommandBase& rpc) const {
+  auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
+
+  auto future = retrieveOwnerRRef(prf.rrefId());
+
+  return future->then(
+      [](JitFuture& future) {
+        SerializedPyObj result = serializePyObject(future.value());
+        return withStorages(
+            PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+}
+
+void RequestCallbackImpl::handleRRefDelete(
+    c10::intrusive_ptr<RRef>& rref) const {
+  if (rref && rref->isPyObj()) {
+    py::gil_scoped_acquire acquire;
+    rref.reset();
+  }
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRpcWithErrors(
+    RpcCommandBase& rpc,
+    const MessageType& messageType,
+    std::vector<c10::Stream> streams) const {
+  try {
+    return processRpc(rpc, messageType, std::move(streams));
+  } catch (py::error_already_set& e) {
+    // Pass a dummy message ID since it will be overwritten anyways.
+    auto future = asFuture(handleError(e, messageType, -1));
+    // There are request callback impls in Python, where Python
+    // exceptions could be thrown. For releasing Python exception
+    // py::objects, GIL must be held.
+    py::gil_scoped_acquire acquire;
+    e.restore(); // Release ownership on py::objects and also restore
+                 // Python Error Indicator.
+    PyErr_Clear(); // Clear the Python Error Indicator as we has
+                   // recorded the exception in the response message.
+    return future;
+  } catch (std::exception& e) {
+    // Pass a dummy message ID since it will be overwritten anyways.
+    return asFuture(handleError(e, messageType, -1));
+  }
+}
+
+bool RequestCallbackImpl::cudaAvailable() const {
+#ifdef USE_CUDA
+  return true;
+#else
+  return false;
+#endif
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRRefBackward(
+    RpcCommandBase& rpc) const {
+  auto& rrefBackwardReq = static_cast<RRefBackwardReq&>(rpc);
+
+  auto future = retrieveOwnerRRef(rrefBackwardReq.getRRefId());
+
+  return future->then(
+      [autogradContextId = rrefBackwardReq.getAutogradContextId(),
+       retainGraph = rrefBackwardReq.retainGraph()](JitFuture& future) {
+        // Run backward (TODO: make this async?).
+        PyRRef::backwardOwnerRRef(
+            autogradContextId, retainGraph, future.value());
+
+        return withStorages(RRefBackwardResp().toMessage());
+      },
+      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+}
+
+c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runJitFunction(
+    const c10::QualifiedName& name,
+    std::vector<at::IValue>& stack,
+    std::vector<c10::Stream> streams,
+    bool isAsyncExecution) const {
+  c10::MultiStreamGuard guard(streams);
+  c10::intrusive_ptr<JitFuture> future;
+  try {
+    // runAsync() starts in the calling thread, but may return an uncompleted
+    // future (though for non-async code, it will typically be completed).
+    // If it was async, our callback will typically be invoked by the
+    // continuation on an at::launch() thread.
+    future = PythonRpcHandler::getInstance()
+                 .jitCompilationUnit()
+                 ->get_function(name)
+                 .runAsync(stack);
+  } catch (const std::exception&) {
+    return asFuture(std::current_exception());
+  }
+
+  if (isAsyncExecution) {
+    at::TypePtr type = future->elementType();
+    if (type->kind() != at::FutureType::Kind) {
+      return asFuture(std::make_exception_ptr(std::runtime_error(c10::str(
+          "Async functions must return an IValue of Future type, but got ",
+          type->str()))));
+    }
+    future = future->thenAsync(
+        [](JitFuture& future) { return future.value().toFuture(); },
+        type->cast<at::FutureType>()->getElementType());
+  }
+
+  return future;
 }
 
 } // namespace rpc

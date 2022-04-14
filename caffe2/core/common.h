@@ -54,8 +54,8 @@ using std::vector;
 #define CAFFE_NOT_IMPLEMENTED CAFFE_THROW("Not Implemented.")
 
 // suppress an unused variable.
-#ifdef _MSC_VER
-#define CAFFE2_UNUSED
+#if defined(_MSC_VER) && !defined(__clang__)
+#define CAFFE2_UNUSED __pragma(warning(suppress : 4100 4101))
 #define CAFFE2_USED
 #else
 #define CAFFE2_UNUSED __attribute__((__unused__))
@@ -63,7 +63,7 @@ using std::vector;
 #endif //_MSC_VER
 
 // Define alignment macro that is cross platform
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
 #define CAFFE2_ALIGNED(x) __declspec(align(x))
 #else
 #define CAFFE2_ALIGNED(x) __attribute__((aligned(x)))
@@ -71,6 +71,15 @@ using std::vector;
 
 #if (defined _MSC_VER && !defined NOMINMAX)
 #define NOMINMAX
+#endif
+
+#if defined(__has_cpp_attribute)
+#if __has_cpp_attribute(nodiscard)
+#define CAFFE2_NODISCARD [[nodiscard]]
+#endif
+#endif
+#if !defined(CAFFE2_NODISCARD)
+#define CAFFE2_NODISCARD
 #endif
 
 using std::make_unique;
@@ -124,19 +133,19 @@ class SkipIndices<> {
 // linked. This function should not be used in static initialization functions
 // as the underlying boolean variable is going to be switched on when one
 // loads libtorch_gpu.so.
-CAFFE2_API bool HasCudaRuntime();
-CAFFE2_API bool HasHipRuntime();
+TORCH_API bool HasCudaRuntime();
+TORCH_API bool HasHipRuntime();
 namespace internal {
 // Sets the Cuda Runtime flag that is used by HasCudaRuntime(). You should
 // never use this function - it is only used by the Caffe2 gpu code to notify
 // Caffe2 core that cuda runtime has been loaded.
-CAFFE2_API void SetCudaRuntimeFlag();
-CAFFE2_API void SetHipRuntimeFlag();
-}
+TORCH_API void SetCudaRuntimeFlag();
+TORCH_API void SetHipRuntimeFlag();
+} // namespace internal
 // Returns which setting Caffe2 was configured and built with (exported from
 // CMake)
-CAFFE2_API const std::map<string, string>& GetBuildOptions();
+TORCH_API const std::map<string, string>& GetBuildOptions();
 
 } // namespace caffe2
 
-#endif  // CAFFE2_CORE_COMMON_H_
+#endif // CAFFE2_CORE_COMMON_H_

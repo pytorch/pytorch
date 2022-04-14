@@ -76,14 +76,18 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
             block_size,
             with_weights,
             is_mean,
-            /*prefetch distance*/ 16);
+            /*prefetch distance*/ 16,
+            /*is_weight_positional*/ false,
+            /*use_offsets*/ false);
       } else {
         CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
         kernel64_ = fbgemm::GenerateEmbeddingSpMDM<std::uint8_t, std::int64_t>(
             block_size,
             with_weights,
             is_mean,
-            /*prefetch distance*/ 16);
+            /*prefetch distance*/ 16,
+            /*is_weight_positional*/ false,
+            /*use_offsets*/ false);
       }
     }
 
@@ -117,7 +121,7 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     auto indices_data = indices.template data<IndexType>();
 
     int64_t current = 0;
-    for (int m = 0; m < output_size; ++m) {
+    for (const auto m : c10::irange(output_size)) {
       for (int i = 0; i < lengths_data[m]; ++i) {
         CAFFE_ENFORCE_LT(current, index_size);
         IndexType idx = indices_data[current];

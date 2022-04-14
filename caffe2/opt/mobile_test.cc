@@ -37,6 +37,7 @@ TEST(MobileTest, Convolution) {
   auto nn = caffe2::convertToNNModule(net);
   caffe2::opt::addNNPACK(&nn);
   auto optimized_net = caffe2::convertToCaffe2Proto(nn, net);
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto op : optimized_net.op()) {
     if (op.type() == "Conv") {
       assert(op.engine() == "NNPACK");

@@ -1,12 +1,5 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import os
-import sys
 import time
-
-if sys.version < '3.3':
-    # Note(jiayq): in Python 2, FileExistsError is not defined and the
-    # error manifests it as OSError.
-    FileExistsError = OSError
 
 
 class FileBaton:
@@ -50,5 +43,7 @@ class FileBaton:
 
     def release(self):
         '''Releases the baton and removes its file.'''
-        os.close(self.fd)
+        if self.fd is not None:
+            os.close(self.fd)
+
         os.remove(self.lock_file_path)

@@ -1,13 +1,14 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <c10/util/irange.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 
@@ -20,16 +21,22 @@ DEFINE_DISPATCH(qtanh_stub);
 // This ALWAYS outputs scale=2.0/256, zp=128, dtype=quint8
 Tensor qnnpack_tanh(Tensor input) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_tanh(): Got empty input tensor");
-
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+               "qnnpack_tanh(): Expected input data type ",
+               toString(c10::kQUInt8),
+               " but got ",
+               toString(input.scalar_type()));
   Tensor qy;
   constexpr float output_scale = 2.0f / 256.0f;
   constexpr int32_t output_zero_point = 128;
 
   initQNNPACK();
 
-  Tensor input_contig = input.contiguous();
-  size_t num_elems = input_contig.numel() / input_contig.size(0);
-
+  Tensor input_contig = input.contiguous(input.suggest_memory_format());
+  size_t num_elems = 1;
+  for (const auto i : c10::irange(1, input_contig.ndimension())) {
+    num_elems *= input_contig.size(i);
+  }
   const auto zero_point = input_contig.q_zero_point();
   const auto scale = input_contig.q_scale();
 
@@ -44,13 +51,18 @@ Tensor qnnpack_tanh(Tensor input) {
     std::numeric_limits<uint8_t>::max() /* output max */,
     0 /* flags */,
     &tanh_op);
+
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+      qnnpack_uniq_ptr(tanh_op);
+
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
                         "failed to create QNNPACK TanH operator");
   qy = at::_empty_affine_quantized(
     input_contig.sizes(),
-    input.options(),
+    at::device(kCPU).dtype(input_contig.dtype()),
     output_scale,
-    output_zero_point);
+    output_zero_point,
+    input_contig.suggest_memory_format());
 
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_tanh_nc_q8(
     tanh_op,
@@ -62,7 +74,7 @@ Tensor qnnpack_tanh(Tensor input) {
   TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
                         "failed to setup QNNPACK TanH operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
 
   const pytorch_qnnp_status runStatus =
     pytorch_qnnp_run_operator(tanh_op, threadpool);
@@ -74,7 +86,7 @@ Tensor qnnpack_tanh(Tensor input) {
 }
 #endif  // USE_PYTORCH_QNNPACK
 
-Tensor quantized_tanh(const Tensor& qx) {
+Tensor tanh_quantized_cpu(const Tensor& qx) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {

@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAException.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <cuda.h>
 #include <cuda_fp16.h>
@@ -49,6 +50,9 @@ __device__ void test(){
   assert(::abs(::acos(Half(-1.0)) - ::acos(-1.0f)) <= threshold);
   assert(::abs(::cosh(Half(1.0)) - ::cosh(1.0f)) <= threshold);
   assert(::abs(::acosh(Half(1.0)) - ::acosh(1.0f)) <= threshold);
+  assert(::abs(::acosh(Half(1.0)) - ::acosh(1.0f)) <= threshold);
+  assert(::abs(::asinh(Half(1.0)) - ::asinh(1.0f)) <= threshold);
+  assert(::abs(::atanh(Half(1.0)) - ::atanh(1.0f)) <= threshold);
   assert(::abs(::asin(Half(1.0)) - ::asin(1.0f)) <= threshold);
   assert(::abs(::sinh(Half(1.0)) - ::sinh(1.0f)) <= threshold);
   assert(::abs(::asinh(Half(1.0)) - ::asinh(1.0f)) <= threshold);
@@ -72,6 +76,13 @@ __device__ void test(){
   assert(::abs(::isnan(Half(0.0)) - ::isnan(0.0f)) <= threshold);
   assert(::abs(::isinf(Half(0.0)) - ::isinf(0.0f)) <= threshold);
 #endif
+
+  // test complex<32>
+  Half real = 3.0f;
+  Half imag = -10.0f;
+  auto complex = c10::complex<Half>(real, imag);
+  assert(complex.real() == real);
+  assert(complex.imag() == imag);
 }
 
 __global__ void kernel(){
@@ -80,6 +91,7 @@ __global__ void kernel(){
 
 void launch_function(){
   kernel<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // half common math functions tests in device

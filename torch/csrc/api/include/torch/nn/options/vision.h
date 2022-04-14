@@ -2,14 +2,20 @@
 
 #include <torch/arg.h>
 #include <torch/enum.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
 
 namespace torch {
 namespace nn {
 namespace functional {
 
-/// Options for a Grid Sample functional.
+/// Options for `torch::nn::functional::grid_sample`.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::grid_sample(input, grid, F::GridSampleFuncOptions().mode(torch::kBilinear).padding_mode(torch::kZeros).align_corners(true));
+/// ```
 struct TORCH_API GridSampleFuncOptions {
   typedef c10::variant<enumtype::kBilinear, enumtype::kNearest> mode_t;
   typedef c10::variant<enumtype::kZeros, enumtype::kBorder, enumtype::kReflection> padding_mode_t;

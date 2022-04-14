@@ -69,7 +69,9 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // CUDAContext::SwitchToDevice
   void SetCurrentStreamId(DeviceIndex gpu, StreamId stream_id) {
     // TODO: use current device id from thread local instead of passing gpu in
-    c10::cuda::setCurrentCUDAStream(GetCUDAStream(gpu, stream_id));
+    if (stream_id != -1) {
+      c10::cuda::setCurrentCUDAStream(GetCUDAStream(gpu, stream_id));
+    }
   }
 
   // Retrieves the CUDAStream corresponding to a logical stream ID, ensuring
@@ -169,18 +171,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   explicit CUDAContext(Device device)
       : CUDAContext(DeviceToOption(device)) {}
 
-  ~CUDAContext() override {
-    if (curand_generator_) {
-      CURAND_CHECK(curandDestroyGenerator(curand_generator_));
-    }
-    // CUDAContext is used in 2 cases now:
-    // - long-lived instance inside OperatorBase in which case what happens in
-    //   destructor doesn't really matter
-    // - short-lived on-the-fly instances that are utilized as CUDAGuard - in
-    //   this case there's only one stream id (passed to SwitchToDevice) and
-    //   it's preferrable to synchronize in the destructor
-    FinishDeviceComputation();
-  }
+  ~CUDAContext() override;
 
   inline void SwitchToDevice(StreamId stream_id) override {
     getCudaObjects().SetCurrentStreamId(gpu_id_, stream_id);
@@ -290,7 +281,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
   template <class SrcContext, class DstContext>
   inline void
-  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+  CopyItems(const TypeMeta meta, size_t n, const void* src, void* dst) {
     CAFFE_ENFORCE(!meta.copy(), "CUDAContext requires fundamental types.");
     CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
   }
@@ -319,7 +310,12 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
   static bool IsStreamFree(const DeviceOption& option, StreamId stream_id) {
     auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
-    return cudaStreamQuery(stream) == cudaSuccess;
+    auto status = cudaStreamQuery(stream);
+    if (status == cudaErrorNotReady) {
+      // ignore and clear the error if not ready
+      (void)cudaGetLastError();
+    }
+    return status == cudaSuccess;
   }
 
   at::Device device() const override {

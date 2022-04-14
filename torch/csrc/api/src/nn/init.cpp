@@ -1,10 +1,12 @@
 #include <torch/nn/init.h>
 
+#include <torch/linalg.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cmath>
@@ -35,57 +37,6 @@ struct Fan {
   int64_t out;
 };
 
-#define COMPUTE_NONLINEARITY_ENUM(name) /* NOLINT(cppcoreguidelines-macro-usage) */ \
-case Nonlinearity::name: \
-  TORCH_WARN( \
-    "The enum value `torch::nn::init::Nonlinearity::", #name, "` is deprecated and will be removed in 1.5. ", \
-    "Please use `torch::k", #name, "` instead."); \
-  return torch::k##name;
-
-#define COMPUTE_FANMODE_ENUM(name) /* NOLINT(cppcoreguidelines-macro-usage) */ \
-case FanMode::name: \
-  TORCH_WARN( \
-    "The enum value `torch::nn::init::FanMode::", #name, "` is deprecated and will be removed in 1.5. ", \
-    "Please use `torch::k", #name, "` instead."); \
-  return torch::k##name;
-
-NonlinearityType _compute_nonlinearity_type(Nonlinearity nonlinearity) {
-  switch (nonlinearity) {
-    COMPUTE_NONLINEARITY_ENUM(Linear)
-    COMPUTE_NONLINEARITY_ENUM(Conv1D)
-    COMPUTE_NONLINEARITY_ENUM(Conv2D)
-    COMPUTE_NONLINEARITY_ENUM(Conv3D)
-    COMPUTE_NONLINEARITY_ENUM(ConvTranspose1D)
-    COMPUTE_NONLINEARITY_ENUM(ConvTranspose2D)
-    COMPUTE_NONLINEARITY_ENUM(ConvTranspose3D)
-    COMPUTE_NONLINEARITY_ENUM(Sigmoid)
-    COMPUTE_NONLINEARITY_ENUM(Tanh)
-    COMPUTE_NONLINEARITY_ENUM(ReLU)
-    COMPUTE_NONLINEARITY_ENUM(LeakyReLU)
-    default:
-      TORCH_INTERNAL_ASSERT(
-        false,
-        "The enum class `torch::nn::init::Nonlinearity` is deprecated, ",
-        "please don't add any new enum to it. ",
-        "Instead, add the new enum to `torch/csrc/api/include/torch/enum.h` ",
-        "and use `torch::kEnumName` to reference it.")
-  }
-}
-
-FanModeType _compute_fanmode_type(FanMode fanmode) {
-  switch (fanmode) {
-    COMPUTE_FANMODE_ENUM(FanIn);
-    COMPUTE_FANMODE_ENUM(FanOut);
-    default:
-      TORCH_INTERNAL_ASSERT(
-        false,
-        "The enum class `torch::nn::init::Nonlinearity` is deprecated, ",
-        "please don't add any new enum to it. ",
-        "Instead, add the new enum to `torch/csrc/api/include/torch/enum.h` ",
-        "and use `torch::kEnumName` to reference it.")
-  }
-}
-
 double calculate_kaiming_std(
     Tensor tensor,
     double a,
@@ -96,10 +47,6 @@ double calculate_kaiming_std(
   const auto gain = calculate_gain(nonlinearity, a);
   double std = 0.0;
 
-  // Support for `torch::nn::init::FanMode` is deprecated and will be removed in 1.5.
-  if (c10::get_if<FanMode>(&mode)) {
-    mode = _compute_fanmode_type(c10::get<FanMode>(mode));
-  }
   if (c10::get_if<enumtype::kFanIn>(&mode)) {
     std = gain / std::sqrt(fan.in);
   } else {
@@ -110,10 +57,6 @@ double calculate_kaiming_std(
 } // namespace
 
 double calculate_gain(NonlinearityType nonlinearity, double param) {
-  // Support for `torch::nn::init::Nonlinearity` is deprecated and will be removed in 1.5.
-  if (c10::get_if<Nonlinearity>(&nonlinearity)) {
-    nonlinearity = _compute_nonlinearity_type(c10::get<Nonlinearity>(nonlinearity));
-  }
   if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
     return 5.0 / 3.0;  // NOLINT
   } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {
@@ -141,7 +84,7 @@ Tensor dirac_(Tensor tensor) {
   const auto min_dim = std::min(sizes[0], sizes[1]);
 
   tensor.zero_();
-  for (int64_t d = 0; d < min_dim; ++d) {
+  for (const auto d : c10::irange(min_dim)) {
     switch (tensor.ndimension()) {
       case 3: // Temporal convolution
         tensor[d][d][sizes[2] / 2] = 1;
@@ -192,7 +135,7 @@ Tensor orthogonal_(Tensor tensor, double gain) {
 
   // Compute the qr factorization
   Tensor q, r;
-  std::tie(q, r) = torch::qr(flattened);
+  std::tie(q, r) = torch::linalg::qr(flattened);
   // Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
   auto d = torch::diag(r, 0);
   auto ph = d.sign();
@@ -218,7 +161,7 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
   const auto columns = tensor.size(1);
   const int64_t num_zeros = std::ceil(sparsity * rows);
   tensor.normal_(0, std);
-  for (int64_t column = 0; column < columns; ++column) {
+  for (const auto column : c10::irange(columns)) {
     auto row_indices = torch::randperm(rows, tensor.options().dtype(kLong));
     auto zero_indices =
         row_indices.slice(/*dim=*/0, /*start=*/0, /*end=*/num_zeros);
@@ -262,6 +205,7 @@ Tensor xavier_normal_(Tensor tensor, double gain) {
   NoGradGuard guard;
 
   Fan fan(tensor);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const auto std = gain * std::sqrt(2.0 / (fan.in + fan.out));
   return tensor.normal_(0, std);
 }
@@ -269,6 +213,7 @@ Tensor xavier_normal_(Tensor tensor, double gain) {
 Tensor xavier_uniform_(Tensor tensor, double gain) {
   NoGradGuard guard;
   Fan fan(tensor);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const auto std = gain * std::sqrt(2.0 / (fan.in + fan.out));
   // Calculate uniform bounds from standard deviation with
   const auto a = std::sqrt(3.0) * std;
@@ -286,6 +231,7 @@ std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(const Tensor& tensor)
     "Fan in and fan out can not be computed "
     "for tensor with fewer than 2 dimensions")
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t fan_in, fan_out;
   if (dimensions == 2) { // Linear
     fan_in = tensor.size(1);

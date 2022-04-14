@@ -13,7 +13,6 @@ bool LpNormOp<float, CPUContext>::RunOnDevice() {
   auto* norm = Output(0, {1}, at::dtype<float>());
   const float* X_data = X.data<float>();
   const float size = average_ ? (float)X.numel() : 1.0f;
-  CAFFE_ENFORCE_GT(size, 0);
   if (p_ == 1) {
     *(norm->template mutable_data<float>()) =
         (ConstEigenVectorMap<float>(X_data, X.numel()).array()).abs().sum() /
@@ -62,7 +61,6 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-namespace {
 // LpNorm
 REGISTER_CPU_OPERATOR(LpNorm, LpNormOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LpNormGradient, LpNormGradientOp<float, CPUContext>);
@@ -170,6 +168,5 @@ class GetLpNormGradient : public GradientMakerBase {
 };
 
 REGISTER_GRADIENT(LpNorm, GetLpNormGradient);
-} // namespace
 
 } // namespace caffe2

@@ -2,6 +2,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/one_hot_ops.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 
@@ -29,6 +30,7 @@ void OneHotOp<CUDAContext>::DoOneHotOp(
       0,
       context_.cuda_stream()>>>(
       batch_size, index_size, indices.data<int64_t>(), output_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(OneHot, OneHotOp<CUDAContext>);

@@ -1,6 +1,7 @@
 #include <cub/cub.cuh>
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/pack_segments.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 
@@ -247,6 +248,7 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
       padding,
       presence_mask_data,
       out_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -337,6 +339,8 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
       num_seq,
       cell_size,
       out_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

@@ -1,12 +1,11 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python.dataio import (
     CompositeReader,
     CompositeReaderBuilder,
-    Reader,
     ReaderBuilder,
     ReaderWithDelay,
     ReaderWithLimit,
@@ -29,7 +28,6 @@ import os
 import shutil
 import unittest
 import tempfile
-import time
 
 
 def make_source_dataset(ws, size=100, offset=0, name=None):
@@ -381,6 +379,7 @@ class TestDBFileReader(TestCase):
 
         return ws.blobs[str(dst_ds.content().label())].fetch()
 
+    @unittest.skipIf("LevelDB" not in core.C.registered_dbs(), "Need LevelDB")
     def test_cached_reader(self):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
@@ -420,6 +419,7 @@ class TestDBFileReader(TestCase):
 
         self._delete_path(db_path)
 
+    @unittest.skipIf("LevelDB" not in core.C.registered_dbs(), "Need LevelDB")
     def test_db_file_reader(self):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)

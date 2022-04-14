@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 
@@ -42,7 +42,7 @@ class TestBatchBucketize(serial.SerializedTestCase):
     @given(
         x=hu.tensor(
             min_dim=2, max_dim=2, dtype=np.float32,
-            elements=st.floats(min_value=0, max_value=5),
+            elements=hu.floats(min_value=0, max_value=5),
             min_value=5),
         seed=st.integers(min_value=2, max_value=1000),
         **hu.gcs_cpu_only)

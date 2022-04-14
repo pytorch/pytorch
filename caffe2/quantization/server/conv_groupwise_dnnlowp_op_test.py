@@ -1,18 +1,18 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import collections
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 from caffe2.python import core, dyndep, workspace
-from caffe2.python.fb import hardcode_scale_zp
+from caffe2.python.fb import hardcode_scale_zp  # type: ignore[import]
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import (
+from caffe2.quantization.server.dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
     run_conv_or_fc,
 )
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -37,6 +37,7 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         preserve_weight_sparsity=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_groupwise_dnnlowp_conv_int(
         self,
         stride,
@@ -185,6 +186,7 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_groupwise_dnnlowp_conv_relu_int(
         self,
         stride,

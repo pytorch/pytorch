@@ -1,5 +1,5 @@
-#include "ATen/ATen.h"
-#include "ATen/Dispatch.h"
+#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
 
 #include <vector>
 
@@ -37,7 +37,7 @@ Tensor cartesian_prod(TensorList tensors) {
   if (tensors.size() == 1) {
     return tensors[0];
   }
-  std::vector<Tensor> grids = at::meshgrid(tensors);
+  std::vector<Tensor> grids = at::meshgrid(tensors, "ij");
   for(Tensor &t : grids) {
     t = t.flatten();
   }
@@ -46,7 +46,10 @@ Tensor cartesian_prod(TensorList tensors) {
 
 Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   TORCH_CHECK(self.dim() == 1, "Expect a 1D vector, but got shape ", self.sizes());
-  TORCH_CHECK(r > 0, "Expect a positive number, but got ", r);
+  TORCH_CHECK(r >= 0, "Expect a non-negative number, but got ", r);
+  if (r == 0) {
+    return at::empty({0}, self.options());
+  }
   int64_t num_elements = self.numel();
   std::vector<Tensor> grids = at::meshgrid(std::vector<Tensor>(r, self));
   Tensor mask = _triu_mask(num_elements, r, with_replacement, self.options());

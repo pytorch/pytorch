@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 from functools import partial
 
 import caffe2.python.hypothesis_test_util as hu
@@ -18,6 +16,9 @@ def ref_adagrad(
     output_effective_lr_and_update=False,
     decay=1.0,
     row_wise=False,
+    weight_decay=0.0,
+    counter_halflife=-1,
+    count=None,  # only used when counter_halflife != -1
 ):
     mom_in_f32 = mom_in
     param_in_f32 = param_in
@@ -25,12 +26,15 @@ def ref_adagrad(
         mom_in_f32 = mom_in.astype(np.float32)
         param_in_f32 = param_in.astype(np.float32)
 
+    if count and count > 0 and counter_halflife > 0:
+        weight_decay *= counter_halflife / count
+    grad_temp = grad + weight_decay * param_in_f32
     if row_wise:
-        mom_out = decay * mom_in_f32 + np.mean(np.square(grad))
+        mom_out = decay * mom_in_f32 + np.mean(np.square(grad_temp))
     else:
-        mom_out = decay * mom_in_f32 + np.square(grad)
+        mom_out = decay * mom_in_f32 + np.square(grad_temp)
     effective_lr = lr / (np.sqrt(mom_out) + epsilon)
-    grad_adj = effective_lr * grad
+    grad_adj = effective_lr * grad_temp
     param_out = param_in_f32 + grad_adj
 
     if output_effective_lr_and_update:
@@ -69,7 +73,17 @@ def ref_adagrad(
 
 
 def adagrad_sparse_test_helper(
-    parent_test, inputs, lr, epsilon, engine, ref_adagrad, gc, dc, row_wise=False
+    parent_test,
+    inputs,
+    lr,
+    epsilon,
+    engine,
+    ref_adagrad,
+    gc,
+    dc,
+    row_wise=False,
+    weight_decay=0.0,
+    counter_halflife=-1,
 ):
     param, momentum, grad = inputs
     if row_wise:
@@ -77,6 +91,9 @@ def adagrad_sparse_test_helper(
         momentum = momentum.reshape(momentum.shape[0], -1)[:, 0]
     momentum = np.abs(momentum)
     lr = np.array([lr], dtype=np.float32)
+    count = None
+    if counter_halflife != -1:
+        count = np.random.rand(param.shape[0])
 
     # Create an indexing array containing values that are lists of indices,
     # which index into grad
@@ -94,14 +111,16 @@ def adagrad_sparse_test_helper(
 
     op = core.CreateOperator(
         "RowWiseSparseAdagrad" if row_wise else "SparseAdagrad",
-        ["param", "momentum", "indices", "grad", "lr"],
+        ["param", "momentum", "indices", "grad", "lr"] if count is None else ["param", "momentum", "indices", "grad", "lr", "count"],
         ["param", "momentum"],
         epsilon=epsilon,
+        weight_decay=weight_decay,
+        counter_halflife=counter_halflife,
         engine=engine,
         device_option=gc,
     )
 
-    def ref_sparse(param, momentum, indices, grad, lr, ref_using_fp16=False):
+    def ref_sparse(param, momentum, indices, grad, lr, count=None, ref_using_fp16=False):
         param_out = np.copy(param)
         momentum_out = np.copy(momentum)
         # Need to do this because it's possible ref_adagrad's using_fp16 could
@@ -118,6 +137,9 @@ def adagrad_sparse_test_helper(
                 grad[i],
                 lr,
                 epsilon,
+                weight_decay=weight_decay,
+                counter_halflife=counter_halflife,
+                count=None if count is None else count[index],
             )
         return (param_out, momentum_out)
 
@@ -136,5 +158,8 @@ def adagrad_sparse_test_helper(
             param_i = param.astype(np.float32)
 
         parent_test.assertReferenceChecks(
-            gc, op, [param_i, momentum_i, indices, grad, lr, ref_using_fp16], ref_sparse
+            gc,
+            op,
+            [param_i, momentum_i, indices, grad, lr, count, ref_using_fp16],
+            ref_sparse
         )

@@ -5,16 +5,17 @@
 Named Tensors
 =============
 
-Named Tensors aim to make tensors easier to use by allowing users to associate
-explicit names with tensor dimensions. In most cases, operations that take
-dimension parameters will accept dimension names, avoiding the need to track
-dimensions by position. In addition, named tensors use names to automatically
-check that APIs are being used correctly at runtime, providing extra safety.
-Names can also be used to rearrange dimensions, for example, to support
+Named Tensors allow users to give explicit names to tensor dimensions.
+In most cases, operations that take dimension parameters will accept
+dimension names, avoiding the need to track dimensions by position.
+In addition, named tensors use names to automatically check that APIs
+are being used correctly at runtime, providing extra safety. Names can
+also be used to rearrange dimensions, for example, to support
 "broadcasting by name" rather than "broadcasting by position".
 
+
 .. warning::
-    The named tensor API is experimental and subject to change.
+    The named tensor API is a prototype feature and subject to change.
 
 Creating named tensors
 ----------------------
@@ -187,7 +188,7 @@ mentioning all of them as in required by :meth:`~Tensor.permute`.
     # Move the F (dim 5) and E dimension (dim 4) to the front while keeping
     # the rest in the same order
     >>> tensor.permute(5, 4, 0, 1, 2, 3)
-    >>> named_tensor.align_to('F', 'E', ...)  # Use '...' instead in Python 2
+    >>> named_tensor.align_to('F', 'E', ...)
 
 Use :meth:`~Tensor.flatten` and :meth:`~Tensor.unflatten` to flatten and unflatten
 dimensions, respectively. These methods are more verbose than :meth:`~Tensor.view`
@@ -317,4 +318,3 @@ operators, see :ref:`name_inference_reference-doc`.
 
       .. warning::
           The named tensor API is experimental and subject to change.
-

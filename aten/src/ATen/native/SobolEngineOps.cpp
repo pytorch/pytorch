@@ -3,11 +3,14 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/native/SobolEngineOpsUtils.h>
+#include <c10/util/irange.h>
 
 #include <vector>
 
 namespace at {
 namespace native {
+
+using namespace sobol_utils;
 
 /// This is the core function to draw samples from a `SobolEngine` given
 /// its state variables (`sobolstate` and `quasi`). `dimension` can be
@@ -38,7 +41,7 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
 
     for (int64_t i = 0; i < n; i++, num_generated++) {
       l = rightmost_zero(num_generated);
-      for (int64_t j = 0; j < dimension; j++) {
+      for (const auto j : c10::irange(dimension)) {
         wquasi_data[j * wquasi_stride] ^= sobolstate_data[j * sobolstate_row_stride + l * sobolstate_col_stride];
         result_data[i * result_row_stride + j * result_col_stride] = wquasi_data[j * wquasi_stride];
       }
@@ -61,6 +64,7 @@ Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
            "quasi needs to be of type ", at::kLong);
 
   // We deal with `data` and `strides` due to performance issues.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t l;
   int64_t* quasi_data = quasi.data_ptr<int64_t>();
   int64_t* sobolstate_data = sobolstate.data_ptr<int64_t>();
@@ -70,7 +74,7 @@ Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
 
   for (int64_t i = 0; i < n; i++, num_generated++) {
     l = rightmost_zero(num_generated);
-    for (int64_t j = 0; j < dimension; j++) {
+    for (const auto j : c10::irange(dimension)) {
       quasi_data[j * quasi_stride] ^= sobolstate_data[j * sobolstate_row_stride + l * sobolstate_col_stride];
     }
   }
@@ -99,13 +103,13 @@ Tensor& _sobol_engine_scramble_(Tensor& sobolstate, const Tensor& ltm, int64_t d
   auto ltm_d_a = ltm_dots.accessor<int64_t, 2>();
 
   /// Main scrambling loop
-  for (int64_t d = 0; d < dimension; ++d) {
-    for (int64_t j = 0; j < MAXBIT; ++j) {
+  for (const auto d : c10::irange(dimension)) {
+    for (const auto j : c10::irange(MAXBIT)) {
       int64_t vdj = ss_a[d][j], l = 1, t2 = 0;
       for (int64_t p = MAXBIT - 1; p >= 0; --p) {
         int64_t lsmdp = ltm_d_a[d][p];
         int64_t t1 = 0;
-        for (int64_t k = 0; k < MAXBIT; ++k) {
+        for (const auto k : c10::irange(MAXBIT)) {
           t1 += (bitsubseq(lsmdp, k, 1) * bitsubseq(vdj, k, 1));
         }
         t1 = t1 % 2;
@@ -124,23 +128,32 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
   TORCH_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
 
-  /// First row of `sobolstate` is 1
-  sobolstate.select(0, 0).fill_(1);
-
   /// Use a tensor accessor for `sobolstate`
   auto ss_a = sobolstate.accessor<int64_t, 2>();
-  for (int64_t d = 0; d < dimension; ++d) {
+
+  /// First row of `sobolstate` is all 1s
+  for (const auto m : c10::irange(MAXBIT)) {
+    ss_a[0][m] = 1;
+  }
+
+  /// Remaining rows of sobolstate (row 2 through dim, indexed by [1:dim])
+  for (const auto d : c10::irange(1, dimension)) {
     int64_t p = poly[d];
     int64_t m = bit_length(p) - 1;
 
-    for (int64_t i = 0; i < m; ++i) {
+    // First m elements of row d comes from initsobolstate
+    for (const auto i : c10::irange(m)) {
       ss_a[d][i] = initsobolstate[d][i];
     }
 
-    for (int64_t j = m; j < MAXBIT; ++j) {
+    // Fill in remaining elements of v as in Section 2 (top of pg. 90) of:
+    // P. Bratley and B. L. Fox. Algorithm 659: Implementing sobol's
+    // quasirandom sequence generator. ACM Trans.
+    // Math. Softw., 14(1):88-100, Mar. 1988.
+    for (const auto j : c10::irange(m, MAXBIT)) {
       int64_t newv = ss_a[d][j - m];
       int64_t pow2 = 1;
-      for (int64_t k = 0; k < m; ++k) {
+      for (const auto k : c10::irange(m)) {
         pow2 <<= 1;
         if ((p >> (m - 1 - k)) & 1) {
           newv = newv ^ (pow2 * ss_a[d][j - k - 1]);
@@ -150,7 +163,18 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
     }
   }
 
-  Tensor pow2s = at::pow(2, at::native::arange((MAXBIT - 1), -1, -1, sobolstate.options()));
+  /// Multiply each column of sobolstate by power of 2:
+  /// sobolstate * [2^(maxbit-1), 2^(maxbit-2),..., 2, 1]
+  Tensor pow2s = at::pow(
+      2,
+      at::native::arange(
+          (MAXBIT - 1),
+          -1,
+          -1,
+          optTypeMetaToScalarType(sobolstate.options().dtype_opt()),
+          sobolstate.options().layout_opt(),
+          sobolstate.options().device_opt(),
+          sobolstate.options().pinned_memory_opt()));
   sobolstate.mul_(pow2s);
   return sobolstate;
 }

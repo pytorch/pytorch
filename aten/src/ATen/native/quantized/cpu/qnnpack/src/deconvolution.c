@@ -36,10 +36,8 @@ static inline size_t compute_output_dimension(
 }
 
 enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
-    uint32_t input_padding_top,
-    uint32_t input_padding_right,
-    uint32_t input_padding_bottom,
-    uint32_t input_padding_left,
+    uint32_t input_padding_height,
+    uint32_t input_padding_width,
     uint32_t adjustment_height,
     uint32_t adjustment_width,
     uint32_t kernel_height,
@@ -52,16 +50,14 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
     size_t group_input_channels,
     size_t group_output_channels,
     uint8_t input_zero_point,
-    float input_scale,
-    uint8_t kernel_zero_point,
-    float kernel_scale,
+    const uint8_t* kernel_zero_points,
     const uint8_t* kernel,
     const int32_t* bias,
     uint8_t output_zero_point,
-    float output_scale,
     uint8_t output_min,
     uint8_t output_max,
     uint32_t flags,
+    const float* requantization_scales,
     pytorch_qnnp_operator_t* deconvolution_out) {
   pytorch_qnnp_operator_t deconvolution = NULL;
   enum pytorch_qnnp_status status = pytorch_qnnp_status_uninitialized;
@@ -103,39 +99,17 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
     goto error;
   }
 
-  if (input_scale <= 0.0f || !isnormal(input_scale)) {
-    pytorch_qnnp_log_error(
-        "failed to create deconvolution with %.7g input scale: scale must be finite and positive",
-        input_scale);
-    goto error;
-  }
-
-  if (kernel_scale <= 0.0f || !isnormal(kernel_scale)) {
-    pytorch_qnnp_log_error(
-        "failed to create deconvolution with %.7g kernel scale: scale must be finite and positive",
-        kernel_scale);
-    goto error;
-  }
-
-  if (output_scale <= 0.0f || !isnormal(output_scale)) {
-    pytorch_qnnp_log_error(
-        "failed to create deconvolution with %.7g output scale: scale must be finite and positive",
-        output_scale);
-    goto error;
-  }
-
   status = pytorch_qnnp_status_unsupported_parameter;
 
-  const float deconvolution_scale = input_scale * kernel_scale / output_scale;
-  if (deconvolution_scale >= 1.0f) {
-    pytorch_qnnp_log_error(
-        "failed to create deconvolution with %.7g input scale, %.7g kernel scale, and %.7g output scale: "
-        "deconvolution scale %.7g is greater or equal to 1.0",
-        input_scale,
-        kernel_scale,
-        output_scale,
-        deconvolution_scale);
-    goto error;
+  for (int i = 0; i < groups * group_output_channels; i++) {
+    if (requantization_scales[i] <= 0.0f ||
+        !isnormal(requantization_scales[i])) {
+      pytorch_qnnp_log_error(
+          "failed to create deconvolution operator with %.7g requantization scale for "
+          "channel %d scale must be finite and positive",
+          requantization_scales[i], i);
+      goto error;
+    }
   }
 
   status = pytorch_qnnp_status_out_of_memory;
@@ -165,7 +139,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
   }
   memset(
       deconvolution->packed_weights,
-      kernel_zero_point,
+      kernel_zero_points[0],
       packed_group_weights_size * groups);
 
   for (uint32_t group = 0; group < groups; group++) {
@@ -177,11 +151,14 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
         kr,
 #if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
         input_zero_point,
-        kernel_zero_point,
+        kernel_zero_points[0],
 #endif
         kernel +
             group * group_output_channels * kernel_size * group_input_channels,
         bias + group * group_output_channels,
+#if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
+        kernel_zero_points + group * group_output_channels,
+#endif
         (void*)((uintptr_t)deconvolution->packed_weights + group * packed_group_weights_size));
   }
 
@@ -202,10 +179,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
   deconvolution->zero_buffer = zero_buffer;
   deconvolution->zero_pointer = (void*)((uintptr_t)zero_buffer + zero_offset);
 
-  deconvolution->input_padding_top = input_padding_top;
-  deconvolution->input_padding_right = input_padding_right;
-  deconvolution->input_padding_bottom = input_padding_bottom;
-  deconvolution->input_padding_left = input_padding_left;
+  deconvolution->input_padding_height = input_padding_height;
+  deconvolution->input_padding_width = input_padding_width;
   deconvolution->adjustment_height = adjustment_height;
   deconvolution->adjustment_width = adjustment_width;
 
@@ -219,19 +194,20 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
   deconvolution->group_input_channels = group_input_channels;
   deconvolution->group_output_channels = group_output_channels;
 
-  deconvolution->kernel_zero_point = kernel_zero_point;
+  deconvolution->kernel_zero_point = kernel_zero_points[0];
 
   deconvolution->conv_quantization_params =
       pytorch_qnnp_compute_conv_quantization_params(
           input_zero_point,
-          kernel_zero_point,
-          deconvolution_scale,
+          kernel_zero_points,
+          requantization_scales,
           output_zero_point,
           output_min,
           output_max);
 
   deconvolution->ukernel_type = pytorch_qnnp_ukernel_type_conv;
   deconvolution->format = pytorch_qnnp_format_quint8;
+  deconvolution->transpose = true;
 
   *deconvolution_out = deconvolution;
   return pytorch_qnnp_status_success;
@@ -286,8 +262,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
   const size_t output_height = deconvolution->output_height =
       compute_output_dimension(
           input_height,
-          deconvolution->input_padding_top +
-              deconvolution->input_padding_bottom,
+          deconvolution->input_padding_height * 2,
           deconvolution->adjustment_height,
           kernel_height,
           deconvolution->dilation_height,
@@ -295,8 +270,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
   const size_t output_width = deconvolution->output_width =
       compute_output_dimension(
           input_width,
-          deconvolution->input_padding_left +
-              deconvolution->input_padding_right,
+          deconvolution->input_padding_width * 2,
           deconvolution->adjustment_width,
           kernel_width,
           deconvolution->dilation_width,

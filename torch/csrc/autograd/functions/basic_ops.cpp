@@ -27,4 +27,29 @@ auto DelayedError::apply(variable_list&& inputs) -> variable_list {
   });
 }
 
+auto UndefinedGrad::apply(variable_list&& inputs) -> variable_list {
+  tensor_list outputs;
+  outputs.reserve(inputs.size());
+  for (auto& var : inputs) {
+    outputs.emplace_back(var.defined() ? var.clone().tensor_data() : at::Tensor());
+  }
+  return wrap_outputs(inputs, std::move(outputs), [&](edge_list&& next_edges) {
+    return std::make_shared<UndefinedGradBackward>(std::move(next_edges));
+  });
+}
+
+auto UndefinedGradBackward::apply(variable_list&& output_grads) -> variable_list {
+  tensor_list input_grads;
+  output_grads.reserve(input_grads.size());
+  for (auto& grad : output_grads) {
+    (void)grad; // Suppress unused variable warning
+    input_grads.emplace_back(at::Tensor());
+  }
+  return input_grads;
+}
+
+auto Identity::apply(variable_list&& grads) -> variable_list {
+  return std::move(grads);
+}
+
 }} // namespace torch::autograd

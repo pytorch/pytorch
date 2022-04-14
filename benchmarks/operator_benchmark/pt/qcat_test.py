@@ -1,12 +1,8 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import operator_benchmark as op_bench
 
 import torch
 import torch.nn.quantized as nnq
+from typing import List
 
 
 """Microbenchmarks for quantized Cat operator"""
@@ -58,11 +54,14 @@ class QCatBenchmark(op_bench.TorchBenchmarkBase):
         elif contig == 'none':
             self.input = (q_input_non_contig, q_input_non_contig)
 
-        self.dim = dim
+        self.inputs = {
+            "input": self.input,
+            "dim": dim
+        }
         self.set_module_name('qcat')
 
-    def forward(self):
-        return self.qf.cat(self.input, dim=self.dim)
+    def forward(self, input: List[torch.Tensor], dim: int):
+        return self.qf.cat(input, dim=dim)
 
 
 op_bench.generate_pt_test(qcat_configs_short + qcat_configs_long,

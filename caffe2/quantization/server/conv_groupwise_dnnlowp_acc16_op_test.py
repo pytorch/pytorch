@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import collections
 
@@ -7,8 +7,11 @@ import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, utils, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import check_quantized_results_close, run_conv_or_fc
-from hypothesis import assume, given
+from caffe2.quantization.server.dnnlowp_test_utils import (
+    check_quantized_results_close,
+    run_conv_or_fc
+)
+from hypothesis import assume, given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -40,6 +43,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         preserve_weight_sparsity=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=None)
     def test_groupwise_dnnlowp_conv_acc16_int(
         self,
         stride,

@@ -767,11 +767,30 @@ else()
   # Search default search paths, after we search our own set of paths.
   cuda_find_host_program(CUDA_NVCC_EXECUTABLE nvcc)
 endif()
+
+# FAST_NVCC
+if(USE_FAST_NVCC AND CUDA_NVCC_EXECUTABLE AND NOT CUDA_NVCC_EXECUTABLE_ORIGIN)
+  set(CUDA_NVCC_EXECUTABLE_ORIGIN "${CUDA_NVCC_EXECUTABLE}")
+  set(FAST_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/fast_nvcc.py")
+  configure_file(${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.sh.in "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.sh")
+  file(COPY "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.sh"
+    DESTINATION "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/"
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  )
+  set(CUDA_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.sh")
+endif()
 mark_as_advanced(CUDA_NVCC_EXECUTABLE)
 
 if(CUDA_NVCC_EXECUTABLE AND NOT CUDA_VERSION)
   # Compute the version.
-  execute_process (COMMAND ${CUDA_NVCC_EXECUTABLE} "--version" OUTPUT_VARIABLE NVCC_OUT)
+  execute_process(COMMAND ${CUDA_NVCC_EXECUTABLE} "--version"
+    OUTPUT_VARIABLE NVCC_OUT
+    RESULT_VARIABLE NVCC_RC)
+  if(NOT (${NVCC_RC} EQUAL 0))
+    message(WARNING "Failed to execute '${CUDA_NVCC_EXECUTABLE} --version'")
+    set(CUDA_FOUND FALSE)
+    return()
+  endif()
   string(REGEX REPLACE ".*release ([0-9]+)\\.([0-9]+).*" "\\1" CUDA_VERSION_MAJOR ${NVCC_OUT})
   string(REGEX REPLACE ".*release ([0-9]+)\\.([0-9]+).*" "\\2" CUDA_VERSION_MINOR ${NVCC_OUT})
   set(CUDA_VERSION "${CUDA_VERSION_MAJOR}.${CUDA_VERSION_MINOR}" CACHE STRING "Version of CUDA as computed from nvcc.")
@@ -781,7 +800,6 @@ else()
   string(REGEX REPLACE "([0-9]+)\\.([0-9]+).*" "\\1" CUDA_VERSION_MAJOR "${CUDA_VERSION}")
   string(REGEX REPLACE "([0-9]+)\\.([0-9]+).*" "\\2" CUDA_VERSION_MINOR "${CUDA_VERSION}")
 endif()
-
 
 # Always set this convenience variable
 set(CUDA_VERSION_STRING "${CUDA_VERSION}")
@@ -1420,7 +1438,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
     set(CUDA_HOST_SHARED_FLAGS)
   endif()
 
-  macro(_filter_blacklisted_host_flags CUDA_FLAGS)
+  macro(_filter_blocklisted_host_flags CUDA_FLAGS)
     string(REGEX REPLACE "[ \t]+" ";" ${CUDA_FLAGS} "${${CUDA_FLAGS}}")
     foreach(_blacklisted ${CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST})
       list(REMOVE_ITEM ${CUDA_FLAGS} "${_blacklisted}")
@@ -1432,7 +1450,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
   # always need to set the SHARED_FLAGS, though.
   if(CUDA_PROPAGATE_HOST_FLAGS)
     set(_cuda_C_FLAGS "${CMAKE_${CUDA_C_OR_CXX}_FLAGS}")
-    _filter_blacklisted_host_flags(_cuda_C_FLAGS)
+    _filter_blocklisted_host_flags(_cuda_C_FLAGS)
     set(_cuda_host_flags "set(CMAKE_HOST_FLAGS ${_cuda_C_FLAGS} ${CUDA_HOST_SHARED_FLAGS})")
   else()
     set(_cuda_host_flags "set(CMAKE_HOST_FLAGS ${CUDA_HOST_SHARED_FLAGS})")
@@ -1458,7 +1476,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         endif()
       endif()
       set(_cuda_C_FLAGS "${CMAKE_${CUDA_C_OR_CXX}_FLAGS_${config_upper}}")
-      _filter_blacklisted_host_flags(_cuda_C_FLAGS)
+      _filter_blocklisted_host_flags(_cuda_C_FLAGS)
       if(_cuda_fix_g3)
         string(REPLACE "-g3" "-g" _cuda_C_FLAGS "${_cuda_C_FLAGS}")
       endif()
@@ -1505,7 +1523,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         set(_cuda_source_format ${format})
       endif()
       # If file isn't a .cu file, we need to tell nvcc to treat it as such.
-      if(NOT ${file} MATCHES "\\.cu$")
+      if(NOT file MATCHES "\\.cu$")
         set(cuda_language_flag -x=cu)
       else()
         set(cuda_language_flag)

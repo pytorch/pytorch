@@ -2,6 +2,8 @@
 #include <unordered_map>
 #include <string>
 #include <ATen/ATen.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/utils/math.h>
@@ -17,6 +19,12 @@ namespace caffe2 {
 
 using at::Half; // for AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ...)
 
+namespace internal {
+TORCH_API at::Tensor index_with_uint8_handling(
+    const at::Tensor& self,
+    const torch::List<c10::optional<at::Tensor>>& indices);
+}
+
 template <class Context>
 class ATenOp : public Operator<Context> {
  public:
@@ -24,7 +32,7 @@ class ATenOp : public Operator<Context> {
   : Operator<Context>(operator_def, ws) {
     VLOG(2) << "ATen OpDef: " << ProtoDebugString(operator_def) << "\n";
     switch(findImplementation(operator_def)) {
-      ${implementations}
+      ${cases}
       default:
         CAFFE_THROW("Unexpected key value for aten operator");
     }
@@ -56,7 +64,7 @@ private:
 
   at::TensorOptions optionsFor(const Tensor& ten) {
     at::Device device = ten.GetDevice();
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
     if (backend() == at::Backend::HIP) {
       device = at::Device(kCUDA, device.index());
     }
@@ -79,6 +87,16 @@ private:
 
   std::vector<at::Tensor> peekSlice(size_t i, size_t len, size_t N) {
     std::vector<at::Tensor> results;
+    results.reserve(len);
+    for (size_t ii = i; ii < i + len; ++ii) {
+      results.push_back(peek(ii, N));
+    }
+    return results;
+  }
+
+  torch::List<c10::optional<at::Tensor>> peekSliceOptionals(size_t i, size_t len, size_t N) {
+    torch::List<c10::optional<at::Tensor>> results;
+    results.reserve(len);
     for (size_t ii = i; ii < i + len; ++ii) {
       results.push_back(peek(ii, N));
     }
@@ -90,8 +108,8 @@ private:
     auto at_sizes = src.sizes();
     caffe2::TypeMeta type_meta = typeMetaFor(src);
     at::Device device = src.device();
-#ifdef __HIP_PLATFORM_HCC__
-    if (device.type() == at::DeviceType::CUDA) {
+#if defined(USE_ROCM)
+    if (device.is_cuda()) {
       device = at::Device(at::DeviceType::HIP, device.index());
     }
 #endif
@@ -113,7 +131,7 @@ private:
   void assignListStartingAt(
       size_t offset,
       const std::vector<at::Tensor>& tensors) {
-    for (size_t i = 0; i < tensors.size(); i++) {
+    for (const auto i : c10::irange(tensors.size())) {
       assignTo(Output(offset + i), tensors[i]);
     }
   }
@@ -132,7 +150,7 @@ private:
     return s.toDouble();
   }
 
-  void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
+  void assignTo(Tensor* dst, at::ScalarType scalar_type, const at::Scalar& scalar) {
     switch(scalar_type) {
       #define DEFINE_CASE(ctype,aten_name) \
         case at::k##aten_name: { \
@@ -159,10 +177,11 @@ private:
     std::stringstream descriptor;
     descriptor << op;
     std::vector<std::string> attrs;
-    for(size_t i = 0; i < operator_def.arg_size(); i++) {
+    for (const auto i : c10::irange(operator_def.arg_size())) {
       auto & attr = operator_def.arg(i);
-      if(attr.name() == "operator" || attr.name() == "type" )
+      if(attr.name() == "operator" || attr.name() == "type" || attr.name() == "overload_name" ) {
         continue;
+      }
       attrs.push_back(attr.name());
     }
     std::sort(attrs.begin(), attrs.end());
@@ -206,11 +225,13 @@ private:
     std::vector<int64_t> ints =
         OperatorBase::GetRepeatedArgument<int64_t>(name, {});
     std::array<bool, N> result;
-    for (size_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       result[i] = ints.at(i);
     }
     return result;
   }
+
+  ${implementations}
 };
 
 }

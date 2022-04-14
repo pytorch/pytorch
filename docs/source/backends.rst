@@ -1,0 +1,106 @@
+.. role:: hidden
+    :class: hidden-section
+
+torch.backends
+==============
+.. automodule:: torch.backends
+
+`torch.backends` controls the behavior of various backends that PyTorch supports.
+
+These backends include:
+
+- ``torch.backends.cuda``
+- ``torch.backends.cudnn``
+- ``torch.backends.mkl``
+- ``torch.backends.mkldnn``
+- ``torch.backends.openmp``
+
+
+torch.backends.cuda
+^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cuda
+
+.. autofunction::  torch.backends.cuda.is_built
+
+.. attribute::  torch.backends.cuda.matmul.allow_tf32
+
+    A :class:`bool` that controls whether TensorFloat-32 tensor cores may be used in matrix
+    multiplications on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
+
+.. attribute::  torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+
+    A :class:`bool` that controls whether reduced precision reductions (e.g., with fp16 accumulation type) are allowed with fp16 GEMMs.
+
+.. attribute::  torch.backends.cuda.cufft_plan_cache
+
+    ``cufft_plan_cache`` caches the cuFFT plans
+
+    .. attribute::  size
+
+        A readonly :class:`int` that shows the number of plans currently in the cuFFT plan cache.
+
+    .. attribute::  max_size
+
+        A :class:`int` that controls cache capacity of cuFFT plan.
+
+    .. method::  clear()
+
+        Clears the cuFFT plan cache.
+
+.. autofunction:: torch.backends.cuda.preferred_linalg_library
+
+
+torch.backends.cudnn
+^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cudnn
+
+.. autofunction:: torch.backends.cudnn.version
+
+.. autofunction:: torch.backends.cudnn.is_available
+
+.. attribute::  torch.backends.cudnn.enabled
+
+    A :class:`bool` that controls whether cuDNN is enabled.
+
+.. attribute::  torch.backends.cudnn.allow_tf32
+
+    A :class:`bool` that controls where TensorFloat-32 tensor cores may be used in cuDNN
+    convolutions on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
+
+.. attribute::  torch.backends.cudnn.deterministic
+
+    A :class:`bool` that, if True, causes cuDNN to only use deterministic convolution algorithms.
+    See also :func:`torch.are_deterministic_algorithms_enabled` and
+    :func:`torch.use_deterministic_algorithms`.
+
+.. attribute::  torch.backends.cudnn.benchmark
+
+    A :class:`bool` that, if True, causes cuDNN to benchmark multiple convolution algorithms
+    and select the fastest.
+
+
+torch.backends.mkl
+^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.mkl
+
+.. autofunction::  torch.backends.mkl.is_available
+
+
+torch.backends.mkldnn
+^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.mkldnn
+
+.. autofunction::  torch.backends.mkldnn.is_available
+
+
+torch.backends.openmp
+^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.openmp
+
+.. autofunction::  torch.backends.openmp.is_available
+
+.. Docs for other backends need to be added here.
+.. Automodules are just here to ensure checks run but they don't actually
+.. add anything to the rendered page for now.
+.. py:module:: torch.backends.quantized
+.. py:module:: torch.backends.xnnpack

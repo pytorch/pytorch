@@ -1,23 +1,22 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, workspace
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 from caffe2.proto import caffe2_pb2
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import random
-import six
-import unittest
 
 
 class TestUtilityOps(serial.SerializedTestCase):
 
-    @serial.given(X=hu.tensor(), args=st.booleans(), **hu.gcs)
+    @given(X=hu.tensor(), args=st.booleans(), **hu.gcs)
+    @settings(deadline=10000)
     def test_slice(self, X, args, gc, dc):
         X = X.astype(dtype=np.float32)
         dim = random.randint(0, X.ndim - 1)
@@ -59,12 +58,29 @@ class TestUtilityOps(serial.SerializedTestCase):
             outputs_with_grads=[0],
         )
 
-    @serial.given(dtype=st.sampled_from([np.float32, np.int32]),
+    @given(ndims=st.integers(min_value=1, max_value=10), **hu.gcs)
+    @settings(deadline=10000)
+    def test_resize_like(self, ndims, gc, dc):
+        X = np.zeros((ndims * 2, ))
+        Y = np.zeros((ndims, 2))
+
+        op = core.CreateOperator(
+            "ResizeLike", ["X", "Y"], ["Z"],
+        )
+
+        def resize_like(X, Y):
+            return [X.reshape(Y.shape)]
+
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertReferenceChecks(gc, op, [X, Y], resize_like, ensure_outputs_are_inferred=True)
+
+    @given(dtype=st.sampled_from([np.float32, np.int32]),
            ndims=st.integers(min_value=1, max_value=5),
            seed=st.integers(min_value=0, max_value=65536),
            null_axes=st.booleans(),
            engine=st.sampled_from(['CUDNN', None]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_transpose(self, dtype, ndims, seed, null_axes, engine, gc, dc):
         if (gc.device_type == caffe2_pb2.CUDA and engine == "CUDNN"):
             # cudnn 5.1 does not support int.
@@ -94,8 +110,9 @@ class TestUtilityOps(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [X, axes],
                                    transpose_ref)
 
-    @serial.given(m=st.integers(5, 10), n=st.integers(5, 10),
+    @given(m=st.integers(5, 10), n=st.integers(5, 10),
            o=st.integers(5, 10), nans=st.booleans(), **hu.gcs)
+    @settings(deadline=10000)
     def test_nan_check(self, m, n, o, nans, gc, dc):
         other = np.array([1, 2, 3]).astype(np.float32)
         X = np.random.rand(m, n, o).astype(np.float32)
@@ -170,8 +187,9 @@ class TestUtilityOps(serial.SerializedTestCase):
         )
         self.assertDeviceChecks(dc, op, inputs, [0])
 
-    @serial.given(n=st.integers(4, 5), m=st.integers(6, 7),
+    @given(n=st.integers(4, 5), m=st.integers(6, 7),
            d=st.integers(2, 3), **hu.gcs)
+    @settings(deadline=10000)
     def test_elementwise_max_grad(self, n, m, d, gc, dc):
         go = np.random.rand(n, m, d).astype(np.float32)
         X = np.random.rand(n, m, d).astype(np.float32)
@@ -225,8 +243,9 @@ class TestUtilityOps(serial.SerializedTestCase):
         )
         self.assertDeviceChecks(dc, op, inputs, [0])
 
-    @serial.given(n=st.integers(4, 5), m=st.integers(6, 7),
+    @given(n=st.integers(4, 5), m=st.integers(6, 7),
            d=st.integers(2, 3), **hu.gcs)
+    @settings(deadline=10000)
     def test_elementwise_min_grad(self, n, m, d, gc, dc):
         go = np.random.rand(n, m, d).astype(np.float32)
         X = np.random.rand(n, m, d).astype(np.float32)
@@ -255,7 +274,47 @@ class TestUtilityOps(serial.SerializedTestCase):
         )
         self.assertDeviceChecks(dc, op, inputs, [0, 1, 2])
 
-    @serial.given(
+    @given(
+        n=st.integers(1, 8), m=st.integers(1, 10), d=st.integers(1, 4),
+        in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
+        seed=st.integers(min_value=0, max_value=65535),
+        dtype=st.sampled_from([np.int32, np.int64, np.float32]),
+        **hu.gcs)
+    @settings(deadline=10000)
+    def test_sum(
+            self, n, m, d, in_place, engine, seed, dtype, gc, dc):
+        input_names = []
+        input_vars = []
+        np.random.seed(seed)
+        for i in range(m):
+            X_name = 'X' + str(i)
+            input_names.extend([X_name])
+            var = np.random.rand(n, d).astype(dtype)
+            vars()[X_name] = var
+            input_vars.append(var)
+
+        def sum_op_ref(*args):
+            res = np.zeros((n, d))
+            for i in range(m):
+                res = res + args[i]
+            return (res, )
+
+        op = core.CreateOperator(
+            "Sum",
+            input_names,
+            [input_names[0]] if in_place else ['Y'],
+            engine=engine,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=input_vars,
+            reference=sum_op_ref,
+        )
+        self.assertDeviceChecks(dc, op, input_vars, [0])
+
+    @given(
         inputs=hu.lengths_tensor().flatmap(
             lambda pair: st.tuples(
                 st.just(pair[0]),
@@ -273,6 +332,7 @@ class TestUtilityOps(serial.SerializedTestCase):
             )
         ),
         **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_lengths_gather(self, inputs, gc, dc):
         items = inputs[0]
         lengths = inputs[1]
@@ -296,9 +356,10 @@ class TestUtilityOps(serial.SerializedTestCase):
             reference=lengths_gather_op,
         )
 
-    @serial.given(
+    @given(
         inputs=hu.lengths_tensor(),
         **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_lengths_to_ranges(self, inputs, gc, dc):
         _, lengths = inputs
 
@@ -335,7 +396,8 @@ class TestUtilityOps(serial.SerializedTestCase):
         self.assertEqual(shapes[output], list(lengths.shape) + [2])
         self.assertEqual(types[output], core.DataType.INT32)
 
-    @serial.given(**hu.gcs)
+    @given(**hu.gcs)
+    @settings(deadline=None, max_examples=50)
     def test_size_op(self, gc, dc):
         X = np.array([[1, 2], [3, 4]]).astype(np.float32)
 
@@ -371,6 +433,7 @@ class TestUtilityOps(serial.SerializedTestCase):
             np.testing.assert_array_equal(X, Y)
 
     @given(**hu.gcs)
+    @settings(deadline=10000)
     def test_range(self, gc, dc):
         names = [
             ('stop_',),
@@ -410,7 +473,7 @@ class TestUtilityOps(serial.SerializedTestCase):
             names[len(inputs) - 1],
             ["Y"]
         )
-        with six.assertRaisesRegex(self, RuntimeError, 'Step size cannot be 0'):
+        with self.assertRaisesRegex(RuntimeError, 'Step size cannot be 0'):
             self.assertReferenceChecks(
                 device_option=gc,
                 op=op,

@@ -16,11 +16,18 @@ std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
 }
 
 bool Dimname::isValidName(const std::string& name) {
+  // allow valid ASCII python identifiers: "uppercase and lowercase
+  // letters A through Z, the underscore _ and, except for the first
+  // character, the digits 0 through 9" (at least length 1)
+  // https://docs.python.org/3/reference/lexical_analysis.html#identifiers
   if (name.length() == 0) {
     return false;
   }
   for (auto it = name.begin(); it != name.end(); ++it) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (std::isalpha(*it) || *it == '_') {
+      continue;
+    } else if (it != name.begin() && std::isdigit(*it)) {
       continue;
     }
     return false;
@@ -31,7 +38,8 @@ bool Dimname::isValidName(const std::string& name) {
 static void check_valid_identifier(const std::string& name) {
   TORCH_CHECK(
       Dimname::isValidName(name),
-      "Invalid name: a valid identifier must contain alphabetical characters and/or underscore, got: '",
+      "Invalid name: a valid identifier contains only digits, alphabetical "
+      "characters, and/or underscore and starts with a non-digit. got: '",
       name, "'.");
 }
 

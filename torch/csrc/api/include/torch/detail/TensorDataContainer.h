@@ -1,6 +1,17 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ScalarOps.h>
+
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/tensor.h>
+#endif
 
 #include <initializer_list>
 
@@ -24,21 +35,15 @@ inline std::ostream& operator<<(std::ostream& stream, c10::BFloat16 value) {
 }
 
 inline c10::ScalarType compute_desired_dtype(c10::ScalarType scalar_type) {
-  // NOTE: the dtype computation in this function only takes effect when the user passes
-  // an integer literal / floating-point literal or a braced-init-list to `torch::tensor`
-  // constructor. It doesn't affect `torch::tensor(at::ArrayRef<T>)` and `torch::tensor(std::vector<T>)`
-  // as the specified dtype `T` is always respected.
   if (scalar_type == at::kInt || scalar_type == at::kLong) {
-    // In C++, an integer literal without suffix (e.g. `1` instead of `1u`) can be one of
-    // `int` / `long int` / `long long int` types. When we find that `scalar_type` is one
-    // of those types, we always use `torch.int64` type, because In Python `torch.tensor(1)`
-    // always gives a tensor of `torch.int64` dtype.
+    // C++ `torch::tensor` with an integer type or an `at::ArrayRef` / `std::vector` /
+    // (nested) braced-init-list of integer types always produces a tensor of dtype `at::kLong`
+    // (aka. int64_t), matching Python `torch.tensor` behavior.
     return at::kLong;
-  } else if (scalar_type == at::kDouble) {
-    // When `scalar_type == at::kDouble`, we know that the user is passing in
-    // a floating-point literal without specifying its type (e.g. `1.0` instead of `1.0f`).
-    // In Python, the dtype of `torch.tensor(1.0)` depends on the value of
-    // `torch.get_default_dtype()`, and we should do the same for C++ `torch::tensor(1.0)`.
+  } else if (scalar_type == at::kFloat || scalar_type == at::kDouble) {
+    // C++ `torch::tensor` with a floating-point type or an `at::ArrayRef` / `std::vector` /
+    // (nested) braced-init-list of floating-point types always produces a tensor of dtype
+    // `torch::get_default_dtype()`, matching Python `torch.tensor` behavior.
     return at::typeMetaToScalarType(at::get_default_dtype());
   } else {
     return scalar_type;
@@ -97,6 +102,7 @@ struct TensorDataContainer {
   // NOTE: For tensors with zero-size dimensions (e.g. `torch::tensor({{}, {}})`),
   // the innermost empty braced-init-list `{}` matches the default constructor of
   // the innermost `TensorDataContainer`.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDataContainer() :
       sizes_({0}),
       // NOTE: In Python, the dtype of tensors with zero-size dimensions (e.g. `torch.tensor([[], []])`)
@@ -106,11 +112,15 @@ struct TensorDataContainer {
 #define TENSOR(T, S) \
   TensorDataContainer(T value) : \
       sizes_(), \
-      scalar_type_(compute_desired_dtype(at::k##S)), \
+      scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Scalar), \
       scalar_(value) {}
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorDataContainer(std::initializer_list<TensorDataContainer> init_list) :
       sizes_(),
       scalar_type_(init_list.begin()->scalar_type()),
@@ -142,19 +152,22 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       sizes_({(int64_t)values.size()}), \
       scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Tensor) { \
-    at::AutoNonVariableTypeMode non_var_type_mode(true); \
+    at::AutoDispatchBelowAutograd mode; \
     if (scalar_type_ == at::kBool) { \
       tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU)); \
     } else { \
       tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU)); \
     } \
   }
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
   // NOTE: We need to handle `std::vector` explicitly instead of relying on an implicit conversion
   // to `at::ArrayRef`, otherwise the following error can be thrown when calling
-  // `torch::tensor(std::vector<double>({1.1, 2.2}))`:
+  // `torch::tensor(std::vector<int>({1, 2}))`:
   // ```
   // error: no matching function for call to 'tensor(const std::vector<int>&)'
   // no known conversion for argument 1 from 'const std::vector<int>' to
@@ -165,7 +178,10 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
   // ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.
 #define TENSOR(T, S) \
   TensorDataContainer(const std::vector<T>& values) : TensorDataContainer(at::ArrayRef<T>(values)) {}
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
   bool is_scalar() const {
@@ -211,11 +227,11 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
 
   at::Tensor convert_to_tensor(at::TensorOptions options) const {
     if (!options.has_dtype()) {
-      options = options.dtype(scalar_type_);
+      options = options.dtype(compute_desired_dtype(scalar_type_));
     }
 
     if (is_scalar()) {
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      at::AutoDispatchBelowAutograd mode;
       return at::scalar_tensor(scalar_, options);
     } else if (is_init_list()) {
       // NOTE: Here we explicitly choose to initialize the tensor on CPU first,
@@ -225,13 +241,15 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
       // filling each element of it (which involves `N` CUDA kernel launches where
       // `N` is the number of the elements in the tensor).
       at::Tensor tensor = ([&]() {
-        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        at::AutoDispatchBelowAutograd mode;
         return at::empty(sizes_, options.device(at::kCPU));
       })();
       fill_tensor(tensor);
       return tensor.to(options.device());
     } else if (is_tensor()) {
-      return tensor_.to(options);
+      auto output = tensor_.to(options);
+      TORCH_CHECK(!tensor_.is_complex() || output.is_complex(), "can not do torch::tensor(complex, dtype=non-complex) because complex can not be casted to real number without loss of information");
+      return output;
     } else {
       TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
     }
@@ -256,7 +274,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
       stream << "}";
     } else if (is_tensor()) {
       stream << "{";
-      for (int64_t i = 0; i < tensor_.sizes()[0]; i++) {
+      for (const auto i : c10::irange(tensor_.sizes()[0]))  {
         AT_DISPATCH_ALL_TYPES_AND3(
             at::kBool,
             at::kHalf,

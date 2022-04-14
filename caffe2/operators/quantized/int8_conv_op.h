@@ -60,8 +60,10 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();
 
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
       pthreadpool_t threadpool =
           reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
+#endif
 
       if (this->qnnpackObject_ == nullptr) {
         CAFFE_ENFORCE(
@@ -141,7 +143,7 @@ class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
         lastOutputPointer_ = Y->t.template mutable_data<uint8_t>();
       }
 
-#ifdef FBCODE_CAFFE2
+#if defined(FBCODE_CAFFE2) || !defined(USE_INTERNAL_PTHREADPOOL_IMPL)
       const qnnp_status runStatus =
           qnnp_run_operator(this->qnnpackObject_, nullptr /* thread pool */);
 #else

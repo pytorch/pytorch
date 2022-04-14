@@ -88,6 +88,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         LOG(INFO) << "copy_to_32bit_frequency " << copy_to_32bit_frequency_;
       }
 
+      // NOLINTNEXTLINE(modernize-make-shared)
       Wq_acc16_packed_.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
           fbgemm::matrix_op_t::Transpose,
           K,

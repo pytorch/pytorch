@@ -1,9 +1,9 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import numpy as np
-from hypothesis import given, assume
+from hypothesis import given, assume, settings
 import hypothesis.strategies as st
 
 from caffe2.python import core, model_helper, brew, utils
@@ -11,7 +11,6 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 import unittest
-import os
 
 
 class TestInstanceNorm(serial.SerializedTestCase):
@@ -61,6 +60,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
            store_mean=st.booleans(),
            seed=st.integers(0, 1000),
            store_inv_stdev=st.booleans())
+    @settings(deadline=10000)
     def test_instance_norm_gradients(
             self, gc, dc, N, C, H, W, order, store_mean, store_inv_stdev,
             epsilon, seed):

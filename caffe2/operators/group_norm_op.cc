@@ -475,6 +475,7 @@ Group Normalization (GN) operation: https://arxiv.org/abs/1803.08494
         "Cannot be used as activations.");
 
 // Input: dY, X, gamma, beta, mu, sig; Output: dX, dgamma, dbeta
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 OPERATOR_SCHEMA(GroupNormGradient).NumInputs(6).NumOutputs(3);
 
 namespace {

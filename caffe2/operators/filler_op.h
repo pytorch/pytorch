@@ -1,6 +1,7 @@
 #ifndef CAFFE2_OPERATORS_FILLER_OP_H_
 #define CAFFE2_OPERATORS_FILLER_OP_H_
 
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -77,9 +78,14 @@ class FillerOp : public Operator<Context> {
               "data type int64_t");
           CAFFE_ENFORCE(input.numel() > 0);
           auto* shape_data = input.template data<int64_t>();
-          std::unique_ptr<int64_t[]> shape_data_copy = std::make_unique<int64_t[]>(input.dim32(0));
-          context_.template CopyToCPU<int64_t>(input.dim32(0), shape_data, shape_data_copy.get());
-          shape.insert(shape.end(), shape_data_copy.get(), shape_data_copy.get() + input.dim32(0));
+          std::unique_ptr<int64_t[]> shape_data_copy =
+              std::make_unique<int64_t[]>(input.dim32(0));
+          context_.template CopyToCPU<int64_t>(
+              input.dim32(0), shape_data, shape_data_copy.get());
+          shape.insert(
+              shape.end(),
+              shape_data_copy.get(),
+              shape_data_copy.get() + input.dim32(0));
         }
       } else {
         auto& input = Input(0);
@@ -87,6 +93,7 @@ class FillerOp : public Operator<Context> {
       }
       shape.insert(shape.end(), extra_shape_.begin(), extra_shape_.end());
       output->Resize(shape);
+      shape_ = shape;
     } else {
       output->Resize(shape_);
     }
@@ -295,6 +302,15 @@ class ConstantFillOp final : public FillerOp<Context> {
   template <typename T>
   bool FillWithType(Tensor* output) {
     T value = this->template GetSingleArgument<T>("value", 0);
+    if (InputSize() == 2) {
+      auto& value_vec = Input(1);
+      if (value_vec) {
+        CAFFE_ENFORCE_EQ(
+            value_vec.size(), 1, "value vector must have 1 element");
+        value = value_vec.template data<T>()[0];
+      }
+    }
+
     auto* data = output->template mutable_data<T>();
     if (output->numel()) {
       math::Set<T, Context>(output->numel(), value, data, &context_);
@@ -303,6 +319,8 @@ class ConstantFillOp final : public FillerOp<Context> {
   }
 
   bool FillWithString(Tensor* output) {
+    CAFFE_ENFORCE_LT(
+        InputSize(), 2, "constant fill string from tensor is not supported");
     auto value = this->template GetSingleArgument<std::string>("value", "");
     auto* data = output->template mutable_data<std::string>();
     for (int i = 0; i < output->numel(); ++i) {
@@ -519,7 +537,7 @@ class LengthsRangeFillOp : public Operator<Context> {
     auto* output_data = output->template mutable_data<int32_t>();
 
     int32_t offset = 0;
-    for (int i = 0; i < input.numel(); ++i) {
+    for (const auto i : c10::irange(input.numel())) {
       auto len = input_data[i];
       auto start = output_data + offset;
       std::iota(

@@ -1,23 +1,24 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import unittest
 
-from caffe2.python import core, workspace
+from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 
 class TestNumpyTile(serial.SerializedTestCase):
-    @serial.given(ndim=st.integers(min_value=1, max_value=4),
+    @given(ndim=st.integers(min_value=1, max_value=4),
            seed=st.integers(min_value=0, max_value=65536),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_numpy_tile(self, ndim, seed, gc, dc):
         np.random.seed(seed)
 
@@ -40,6 +41,7 @@ class TestNumpyTile(serial.SerializedTestCase):
     @given(ndim=st.integers(min_value=1, max_value=4),
            seed=st.integers(min_value=0, max_value=65536),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_numpy_tile_zero_dim(self, ndim, seed, gc, dc):
         np.random.seed(seed)
 

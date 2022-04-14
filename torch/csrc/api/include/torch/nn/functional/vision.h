@@ -49,6 +49,7 @@ inline Tensor affine_grid(
 
 // ============================================================================
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor grid_sample(
     const Tensor& input,
@@ -56,12 +57,15 @@ inline Tensor grid_sample(
     GridSampleFuncOptions::mode_t mode,
     GridSampleFuncOptions::padding_mode_t padding_mode,
     c10::optional<bool> align_corners) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t mode_enum, padding_mode_enum;
 
   if (c10::get_if<enumtype::kBilinear>(&mode)) {
     mode_enum = 0;
-  } else { /// mode == 'nearest'
+  } else if (c10::get_if<enumtype::kNearest>(&mode)) {
     mode_enum = 1;
+  } else { /// mode == 'bicubic'
+    mode_enum = 2;
   }
 
   if (c10::get_if<enumtype::kZeros>(&padding_mode)) {
@@ -83,7 +87,19 @@ inline Tensor grid_sample(
   return torch::grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners.value());
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.grid_sample
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::GridSampleFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::grid_sample(input, grid, F::GridSampleFuncOptions().mode(torch::kBilinear).padding_mode(torch::kZeros).align_corners(true));
+/// ```
 inline Tensor grid_sample(
     const Tensor& input,
     const Tensor& grid,

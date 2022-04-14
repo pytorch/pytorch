@@ -13,7 +13,7 @@ class IDEEPNHWC2NCHWOp final : public IDEEPOperator {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     CAFFE_ENFORCE_EQ(X.ndims(), 4);
-    CAFFE_ENFORCE(X.get_internal_format() == iformat::nhwc);
+    CAFFE_ENFORCE(X.get_desc().is_nhwc());
 
     auto *Y = Output(OUTPUT);
     CAFFE_ENFORCE(Y != &X);
@@ -22,6 +22,10 @@ class IDEEPNHWC2NCHWOp final : public IDEEPOperator {
     // Thus, for iDEEP tensor, the shapes of NCHW and NHWC are identical.
     Y->init({X.get_dims(), X.get_data_type(), iformat::nchw});
     Y->feed_from(X);
+    // NOTE: This ops is only used to quantization path, setting scale
+    // to distinguish with fp32 path activation(always return NCHW format
+    // even ideep tensor has NHWC format) when convert to numpy memory.
+    Y->set_scale({1.0});
     return true;
   }
 
@@ -39,7 +43,7 @@ class IDEEPNCHW2NHWCOp final : public IDEEPOperator {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     CAFFE_ENFORCE_EQ(X.ndims(), 4);
-    CAFFE_ENFORCE(X.get_internal_format() == iformat::nchw);
+    CAFFE_ENFORCE(X.get_desc().is_nchw());
 
     auto *Y = Output(OUTPUT);
     CAFFE_ENFORCE(Y != &X);
@@ -48,6 +52,10 @@ class IDEEPNCHW2NHWCOp final : public IDEEPOperator {
     // Thus, for iDEEP tensor, the shapes of NCHW and NHWC are identical.
     Y->init({X.get_dims(), X.get_data_type(), iformat::nhwc});
     Y->feed_from(X);
+    // NOTE: This ops is only used to quantization path, setting scale
+    // to distinguish with fp32 path activation(always return NCHW format
+    // even ideep tensor has NHWC format) when convert to numpy memory.
+    Y->set_scale({1.0});
     return true;
   }
 

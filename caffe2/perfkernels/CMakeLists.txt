@@ -1,4 +1,4 @@
-if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   list(APPEND Caffe2_CPU_SRCS
     "${CMAKE_CURRENT_SOURCE_DIR}/embedding_lookup_idx.cc"
   )
@@ -21,14 +21,17 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${common_srcs})
 
 # We will only build the perf kernel files if the compiler supports avx2
 # extensions.
-if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+if(CXX_AVX2_FOUND)
   add_library(Caffe2_perfkernels_avx STATIC ${avx_srcs})
   add_library(Caffe2_perfkernels_avx2 STATIC ${avx2_srcs})
   add_dependencies(Caffe2_perfkernels_avx Caffe2_PROTO)
   add_dependencies(Caffe2_perfkernels_avx2 Caffe2_PROTO)
   target_link_libraries(Caffe2_perfkernels_avx PRIVATE c10)
   target_link_libraries(Caffe2_perfkernels_avx2 PRIVATE c10)
-  if (MSVC)
+  install(TARGETS Caffe2_perfkernels_avx Caffe2_perfkernels_avx2
+      ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+
+  if(MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     target_compile_options(Caffe2_perfkernels_avx
         PRIVATE "/arch:AVX"
         PRIVATE "/D__F16C__")
@@ -57,11 +60,14 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
        Caffe2_DEPENDENCY_WHOLE_LINK_LIBS
        "Caffe2_perfkernels_avx2_interface")
 
-  if (CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
+  if(CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
     add_library(Caffe2_perfkernels_avx512 STATIC ${avx512_srcs})
     add_dependencies(Caffe2_perfkernels_avx512 Caffe2_PROTO)
     target_link_libraries(Caffe2_perfkernels_avx512 PRIVATE c10)
-    if (MSVC)
+    install(TARGETS Caffe2_perfkernels_avx512
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+
+    if(MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
       target_compile_options(Caffe2_perfkernels_avx512
           PRIVATE "/D__AVX512F__"
           PRIVATE "/D__AVX512DQ__"

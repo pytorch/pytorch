@@ -6,6 +6,7 @@
 #include <torch/optim/serialize.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 
@@ -38,6 +39,14 @@ void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, eps);
 }
 
+double AdagradOptions::get_lr() const {
+  return lr();
+}
+
+void AdagradOptions::set_lr(const double lr) {
+  this->lr(lr);
+}
+
 bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
             torch::equal(lhs.sum(), rhs.sum());
@@ -55,13 +64,19 @@ void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
-void Adagrad::step() {
+Tensor Adagrad::step(LossClosure closure) {
+  NoGradGuard no_grad;
+  Tensor loss = {};
+  if (closure != nullptr) {
+    at::AutoGradMode enable_grad(true);
+    loss = closure();
+  }
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
       if (!p.grad().defined()) {
         continue;
       }
-      auto grad = p.grad().data();
+      auto grad = p.grad();
       TORCH_INTERNAL_ASSERT(state_[c10::guts::to_string(p.unsafeGetTensorImpl())] != nullptr, "state found NULL for the Tensor ", p);
       auto& state = static_cast<AdagradParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
       auto& options = static_cast<AdagradOptions&>(group.options());
@@ -69,8 +84,8 @@ void Adagrad::step() {
       state.step(state.step() + 1);
 
       if (options.weight_decay() != 0) {
-        TORCH_CHECK(!p.grad().data().is_sparse(), "weight_decay option is not compatible with sparse gradients");
-        grad = grad.add(p.data(), options.weight_decay());
+        TORCH_CHECK(!p.grad().is_sparse(), "weight_decay option is not compatible with sparse gradients");
+        grad = grad.add(p, options.weight_decay());
       }
       const auto clr = options.lr() /
           (1 + static_cast<double>(state.step() - 1) * options.lr_decay());
@@ -91,35 +106,16 @@ void Adagrad::step() {
         auto std = state.sum().sparse_mask(grad);
         const auto std_values = std._values().sqrt_().add_(options.eps());
 
-        p.data().add_(make_sparse(grad_values / std_values), -clr);
+        p.add_(make_sparse(grad_values / std_values), -clr);
       }
       else {
         state.sum(state.sum().addcmul_(grad, grad, 1.0));
         const auto std = state.sum().sqrt().add_(options.eps());
-        p.data().addcdiv_(grad, std, -clr);
+        p.addcdiv_(grad, std, -clr);
       }
     }
   }
-}
-
-void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
-  param_groups_.emplace_back(OptimizerParamGroup(parameters, defaults_->clone()));
-}
-
-const std::vector<Tensor>& Adagrad::parameters() const noexcept {
-  return param_groups_.at(0).params();
-}
-
-std::vector<Tensor>& Adagrad::parameters() noexcept {
-  return param_groups_.at(0).params();
-}
-
-size_t Adagrad::size() const noexcept {
-  size_t count = 0;
-  for (const auto& group : param_groups_) {
-    count += group.params().size();
-  }
-  return count;
+  return loss;
 }
 
 void Adagrad::save(serialize::OutputArchive& archive) const {
@@ -141,7 +137,7 @@ void Adagrad::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "step_buffers", step_buffers);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for (size_t idx = 0; idx < params.size(); idx++) {
+    for(const auto idx : c10::irange(params.size())) {
       auto state = std::make_unique<AdagradParamState>();
       state->step(step_buffers[idx]);
       state->sum(sum_buffers[idx]);

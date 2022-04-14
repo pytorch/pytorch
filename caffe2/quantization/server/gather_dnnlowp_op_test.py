@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import collections
 
@@ -6,7 +6,7 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
-from dnnlowp_test_utils import check_quantized_results_close
+from caffe2.quantization.server.dnnlowp_test_utils import check_quantized_results_close
 from hypothesis import given
 
 

@@ -1,3 +1,6 @@
+// aten_interned_strings.h includes the names of all operators
+#undef TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <ATen/core/interned_strings.h>
 #include <cstdint>
 #include <cstring>
@@ -7,6 +10,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <c10/util/Exception.h>
 #include <ATen/core/interned_strings_class.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
@@ -28,6 +32,9 @@ std::pair<const char*, const char*> InternedStrings::string(Symbol sym) {
   // we can bypass the need to acquire a lock
   // to read the map for Builtins because we already
   // know their string value
+#if defined C10_MOBILE
+  return customString(sym);
+#else
   switch (sym) {
 #define DEFINE_CASE(ns, s) \
   case static_cast<unique_t>(ns::s): \
@@ -37,13 +44,19 @@ std::pair<const char*, const char*> InternedStrings::string(Symbol sym) {
     default:
       return customString(sym);
   }
+#endif
 }
 
 Symbol InternedStrings::ns(Symbol sym) {
+#if defined C10_MOBILE
+  std::lock_guard<std::mutex> guard(mutex_);
+  return sym_to_info_.at(sym).ns;
+#else
   switch (sym) {
 #define DEFINE_CASE(ns, s) \
   case static_cast<unique_t>(ns::s): \
     return namespaces::ns;
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     FORALL_NS_SYMBOLS(DEFINE_CASE)
 #undef DEFINE_CASE
     default: {
@@ -51,6 +64,7 @@ Symbol InternedStrings::ns(Symbol sym) {
       return sym_to_info_.at(sym).ns;
     }
   }
+#endif
 }
 
 Symbol InternedStrings::_symbol(const std::string& s) {
@@ -121,5 +135,14 @@ Symbol Symbol::fromDomainAndUnqualString(const std::string & d, const std::strin
   std::string qualString = d.substr(domain_prefix().size()) + "::" + s;
   return fromQualString(qualString);
 }
+
+bool Symbol::is_attr() const { return ns() == namespaces::attr; }
+bool Symbol::is_aten() const { return ns() == namespaces::aten; }
+bool Symbol::is_cuda() const { return ns() == namespaces::cuda; }
+bool Symbol::is_prim() const { return ns() == namespaces::prim; }
+bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
+bool Symbol::is_user() const { return ns() == namespaces::user; }
+bool Symbol::is_caffe2() const { return ns() == namespaces::_caffe2; }
+bool Symbol::is_dimname() const { return ns() == namespaces::dimname; }
 
 } // namespace c10

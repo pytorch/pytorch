@@ -1,10 +1,15 @@
 #include <torch/csrc/utils/throughput_benchmark.h>
 
 #include <pybind11/pybind11.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace throughput_benchmark {
+
+std::ostream& operator<<(std::ostream& os, const BenchmarkExecutionStats& value) {
+    return os << "Average latency / iter (ms): " << value.latency_avg_ms
+              << "\n Total number of iters: " << value.num_iters;
+}
 
 void ThroughputBenchmark::addInput(py::args args, py::kwargs kwargs) {
   CHECK(script_module_.initialized() ^ module_.initialized());
@@ -32,7 +37,7 @@ py::object ThroughputBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)  {
 }
 
 ThroughputBenchmark::ThroughputBenchmark(
-    jit::script::Module script_module)
+    jit::Module script_module)
     : script_module_(script_module) {}
 
 ThroughputBenchmark::ThroughputBenchmark(
@@ -74,6 +79,7 @@ ScriptModuleOutput ScriptModuleBenchmark::runOnce(
   ScriptModuleInput stack = jit::createStackForSchema(
       function.getSchema(),
       std::move(args),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(kwargs),
       model_._ivalue());
   return function(std::move(stack));
@@ -99,9 +105,16 @@ void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
   jit::Stack stack = jit::createStackForSchema(
       model_.get_method("forward").function().getSchema(),
       std::move(args),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(kwargs),
       model_._ivalue());
   inputs_.emplace_back(std::move(stack));
+}
+
+template <>
+void ScriptModuleBenchmark::addInput(ScriptModuleInput&& input) {
+  input.insert(input.begin(), model_._ivalue());
+  inputs_.emplace_back(std::move(input));
 }
 
 template <>

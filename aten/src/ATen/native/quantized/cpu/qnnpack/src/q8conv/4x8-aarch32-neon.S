@@ -11,6 +11,39 @@
 
 .syntax unified
 
+#  Args passed via 4 registers (16 bytes)
+#  r0: mr
+#  r1: nr
+#  r2: kc
+#  r3: ks
+#
+
+#  Args passed via stack.
+#  TOS
+#  |-----------|
+#  |a          | 0
+#  |w          | 4
+#  |c          | 8
+#  |c_stride   | 12
+#  |out ch indx| 16
+#  |params     | 20
+#  |-----------|
+#
+
+#  After loading w pointer in ip reg.
+#  And after pushing r4-r8 and d8-d15 on stack
+#  |-----------|
+#  |d8 - d15   | 0
+#  |r4 - r11   | 64
+#  |a          | 96
+#  |w          | 100
+#  |c          | 104
+#  |c_stride   | 108
+#  |out ch indx| 112
+#  |params     | 116
+#  |-----------|
+#
+
 # void pytorch_q8conv_ukernel_4x8__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
@@ -32,22 +65,41 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     LDR ip, [sp, 4]
     PUSH {r4, r5, r6, r7, r8, r9, r10, r11}
 
+    # Load params:
+    # - r9 = params
+    LDR r9, [sp, 52]
+
     VPUSH {d8-d15}
 
     # Load bias0123, bias4567
     VLDM ip!, {d16-d19}
-    # Load params:
-    # - r9 = params
-    LDR r9, [sp, 112]
 
-    # q10 := vacc1x0123
-    VMOV.I32 q10, q8
-    MOV r4, 2
-    # q11 := vacc1x4567
-    VMOV.I32 q11, q9
     # Load a
     # - r8 = a
     LDR r8, [sp, 96]
+    # Load output channel index
+    LDR r5, [sp, 112]
+    ADD r7, r9, 4
+    # Load pointer to per channel zero points array
+    LDR r4, [r9], 8
+    # Load pointer to per channel requant scale
+    # add 8 bytes to get to vfmax
+    LDR r11, [r9], 8
+    # Load a_zero_point:
+    # - d14 = a_zero_point
+    VLD1.8 {d14[]}, [r7]
+    # Byte offset of output channel index for requant scale.
+    LSL r6, r5, 2
+    # Add offset to the base pointer
+    ADD r5, r4, r5
+
+    # Store in r11 pointer from where to load requant scale.
+    ADD r11, r11, r6
+
+    # q10 := vacc1x0123
+    VMOV.I32 q10, q8
+    # q11 := vacc1x4567
+    VMOV.I32 q11, q9
     # q12 := vacc2x0123
     VMOV.I32 q12, q8
     # q13 := vacc2x4567
@@ -56,15 +108,10 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     VMOV.I32 q14, q8
     # Load b_zero_point:
     # - d15 = b_zero_point
-    VLD1.8 {d15[]}, [r9], r4
-    # Load a_zero_point:
-    # - d14 = a_zero_point
-    VLD1.8 {d14[]}, [r9], r4
+    VLD1.8 {d15}, [r5]
+
     # q15 := vacc3x4567
     VMOV.I32 q15, q9
-    # Load multiplier:
-    # - d12 = vmultiplier
-    VLD1.32 {d12[]}, [r9]!
 
     .p2align 5
 0:
@@ -637,103 +684,103 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     SUBS r3, r3, 1
     BNE 0b
 
-    # Load right_shift
-    # - q4 = d8:d9 = vright_shift
+    # Load requantization_scale:
+    # - d12 = requantization_scale
+    VLD1.32 {d12, d13}, [r11]!
+    # Load vfmax:
+    VLD1.32 {d10[], d11[]}, [r9]!
+    VLD1.32 {d4, d5}, [r11]
+    # Load vfmin:
     VLD1.32 {d8[], d9[]}, [r9]!
+    # Load vfmagic:
+    VLD1.32 {d0[], d1[]}, [r9]!
+    # Load vimagic:
+    VLD1.32 {d2[], d3[]}, [r9]!
 
-    VQRDMULH.S32  q8, q8, d12[0]
-    VQRDMULH.S32  q9, q9, d12[0]
-    VQRDMULH.S32 q10, q10, d12[0]
-    VQRDMULH.S32 q11, q11, d12[0]
+    VCVT.F32.S32 q8, q8
+    VCVT.F32.S32 q9, q9
+    VCVT.F32.S32 q10, q10
+    VCVT.F32.S32 q11, q11
+    VCVT.F32.S32 q12, q12
+    VCVT.F32.S32 q13, q13
+    VCVT.F32.S32 q14, q14
+    VCVT.F32.S32 q15, q15
 
-    # Compute vzero_shift_mask
-    # - q5 = vzero_shift_mask
-    VCEQ.S32 q5, q4, 0
+    VMUL.F32 q8, q8, q6
+    VMUL.F32 q9, q9, q2
+    VMUL.F32 q10, q10, q6
+    VMUL.F32 q11, q11, q2
+    VMUL.F32 q12, q12, q6
+    VMUL.F32 q13, q13, q2
+    VMUL.F32 q14, q14, q6
+    VMUL.F32 q15, q15, q2
 
-    VQRDMULH.S32 q12, q12, d12[0]
-    VQRDMULH.S32 q13, q13, d12[0]
-    VQRDMULH.S32 q14, q14, d12[0]
-    VQRDMULH.S32 q15, q15, d12[0]
+    VMIN.F32 q8, q8, q5
+    VMIN.F32 q9, q9, q5
+    VMIN.F32 q10, q10, q5
+    VMIN.F32 q11, q11, q5
+    VMIN.F32 q12, q12, q5
+    VMIN.F32 q13, q13, q5
+    VMIN.F32 q14, q14, q5
+    VMIN.F32 q15, q15, q5
 
-    VBIC q0,  q8, q5
-    VBIC q1,  q9, q5
-    VBIC q2, q10, q5
-    VBIC q3, q11, q5
+    VMAX.F32 q8, q8, q4
+    VMAX.F32 q9, q9, q4
+    VMAX.F32 q10, q10, q4
+    VMAX.F32 q11, q11, q4
+    VMAX.F32 q12, q12, q4
+    VMAX.F32 q13, q13, q4
+    VMAX.F32 q14, q14, q4
+    VMAX.F32 q15, q15, q4
 
-    VSRA.S32  q8, q0, 31
-    VSRA.S32  q9, q1, 31
-    VSRA.S32 q10, q2, 31
-    VSRA.S32 q11, q3, 31
-
-    # Load output_zero_point
-    # - q7 = d14:d15 = voutput_zero_point
-    VLD1.16 {d14[], d15[]}, [r9]!
-
-    VBIC q0, q12, q5
-    VBIC q1, q13, q5
-    VBIC q2, q14, q5
-    VBIC q3, q15, q5
-
-    VSRA.S32 q12, q0, 31
-    VSRA.S32 q13, q1, 31
-    VSRA.S32 q14, q2, 31
-    VSRA.S32 q15, q3, 31
-
-    # Load max:
-    # - q5 = d10:d11 = voutput_max
-    VLD1.8 {d10[], d11[]}, [r9]!
-
-    VRSHL.S32  q8,  q8, q4
-    VRSHL.S32  q9,  q9, q4
-    VRSHL.S32 q10, q10, q4
-    VRSHL.S32 q11, q11, q4
-    VRSHL.S32 q12, q12, q4
-    VRSHL.S32 q13, q13, q4
-    VRSHL.S32 q14, q14, q4
-    VRSHL.S32 q15, q15, q4
+    VADD.F32 q8, q8, q0
+    VADD.F32 q9, q9, q0
+    VADD.F32 q10, q10, q0
+    VADD.F32 q11, q11, q0
+    VADD.F32 q12, q12, q0
+    VADD.F32 q13, q13, q0
+    VADD.F32 q14, q14, q0
+    VADD.F32 q15, q15, q0
 
     # Load c, c_stride:
     # - r2 = c
-    # - r3 = c_stride
+    # - r2 = c_stride
     LDRD r2, r3, [sp, 104]
 
+    VSUB.S32 q8, q8, q1
+    VSUB.S32 q9, q9, q1
+    VSUB.S32 q10, q10, q1
+    VSUB.S32 q11, q11, q1
+    VSUB.S32 q12, q12, q1
+    VSUB.S32 q13, q13, q1
+    VSUB.S32 q14, q14, q1
+    VSUB.S32 q15, q15, q1
+
+    ADD r4, r2, r3
     VQMOVN.S32 d16,  q8
     VQMOVN.S32 d17,  q9
+    CMP r0, 2
     VQMOVN.S32 d18, q10
     VQMOVN.S32 d19, q11
+    MOVLO r4, r2
     VQMOVN.S32 d20, q12
     VQMOVN.S32 d21, q13
     VQMOVN.S32 d22, q14
     VQMOVN.S32 d23, q15
 
-    # Load min:
-    # - q4 = q8:q9 = voutput_min
-    VLD1.8 {d8[], d9[]}, [r9]!
-    ADD r4, r2, r3
 
-    VQADD.S16  q8,  q8, q7
-    VQADD.S16  q9,  q9, q7
-    CMP r0, 2
-    VQADD.S16 q10, q10, q7
-    VQADD.S16 q11, q11, q7
-    MOVLO r4, r2
-
-    VQMOVUN.S16 d16,  q8
-    VQMOVUN.S16 d17,  q9
     ADD r5, r4, r3
-    VQMOVUN.S16 d18, q10
-    VQMOVUN.S16 d19, q11
+    VQMOVUN.S16 d16,  q8
     MOVLS r5, r4
-
-    VMIN.U8 q8, q8, q5
+    VQMOVUN.S16 d17,  q9
+    VQMOVUN.S16 d18, q10
     CMP r0, 4
-    VMIN.U8 q9, q9, q5
     ADD r3, r5, r3
 
-    VMAX.U8 q8, q8, q4
     MOVNE r3, r5
     CMP r1, 8
-    VMAX.U8 q9, q9, q4
+    VQMOVUN.S16 d19, q11
+
 
     BNE 5f
 

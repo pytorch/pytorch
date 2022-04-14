@@ -48,7 +48,7 @@ void EmbeddingLookupIdx(
     const std::int64_t data_size,
     const InType* input,
     const IndexType* indices,
-    const int64_t* offsets,
+    const IndexType* offsets,
     const float* weights, // optional, can be null for non-weighted sum
     const float* scale_bias, // optional scale & bias params for uint8 input
     bool normalize_by_lengths,

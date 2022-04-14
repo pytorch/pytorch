@@ -1,10 +1,16 @@
 #pragma once
-#include <conv_utils.h>
+
+#include <cstdlib>
+#include <qnnpack/operator.h>
 
 namespace qnnpack {
 class PrePackConvWeights final {
  public:
-  PrePackConvWeights(const conv_param_t& conv_param, const uint8_t* kernel, const int32_t* bias);
+  PrePackConvWeights(
+      const pytorch_qnnp_operator_t convolution,
+      const uint8_t* kernel_zero_points,
+      const uint8_t* kernel,
+      const int32_t* bias);
 
   void* getPackedWeights() const
   {
@@ -37,8 +43,21 @@ class PackBMatrix final {
   PackBMatrix(
       size_t input_channels,
       size_t output_channels,
-      uint8_t kernel_zero_point,
-      float kernel_scale,
+      const uint8_t* kernel_zero_points,
+      const float* requantization_scale,
+      const uint8_t* kernel,
+      const int32_t* bias);
+
+  // This constructor is to be used for dynamic mode
+  // quantization. In dynamic mode, we dont yet support
+  // per channel quantization, and paying the cost of
+  // memory allocation for per channel zero point and
+  // requant scale will hurt performance.
+  PackBMatrix(
+      size_t input_channels,
+      size_t output_channels,
+      const uint8_t kernel_zero_point,
+      const float requantization_scale,
       const uint8_t* kernel,
       const int32_t* bias);
 
@@ -79,11 +98,9 @@ enum pytorch_qnnp_status qnnpackLinear(
     const size_t input_channels,
     const size_t output_channels,
     const uint8_t input_zero_point,
-    const float input_scale,
-    const uint8_t kernel_zero_point,
-    const float kernel_scale,
+    const uint8_t* kernel_zero_points,
+    const float* requantization_scales,
     const uint8_t output_zero_point,
-    const float output_scale,
     const uint8_t output_min,
     const uint8_t output_max,
     const uint8_t* input,
@@ -94,16 +111,35 @@ enum pytorch_qnnp_status qnnpackLinear(
     pthreadpool_t threadpool);
 
 enum pytorch_qnnp_status qnnpackConv(
-    const conv_param_t& conv_p,
+    const pytorch_qnnp_operator_t convolution,
+    void* packed_weights,
+    const size_t batch_size,
+    const size_t input_depth,
+    const size_t input_height,
+    const size_t input_width,
+    const uint8_t input_zero_point,
+    const uint8_t* input,
+    const uint8_t* kernel_zero_points,
+    const float* requantization_scales,
+    const uint8_t output_zero_point,
+    const uint8_t output_min,
+    const uint8_t output_max,
+    uint8_t* output,
+    pthreadpool_t threadpool);
+
+enum pytorch_qnnp_status qnnpackDeConv(
+    const pytorch_qnnp_operator_t deconvolution,
     void* packed_weights,
     const size_t batch_size,
     const size_t input_height,
     const size_t input_width,
-    const float input_scale,
     const uint8_t input_zero_point,
     const uint8_t* input,
-    const float output_scale,
+    const uint8_t* kernel_zero_points,
+    const float* requantization_scales,
     const uint8_t output_zero_point,
+    const uint8_t output_min,
+    const uint8_t output_max,
     uint8_t* output,
     pthreadpool_t threadpool);
 
@@ -112,9 +148,8 @@ enum pytorch_qnnp_status qnnpackLinearDynamic(
     const size_t input_channels,
     const size_t output_channels,
     const uint8_t input_zero_point,
-    const float input_scale,
-    const uint8_t kernel_zero_point,
-    const float kernel_scale,
+    const uint8_t* kernel_zero_points,
+    const float* dequantization_scales,
     const uint8_t* input,
     const size_t input_stride,
     void* packed_weights,

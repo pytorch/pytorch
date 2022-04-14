@@ -10,6 +10,7 @@ inline Tensor one_hot(const Tensor& tensor, int64_t num_classes = -1) {
   return torch::one_hot(tensor, num_classes);
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline void _no_grad_embedding_renorm_(Tensor weight, const Tensor& input, float max_norm, float norm_type) {
   torch::NoGradGuard no_grad;
@@ -39,12 +40,25 @@ inline Tensor embedding(const Tensor& input,
 
   if (max_norm != c10::nullopt) {
     input_ = input_.contiguous();
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     _no_grad_embedding_renorm_(weight, input_, *max_norm, norm_type);
   }
   return torch::embedding(weight, input_, *padding_idx, scale_grad_by_freq, sparse);
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.embedding
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::EmbeddingFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::embedding(input, weight, F::EmbeddingFuncOptions().norm_type(2.5).scale_grad_by_freq(true).sparse(true));
+/// ```
 inline Tensor embedding(const Tensor& input, const Tensor& weight, const EmbeddingFuncOptions& options = {}) {
   return detail::embedding(
     input,
@@ -56,6 +70,7 @@ inline Tensor embedding(const Tensor& input, const Tensor& weight, const Embeddi
     options.sparse());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 inline Tensor embedding_bag(
     const Tensor& input,
@@ -67,7 +82,8 @@ inline Tensor embedding_bag(
     EmbeddingBagMode mode,
     bool sparse,
     const Tensor& per_sample_weights,
-    bool include_last_offset) {
+    bool include_last_offset,
+    c10::optional<int64_t> padding_idx) {
   auto input_ = input;
   auto offsets_ = offsets;
   auto per_sample_weights_ = per_sample_weights;
@@ -92,6 +108,7 @@ inline Tensor embedding_bag(
     TORCH_CHECK(false, "input has to be 1D or 2D Tensor, but got Tensor of dimension ", input_.dim());
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int mode_enum;
   if (c10::get_if<enumtype::kSum>(&mode)) {
     mode_enum = 0;
@@ -106,6 +123,7 @@ inline Tensor embedding_bag(
   }
 
   if (max_norm != c10::nullopt) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     _no_grad_embedding_renorm_(weight, input_, *max_norm, norm_type);
   }
 
@@ -124,10 +142,23 @@ inline Tensor embedding_bag(
       mode_enum,
       sparse,
       per_sample_weights_,
-      include_last_offset));
+      include_last_offset,
+      padding_idx));
 }
 } // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.embedding_bag
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::EmbeddingBagFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::embedding_bag(input, weight, F::EmbeddingBagFuncOptions().mode(torch::kSum).offsets(offsets));
+/// ```
 inline Tensor embedding_bag(const Tensor& input, const Tensor& weight, const EmbeddingBagFuncOptions& options = {}) {
   return detail::embedding_bag(
     input,
@@ -139,7 +170,8 @@ inline Tensor embedding_bag(const Tensor& input, const Tensor& weight, const Emb
     options.mode(),
     options.sparse(),
     options.per_sample_weights(),
-    options.include_last_offset());
+    options.include_last_offset(),
+    options.padding_idx());
 }
 
 } // namespace functional

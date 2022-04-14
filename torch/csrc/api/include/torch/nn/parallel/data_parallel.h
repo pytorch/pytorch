@@ -13,6 +13,7 @@
 #include <ATen/Parallel.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <cstddef>
 #include <exception>
@@ -104,7 +105,7 @@ void replicate_grad_edges(
     auto grad_fn = std::make_shared<ReduceAdd>((*parameter).device());
     grad_fn->set_next_edges(autograd::collect_next_edges(*parameter));
 
-    for (size_t i = 0; i < devices.size(); ++i) {
+    for (const auto i : c10::irange(devices.size())) {
       autograd::set_history(replicas[i]->parameters_[parameter.key()], grad_fn);
     }
   }
@@ -114,7 +115,7 @@ void replicate_grad_edges(
       auto grad_fn = std::make_shared<ReduceAdd>((*buffer).device());
       grad_fn->set_next_edges(autograd::collect_next_edges(*buffer));
 
-      for (size_t i = 0; i < devices.size(); ++i) {
+      for (const auto i : c10::irange(devices.size())) {
         autograd::set_history(replicas[i]->buffers_[buffer.key()], grad_fn);
       }
     }
@@ -255,8 +256,8 @@ Tensor data_parallel(
         device_count > 0, "Expected at least one CUDA device to be available");
     devices = std::vector<Device>();
     devices->reserve(device_count);
-    for (size_t index = 0; index < device_count; ++index) {
-      devices->emplace_back(kCUDA, index);
+    for (const auto index : c10::irange(device_count)) {
+      devices->emplace_back(kCUDA, static_cast<torch::DeviceIndex>(index));
     }
   }
   if (!output_device) {
@@ -271,6 +272,10 @@ Tensor data_parallel(
 
   autograd::Scatter scatter(*devices, /*chunk_sizes=*/nullopt, dim);
   auto scattered_inputs = fmap<Tensor>(scatter.apply({std::move(input)}));
+  // Input tensor might not be big enough to scale across all available devices
+  if (scattered_inputs.size() < devices->size()) {
+    devices->resize(scattered_inputs.size(), Device(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES));
+  }
 
   auto replicas = replicate(module, *devices);
   auto outputs = parallel_apply(replicas, scattered_inputs, *devices);

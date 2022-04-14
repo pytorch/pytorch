@@ -15,6 +15,15 @@ android {
         ndk {
             abiFilters ABI_FILTERS.split(",")
         }
+        externalNativeBuild {
+            cmake {
+              if(System.env.BUILD_LITE_INTERPRETER == '0') {
+                arguments "-DANDROID_STL=c++_shared", "-DBUILD_LITE_INTERPRETER=OFF", "-DUSE_LITE_INTERPRETER_PROFILER=OFF"
+              } else {
+                arguments "-DANDROID_STL=c++_shared", "-DUSE_LITE_INTERPRETER_PROFILER=OFF"
+              }
+            }
+        }
     }
     buildTypes {
         debug {
@@ -28,14 +37,30 @@ android {
     sourceSets {
         main {
             java {
+              if(System.env.BUILD_LITE_INTERPRETER == '0') {
+                println 'Build pytorch_jni'
                 exclude 'org/pytorch/LiteModuleLoader.java'
                 exclude 'org/pytorch/LiteNativePeer.java'
+              } else {
+                println 'Build pytorch_jni_lite'
+              }
             }
             jniLibs.srcDirs = ['src/main/jniLibs']
+            manifest.srcFile 'src/main/AndroidManifest.xml'
         }
         androidTest {
             java {
-                exclude 'org/pytorch/PytorchHostTests.java'
+                if(System.env.BUILD_LITE_INTERPRETER == '0') {
+                    println 'Build test for full jit (pytorch_jni)'
+                    exclude 'org/pytorch/PytorchHostTests.java'
+                    exclude 'org/pytorch/PytorchLiteInstrumentedTests.java'
+                    exclude 'org/pytorch/suite/PytorchLiteInstrumentedTestSuite.java'
+                } else {
+                    println 'Build test for lite interpreter (pytorch_jni_lite)'
+                    exclude 'org/pytorch/PytorchHostTests.java'
+                    exclude 'org/pytorch/PytorchInstrumentedTests.java'
+                    exclude 'org/pytorch/suite/PytorchInstrumentedTestSuite.java'
+                }
             }
         }
     }
@@ -59,7 +84,6 @@ android {
 
 dependencies {
     implementation 'com.facebook.fbjni:fbjni-java-only:' + rootProject.fbjniJavaOnlyVersion
-    implementation 'com.android.support:appcompat-v7:' + rootProject.androidSupportAppCompatV7Version
     implementation 'com.facebook.soloader:nativeloader:' + rootProject.soLoaderNativeLoaderVersion
 
     testImplementation 'junit:junit:' + rootProject.junitVersion
@@ -77,6 +101,63 @@ apply from: rootProject.file('gradle/release.gradle')
 task sourcesJar(type: Jar) {
     from android.sourceSets.main.java.srcDirs
     classifier = 'sources'
+}
+
+def getLibtorchHeadersDir() {
+  def abi = ABI_FILTERS.split(",")[0]
+  return "$rootDir/pytorch_android/src/main/cpp/libtorch_include/$abi"
+}
+
+afterEvaluate {
+  if (POM_PACKAGING == 'aar') {
+    android.libraryVariants.all { variant ->
+      variant.outputs.each { output ->
+        File f = output.outputFile
+        if (f.name.endsWith(".aar")) {
+          output.assemble.finalizedBy addFolderToAarTask(
+              "addHeadersToAar" + variant.name,
+              f.path,
+              getLibtorchHeadersDir(),
+              "headers")
+        }
+      }
+    }
+  }
+}
+
+tasks.whenTaskAdded { task ->
+  if (task.name.startsWith("bundle") && task.name.endsWith("Aar")) {
+    doLast {
+      addFolderToAar("addHeadersTo" + task.name, task.archivePath, getLibtorchHeadersDir(), 'headers')
+    }
+  }
+}
+
+def addFolderToAarTask(taskName, aarPath, folderPath, folderPathInAar) {
+  return tasks.register(taskName) {
+    doLast {
+      addFolderToAar(taskName, aarPath, folderPath, folderPathInAar)
+    }
+  }
+}
+
+def addFolderToAar(taskName, aarPath, folderPath, folderPathInAar) {
+    def tmpDir = file("${buildDir}/${taskName}")
+    tmpDir.mkdir()
+    def tmpDirFolder = file("${tmpDir.path}/${folderPathInAar}")
+    tmpDirFolder.mkdir()
+    copy {
+      from zipTree(aarPath)
+      into tmpDir
+    }
+    copy {
+      from fileTree(folderPath)
+      into tmpDirFolder
+    }
+    ant.zip(destfile: aarPath) {
+      fileset(dir: tmpDir.path)
+    }
+    delete tmpDir
 }
 
 artifacts.add('archives', sourcesJar)

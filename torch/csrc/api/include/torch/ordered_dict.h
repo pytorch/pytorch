@@ -170,6 +170,10 @@ class OrderedDict {
   /// `OrderedDict` into a vector of `std::pair<Key, Value>`.
   ::std::vector<std::pair<Key, Value>> pairs() const;
 
+  /// Returns true if both dicts contain the same keys and values, in the same order.
+  template<typename K, typename V>
+  friend bool operator==(const OrderedDict<K, V> &a, const OrderedDict<K, V> &b);
+
  private:
   /// A mapping from a key to an index into the `items_` vector.
   ::std::unordered_map<Key, size_t> index_;
@@ -188,6 +192,16 @@ class OrderedDict<Key, Value>::Item {
  public:
   /// Constructs a new item.
   Item(Key key, Value value) : pair_(std::move(key), std::move(value)) {}
+
+#if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ < 11) && defined(_MSC_VER)
+  /// Related issue: https://github.com/pytorch/pytorch/issues/55266
+  /// Needs to define this function for CUDA < 11.0 on Windows,
+  /// although it usually won't be used actually.
+  Item& operator=(const Item& other) {
+    pair_ = other.pair_;
+    return *this;
+  }
+#endif
 
   /// Returns a reference to the value.
   Value& operator*() {
@@ -486,6 +500,18 @@ template <typename Key, typename Value>
 void OrderedDict<Key, Value>::reserve(size_t requested_capacity) {
   index_.reserve(requested_capacity);
   items_.reserve(requested_capacity);
+}
+
+template<typename K, typename V>
+bool operator==(const torch::OrderedDict<K, V>& a, const torch::OrderedDict<K, V>& b) {
+  using Item = typename torch::OrderedDict<K, V>::Item;
+  if (a.index_ != b.index_) return false;
+  if (a.items_.size() != b.items_.size()) return false;
+  // NOTE: There's no point in comparing keys for items_, as we already know that index is equal.
+  return std::equal(a.items_.begin(), a.items_.end(),
+                    b.items_.begin(),
+                    [](const Item& a, const Item& b)
+                    { return a.value() == b.value(); });
 }
 
 } // namespace torch

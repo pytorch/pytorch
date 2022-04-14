@@ -1,6 +1,7 @@
-#include <caffe2/video/video_decoder.h>
 #include <assert.h>
 #include <caffe2/core/logging.h>
+#include <caffe2/video/video_decoder.h>
+#include <array>
 #include <mutex>
 #include <random>
 

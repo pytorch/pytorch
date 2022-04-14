@@ -36,7 +36,7 @@ namespace caffe2 {
  *                            IDEEPFallbackOp<MyMagicOp, SkipIndices<0>>);
  */
 template <class CPUOp, typename SkipOutputCopy = SkipIndices<>>
-class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
+class IDEEPFallbackOp final : public IDEEPOperator {
  public:
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_OPERATOR_FUNCTIONS();
@@ -52,7 +52,7 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
     // Create output blobs in parent workspace,
     // then forward output blobs to local workspace.
     std::unordered_map<string, string> forwarded_output_blobs;
-    for (int i = 0; i < base_def_.output_size(); i++) {
+    for (const auto i : c10::irange(base_def_.output_size())) {
       // For in-place case, the in/output tensor for local_ws must be
       // re-created, instead of forwarding from current workspace.
       string parent_name(base_def_.output(i));
@@ -81,7 +81,7 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
   }
 
   bool RunOnDevice() override {
-    for (int i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       if (InputIsType<itensor>(i)
           && (Input(i).has_scale()
             || Input(i).get_data_type() == idtype::f32)) {
@@ -94,7 +94,7 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
         dtensor->Resize(input.get_dims());
         // If fallback from INT8, the public format of original input is nhwc.
         // While the required format is nchw, need to reorder to nchw.
-        if (input.get_public_format() == iformat::nhwc) {
+        if (input.get_desc().is_nhwc()) {
           itensor temp_ten ({input.get_dims(), idtype::f32, iformat::nchw},
               dtensor->template mutable_data<float>());
           temp_ten.feed_from(input);
@@ -128,7 +128,7 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
       return false;
     }
 
-    for (int i = 0; i < OutputSize(); ++i) {
+    for (const auto i : c10::irange(OutputSize())) {
       if (SkipOutputCopy::Contains(i)) {
         VLOG(1) << "Copy output: index " << i << " skipped.";
         continue;

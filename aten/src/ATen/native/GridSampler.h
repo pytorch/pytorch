@@ -1,16 +1,13 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <utility>
+
+#include <ATen/native/GridSamplerUtils.h>
 
 namespace at { namespace native {
-
-namespace detail {
-
-  enum class GridSamplerInterpolation {Bilinear, Nearest};
-  enum class GridSamplerPadding {Zeros, Border, Reflection};
-
-}  // namespace detail
 
 using detail::GridSamplerInterpolation;
 using detail::GridSamplerPadding;
@@ -67,12 +64,14 @@ static inline scalar_t clip_coordinates(scalar_t in, int64_t clip_limit) {
 template<typename scalar_t>
 static inline scalar_t clip_coordinates_set_grad(scalar_t in, int64_t clip_limit,
                                                  scalar_t *grad_in) {
-  if (in < static_cast<scalar_t>(0)) {
+  // Note that it is important for the gradient calculation that borders
+  // are considered out of bounds.
+  if (in <= static_cast<scalar_t>(0)) {
     *grad_in = static_cast<scalar_t>(0);
     return static_cast<scalar_t>(0);
   } else {
     scalar_t max = static_cast<scalar_t>(clip_limit - 1);
-    if (in > max) {
+    if (in >= max) {
       *grad_in = static_cast<scalar_t>(0);
       return max;
     } else {
@@ -137,14 +136,12 @@ static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int64_t twice_l
   }
 }
 
-// Computes the pixel source index value for a grid coordinate
-template <typename scalar_t>
-static inline scalar_t grid_sampler_compute_source_index(
-    scalar_t coord,
-    int64_t size,
-    GridSamplerPadding padding_mode,
-    bool align_corners) {
-  coord = grid_sampler_unnormalize(coord, size, align_corners);
+// Mapping the out-of-boundary points back into boundary
+// This would only affect padding_mode=border or reflection
+template<typename scalar_t>
+static inline scalar_t compute_coordinates(scalar_t coord, int64_t size,
+                                           GridSamplerPadding padding_mode,
+                                           bool align_corners) {
   if (padding_mode == GridSamplerPadding::Border) {
     // clip coordinates to image borders
     coord = clip_coordinates(coord, size);
@@ -154,10 +151,22 @@ static inline scalar_t grid_sampler_compute_source_index(
       coord = reflect_coordinates(coord, 0, 2*(size - 1));
     } else {
       coord = reflect_coordinates(coord, -1, 2*size - 1);
-      // when align_corners=False, reflection does not auto clip coords
-      coord = clip_coordinates(coord, size);
     }
+    // clip coordinates to image borders
+    coord = clip_coordinates(coord, size);
   }
+  return coord;
+}
+
+// Computes the pixel source index value for a grid coordinate
+template <typename scalar_t>
+static inline scalar_t grid_sampler_compute_source_index(
+    scalar_t coord,
+    int64_t size,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  coord = grid_sampler_unnormalize(coord, size, align_corners);
+  coord = compute_coordinates(coord, size, padding_mode, align_corners);
   return coord;
 }
 
@@ -182,13 +191,12 @@ static inline scalar_t grid_sampler_compute_source_index_set_grad(
     // reflect coordinates by image borders
     if (align_corners) {
       coord = reflect_coordinates_set_grad(coord, 0, 2*(size - 1), &grad_refl);
-      *grad_in = (*grad_in) * grad_refl;
     } else {
       coord = reflect_coordinates_set_grad(coord, -1, 2*size - 1, &grad_refl);
-      // when align_corners=False, reflection does not auto clip coords
-      coord = clip_coordinates_set_grad(coord, size, &grad_clip);
-      *grad_in = (*grad_in) * grad_refl * grad_clip;
     }
+    // clip coordinates to image borders
+    coord = clip_coordinates_set_grad(coord, size, &grad_clip);
+    *grad_in = (*grad_in) * grad_refl * grad_clip;
   }
   return coord;
 }
@@ -199,6 +207,30 @@ static inline bool within_bounds_2d(int64_t h, int64_t w, int64_t H, int64_t W) 
 
 static inline bool within_bounds_3d(int64_t d, int64_t h, int64_t w, int64_t D, int64_t H, int64_t W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
+}
+
+template<typename scalar_t>
+static inline scalar_t get_value_bounded(
+    scalar_t* data,
+    scalar_t x,
+    scalar_t y,
+    int64_t W,
+    int64_t H,
+    int64_t sW,
+    int64_t sH,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+
+  x = compute_coordinates(x, W, padding_mode, align_corners);
+  y = compute_coordinates(y, H, padding_mode, align_corners);
+
+  int64_t ix = static_cast<int64_t>(x);
+  int64_t iy = static_cast<int64_t>(y);
+
+  if (within_bounds_2d(iy, ix, H, W)) {
+    return data[iy * sH + ix * sW];
+  }
+  return static_cast<scalar_t>(0);
 }
 
 template<typename scalar_t>
@@ -218,6 +250,49 @@ static inline void safe_add_3d(scalar_t *data, int64_t d, int64_t h, int64_t w,
   if (within_bounds_3d(d, h, w, D, H, W)) {
     data[d * sD + h * sH + w * sW] += delta;
   }
+}
+
+template<typename scalar_t>
+static inline void add_value_bounded(
+    scalar_t* data,
+    scalar_t x,
+    scalar_t y,
+    int64_t W,
+    int64_t H,
+    int64_t sW,
+    int64_t sH,
+    scalar_t delta,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+
+  x = compute_coordinates(x, W, padding_mode, align_corners);
+  y = compute_coordinates(y, H, padding_mode, align_corners);
+
+  int64_t ix = static_cast<int64_t>(x);
+  int64_t iy = static_cast<int64_t>(y);
+
+  safe_add_2d(data, iy, ix, sH, sW, H, W, delta);
+}
+
+// Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
+template<typename scalar_t>
+static inline void get_cubic_coefficients_grad(
+    scalar_t coeffs[4],
+    scalar_t t) {
+
+  // Must be the same as forward calculation in
+  // aten/src/ATen/native/UpSample.h:get_cubic_upsample_coefficients
+  scalar_t A = -0.75;
+
+  scalar_t x;
+  x = -1 - t; // 1 < x = |-1 - tx| < 2
+  coeffs[0] = (-3 * A * x - 10 * A ) * x - 8 * A;
+  x = -t;     // x = |0 - tx| <= 1
+  coeffs[1] = (-3 * (A + 2) * x - 2 * (A + 3)) * x;
+  x = 1 - t;  // x = |1 - tx| <= 1
+  coeffs[2] = (3 * (A + 2) * x - 2 * (A + 3)) * x;
+  x = 2 - t;  // 1 < x = |2 - tx| < 2
+  coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A;
 }
 
 }}  // namespace at::native

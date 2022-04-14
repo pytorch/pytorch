@@ -7,8 +7,6 @@ import datetime
 
 from .runner import get_nn_runners
 
-PY3 = sys.version_info >= (3, 0)
-
 
 def run_rnn(name, rnn_creator, nloops=5,
             seqLength=100, numLayers=1, inputSize=512, hiddenSize=512,
@@ -27,8 +25,9 @@ def run_rnn(name, rnn_creator, nloops=5,
 
         # "Update" parameters
         if modeldef.backward is not None:
-            for param in modeldef.params:
-                param.grad.data.zero_()
+            with torch.no_grad():
+                for param in modeldef.params:
+                    param.grad.zero_()
         torch.cuda.synchronize()
 
     assert device == 'cuda'
@@ -60,9 +59,8 @@ def system(command):
                          stderr=subprocess.PIPE, shell=True)
     output, err = p.communicate()
     rc = p.returncode
-    if PY3:
-        output = output.decode("ascii")
-        err = err.decode("ascii")
+    output = output.decode("ascii")
+    err = err.decode("ascii")
     return rc, output, err
 
 

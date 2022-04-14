@@ -1,9 +1,9 @@
 ## @package beam_search
 # Module caffe2.python.models.seq2seq.beam_search
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from collections import namedtuple
 from caffe2.python import core

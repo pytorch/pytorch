@@ -16,6 +16,7 @@ bool AbsGradientFunctor<CPUContext>::Forward(
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, size);
   ConstEigenVectorArrayMap<T> X_arr(X, size);
@@ -86,7 +87,10 @@ Y: [0.3005476  1.551666   1.3591481  0.39191285 0.21866608]
         "*(type: Tensor`<float>`)* Absolute value of input element-wise.")
     .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(AbsGradient).NumInputs(2).NumOutputs(1).IdenticalTypeAndShape();
+OPERATOR_SCHEMA(AbsGradient)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInput(0);
 
 namespace {
 

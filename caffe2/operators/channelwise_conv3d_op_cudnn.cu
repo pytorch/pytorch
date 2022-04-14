@@ -4,6 +4,7 @@
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_op_cache_cudnn.h"
 #include "caffe2/operators/conv_pool_op_base.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 // Adopted from caffe2 depthwise conv at
 // pytorch/caffe2/caffe2/operators/depthwise_3x3_conv_op_cudnn.cu
@@ -220,7 +221,7 @@ __global__ void DepthwiseConv3dBackpropFilterGPUKernelNCHW(
             T* addr = filter_backprop +
                 (in_d * filter_rows * filter_cols * filter_length) +
                 (f_l * filter_rows * filter_cols) + (f_c + filter_cols * f_r);
-            atomicAdd(addr, partial_sum);
+            gpu_atomic_add(addr, partial_sum);
           }
         }
       }
@@ -251,7 +252,7 @@ __global__ void DepthwiseConv3dBackpropFilterGPUKernelNCHW(
               T* addr = filter_backprop +
                   (in_d * filter_rows * filter_cols * filter_length) +
                   (f_l * filter_rows * filter_cols) + (f_c + filter_cols * f_r);
-              atomicAdd(addr, partial_sum);
+              gpu_atomic_add(addr, partial_sum);
             }
           }
         }
@@ -324,8 +325,7 @@ __global__ void DepthwiseConv3dBackpropInputGPUKernelNCHW(
           sum += __ldg(out_backprop + out_backprop_offset) *
               __ldg(filter + filter_offset);
 #else
-          sum += out_backprop[out_backprop_offset] *
-              filter[filter_offset];
+          sum += out_backprop[out_backprop_offset] * filter[filter_offset];
 #endif
         }
       }
@@ -412,6 +412,7 @@ class ChannelwiseConv3dOp final : public ConvPoolOpBase<CUDAContext> {
             filter.data<float>(),
             Y->mutable_data<float>(),
             Y->size());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     if (InputSize() == 3) {
       std::vector<int> bias_dims(X.ndim(), 1);
@@ -464,8 +465,8 @@ class ChannelwiseConv3dGradientOp final : public ConvPoolOpBase<CUDAContext> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext);
   ChannelwiseConv3dGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : cudnn_wrapper_(&context_),
-        ConvPoolOpBase<CUDAContext>(operator_def, ws),
+      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+        cudnn_wrapper_(&context_),
         no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
@@ -537,6 +538,8 @@ class ChannelwiseConv3dGradientOp final : public ConvPoolOpBase<CUDAContext> {
             X.data<float>(),
             dfilter->mutable_data<float>(),
             dY.size());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     DepthwiseConv3dBackpropInputGPUKernelNCHW<float>
         <<<CAFFE_GET_BLOCKS(dX->size()),
            CAFFE_CUDA_NUM_THREADS,
@@ -547,6 +550,7 @@ class ChannelwiseConv3dGradientOp final : public ConvPoolOpBase<CUDAContext> {
             filter.data<float>(),
             dX->mutable_data<float>(),
             dX->size());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     if (!no_bias_) {
       std::vector<int> bias_dims(X.ndim(), 1);

@@ -122,6 +122,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       // Solve Ax=b
       const float div = A.determinant();
       EVecXf delta(2);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float deltaScore;
       const float MAX_DELTA = 1.5;
       if (std::abs(div) < 1e-4f) {
@@ -171,4 +172,5 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
       "bool should_output_softmax = True"
     ") -> Tensor keypoints",
     HeatmapMaxKeypointOpFloatCPU);
+
 // clang-format on

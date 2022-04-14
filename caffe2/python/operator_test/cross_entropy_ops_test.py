@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -9,7 +9,6 @@ import hypothesis.strategies as st
 import numpy as np
 
 import unittest
-import os
 
 def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
@@ -46,14 +45,13 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
             elements=st.integers(min_value=1, max_value=5),
             min_size=1,
             max_size=2,
-            average_size=2,
         ).flatmap(
             lambda shape: st.tuples(
                 hu.arrays(
                     dims=shape,
                     elements=st.one_of(
-                        st.floats(min_value=-1.0, max_value=-0.1),
-                        st.floats(min_value=0.1, max_value=1.0),
+                        hu.floats(min_value=-1.0, max_value=-0.1),
+                        hu.floats(min_value=0.1, max_value=1.0),
                     )),
                 hu.arrays(
                     dims=shape,
@@ -200,14 +198,13 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
             elements=st.integers(min_value=1, max_value=5),
             min_size=1,
             max_size=2,
-            average_size=2,
         ).flatmap(
             lambda shape: st.tuples(
                 hu.arrays(
                     dims=shape,
                     elements=st.one_of(
-                        st.floats(min_value=-1.0, max_value=-0.1),
-                        st.floats(min_value=0.1, max_value=1.0),
+                        hu.floats(min_value=-1.0, max_value=-0.1),
+                        hu.floats(min_value=0.1, max_value=1.0),
                     )),
                 hu.arrays(
                     dims=shape,
@@ -215,7 +212,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
                 ),
                 hu.arrays(
                     dims=shape,
-                    elements=st.floats(min_value=0.1, max_value=1.0),
+                    elements=hu.floats(min_value=0.1, max_value=1.0),
                 ),
             )
         ),

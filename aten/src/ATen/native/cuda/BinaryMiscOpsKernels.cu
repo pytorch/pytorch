@@ -1,168 +1,39 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
-
+#include <ATen/native/cuda/Math.cuh>
+#include <ATen/NumericUtils.h>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
 namespace at { namespace native {
 
-void atan2_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "atan2_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return ::atan2(a, b);
-    });
-  });
-}
-
-void bitwise_and_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    gpu_kernel_with_scalars(
-        iter,
-        []GPU_LAMBDA(bool a, bool b) {
-          return a && b;
-    });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_and_cuda", [&]() {
-      gpu_kernel_with_scalars(
-          iter,
-          []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-            return a & b;
-      });
-    });
-  }
-}
-
-void bitwise_or_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    gpu_kernel_with_scalars(
-        iter,
-        []GPU_LAMBDA(bool a, bool b) {
-          return a || b;
-    });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_or_cuda", [&]() {
-      gpu_kernel_with_scalars(
-          iter,
-          []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-            return a | b;
-      });
-    });
-  }
-}
-
-void bitwise_xor_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    // Boolean type does not work with ^ (bitwise XOR) in C++. bitwise_xor wraps this operation for both Boolean and
-    // integral types.
-    gpu_kernel_with_scalars(
-          iter,
-          []GPU_LAMBDA(bool a, bool b) {
-            return a != b;
-          });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_xor_cuda", [&]() {
-      gpu_kernel_with_scalars(
-          iter,
-          []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-            return a ^ b;
-      });
-    });
-  }
-}
-
-void lshift_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "lshift_cuda", [&]() {
-      gpu_kernel_with_scalars(
-        iter,
-        []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return a * std::pow((scalar_t)(2), b);
-      });
-    });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lshift_cuda", [&]() {
-      gpu_kernel_with_scalars(iter,
-        []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return a << b;
-      });
-    });
-  }
-}
-
-void rshift_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rshift_cuda", [&]() {
-      gpu_kernel_with_scalars(
-        iter,
-        []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return a / std::pow((scalar_t)(2), b);
-      });
-    });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cuda", [&]() {
-      gpu_kernel_with_scalars(iter,
-        []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-          return a >> b;
-      });
-    });
-  }
-}
-
-void logical_and_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_and_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-      return a && b;
-    });
-  });
-}
-
-void logical_or_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_or_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-      return a || b;
-    });
-  });
-}
-
-void logical_xor_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_xor_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-      return bool(a) != bool(b);
-    });
-  });
-}
-
-void smooth_l1_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "smooth_l1_cuda", [&]() {
-    gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
+void smooth_l1_kernel_cuda(TensorIteratorBase& iter, double beta) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "smooth_l1_cuda", [&iter, beta]() {
+    scalar_t beta_val(beta);
+    gpu_kernel(iter, [beta_val] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
       auto z = ::abs(a - b);
-      return z < scalar_t(1.) ? scalar_t(0.5) * z * z : z - scalar_t(0.5);
+      return z < beta_val ? scalar_t(0.5) * z * z / beta_val : z - scalar_t(0.5) * beta_val;
     });
   });
 }
 
-void sigmoid_backward_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sigmoid_backward_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return a * (scalar_t(1.) - b) * b;
+void huber_kernel_cuda(TensorIterator& iter, double delta) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_cuda", [&iter, delta] {
+    scalar_t delta_val(delta);
+    gpu_kernel(iter, [delta_val] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
+      auto z = ::abs(a - b);
+      return z < delta_val ? scalar_t(0.5) * z * z : delta_val * (z - scalar_t(0.5) * delta_val);
     });
   });
 }
 
-void tanh_backward_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "tanh_backward_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return a * (scalar_t(1.) - b * b);
-    });
-  });
-}
-
-void mse_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cuda", [&]() {
+void mse_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "mse_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       auto diff = a - b;
       return diff * diff;
@@ -170,18 +41,41 @@ void mse_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
-REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel_cuda);
-REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel_cuda);
-REGISTER_DISPATCH(lshift_stub, &lshift_kernel_cuda);
-REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel_cuda);
-REGISTER_DISPATCH(rshift_stub, &rshift_kernel_cuda);
-REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel_cuda);
-REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel_cuda);
-REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
+void xlogy_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "xlogy_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t x, scalar_t y) -> scalar_t {
+      if (at::_isnan(y)){
+        return NAN;
+      }
+      if (x == 0){
+        return 0;
+      }
+      return x * std::log(y);
+    });
+  });
+}
+
+void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "xlog1py_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t x, scalar_t y) -> scalar_t {
+      if (at::_isnan(y)){
+        return NAN;
+      }
+      if (x == 0){
+        return 0;
+      }
+      return x * std::log1p(y);
+    });
+  });
+}
+
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
-REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel_cuda);
-REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel_cuda);
+REGISTER_DISPATCH(huber_stub, &huber_kernel_cuda);
 REGISTER_DISPATCH(mse_stub, &mse_kernel_cuda);
+REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel_cuda);
+REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel_cuda);
+
+// DO NOT ADD ANY NEW KERNELS HERE
+// CUDA compilation times grow quickly.  It's perfectly acceptable to have a file per kernel.
 
 }} // namespace at::native

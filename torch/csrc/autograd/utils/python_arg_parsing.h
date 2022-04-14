@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <torch/csrc/utils/python_arg_parser.h>
 
@@ -10,14 +10,7 @@ namespace torch { namespace autograd { namespace utils {
 // The parameter allow_copy is to accept copy for Tensor.to (and by proxy
 // PackedSequences.to) but not nn.Module.to.
 inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool, bool, c10::optional<at::MemoryFormat>>
-  parse_to_conversion(PyObject *args, PyObject *kwargs, bool allow_copy) {
-  static PythonArgParser parser({
-    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-    "to(Tensor tensor, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-  });
-  ParsedArgs<5> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
+  parse_to_conversion(PythonArgs& r, bool allow_copy) {
   if (r.idx == 0) {
     if (!allow_copy && !r.isNone(3))
       throw std::runtime_error(".to() does not accept copy argument");

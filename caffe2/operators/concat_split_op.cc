@@ -62,6 +62,7 @@ vector<TensorShape> TensorInferenceForSplit(
       return ret_invalid_shape();
     }
     split.resize(output_size, input_channels / output_size);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   } else if (split.size() != output_size) {
     LOG(WARNING) << "`split` size (" << split.size()
                  << ") should be equal to output size (" << output_size << ")";
@@ -93,6 +94,30 @@ vector<TensorShape> TensorInferenceForSplit(
   }
   return output_shapes;
 }
+
+OpSchema::Cost CostInferenceForSplit(
+    const OperatorDef&,
+    const vector<TensorShape>& in) {
+  CAFFE_ENFORCE_GT(in.size(), 0);
+  struct OpSchema::Cost cost;
+  cost.flops = 0;
+  auto const& input_0_element_size_byte =
+      DataTypeToTypeMeta(in[0].data_type()).itemsize();
+  auto input_bytes_count = nElemFromDim(in[0]) * input_0_element_size_byte;
+  auto split_bytes_count = in.size() > 1
+      ? nElemFromDim(in[1]) * DataTypeToTypeMeta(in[1].data_type()).itemsize()
+      : 0;
+  // There can be two input blobs:
+  // (1) actual tensor to be split
+  // (2) lengths of outputs along split axis
+  // So, bytes_read is the sum of the bytes in the two blobs.
+  cost.bytes_read = input_bytes_count + split_bytes_count;
+  // Split operator only changes shape, does not change element count. So,
+  // bytes_written is same as input_bytes_count.
+  cost.bytes_written = input_bytes_count;
+  cost.params_bytes = 0;
+  return cost;
+}
 } // namespace.
 
 REGISTER_CPU_OPERATOR(Split, SplitOp<CPUContext>);
@@ -112,9 +137,11 @@ OPERATOR_SCHEMA(Split)
     .Arg("split", "(*Tuple(int)*): length of each output")
     .Arg(
         "order",
+        // NOLINTNEXTLINE(modernize-raw-string-literal)
         "(*string*): order of dimensions of input and output blobs; either \"NCHW\" or \"NHWC\"")
     .Output(0, "[output_0, output_1, ...]", "(*Tensor*): output tensor")
     .TensorInferenceFunction(TensorInferenceForSplit)
+    .CostInferenceFunction(CostInferenceForSplit)
     .DeviceInferenceFunction(splitOpDevInfer)
     .SetDoc(R"DOC(
 Split an `input` tensor into a list of tensors, along the axis specified by the `axis` dimension. The lengths of the split can be specified using argument `split` or optional second input blob to the operator. Otherwise, the tensor is split to equal sized parts.
@@ -172,6 +199,10 @@ OPERATOR_SCHEMA(SplitByLengths)
     .Input(1, "legnths", "The tensor `l_i` indicates the logic block of input.")
     .Arg("axis", "Which axis to split on")
     .Arg("order", "Either NHWC or NCWH, will split on C axis, defaults to NCHW")
+    .Arg(
+        "use_scaling_lengths",
+        "(*bool*): Enables automatic scaling of the lengths values. When enabled "
+        "will automatically find a value K >= 1, such that sum(lengths) * K == len(input).")
     .DeviceInferenceFunction([](const OperatorDef& def) {
       auto op_device =
           def.has_device_option() ? def.device_option() : DeviceOption();
@@ -185,7 +216,89 @@ OPERATOR_SCHEMA(SplitByLengths)
 Split a tensor into a list of tensors, given a lengths input, along the specified
 'axis'. If `K` outputs are provided, the op assumes `len(lengths) % K == 0`.
 The `input` will be split into `K` parts. Each part of length
-`sum(lengths[i*k:i*k+k))`)DOC");
+`sum(lengths[i*k:i*k+k))`
+
+<details>
+
+<summary> <b>Example 1</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "SplitByLengths",
+    ["input", "lengths"],
+    ["output_0","output_1","output_2"],
+    axis=0
+)
+
+workspace.FeedBlob("input", np.random.randint(10, size=(9)))
+workspace.FeedBlob("lengths", np.array([3,2,4], dtype=np.int32))
+print("input:", workspace.FetchBlob("input"))
+print("lengths:", workspace.FetchBlob("lengths"))
+workspace.RunOperatorOnce(op)
+print("output_0:", workspace.FetchBlob("output_0"))
+print("output_1:", workspace.FetchBlob("output_1"))
+print("output_2:", workspace.FetchBlob("output_2"))
+
+```
+
+**Result**
+
+```
+
+input: [2 2 6 6 6 0 5 7 4]
+lengths: [3 2 4]
+output_0: [2 2 6]
+output_1: [6 6]
+output_2: [0 5 7 4]
+
+```
+
+<summary> <b>Example 2</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "SplitByLengths",
+    ["input", "lengths"],
+    ["output_0","output_1","output_2"],
+    axis=0,
+    use_scaling_lengths=true,
+)
+
+workspace.FeedBlob("input", np.random.randint(10, size=(9)))
+workspace.FeedBlob("lengths", np.array([1,1,1], dtype=np.int32))
+print("input:", workspace.FetchBlob("input"))
+print("lengths:", workspace.FetchBlob("lengths"))
+print("output_0:", workspace.FetchBlob("output_0"))
+print("output_1:", workspace.FetchBlob("output_1"))
+print("output_2:", workspace.FetchBlob("output_2"))
+
+```
+
+**Result**
+
+```
+
+input: [2 2 6 6 6 0 5 7 4]
+lengths: [1 1 1]
+output_0: [2 2 6]
+output_1: [6 6 6]
+output_2: [5 7 4]
+
+```
+
+</details>
+
+)DOC");
 
 OpSchema::Cost CostInferenceForConcat(
     const OperatorDef& def,
@@ -208,7 +321,8 @@ OpSchema::Cost CostInferenceForConcat(
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
   }
-  uint64_t nElemRead = 1;
+  uint64_t nElemRead = 0;
+  // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int i = 0; i < in.size(); ++i) {
     nElemRead += nElemFromDim(in[i]);
   }
@@ -216,11 +330,15 @@ OpSchema::Cost CostInferenceForConcat(
   for (auto& s : out_shape) {
     size *= s;
   }
+  auto split_info_bytes_count = in.size() * sizeof(int);
 
+  auto const& input_0_element_size_byte =
+      DataTypeToTypeMeta(in[0].data_type()).itemsize();
   struct OpSchema::Cost cost;
   cost.flops = 0;
-  cost.bytes_read = nElemRead * sizeof(in[0].data_type());
-  cost.bytes_written = size * sizeof(in[0].data_type());
+  cost.bytes_read = nElemRead * input_0_element_size_byte;
+  cost.bytes_written =
+      size * input_0_element_size_byte + split_info_bytes_count;
   cost.params_bytes = 0;
   return cost;
 }
@@ -256,6 +374,7 @@ vector<TensorShape> TensorInferenceForConcat(
   vector<int> split_shape(1, in.size());
   vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
   if (add_axis) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < in.size(); ++i) {
       CAFFE_ENFORCE_EQ(
           in[0].dims().size(),
@@ -276,6 +395,7 @@ vector<TensorShape> TensorInferenceForConcat(
     }
     out_shape.insert(out_shape.begin() + canonical_axis, in.size());
   } else {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < in.size(); ++i) {
       CAFFE_ENFORCE(
           in[0].dims_size() == in[i].dims_size() ||
@@ -303,6 +423,7 @@ vector<TensorShape> TensorInferenceForConcat(
       }
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < in.size(); ++i) {
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
@@ -503,6 +624,7 @@ class GetConcatGradient : public GradientMakerBase {
     }
     vector<string> grads;
     for (int i = 0; i < def_.input_size(); ++i) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       grads.push_back(GI(i));
     }
     return SingleGradientDef("Split", "", vector<string>{GO(0), O(1)}, grads);

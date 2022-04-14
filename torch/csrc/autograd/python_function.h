@@ -22,10 +22,10 @@ namespace torch { namespace autograd {
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
 struct PyNode : public Node {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list legacy_apply(const variable_list& inputs);
 
   void release_variables() override;
   std::string name() const override;
@@ -34,12 +34,15 @@ struct PyNode : public Node {
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
 
-  ~PyNode() {
+  ~PyNode() override {
     // Can't use THPObjectPtr as a field in this class; destructor won't take
     // out GIL!  When I forgot to do this by hand
     // TestAutograd.test_inplace_view_python called me out about it.
-    pybind11::gil_scoped_acquire g;
-    Py_DECREF(obj);
+    // If python is already dead, leak the wrapped python objects
+    if (Py_IsInitialized()) {
+      pybind11::gil_scoped_acquire gil;
+      Py_DECREF(obj);
+    }
   }
 };
 
@@ -60,6 +63,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 
 }} // namespace torch::autograd
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPFunction {
     PyObject_HEAD
 
@@ -78,6 +82,11 @@ struct THPFunction {
     // modified inplace.
     PyObject *dirty_tensors;
 
+    // boolean indicating whether to materialize undefined output grad tensors
+    // into tensors full of zeros. Set by Python with 'set_materialize_grads'.
+    // Default is true.
+    bool materialize_grads;
+
     std::vector<torch::autograd::VariableInfo> output_info;
     std::vector<torch::autograd::VariableInfo> input_info;
     std::vector<torch::autograd::SavedVariable> saved_variables;
@@ -85,6 +94,7 @@ struct THPFunction {
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
 
+    PyObject *saved_for_forward;
     // The actual PyNode (in the autograd graph) that this data was
     // saved for.  This field may be NULL (because a user can construct
     // a THPFunction directly from Python), but when this field is non-NULL,

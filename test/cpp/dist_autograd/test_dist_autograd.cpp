@@ -19,6 +19,11 @@ class DistAutogradTest : public ::testing::Test {
   static void SetUpTestCase() {
     autogradContainer_ = &DistAutogradContainer::init(0);
   }
+
+  virtual void TearDown() {
+    autogradContainer_->releaseContext(autogradContainer_->currentContext()->contextId());
+  }
+
   static DistAutogradContainer* autogradContainer_;
 };
 
@@ -56,18 +61,18 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
 
 TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   autogradContainer_->newContext();
+  auto contextId = autogradContainer_->currentContext()->contextId();
   auto& engine = DistEngine::getInstance();
   ASSERT_EQ(0, engine.numBackwardPasses());
 
-  // Attach appropriate grad fn.
-  auto options = at::TensorOptions().requires_grad(true);
-  auto t = torch::autograd::make_variable(torch::ones({1}, options), true);
-  const auto& e = torch::autograd::impl::gradient_edge(t);
-  torch::autograd::impl::set_gradient_edge(t, e);
-  ASSERT_NE(nullptr, t.grad_fn());
+  // Build autograd graph
+  auto x = torch::randn({2, 2}, torch::requires_grad());
+  auto y = torch::randn({2, 2}, torch::requires_grad());
+  auto z = (x * x + y * y).sum();
+  ASSERT_NE(nullptr, z.grad_fn());
 
   // Execute engine.
-  engine.execute({t});
+  engine.execute(contextId, {z}, /* retainGraph */ false);
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());
@@ -90,7 +95,9 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
   sendFunction->setGrads({t});
 
   // Execute engine.
-  engine.executeSendFunctionAsync(context, sendFunction)->wait();
+  engine
+      .executeSendFunctionAsync(context, sendFunction, /*retrainGraph*/ false)
+      ->wait();
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());

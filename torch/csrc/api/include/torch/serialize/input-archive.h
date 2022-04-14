@@ -2,9 +2,9 @@
 
 #include <c10/util/Optional.h>
 #include <c10/core/Device.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 
 #include <iosfwd>
 #include <memory>
@@ -18,9 +18,7 @@ class Tensor;
 namespace torch {
 using at::Tensor;
 namespace jit {
-namespace script {
 struct Module;
-} // namespace script
 } // namespace jit
 } // namespace torch
 
@@ -108,7 +106,7 @@ class TORCH_API InputArchive final {
   }
 
  private:
-  jit::script::Module module_;
+  jit::Module module_;
   std::string hierarchy_prefix_;
 };
 } // namespace serialize

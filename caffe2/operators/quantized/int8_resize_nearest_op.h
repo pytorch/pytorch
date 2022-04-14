@@ -5,6 +5,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/quantized/int8_utils.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -17,7 +18,8 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
       : Operator<CPUContext>(std::forward<Args>(args)...) {
     width_scale_ = this->template GetSingleArgument<float>("width_scale", 1);
     height_scale_ = this->template GetSingleArgument<float>("height_scale", 1);
-    output_dims = this->template GetRepeatedArgument<int>("output_size", vector<int>{});
+    output_dims =
+        this->template GetRepeatedArgument<int>("output_size", vector<int>{});
     CAFFE_ENFORCE_GT(width_scale_, 0);
     CAFFE_ENFORCE_GT(height_scale_, 0);
   }
@@ -34,7 +36,8 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
     const int IW = X.t.dim32(2);
     const int C = X.t.dim32(3);
     if (!output_dims.empty()) {
-      CAFFE_ENFORCE_EQ(2, output_dims.size(), "Int8ResizeNearest expects 2 dim output size");
+      CAFFE_ENFORCE_EQ(
+          2, output_dims.size(), "Int8ResizeNearest expects 2 dim output size");
       height_scale_ = output_dims[0] / IH;
       width_scale_ = output_dims[1] / IW;
     }
@@ -52,10 +55,10 @@ class Int8ResizeNearestOp final : public Operator<CPUContext> {
     const uint8_t* Xdata = X.t.data<uint8_t>();
     uint8_t* Ydata = Y->t.mutable_data<uint8_t>();
 
-    for (int n = 0; n < N; ++n) {
-      for (int y = 0; y < OH; ++y) {
+    for (const auto n : c10::irange(N)) {
+      for (const auto y : c10::irange(OH)) {
         const int in_y = std::min((int)(y / height_scale_), (IH - 1));
-        for (int x = 0; x < OW; ++x) {
+        for (const auto x : c10::irange(OW)) {
           const int in_x = std::min((int)(x / width_scale_), (IW - 1));
           std::memcpy(
               &Ydata[C * x + C * OW * y + C * OW * OH * n],

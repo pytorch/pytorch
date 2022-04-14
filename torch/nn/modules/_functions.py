@@ -1,38 +1,77 @@
 import torch
-from torch.autograd.function import Function
+import torch.distributed as dist
 
+from torch.autograd.function import Function
 
 class SyncBatchNorm(Function):
 
     @staticmethod
     def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
-        input = input.contiguous()
+        if not input.is_contiguous(memory_format=torch.channels_last):
+            input = input.contiguous()
+        if weight is not None:
+            weight = weight.contiguous()
 
-        size = input.numel() // input.size(1)
-        if size == 1:
+        size = int(input.numel() // input.size(1))
+        if size == 1 and world_size < 2:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
-        count = torch.Tensor([size]).to(input.device)
 
-        # calculate mean/invstd for input.
-        mean, invstd = torch.batch_norm_stats(input, eps)
+        num_channels = input.shape[1]
+        if input.numel() > 0:
+            # calculate mean/invstd for input.
+            mean, invstd = torch.batch_norm_stats(input, eps)
 
-        count_all = torch.empty(world_size, 1, dtype=count.dtype, device=count.device)
-        mean_all = torch.empty(world_size, mean.size(0), dtype=mean.dtype, device=mean.device)
-        invstd_all = torch.empty(world_size, invstd.size(0), dtype=invstd.dtype, device=invstd.device)
+            count = torch.full(
+                (1,),
+                input.numel() // input.size(1),
+                dtype=mean.dtype,
+                device=mean.device
+            )
 
-        count_l = list(count_all.unbind(0))
-        mean_l = list(mean_all.unbind(0))
-        invstd_l = list(invstd_all.unbind(0))
+            # C, C, 1 -> (2C + 1)
+            combined = torch.cat([mean, invstd, count], dim=0)
+        else:
+            # for empty input, set stats and the count to zero. The stats with
+            # zero count will be filtered out later when computing global mean
+            # & invstd, but they still needs to participate the all_gather
+            # collective communication to unblock other peer processes.
+            combined = torch.zeros(
+                2 * num_channels + 1,
+                dtype=input.dtype,
+                device=input.device
+            )
 
-        # using all_gather instead of all reduce so we can calculate count/mean/var in one go
-        count_all_reduce = torch.distributed.all_gather(count_l, count, process_group, async_op=True)
-        mean_all_reduce = torch.distributed.all_gather(mean_l, mean, process_group, async_op=True)
-        invstd_all_reduce = torch.distributed.all_gather(invstd_l, invstd, process_group, async_op=True)
+        # Use allgather instead of allreduce because count could be different across
+        # ranks, simple all reduce op can not give correct results.
+        # batch_norm_gather_stats_with_counts calculates global mean & invstd based on
+        # all gathered mean, invstd and count.
+        # for nccl backend, use the optimized version of all gather.
+        if process_group._get_backend_name() == 'nccl':
+            # world_size * (2C + 1)
+            combined_size = combined.numel()
+            combined_flat = torch.empty(1,
+                                        combined_size * world_size,
+                                        dtype=combined.dtype,
+                                        device=combined.device)
+            dist._all_gather_base(combined_flat, combined, process_group, async_op=False)
+            combined = torch.reshape(combined_flat, (world_size, combined_size))
+            # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
+            mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
+        else:
+            # world_size * (2C + 1)
+            combined_list = [
+                torch.empty_like(combined) for _ in range(world_size)
+            ]
+            dist.all_gather(combined_list, combined, process_group, async_op=False)
+            combined = torch.stack(combined_list, dim=0)
+            # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
+            mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
 
-        # wait on the async communication to finish
-        count_all_reduce.wait()
-        mean_all_reduce.wait()
-        invstd_all_reduce.wait()
+        # remove stats from empty inputs
+        mask = count_all.squeeze(-1) >= 1
+        count_all = count_all[mask]
+        mean_all = mean_all[mask]
+        invstd_all = invstd_all[mask]
 
         # calculate global mean & invstd
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
@@ -43,69 +82,84 @@ class SyncBatchNorm(Function):
             running_var,
             momentum,
             eps,
-            count_all.view(-1).long().tolist()
+            count_all.view(-1)
         )
 
-        self.save_for_backward(input, weight, mean, invstd)
+        self.save_for_backward(input, weight, mean, invstd, count_all.to(torch.int32))
         self.process_group = process_group
-        self.world_size = world_size
 
         # apply element-wise normalization
-        out = torch.batch_norm_elemt(input, weight, bias, mean, invstd, eps)
-        return out
+        if input.numel() > 0:
+            return torch.batch_norm_elemt(input, weight, bias, mean, invstd, eps)
+        else:
+            return torch.empty_like(input)
 
     @staticmethod
     def backward(self, grad_output):
-        grad_output = grad_output.contiguous()
-        saved_input, weight, mean, invstd = self.saved_tensors
+        if not grad_output.is_contiguous(memory_format=torch.channels_last):
+            grad_output = grad_output.contiguous()
+        saved_input, weight, mean, invstd, count_tensor = self.saved_tensors
         grad_input = grad_weight = grad_bias = None
         process_group = self.process_group
-        world_size = self.world_size
 
-        # calculate local stats as well as grad_weight / grad_bias
-        mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(
-            grad_output,
-            saved_input,
-            mean,
-            invstd,
-            weight,
-            self.needs_input_grad[0],
-            self.needs_input_grad[1],
-            self.needs_input_grad[2]
-        )
-
-        if self.needs_input_grad[0]:
-            # synchronizing stats used to calculate input gradient.
-            # TODO: move div_ into batch_norm_backward_elemt kernel
-            mean_dy_all_reduce = torch.distributed.all_reduce(
-                mean_dy, torch.distributed.ReduceOp.SUM, process_group, async_op=True)
-            mean_dy_xmu_all_reduce = torch.distributed.all_reduce(
-                mean_dy_xmu, torch.distributed.ReduceOp.SUM, process_group, async_op=True)
-
-            # wait on the async communication to finish
-            mean_dy_all_reduce.wait()
-            mean_dy_xmu_all_reduce.wait()
-
-            mean_dy.div_(world_size)
-            mean_dy_xmu.div_(world_size)
-            # backward pass for gradient calculation
-            grad_input = torch.batch_norm_backward_elemt(
+        if saved_input.numel() > 0:
+            # calculate local stats as well as grad_weight / grad_bias
+            sum_dy, sum_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(
                 grad_output,
                 saved_input,
                 mean,
                 invstd,
                 weight,
-                mean_dy,
-                mean_dy_xmu
+                self.needs_input_grad[0],
+                self.needs_input_grad[1],
+                self.needs_input_grad[2]
             )
 
-        # synchronizing of grad_weight / grad_bias is not needed as distributed
-        # training would handle all reduce.
-        if weight is None or not self.needs_input_grad[1]:
-            grad_weight = None
+            if self.needs_input_grad[0]:
+                # synchronizing stats used to calculate input gradient.
+                num_channels = sum_dy.shape[0]
+                combined = torch.cat([sum_dy, sum_dy_xmu], dim=0)
+                torch.distributed.all_reduce(
+                    combined, torch.distributed.ReduceOp.SUM, process_group, async_op=False)
+                sum_dy, sum_dy_xmu = torch.split(combined, num_channels)
 
-        if weight is None or not self.needs_input_grad[2]:
-            grad_bias = None
+                # backward pass for gradient calculation
+                grad_input = torch.batch_norm_backward_elemt(
+                    grad_output,
+                    saved_input,
+                    mean,
+                    invstd,
+                    weight,
+                    sum_dy,
+                    sum_dy_xmu,
+                    count_tensor
+                )
+            # synchronizing of grad_weight / grad_bias is not needed as distributed
+            # training would handle all reduce.
+            if weight is None or not self.needs_input_grad[1]:
+                grad_weight = None
+
+            if weight is None or not self.needs_input_grad[2]:
+                grad_bias = None
+        else:
+            # This process got an empty input tensor in the forward pass.
+            # Although this process can directly set grad_input as an empty
+            # tensor of zeros, it still needs to participate in the collective
+            # communication to unblock its peers, as other peer processes might
+            # have recieved non-empty inputs.
+            num_channels = saved_input.shape[1]
+            if self.needs_input_grad[0]:
+                # launch all_reduce to unblock other peer processes
+                combined = torch.zeros(
+                    2 * num_channels,
+                    dtype=saved_input.dtype,
+                    device=saved_input.device
+                )
+                torch.distributed.all_reduce(
+                    combined, torch.distributed.ReduceOp.SUM, process_group, async_op=False)
+
+            # Leave grad_input, grad_weight and grad_bias as None, which will be
+            # interpreted by the autograd engine as Tensors full of zeros.
 
         return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
 
@@ -153,11 +207,11 @@ class CrossMapLRN2d(Function):
             scale_current.copy_(scale_previous)
             if c < channels - pre_pad + 1:
                 square_next = input_square.select(1, c + pre_pad - 1)
-                scale_current.add_(1, square_next)
+                scale_current.add_(square_next, alpha=1)
 
             if c > pre_pad:
                 square_previous = input_square.select(1, c - pre_pad)
-                scale_current.add_(-1, square_previous)
+                scale_current.add_(square_previous, alpha=-1)
 
         ctx.scale.mul_(ctx.alpha / ctx.size).add_(ctx.k)
 
@@ -197,8 +251,17 @@ class CrossMapLRN2d(Function):
                 paddded_ratio.narrow(0, 0, ctx.size - 1), 0, keepdim=False, out=accum_ratio)
             for c in range(channels):
                 accum_ratio.add_(paddded_ratio[c + ctx.size - 1])
-                grad_input[n][c].addcmul_(-cache_ratio_value, input[n][c],
-                                          accum_ratio)
-                accum_ratio.add_(-1, paddded_ratio[c])
+                grad_input[n][c].addcmul_(input[n][c], accum_ratio, value=-cache_ratio_value)
+                accum_ratio.add_(paddded_ratio[c], alpha=-1)
 
         return grad_input, None, None, None, None
+
+class BackwardHookFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, *args):
+        ctx.mark_non_differentiable(*[arg for arg in args if not arg.requires_grad])
+        return args
+
+    @staticmethod
+    def backward(ctx, *args):
+        return args

@@ -1,27 +1,14 @@
-#include "caffe2/caffe2/fb/predictor/Transforms.h"
+#include "caffe2/predictor/transforms.h"
+#include "caffe2/onnx/onnx_exporter.h"
+#include "caffe2/utils/proto_utils.h"
 
+#include <unordered_set>
 
 namespace caffe2 {
 
 namespace {
-string
-NextBlob(const Workspace& ws, const string& prefix, int max_tries = 1000000) {
-  for (int i = 0; i < max_tries; ++i) {
-    std::stringstream stream;
-    stream << prefix;
-    if (i) {
-      stream << '_' << i;
-    }
-    if (!ws.HasBlob(stream.str())) {
-      return stream.str();
-    }
-  }
-  CAFFE_THROW("Failed to find a new blob name");
-  return "";
-}
-
 bool HasInput(const string& blob, const OperatorDef& op) {
-  for (auto in : op.input()) {
+  for (const auto& in : op.input()) {
     if (blob == in) {
       return true;
     }
@@ -30,7 +17,7 @@ bool HasInput(const string& blob, const OperatorDef& op) {
 }
 
 bool HasOutput(const string& blob, const OperatorDef& op) {
-  for (auto out : op.output()) {
+  for (const auto& out : op.output()) {
     if (blob == out) {
       return true;
     }
@@ -38,292 +25,305 @@ bool HasOutput(const string& blob, const OperatorDef& op) {
   return false;
 }
 
-/*
-Tests if it is valid to simply rename "from" to "to" after start (at or after
-start) ignoring in-place ops of operator types in ignoreTypes. There is a set of
-ignoreTypes instead of a single ignoreType for uses cases where multiple
-op-types will be in-placed; in such cases this function will give a more optimal
-answer if it can consider all types at the same time.
-*/
-bool CanRenameForwards(
+void RewriteSubnetsForIfOp(
     const string& from,
     const string& to,
-    const std::shared_ptr<NetDef>& net,
-    const std::set<string>& netOutputs,
-    const std::set<string>& ignoreTypes,
-    int start) {
-  bool redefined_to = false;
-  for (int i = start; i < net->op_size(); i++) {
-    auto op = net->op(i);
-    bool uses_from = HasInput(from, op);
+    OperatorDef* op) {
+  ArgumentHelper helper(*op);
+  Argument *then_arg = nullptr, *else_arg = nullptr;
 
-    // If there's a use of "from" after a redefine of "to" then we can't rename
-    // this "from" to "to" b/c it will use the wrong "to" (this op's "to"
-    // instead of the "to" that would be produced by renaming ops[start-1] to
-    // output "to" to "from")
-    if (redefined_to && uses_from) {
-      VLOG(7) << "CanRenameForwards " << to << " is redefined before " << from
-              << " is used. Cannot rename from " << from << " to " << to;
-      return false;
-    }
-    // If "to" is redefined then we have to be careful of in-placing this op or
-    // blocking future uses of "from"
-    if (HasOutput(to, op)) {
-      // If this op also uses "from", then renaming "from" to "to" will make
-      // this op inplace
-      if (uses_from) {
-        // In-placing of this op is not allowed
-        if (!ignoreTypes.count(op.type())) {
-          VLOG(7) << "CanRenameForwards detected in-placing of op of type "
-                  << op.type();
-          return false;
-        }
-        VLOG(7) << "CanRenameForwards will make " << op.DebugString()
-                << " in-place, but this is in the okay-types-to-inplace "
-                << "whitelist";
-      }
-      // This op won't be inplaced (or it's okay if it is) but we still have to
-      // watch out for future uses of "from"
-      redefined_to = true;
-      VLOG(7) << "CanRenameForwards " << to << " is redefined at " << i;
-    }
-    // If this op redefines "from" then renaming will stop with the inputs of
-    // this op. Since we haven't found any problems with renaming, it's okay to
-    // rename. Note that we don't need to check if "from" is a network output,
-    // as this op will produce "from"
-    if (HasOutput(from, op)) {
-      VLOG(7) << "CanRenameForwards found another op making " << from
-              << " so it's fine to rename " << from << " to " << to
-              << " in earlier ops of the net.";
-      return true;
-    }
+  std::map<std::string, std::string> oldname_to_newname;
+  oldname_to_newname[from] = to;
+
+  if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
+    then_arg = GetMutableArgument("then_net", false, op);
+    onnx::rewriteSubnet(then_arg, oldname_to_newname);
   }
-  // We reached the end of the ops. There have been no redefinitions of "from",
-  // so if "from" is needed in the network outputs then we can't rename it
-  return !netOutputs.count(from);
+  if (helper.HasSingleArgumentOfType<NetDef>("else_net")) {
+    else_arg = GetMutableArgument("else_net", false, op);
+    onnx::rewriteSubnet(else_arg, oldname_to_newname);
+  }
 }
 
-bool CanRenameBackwards(
+void RenameInputs(
     const string& from,
     const string& to,
-    const std::shared_ptr<NetDef>& net,
-    const std::set<string>& netInputs,
-    const std::set<string>& netOutputs,
-    const std::set<string>& ignoreTypes,
-    int end) {
-  for (int i = end; i >= 0; i--) {
-    auto op = net->op(i);
-    // If this op defines "to", then all ops after this point will use this op's
-    // "to" instead of the producer-of-"from"s, so the producer can't be renamed
-    // to produce "to" instead of "from"
-    // FUTURE_POSSIBILITY: We might be able to rename this op to not produce to
-    if (HasOutput(to, op)) {
-      VLOG(7) << "CanRenameBackwards " << to << " is defined after " << from
-              << " is. Cannot rename.";
-      return false;
-    }
-    // Because of the previous question, we know that no op in between this op
-    // and end has "to" as an output, so it is impossible to make any of them
-    // in-place by adding "to" as an input to any of them
-
-    // If we find the producer of "from", then we will stop renaming backwards
-    // (we won't rename this ops inputs)
-    if (HasOutput(from, op)) {
-      // If this op has "to" as an input, then renaming "from" to "to" will
-      // in-place this op
-      if (HasInput(to, op)) {
-        if (!ignoreTypes.count(op.type())) {
-          // In future, you could maybe check if "to" could be renamed to a
-          // brand new unique blob name
-          VLOG(7) << "CanRenameBackwards will in-place producer of " << from;
-          return false;
-        }
-        VLOG(7) << "CanRenameBackwards will in-place the producer of " << from
-                << " but this is okay because it's in our in-placeable "
-                << "whitelist";
-      }
-      // This op won't be in-placed (or it will but it's still okay), but we
-      // have to check the forwards logic too
-      // TODO why? what's the specific case again?
-      VLOG(7) << "CanRenameBackwards found the parent of " << from
-              << ". Recursively testing if we can rename the parent.";
-      return CanRenameForwards(from, to, net, netOutputs, ignoreTypes, i + 1);
-    }
-    // After this point, inputs of this op may be renamed
-
-    // If this blob uses "to", then renaming the producer of "from" to produce
-    // "to" will interfere with this op. Technically it will only interfere if
-    // the producer of "from" would overwrite this op's "to", but if that wasn't
-    // the case then there's some op that produces "to" after the producer of
-    // "from", and this will be caught in the first if (HasOutput(to, op))
-    if (HasInput(to, op)) {
-      VLOG(7) << "CanRenameBackwards " << to << " is used after " << from
-              << " is defined. Cannot rename.";
-      return false;
-    }
-  }
-  // Found no parent, so must be a network output. We cannot rename it
-  CAFFE_ENFORCE(netInputs.count(from));
-  VLOG(7) << "CanRenameBackwards " << from << " is a network input. Cannot "
-          << "rename.";
-  return false;
-}
-
-void RenameInputs(const string& from, const string& to, OperatorDef* def) {
-  VLOG(6) << "RenameInputs(from=" << from << ", to=" << to << ", "
+    OperatorDef* def,
+    int op_idx,
+    std::unordered_map<std::string, std::unordered_set<int>>& children) {
+  VLOG(2) << "RenameInputs (from=" << from << ", to=" << to << ", "
           << def->DebugString() << ")";
   for (int i = 0; i < def->input_size(); i++) {
     if (def->input(i) == from) {
       *def->mutable_input(i) = to;
+      children[from].erase(op_idx);
+      children[to].insert(op_idx);
     }
+  }
+  // Rename inputs in the subnets of If/AsyncIf op
+  if (def->type() == "If" || def->type() == "AsyncIf") {
+    RewriteSubnetsForIfOp(from, to, def);
   }
 }
 
-void RenameOutputs(const string& from, const string& to, OperatorDef* def) {
-  VLOG(6) << "RenameOutputs(from=" << from << ", to=" << to << ", "
+void RenameOutputs(
+    const string& from,
+    const string& to,
+    OperatorDef* def,
+    int op_idx,
+    std::unordered_map<std::string, std::unordered_set<int>>& parents) {
+  VLOG(2) << "RenameOutputs (from=" << from << ", to=" << to << ", "
           << def->DebugString() << ")";
   for (string& output : *def->mutable_output()) {
     if (output == from) {
       output = to;
+      parents[from].erase(op_idx);
+      parents[to].insert(op_idx);
     }
+  }
+  // Rename outputs in the subnets of If/AsyncIf op
+  if (def->type() == "If" || def->type() == "AsyncIf") {
+    RewriteSubnetsForIfOp(from, to, def);
   }
 }
 
 void RenameInputsInChildren(
     const string& from,
     const string& to,
-    std::shared_ptr<caffe2::NetDef> net,
-    int pidx) {
-  // This does NOT continue through in-place ops
-  VLOG(4) << "RenameInputsInChildren(from=" << from << ", to=" << to;
-  for (int j = pidx + 1; j < net->op_size(); j++) {
-    if (HasInput(from, net->op(j))) {
-      RenameInputs(from, to, net->mutable_op(j));
+    caffe2::NetDef* net,
+    std::unordered_map<std::string, std::unordered_set<int>>& children) {
+  VLOG(2) << "RenameInputsInChildren (from=" << from << ", to=" << to << ")";
+  if (children.count(from) == 0) {
+    return;
+  }
+
+  // make an temporary copy here because we're going to modify children
+  for (int child : std::unordered_set<int>(children[from])) {
+    RenameInputs(from, to, net->mutable_op(child), child, children);
+  }
+}
+
+void RenameOutputInParents(
+    const std::string& from,
+    const std::string& to,
+    caffe2::NetDef* net,
+    std::unordered_map<std::string, std::unordered_set<int>>& parents) {
+  VLOG(2) << "RenameOutputInParents (from=" << from << ", to=" << to << ")";
+  if (parents.count(from) == 0) {
+    return;
+  }
+
+  // make an temporary copy here because we're going to modify parents
+  for (int parent : std::unordered_set<int>(parents[from])) {
+    RenameOutputs(from, to, net->mutable_op(parent), parent, parents);
+  }
+}
+
+bool FoundOpCandidate(
+    const OperatorDef* op,
+    int op_idx,
+    const std::string& op_type,
+    const std::unordered_set<std::string>& inputs,
+    const std::unordered_set<std::string>& outputs,
+    const std::unordered_map<std::string, std::unordered_set<int>>& parents,
+    const std::unordered_map<std::string, std::unordered_set<int>>& children) {
+  if (op->type() != op_type) {
+    VLOG(2) << "InplaceOps(" << op_type << ") skipping op: \n"
+            << op->DebugString();
+    return false;
+  }
+  if (op->input_size() != 1 || op->output_size() != 1) {
+    VLOG(2) << "InplaceOps(" << op_type
+            << ") only supports ops with exactly 1 output "
+            << "and exactly 1 input. Skipping op: \n"
+            << op->DebugString();
+    return false;
+  }
+
+  // use actual copy because op->input/output may change
+  const std::string in = op->input(0);
+  const std::string out = op->output(0);
+
+  if (in == out) {
+    // This case can still exist when in/out is in the predict_net's outputs.
+    // The op is an inplace op already.
+    return false;
+  }
+
+  // The following is to handle the special cases of inputs being overwritten
+  // by ops in the net and then appear in outputs of the net
+  if (outputs.count(out) == 0) {
+    // Propagate input downwards
+    // Make sure that after input is propagated down, it doesn't have parents
+    // that comes after i but before the new child
+    int earliest_child = INT_MAX;
+    const auto& iter = children.find(out);
+    if (iter != children.end()) {
+      for (int child : iter->second) {
+        earliest_child = std::min(earliest_child, child);
+      }
     }
-    // If any child op redefines from, then future ops no longer use this op's
-    // (at j) version of from
-    if (HasOutput(from, net->op(j))) {
-      return;
+    if (earliest_child == INT_MAX) {
+      return true;
+    }
+    const auto& iter2 = parents.find(in);
+    if (iter2 != parents.end()) {
+      for (int parent : iter2->second) {
+        if (parent > op_idx && parent < earliest_child) {
+          VLOG(2) << "InplaceOps(" << op_type << ") skipping op: \n"
+                  << op->DebugString();
+          return false;
+        }
+      }
+    }
+  } else {
+    // Propagate output upwards
+    if (inputs.count(in) != 0 || outputs.count(in) != 0) {
+      // This is the case when the op is absolutely needed. It exists to serve
+      // one and only one purpose, to copy from in to out where in is one of
+      // the net's inputs or outputs and out is one of the net's outputs.
+      VLOG(2) << "InplaceOps(" << op_type << ") skipping op: \n"
+              << op->DebugString();
+      return false;
+    }
+    // find latest parent of in
+    int latest_parent = -1;
+    const auto& iter = parents.find(in);
+    if (iter != parents.end()) {
+      for (int parent : iter->second) {
+        latest_parent = std::max(latest_parent, parent);
+      }
+    }
+    if (latest_parent == -1) {
+      return false;
+    }
+    // Make sure that after output is propagated, it doesn't have children that
+    // comes after its new parent, but before its previous parent
+    const auto& iter2 = children.find(out);
+    if (iter2 != children.end()) {
+      for (int child : iter2->second) {
+        if (child < op_idx && child > latest_parent) {
+          VLOG(2) << "InplaceOps(" << op_type << ") skipping op: \n"
+                  << op->DebugString();
+          return false;
+        }
+      }
     }
   }
+
+  return true;
 }
 
 } // namespace
 
-void InPlaceOps(const InferenceGraph& graph, const std::string& op_type) {
-  int num_inplaced = 0;
-  auto net = graph.predict_net_def;
+// Conceptually it's a pretty easy process and consists of 3 steps:
+// 1) SSA rewrite; 2) propagate inputs forwards; 3) propagate outputs
+// backwards and then forwards again. However, because of model outputs
+// which can't be overwritten during the SSA process, and the fact that
+// inputs could be overwritten by ops and also appear in outputs, it adds
+// a lot of extra complexity to handle these special cases. A lot of this
+// extra complexity is handled in FoundOpCandidate.
+void RemoveOpsByType(InferenceGraph& graph, const std::string& op_type) {
+  int num_removed = 0;
+  NetDef* net = graph.predict_net_def.get();
+  for (auto& op : net->op()) {
+    if (op.type() == "RecurrentNetwork") {
+      LOG(INFO) << "RemoveOpsByType does not support RecurrentNetwork yet";
+      return;
+    }
+  }
 
-  // Collect blob names that we can never rename
-  std::set<string> netInputs(
-      graph.parameter_names.begin(), graph.parameter_names.end());
-  netInputs.insert(graph.input_names.begin(), graph.input_names.end());
-  std::set<string> netOutputs(
+  std::unordered_set<std::string> inputs(
+      graph.input_names.begin(), graph.input_names.end());
+  std::unordered_set<std::string> outputs(
       graph.output_names.begin(), graph.output_names.end());
 
-  // In-place ops greedily in a forward manner
+  if (!graph.predictor_net_ssa_rewritten) {
+    net->mutable_external_output()->Clear();
+    // add external_outputs to net as they're necessary to correctly do ssa
+    // rewriting
+    for (const auto& o : graph.output_names) {
+      net->add_external_output(o);
+    }
+    onnx::SsaRewrite(nullptr, net);
+    // clear external_outputs
+    net->mutable_external_output()->Clear();
+    graph.predictor_net_ssa_rewritten = true;
+  }
+
+  // construct parents/children graphs to facilitate graph traversal
+  std::unordered_map<std::string, std::unordered_set<int>> parents, children;
   for (int i = 0; i < net->op_size(); i++) {
-    OperatorDef op = net->op(i);
+    OperatorDef* op = net->mutable_op(i);
+    for (auto& in : op->input()) {
+      children[in].insert(i);
+    }
+    for (auto& output : op->output()) {
+      parents[output].insert(i);
+    }
+  }
 
-    // Only inplace the requested
-    if (op.type() != op_type) {
-      VLOG(2) << "InPlaceObs: Type is " << op_type << ". Not in-placing";
+  // Inplace ops. Step 1: propagate inputs downward
+  for (int i = 0; i < net->op_size(); i++) {
+    OperatorDef* op = net->mutable_op(i);
+    if (!FoundOpCandidate(op, i, op_type, inputs, outputs, parents, children)) {
       continue;
     }
+    const std::string in = op->input(0);
+    const std::string out = op->output(0);
+    if (outputs.count(out) == 0) {
+      // Rename all apperances of out to in
+      VLOG(2) << "InplaceOps(" << op_type << ") inplacing op:\n"
+              << op->DebugString();
+      RenameInputsInChildren(out, in, net, children);
+      RenameOutputs(out, in, op, i, parents);
+    }
+  }
 
-    if (op.input_size() != 1 || op.output_size() != 1) {
-      LOG(ERROR) << "InPlaceOps only supports ops with exactly 1 output "
-                 << "and exactly 1 input. Skipping op " << op.DebugString();
+  // Step 2: propagate outputs upward
+  for (int i = 0; i < net->op_size(); i++) {
+    OperatorDef* op = net->mutable_op(i);
+    if (!FoundOpCandidate(op, i, op_type, inputs, outputs, parents, children)) {
       continue;
     }
-
-    const string& in = op.input(0);
-    const string& out = op.output(0);
-
-    // If it's already in place then let's not do any more work
-    if (in == out) {
-      continue;
-    }
-
-    // Otherwise check if we can rename things
-    bool can_rename_forwards =
-        CanRenameForwards(out, in, net, netOutputs, {op_type}, i + 1);
-
-    // If renaming is impossible (or complicated) then skip this op
-    if (!can_rename_forwards &&
-        !CanRenameBackwards(
-            in, out, net, netInputs, netOutputs, {op_type}, i - 1)) {
-      VLOG(2) << "InPlaceOps: Complicated or impossible remove for op: "
-              << op.DebugString();
-      continue;
-    }
-    VLOG(2) << "InPlaceOps will inplace " << op.DebugString();
-    num_inplaced++;
-
-    // Handle renaming
-    if (can_rename_forwards) {
-      // Rename out to in
-      VLOG(3) << "InPlaceOps can rename in children from " << out << " to "
-              << in;
-      RenameInputsInChildren(out, in, net, i);
-
-    } else {
-      // Since out is an output of the network, we must rename in parents of op
-      VLOG(3) << "InPlaceOps must find parent that produced " << in
-              << " and rename in all of its children from " << in << " to "
-              << out;
-      for (int pidx = i - 1; pidx >= 0; pidx--) {
-        if (HasOutput(in, net->op(pidx))) {
-          VLOG(5) << "InPlaceOps found parent is "
-                  << net->op(pidx).DebugString();
-          RenameOutputs(in, out, net->mutable_op(pidx));
-          RenameInputsInChildren(in, out, net, pidx);
-          break;
+    const std::string in = op->input(0);
+    const std::string out = op->output(0);
+    if (outputs.count(out) != 0) {
+      if (inputs.count(in) == 0 && outputs.count(in) == 0) {
+        // Rename all apperances (regardless of inputs/outputs) of in (if not
+        // in inputs) to out, when out is guaranteed to be produced a parent
+        // op. With the parents/children graph which remembers all apprerances
+        // of nodes (not just immediate parent/children), we don't need to
+        // propagate the outputs back down again because those cases are already
+        // handled by RenameOutputInParents and RenameInputsInChildren
+        if (parents.count(in) > 0 && !parents[in].empty()) {
+          RenameOutputInParents(in, out, net, parents);
+          VLOG(2) << "InplaceOps(" << op_type << ") inplacing op:\n"
+                  << op->DebugString();
+          RenameInputsInChildren(in, out, net, children);
+          RenameInputs(in, out, op, i, children);
         }
       }
     }
-  } // For every op
-  VLOG(1) << "InPlaceOps(" << op_type << ") renamed " << num_inplaced << " ops";
-}
+  }
 
-void RemoveOpsByType(const InferenceGraph& graph, const std::string& op_type) {
-  int num_removed = 0;
-  auto net = graph.predict_net_def;
-
-  // Rename all the ops we want to delete
-  InPlaceOps(graph, op_type);
-
-  // Now the only ops we can delete are inplaced ones
-  for (int i = 0; i < net->op_size(); i++) {
+  // Remove inplace ops
+  int i = 0;
+  while (i < net->op_size()) {
     OperatorDef op = net->op(i);
-
-    // Only remove ops of the requested type
-    if (op.type() != op_type) {
-      VLOG(2) << "RemoveOpsByType: Type is " << op_type << ". Not removing";
-      continue;
-    }
-
-    if (op.input_size() != 1 || op.output_size() != 1) {
-      LOG(ERROR) << "RemoveOpsByType only supports ops with exactly 1 output "
-                 << "and exactly 1 input. Skipping op " << op.DebugString();
-      continue;
-    }
-
-    const string& in = op.input(0);
-    const string& out = op.output(0);
-
-    // If the op is in-place then we can always delete it
-    if (in == out) {
-      VLOG(1) << "RemoveOpsByType(" << op_type << ") deleting inplace op";
+    if (op.type() == op_type && op.input_size() == 1 && op.output_size() == 1 &&
+        op.input(0) == op.output(0)) {
       net->mutable_op()->erase(net->mutable_op()->begin() + i);
-      i--;
       num_removed++;
+      VLOG(2) << "RemoveOpsByType(" << op_type << ") deleting inplace op: \n"
+              << op.DebugString();
     } else {
-      VLOG(2) << "RemoveOpsByType(" << op_type << ") can't delete.";
+      i++;
+      VLOG(2) << "RemoveOpsByType(" << op_type << ") skipping op: \n"
+              << op.DebugString();
     }
-  } // For every op
-  VLOG(1) << "RemoveOpsByType(" << op_type << ") removed " << num_removed
+  }
+  VLOG(2) << "RemoveOpsByType(" << op_type << ") removed " << num_removed
           << " ops";
 }
-
 } // namespace caffe2

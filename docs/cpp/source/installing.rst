@@ -22,6 +22,9 @@ example:
 Note that the above link has CPU-only libtorch. If you would like to download a GPU-enabled
 libtorch, find the right link in the link selector on https://pytorch.org
 
+If you're a Windows developer and wouldn't like to use CMake, you could jump to the Visual Studio
+Extension section.
+
 Next, we can write a minimal CMake build configuration to develop a small
 application that depends on LibTorch. CMake is not a hard requirement for using
 LibTorch, but it is the recommended and blessed build system and will be well
@@ -89,7 +92,14 @@ We can now run the following commands to build the application from within the
   cmake --build . --config Release
 
 where ``/absolute/path/to/libtorch`` should be the absolute (!) path to the unzipped LibTorch
-distribution. If all goes well, it will look something like this:
+distribution. If PyTorch was installed via conda or pip, `CMAKE_PREFIX_PATH` can be queried
+using `torch.utils.cmake_prefix_path` variable. In that case CMake configuration step would look something like follows:
+
+.. code-block:: sh
+
+  cmake -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'`
+
+If all goes well, it will look something like this:
 
 .. code-block:: sh
 
@@ -143,6 +153,14 @@ should now merrily print the tensor (exact output subject to randomness):
   build your project in debug mode, please try the debug version of LibTorch.
   Also, make sure you specify the correct configuration in the ``cmake --build .``
   line above.
+
+Visual Studio Extension
+-----------------------
+
+`LibTorch Project Template <https://marketplace.visualstudio.com/items?itemName=YiZhang.LibTorch001>`_ can help Windows developers
+set all libtorch project settings and link options for debug and release.
+It's easy to use and you could check out the `demo video <https://ossci-windows.s3.us-east-1.amazonaws.com/vsextension/demo.mp4>`_.
+The only prerequisite is to download the libtorch on https://pytorch.org
 
 Support
 -------
