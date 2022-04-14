@@ -3755,6 +3755,7 @@
   ],
   "torch": [
     "Union",
-    "Typing"
+    "Set",
+    "Callable"
   ]
 }

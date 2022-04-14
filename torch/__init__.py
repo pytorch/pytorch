@@ -15,6 +15,7 @@ import platform
 import textwrap
 import ctypes
 import warnings
+import inspect
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
@@ -29,7 +30,7 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING, Union
+from typing import Set, Type, TYPE_CHECKING, Union, Callable
 import builtins
 
 __all__ = [
@@ -230,14 +231,12 @@ except ImportError:
 
 for name in dir(_C):
     if name[0] != '_' and not name.endswith('Base'):
+        __all__ += name
         obj = getattr(_C, name)
-        try:
-            setattr(obj, '__module__', 'torch')
-        # if the module is read only or doesn't exist
-        except Exception:
-            pass
-
-__all__ += [name]
+        if (isinstance(obj, Callable) or inspect.isclass(obj)) and (obj.__module__ != 'torch'):
+            # TODO: fix their module from C++ side
+            if name not in ['DisableTorchFunction', 'Generator']:
+                setattr(obj, '__module__', 'torch')
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
@@ -750,7 +749,7 @@ for name in dir(_C._VariableFunctions):
         continue
     obj = getattr(_C._VariableFunctions, name)
     obj.__module__ = 'torch'
-    globals()[name] = getattr(_C._VariableFunctions, name)
+    globals()[name] = obj
     __all__.append(name)
 
 ################################################################################
