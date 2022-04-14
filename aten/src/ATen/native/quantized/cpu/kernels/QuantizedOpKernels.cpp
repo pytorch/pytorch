@@ -2055,88 +2055,90 @@ void qupsample_bilinear2d_nhwc_kernel(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  AT_DISPATCH_QINT_TYPES(
-      input.scalar_type(), "upsample_bilinear2d_nhwc", [&]() {
-        auto* idata = static_cast<scalar_t*>(input.data_ptr());
-        auto* odata = static_cast<scalar_t*>(output.data_ptr());
-        float inverse_scale = output.q_scale() / input.q_scale();
-        const auto rheight = area_pixel_compute_scale<float>(
-            input_height, output_height, align_corners, scales_h);
-        const auto rwidth = area_pixel_compute_scale<float>(
-            input_width, output_width, align_corners, scales_w);
+  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "upsample_bilinear2d_nhwc", [&]() {
+    auto* idata = static_cast<scalar_t*>(input.data_ptr());
+    auto* odata = static_cast<scalar_t*>(output.data_ptr());
+    float inverse_scale = output.q_scale() / input.q_scale();
+    const auto rheight = area_pixel_compute_scale<float>(
+        input_height, output_height, align_corners, scales_h);
+    const auto rwidth = area_pixel_compute_scale<float>(
+        input_width, output_width, align_corners, scales_w);
 
-        const int64_t input_q_zero_point = input.q_zero_point();
-        const int64_t output_q_zero_point = output.q_zero_point();
+    auto input_q_zero_point = input.q_zero_point();
+    auto output_q_zero_point = output.q_zero_point();
+    at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
+      int64_t b{0}, h2{0}, w2{0};
+      data_index_init(begin, b, nbatch, h2, output_height, w2, output_width);
 
-        for (const auto b : c10::irange(nbatch)) {
-          auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
-              idata + b * input_height * input_width * channels);
-          auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
-              odata + b * output_height * output_width * channels);
+      for (const auto i : c10::irange(begin, end)) {
+        (void)i; //Suppress unused variable warning
+        auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
+            idata + b * input_height * input_width * channels);
+        auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
+            odata + b * output_height * output_width * channels);
 
-          for (const auto h2 : c10::irange(output_height)) {
-            const auto h1r = area_pixel_compute_source_index<float>(
-                rheight, h2, align_corners, /*cubic=*/false);
+        const auto h1r = area_pixel_compute_source_index<float>(
+            rheight, h2, align_corners, /*cubic=*/false);
 
-            const int64_t h1 = h1r;
-            const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
-            const float h1lambda = h1r - h1;
-            const float h0lambda = static_cast<float>(1.) - h1lambda;
+        const int64_t h1 = h1r;
+        const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
+        const float h1lambda = h1r - h1;
+        const float h0lambda = static_cast<float>(1.) - h1lambda;
 
-            for (const auto w2 : c10::irange(output_width)) {
-              const auto w1r = area_pixel_compute_source_index<float>(
-                  rwidth, w2, align_corners, /*cubic=*/false);
-              const int64_t w1 = w1r;
-              const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
+        const auto w1r = area_pixel_compute_source_index<float>(
+            rwidth, w2, align_corners, /*cubic=*/false);
+        const int64_t w1 = w1r;
+        const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
 
-              const float w1lambda = w1r - w1;
-              const float w0lambda = static_cast<float>(1.) - w1lambda;
+        const float w1lambda = w1r - w1;
+        const float w0lambda = static_cast<float>(1.) - w1lambda;
 
-              int64_t c = 0;
-              // We use float32 to do the computation
-              const typename scalar_t::underlying* pos1 =
-                  i_p + (h1 * input_width + w1) * channels;
-              typename scalar_t::underlying* pos2 =
-                  o_p + (h2 * output_width + w2) * channels;
-              // We have to isolate this function out because the VS does not
-              // expand the macro correctly.
-              c = do_quantized_bilinear_on_AVX_n<scalar_t>(
-                  pos1,
-                  pos2,
-                  input_height,
-                  input_width,
-                  output_height,
-                  output_width,
-                  channels,
-                  output_q_zero_point,
-                  input_q_zero_point,
-                  inverse_scale,
-                  h0lambda,
-                  h1lambda,
-                  w0lambda,
-                  w1lambda,
-                  h1p,
-                  w1p);
-              // 1) The following loop handles the remaining channels
-              // 2) It also handles the Non-AVX2 path
-              for (; c < channels; ++c) {
-                float result = h0lambda *
-                        (w0lambda * pos1[0] + w1lambda * pos1[w1p * channels]) +
-                    h1lambda *
-                        (w0lambda * pos1[h1p * input_width * channels] +
-                         w1lambda * pos1[(h1p * input_width + w1p) * channels]);
-                pos2[0] = at::native::quantize_val<scalar_t>(
-                              inverse_scale,
-                              output_q_zero_point,
-                              result - input_q_zero_point)
-                              .val_;
-                pos1 += 1;
-                pos2 += 1;
-              } // c
-            } // w2
-          } // h2
-        } // b
-      });
+        int64_t c = 0;
+        // We use float32 to do the computation
+        const typename scalar_t::underlying* pos1 =
+            i_p + (h1 * input_width + w1) * channels;
+        typename scalar_t::underlying* pos2 =
+            o_p + (h2 * output_width + w2) * channels;
+        // We have to isolate this function out because the VS does not
+        // expand the macro correctly.
+        c = do_quantized_bilinear_on_AVX_n<scalar_t>(
+            pos1,
+            pos2,
+            input_height,
+            input_width,
+            output_height,
+            output_width,
+            channels,
+            output_q_zero_point,
+            input_q_zero_point,
+            inverse_scale,
+            h0lambda,
+            h1lambda,
+            w0lambda,
+            w1lambda,
+            h1p,
+            w1p);
+        // 1) The following loop handles the remaining channels
+        // 2) It also handles the Non-AVX2 path
+        for (; c < channels; ++c) {
+          float result = h0lambda *
+                  (w0lambda * pos1[0] + w1lambda * pos1[w1p * channels]) +
+              h1lambda *
+                  (w0lambda * pos1[h1p * input_width * channels] +
+                   w1lambda * pos1[(h1p * input_width + w1p) * channels]);
+          pos2[0] = at::native::quantize_val<scalar_t>(
+                        inverse_scale,
+                        output_q_zero_point,
+                        result - input_q_zero_point)
+                        .val_;
+          pos1 += 1;
+          pos2 += 1;
+        } // c
+
+        data_index_step(b, nbatch, h2, output_height, w2, output_width);
+      }
+    });
+  });
 }
 
 void qtopk_kernel(Tensor& values,
