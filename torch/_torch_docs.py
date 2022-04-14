@@ -8962,6 +8962,7 @@ Example::
 for _ctor in [torch.sparse_csr_tensor, torch.sparse_csc_tensor,
               torch.sparse_bsr_tensor, torch.sparse_bsc_tensor,
               torch.sparse_compressed_tensor]:
+    _ctor.__module__ = 'torch'
     _cname = _ctor.__name__.split('_')[1]
     _cdimname = dict(csr='row', csc='column', bsr='row', bsc='column', compressed='compressed dimension')[_cname]
     _pdimname = dict(csc='row', csr='column', bsc='row', bsr='column', compressed='plain dimension')[_cname]
