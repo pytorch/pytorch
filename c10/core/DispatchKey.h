@@ -347,11 +347,13 @@ enum class DispatchKey : uint16_t {
   VmapMode,
 
   FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
+
   // Alias and mutation removal.
   // If some backends want to opt into only alias removal or only mutation
   // removal,
   // we can consider adding separate keys dedicated to those individual passes.
   // See Note [Functionalization Pass In Core] for details.
+  FunctionalizeAddBackViews,
   Functionalize,
 
   // Used by Python key logic to know the set of tls on entry to the dispatcher

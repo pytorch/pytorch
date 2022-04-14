@@ -34,6 +34,15 @@ namespace {
           auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(tensors));
           (*stack)[arguments_begin + idx] = t_new;
         }
+      } else if (ivalue.isOptionalTensorList()) {
+        any_tensor_inputs = true;
+        auto opt_tensors = ivalue.toOptionalTensorList();
+        if (at::functionalization::impl::isFunctionalTensor(opt_tensors)) {
+          any_functional_inputs = true;
+          at::functionalization::impl::sync(opt_tensors);
+          auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
+          (*stack)[arguments_begin + idx] = t_new;
+        }
       }
     }
     // we should wrap the output if any inputs were wrapped,
@@ -57,6 +66,10 @@ namespace {
         auto tensors = ivalue.toTensorList();
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(tensors));
         (*stack)[returns_begin + idx] = t_new;
+      } else if (ivalue.isOptionalTensorList() && should_wrap_outputs) {
+        auto opt_tensors = ivalue.toOptionalTensorList();
+        auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(opt_tensors));
+        (*stack)[returns_begin + idx] = t_new;
       }
     }
   }
@@ -64,4 +77,7 @@ namespace {
 
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
+}
+TORCH_LIBRARY_IMPL(_, FunctionalizeAddBackViews, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
 }
