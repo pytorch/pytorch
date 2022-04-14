@@ -6130,7 +6130,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.skip_half = kwargs.get('skip_half', False)
         self.with_tf32 = kwargs.get('with_tf32', False)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
-        self.tf32_rtol = kwargs.get('tf32_rtol', 0.)
+        self.tf32_rtol = kwargs.get('tf32_rtol', None)
         self.test_cpu = kwargs.get('test_cpu', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
