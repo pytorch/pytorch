@@ -11963,3 +11963,141 @@ Example::
     tensor([[2, 3, 5],
             [2, 3, 5]])
 """)
+
+add_docstr(torch.view_as_real_copy,
+           r"""
+Performs the same operation as :func:`torch.view_as_real`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.view_as_complex_copy,
+           r"""
+Performs the same operation as :func:`torch.view_as_complex`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.as_strided_copy,
+           r"""
+Performs the same operation as :func:`torch.as_strided`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.diagonal_copy,
+           r"""
+Performs the same operation as :func:`torch.diagonal`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.expand_copy,
+           r"""
+Performs the same operation as :func:`torch.expand`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.permute_copy,
+           r"""
+Performs the same operation as :func:`torch.permute`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.select_copy,
+           r"""
+Performs the same operation as :func:`torch.select`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.detach_copy,
+           r"""
+Performs the same operation as :func:`torch.detach`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.slice_copy,
+           r"""
+Performs the same operation as :func:`torch.slice`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.split_copy,
+           r"""
+Performs the same operation as :func:`torch.split`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.split_with_sizes_copy,
+           r"""
+Performs the same operation as :func:`torch.split_with_sizes`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.squeeze_copy,
+           r"""
+Performs the same operation as :func:`torch.squeeze`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.t_copy,
+           r"""
+Performs the same operation as :func:`torch.t`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.transpose_copy,
+           r"""
+Performs the same operation as :func:`torch.transpose`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.unsqueeze_copy,
+           r"""
+Performs the same operation as :func:`torch.unsqueeze`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.indices_copy,
+           r"""
+Performs the same operation as :func:`torch.indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.values_copy,
+           r"""
+Performs the same operation as :func:`torch.values`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.crow_indices_copy,
+           r"""
+Performs the same operation as :func:`torch.crow_indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.col_indices_copy,
+           r"""
+Performs the same operation as :func:`torch.col_indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.unbind_copy,
+           r"""
+Performs the same operation as :func:`torch.unbind`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.view_copy,
+           r"""
+Performs the same operation as :func:`torch.view`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.unfold_copy,
+           r"""
+Performs the same operation as :func:`torch.unfold`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.alias_copy,
+           r"""
+Performs the same operation as :func:`torch.alias`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
