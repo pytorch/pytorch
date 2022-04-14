@@ -83,6 +83,8 @@ template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
     const scalar_t* const bottom_data, const int64_t channels,
     const int64_t height, const int64_t width, const int pooled_height,
+    const int pooled_width, const int kernel_h, const int kernel_w,
+    const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const top_data, const int divisor_override,
     const bool count_include_pad, const bool use_divisor) {
   CUDA_KERNEL_LOOP(index, nthreads) {
