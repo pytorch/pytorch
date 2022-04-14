@@ -10457,7 +10457,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # Forward-over-reverse gradgrad might be incorrect
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
@@ -10541,7 +10541,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # The values for attribute 'shape' do not match
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
            )),
     OpInfo('linalg.lstsq',
            aten_name='linalg_lstsq',
@@ -14817,7 +14817,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Expected RuntimeError when doing an unsafe cast from a result
                #   of dtype torch.float32 into an out= with dtype torch.long
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
                # TODO: see https://github.com/pytorch/pytorch/issues/64709
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # RuntimeError: Arguments for call not valid.
@@ -15732,16 +15732,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_pdist,
         dtypes=floating_types(),
         supports_autograd=False,
-        supports_out=False,
-        skips=(
-            # RuntimeError:
-            # python value of type 'float' cannot be used as a value. Perhaps it is a closed over global variable? If so,
-            # please consider passing it in as an argument or use a local varible instead.:
-            #
-            # def the_method(i0):
-            #     return torch.nn.functional.pdist(i0, p=inf)
-            DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
-        )),
+        supports_out=False),
     OpInfo(
         "nn.functional.binary_cross_entropy",
         sample_inputs_func=sample_inputs_binary_cross_entropy,
