@@ -228,10 +228,12 @@ except ImportError:
             ''').strip()) from None
     raise  # If __file__ is not None the cause is unknown, so just re-raise.
 
+for name in dir(_C):
+    if name[0] != '_' and not name.endswith('Base'):
+        obj = getattr('torch._C', name)
+        obj.__module__ = 'torch'
 
-__all__ += [name for name in dir(_C)
-            if name[0] != '_' and
-            not name.endswith('Base')]
+__all__ += [name ]
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
@@ -742,6 +744,8 @@ PRIVATE_OPS = (
 for name in dir(_C._VariableFunctions):
     if name.startswith('__') or name in PRIVATE_OPS:
         continue
+    obj = getattr(_C._VariableFunctions, name)
+    obj.__module__ = 'torch'
     globals()[name] = getattr(_C._VariableFunctions, name)
     __all__.append(name)
 
