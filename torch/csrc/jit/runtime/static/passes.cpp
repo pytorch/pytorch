@@ -777,7 +777,8 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
           "fb::gather_ranges_to_dense_v2",
           "static_runtime::fused_gather_ranges_to_dense_v2"),
       OP_PAIR(
-          "fb::split_and_squeeze", "static_runtime::fused_split_and_squeeze")};
+          "fb::split_and_squeeze",
+          "static_runtime::fused_split_and_squeeze_copy")};
 
   // replacement contains (old_node, new_node, list_unpack_node)
   std::vector<std::tuple<Node*, Node*, Node*>> replacement;
@@ -1101,7 +1102,8 @@ void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
       continue;
     }
     auto* split_and_squeeze_node = graph->create(
-        c10::Symbol::fromQualString("static_runtime::fused_split_and_squeeze"),
+        c10::Symbol::fromQualString(
+            "static_runtime::fused_split_and_squeeze_copy"),
         num_outputs);
     split_and_squeeze_node->addInput(node->input(0));
     split_and_squeeze_node->addInput(node->input(1));
