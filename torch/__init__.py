@@ -231,12 +231,12 @@ except ImportError:
 
 for name in dir(_C):
     if name[0] != '_' and not name.endswith('Base'):
-        __all__ += name
+        __all__.append(name)
         obj = getattr(_C, name)
         if (isinstance(obj, Callable) or inspect.isclass(obj)) and (obj.__module__ != 'torch'):
             # TODO: fix their module from C++ side
             if name not in ['DisableTorchFunction', 'Generator']:
-                setattr(obj, '__module__', 'torch')
+                obj.__module__ = 'torch'
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are

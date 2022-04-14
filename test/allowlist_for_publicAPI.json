@@ -1849,6 +1849,12 @@
     "Union",
     "cast"
   ],
+  "torch.fx": [
+    "ProxyableClassMeta",
+    "Tracer",
+    "symbolic_trace",
+    "wrap"
+  ],
   "torch.fx.experimental.unification.core": [
     "Iterator",
     "assoc",
@@ -2175,7 +2181,35 @@
     "is_scripting",
     "last_executed_optimized_graph",
     "set_module",
-    "unused"
+    "unused",
+    "Attribute",
+    "ONNXTracedModule",
+    "RecursiveScriptClass",
+    "RecursiveScriptModule",
+    "ScriptModule",
+    "ScriptWarning",
+    "TopLevelTracedModule",
+    "TracedModule",
+    "TracerWarning",
+    "TracingCheckError",
+    "fork",
+    "freeze",
+    "fuser",
+    "interface",
+    "is_tracing",
+    "jit_module_from_flatbuffer",
+    "load",
+    "optimize_for_inference",
+    "optimized_execution",
+    "run_frozen_optimizations",
+    "save",
+    "save_jit_module_to_flatbuffer",
+    "script",
+    "script_method",
+    "set_fusion_strategy",
+    "trace",
+    "trace_module",
+    "wait"
   ],
   "torch.jit.annotations": [
     "Any",
@@ -3325,7 +3359,32 @@
   "torch.testing": [
     "FileCheck",
     "rand",
-    "randn"
+    "randn",
+    "all_types",
+    "all_types_and",
+    "all_types_and_complex",
+    "all_types_and_complex_and",
+    "all_types_and_half",
+    "assert_allclose",
+    "assert_close",
+    "complex_types",
+    "double_types",
+    "empty_types",
+    "floating_and_complex_types",
+    "floating_and_complex_types_and",
+    "floating_types",
+    "floating_types_and",
+    "floating_types_and_half",
+    "get_all_complex_dtypes",
+    "get_all_device_types",
+    "get_all_dtypes",
+    "get_all_fp_dtypes",
+    "get_all_int_dtypes",
+    "get_all_math_dtypes",
+    "integral_types",
+    "integral_types_and",
+    "make_non_contiguous",
+    "make_tensor"
   ],
   "torch.torch_version": [
     "Any",
@@ -3421,6 +3480,22 @@
     "Union",
     "build_ext",
     "get_hip_file_path"
+  ],
+  "torch.utils": [
+    "disable_minidumps",
+    "enable_minidumps",
+    "enable_minidumps_on_exceptions"
+  ],
+  "torch.utils.data": [
+    "argument_validation",
+    "default_collate",
+    "default_convert",
+    "functional_datapipe",
+    "get_worker_info",
+    "guaranteed_datapipes_determinism",
+    "non_deterministic",
+    "runtime_validation",
+    "runtime_validation_disabled"
   ],
   "torch.utils.data.communication.eventloop": [
     "IterDataPipe",
@@ -3756,6 +3831,21 @@
   "torch": [
     "Union",
     "Set",
-    "Callable"
+    "Callable",
+    "CudaByteStorageBase",
+    "DisableTorchFunction",
+    "Generator",
+    "LoggerBase",
+    "classproperty",
+    "get_file_path",
+    "lobpcg",
+    "pca_lowrank",
+    "prepare_multiprocessing_environment",
+    "quantized_gru",
+    "quantized_lstm",
+    "set_printoptions",
+    "svd_lowrank",
+    "to_dlpack",
+    "vmap"
   ]
 }
