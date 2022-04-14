@@ -9,6 +9,7 @@ function install_ucx() {
   git clone --recursive https://github.com/openucx/ucx.git
   pushd ucx
   git checkout ${UCX_COMMIT}
+  git submodule update --init --recursive
   ./autogen.sh
   ./configure --prefix=$UCX_HOME      \
       --enable-mt                     \
@@ -26,6 +27,7 @@ function install_ucc() {
   git clone --recursive https://github.com/openucx/ucc.git
   pushd ucc
   git checkout ${UCC_COMMIT}
+  git submodule update --init --recursive
   ./autogen.sh
   ./configure --prefix=$UCC_HOME --with-ucx=$UCX_HOME --with-nccl=no
   time make -j
