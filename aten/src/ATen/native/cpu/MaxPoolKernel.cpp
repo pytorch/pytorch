@@ -66,7 +66,11 @@ void cpu_max_pool(
         for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
           int64_t index = ih * input_width + iw;
           accscalar_t val = accscalar_t(input_ptr[index]);
-          if ((val > maxval) || std::isnan(val)) {
+          // microsoft compilers do not have an overload for fpclassify that accepts an integral
+          // type: https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/fpclassify?view=msvc-170
+          // resulting in failures in CIs that use MS compilers when compiling std::isnan(integral variable)
+          // So we use false directly here instead of calling std::isnan when val is an integer
+          if ((val > maxval) || (std::is_integral<accscalar_t>::value ? false : std::isnan(val))) {
             maxval = val;
             maxindex = index;
           }
@@ -187,7 +191,11 @@ void cpu_max_pool_channels_last(
             int64_t maxindex = ind[d2];
             scalar_t maxval = out[d2];
 
-            bool mask = (val > maxval) || std::isnan(val);
+            // microsoft compilers do not have an overload for fpclassify that accepts an integral
+            // type: https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/fpclassify?view=msvc-170
+            // resulting in failures in CIs that use MS compilers when compiling std::isnan(integral variable)
+            // So we use false directly here instead of calling std::isnan when val is an integer
+            bool mask = (val > maxval) || (std::is_integral<scalar_t>::value ? false : std::isnan(val));
             out[d2] = mask ? val : maxval;
             ind[d2] = mask ? index : maxindex;
           }
