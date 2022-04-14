@@ -2,7 +2,7 @@ import torch
 from torch import nn, Tensor
 
 try:
-    import functorch
+    import functorch  # noqa: F401
     has_functorch = True
 except ImportError:
     has_functorch = False

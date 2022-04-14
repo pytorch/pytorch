@@ -10,7 +10,6 @@ try:
     import functorch as ft
     has_functorch = True
     print(f"Found functorch: {ft.__version__}")
-    import functools
 except ImportError:
     has_functorch = False
 

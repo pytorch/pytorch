@@ -3,7 +3,7 @@ from torch import Tensor
 import torchvision_models as models
 
 try:
-    import functorch
+    import functorch  # noqa: F401
     has_functorch = True
 except ImportError:
     has_functorch = False
