@@ -1,3 +1,6 @@
+.. automodule:: torch.package
+.. py:module:: torch.package.analyze
+
 .. currentmodule:: torch.package
 
 torch.package

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stack>
+
 #include <c10/core/InferenceMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
@@ -8,6 +10,7 @@
 #include <ATen/record_function.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/core/PythonModeTLS.h>
+#include <ATen/PythonTorchFunctionTLS.h>
 
 namespace at {
 
@@ -51,10 +54,14 @@ class TORCH_API ThreadLocalState {
   // TLS for AutogradModes
   AutogradState autograd_tls_;
 
-  std::shared_ptr<TorchDispatchTypeObject> python_mode_state_;
+  // TLS for enable_python_mode (__torch_dispatch__)
+  std::shared_ptr<SafePyObject> python_mode_state_;
+
+  // TLS for __torch_function__ (mode and disable_torch_function)
+  at::impl::PythonTorchFunctionTLS python_torch_function_state_;
 
   // TLS for saved tensors default hooks
-  std::pair<PyObject*, PyObject*> saved_tensors_default_hooks_;
+  std::stack<std::pair<PyObject*, PyObject*>> saved_tensors_default_hooks_;
 
   // Whether pre-sampling RecordFunction optimization was enabled
   bool bumped_record_all_functions_ = false;

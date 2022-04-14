@@ -6,6 +6,7 @@
 
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/type_ptr.h>
+#include <ATen/core/SymInt.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
@@ -48,7 +49,9 @@ namespace c10 {
   _(AnyListType)            \
   _(AnyTupleType)           \
   _(AnyClassType)           \
-  _(UnionType)
+  _(SymIntType)             \
+  _(UnionType)              \
+  _(DynamicType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -132,14 +135,21 @@ struct as_shared_type<const T*> {
 } // namespace detail
 
 struct TORCH_API Type {
+  friend TORCH_API bool operator==(const Type& lhs, const Type& rhs);
  private:
   TypeKind kind_;
 
   protected:
   Type(TypeKind kind) : kind_(kind) {}
 
-  virtual std::string annotation_str_impl(TypePrinter printer) const {
+  virtual std::string annotation_str_impl(TypePrinter /*printer*/) const {
     return str();
+  }
+  // a == b
+  virtual bool equals(const Type& rhs) const = 0;
+  // a == b <=> b == a
+  virtual bool symmetric() const {
+    return true;
   }
 
  public:
@@ -365,8 +375,8 @@ struct TORCH_API Type {
   };
 
   using TypePtr = SingletonOrSharedTypePtr<Type>;
-
-  virtual bool operator==(const Type& rhs) const = 0;
+  using Ptr = TypePtr;
+  using ElementType = Type;
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal or if this <: T where rhs = Optional[T]
@@ -455,7 +465,7 @@ struct TORCH_API Type {
     return kind_;
   }
 
-  bool isUnionType() const {
+  virtual bool isUnionType() const {
     return false;
   }
 
@@ -547,13 +557,19 @@ struct TORCH_API Type {
   virtual at::ArrayRef<TypePtr> containedTypes() const {
     return {};
   }
+  virtual TypePtr containedType(size_t i) const {
+    return containedTypes().at(i);
+  }
+  virtual size_t containedTypeSize() const {
+    return containedTypes().size();
+  }
   // create a new version of this type, replacing its contained types with
   // contained_types
   TypePtr withContained(std::vector<TypePtr> contained_types);
   // per-type constructor, you only need to override this if the
   // containedTypes() is not empty
   virtual TypePtr createWithContained(
-      std::vector<TypePtr> contained_types) const {
+      std::vector<TypePtr> /*contained_types*/) const {
     AT_ERROR(
         "type with contained types did not overload createWithContained: ",
         str());
@@ -644,6 +660,13 @@ inline TypePtr Type::withContained(std::vector<TypePtr> contained_types) {
   return createWithContained(std::move(contained_types));
 }
 
+
+TORCH_API inline bool operator==(const Type& lhs, const Type& rhs) {
+  if (C10_UNLIKELY(!rhs.symmetric())) {
+    return rhs.equals(lhs);
+  }
+  return lhs.equals(rhs);
+}
 
 struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;

@@ -1,9 +1,10 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
-#include <ATen/ATen.h>
-#include <ATen/ceil_div.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/Atomic.cuh>
@@ -11,6 +12,14 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/upsample_trilinear3d_native.h>
+#include <ATen/ops/upsample_trilinear3d_backward_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -247,8 +256,6 @@ static void upsample_trilinear3d_out_cuda_template(
   int output_height = output_size[1];
   int output_width = output_size[2];
 
-  int nbatch = input.size(0);
-  int channels = input.size(1);
   int input_depth = input.size(2);
   int input_height = input.size(3);
   int input_width = input.size(4);
@@ -307,8 +314,6 @@ static void upsample_trilinear3d_backward_out_cuda_template(
   int output_height = output_size[1];
   int output_width = output_size[2];
 
-  int nbatch = input_size[0];
-  int channels = input_size[1];
   int input_depth = input_size[2];
   int input_height = input_size[3];
   int input_width = input_size[4];

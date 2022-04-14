@@ -230,7 +230,7 @@ static void replication_pad1d_out_frame(
     long nslices,
     long iwidth,
     long owidth,
-    int pad_l, int pad_r)
+    int pad_l)
 {
   int iStartX = std::max(0, -pad_l);
   int oStartX = std::max(0, pad_l);
@@ -263,14 +263,14 @@ static void replication_pad1d_out_batch(
     long nslices,
     long iwidth,
     long owidth,
-    int pad_l, int pad_r,
+    int pad_l,
     int nbatch)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
     for (const auto p : c10::irange(start, end)) {
       scalar_t *input_p = input_data+p*nslices*iwidth;
       scalar_t *output_p = output_data+p*nslices*owidth;
-      replication_pad1d_out_frame(input_p, output_p, nslices, iwidth, owidth, pad_l, pad_r);
+      replication_pad1d_out_frame(input_p, output_p, nslices, iwidth, owidth, pad_l);
     }
   });
 }
@@ -281,7 +281,7 @@ static void replication_pad1d_backward_out_frame(
     long nslices,
     long iwidth,
     long owidth,
-    int pad_l, int pad_r)
+    int pad_l)
 {
   int iStartX = std::max(0, -pad_l);
   int oStartX = std::max(0, pad_l);
@@ -322,7 +322,7 @@ static void replication_pad1d_backward_out_batch(
       scalar_t *ginput_p = ginput_data + p * nslices * iwidth;
       scalar_t *goutput_p = goutput_data + p * nslices * owidth;
       replication_pad1d_backward_out_frame(ginput_p, goutput_p,
-        nslices, iwidth, owidth, pad_l, pad_r);
+        nslices, iwidth, owidth, pad_l);
     }
   });
 }
@@ -334,7 +334,7 @@ static void replication_pad2d_out_frame(
     int64_t iwidth, int64_t iheight,
     int64_t owidth, int64_t oheight,
     int pad_l, int pad_r,
-    int pad_t, int pad_b)
+    int pad_t)
 {
   int iStartX = std::max(0, -pad_l);
   int iStartY = std::max(0, -pad_t);
@@ -381,7 +381,7 @@ static void replication_pad2d_out_batch(
     int64_t iwidth, int64_t iheight,
     int64_t owidth, int64_t oheight,
     int pad_l, int pad_r,
-    int pad_t, int pad_b,
+    int pad_t,
     int nbatch)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
@@ -389,7 +389,7 @@ static void replication_pad2d_out_batch(
       scalar_t *input_p = input_data+p*nslices*iwidth*iheight;
       scalar_t *output_p = output_data+p*nslices*owidth*oheight;
       replication_pad2d_out_frame(input_p, output_p, nslices,
-          iwidth, iheight, owidth, oheight, pad_l, pad_r, pad_t, pad_b);
+          iwidth, iheight, owidth, oheight, pad_l, pad_r, pad_t);
     }
   });
 }
@@ -811,7 +811,6 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cpu) (
   constexpr int64_t dimslices = -2;
 
   int64_t pad_l = paddingSize[0];
-  int64_t pad_r = paddingSize[1];
 
   /* get contiguous input */
   auto input = input_.contiguous();
@@ -837,7 +836,7 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cpu) (
         nslices,
         iwidth,
         owidth,
-        pad_l, pad_r);
+        pad_l);
       }
     );
   }
@@ -852,7 +851,7 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cpu) (
         nslices,
         iwidth,
         owidth,
-        pad_l, pad_r,
+        pad_l,
         nbatch);
       }
     );
@@ -907,7 +906,7 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cpu) (
         nslices,
         iwidth,
         owidth,
-        pad_l, pad_r);
+        pad_l);
       }
     );
   }
@@ -969,7 +968,7 @@ TORCH_IMPL_FUNC(replication_pad2d_out_cpu) (
         iwidth, iheight,
         owidth, oheight,
         pad_l, pad_r,
-        pad_t, pad_b);
+        pad_t);
       }
     );
   }
@@ -983,7 +982,7 @@ TORCH_IMPL_FUNC(replication_pad2d_out_cpu) (
         iwidth, iheight,
         owidth, oheight,
         pad_l, pad_r,
-        pad_t, pad_b,
+        pad_t,
         nbatch);
       }
     );

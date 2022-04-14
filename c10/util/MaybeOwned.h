@@ -24,7 +24,7 @@ struct MaybeOwnedTraitsGenericImpl {
     lhs = rhs;
   }
 
-  static void destroyBorrow(borrow_type& toDestroy) {}
+  static void destroyBorrow(borrow_type& /*toDestroy*/) {}
 
   static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
     return *borrow;

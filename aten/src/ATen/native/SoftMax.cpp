@@ -170,7 +170,7 @@ void host_softmax(
             }
           } else {
             for (const auto d : c10::irange(0, dim_size)) {
-              if (mask_data[d * dim_stride]) {
+              if (!mask_data[d * dim_stride]) {
                 max_input = is_meaningful_max
                     ? std::max(max_input, input_data[d * dim_stride])
                     : input_data[d * dim_stride];
@@ -183,7 +183,7 @@ void host_softmax(
           acc_type<scalar_t, false> tmpsum = 0;
           for (const auto d : c10::irange(dim_size)) {
             scalar_t z{};
-            if (!MaskedSoftMax || mask_data[d * dim_stride]) {
+            if (!MaskedSoftMax || !mask_data[d * dim_stride]) {
               z = std::exp(input_data[d * dim_stride] - max_input);
             } else {
               z = 0;
@@ -456,6 +456,7 @@ DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 DEFINE_DISPATCH(softmax_kernel);
+DEFINE_DISPATCH(log_softmax_kernel);
 
 Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);

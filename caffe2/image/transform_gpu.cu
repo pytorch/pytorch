@@ -16,7 +16,6 @@ namespace {
 // input in (int8, NHWC), output in (fp32, NCHW)
 template <typename In, typename Out>
 __global__ void transform_kernel(
-    const int N,
     const int C,
     const int H,
     const int W,
@@ -24,20 +23,20 @@ __global__ void transform_kernel(
     const float* std,
     const In* in,
     Out* out) {
-  const int n = blockIdx.x;
+  const auto n = blockIdx.x;
 
-  const int nStride = C*H*W;
+  const auto nStride = C*H*W;
 
   // pointers to data for this image
-  const In* input_ptr = &in[n*nStride];
-  Out* output_ptr = &out[n*nStride];
+  const In *const input_ptr = &in[n*nStride];
+  Out *const output_ptr = &out[n*nStride];
 
   // either read or write uncoalesced - try reading
   for (int c=0; c < C; ++c) {
     for (int h=threadIdx.y; h < H; h += blockDim.y) {
       for (int w=threadIdx.x; w < W; w += blockDim.x) {
-        int in_idx = c + C*w + C*W*h;  // HWC
-        int out_idx = c*H*W + h*W + w;  // CHW
+        const int in_idx = c + C*w + C*W*h;  // HWC
+        const int out_idx = c*H*W + h*W + w;  // CHW
 
         output_ptr[out_idx] = convert::To<float,Out>(
           (convert::To<In,float>(input_ptr[in_idx])-mean[c]) * std[c]);
@@ -62,7 +61,7 @@ bool TransformOnGPU(
 
   transform_kernel<
     T_IN, T_OUT><<<N, dim3(16, 16), 0, context->cuda_stream()>>>(
-      N, C, H, W, mean.template data<float>(), std.template data<float>(),
+      C, H, W, mean.template data<float>(), std.template data<float>(),
       input_data, output_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 

@@ -67,6 +67,9 @@ struct ContextConv2D final {
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
 
+
+bool available();
+
 namespace internal {
 
 struct Layout final {
@@ -121,9 +124,6 @@ struct Layout final {
     static constexpr size_t width = 1u;
   };
 };
-
-bool available();
-
 } // namespace internal
 } // namespace xnnpack
 } // namespace native

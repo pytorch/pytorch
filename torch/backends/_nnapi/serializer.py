@@ -1267,7 +1267,16 @@ class _NnapiSerializer(object):
         assert node.outputsSize() == 1
 
         in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
-        out_id = self.add_tensor_operand(node.outputsAt(0), in_oper)
+
+        out_oper = in_oper
+        if opcode == NNAPI_OperationCode.LOGISTIC:
+            # NNAPI docs: For ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, the scale
+            # must be 1.f / 256 and the zeroPoint must be 0.
+            # https://fburl.com/h52stoog
+            if in_oper.op_type == NNAPI_OperandCode.TENSOR_QUANT8_ASYMM:
+                out_oper = in_oper._replace(zero_point=0, scale=1.0 / 256)
+
+        out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         for idx, dim in enumerate(in_oper.shape):
             if dim == 0:
@@ -1540,11 +1549,28 @@ class _NnapiSerializer(object):
         self.add_operation(NNAPI_OperationCode.AVERAGE_POOL_2D, inputs, outputs)
 
     def add_upsample_nearest2d(self, node):
-        assert node.inputsSize() == 3
+        assert node.inputsSize() == 3 or node.inputsSize() == 4
         assert node.outputsSize() == 1
-        image, size_jit, scale_jit = node.inputs()
+        if node.inputsSize() == 3:
+            image, size_jit, scale_jit = node.inputs()
+        else:
+            image, size_jit, scale_h_jit, scale_w_jit = node.inputs()
         size_ctype, size_arg = self.get_constant_value(size_jit)
-        scale_ctype, scale_arg = self.get_constant_value(scale_jit)
+
+        if node.inputsSize() == 3:
+            scale_ctype, scale_arg = self.get_constant_value(scale_jit)
+        else:
+            scale_h_ctype, scale_h_arg = self.get_constant_value(scale_h_jit)
+            scale_w_ctype, scale_w_arg = self.get_constant_value(scale_w_jit)
+
+            # The only way for the 4-argument overload of upsample_nearest2d to
+            # have been added to the graph without error is if the scale_h and
+            # scale_w arguments are None
+            assert scale_h_ctype.kind() == "NoneType"
+            assert scale_w_ctype.kind() == "NoneType"
+
+            scale_ctype = scale_h_ctype
+            scale_arg = scale_h_arg
 
         image_id, image_oper = self.get_tensor_operand_by_jitval(image)
         assert len(image_oper.shape) == 4
