@@ -210,7 +210,13 @@ void _validate_sparse_bsc_tensor_args(const Tensor& ccol_indices, const Tensor& 
   _validate_sparse_compressed_tensor_args_worker(ccol_indices, row_indices, values, size, kSparseBsc);
 }
 
-// Construction of CSR tensors.
+// Construction of CSR, CSC, BSR, and BSC tensors.
+
+// Note: The usage of "Csr" in names like SparseCsrTensor,
+// SparseCsrCPU, SparseCsrCUDA, and SparseCsrTensorImpl exists because
+// of historical reasons (that ought to be removed in future) and does
+// not mean that the corresponding functionality would be CSR layout
+// only specific.
 SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor
   // constructor.
@@ -231,70 +237,45 @@ SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
     DispatchKeySet(dispatch_key), layout, options.dtype());
 }
 
-Tensor _sparse_compressed_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
-                                        const Tensor& values,
-                                        IntArrayRef size,
-                                        c10::optional<ScalarType> dtype,
-                                        c10::optional<Layout> layout,
-                                        c10::optional<Device> device,
-                                        c10::optional<bool> pin_memory) {
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout.value()).device(device).pinned_memory(pin_memory);
+template <Layout expected_layout>
+Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
+                                                 const Tensor& plain_indices,
+                                                 const Tensor& values,
+                                                 IntArrayRef size,
+                                                 c10::optional<ScalarType> dtype,
+                                                 c10::optional<Layout> layout,
+                                                 c10::optional<Device> device,
+                                                 c10::optional<bool> pin_memory) {
+  Layout layout_ = layout.value_or(expected_layout);
+  if (expected_layout == kDummyLayout) {
+    TORCH_CHECK(layout_ != kDummyLayout, "expected layout SparseCsr, SparseCsc, SparseBsr, or SparseBsc but got none");
+  } else {
+    TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
+  }
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
-  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values, size);
+  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
   return self;
 }
 
-Tensor _sparse_csr_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
-                                 const Tensor& values,
-                                 IntArrayRef size,
-                                 c10::optional<ScalarType> dtype,
-                                 c10::optional<Layout> layout,
-                                 c10::optional<Device> device,
-                                 c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseCsr;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  return _sparse_compressed_tensor_unsafe(crow_indices, col_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
+#define SPARSE_COMPRESSED_TENSOR_UNSAFE(KIND, EXPECTED_LAYOUT)          \
+  Tensor _sparse_##KIND##_tensor_unsafe(const Tensor& compressed_indices, \
+                                        const Tensor& plain_indices,    \
+                                        const Tensor& values,           \
+                                        IntArrayRef size,               \
+                                        c10::optional<ScalarType> dtype, \
+                                        c10::optional<Layout> layout,   \
+                                        c10::optional<Device> device,   \
+                                        c10::optional<bool> pin_memory) { \
+    return _sparse_compressed_tensor_unsafe_template<EXPECTED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
+  }
 
-Tensor _sparse_csc_tensor_unsafe(const Tensor& ccol_indices, const Tensor& row_indices,
-                                 const Tensor& values,
-                                 IntArrayRef size,
-                                 c10::optional<ScalarType> dtype,
-                                 c10::optional<Layout> layout,
-                                 c10::optional<Device> device,
-                                 c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseCsc;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  return _sparse_compressed_tensor_unsafe(ccol_indices, row_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
+SPARSE_COMPRESSED_TENSOR_UNSAFE(compressed, kDummyLayout)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc)
 
-Tensor _sparse_bsr_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
-                                 const Tensor& values,
-                                 IntArrayRef size,
-                                 c10::optional<ScalarType> dtype,
-                                 c10::optional<Layout> layout,
-                                 c10::optional<Device> device,
-                                 c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseBsr;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  return _sparse_compressed_tensor_unsafe(crow_indices, col_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
-
-Tensor _sparse_bsc_tensor_unsafe(const Tensor& ccol_indices, const Tensor& row_indices,
-                                 const Tensor& values,
-                                 IntArrayRef size,
-                                 c10::optional<ScalarType> dtype,
-                                 c10::optional<Layout> layout,
-                                 c10::optional<Device> device,
-                                 c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseBsc;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  return _sparse_compressed_tensor_unsafe(ccol_indices, row_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
 
 inline DimVector _estimate_sparse_compressed_tensor_size(
     const Tensor& compressed_indices,
@@ -339,166 +320,70 @@ inline DimVector _estimate_sparse_compressed_tensor_size(
 // to make autograd dispatch available for the CSR constructor. See the relevant
 // note in native_functions.yaml.
 
-Tensor sparse_compressed_tensor(
+template <Layout expected_layout>
+Tensor sparse_compressed_tensor_template(
     const Tensor& compressed_indices,
     const Tensor& plain_indices,
     const Tensor& values,
-    IntArrayRef size,
+    c10::optional<IntArrayRef> size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  Layout layout_ = layout.value_or(kDummyLayout);
-  TORCH_CHECK(layout_ != kDummyLayout, "sparse_compressed_tensor: expected layout.");
+
+  Layout layout_ = layout.value_or(expected_layout);
+  if (expected_layout == kDummyLayout) {
+    TORCH_CHECK(layout_ != kDummyLayout, "expected layout SparseCsr, SparseCsc, SparseBsr, or SparseBsc but got none");
+  } else {
+    TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
+  }
+  auto size_ = (size.has_value() ? size.value() : _estimate_sparse_compressed_tensor_size(compressed_indices, plain_indices, values, layout_));
+
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
 
-  _validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, values, size, layout);
+  _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size_, layout_);
 
   return at::native::_sparse_compressed_tensor_unsafe(
       compressed_indices,
       plain_indices,
       values,
-      size,
+      size_,
       optTypeMetaToScalarType(options.dtype_opt()),
       options.layout_opt(),
       options.device_opt(),
       options.pinned_memory_opt());
 }
 
-Tensor sparse_compressed_tensor(
-    const Tensor& compressed_indices,
-    const Tensor& plain_indices,
-    const Tensor& values,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  Layout layout_ = layout.value_or(kDummyLayout);
-  TORCH_CHECK(layout_ != kDummyLayout, "sparse_compressed_tensor: expected layout.");
-  IntArrayRef size = _estimate_sparse_compressed_tensor_size(compressed_indices, plain_indices, values, layout_);
-  return sparse_compressed_tensor(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory);
-}
+#define SPARSE_COMPRESSED_TENSOR(KIND, EXPECTED_LAYOUT) \
+  Tensor sparse_##KIND##_tensor(const Tensor& compressed_indices,       \
+                                const Tensor& plain_indices,            \
+                                const Tensor& values,                   \
+                                c10::optional<ScalarType> dtype,        \
+                                c10::optional<Layout> layout,           \
+                                c10::optional<Device> device,           \
+                                c10::optional<bool> pin_memory) {       \
+  c10::optional<IntArrayRef> size;                                        \
+  return sparse_compressed_tensor_template<EXPECTED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
+  }                                                                     \
+  Tensor sparse_##KIND##_tensor(const Tensor& compressed_indices,       \
+                                const Tensor& plain_indices,            \
+                                const Tensor& values,                   \
+                                IntArrayRef size,                       \
+                                c10::optional<ScalarType> dtype,        \
+                                c10::optional<Layout> layout,           \
+                                c10::optional<Device> device,           \
+                                c10::optional<bool> pin_memory) {       \
+  c10::optional<IntArrayRef> size_(size);                                 \
+  return sparse_compressed_tensor_template<EXPECTED_LAYOUT>(compressed_indices, plain_indices, values, size_, dtype, layout, device, pin_memory); \
+  }
 
-Tensor sparse_csr_tensor(
-    const Tensor& crow_indices,
-    const Tensor& col_indices,
-    const Tensor& values,
-    IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseCsr;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  return sparse_compressed_tensor(crow_indices, col_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
+SPARSE_COMPRESSED_TENSOR(compressed, kDummyLayout)
+SPARSE_COMPRESSED_TENSOR(csr, kSparseCsr)
+SPARSE_COMPRESSED_TENSOR(csc, kSparseCsc)
+SPARSE_COMPRESSED_TENSOR(bsr, kSparseBsr)
+SPARSE_COMPRESSED_TENSOR(bsc, kSparseBsc)
 
-Tensor sparse_csc_tensor(
-    const Tensor& ccol_indices,
-    const Tensor& row_indices,
-    const Tensor& values,
-    IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseCsc;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  return sparse_compressed_tensor(ccol_indices, row_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
-
-Tensor sparse_bsr_tensor(
-    const Tensor& crow_indices,
-    const Tensor& col_indices,
-    const Tensor& values,
-    IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseBsr;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  return sparse_compressed_tensor(crow_indices, col_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
-
-Tensor sparse_bsc_tensor(
-    const Tensor& ccol_indices,
-    const Tensor& row_indices,
-    const Tensor& values,
-    IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseBsc;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  return sparse_compressed_tensor(ccol_indices, row_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
-
-Tensor sparse_csr_tensor(
-    const Tensor& crow_indices,
-    const Tensor& col_indices,
-    const Tensor& values,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseCsr;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  IntArrayRef size = _estimate_sparse_compressed_tensor_size(crow_indices, col_indices, values, layout_);
-  return sparse_compressed_tensor(crow_indices, col_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
-
-Tensor sparse_csc_tensor(
-    const Tensor& ccol_indices,
-    const Tensor& row_indices,
-    const Tensor& values,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseCsc;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  IntArrayRef size = _estimate_sparse_compressed_tensor_size(ccol_indices, row_indices, values, layout_);
-  return sparse_compressed_tensor(ccol_indices, row_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
-
-Tensor sparse_bsr_tensor(
-    const Tensor& crow_indices,
-    const Tensor& col_indices,
-    const Tensor& values,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseBsr;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  IntArrayRef size = _estimate_sparse_compressed_tensor_size(crow_indices, col_indices, values, layout_);
-  return sparse_compressed_tensor(crow_indices, col_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
-
-Tensor sparse_bsc_tensor(
-    const Tensor& ccol_indices,
-    const Tensor& row_indices,
-    const Tensor& values,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  constexpr Layout expected_layout = kSparseBsc;
-  Layout layout_ = layout.value_or(expected_layout);
-  TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
-  IntArrayRef size = _estimate_sparse_compressed_tensor_size(ccol_indices, row_indices, values, layout_);
-  return sparse_compressed_tensor(ccol_indices, row_indices, values, size, dtype, expected_layout, device, pin_memory);
-}
 
 Tensor empty_sparse_csr(
     IntArrayRef size,
