@@ -119,8 +119,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2019, Torch Contributors'
-author = 'Torch Contributors'
+copyright = '2022, PyTorch Contributors'
+author = 'PyTorch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
