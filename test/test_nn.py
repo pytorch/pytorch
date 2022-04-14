@@ -20965,18 +20965,35 @@ class TestStateDictHooks(TestCase):
                 nonlocal hook_called
                 hook_called += 1
 
-        m = MyModule()
-        state_dict = m.state_dict()
+        # Test that hooks registered on a submodule are also called
+        # appropriately, i.e. with the submodule as module argument in
+        # my_pre_load_hook_with_module.
+        class MyModuleContainer(nn.Module):
+            def __init__(self, mod):
+                super().__init__()
+                self.mod = mod
 
-        hook_called = 0
-        m._register_load_state_dict_pre_hook(m.my_pre_load_hook)
-        m.load_state_dict(state_dict)
-        self.assertEqual(1, hook_called)
+        for ctor in [MyModuleContainer, lambda x: x]:
+            m = ctor(MyModule())
+            state_dict = m.state_dict()
+            if isinstance(m, MyModuleContainer):
+                mod = m.mod
+            else:
+                mod = m
 
-        hook_called = 0
-        m._register_load_state_dict_pre_hook(m.my_pre_load_hook_with_module, True)
-        m.load_state_dict(state_dict)
-        self.assertEqual(2, hook_called)
+            hook_called = 0
+            mod._register_load_state_dict_pre_hook(
+                mod.my_pre_load_hook
+            )
+            m.load_state_dict(state_dict)
+            self.assertEqual(1, hook_called)
+
+            hook_called = 0
+            mod._register_load_state_dict_pre_hook(
+                mod.my_pre_load_hook_with_module, True
+            )
+            m.load_state_dict(state_dict)
+            self.assertEqual(2, hook_called)
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())

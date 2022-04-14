@@ -1,13 +1,11 @@
 from abc import ABC
-from typing import List, Union, Tuple
+from typing import List, Union
 from dataclasses import dataclass
 from tools.codegen.context import method_with_native_function
-from tools.codegen.model import (BackendIndex, NativeFunction, Argument,
-                                 NativeFunctionsGroup, Tag)
-from tools.codegen.api.types import (BaseCType, OptionalCType, DispatcherSignature,
-                                     VectorCType, kernel_signature, Binding)
-
-from tools.codegen.api.translate import translate
+from tools.codegen.model import (BackendIndex, NativeFunction,
+                                 NativeFunctionsGroup)
+from tools.codegen.api.types import (BaseCType, OptionalCType,
+                                     VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.lazy import LazyIrSchema, LazyArgument, isValueType, tensorListValueT
 from tools.codegen.dest.lazy_ts_lowering import ts_lowering_body
@@ -201,23 +199,6 @@ def lazy_tensor_decls(value_args: List[LazyArgument], tensor_class: str) -> str:
             raise AssertionError(f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})")
     return ("\n        ").join(lazy_tensor_decls)
 
-
-# converts  all tensor-like arguments to meta tensors. Returns:
-# (1) a string containing all of the logic that does the conversions.
-# (2) a context, to be used by translate(), with all of the relevant bindings.
-def convert_to_meta_tensors(sig: DispatcherSignature) -> Tuple[str, List[Binding]]:
-    context: List[Binding] = []
-    unwrapped_tensor_args: List[str] = []
-    for arg in sig.arguments():
-        if isinstance(arg.argument, Argument) and arg.argument.type.is_tensor_like():
-            unwrapped_name = f'{arg.name}_meta'
-            unwrapped_tensor_args.append(f"auto {unwrapped_name} = at::native::to_meta({arg.name});")
-            context.append(arg.with_name(unwrapped_name))
-        else:
-            context.append(arg)
-    unwrap_tensor_args_str = '\n        '.join(unwrapped_tensor_args)
-    return unwrap_tensor_args_str, context
-
 @dataclass(frozen=True)
 class GenLazyNativeFuncDefinition:
     class_method_name: str
@@ -232,18 +213,8 @@ class GenLazyNativeFuncDefinition:
         all_args = schema.filtered_args()
         returns_length = len(schema.returns)
 
-        # Note [Generated LTC Shape Functions]
-        # LTC uses meta tensors from core to do shape inference when possible, and otherwise
-        # we generate a shape function declaration that needs to be manually implemented.
-        # How do we detect which ops are eligible to use meta tensors?
-        # In general we should be able to use meta tensors not just on structured operators,
-        # but also on composite operators that are implemented in terms of structured kernels.
-        # We don't currently have a way of knowing at codegen time which ops are implemented that way.
-        # This is the case for all view and view_copy operators however, so we're going to
-        # use them specifically for al of the view_copy ops (instead of manually writing shape rules for all of them).
-        is_view_copy_op = func.tag == Tag.view_copy
-        is_structured = func.structured or func.structured_delegate is not None
-        if is_structured or is_view_copy_op:
+        # call the meta kernel if it exists, to compute output shape/dtype for our IR
+        if func.structured or func.structured_delegate is not None:
             meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
 
@@ -253,18 +224,7 @@ class GenLazyNativeFuncDefinition:
                 shapes_str = ",".join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
 
-            # Convert tensor args to the meta device and call it.
-            # (We can't pass in the input tensors directly, because they are "functional wrappers".
-            # If any of the meta kernels call a tensor op and redispatch, we don't want to hit the functionalize kernels.)
-            # Even at::meta:: functions might redispatch, e.g. if they call into view ops.
-            dispatcher_sig = DispatcherSignature.from_schema(func.func)
-            meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
-            meta_call_args = [e.expr for e in translate(meta_call_ctx, dispatcher_sig.arguments(), method=False)]
-            dispatch_ns = 'meta' if is_structured else 'compositeexplicitautograd'
-            # view_copy ops always have a CompositeExplicitAutograd kernel
-            meta_str = f"""\
-        {meta_conversion_str}
-        auto out_meta = at::{dispatch_ns}::{schema.aten_name}({', '.join(meta_call_args)});
+            meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(a.name) for a in all_args)});
         {meta_out}"""
         else:
             shape_sig = ComputeShapeSignature(metadata.kernel, func)
@@ -388,11 +348,10 @@ class GenLazyShapeInferenceDefinition:
         lazy_tensor_decls_str = lazy_tensor_decls(value_args, self.tensor_class)
         node_ctor_input_str = node_ctor_inputs(schema)
 
-        # See Note [Generated LTC Shape Functions]
-        is_view_copy_op = f.tag == Tag.view_copy and f.has_composite_explicit_autograd_kernel
-        is_structured = f.structured or f.structured_delegate is not None
-        if is_structured or is_view_copy_op:
-            return []
-        else:
+        # Only generate shape/dtype fn for non-structured kernels,
+        # since we just use the meta function for structured kernels
+        if not f.structured and f.structured_delegate is None:
             shape_sig = ComputeShapeSignature(metadata.kernel, f)
             return ["\n".join([f"{shape_sig.shape_decl};"])]
+        else:
+            return []

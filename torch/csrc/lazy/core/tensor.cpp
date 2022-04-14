@@ -12,8 +12,6 @@
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/ts_backend/ops/scalar.h>
 
-#include <ATen/FunctionalTensorWrapper.h>
-
 
 namespace torch {
 namespace lazy {
@@ -519,27 +517,6 @@ at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor) {
 
 at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor) {
   return at::Tensor(c10::make_intrusive<LTCTensorImpl>(std::move(ltc_tensor)));
-}
-
-at::Tensor to_lazy_tensor(const at::Tensor & self,
-                             const c10::TensorOptions & options,
-                             at::Device device,
-                             bool non_blocking,
-                             bool functionalize_output) {
-  // This helper is only meant to be used for nonlazy -> lazy conversions.
-  TORCH_INTERNAL_ASSERT(self.device().type() != c10::kLazy);
-  TORCH_INTERNAL_ASSERT(device.type() == c10::kLazy);
-
-  auto eager_tensor = self.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
-  auto lazy_self = torch::lazy::GetOrCreateLtcTensor(eager_tensor,
-                                                torch::lazy::atenDeviceToBackendDevice(device));
-  auto out = torch::lazy::CreateAtenFromLtcTensor(lazy_self);
-  if (functionalize_output) {
-    // See Note [Lazy Tensor Functionalization]
-    return at::functionalization::impl::to_functional_tensor(out);
-  } else {
-    return out;
-  }
 }
 
 } // namespace lazy

@@ -211,20 +211,6 @@ TORCH_API LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& t
 TORCH_API at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor);
 TORCH_API at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor);
 
-// Given a non-lazy tensor, creates a lazy tensor on the specified (lazy) device.
-// The functionalize_output determines whether or not we should wrap the output
-// in a "functional wrapper".
-// Note: Any kernels in LTC that internally use this function probably should not
-// wrap their output in a functional wrapper.
-// The only time we want to wrap the output is when directly implementing LTC kernels for:
-// - (1) In a factory function (the lTC kernel for at::empty)
-// - (2) CPU -> Lazy conversion (the LTC kernel for at::to_device)
-TORCH_API at::Tensor to_lazy_tensor(const at::Tensor & self,
-                                       const c10::TensorOptions & options,
-                                       at::Device device,
-                                       bool non_blocking,
-                                       bool functionalize_output);
-
 template <size_t... Indices>
 auto TupleAtenFromLtcTensorsImpl(const std::vector<LazyTensorPtr>& tensors, std::index_sequence<Indices...>) {
     return std::make_tuple(CreateAtenFromLtcTensor(tensors[Indices])...);
