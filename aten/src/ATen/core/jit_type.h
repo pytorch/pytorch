@@ -435,6 +435,17 @@ struct TORCH_API SymbolicShape {
     return dims_;
   }
 
+  c10::optional<std::vector<bool>> symbolicDims() const {
+    if (!dims_) {
+      return c10::nullopt;
+    }
+    auto symbolic_dims = std::vector<bool>();
+    for (const ShapeSymbol& s : *dims_) {
+      symbolic_dims.push_back(!s.is_static());
+    }
+    return symbolic_dims;
+  }
+
   // Checks whether the shape is fully defined/complete, ie. rank and sizes
   // of every dimension are known.
   bool isComplete() const {
@@ -455,6 +466,14 @@ struct TORCH_API SymbolicShape {
   // If either of two shapes are of unknown rank or they have unmatching rank,
   // result will be unranked.
   SymbolicShape merge(const SymbolicShape& other) const;
+
+  friend bool operator==(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return lhs.dims_ == rhs.dims_;
+  }
+
+  friend bool operator!=(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return !(lhs == rhs);
+  }
 
   private:
     c10::optional<std::vector<ShapeSymbol>> dims_;
@@ -1236,6 +1255,31 @@ struct TORCH_API ComplexType : public NumberType {
   }
 };
 
+// We need to introduce `SymIntType` to represent the `SymInt` type
+// used in function schemas e.g. `aten::narrow_copy(... SymInt length)
+// `SymInt` will be used to enable tracing arithmetic operations on
+// dimension values. Please see [SymInt.h] for more information
+struct SymIntType;
+using SymIntTypePtr = SingletonTypePtr<SymIntType>;
+struct TORCH_API SymIntType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymInt";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    // TODO: will become a Union[SymbolicIntNode|int] in the near future
+    return "int";
+  }
+  static const TypeKind Kind = TypeKind::SymIntType;
+  // global singleton
+  static SymIntTypePtr get();
+
+ private:
+  SymIntType() : Type(TypeKind::SymIntType) {}
+};
+
 struct IntType;
 using IntTypePtr = SingletonTypePtr<IntType>;
 // This type represents a Python int number
@@ -1697,6 +1741,13 @@ struct getTypePtr_<int64_t> final {
     return IntType::get();
   }
 };
+
+template <>
+struct getTypePtr_<SymInt> final {
+  static decltype(auto) call() {
+    return SymIntType::get();
+  }
+};
 template <>
 struct getTypePtr_<c10::ScalarType> final {
   static decltype(auto) call() {
@@ -1816,6 +1867,15 @@ struct getTypePtr_<at::optional<T>> final {
     return type;
   }
 };
+
+template<>
+struct getTypePtr_<at::OptionalIntArrayRef> final {
+  static const auto& call() {
+    static auto type = OptionalType::create(getTypePtr_<IntArrayRef>::call());
+    return type;
+  }
+};
+
 template <class... Contained>
 struct getTypePtr_<std::tuple<Contained...>> final {
   static const auto& call() {
