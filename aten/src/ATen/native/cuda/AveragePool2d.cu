@@ -85,6 +85,7 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
     const int64_t height, const int64_t width, const int pooled_height,
     scalar_t* const top_data, const int divisor_override,
     const bool count_include_pad, const bool use_divisor) {
+  CUDA_KERNEL_LOOP(index, nthreads) {
     const int c = index % channels;
     const int pw = (index / channels) % pooled_width;
     const int ph = (index / channels / pooled_width) % pooled_height;
