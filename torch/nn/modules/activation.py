@@ -900,17 +900,17 @@ class MultiheadAttention(Module):
     conditions are met:
     - self attention is being computed (i.e., query, key, and value are the same tensor.
       This restriction will be loosened in the future.)
+    - inference mode is enabled (using the torch.inference_mode() context manager)
     - training is disabled (using .eval())
     - dropout is 0
     - add_bias_kv is False
     - add_zero_attn is False
     - batch_first is True and the input is batched
     - kdim and vdim are equal to embed_dim
-    - at most one of key_padding_mask and attn_mask is used
-    - neither key_padding_mask nor attn_mask is passed (this restriction will be loosened)
+    - at most one of key_padding_mask or attn_mask is passed
 
     If the optimized implementation is in use, a NestedTensor can be
-    passed to more represent padding more efficiently than using a
+    passed for query/key/value to more represent padding more efficiently than using a
     padding mask. In this case, a NestedTensor will be returned, and
     an additional speedup proportional to the fraction of the input
     that is padding can be expected.
@@ -1058,11 +1058,12 @@ class MultiheadAttention(Module):
         """
         is_batched = query.dim() == 3
         # TODO: unblock mask support for fast path and update the docstring accordingly
-        if (is_batched and not self.training and self.batch_first and
-            self.bias_k is None and self.bias_v is None and
-            self.dropout == 0 and not self.add_zero_attn and
-            self._qkv_same_embed_dim and key_padding_mask is None and
-            attn_mask is None and query is key and key is value):
+        if (torch.is_inference_mode_enabled() and is_batched and not self.training
+            and self.batch_first and self.bias_k is None and
+            self.bias_v is None and self.dropout == 0 and
+            not self.add_zero_attn and self._qkv_same_embed_dim and
+            (key_padding_mask is None or attn_mask is None) and
+            query is key and key is value):
             tensor_args = (
                 query,
                 key,

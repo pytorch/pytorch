@@ -312,7 +312,6 @@ std::tuple<Tensor, Tensor> multi_head_attention(
     const c10::optional<Tensor>& mask,
     bool need_weights,
     bool average_attn_weights) {
-  c10::InferenceMode guard;
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
 

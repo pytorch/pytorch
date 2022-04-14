@@ -269,13 +269,17 @@ class TransformerEncoderLayer(Module):
 
     forward() will use a special optimized implementation if all of the following
     conditions are met:
-    - All conditions for the fast path of torch.nn.MultiheadAttention
+    - inference mode is enabled (using the torch.inference_mode() context manager)
+    - training is disabled (using .eval())
+    - batch_first is True and the input is batched (i.e., src.dim() == 3)
     - norm_first is False (this restriction may be loosened in the future)
-    - activation is one of "relu", "gelu", torch.functional.relu, or torch.functional.gelu
-    - neither src_mask nor src_key_padding_mask is passed (this restriction will be loosened)
+    - activation is one of: "relu", "gelu", torch.functional.relu, or torch.functional.gelu
+    - at most one of src_mask and src_key_padding_mask is passed
+    - the two LayerNorm instances have a consistent eps value (this will naturally be the
+      case unless the caller has manually modified one without modifying the other)
 
     If the optimized implementation is in use, a NestedTensor can be
-    passed to represent padding more efficiently than using a padding
+    passed for src to represent padding more efficiently than using a padding
     mask. In this case, a NestedTensor will be returned, and an
     additional speedup proportional to the fraction of the input that
     is padding can be expected.
@@ -358,11 +362,10 @@ class TransformerEncoderLayer(Module):
         # REVIEW: do we want to add an explicit opt-out here beyond training mode?
         # REVIEW: is there a better way to detect _qkv_same_embed_dim?
 
-        if (not self.norm_first and not self.training and
+        if (torch.is_inference_mode_enabled() and not self.norm_first and not self.training and
             self.self_attn.batch_first and src.dim() == 3 and self.self_attn._qkv_same_embed_dim and
             self.activation_relu_or_gelu and self.norm1.eps == self.norm2.eps and
-            # TODO: unblock mask support for fast path
-            (src_mask is None and src_key_padding_mask is None)):
+            (src_mask is None or src_key_padding_mask is None)):
             tensor_args = (
                 src,
                 self.self_attn.in_proj_weight,

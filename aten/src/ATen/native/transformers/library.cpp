@@ -30,14 +30,6 @@ TORCH_LIBRARY(nativetransformers, m) {
       TORCH_FN(transform_bias_rescale_qkv_op_cpu));
 
   m.def(
-      "_ffn(Tensor input, Tensor weight1, Tensor bias1, Tensor weight2, Tensor bias2, bool use_gelu=False, bool add_norm=False) -> Tensor");
-  m.impl("_ffn", c10::kCPU, TORCH_FN(ffn_cpu));
-
-  // TODO Current ffn for cpu and cuda shares the same slow kernel.
-  // We need to fix here when we have separate kernels.
-  m.impl("_ffn", c10::kCUDA, TORCH_FN(ffn_cpu));
-
-  m.def(
       "_transformer_encoder_layer_forward(Tensor src, int embed_dim, "
       "int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, "
       "Tensor proj_bias, bool use_gelu, bool norm_first, "
@@ -47,21 +39,8 @@ TORCH_LIBRARY(nativetransformers, m) {
       TORCH_FN(transformer_encoder_layer_forward));
   m.impl(
       "_transformer_encoder_layer_forward",
-      c10::DispatchKey::NestedTensor,
+      c10::DispatchKey::NestedTensorCPU,
       TORCH_FN(transformer_encoder_layer_forward));
-
-  m.def("_to_padded_tensor(Tensor nt, float padding) -> Tensor");
-  m.impl(
-      "_to_padded_tensor",
-      c10::DispatchKey::NestedTensor,
-      TORCH_FN(NestedTensor_to_padded_tensor));
-
-  m.def(
-      "_layer_norm(Tensor nt, Tensor? weight, Tensor? bias, float eps) -> Tensor");
-  m.impl(
-      "_layer_norm",
-      c10::DispatchKey::NestedTensor,
-      TORCH_FN(NestedTensor_layer_norm));
 }
 } // namespace native
 } // namespace at
