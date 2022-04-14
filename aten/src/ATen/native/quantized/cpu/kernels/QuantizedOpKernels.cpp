@@ -2095,6 +2095,7 @@ void qupsample_bilinear2d_nhwc_kernel(
       data_index_init(begin, b, nbatch, h2, output_height, w2, output_width);
 
       for (const auto i : c10::irange(begin, end)) {
+        (void)i; //Suppress unused variable warning
         auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
             idata + b * input_height * input_width * channels);
         auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
