@@ -230,10 +230,14 @@ except ImportError:
 
 for name in dir(_C):
     if name[0] != '_' and not name.endswith('Base'):
-        obj = getattr('torch._C', name)
-        obj.__module__ = 'torch'
+        obj = getattr(_C, name)
+        try:
+            setattr(obj, '__module__', 'torch')
+        # if the module is read only or doesn't exist
+        except Exception:
+            pass
 
-__all__ += [name ]
+__all__ += [name]
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
