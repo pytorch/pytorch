@@ -1604,7 +1604,10 @@ def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad, *, variant=None, **kwargs):
+    if variant is not None and variant not in ('subgradient_at_zero',):
+        raise ValueError(f"Unsupported variant, expected variant to be 'subgradient_at_zero' but got: {variant}")
+
     test_sizes = [
         (S,),
         (0,),
@@ -1628,12 +1631,13 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad, **kwargs):
         is_matrix_norm = len(test_size) == 2
 
         for keepdim in [False, True]:
-            inputs.append(SampleInput(
-                make_tensor(
-                    test_size, dtype=dtype, device=device, low=None, high=None,
-                    requires_grad=requires_grad),
-                kwargs=dict(
-                    keepdim=keepdim)))
+            if not variant == 'subgradient_at_zero':
+                inputs.append(SampleInput(
+                    make_tensor(
+                        test_size, dtype=dtype, device=device, low=None, high=None,
+                        requires_grad=requires_grad),
+                    kwargs=dict(
+                        keepdim=keepdim)))
 
             if not (is_vector_norm or is_matrix_norm):
                 continue
@@ -1641,26 +1645,34 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad, **kwargs):
             ords = vector_ords if is_vector_norm else matrix_ords
 
             for ord in ords:
-
-                inputs.append(SampleInput(
-                    make_tensor(
-                        test_size, dtype=dtype, device=device,
-                        low=None, high=None,
-                        requires_grad=requires_grad),
-                    args=(ord,),
-                    kwargs=dict(
-                        keepdim=keepdim)))
-
-                if ord in ['nuc', 'fro']:
+                if variant == 'subgradient_at_zero':
+                    inputs.append(SampleInput(
+                        torch.zeros(
+                            test_size, dtype=dtype, device=device,
+                            requires_grad=requires_grad),
+                        args=(ord,),
+                        kwargs=dict(keepdim=keepdim)))
+                else:
                     inputs.append(SampleInput(
                         make_tensor(
                             test_size, dtype=dtype, device=device,
                             low=None, high=None,
                             requires_grad=requires_grad),
+                        args=(ord,),
                         kwargs=dict(
-                            ord=ord,
-                            keepdim=keepdim,
-                            dim=(0, 1))))
+                            keepdim=keepdim)))
+
+                    if ord in ['nuc', 'fro']:
+                        inputs.append(SampleInput(
+                            make_tensor(
+                                test_size, dtype=dtype, device=device,
+                                low=None, high=None,
+                                requires_grad=requires_grad),
+                            kwargs=dict(
+                                ord=ord,
+                                keepdim=keepdim,
+                                dim=(0, 1))))
+
         return inputs
 
 def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):
@@ -7771,6 +7783,20 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     for input, target, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target,), kwargs=kwargs)
 
+def sample_inputs_binary_cross_entropy_with_logits(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    for input, target, base_dict in _generate_sample_inputs_nn_loss(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        weight_lst = [None, random.uniform(-9, 9)]
+        pos_weight_lst = [None, random.uniform(-9, 9)]
+        for weight, pos_weight in product(weight_lst, pos_weight_lst):
+            base_dict["weight"] = _make_tensor(input.shape)
+            base_dict["pos_weight"] = _make_tensor(1, low=0)
+            yield SampleInput(input, args=(target,), kwargs=base_dict)
+
 def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(torch.tensor([1, 0, 2, 0], dtype=dtype, device=device, requires_grad=requires_grad))
     mask = torch.tensor([[0, 1, 0, 1, 0],
@@ -10309,6 +10335,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
            )),
+    # NB: linalg.norm has two variants so that different skips can be used for different sample inputs
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -10321,6 +10348,25 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+           )),
+    OpInfo('linalg.norm',
+           op=torch.linalg.norm,
+           variant_test_name='subgradients_at_zero',
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           sample_inputs_func=partial(sample_inputs_linalg_norm, variant='subgradient_at_zero'),
+           aten_name='linalg_norm',
+           skips=(
+               # Copied from above
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+
+               # [NEW] Skips specifically for sample inputs at zero
+               # norm's vjp/jvp are not well-conditioned near zero
+               DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_gradgrad'),
            )),
     OpInfo('linalg.matrix_norm',
            aten_name='linalg_matrix_norm',
@@ -11203,6 +11249,57 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_avgpool3d),
+    OpInfo(
+        "nn.functional.binary_cross_entropy_with_logits",
+        aten_name="binary_cross_entropy_with_logits",
+        supports_autograd=True,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        sample_inputs_func=sample_inputs_binary_cross_entropy_with_logits,
+        skips=(
+            # The Weight tensor requires_grad = False
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_floating_inputs_are_differentiable",
+                dtypes=(torch.float32,)
+            ),
+            # Adding OpInfo to existing operator
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_backward",
+                dtypes=(torch.float32,)
+            ),
+            # Pos Weight is required to be positve
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestMathBits",
+                "test_neg_view",
+                dtypes=(torch.float64,)
+            ),
+            # Test Gradient failures CI
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestGradients",
+                "test_neg_view",
+                dtypes=(torch.float64,)
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestJit',
+                'test_variant_consistency_jit',
+                dtypes=(torch.float32,)
+            ),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_gradgrad", dtypes=(torch.float64,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_forward_mode_AD", dtypes=(torch.float64,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_fwgrad_bwgrad", dtypes=(torch.float64,)),
+        ),
+    ),
     OpInfo('nn.functional.relu',
            aten_name="relu",
            supports_autograd=True,
