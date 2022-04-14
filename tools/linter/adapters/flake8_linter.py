@@ -1,5 +1,4 @@
 import argparse
-import concurrent.futures
 import json
 import logging
 import os
@@ -244,8 +243,8 @@ def get_issue_documentation_url(code: str) -> str:
     return ""
 
 
-def check_file(
-    filename: str,
+def check_files(
+    filenames: List[str],
     binary: str,
     flake8_plugins_path: Optional[str],
     severities: Dict[str, LintSeverity],
@@ -253,7 +252,7 @@ def check_file(
 ) -> List[LintMessage]:
     try:
         proc = run_command(
-            [binary, "--exit-zero", filename],
+            [binary, "--exit-zero"] + filenames,
             extra_env={"FLAKE8_PLUGINS_PATH": flake8_plugins_path}
             if flake8_plugins_path
             else None,
@@ -262,7 +261,7 @@ def check_file(
     except (OSError, subprocess.CalledProcessError) as err:
         return [
             LintMessage(
-                path=filename,
+                path=None,
                 line=None,
                 char=None,
                 code="FLAKE8",
@@ -369,28 +368,9 @@ def main() -> None:
             assert len(parts) == 2, f"invalid severity `{severity}`"
             severities[parts[0]] = LintSeverity(parts[1])
 
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=os.cpu_count(),
-        thread_name_prefix="Thread",
-    ) as executor:
-        futures = {
-            executor.submit(
-                check_file,
-                filename,
-                args.binary,
-                flake8_plugins_path,
-                severities,
-                args.retries,
-            ): filename
-            for filename in args.filenames
-        }
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                for lint_message in future.result():
-                    print(json.dumps(lint_message._asdict()), flush=True)
-            except Exception:
-                logging.critical('Failed at "%s".', futures[future])
-                raise
+    lint_messages = check_files(args.filenames, args.binary, flake8_plugins_path, severities, args.retries)
+    for lint_message in lint_messages:
+        print(json.dumps(lint_message._asdict()), flush=True)
 
 
 if __name__ == "__main__":
