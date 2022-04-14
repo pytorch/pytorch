@@ -1,5 +1,6 @@
 import argparse
 import os
+import pathlib
 import sys
 import yaml
 from typing import Any, List, Optional, cast
@@ -51,8 +52,8 @@ def generate_code(ninja_global: Optional[str] = None,
             os.makedirs(d)
     runfiles_dir = os.environ.get("RUNFILES_DIR", None)
     data_dir = os.path.join(runfiles_dir, 'pytorch') if runfiles_dir else ''
-    autograd_dir = os.path.join(data_dir, 'tools', 'autograd')
     tools_jit_templates = os.path.join(data_dir, 'tools', 'jit', 'templates')
+    autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
@@ -197,17 +198,19 @@ def main() -> None:
         assert os.path.isfile(ts_backend_yaml), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
         assert os.path.isfile(ts_native_functions), f"Unable to access {ts_native_functions}"
         from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
+        from tools.codegen.dest.lazy_ir import TSLazyIR
         run_gen_lazy_tensor(aten_path=aten_path,
                             source_yaml=ts_backend_yaml,
                             backend_name="TorchScript",
                             output_dir=lazy_install_dir,
                             dry_run=False,
                             impl_path=ts_native_functions,
-                            gen_ts_lowerings=True,
                             node_base="TsNode",
                             node_base_hdr=ts_node_base,
                             build_in_tree=True,
-                            per_operator_headers=options.per_operator_headers)
+                            lazy_ir_cls=TSLazyIR,
+                            per_operator_headers=options.per_operator_headers,
+                            gen_forced_fallback_code=True)
 
 
 if __name__ == "__main__":

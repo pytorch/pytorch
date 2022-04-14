@@ -4132,7 +4132,7 @@ TEST_F(LazyOpsTest, TestDropoutInPlace) {
 }
 
 TEST_F(LazyOpsTest, TestRandperm) {
-  int n = 5;
+  unsigned n = 5;
   torch::Tensor shuffle = torch::randperm(
       n, torch::TensorOptions(torch::kLong).device(torch::kLazy));
   torch::Tensor shuffle_cpu = CopyToDevice(shuffle, torch::kCPU);
@@ -8677,6 +8677,27 @@ TEST_F(LazyOpsTest, TestDiagonal) {
       torch::Tensor lazy_input = CopyToDevice(input, device);
       torch::Tensor lazy_output = torch::diagonal(lazy_input, diagonal);
       AllClose(output, lazy_output);
+    });
+  }
+}
+
+TEST_F(LazyOpsTest, TestDiagonalUpdate) {
+  int size = 5;
+  // Test all diagonals and out of bounds (must be no-op).
+  for (int diagonal = -size; diagonal <= size; ++diagonal) {
+    auto input = torch::rand({size, size},
+        torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+    auto input_clone = input.clone();
+    auto output = torch::diagonal(input, diagonal);
+    output.add_(1);
+
+    ForEachDevice([&](const torch::Device& device) {
+      torch::Tensor lazy_input = CopyToDevice(input_clone, device);
+      torch::Tensor lazy_output = torch::diagonal(lazy_input, diagonal);
+      lazy_output.add_(1);
+
+      AllClose(output, lazy_output);
+      AllClose(input, lazy_input);
     });
   }
 }
