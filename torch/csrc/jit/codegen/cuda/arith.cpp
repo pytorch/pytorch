@@ -725,10 +725,11 @@ TensorView* max(
   Val* init = nullptr;
   switch (v1->getDataType().value()) {
     case (DataType::Double):
-      init = IrBuilder::create<Double>(std::numeric_limits<double>::lowest());
+      init =
+          IrBuilder::create<Double>(-std::numeric_limits<double>::infinity());
       break;
     case (DataType::Float):
-      init = IrBuilder::create<Double>(std::numeric_limits<float>::lowest());
+      init = IrBuilder::create<Double>(-std::numeric_limits<float>::infinity());
       break;
     case (DataType::Int):
       init = IrBuilder::create<Int>(std::numeric_limits<int64_t>::lowest());
@@ -756,10 +757,10 @@ TensorView* min(
   Val* init = nullptr;
   switch (v1->getDataType().value()) {
     case (DataType::Double):
-      init = IrBuilder::create<Double>(DBL_MAX);
+      init = IrBuilder::create<Double>(std::numeric_limits<double>::infinity());
       break;
     case (DataType::Float):
-      init = IrBuilder::create<Double>(FLT_MAX);
+      init = IrBuilder::create<Double>(std::numeric_limits<float>::infinity());
       break;
     case (DataType::Int):
       init = IrBuilder::create<Int>(std::numeric_limits<int64_t>::max());
