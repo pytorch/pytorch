@@ -2551,11 +2551,11 @@ class TestCudaFuser(JitTestCase):
                      "Requires fusion optimization pass to be effective")
     def test_linear_symbolic_shapes(self):
         def fn(x: int):
-            y = torch.zeros((x, x+2)).cuda()
+            y = torch.zeros((x, x + 2)).cuda()
             for i in range(2):
-                inp = torch.rand((x, x+i)).cuda()
-                weight = torch.rand((x+2, x+i)).cuda()
-                bias = torch.rand((x, x+2)).cuda()
+                inp = torch.rand((x, x + i)).cuda()
+                weight = torch.rand((x + 2, x + i)).cuda()
+                bias = torch.rand((x, x + 2)).cuda()
                 y += torch.sin(torch.nn.functional.linear(inp, weight, bias))
             return y
 
