@@ -620,9 +620,12 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
   DimVector sizes(ndim, 1), strides(ndim, 0);
   auto as_nd = [&](const Tensor& t) {
     TORCH_INTERNAL_ASSERT(t.defined() && (t.dim() == 1 || t.dim() == 0));
-    sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
-    strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
-    return t.as_strided(sizes, strides);
+    if (ndim >= 2) {
+      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+      return t.as_strided(sizes, strides);
+    }
+    return t;
   };
   Tensor w;
   if (self.scalar_type() == ScalarType::BFloat16) {
@@ -670,9 +673,12 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
   DimVector sizes(ndim, 1), strides(ndim, 0);
   auto as_nd = [&](const Tensor& t) {
     TORCH_INTERNAL_ASSERT(t.defined() && (t.dim() == 1 || t.dim() == 0));
-    sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
-    strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
-    return t.as_strided(sizes, strides);
+    if (ndim >= 2) {
+      sizes[1] = t.dim() == 1 ? t.sizes()[0] : 1;
+      strides[1] = t.dim() == 1 ? t.strides()[0] : 0;
+      return t.as_strided(sizes, strides);
+    }
+    return t;
   };
   Tensor w;
   if (self.scalar_type() == ScalarType::BFloat16) {
