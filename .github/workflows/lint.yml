@@ -5,7 +5,6 @@ on:
     branches:
       - master
   pull_request:
-  workflow_dispatch:
 
 jobs:
   lintrunner:
@@ -18,7 +17,7 @@ jobs:
           architecture: x64
 
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Install lintrunner
         run: pip install lintrunner==0.5.*
@@ -35,7 +34,7 @@ jobs:
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
       - name: Run lintrunner on all files
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        # if: github.event_name == 'push'
         run: lintrunner -vv --paths-cmd='git grep -Il .' --force-color
 
       - name: Run lintrunner on PR files
