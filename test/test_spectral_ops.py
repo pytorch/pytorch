@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
 from torch.testing._internal.common_methods_invocations import spectral_funcs, SpectralFuncInfo
 
-from setuptools import distutils
+from distutils.version import LooseVersion
 from typing import Optional, List
 
 
@@ -217,7 +217,7 @@ class TestFFT(TestCase):
     @ops([op for op in spectral_funcs if not op.ndimensional])
     def test_reference_1d(self, device, dtype, op):
         norm_modes = ((None, "forward", "backward", "ortho")
-                      if distutils.version.LooseVersion(np.__version__) >= '1.20.0'
+                      if LooseVersion(np.__version__) >= '1.20.0'
                       else (None, "ortho"))
         test_args = [
             *product(
@@ -370,7 +370,7 @@ class TestFFT(TestCase):
     @ops([op for op in spectral_funcs if op.ndimensional])
     def test_reference_nd(self, device, dtype, op):
         norm_modes = ((None, "forward", "backward", "ortho")
-                      if distutils.version.LooseVersion(np.__version__) >= '1.20.0'
+                      if LooseVersion(np.__version__) >= '1.20.0'
                       else (None, "ortho"))
 
         # input_ndim, s, dim
@@ -469,7 +469,7 @@ class TestFFT(TestCase):
     @dtypes(torch.double, torch.complex128)
     def test_fft2_numpy(self, device, dtype):
         norm_modes = ((None, "forward", "backward", "ortho")
-                      if distutils.version.LooseVersion(np.__version__) >= '1.20.0'
+                      if LooseVersion(np.__version__) >= '1.20.0'
                       else (None, "ortho"))
 
         # input_ndim, s
