@@ -575,8 +575,6 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   endif()
 endif()
 
-string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_ASSERTIONS")
-
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 # It's disabled for caffe2 mobile library.
 if(INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
