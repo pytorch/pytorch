@@ -342,7 +342,7 @@ class FullyShardedDataParallel(nn.Module):
         mixed_precision: Optional[MixedPrecision] = None
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
-        param_init_fns=None,
+        param_init_fns: Optional[Union[Callable, Dict[torch.nn.Module, Callable]]]=None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -368,7 +368,6 @@ class FullyShardedDataParallel(nn.Module):
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
                 err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
             )
-#            self._rank0_print(f"Call to Recursive wrap")
             _recursive_wrap(
                 module,
                 auto_wrap_policy=auto_wrap_policy,
@@ -388,32 +387,27 @@ class FullyShardedDataParallel(nn.Module):
                 param_init_fns=param_init_fns,
             )
 
-#        self._rank0_print(f"Wrapping {module}")
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
 
-        # Check if meta device.
-        # Right now this check is just if user has
-        # specified param_init_fns, implying it is a
-        # meta module. Will make it more user friendly
-        # as part of flushing out the API.
+        # We assume that the module is initialized on the meta device
+        # if the user has specified param_init_fns. TODO: investigate
+        # a way to more robustly determine if the module is on the meta
+        # device or not.
         is_meta_module = param_init_fns is not None
 
-        if is_meta_module:
-#            self._rank0_print(f"Got meta module {module}")
-            # Materialize the module first.
-#            self._rank0_print(f"Materializing it on {torch.cuda.current_device()}")
 
             # Initialize parameters according to the user lambda.
-            if param_init_fns is None:
-                raise ValueError("Must specify module init function")
-
-            # Will call nn.utils.materialize_module(m)
             if isinstance(param_init_fns, dict):
+                # As an example, this will call something like
+                # module.reset_parameters() to initialize the parameters
+                # on CPU / GPU.
+                module_fn = param_init_fns[module]
+                assert callable(module_fn), f"Expected {module_fn} to be callable, but got type {type(param_init_fns)}"
                 param_init_fns[module](module)
             else:
-                assert callable(param_init_fns)
+                assert callable(param_init_fns), f"Expected {param_init_fns} to be callable, but got {type(param_init_fns)}"
                 param_init_fns(module)
             
 
@@ -509,11 +503,6 @@ class FullyShardedDataParallel(nn.Module):
         if self.cpu_offload.offload_params:
             for p in self.params:
                 self._offload_to_cpu(p)
-
-    def _rank0_print(self, msg, process_group=None):
-        rank = dist.get_rank(process_group) if process_group is not None else dist.get_rank()
-        if rank == 0:
-            print(msg)
 
     def _init_reshard_after_forward(self):
         if self.sharding_strategy == ShardingStrategy.FULL_SHARD:
@@ -639,7 +628,6 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             Module: self
         """
-        raise ValueError("Called fsdp apply....")
         uninitialized = self._is_root is None
         self._assert_state(TrainingState_.IDLE)
         with self._summon_full_params(recurse=False, writeback=True):
@@ -1034,7 +1022,6 @@ class FullyShardedDataParallel(nn.Module):
                 device=self.compute_device,
                 dtype=full_param_dtype,
             )
-            print(f"Created full param padded: {p._full_param_padded}")
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
 
     def _set_is_root(self) -> None:

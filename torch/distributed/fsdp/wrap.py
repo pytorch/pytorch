@@ -18,15 +18,6 @@ from typing import (
 
 import torch.nn as nn
 
-def always_wrap_policy(*args, **kwargs) -> bool:
-    return True
-
-def wrap_if_annotated(module: nn.Module, *args, **kwargs) -> bool:
-    if hasattr(module, '_should_wrap'):
-        print("Policy: returning TRUE")
-        return module._should_wrap
-
-    return False
 
 def always_wrap_policy(*args, **kwargs) -> bool:
     """
@@ -169,8 +160,6 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
             _ConfigAutoWrap.wrapper_cls,
             **wrap_overrides,
         )
-    else:
-        module._should_wrap = True
     return module
 
 
@@ -242,10 +231,6 @@ def _recursive_wrap(
         if not only_wrap_children and auto_wrap_policy(
             module=module, recurse=False, unwrapped_params=remainder
         ):
-
-#            from torch.distributed import get_rank
-#            if get_rank() == 0:
-#                print("Recursively wrapping")
             # Leaf node or final wrapping of the remainder both happen here.
             return _wrap(module, wrapper_cls, **kwargs), num_params
         else:
