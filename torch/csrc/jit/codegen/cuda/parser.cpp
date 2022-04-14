@@ -47,6 +47,7 @@ constexpr auto kNumViewOps = 2;
 constexpr auto kNumVarOps = 2;
 constexpr auto kNumSoftmaxFwd = 2;
 constexpr auto kNumSoftmaxBwd = 2;
+constexpr auto kNumAminAmaxOps = 2;
 
 namespace {
 
@@ -2590,57 +2591,70 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            MemoryFormat format;
-            std::list<Val*> list_val;
-            std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
-                value_map[node->inputs()[0]->unique()]);
-            auto self = list_val.front();
-            list_val.pop_front();
-            auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
-            TORCH_INTERNAL_ASSERT(
-                dims_list.has_value(),
-                "aten::amax cannot be fused with dynamic axes");
-            std::vector<int> dims;
-            if (!dims_list->empty()) {
-              for (const auto dim : dims_list->vec()) {
-                dims.emplace_back(static_cast<int>(dim));
+      std::array<const char*, kNumAminAmaxOps> BinaryFloatOp = {
+          "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor",
+          "aten::amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor"};
+      for (auto signature : BinaryFloatOp) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(),
+                  value_map[node->inputs()[0]->unique()]);
+              auto self = list_val.front();
+              list_val.pop_front();
+              auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
+              TORCH_INTERNAL_ASSERT(
+                  dims_list.has_value(),
+                  "aten::amax/amin cannot be fused with dynamic axes");
+              std::vector<int> dims;
+              if (!dims_list->empty()) {
+                for (const auto dim : dims_list->vec()) {
+                  dims.emplace_back(static_cast<int>(dim));
+                }
+              } else {
+                dims.resize(self->as<TensorView>()->nDims());
+                std::iota(dims.begin(), dims.end(), 0);
               }
-            } else {
-              dims.resize(self->as<TensorView>()->nDims());
-              std::iota(dims.begin(), dims.end(), 0);
-            }
-            auto keepdim = constant_as<bool>(node->input(2));
-            TORCH_INTERNAL_ASSERT(
-                keepdim.has_value(),
-                "aten::amax cannot be fused with dynamic keepdim");
+              auto keepdim = constant_as<bool>(node->input(2));
+              TORCH_INTERNAL_ASSERT(
+                  keepdim.has_value(),
+                  "aten::amax/amin cannot be fused with dynamic keepdim");
 
-            auto out = max(self->as<TensorView>(), dims, keepdim.value());
-            value_map.emplace(node->output()->unique(), out);
-          },
-          [](const Node* node) -> bool {
-            if (isReductionNonCompatibleTensor(
-                    node->input(0)->type()->cast<TensorType>())) {
-              return false;
-            }
-            // we don't support dynamic reduction axes;
-            if (node->inputs()[1]->node()->kind() != prim::Constant) {
-              return false;
-            }
-            // we don't support dynamic keepdim yet;
-            if (node->inputs()[2]->node()->kind() != prim::Constant) {
-              return false;
-            }
-            return true;
-          },
-          [](const Node* node) -> OperatorType {
-            return OperatorType::Reduction;
-          });
+              TensorView* out = nullptr;
+              if (node->kind() ==
+                  c10::Symbol::fromQualString("aten::amax")) {
+                out = max(self->as<TensorView>(), dims, keepdim.value());
+              } else if (node->kind() ==
+                  c10::Symbol::fromQualString("aten::amin")) {
+                out = min(self->as<TensorView>(), dims, keepdim.value());
+              } else {
+                TORCH_INTERNAL_ASSERT(false, "unrecognized operation in aten::amax/amin");
+              }
+              value_map.emplace(node->output()->unique(), out);
+            },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              // we don't support dynamic reduction axes;
+              if (node->inputs()[1]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              // we don't support dynamic keepdim yet;
+              if (node->inputs()[2]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              return true;
+            },
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Reduction;
+            });
+      }
     }
 
     {
@@ -3305,7 +3319,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       getOperatorForLiteral(
           "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor")
           ->schema();
-  if (node->matches(amax_schema)) {
+  static auto amin_schema =
+      getOperatorForLiteral(
+          "aten::amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor")
+          ->schema();
+  if (node->matches(amax_schema) || node->matches(amin_schema)) {
     switch (offset) {
       // argument 1: reduction axes;
       case 1:
