@@ -663,7 +663,18 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
 ]
 
 def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
-    return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
+    enable_flatbuffer = bool(native.read_config("fbcode", "caffe2_enable_flatbuffer", None))
+    flatbuffer_serializer_sources = [
+        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
+        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
+    ]
+    if enable_flatbuffer:
+        return (
+            libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources +
+            flatbuffer_serializer_sources
+        )
+    else:
+        return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
 
 libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
@@ -1223,6 +1234,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qreduction.cpp",
     "aten/src/ATen/native/quantized/cpu/qrelu.cpp",
     "aten/src/ATen/native/quantized/cpu/qsigmoid.cpp",
+    "aten/src/ATen/native/quantized/cpu/qsoftmax.cpp",
     "aten/src/ATen/native/quantized/cpu/qsort.cpp",
     "aten/src/ATen/native/quantized/cpu/qtanh.cpp",
     "aten/src/ATen/native/quantized/cpu/qthreshold.cpp",

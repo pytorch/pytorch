@@ -81,7 +81,7 @@ class JitBackendTestCase(JitTestCase):
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
-        # lowered_modle - a version of module lowered to a backend
+        # lowered_module - a version of module lowered to a backend
 
     def check_function(self, function_name, input):
         """
@@ -498,7 +498,7 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
         # Subclasses are expected to set up four variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
-        # lowered_modle - a version of module lowered to a backend
+        # lowered_module - a version of module lowered to a backend
         # mobile_module - a module with a format that Pytorch Mobile can execute
 
     def check_forward(self, input):
