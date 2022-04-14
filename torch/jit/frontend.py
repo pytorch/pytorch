@@ -3,6 +3,7 @@ import sys
 import ast
 import inspect
 import string
+import re
 from collections import namedtuple
 from textwrap import dedent
 from typing import List, Tuple  # noqa: F401
@@ -390,7 +391,8 @@ def build_ignore_context_manager(ctx, stmt):
     def create_unique_name_ext(ctx, stmt):
         # extension will be based on the full path filename plus
         # the line number of original context manager
-        return ctx.filename.replace(".", "_").replace("/", "_") + "_" + str(stmt.lineno)
+        fn = re.sub(r'[^a-zA-Z0-9_]', '_', ctx.filename)
+        return f"{fn}_{stmt.lineno}"
 
     def build_return_ann_stmt(outputs):
         return_type_ann = ""

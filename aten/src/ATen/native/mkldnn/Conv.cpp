@@ -60,6 +60,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
   TORCH_CHECK(false, "mkldnn_convolution_transpose_backward: ATen not compiled with MKLDNN support");
 }
 
+REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_stub);
 REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub);
 
 }}
@@ -441,11 +442,11 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
   if (!is_channels_last) {
     return std::make_tuple(
         mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())),
-        mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())));
+        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
   } else {
     return std::make_tuple(
         mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(at::MemoryFormat::ChannelsLast),
-        mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())));
+        bias_defined ? mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())) : Tensor());
   }
 }
 
@@ -469,6 +470,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
+REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_stub, &mkldnn_convolution_transpose);
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub, &mkldnn_convolution_transpose_backward);
 
 }}  // namespace at::native
