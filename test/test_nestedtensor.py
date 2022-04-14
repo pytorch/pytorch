@@ -7,7 +7,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
-    onlyCUDA,
     skipMeta,
 )
 from torch.testing._internal.common_utils import TestCase, IS_FBCODE
