@@ -779,6 +779,9 @@ std::string generate_code(
   }
   if (f_inputs_type == "std::complex<at::Half>" ||
       result_type == "std::complex<at::Half>" || dynamic_casting) {
+    // dynamic_casting requires the definition of all types
+    // include complex<at::Half>
+    // Look at the definition of `StoreWithCast` and `LoadWithCast`.
     env.s("complex_half_body_string", get_complex_half_body_string());
   } else {
     env.s("complex_half_body_string", "");
