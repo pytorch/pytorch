@@ -432,7 +432,7 @@ class TestSortAndSelect(TestCase):
                                                 device=device)
             expected_inverse_dim2 = torch.tensor([0, 1])
             expected_counts_dim2 = torch.tensor([1, 1])
-            expected_unique_empty = torch.tensor([], dtype=dtype, device=device)
+            expected_unique_empty = torch.empty(5, 0, dtype=dtype, device=device)
             expected_inverse_empty = torch.tensor([], dtype=torch.long, device=device)
             expected_counts_empty = torch.tensor([], dtype=torch.long, device=device)
             if dtype in floating_types_and(torch.float16, torch.bfloat16):
