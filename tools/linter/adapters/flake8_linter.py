@@ -251,7 +251,7 @@ def check_files(
 ) -> List[LintMessage]:
     try:
         proc = run_command(
-            ["python3", "-mflake8", "--exit-zero"] + filenames,
+            [sys.executable, "-mflake8", "--exit-zero"] + filenames,
             extra_env={"FLAKE8_PLUGINS_PATH": flake8_plugins_path}
             if flake8_plugins_path
             else None,

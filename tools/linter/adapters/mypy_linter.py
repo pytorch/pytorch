@@ -89,7 +89,7 @@ def check_files(
 ) -> List[LintMessage]:
     try:
         proc = run_command(
-            ["python3", "-mmypy", f"--config={config}"] + filenames,
+            [sys.executable, "-mmypy", f"--config={config}"] + filenames,
             extra_env={},
             retries=retries,
         )
