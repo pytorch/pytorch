@@ -34,6 +34,7 @@ shellcheck:
 
 setup_lint:
 	$(PIP) install lintrunner
+	lintrunner init
 	$(PYTHON) -mpip install jinja2 --user
 
 quick_checks:
