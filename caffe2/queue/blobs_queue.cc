@@ -70,7 +70,6 @@ bool BlobsQueue::blockingRead(
   };
   // Decrease queue balance before reading to indicate queue read pressure
   // is being increased (-ve queue balance indicates more reads than writes)
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   CAFFE_EVENT(stats_, queue_balance, -1);
   if (timeout_secs > 0) {
     std::chrono::milliseconds timeout_ms(int(timeout_secs * 1000));
@@ -93,17 +92,14 @@ bool BlobsQueue::blockingRead(
   CAFFE_ENFORCE(inputs.size() >= result.size());
   for (const auto i : c10::irange(result.size())) {
     auto bytes = BlobStat::sizeBytes(*result[i]);
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     CAFFE_EVENT(stats_, queue_dequeued_bytes, bytes, i);
     using std::swap;
     swap(*(inputs[i]), *(result[i]));
   }
   CAFFE_SDT(queue_read_end, name, (void*)this, writer_ - reader_);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   CAFFE_EVENT(stats_, queue_dequeued_records);
   ++reader_;
   cv_.notify_all();
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   CAFFE_EVENT(stats_, read_time_ns, readTimer.NanoSeconds());
   return true;
 }
@@ -120,11 +116,9 @@ bool BlobsQueue::tryWrite(const std::vector<Blob*>& inputs) {
   }
   // Increase queue balance before writing to indicate queue write pressure is
   // being increased (+ve queue balance indicates more writes than reads)
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   CAFFE_EVENT(stats_, queue_balance, 1);
   DCHECK(canWrite());
   doWrite(inputs);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   CAFFE_EVENT(stats_, write_time_ns, writeTimer.NanoSeconds());
   return true;
 }
@@ -137,7 +131,6 @@ bool BlobsQueue::blockingWrite(const std::vector<Blob*>& inputs) {
   std::unique_lock<std::mutex> g(mutex_);
   // Increase queue balance before writing to indicate queue write pressure is
   // being increased (+ve queue balance indicates more writes than reads)
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   CAFFE_EVENT(stats_, queue_balance, 1);
   cv_.wait(g, [this]() { return closing_ || canWrite(); });
   if (!canWrite()) {
@@ -146,7 +139,6 @@ bool BlobsQueue::blockingWrite(const std::vector<Blob*>& inputs) {
   }
   DCHECK(canWrite());
   doWrite(inputs);
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
   CAFFE_EVENT(stats_, write_time_ns, writeTimer.NanoSeconds());
   return true;
 }
