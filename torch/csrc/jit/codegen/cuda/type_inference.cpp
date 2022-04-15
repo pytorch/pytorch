@@ -410,6 +410,7 @@ class NaiveTypePropagator {
         break;
       }
       case aten::amax:
+      case aten::amin:
       case aten::mean:
       case aten::sum: {
         auto out_type = getInputTensorType(node, 0);
