@@ -10,6 +10,7 @@
 #include <ATen/native/TensorIterator.h>
 
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -20,8 +21,9 @@ namespace at { namespace native {
 class ReduceMultiply {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMul(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMul(self_data_start + index, *src_data);
   }
 };
 static ReduceMultiply reduce_multiply;
@@ -29,8 +31,8 @@ static ReduceMultiply reduce_multiply;
 class ReduceAdd {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicAddNoReturn(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
   }
 };
 static ReduceAdd reduce_add;
@@ -38,8 +40,8 @@ static ReduceAdd reduce_add;
 class ReduceMean {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicAddNoReturn(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
   }
 };
 static ReduceMean reduce_mean;
@@ -47,8 +49,9 @@ static ReduceMean reduce_mean;
 class ReduceMinimum {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMin(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMin(self_data_start + index, *src_data);
   }
 };
 static ReduceMinimum reduce_minimum;
@@ -56,8 +59,9 @@ static ReduceMinimum reduce_minimum;
 class ReduceMaximum {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicMax(self_data, *src_data);
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    gpuAtomicMax(self_data_start + index, *src_data);
   }
 };
 static ReduceMaximum reduce_maximum;
@@ -65,8 +69,9 @@ static ReduceMaximum reduce_maximum;
 class TensorAssign {
 public:
   template <typename scalar_t>
-  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    *self_data = *src_data;
+  constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+    (void)numel; // suppress unused warning
+    *(self_data_start + index) = *src_data;
   }
 };
 static TensorAssign tensor_assign;
@@ -115,12 +120,13 @@ struct _cuda_scatter_gather_internal_kernel {
     TensorIterator& iter,
     int64_t index_size,
     int64_t index_stride,
+    int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
     const func_t& f
   ) {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
         _cuda_scatter_gather_internal_kernel<is_scatter_like, scalar_t>()(
-          sub_iter, index_size, index_stride, f
+          sub_iter, index_size, index_stride, numel, f
         );
       }
       return;
@@ -138,14 +144,12 @@ struct _cuda_scatter_gather_internal_kernel {
       CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
         && "index out of bounds");
 
-      char* self_data = self_ptr + offsets[0];
-      char* src_data = src_ptr + offsets[1];
-
       f(
-        (scalar_t*)self_data + (is_scatter_like ? idx_dim * index_stride : 0),
-        (scalar_t*)src_data + (is_scatter_like ? 0 : idx_dim * index_stride)
+        (scalar_t*)(self_ptr + offsets[0]),
+        is_scatter_like ? idx_dim * index_stride : 0,
+        numel,
+        (scalar_t*)(src_ptr + offsets[1]) + (is_scatter_like ? 0 : idx_dim * index_stride)
       );
-
     };
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
@@ -206,7 +210,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, f
+          iter, index_size, index_stride, self.numel(), f
         );
       }
     );
@@ -264,7 +268,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, f
+          iter, index_size, index_stride, self.numel(), f
         );
       }
     );
@@ -323,7 +327,7 @@ struct cuda_scatter_gather_base_kernel {
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
         _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
-          iter, index_size, index_stride, f
+          iter, index_size, index_stride, self.numel(), f
         );
       }
     );
@@ -338,12 +342,13 @@ struct _cuda_scatter_fill_internal_kernel {
     scalar_t src_val,
     int64_t index_size,
     int64_t index_stride,
+    int64_t numel,  // Do not use `const` qualifier here as it may cause issue in cuda 11.6.x. See #75434, #75545
     const func_t& f
   ) {
     if (!iter.can_use_32bit_indexing()) {
       for (auto& sub_iter : iter.with_32bit_indexing()) {
         _cuda_scatter_fill_internal_kernel<scalar_t>()(
-          sub_iter, src_val, index_size, index_stride, f
+          sub_iter, src_val, index_size, index_stride, numel, f
         );
       }
       return;
@@ -361,13 +366,12 @@ struct _cuda_scatter_fill_internal_kernel {
         && "index out of bounds"
       );
 
-      char* self_data = self_ptr + offsets[0];
-
       f(
-        (scalar_t*)self_data + idx_dim * index_stride,
+        (scalar_t*)(self_ptr + offsets[0]),
+        idx_dim * index_stride,
+        numel,
         (scalar_t*)&src_val
       );
-
     };
 
     _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
@@ -414,7 +418,7 @@ struct cuda_scatter_fill_base_kernel {
         auto src_val = *(dtype*)&src_scalar_val;
 
         _cuda_scatter_fill_internal_kernel<dtype>()(
-          iter, src_val, index_size, index_stride, f
+          iter, src_val, index_size, index_stride, self.numel(), f
         );
       }
     );
@@ -457,7 +461,7 @@ struct cuda_scatter_fill_base_kernel {
         auto src_val = *(dtype*)&src_scalar_val;
 
         _cuda_scatter_fill_internal_kernel<dtype>()(
-          iter, src_val, index_size, index_stride, f
+          iter, src_val, index_size, index_stride, self.numel(), f
         );
       }
     );
