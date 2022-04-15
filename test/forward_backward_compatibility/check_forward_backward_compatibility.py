@@ -131,6 +131,7 @@ ALLOW_LIST = [
     ("aten::var_mean", datetime.date(2022, 5, 1)),
     ("aten::var_mean.dim", datetime.date(2022, 5, 1)),
     ("aten::var_mean.names_dim", datetime.date(2022, 5, 1)),
+    ("aten::_cat", datetime.date(2022, 5, 15)),
 ]
 
 ALLOW_LIST_COMPILED = [
