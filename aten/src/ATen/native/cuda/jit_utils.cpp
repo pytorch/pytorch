@@ -131,6 +131,7 @@ const std::string jit_common_types = R"ESCAPE(
   ${half_string}
   ${bfloat16_string}
   ${complex_body_string}
+  ${complex_half_body_string}
   ${complex_math_string}
 
 
@@ -772,15 +773,18 @@ std::string generate_code(
     env.s("complex_math_string", "");
   }
   if (f_inputs_type == "std::complex<at::Half>" ||
-      result_type == "std::complex<at::Half>" || dynamic_casting) {
+      result_type == "std::complex<at::Half>") {
+    // complex<Half> depends on complex<T> and Half dtypes.
     env.s("traits_string", get_traits_string());
     env.s("half_string", jiterator_half_support_literal);
-    static const auto complex_body_string =
-        get_complex_body_string() + get_complex_half_body_string();
-    env.s(
-        "complex_body_string",
-        complex_body_string);
+    env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
+
+    env.s("complex_half_body_string", get_complex_half_body_string());    
+  } else if (dynamic_casting) {
+    env.s("complex_half_body_string", get_complex_half_body_string());
+  } else {
+    env.s("complex_half_body_string", "");
   }
 
   if (!vectorized) {
