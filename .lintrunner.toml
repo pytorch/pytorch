@@ -515,3 +515,19 @@ init_command = [
     '--output-dir=.lintbin',
     '--output-name=actionlint',
 ]
+
+[[linter]]
+code = 'TESTOWNERS'
+include_patterns = [
+    'test/**/test_*.py',
+    'test/**/*_test.py',
+]
+exclude_patterns = [
+    'test/run_test.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/testowners_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]

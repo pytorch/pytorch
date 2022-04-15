@@ -3270,7 +3270,7 @@
   dispatch:
     CPU: narrow_copy_dense_cpu
     SparseCPU, SparseCUDA: narrow_copy_sparse
-    CompositeImplicitAutograd: narrow_copy_dense
+    CompositeExplicitAutograd: narrow_copy_dense
   tags: view_copy
 
 - func: narrow_copy.SymInt(Tensor self, int dim, int start, SymInt length) -> Tensor
