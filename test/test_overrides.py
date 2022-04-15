@@ -7,7 +7,6 @@ import functools
 import pprint
 import pickle
 import collections
-import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.overrides import (
@@ -729,9 +728,6 @@ def generate_tensor_like_override_tests(cls):
         setattr(cls, name, test_method)
 
 generate_tensor_like_override_tests(TestTorchFunctionOverride)
-TestTorchFunctionOverride.test_torch_functional_histogramdd = unittest.skip(
-    "histogramdd is missing __torch_function__ support")(
-        TestTorchFunctionOverride.test_torch_functional_histogramdd)
 
 class Wrapper:
     "Basic data container that knows how to unwrap itself"
@@ -1120,6 +1116,19 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.split(None, [2]), -1)  # python side
             self.assertEqual(bar(x), -1)
 
+    def test_factory_override(self):
+        class A(TorchFunctionMode):
+            def __torch_function__(self, *args, **kwargs):
+                return -1
+
+        with torch.overrides.push_torch_function_mode(A):
+            self.assertEqual(torch.tensor([1]), -1)
+            self.assertEqual(torch.sparse_coo_tensor(1, 1, 1), -1)
+            self.assertEqual(torch.sparse_csr_tensor(1, 1, 1), -1)
+            self.assertEqual(torch._sparse_coo_tensor_unsafe(1, 1, (1, 1)), -1)
+            self.assertEqual(torch._sparse_csr_tensor_unsafe(1, 1, 1, (1, 1)), -1)
+            self.assertEqual(torch.as_tensor([1]), -1)
+
     def test_enable_torch_function_mode_with_tensor_subclass(self):
         x = torch.randn(1)
         with torch.overrides.enable_torch_function_mode(SubTensor):
@@ -1324,6 +1333,8 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertIs(type(r), B)
         self.assertEqual(called, 2)
+
+
 
 
 if __name__ == '__main__':
