@@ -61,7 +61,7 @@ def check_labels(
     labels: List[str], filename: str, line_number: int
 ) -> List[LintMessage]:
     lint_messages = []
-    for label in labels:
+        for label in labels:
         if label not in PYTORCH_LABELS:
             lint_messages.append(
                 LintMessage(

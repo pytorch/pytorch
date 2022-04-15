@@ -49,6 +49,19 @@ jobs:
           echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
           echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
 
+      - name: Store annotatations
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # The easiest way to get annotations is to just run lintrunner again
+          # in JSON mode and add a GitHub problem matcher to pattern match the
+          # output.
+          echo "::add-matcher::.github/lintrunner_problem_matcher.json"
+
+          # `|| true` because we don't want this step to error
+          lintrunner --merge-base-with "${PR_BASE_SHA}" --json || true
+
   quick-checks:
     name: quick-checks
     runs-on: ubuntu-18.04

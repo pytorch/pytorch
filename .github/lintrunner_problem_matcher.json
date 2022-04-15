@@ -1,0 +1,19 @@
+
+{
+    "problemMatcher": [
+        {
+            "owner": "eslint-stylish",
+            "pattern": [
+                {
+                    "regexp": "^{\"path\":\"(.*)\",\"line\":(\\d+),\"char\":(\\d+),\"code\":\"(.*)\",\"severity\":\"(.*)\",\"name\":\"(.*)\",\"description\":\"(.*)\"}$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "code": 4,
+                    "severity": 5,
+                    "message": 6
+                }
+            ]
+        }
+    ]
+}
