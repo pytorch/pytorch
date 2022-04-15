@@ -435,6 +435,7 @@ inline static void apply_svd_cusolver_gesvd(const Tensor& A, const Tensor& U, co
   }
 }
 
+// We'll copy A inside svd_cusolver_gesvd
 inline static void svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
   const Tensor& infos, bool full_matrices, bool compute_uv,
   const bool calculate_all_batches = true,
@@ -522,6 +523,7 @@ inline static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, c
 
 // wrapper around apply_svd_cusolver_gesvdj that handles dtype dispatch
 // note that gesvdj returns V, which is what we want
+// Need to pass a copy of A, since A will be rewritten inside the function call
 inline static void svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& infos, bool full_matrices, bool compute_uv) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda_gesvdj", [&] {
     apply_svd_cusolver_gesvdj<scalar_t>(A, U, S, V, infos, full_matrices, compute_uv);
@@ -713,37 +715,50 @@ void svd_cusolver(const Tensor& A,
 
   const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
 
-  if (!driver.has_value() || driver.value() == "gesvd") {
-    // Use default gesvd driver to get the best numerical stability.
-    // We'll copy A inside svd_cusolver_gesvd
-    TORCH_WARN_ONCE(
-      "The default driver of SVD on CUDA was changed to achieve the best numerical stability. "
-      "You may experience slower speed than before. "
-      "To get the old behavior, set `driver = \"gesvdj\"` kwarg in SVD function calls. ",
-      check_svd_doc);
-    svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
-  } else {
-    // Need to pass a copy of A, since A will be rewritten inside the function call
+  const bool gesvdj_batched_requirements = (m <= 32 && n <= 32 && batch_size > 1 && (full_matrices || m == n));
+  bool convergence_check_needed = false;
 
-    if (driver.value() == "gesvdj") {
+  if (!driver.has_value()) {
+    // use the default heuristics
+    if (gesvdj_batched_requirements) {
+      svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
+      convergence_check_needed = true;
+    } else if (m <= 1024 && n <= 1024) {
+      // gesvdj driver may be numerically unstable for large sized matrix
+      // Todo: Expose/adjust cusolver options of gesvdj number of iterations and numerical tolerance
+      svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
+      convergence_check_needed = true;
+    } else {
+      svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
+    }
+    // DO NOT use gesvdaStridedBatched as a default SVD backend driver since it may be inaccurate.
+  } else {
+    if (driver.value() == "gesvd") {
+      svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
+    } else if (driver.value() == "gesvdj") {
       // gesvdj has good performance for general matrices, but may hard to converge for certain large size or ill-conditioned matrices.
       svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
+      convergence_check_needed = true;
     } else if (driver.value() == "gesvdjBatched") {
       // gesvdjBatched just works for square matrices
-      TORCH_CHECK(batch_size > 0 && m <= 32 && n <= 32 && (full_matrices || m == n),
+      TORCH_CHECK(gesvdj_batched_requirements,
         "Cusolver SVD `gesvdjBatched` driver requires the input matrices be non-empty, "
         "are square matrices, and have sizes no larger than 32.");
       svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
+      convergence_check_needed = true;
     } else if (driver.value() == "gesvdaBatched") {
       // gesvdaStridedBatched is preferred for "tall skinny" matrices
       TORCH_CHECK(batch_size > 0 && m > 0 && n > 0 && m > n,
         "Cusolver SVD `gesvdaBatched` driver requires the input matrices be non-empty "
         "and number of rows be greater than number of columns (ideally tall and skinny).");
       svd_cusolver_gesvdaStridedBatched(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
+      convergence_check_needed = true;
     } else {
       TORCH_CHECK(false, "Unknown svd driver ", driver.value(), " in svd_cusolver computation.");
     }
+  }
 
+  if (convergence_check_needed) {
     // A device-host sync will be performed.
     // Todo: implement the svd_ex variant to not check result convergence, thus removing the device-host sync
     const auto svd_non_converging_batches = _check_gesvdj_convergence(info, k + 1);
@@ -752,8 +767,13 @@ void svd_cusolver(const Tensor& A,
       TORCH_WARN_ONCE("During SVD computation with the selected cusolver driver, ",
                       _format_non_converging_batches(svd_non_converging_batches),
                       " failed to converge. ",
-                      "It is recommended to redo this SVD with another driver.",
+                      (driver.has_value()
+                        ?  "It is recommended to redo this SVD with another driver. "
+                        : "A more accurate method will be used to calculate the SVD as a fallback. "),
                       check_svd_doc);
+      if (!driver.has_value()) {
+        svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv, false, svd_non_converging_batches);
+      }
     }
   }
 
