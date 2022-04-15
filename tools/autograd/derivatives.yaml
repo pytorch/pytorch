@@ -418,6 +418,7 @@
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs, angle: polar_backward(grad, result)
+  result: at::complex(abs_t*angle_p.cos() - angle_t*abs_p*angle_p.sin(), abs_t*angle_p.sin() + angle_t*abs_p*angle_p.cos())
 
 - name: _conj(Tensor(a) self) -> Tensor(a)
   self: grad.conj()
@@ -515,6 +516,7 @@
 - name: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   self: norm_backward(grad, self - other, p, result)
   other: -norm_backward(grad, self - other, p, result)
+  result: norm_jvp(self_p - other_p, self_t - other_t, p, result, {}, false)
 
 # The backward formula is done in this order to improve numerical stability
 # of the higher order derivatives, see https://github.com/pytorch/pytorch/issues/43414
@@ -552,6 +554,7 @@
 
 - name: native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)
   input: "GradMode::is_enabled() ? infinitely_differentiable_native_dropout_backward(grad, result1, (!train.has_value() || !train.value() ? 1 : (p == 1 ? 0.0 : 1.0 / (1.0 - p)))) : native_dropout_backward(grad, result1, (!train.has_value() || !train.value() ? 1 : (p == 1 ? 0.0 : 1.0 / (1.0 - p))))"
+  result0: "(!train.has_value() || train.value()) ? (p == 1 ? 0.0 : 1.0 / (1.0 - p)) * input_t * result1 : input_t"
 
 - name: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
   grad_output: "native_dropout_double_backward(grad, grad_output, mask, scale)"
@@ -983,7 +986,7 @@
 - name: maximum(Tensor self, Tensor other) -> Tensor
   self: at::where(self == other, grad / 2, grad).masked_fill_(self < other, 0)
   other: at::where(self == other, grad / 2, grad).masked_fill_(self > other, 0)
-  result: other_t + at::where(self_p == other_p, 0.5, (self_p > other_p).to(result.scalar_type())) * (self_t - other_t)
+  result: other_t + at::where(self_p == other_p, at::scalar_tensor(0.5, result.options()), (self_p > other_p).to(result.scalar_type())) * (self_t - other_t)
 
 - name: fmax(Tensor self, Tensor other) -> Tensor
   self: grad.masked_fill((self >= other).logical_or_(other.isnan()).logical_not_(), 0)
@@ -1039,7 +1042,7 @@
 - name: minimum(Tensor self, Tensor other) -> Tensor
   self: at::where(self == other, grad / 2, grad).masked_fill_(self > other, 0)
   other: at::where(self == other, grad / 2, grad).masked_fill_(self < other, 0)
-  result: other_t + at::where(self_p == other_p, 0.5, (self_p < other_p).to(result.scalar_type())) * (self_t - other_t)
+  result: other_t + at::where(self_p == other_p, at::scalar_tensor(0.5, result.options()), (self_p < other_p).to(result.scalar_type())) * (self_t - other_t)
 
 - name: fmin(Tensor self, Tensor other) -> Tensor
   self: grad.masked_fill((self <= other).logical_or_(other.isnan()).logical_not_(), 0)
@@ -1127,18 +1130,23 @@
 
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)
+  result: norm_jvp(self_p, self_t, p, result)
 
 - name: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
   self: norm_backward(grad, self, p, result, dim, keepdim)
+  result: norm_jvp(self_p, self_t, p, result, dim, keepdim)
 
 - name: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result)
+  result: norm_jvp(self_p, self_t, p, result)
 
 - name: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim)
+  result: norm_jvp(self_p, self_t, p, result, dim, keepdim)
 
 - name: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: linalg_vector_norm_backward(grad, self, ord, result, dim, keepdim)
+  result: linalg_vector_norm_jvp(self_p, self_t, ord, result, dim, keepdim)
 
 - name: _pdist_forward(Tensor self, float p=2) -> Tensor
   self: _pdist_backward(grad, self, p, result)
@@ -1460,9 +1468,11 @@
 - name: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), maybe_multiply(-grad, alpha.conj()))
   other: handle_r_to_c(other.scalar_type(), grad)
+  result: -maybe_multiply(self_t, alpha) + other_t
 
 - name: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), maybe_multiply(-grad, alpha.conj()))
+  result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: grad.expand(self.sizes())
@@ -1486,22 +1496,18 @@
                    full_matrices ? U.narrow(-1, 0, S.size(-1)) : U,
                    S,
                    full_matrices ? Vh.narrow(-2, 0, S.size(-1)) : Vh)"
-  U: std::get<0>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
-  S: std::get<1>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
-  Vh: std::get<2>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
+  U, S, Vh: linalg_svd_jvp(A_t, U, S, Vh, full_matrices)
 
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors_return, /*is_hermitian=*/true, /*symeig_eigenvector=*/eigenvectors)
 
 - name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/true)
-  eigenvalues: std::get<0>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/true))
-  eigenvectors: std::get<1>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/true))
+  eigenvalues, eigenvectors: linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/true)
 
 - name: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: handle_r_to_c(self.scalar_type(), linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/false))
-  eigenvalues: std::get<0>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/false))
-  eigenvectors: std::get<1>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/false))
+  eigenvalues, eigenvectors: linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/false)
 
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
@@ -2174,6 +2180,7 @@
 - name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result) -> Tensor
   grad_output: elu_backward(grad, alpha, scale, input_scale, is_result, self_or_result)
   self_or_result: elu_double_backward(grad, grad_output, alpha, scale, input_scale, is_result, self_or_result)
+  result: elu_backward(grad_output_t, alpha, scale, input_scale, is_result, self_or_result_p) + elu_double_backward(self_or_result_t, grad_output_p, alpha, scale, input_scale, is_result, self_or_result_p)
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices) -> Tensor
   grad_output: max_pool_double_backward(grad, indices, 2)
@@ -2216,6 +2223,24 @@
   # self_is_result is always false here since double backward call is an out-of-place call, self is input itself
   grad_output: leaky_relu_backward(grad, self, negative_slope, false)
   self: zeros_like(grad)
+  # leaky_relu_backward(grad_output, self, negative_slope, false)
+  # computes grad_output * at::where(self_p > 0, 1, negative_slope)
+  # so the jvp formula is the following:
+  # grad_output_t * at::where(self_p > 0, self_p.new_ones([]), negative_slope);
+  #
+  # leaky_relu_backward(grad_output, result, negative_slope, true)
+  # computes grad_output * at::where(result > 0, 1, negative_slope)
+  # under the assumption that `negative_slope` is positive (otherwise,
+  # it is not possible to compute the gradient).
+  #
+  # so the jvp formula is the following:
+  # grad_output_t * at::where(result_p > 0, result_p.new_ones([]), negative_slope);
+  # with the assumption that negative_slope is positive.
+  #
+  # Combined together that results in the following optimized kernel which
+  # also checks the assumption that negative_slope is positive when self_is_result
+  # is True:
+  result: leaky_relu_backward(grad_output_t, self_p, negative_slope, self_is_result)
 
 - name: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
   grad_output: max_pool_double_backward(grad, indices, 2)
@@ -2529,12 +2554,15 @@
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   self: fft_r2c_backward(grad, dim, normalization, onesided, self.size(dim.back()))
+  result: auto_linear
 
 - name: _fft_c2r(Tensor self, int[] dim, int normalization, int last_dim_size) -> Tensor
   self: fft_c2r_backward(grad, dim, normalization)
+  result: auto_linear
 
 - name: _fft_c2c(Tensor self, int[] dim, int normalization, bool forward) -> Tensor
   self: _fft_c2c(grad, dim, normalization, !forward)
+  result: auto_linear
 
 - name: unbind.int(Tensor(a -> *) self, int dim=0) -> Tensor(a)[]
   self: unbind_backward(grads, dim)
@@ -2634,6 +2662,6 @@
 - name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
 
-- name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce) -> Tensor
-  self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, result)
+- name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
+  self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable

@@ -11,6 +11,7 @@
 /torch/nn/ @albanD @jbschlosser
 /torch/optim/ @albanD
 /test/test_public_bindings.py @albanD
+/test/allowlist_for_publicAPI.json @albanD @anjali411
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/native_functions.yaml @bdhirsh
 
@@ -47,9 +48,9 @@
 /.github/ @seemethere @janeyx99 @atalman
 
 # Custom Test Infrastructure
-/test/run_test.py @pytorch-dev-infra
+/test/run_test.py @pytorch/pytorch-dev-infra
 /torch/testing/_internal/common_device_type.py @mruberry
-/torch/testing/_internal/common_utils.py @pytorch-dev-infra
+/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano

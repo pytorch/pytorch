@@ -7,7 +7,6 @@ import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    OPTIM_TARGET_RANK,
     OptimStateKeyType,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -235,7 +234,7 @@ class TestFSDPOptimState(FSDPTest):
         ``torch.save()`` and ``torch.load()`` so that all ranks can have it."""
         obj_list = [full_osd]
         dist.broadcast_object_list(
-            obj_list, src=OPTIM_TARGET_RANK, group=group,
+            obj_list, src=0, group=group,
         )
         full_osd = obj_list[0]
         return full_osd
@@ -334,9 +333,11 @@ class TestFSDPOptimState(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
+    @parametrize("rank0_only", [False, True])
     def test_full_optim_state_dict_nested(
         self,
         use_multiple_param_groups: bool,
+        rank0_only: bool,
     ) -> None:
         """
         Tests :meth:`full_optim_state_dict` by comparing the returned dict for
@@ -352,8 +353,12 @@ class TestFSDPOptimState(FSDPTest):
             wrap=True, use_multiple_param_groups=use_multiple_param_groups,
         )
         losses1 = self._step_model(model1, optim1, num_iters=NUM_ITERS)
-        full_osd = FSDP.full_optim_state_dict(model1, optim1, optim_input)
-        if self.rank != OPTIM_TARGET_RANK:
+        full_osd = FSDP.full_optim_state_dict(
+            model1, optim1, optim_input, rank0_only=rank0_only,
+        )
+        # Non-target ranks get an empty state dict
+        if rank0_only and self.rank != 0:
+            self.assertEqual(len(full_osd), 0)
             return
         model2, optim2, _ = self._init_nested_model(
             wrap=False, use_multiple_param_groups=use_multiple_param_groups,
