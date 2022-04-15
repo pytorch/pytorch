@@ -143,7 +143,7 @@ jobs:
     with:
       build-environment: linux-bionic-py3.7-clang9-slow
       docker-image: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.docker-image }}
-      needs-submodules: true
+      checkout-pytorch-submodules: recursive
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },

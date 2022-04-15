@@ -20,10 +20,10 @@ on:
         type: boolean
         default: false
         description: checks out viable/strict
-      needs-submodules:
+      checkout-pytorch-submodules:
         required: false
         default: false
-        type: boolean
+        type: string
         description: If this job needs to checkout the submodules
 
 env:
@@ -46,7 +46,7 @@ jobs:
         with:
           needs-viable-strict: ${{ inputs.needs-viable-strict }}
           needs-history-and-master: true
-          submodules: ${{ inputs.needs-submodules }}
+          submodules: ${{ inputs.checkout-pytorch-submodules }}
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux

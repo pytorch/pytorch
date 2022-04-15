@@ -114,7 +114,7 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-clang7-onnx
       docker-image: ${{ needs.linux-xenial-py3_7-clang7-onnx-build.outputs.docker-image }}
-      needs-submodules: true
+      checkout-pytorch-submodules: recursive
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
