@@ -315,6 +315,15 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
   }
 }
 
+c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
+  c10::List<c10::optional<Tensor>> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto i : c10::irange(t_list.size())) {
+    outputs.push_back(from_functional_tensor(t_list[i]));
+  }
+  return outputs;
+}
+
 bool isFunctionalTensor(ITensorListRef list) {
   return isFunctionalTensorIListRef(list);
 }
