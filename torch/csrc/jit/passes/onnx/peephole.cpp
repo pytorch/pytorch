@@ -1047,7 +1047,6 @@ void PeepholeOptimizeONNX(
   fuseListConstructListUnpack(graph->block());
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
-  std::cout << "graph before erase: " << *graph << std::endl;
   eraseTupleConstruct(graph->block());
   EliminateDeadCode(
       graph->block(),
