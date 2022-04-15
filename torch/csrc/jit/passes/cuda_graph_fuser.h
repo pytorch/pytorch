@@ -16,8 +16,16 @@ struct TORCH_API RegisterCudaFuseGraph
   static bool registerPass(bool enabled) {
     bool old_flag = PassManager::isRegistered();
     if (enabled) {
+      // TODO: this might not be the right place to put the ROCm logic.
+      // i.e. since this is built as part of libtorch cpu, USE_ROCM flag
+      // might not be available while building this lib.
+#ifdef USE_ROCM
+      bool has_rocm = true;
+#else
+      bool has_rocm = false;
+#endif
       TORCH_CHECK(
-          at::globalContext().hasCUDA() && !at::globalContext().hasHIP(),
+          at::globalContext().hasCUDA() && !has_rocm,
           "Running CUDA fuser is only supported on CUDA builds.");
       PassManager::registerPass(fuser::cuda::fuseGraph);
     } else {

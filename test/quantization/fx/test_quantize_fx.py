@@ -4254,6 +4254,28 @@ class TestQuantizeFx(QuantizationTestCase):
                             self.assertEqual(mod.quant_min, 0)
                             self.assertEqual(mod.quant_max, 255)
 
+    def test_prepare_mode(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def _test(prepare_fn, qconfig_dict):
+            m = LinearModel()
+            m1 = copy.deepcopy(m)
+            m1.train()
+            prepare_fn(m1, qconfig_dict)
+            m2 = copy.deepcopy(m)
+            m2.eval()
+            prepare_fn(m2, qconfig_dict)
+
+        # Ensure prepare_fx and prepare_qat_fx work in both training and eval modes
+        _test(prepare_fx, get_default_qconfig_dict())
+        _test(prepare_qat_fx, get_default_qat_qconfig_dict())
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
@@ -4363,18 +4385,18 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.use_bias = use_bias
                 if has_relu:
                     if f_relu:
-                        self.relu = F.relu
+                        self.relu_or_id = F.relu
                     else:
-                        self.relu = torch.nn.ReLU()
+                        self.relu_or_id = torch.nn.ReLU()
                 else:
-                    self.relu = torch.nn.Identity()
+                    self.relu_or_id = torch.nn.Identity()
 
             def forward(self, x):
                 if self.use_bias:
                     x = F.linear(x, self.w, self.b)
                 else:
                     x = F.linear(x, self.w)
-                x = self.relu(x)
+                x = self.relu_or_id(x)
                 return x
 
         data = (torch.rand((1, 30), dtype=torch.float),)
@@ -4402,7 +4424,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # it is a copy node, that's why we have extra observer/fake_quant
             # when has_relu is False
             quant_type_to_prepare_expected_node_occurrence = {
-                QuantType.DYNAMIC: {},
+                QuantType.DYNAMIC: {
+                    ns.call_module(torch.ao.quantization.PlaceholderObserver): 1,
+                    ns.call_module(torch.ao.quantization.MinMaxObserver): 1,
+                },
                 # There should be 3 observers: after input, weight and activation.
                 # one more observer for torch.nn.Identity when there is no relu
                 QuantType.STATIC: {
@@ -4431,7 +4456,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             convert_node_occurrence = {
                 ns.call_function(torch.quantize_per_tensor): 1 if quant_type != QuantType.DYNAMIC else 0,
                 qlinear_fun: 1,
-                ns.call_method("dequantize"): num_dequantize,
+                ns.call_method("dequantize"): num_dequantize if quant_type != QuantType.DYNAMIC else 0,
             }
             prepare_expected_node_occurrence = \
                 quant_type_to_prepare_expected_node_occurrence[quant_type]
@@ -4485,10 +4510,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                     qlinear_fun = ns.call_function(torch.ops.quantized.linear_dynamic_fp16)
             prepare_node_occurrence = {
                 # activation and weight
-                # TODO: this is temporary behavior, should be fixed after we use
-                # backend_config_dict to configure default pt quantization behavior
-                # activation for nn.Identity (not has_relu)
-                ns.call_module(torch.ao.quantization.PlaceholderObserver): 2 + int(not has_relu)
+                ns.call_module(torch.ao.quantization.PlaceholderObserver): 2
             }
             convert_node_occurrence = {
                 qlinear_fun: 1,
@@ -4502,6 +4524,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 prepare_expected_node_occurrence=prepare_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
 
+    # TODO: maybe remove this support
     def test_linear_static_fp16(self):
         class FuncLinear(torch.nn.Module):
             def __init__(self, use_bias, has_relu, f_relu):
@@ -5313,9 +5336,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_norm_impl(
             nn.LayerNorm, F.layer_norm, [[2, 5, 5]], data, nnq.LayerNorm, torch.ops.quantized.layer_norm)
 
-        self._test_norm_float16_impl(
-            nn.LayerNorm, F.layer_norm, [[2, 5, 5]], data)
-
     def test_instance_norm(self):
         data_1d = (torch.rand((1, 4, 5), dtype=torch.float),)
         data_2d = (torch.rand((1, 4, 5, 1), dtype=torch.float),)
@@ -5407,6 +5427,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
 
+    @unittest.skip("TODO: reenable with backend_config_dict api")
     def test_gelu_normal(self):
         module = torch.nn.GELU
         functional = torch.nn.functional.gelu
@@ -5419,6 +5440,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
 
+    @unittest.skip("TODO: reenable with backend_config_dict api")
     def test_softmax_normal(self):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
@@ -5655,7 +5677,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
         quant_type = QuantType.STATIC
         qconfig = torch.ao.quantization.QConfig(
-            activation=HistogramObserver.with_args(qscheme=torch.per_tensor_symmetric, dtype=torch.qint8),
+            activation=HistogramObserver.with_args(qscheme=torch.per_tensor_symmetric, dtype=torch.quint8),
             weight=default_weight_observer)
         qconfig_dict = {"": qconfig}
         node_occurrence = {
@@ -6867,15 +6889,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             model = EmbeddingBagLinear().train()
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict)
             test_only_train_fn(prepared_fx_model, train_indices)
-            convert_custom_config_dict = {
-                "additional_object_mapping": {
-                    "static": {
-                        torch.nn.qat.EmbeddingBag: nn.quantized.EmbeddingBag,
-                    }
-                }
-            }
             quant_model = convert_fx(prepared_fx_model,
-                                     convert_custom_config_dict=convert_custom_config_dict,
                                      qconfig_dict=qconfig_dict)
 
             def checkQuantized(model):
@@ -6915,15 +6929,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             model = EmbeddingLinear().train()
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict)
             test_only_train_fn(prepared_fx_model, train_indices)
-            convert_custom_config_dict = {
-                "additional_object_mapping": {
-                    "static": {
-                        torch.nn.qat.Embedding: nn.quantized.Embedding,
-                    }
-                }
-            }
             quant_model = convert_fx(prepared_fx_model,
-                                     convert_custom_config_dict=convert_custom_config_dict,
                                      qconfig_dict=qconfig_dict)
 
             def checkQuantized(model):
