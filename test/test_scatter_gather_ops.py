@@ -72,7 +72,8 @@ class TestScatterGather(TestCase):
         expected = torch.tensor(((False, False), (True, True)), device=device, dtype=dtype)
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-    def _test_scatter_base(self, fn, *, device, dtype, is_scalar, reduction, unique_indices=True):
+    def _test_scatter_base(self, fn, *, device, dtype, is_scalar, reduction,
+                           unique_indices=True, include_self=True):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
         elems_per_row = random.randint(1, 10)
         dim = random.randrange(3)
@@ -90,12 +91,15 @@ class TestScatterGather(TestCase):
 
         base = make_tensor((m, n, o), device=device, dtype=dtype)
         if reduction is not None:
-            actual = fn(base.clone(), dim, idx, src, reduce=reduction)
+            if fn is torch.Tensor.scatter_reduce_:
+                actual = fn(base.clone(), dim, idx, src, reduce=reduction, include_self=include_self)
+            else:
+                actual = fn(base.clone(), dim, idx, src, reduce=reduction)
         else:
             actual = fn(base.clone(), dim, idx, src)
 
         expected = base.clone()
-        counts = torch.ones(base.shape, dtype=torch.long, device=device)
+        counts = torch.zeros(base.shape, dtype=torch.long, device=device) + include_self
         for i in range(idx_size[0]):
             for j in range(idx_size[1]):
                 for k in range(idx_size[2]):
@@ -109,21 +113,26 @@ class TestScatterGather(TestCase):
                         # while the latter two always do
                         value = src if is_scalar else src[i, j, k]
 
-                        if reduction == "add" or reduction == "sum":
-                            expected[tuple(ii)] += value
-                        elif reduction == "multiply" or reduction == "prod":
-                            expected[tuple(ii)] *= value
-                        elif reduction == "amax":
-                            expected[tuple(ii)] = max(expected[tuple(ii)], value)
-                        elif reduction == "amin":
-                            expected[tuple(ii)] = min(expected[tuple(ii)], value)
-                        elif reduction == "mean":
-                            expected[tuple(ii)] += value
-                            counts[tuple(ii)] += 1
-                        else:
+                        if ((not include_self) and counts[tuple(ii)] == 0):
                             expected[tuple(ii)] = value
+                        else:
+                            if reduction == "add" or reduction == "sum":
+                                expected[tuple(ii)] += value
+                            elif reduction == "multiply" or reduction == "prod":
+                                expected[tuple(ii)] *= value
+                            elif reduction == "amax":
+                                expected[tuple(ii)] = max(expected[tuple(ii)], value)
+                            elif reduction == "amin":
+                                expected[tuple(ii)] = min(expected[tuple(ii)], value)
+                            elif reduction == "mean":
+                                expected[tuple(ii)] += value
+                            else:
+                                expected[tuple(ii)] = value
+
+                        counts[tuple(ii)] += 1
 
         if (reduction == "mean"):
+            counts.masked_fill_(counts == 0, 1)
             if (dtype.is_floating_point or dtype.is_complex):
                 expected /= counts
             else:
@@ -181,32 +190,42 @@ class TestScatterGather(TestCase):
     # FIXME: discrepancy between bool ReduceAdd on CUDA and CPU (a + b on CPU and buggy a && b on CUDA)
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     def test_scatter_reduce_sum(self, device, dtype):
-        self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
-                                is_scalar=False, reduction='sum', unique_indices=False)
+        for include_self in (True, False):
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='sum', unique_indices=False,
+                                    include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True))
     @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
     def test_scatter_reduce_prod(self, device, dtype):
-        self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
-                                is_scalar=False, reduction='prod', unique_indices=False)
+        for include_self in (True, False):
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='prod', unique_indices=False,
+                                    include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=False))
     @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
     def test_scatter_reduce_mean(self, device, dtype):
-        self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
-                                is_scalar=False, reduction='mean', unique_indices=False)
+        for include_self in (True, False):
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='mean', unique_indices=False,
+                                    include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
     def test_scatter_reduce_amax(self, device, dtype):
-        self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
-                                is_scalar=False, reduction='amax', unique_indices=False)
+        for include_self in (True, False):
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='amax', unique_indices=False,
+                                    include_self=include_self)
 
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     @dtypesIfCUDA(*get_all_fp_dtypes(include_half=True, include_bfloat16=True))
     def test_scatter_reduce_amin(self, device, dtype):
-        self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
-                                is_scalar=False, reduction='amin', unique_indices=False)
+        for include_self in (True, False):
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='amin', unique_indices=False,
+                                    include_self=include_self)
 
 
 # Generic Device Test Framework instantation, see
