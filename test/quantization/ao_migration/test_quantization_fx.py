@@ -168,11 +168,10 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         ]
         self._test_function_import('fx.fusion_patterns', function_list)
 
-    # we moved torch.ao.quantization.fx.quantization_types to torch.ao.quantization
-    # so the test is not valid anymore, we removed the test for
-    # torch.ao.quantization.fx.quantization_types
-    # the old torch.quantization.fx.quantization_types is still valid at this point
-    # since breaking bc for that namespace doesn't make a lot of sense
+    # we removed matching test for torch.quantization.fx.quantization_types
+    # old: torch.quantization.fx.quantization_types
+    # new: torch.ao.quantization.quantization_types
+    # both are valid, but we'll deprecate the old path in the future
 
     def test_package_import_fx_utils(self):
         self._test_package_import('fx.utils')
