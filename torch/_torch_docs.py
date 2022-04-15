@@ -9206,7 +9206,7 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-                      For `Bessel's correction`_, use ``correction=1``.
+        For `Bessel's correction`_, use ``correction=1``.
     {keepdim}
     {out}
 
@@ -9260,7 +9260,7 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-                      For `Bessel's correction`_, use ``correction=1``.
+        For `Bessel's correction`_, use ``correction=1``.
     {keepdim}
     {out}
 
@@ -10536,7 +10536,7 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-                      For `Bessel's correction`_, use ``correction=1``.
+        For `Bessel's correction`_, use ``correction=1``.
     {keepdim}
     {out}
 
@@ -10589,7 +10589,7 @@ Args:
 
 Keyword args:
     correction (int): difference between the sample size and sample degrees of freedom.
-                      For `Bessel's correction`_, use ``correction=1``.
+        For `Bessel's correction`_, use ``correction=1``.
     {keepdim}
     {out}
 
