@@ -198,6 +198,13 @@ bool disableIndexHoisting() {
   return disable_index_hoist ? atoi(disable_index_hoist) : false;
 }
 
+bool disablePredicateElimination() {
+  const static char* disable_predicate_elimination =
+      getenv("PYTORCH_NVFUSER_DISABLE_PREDICATE_ELIMINATION");
+  return disable_predicate_elimination ? atoi(disable_predicate_elimination)
+                                       : false;
+}
+
 std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {
   TORCH_INTERNAL_ASSERT(tensor_type != nullptr, "Input must be a Tensor.");
   auto optional_sizes = tensor_type->sizes().concrete_sizes();

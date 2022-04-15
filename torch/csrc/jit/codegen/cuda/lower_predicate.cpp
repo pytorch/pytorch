@@ -126,10 +126,14 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
   }
 };
 
+// Warp primitives are currently limited to un-predicated usage,
+//   predicating these ops will require extra steps to ensure that
+//   the whole warp will get the same value.
 void assertOnWarpOps(const Expr* expr) {
   TORCH_INTERNAL_ASSERT(
       !expr->isA<MmaOp>(),
-      "Mma op: cannot eliminate predicate for mma op, tiling not valid");
+      "Mma op: cannot eliminate predicate for mma op, tiling not valid. ",
+      expr->toString());
 }
 
 } // namespace
@@ -363,9 +367,6 @@ void PredicateElimination::handle(Expr* expr) {
   }
 
   if (needsPredicate(expr)) {
-    // Warp primitives are currently limited to un-predicated usage,
-    //   predicating these ops will require extra steps to ensure that
-    //   the whole warp will get the same value.
     assertOnWarpOps(expr);
     return;
   }
@@ -463,6 +464,13 @@ bool PredicateElimination::setReductionInitValue(
 }
 
 bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
+  // Predicate elimination can be disabled with
+  // PYTORCH_NVFUSER_DISABLE_PREDICATE_ELIMINATION
+  if (disablePredicateElimination()) {
+    assertOnWarpOps(expr);
+    return false;
+  }
+
   TORCH_INTERNAL_ASSERT(expr != nullptr);
   const auto out_tv = ir_utils::getTvOutput(expr);
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Not a tensor expression");
@@ -478,6 +486,7 @@ bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
     return true;
   }
 
+  assertOnWarpOps(expr);
   return false;
 }
 

@@ -54,6 +54,9 @@ bool disableRNGUnrolling();
 //! Returns if index hoisting should be disabled
 TORCH_CUDA_CU_API bool disableIndexHoisting();
 
+//! Returns if predicate elimination should be disabled
+TORCH_CUDA_CU_API bool disablePredicateElimination();
+
 //! Ceil integer division
 constexpr int64_t ceilDiv(int64_t a, int64_t b) {
   return (a + b - 1) / b;
