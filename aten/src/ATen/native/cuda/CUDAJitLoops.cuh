@@ -223,9 +223,20 @@ at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
   }
 }
 
-template <char const *name, typename result_type, typename f_inputs_type, int arity,
-          at::cuda::jit::BinaryFuncVariant scalar_pos=at::cuda::jit::BinaryFuncVariant::NoScalar, typename ... Args>
-void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, const bool dynamic_casting, f_inputs_type scalar_val, std::tuple<Args...> extra_args) {
+template <
+    char const* name,
+    typename result_type,
+    typename f_inputs_type,
+    int arity,
+    at::cuda::jit::BinaryFuncVariant scalar_pos =
+        at::cuda::jit::BinaryFuncVariant::NoScalar,
+    typename... Args>
+void jitted_gpu_kernel_impl(
+    TensorIteratorBase& iter,
+    const std::string& f,
+    const bool dynamic_casting,
+    at::opmath_type<f_inputs_type> scalar_val,
+    std::tuple<Args...> extra_args) {
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ninputs() == arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
