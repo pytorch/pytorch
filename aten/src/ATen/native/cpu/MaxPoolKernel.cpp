@@ -72,12 +72,10 @@ void cpu_max_pool(
           // To remedy that, we neglect compilation of std::isnan when accscalar_t is an integral type
           // TODO: change c10::guts::if_constexpr to if constexpr when C++17 is available
           auto maybe_eval_rhs = [](accscalar_t val) {
-            bool res{false};
-            c10::guts::if_constexpr<std::is_integral<accscalar_t>::value> (
-              [&res] () { res = false; }, // if integral type
-              [&res, val] () { res = std::isnan(val); }  // if not integral type
+            return c10::guts::if_constexpr<!std::is_integral<accscalar_t>::value> (
+              [] (auto _) { return false; }, // if integral type
+              [&val] (auto _) { return _(std::isnan(val)); }  // if not integral type
             );
-            return res;
           };
           if ((val > maxval) || maybe_eval_rhs(val)) {
             maxval = val;
@@ -205,12 +203,10 @@ void cpu_max_pool_channels_last(
             // To remedy that, we neglect compilation of std::isnan when accscalar_t is an integral type
             // TODO: change c10::guts::if_constexpr to if constexpr when C++17 is available
             auto maybe_eval_rhs = [](scalar_t val) {
-              bool res{false};
-              c10::guts::if_constexpr<std::is_integral<scalar_t>::value> (
-                [&res] () { res = false; }, // if integral type
-                [&res, val] () { res = std::isnan(val); }  // if not integral type
+              return c10::guts::if_constexpr<!std::is_integral<scalar_t>::value> (
+                [] (auto _) { return false; }, // if integral type
+                [&val] (auto _) { return _(std::isnan(val)); }  // if not integral type
               );
-              return res;
             };
             bool mask = (val > maxval) || maybe_eval_rhs(val);
             out[d2] = mask ? val : maxval;
