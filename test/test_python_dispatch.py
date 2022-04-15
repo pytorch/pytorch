@@ -12,17 +12,43 @@ import logging
 
 class TestPythonRegistration(TestCase):
     def test_override_cpu_sum(self) -> None:
+        # Example 1
         run = [False]
         def my_sum(*args, **kwargs):
             run[0] = True
             return args[0]
+
         torch.ops.aten.sum.default.impl("CPU", my_sum)
+
         x = torch.tensor([1, 2])
         self.assertEqual(torch.sum(x), x)
         self.assertTrue(run[0])
 
+        # Example 2
+        def my_neg(*args, **kwargs):
+            return args[0]._neg_view()
+
+        torch.ops.aten.neg.default.impl("CPU", my_neg)
+
+        self.assertTrue(torch.neg(x).is_neg())
+
+        # Example 3
+        def my_mul(*args, **kwargs):
+            return torch.zeros_like(args[0])
+
+        torch.ops.aten.mul.Tensor.impl("ZeroTensor", my_mul)
+
+        y = torch._efficientzerotensor(2)
+        self.assertTrue(not torch.mul(x, y)._is_zerotensor())
+
+        # Remove the custom registrations
+        # End state: torch.remove_custom_library('aten')
         torch.ops.aten.sum.default.remove_impl()
+
+        # Validate that the old behavior is restored
         self.assertEqual(torch.sum(x), torch.tensor(3))
+        self.assertTrue(not torch.neg(x).is_neg())
+        self.assertTrue(torch.mul(x, y)._is_zerotensor())
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
