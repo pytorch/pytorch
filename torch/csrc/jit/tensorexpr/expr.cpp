@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/expr.h>
 
 #include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch {
 namespace jit {
@@ -432,6 +433,19 @@ BufHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
 BufHandle Buf::make(
     const std::string& name_hint,
     const std::vector<ExprHandle>& dims,
+    const std::vector<ExprHandle>& strides,
+    Dtype dtype) {
+  return BufHandle(alloc<Buf>(
+      name_hint,
+      ExprHandleVectorToExprVector(dims),
+      dtype,
+      nullptr,
+      ExprHandleVectorToExprVector(strides)));
+}
+
+BufHandle Buf::make(
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims,
     Dtype dtype,
     c10::optional<ExprHandle> initializer,
     c10::optional<std::vector<ExprHandle>> strides,
@@ -453,6 +467,39 @@ BufHandle Buf::make(
 
 std::vector<ExprHandle> BufHandle::dims() const {
   return ExprVectorToExprHandleVector(node()->dims());
+}
+
+bool Buf::is_cont_with(int cur_dim, int adjacent_dim) {
+  auto is_cont_fn = [](ExprPtr adjacent_dim,
+                       ExprPtr adjacent_stride,
+                       ExprPtr cur_stride) {
+    auto mul_node = to<Mul>(cur_stride);
+    if (!mul_node) {
+      return false;
+    }
+    auto dim_ = mul_node->lhs();
+    auto stride_ = mul_node->rhs();
+    auto same_dim = exprEquals(dim_, adjacent_dim) || (adjacent_dim == dim_);
+    auto same_stride =
+        exprEquals(stride_, adjacent_stride) || (adjacent_stride == stride_);
+    return same_dim && same_stride;
+  };
+  return is_cont_fn(
+      dims_[adjacent_dim], strides_[adjacent_dim], strides_[cur_dim]);
+}
+
+bool Buf::is_leading_dim(int cur_dim) {
+  auto is_leading_dim_fn = [](ExprPtr stride) {
+    if (!stride->isConstant()) {
+      return false;
+    }
+    if (immediateAs<long>(stride) != 1) {
+      return false;
+    }
+
+    return true;
+  };
+  return is_leading_dim_fn(strides_[cur_dim]);
 }
 
 ExprHandle expr_to_vec(ExprHandle v, int lanes) {

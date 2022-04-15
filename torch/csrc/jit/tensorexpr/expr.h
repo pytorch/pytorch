@@ -196,6 +196,12 @@ class TORCH_API Buf : public ExprNode<Buf> {
   static BufHandle make(
       const std::string& name_hint,
       const std::vector<ExprHandle>& dims,
+      const std::vector<ExprHandle>& strides,
+      Dtype dtype);
+
+  static BufHandle make(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
       Dtype dtype,
       c10::optional<ExprHandle> initializer = c10::nullopt,
       c10::optional<std::vector<ExprHandle>> strides = c10::nullopt,
@@ -295,6 +301,33 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return true;
   }
 
+  bool is_channels_last_1d_contiguous() {
+    if (dims_.size() != 3) {
+      return false;
+    }
+    return is_leading_dim(1) && is_cont_with(2, 1) && is_cont_with(0, 2);
+  }
+
+  bool is_channels_last_2d_contiguous() {
+    if (dims_.size() != 4) {
+      return false;
+    }
+    return is_leading_dim(1) && is_cont_with(3, 1) && is_cont_with(2, 3) &&
+        is_cont_with(0, 2);
+  }
+
+  bool is_channels_last_3d_contiguous() {
+    if (dims_.size() != 5) {
+      return false;
+    }
+    return is_leading_dim(1) && is_cont_with(4, 1) && is_cont_with(3, 4) &&
+        is_cont_with(2, 3) && is_cont_with(0, 2);
+  }
+
+ private:
+  bool is_cont_with(int cur_dim, int adjacent_dim);
+  bool is_leading_dim(int cur_dim);
+
  private:
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
@@ -312,6 +345,13 @@ class TORCH_API BufHandle : public ExprHandle {
       const std::vector<ExprHandle>& dims,
       Dtype dtype)
       : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
+
+  BufHandle(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
+      const std::vector<ExprHandle>& strides,
+      Dtype dtype)
+      : ExprHandle(Buf::make(name_hint, dims, strides, dtype)) {}
 
   BufHandle(const std::vector<ExprHandle>& dims, Dtype dtype)
       : ExprHandle(Buf::make("_", dims, dtype)) {}
