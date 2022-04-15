@@ -780,7 +780,7 @@ std::string generate_code(
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
 
-    env.s("complex_half_body_string", get_complex_half_body_string());    
+    env.s("complex_half_body_string", get_complex_half_body_string());
   } else if (dynamic_casting) {
     env.s("complex_half_body_string", get_complex_half_body_string());
   } else {
