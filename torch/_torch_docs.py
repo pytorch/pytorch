@@ -4615,6 +4615,8 @@ Example::
                       tensor([0.0000, 0.5000, 1.0000])))
 
 """)
+# TODO: Fix via https://github.com/pytorch/pytorch/issues/75798
+torch.histogramdd.__module__ = "torch"
 
 add_docstr(torch.hypot,
            r"""
