@@ -64,7 +64,7 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
       values_(std::move(values)),
       layout_(layout) {
   // https://pytorch.org/blog/pytorch-feature-classification-changes/#beta
-  TORCH_WARN_ONCE("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensor support is in beta state.",
+  TORCH_WARN_ONCE("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensor support is in beta state."
                   "If you miss a functionality in the sparse tensor support, please submit a feature request "
                   "to https://github.com/pytorch/pytorch/issues.");
   set_storage_access_should_throw();
