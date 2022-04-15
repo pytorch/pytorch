@@ -49,8 +49,6 @@ if sys.version_info >= (3, 8):
         expected = [
             "shellcheck: Regenerate workflows",
             "shellcheck: Assert that regenerating the workflows didn't change them",
-            "shellcheck: Extract scripts from GitHub Actions workflows",
-            "shellcheck: Run ShellCheck",
         ]
 
         def test_lint(self):
