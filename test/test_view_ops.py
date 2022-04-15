@@ -908,6 +908,24 @@ class TestViewOps(TestCase):
             op = partial(fn, source=0, destination=1)
             run_test(device, op)
 
+    # Testing that the generated view_copy kernel and its derivative are implemented correctly
+    def test_view_copy(self, device):
+        a = torch.randn(4, device=device, requires_grad=True)
+        a_ref = a.clone().detach().requires_grad_()
+        a_view = a_ref.view(2, 2)
+        a_view_copy = torch.view_copy(a, (2, 2))
+
+        # view_copy ops don't preserve view relationship
+        self.assertTrue(self.is_view_of(a_ref, a_view))
+        self.assertFalse(self.is_view_of(a, a_view_copy))
+
+        a_view_copy.sum().backward()
+        a_view.sum().backward()
+
+        # forward and backward give the same shape + result
+        self.assertEqual(a_view_copy, a_view)
+        self.assertEqual(a.grad, a_ref.grad)
+
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):
 
@@ -1794,6 +1812,14 @@ class TestOldViewOps(TestCase):
             y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
             x.resize_as_(y)
             self.assertEqual(y.shape, x.shape)
+
+    @onlyNativeDeviceTypes
+    def test_resize_overflow(self, device):
+        x = torch.empty((), dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            x.resize_([2, 4, 2**29, 2**29])
+        with self.assertRaisesRegex(RuntimeError, 'overflow'):
+            x.resize_([8, 8, 2**29, 2**29])
 
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
