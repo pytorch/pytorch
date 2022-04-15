@@ -321,7 +321,7 @@ class TestPublicBindings(TestCase):
                 # elem's name must NOT begin with an `_` and it's module name
                 # SHOULD start with it's current module since it's a public API
                 looks_public = not elem.startswith('_') and elem_modname_starts_with_mod
-                if is_public == looks_public:
+                if is_public != looks_public:
                     add_to_failure_list_if_not_in_allow_dict(modname, elem, elem_module)
 
             if hasattr(modname, '__all__'):
