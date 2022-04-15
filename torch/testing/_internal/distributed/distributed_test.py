@@ -11,7 +11,7 @@ from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple, Callable, Any
-
+import numpy as np
 import torch
 import torch.cuda
 import torch.distributed as dist
@@ -1029,12 +1029,51 @@ class DistributedTest:
                 for step in range(0, 20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
+                    for params in model.parameters():
+                        # mock grad
+                        params.grad = torch.ones_like(param.data)
                     averager.average_parameters(model.parameters())
                     if step >= warmup_steps and (step - warmup_steps) % period == 0:
                         self.assertEqual(param.data, expected_avg_tensor)
                     else:
                         # No model averaging, so the parameters are not updated.
                         self.assertEqual(param.data, tensor)
+
+        @skip_if_lt_x_gpu(2)
+        def test_periodic_model_averager_param_group(self):
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+            rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
+            device_id = rank_to_GPU[rank][0]
+
+            model = nn.Linear(1, 5, bias=False).cuda(device_id)
+            param = next(model.parameters())
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+
+            period = 4
+            for warmup_steps in [12, 13, 14, 15]:
+                averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps)
+                for step in range(0, 20):
+                    # Reset the parameters at every step.
+                    for param_group in opt.param_groups:
+                        for params in param_group["params"]:
+                            # mock grad
+                            params.grad = torch.ones_like(param.data) * rank
+                            params.data = torch.ones_like(param.data) * rank
+                    averager.average_parameters(opt.param_groups)
+                    if step >= warmup_steps and (step - warmup_steps) % period == 0:
+                        for param_group in opt.param_groups:
+                            for params in param_group["params"]:
+                                if params.grad is None:
+                                    continue
+                                self.assertEqual(param.data, torch.ones_like(param.data) * sum(range(world_size)) / world_size)
+                    else:
+                        # No model averaging, so the parameters are not updated.
+                        for param_group in opt.param_groups:
+                            for params in param_group["params"]:
+                                if params.grad is None:
+                                    continue
+                                self.assertEqual(param.data, torch.ones_like(param.data) * rank)
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
@@ -1065,6 +1104,9 @@ class DistributedTest:
                 for step in range(0, 20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
+                    for params in model.parameters():
+                        # mock grad
+                        params.grad = torch.ones_like(param.data)
                     averager.average_parameters(model.parameters())
                     if step >= warmup_steps and (step - warmup_steps) % period == 0:
                         self.assertEqual(param.data, expected_avg_tensor)
@@ -1079,6 +1121,7 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_3_level_hierarchical_model_averager(self):
+            from torch.distributed.distributed_c10d import _pg_group_ranks
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1106,11 +1149,21 @@ class DistributedTest:
             averager = hierarchicalSGD.HierarchicalModelAverager(
                 period_group_size_dict=period_group_size_dict, warmup_steps=warmup_steps
             )
+            subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
+            subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
+
+            real_group_ranks_res1 = list(_pg_group_ranks[subgroup1].keys())
+            real_group_ranks_res2 = list(_pg_group_ranks[subgroup2].keys())
+            expect_group_ranks_res1 = (rank // subgroup_size1 * subgroup_size1 + np.array(list(range(subgroup_size1)))).tolist()
+            expect_group_ranks_res2 = (rank // subgroup_size2 * subgroup_size2 + np.array(list(range(subgroup_size2)))).tolist()
+            self.assertEqual(real_group_ranks_res1, expect_group_ranks_res1)
+            self.assertEqual(real_group_ranks_res2, expect_group_ranks_res2)
+
             expected_avg_tensor_within_subgroup1 = (
-                torch.ones_like(param.data) * sum(range(subgroup_size1)) / subgroup_size1
+                torch.ones_like(param.data) * sum(real_group_ranks_res1) / subgroup_size1
             )
             expected_avg_tensor_within_subgroup2 = (
-                torch.ones_like(param.data) * sum(range(subgroup_size2)) / subgroup_size2
+                torch.ones_like(param.data) * sum(real_group_ranks_res2) / subgroup_size2
             )
             expected_global_avg_tensor = (
                 torch.ones_like(param.data) * sum(range(world_size)) / world_size
@@ -1118,13 +1171,16 @@ class DistributedTest:
             for step in range(0, 25):
                 # Reset the parameters at every step.
                 param.data = copy.deepcopy(tensor)
+                for params in model.parameters():
+                    # mock grad
+                    params.grad = torch.ones_like(param.data)
                 averager.average_parameters(model.parameters())
                 if step == 16 or step == 24:
                     # Run global model averaging when `step` can be divided by 8.
                     self.assertEqual(param.data, expected_global_avg_tensor)
                 elif step == 12 or step == 20:
                     # Run model averaging within subgroup when `step` can be divided by 4 but not by 8.
-                    self.assertEqual(param.data, expected_avg_tensor_within_subgroup1)
+                    self.assertEqual(param.data, expected_avg_tensor_within_subgroup2)
                 elif step == 10 or step == 14 or step == 18 or step == 22:
                     # Run model averaging within subgroup when `step` can be divided by 2 but not by 4 or 8.
                     self.assertEqual(param.data, expected_avg_tensor_within_subgroup1)
@@ -1164,8 +1220,33 @@ class DistributedTest:
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
+        def test_batch_isend_irecv_ring_exchange_nccl(self):
+            self._barrier()
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+            rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
+            device_id = rank_to_GPU[rank][0]
+            torch.cuda.set_device(device_id)
+            p2p_op_list = []
+
+            send_tensor = _build_tensor(world_size, device_id=device_id)
+            recv_tensor = _build_tensor(world_size, value=-1, device_id=device_id)
+            send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1) % world_size)
+            recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank - 1 + world_size) % world_size)
+            reqs = dist.batch_isend_irecv([send_op, recv_op])
+            for req in reqs:
+                req.wait()
+
+            self._barrier()
+
+        @skip_if_no_gpu
+        @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
+        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_self_nccl(self):
             self._barrier()
+            # Ensure the process group has been fully initialized (needed by
+            # the first sub-group batch_isend_irecv call)
+            dist.barrier()
             rank = dist.get_rank()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             device_id = rank_to_GPU[rank][0]
@@ -1191,6 +1272,9 @@ class DistributedTest:
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_no_rank_zero_nccl(self):
             self._barrier()
+            # Ensure the process group has been fully initialized (needed by
+            # the first sub-group batch_isend_irecv call)
+            dist.barrier()
             rank = dist.get_rank()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             device_id = rank_to_GPU[rank][0]
@@ -4830,7 +4914,6 @@ class DistributedTest:
                 loss_using_post_localSGD_opt = loss_fn(output_using_post_localSGD_opt, target)
                 loss_using_post_localSGD_opt.backward()
                 post_localSGD_opt.step()
-
                 for p1, p2 in zip(net.parameters(), net_using_post_localSGD_opt.parameters()):
                     self.assertEqual(p1.data, p2.data)
 
