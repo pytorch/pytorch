@@ -34,12 +34,40 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
+  linux-bionic-cuda11_6-py3_7-gcc7-build:
+    name: linux-bionic-cuda11.6-py3.7-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
+
+  linux-bionic-cuda11_6-py3_7-gcc7-test:
+    name: linux-bionic-cuda11.6-py3.7-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_6-py3_7-gcc7-build
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
   libtorch-linux-bionic-cuda11_5-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.5-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: libtorch-linux-bionic-cuda11.5-py3.7-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
+      build-generates-artifacts: false
+
+  libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
+    name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       build-generates-artifacts: false
 
   linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build:
@@ -97,6 +125,27 @@ jobs:
     with:
       build-environment: win-vs2019-cuda11.5-py3
       cuda-version: "11.5"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
+        ]}
+
+  win-vs2019-cuda11_6-py3-build:
+    name: win-vs2019-cuda11.6-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2019-cuda11.6-py3
+      cuda-version: "11.6"
+
+  win-vs2019-cuda11_6-py3-test:
+    name: win-vs2019-cuda11.6-py3
+    uses: ./.github/workflows/_win-test.yml
+    needs: win-vs2019-cuda11_6-py3-build
+    with:
+      build-environment: win-vs2019-cuda11.6-py3
+      cuda-version: "11.6"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },

@@ -628,16 +628,22 @@ class TestTensorCreation(TestCase):
         y = torch.randn((4, 6), device=device)
 
         with self.assertRaisesRegex(
-                RuntimeError, r"unsupported operation:.* input tensor 0"):
+                RuntimeError,
+                r"unsupported operation: some elements of the input tensor and "
+                r"the written-to tensor refer to a single memory location."):
             torch.cat([x, y], dim=0, out=x)
 
         with self.assertRaisesRegex(
-                RuntimeError, r"unsupported operation:.* input tensor 1"):
+                RuntimeError,
+                r"unsupported operation: some elements of the input tensor and "
+                r"the written-to tensor refer to a single memory location."):
             torch.cat([x, y], dim=0, out=y)
 
         z = torch.zeros((4, 6), device=device)
         with self.assertRaisesRegex(
-                RuntimeError, r"unsupported operation:.* input tensor 1"):
+                RuntimeError,
+                r"unsupported operation: some elements of the input tensor and "
+                r"the written-to tensor refer to a single memory location."):
             torch.cat([y, z], out=z[:2, :])
 
         w = y.view(-1).clone()
@@ -741,8 +747,7 @@ class TestTensorCreation(TestCase):
         self.assertTrue(res1_cpu.is_contiguous(memory_format=torch.contiguous_format))
 
         # Case 2: if out= is not the correct shape then the output it is resized internally
-        # - For the CPU variant the memory format is that of the first tensor
-        # - For the CUDA variant it only propagates memory format if all the tensors have
+        # - For both CPU and CUDA variants, it only propagates memory format if all the tensors have
         #   the same memory format, otherwise it just uses contiguous_format as a default
 
         out_cuda = torch.empty((0), device=device).contiguous(memory_format=torch.contiguous_format)
@@ -753,7 +758,7 @@ class TestTensorCreation(TestCase):
         res2_cpu = torch.cat((a_cpu, b_cpu), out=out_cpu)
 
         self.assertTrue(res2_cuda.is_contiguous(memory_format=torch.contiguous_format))
-        self.assertTrue(res2_cpu.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(res2_cpu.is_contiguous(memory_format=torch.contiguous_format))
 
         out_cuda = torch.empty((0), device=device).contiguous(memory_format=torch.contiguous_format)
         # a_cuda and c_cuda have same memory_format
@@ -2664,6 +2669,15 @@ class TestTensorCreation(TestCase):
             size_ones_instead_of_zeros = (x if x != 0 else 1 for x in size)
             y = torch.empty(tuple(size_ones_instead_of_zeros), device=device)
             self.assertEqual(x.stride(), y.stride())
+
+    @onlyNativeDeviceTypes
+    def test_empty_overflow(self, device):
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            torch.empty([2, 4, 2**29, 2**29], dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            torch.empty([8, 8, 2**29, 2**29], dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            torch.empty_strided([8, 8], [2**61, 1], dtype=torch.float64)
 
     def test_eye(self, device):
         for dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):

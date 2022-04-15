@@ -49,6 +49,15 @@ Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool keepdim
 Tensor scale_grad_by_count(const Tensor &grad, const Tensor &mask, IntArrayRef dims);
 at::Tensor norm_backward(const at::Tensor & grad, const at::Tensor & self, const optional<at::Scalar> & p_, const at::Tensor & norm);
 at::Tensor norm_backward(at::Tensor grad, const at::Tensor & self, const optional<at::Scalar> & p_, at::Tensor norm, at::IntArrayRef dim, bool keepdim);
+Tensor norm_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const optional<Scalar> & p_,
+  Tensor norm,
+  IntArrayRef dim,
+  bool keepdim
+);
+Tensor norm_jvp(const Tensor& grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm);
+Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim);
 at::Tensor linalg_vector_norm_backward(at::Tensor grad, const at::Tensor & self, const at::Scalar & ord, at::Tensor norm, const at::OptionalIntArrayRef & opt_dim, bool keepdim);
 at::Tensor pow_backward(at::Tensor grad, const at::Tensor & self, const at::Scalar & exponent_);
 at::Tensor pow_backward_self(at::Tensor grad, const at::Tensor & self, const at::Tensor & exponent);
@@ -113,6 +122,7 @@ at::Tensor masked_scatter_backward(const at::Tensor & grad, const at::Tensor & m
 at::Tensor cholesky_backward(at::Tensor grad, bool upper, at::Tensor L);
 at::Tensor cholesky_jvp(const at::Tensor& input_tangent, const at::Tensor& L, bool upper);
 at::Tensor cholesky_inverse_backward(at::Tensor grad, at::Tensor L, bool upper, at::Tensor inverse);
+at::Tensor cholesky_inverse_jvp(const at::Tensor& F, const at::Tensor& dF, const at::Tensor& X, bool upper);
 Tensor pinv_jvp(
   const Tensor& A,
   const Tensor& pinvA,
@@ -471,12 +481,14 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
     ::std::array<bool,2> output_mask);
 
-Tensor scatter_reduce_backward(
+std::tuple<Tensor, Tensor> scatter_reduce_backward(
   const Tensor& grad,
-  const Tensor& input,
+  const Tensor& self,
   int dim,
   const Tensor& index,
+  const Tensor& src,
   c10::string_view reduce,
+  bool include_self,
   const Tensor& result
 );
 
