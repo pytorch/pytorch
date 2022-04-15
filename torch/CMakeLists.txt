@@ -362,7 +362,6 @@ if(USE_NUMPY)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
-list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS BUILD_CAFFE2)
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
