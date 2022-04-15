@@ -746,7 +746,10 @@ std::string generate_code(
     functor_args << "arg0[j], scalar_val";
   }
   env.s("args", functor_args.str());
-  if (f_inputs_type == "at::Half" || result_type == "at::Half" || dynamic_casting) {
+  if (f_inputs_type == "at::Half" || result_type == "at::Half" ||
+      f_inputs_type == "std::complex<at::Half>" ||
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
+    // complex<Half> depends on complex<T> and Half dtypes.
     env.s("half_string", jiterator_half_support_literal);
   } else {
     env.s("half_string", "");
@@ -759,7 +762,9 @@ std::string generate_code(
   // the definition of complex math functions is only needed when the compute type is complex
   // but the definition of std::complex is needed for dynamic casting even if the compute type is not complex
   if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
-      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>") {
+      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>" ||
+      f_inputs_type == "std::complex<at::Half>" || result_type == "std::complex<at::Half>") {
+    // complex<Half> depends on complex<T> and Half dtypes.
     env.s("traits_string", get_traits_string());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
@@ -773,15 +778,7 @@ std::string generate_code(
     env.s("complex_math_string", "");
   }
   if (f_inputs_type == "std::complex<at::Half>" ||
-      result_type == "std::complex<at::Half>") {
-    // complex<Half> depends on complex<T> and Half dtypes.
-    env.s("traits_string", get_traits_string());
-    env.s("half_string", jiterator_half_support_literal);
-    env.s("complex_body_string", get_complex_body_string());
-    env.s("complex_math_string", get_complex_math_string());
-
-    env.s("complex_half_body_string", get_complex_half_body_string());
-  } else if (dynamic_casting) {
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
     env.s("complex_half_body_string", get_complex_half_body_string());
   } else {
     env.s("complex_half_body_string", "");
