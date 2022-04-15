@@ -246,6 +246,13 @@ c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t) {
   }
   return c10::nullopt;
 }
+std::vector<Tensor> from_functional_tensor(TensorList t_list) {
+  std::vector<Tensor> outputs(t_list.size());
+  for (const auto i : c10::irange(t_list.size())) {
+    outputs.push_back(from_functional_tensor(t_list[i]));
+  }
+  return outputs;
+}
 c10::List<Tensor> from_functional_tensor(ITensorListRef t_list) {
   c10::List<Tensor> outputs;
   outputs.reserve(t_list.size());

@@ -135,7 +135,7 @@ TEST(ITensorListRefTest, UnboxedIndirect_Equal) {
   //   4. temporary `std::vector`
   auto vec = get_tensor_vector();
   // Implicit constructors
-  check_elements_same(vec[0], std::vector<at::Tensor>{vec[0]}, /* use_count= */ 4);
+  check_elements_same(vec[0], std::vector<at::Tensor>{vec[0]}, /* use_count= */ 3);
   check_elements_same({vec.data(), vec.size()}, vec, /* use_count= */ 1);
   check_elements_same({&*vec.begin(), &*vec.end()}, vec, /* use_count= */ 1);
   // Vector constructor
