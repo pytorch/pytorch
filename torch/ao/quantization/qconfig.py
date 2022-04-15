@@ -354,6 +354,8 @@ def _get_default_qconfig_dict_helper(qconfig, qconfig_transpose):
                         (torch.nn.functional.conv_transpose3d, qconfig_transpose),
                         (torch.nn.functional.linear, qconfig),
                         (torch.nn.ReLU, qconfig),
+                        (torch.nn.functional.relu, qconfig),
+                        (torch.relu, qconfig),
                         (torch.nn.BatchNorm1d, qconfig),
                         (torch.nn.BatchNorm2d, qconfig),
                         (torch.nn.BatchNorm3d, qconfig)]}

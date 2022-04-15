@@ -1779,20 +1779,46 @@ class TestQuantizeFx(QuantizationTestCase):
 
 
     def test_qconfig_dict_with_fused_modules(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
+        class LinearReLUModel(torch.nn.Module):
+            def __init__(self, relu):
+                super(LinearReLUModel, self).__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.relu = relu
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.relu(x)
+                return x
+
+        class ConvReLUModel(torch.nn.Module):
+            def __init__(self, relu):
+                super(ConvReLUModel, self).__init__()
                 self.conv = torch.nn.Conv1d(3, 3, 3)
-                self.relu = torch.nn.ReLU()
+                self.relu = relu
 
             def forward(self, x):
                 x = self.conv(x)
                 x = self.relu(x)
                 return x
 
-        m = Model().eval()
-        qconfig_dict = torch.ao.quantization.get_default_qconfig_dict("fbgemm")
-        prepare_fx(m, qconfig_dict)
+        class ConvBnReLUModel(torch.nn.Module):
+            def __init__(self, relu):
+                super(ConvBnReLUModel, self).__init__()
+                self.conv = torch.nn.Conv1d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm1d(3)
+                self.relu = relu
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        for model in [LinearReLUModel, ConvReLUModel, ConvBnReLUModel]:
+            for relu in [torch.nn.ReLU(), torch.nn.functional.relu, torch.relu]:
+                m = model(relu).eval()
+                qconfig_dict = torch.ao.quantization.get_default_qconfig_dict("fbgemm")
+                prepare_fx(m, qconfig_dict)
 
     def test_qconfig_dict_validity(self):
         r"""
