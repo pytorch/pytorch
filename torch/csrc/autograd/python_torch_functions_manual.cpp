@@ -748,9 +748,13 @@ static PyObject * THPVariable__enable_functionalization(PyObject *self, PyObject
   auto r = parser.parse(args, kwargs, parsed_args);
   const auto reapply_views = r.toBool(0);
 
+  if (c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Functionalize)) {
+    TORCH_INTERNAL_ASSERT(false, "multiple layers of mode-style functionalization nesting is not"
+     " currently supported, outside of the functionalize() transform");
+  }
   c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Functionalize, true);
   if (reapply_views) {
-      c10::impl::tls_set_dispatch_key_included(at::DispatchKey::FunctionalizeAddBackViews, true);
+      at::functionalization::impl::setFunctionalizationReapplyViewsTLS(true);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -760,7 +764,7 @@ static PyObject * THPVariable__disable_functionalization(PyObject *self, PyObjec
 {
   HANDLE_TH_ERRORS
   c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Functionalize, false);
-  c10::impl::tls_set_dispatch_key_included(at::DispatchKey::FunctionalizeAddBackViews, false);
+  at::functionalization::impl::setFunctionalizationReapplyViewsTLS(false);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
