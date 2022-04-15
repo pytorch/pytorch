@@ -2591,6 +2591,9 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: linear
+    NestedTensor: linear
 
 - func: linear.out(Tensor input, Tensor weight, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
