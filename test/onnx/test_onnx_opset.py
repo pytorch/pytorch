@@ -283,12 +283,12 @@ class TestONNXOpset(TestCase):
                  {"op_name" : "Unsqueeze"},
                  {"op_name" : "Unsqueeze"},
                  {"op_name" : "Concat"},
-                 {"op_name" : "Constant"},
                  {"op_name" : "Cast"},
                  {"op_name" : "Shape"},
                  {"op_name" : "Slice"},
                  {"op_name" : "Cast"},
                  {"op_name" : "Div"},
+                 {"op_name" : "Constant"},
                  {"op_name" : "Concat"},
                  {"op_name" : "Upsample",
                   "attributes" :
@@ -306,7 +306,6 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Unsqueeze"},
                   {"op_name" : "Unsqueeze"},
                   {"op_name" : "Concat"},
-                  {"op_name" : "Constant"},
                   {"op_name" : "Cast"},
                   {"op_name" : "Shape"},
                   {"op_name" : "Constant"},
@@ -315,6 +314,7 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Slice"},
                   {"op_name" : "Cast"},
                   {"op_name" : "Div"},
+                  {"op_name" : "Constant"},
                   {"op_name" : "Concat"},
                   {"op_name" : "Resize",
                    "attributes" :
@@ -325,23 +325,23 @@ class TestONNXOpset(TestCase):
         check_onnx_opsets_operator(MyModel(), x, ops, opset_versions=[9, 10],
                                    input_names=["x"], dynamic_axes={"x": [0, 1, 2, 3]})
 
-        ops_9 = [{"op_name" : "Constant"},
-                 {"op_name" : "Shape"},
+        ops_9 = [{"op_name" : "Shape"},
                  {"op_name" : "Slice"},
                  {"op_name" : "Cast"},
                  {"op_name" : "Div"},
+                 {"op_name" : "Constant"},
                  {"op_name" : "Concat"},
                  {"op_name" : "Upsample",
                   "attributes" :
                   [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
-        ops_10 = [{"op_name" : "Constant"},
-                  {"op_name" : "Shape"},
+        ops_10 = [{"op_name" : "Shape"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Slice"},
                   {"op_name" : "Cast"},
                   {"op_name" : "Div"},
+                  {"op_name" : "Constant"},
                   {"op_name" : "Concat"},
                   {"op_name" : "Resize"}]
 

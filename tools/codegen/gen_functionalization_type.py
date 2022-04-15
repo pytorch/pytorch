@@ -1,16 +1,74 @@
 from tools.codegen.api import cpp
 from tools.codegen.api.types import (
-    DispatcherSignature, Binding, FunctionalizationLambda, ViewInverseSignature
+    DispatcherSignature, Binding, FunctionalizationLambda, ViewInverseSignature,
+    NativeSignature
 )
 from tools.codegen.api.translate import translate
-from tools.codegen.context import with_native_function
+from tools.codegen.context import (
+    with_native_function, with_native_function_and_selector_and_index,
+    with_native_function_and
+)
 from tools.codegen.model import (
     Argument, NativeFunction, SchemaKind, BackendIndex,
-    Tag, FunctionSchema, SelfArgument, TensorOptionsArguments, BaseType, BaseTy
+    Tag, FunctionSchema, SelfArgument, TensorOptionsArguments, BaseType, BaseTy,
+    NativeFunctionsViewGroup, ListType
 )
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import List, Optional, Union, Tuple
-from tools.codegen.utils import mapMaybe
+
+# This file contains codegen that relates to the functionalization pass.
+# It includes:
+# - gen_functionalization_definition
+#     Generates dispatcher kernel definitions for the functionalization pass.
+# - gen_functionalization_registration
+#     Generates dispatcher kernel registrations for the functionalization pass.
+# - gen_functionalization_view_inverse_declaration
+#     Generates a declaration for an "inverse view", for every view op
+#     that is needed in functionalization. We manually implement their definitions.
+# - gen_composite_view_copy_kernel
+#     Generates view_copy() composite kernels for all view_copy operators.
+
+
+# Generates the body of the default composite C++ kernel for a {view}_copy NativeFunction
+# See Note [view_copy NativeFunctions]
+@with_native_function
+def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]:
+
+    if g.view_copy is None:
+        return None
+    # view_copy is a native signature, since we're generating an at::native:: kernel
+    view_copy_sig = NativeSignature(g.view_copy.func)
+    # view is a dispatcher signature, since we're calling into the at::_ops API
+    view_sig = DispatcherSignature(g.view.func)
+
+    view_api_name = g.view.func.name.unambiguous_name()
+    exprs = ', '.join([e.expr for e in translate(view_copy_sig.arguments(), view_sig.arguments())])
+
+    # view ops today always return either a Tensor or a list of Tensors
+    assert len(g.view.func.returns) == 1
+    assert g.view.func.returns[0].type == BaseType(BaseTy.Tensor) \
+           or g.view.func.returns[0].type == ListType(BaseType(BaseTy.Tensor), None)
+
+    if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
+        return_cloned_output = '''\
+  return output.clone();'''
+    else:
+        # If the return type is a list, we need to clone each tensor in the list.
+        return_cloned_output = f'''\
+  {view_copy_sig.returns_type().cpp_type()} out_clone;
+  for (const auto i : c10::irange(output.size())) {{
+    out_clone.push_back(output[i].clone());
+  }}
+  return out_clone;'''
+
+    # The default generated composite kernel for {view}_copy() operators just clones
+    # the input tensor, and runs the underlying view on the clone.
+    return f"""
+{view_copy_sig.defn()} {{
+  auto output = at::_ops::{view_api_name}::call({exprs});
+  {return_cloned_output}
+}}
+"""
 
 def modifies_arguments(f: NativeFunction) -> bool:
     return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
@@ -40,15 +98,26 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
 # unwraps all tensor-like arguments, returning:
 # (1) a string containing all of the logic that does the unwrapping
 # (2) a context, to be used by translate(), with all of the relevant bindings.
-def unwrap_tensor_args(sig: DispatcherSignature) -> Tuple[str, List[Binding]]:
+def unwrap_tensor_args(sig: DispatcherSignature, *, is_view_op: bool) -> Tuple[str, List[Binding]]:
     context: List[Binding] = []
     unwrapped_tensor_args: List[str] = []
     for arg in sig.arguments():
         if is_tensor_like(arg.argument):
             # for tensor inputs, we want to unwrap them before passing them into the redispatch calls.
             unwrapped_name = f'{arg.name}_'
-            unwrapped_tensor_args.append(
-                f'auto {unwrapped_name} = at::functionalization::impl::from_functional_tensor({arg.name});')
+            # For most ops, the functionalization needs to sync any pending updates on the input tensors
+            # before calling the operator, since otherwise the operator will act on stale data.
+            # For view ops though, we can continue to defer syncing until the tensor is used by
+            # a non-view operator.
+            maybe_sync_input = '' if is_view_op else f'at::functionalization::impl::sync({arg.name});'
+            unwrapped_tensor_args.append(f"""
+      {arg.nctype.remove_const_ref().cpp_type()} {unwrapped_name};
+      if (at::functionalization::impl::isFunctionalTensor({arg.name})) {{
+        {maybe_sync_input}
+        {unwrapped_name} = at::functionalization::impl::from_functional_tensor({arg.name});
+      }} else {{
+        {unwrapped_name} = {arg.name};
+      }}""")
             context.append(arg.with_name(unwrapped_name))
         else:
             # for non-tensor inputs, we want to pass them directly into the redispatch calls.
@@ -100,6 +169,7 @@ View operators with multiple aliasing inputs aren't supported yet. Found an oper
 # Generates the Functionalization kernel for:
 # - ops that create aliases (e.g. transpose())
 # - ops that are views AND mutations (e.g. transpose_())
+@with_native_function_and
 def emit_view_functionalization_body(
         f: NativeFunction,
         functional_op: NativeFunction
@@ -129,11 +199,10 @@ def emit_view_functionalization_body(
     assert_view_op_properties(f.func)
     view_tensor_name = dispatcher_sig.arguments()[0].name
 
-    keyset = 'dispatchKeySet & c10::after_func_keyset'
     return_type = dispatcher_sig.returns_type().remove_const_ref().cpp_type()
 
-    unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(dispatcher_sig)
-    view_redispatch_args = [keyset] + [e.expr for e in translate(unwrapped_args_ctx, call_sig.arguments(), method=False)]
+    unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(dispatcher_sig, is_view_op=True)
+    view_redispatch_args = [e.expr for e in translate(unwrapped_args_ctx, call_sig.arguments(), method=False)]
 
     forward_lambda = FunctionalizationLambda.from_func(f, functional_op=functional_op, is_reverse=False)
     reverse_lambda = FunctionalizationLambda.from_func(f, functional_op=functional_op, is_reverse=True)
@@ -145,6 +214,13 @@ def emit_view_functionalization_body(
     if f.tag is Tag.inplace_view:
         # See Note [Functionalization Pass - Inplace View Ops] for more details
         return f"""
+    {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
+      if (!at::functionalization::impl::isFunctionalTensor({view_tensor_name})) {{
+        // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
+        {unwrap_tensor_args_str}
+        at::AutoDispatchSkipFunctionalize guard;
+        return at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(view_redispatch_args)});
+      }}
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
         {forward_lambda.decl()} {{
           return {forward_lambda.inner_call()}
@@ -154,7 +230,6 @@ def emit_view_functionalization_body(
         }}
       );
       at::functionalization::impl::mutate_view_meta({view_tensor_name}, view_meta);
-      {unwrap_tensor_args_str}
       {return_type} reference_tensor_output;
       {{
         at::AutoDispatchSkipFunctionalize guard;
@@ -164,18 +239,25 @@ def emit_view_functionalization_body(
       // See  Note [Propagating strides in the functionalization pass]
       at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
       return {view_tensor_name};
+    }}
 """
 
     else:
         return f"""
+    {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       {unwrap_tensor_args_str}
+      if (!at::functionalization::impl::isFunctionalTensor({view_tensor_name})) {{
+        // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
+        at::AutoDispatchSkipFunctionalize guard;
+        return at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
+      }}
       {return_type} tmp_output;
       {return_type} reference_tensor_output;
       {{
         at::AutoDispatchSkipFunctionalize guard;
         {meta_conversion_str}
         reference_tensor_output = at::_ops::{api_name}::call({', '.join(meta_call_args)});
-        tmp_output = at::_ops::{api_name}::redispatch({', '.join(view_redispatch_args)});
+        tmp_output = at::_ops::{api_name}::call({', '.join(view_redispatch_args)});
         // I'm fusing the [alias removal], [mutation removal], [add views back] passes together.
         // Later, we'll want to turn them into separate passes (since e.g. vulkan only cares about alias removal).
       }}
@@ -191,9 +273,11 @@ def emit_view_functionalization_body(
       // See  Note [Propagating strides in the functionalization pass]
       at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
       return out;
+    }}
 """
 
 # Generates the Functionalization kernel for inplace ops
+@with_native_function_and
 def emit_inplace_functionalization_body(
         f: NativeFunction,
         functional_op: Optional[NativeFunction]
@@ -203,16 +287,23 @@ def emit_inplace_functionalization_body(
 
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-    keyset = 'dispatchKeySet & c10::after_func_keyset'
     return_type = dispatcher_sig.returns_type().remove_const_ref().cpp_type()
 
-    unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(dispatcher_sig)
+    unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(dispatcher_sig, is_view_op=False)
 
     maybe_return = '' if len(f.func.returns) == 0 else 'return '
-    sync_tensor_args = '\n      '.join(mapMaybe(
-        lambda arg: f'at::functionalization::impl::sync({arg.name});'
-                    if arg.type.is_tensor_like() else None,
-        f.func.arguments.flat_all))
+
+    mutated_names = [a.name for a in f.func.arguments.flat_all if a.type.is_tensor_like() and a.annotation is not None]
+    non_mutated_names = [a.name for a in f.func.arguments.flat_all if a.type.is_tensor_like() and a.annotation is None]
+    # all mutable inputs must be functional tensors in order to participate in functionalization
+    check_all_mutated_args_are_functional = ' && '.join(
+        ['true'] + [f'at::functionalization::impl::isFunctionalTensor({a})' for a in mutated_names])
+    check_any_non_mutated_args_are_functional = ' || '.join(
+        ['false'] + [f'at::functionalization::impl::isFunctionalTensor({a})' for a in non_mutated_names])
+    # These are used in the cases where we don't functionalize and redispatch to the inplace op
+    # case 1: we hit an inplace op that doesn't have an out-of-place equivalent
+    # case 2: we hit an inplace ops but our inputs are not functional tensors (in which case our kernel just no-ops)
+    inplace_exprs = [e.expr for e in translate(unwrapped_args_ctx, dispatcher_sig.arguments(), method=False)]
 
     # Note [functionalizating copy_() and not preserving strides]
     # copy_() can't be functionalized, since there doesn't exist an out-of-place variant.
@@ -225,34 +316,33 @@ def emit_inplace_functionalization_body(
     # - There are actually a few other places where the functionalization pass currently doesn't support strides:
     #   calls to slice/diagonal_scatter don't currently preserve the strides of their inputs (but maybe we should fix this).
     if str(f.func.name) == 'copy_':
-        exprs = [keyset] + [a.name for a in unwrapped_args_ctx]
-        functional_call_str = f"""\
-            auto tmp_intermediate = at::_ops::to_other::redispatch({keyset}, src_, self_, non_blocking, false, c10::nullopt);
-            tmp_output = at::_ops::expand_as::redispatch({keyset}, tmp_intermediate, self_);"""
+        functional_call_str = """\
+            auto tmp_intermediate = at::_ops::to_other::call(src_, self_, non_blocking, false, c10::nullopt);
+            tmp_output = at::_ops::expand_as::call(tmp_intermediate, self_);"""
     elif functional_op is None:
         # We can't functionalize this inplace op, since we don't know what the corresponding functional op is.
-        inplace_exprs = [keyset] + [e.expr for e in translate(unwrapped_args_ctx, dispatcher_sig.arguments(), method=False)]
-        warn_str = "Note: the functionalization pass encountered an operator ({}) that it could not functionalize, \
+        warn_str = "Note: the functionalization pass encountered an operator ({str(f.func.name)}) that it could not functionalize, \
 because it couldn't find an out-of-place equivalent of the operator to call. \
 Instead, it's calling the inplace/view operator directly. \
-If this causes problems in your program, consider upstreaming the out-of-place op to PyTorch.".format(str(f.func.name))
+If this causes problems in your program, consider upstreaming the out-of-place op to PyTorch."
 
         return f"""
+    {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       if (c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize)) {{
           TORCH_WARN("{warn_str}");
       }}
-      {sync_tensor_args}
       {unwrap_tensor_args_str}
       at::AutoDispatchSkipFunctionalize guard;
       // Redispatch as normally otherwise, since XLA has its own lowerings for special inplace ops.
-      {maybe_return}at::_ops::{f.func.name.unambiguous_name()}::redispatch({', '.join(inplace_exprs)});
+      {maybe_return}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
+    }}
 """
     else:
         # call the out-of-place variant of the op
         functional_sig = DispatcherSignature.from_schema(functional_op.func)
-        functional_exprs = [keyset] + [e.expr for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)]
+        functional_exprs = [e.expr for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)]
         functional_call_str = \
-            f"tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::redispatch({', '.join(functional_exprs)});"
+            f"tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});"
 
     mutable_input_post_processing = '\n'.join([
         f"""
@@ -263,16 +353,31 @@ If this causes problems in your program, consider upstreaming the out-of-place o
         if a.annotation and a.annotation.is_write and a.type.is_tensor_like()])
 
     return f"""
-      {sync_tensor_args}
+    {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       {unwrap_tensor_args_str}
-      {return_type} tmp_output;
-      {{
+      if (!({check_all_mutated_args_are_functional})) {{
+        if (({check_any_non_mutated_args_are_functional})) {{
+         // case 1: trying to mutate a non functional tensor with a functional tensor is an error
+         TORCH_INTERNAL_ASSERT(false,
+           "mutating a non-functional tensor with a functional tensor is not allowed.",
+           " Please ensure that all of your inputs are wrapped inside of a functionalize() call.");
+        }} else {{
+         // case 2: arguments are not functional tensors, so we no-op and redispatch.
+         at::AutoDispatchSkipFunctionalize guard;
+         at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
+        {return_str(f)};
+        }}
+      }} else {{
+        {return_type} tmp_output;
+        {{
           at::AutoDispatchSkipFunctionalize guard;
           // The functionalization pass explicitly doesn't pass out= parameters to the redispatch
           {functional_call_str}
+        }}
+        {mutable_input_post_processing}
+        {return_str(f)};
       }}
-      {mutable_input_post_processing}
-      {return_str(f)};"""
+    }}"""
 
 
 def emit_declaration_for_noncomposite_views(f: NativeFunction) -> str:
@@ -286,26 +391,47 @@ def emit_declaration_for_noncomposite_views(f: NativeFunction) -> str:
 # These files provide the kernels that run the functionalization pass, which can be opted into
 # per backend (e.g. XLA or Vulkan), or as a composable transform (functionalize() in functorch).
 
+# TODO: later, I'll generate separate kernels for "Functionalize", and "AddBackViews"
+# That will probably be an enum, that this function will take in to know which ops get kernels.
 def needs_functionalization(
     selector: SelectiveBuilder,
-    f: NativeFunction,
+    g: Union[NativeFunction, NativeFunctionsViewGroup],
 ) -> bool:
-    return (selector.include_all_operators and
-            (f.is_view_op or modifies_arguments(f)))
+    # Don't generate kernels in mobile build
+    if not selector.include_all_operators:
+        return False
+    # Every view op needs *some* handling in functionalization:
+    # - non-composite view ops get a generated kernel
+    # - composite view ops get a generated registration (that directly registers the composite kernel)
+    if isinstance(g, NativeFunctionsViewGroup):
+        return True
+    # For non-view ops, only inplace operators get functionalized
+    assert isinstance(g, NativeFunction)
+    return modifies_arguments(g)
 
 
+# See Note [Functionalization Pass: View Inverses].
+def gen_functionalization_view_inverse_declaration(selector: SelectiveBuilder, g: NativeFunctionsViewGroup) -> Optional[str]:
+    # For every (non-composite) view op, we need a corresponding "inverse view" function.
+    # This generates the declarations so we get a good compiler error when someone adds a new view.
+    @with_native_function
+    def emit_decl_helper(g: NativeFunctionsViewGroup) -> Optional[str]:
+        if g.view.has_composite_implicit_autograd_kernel:
+            return None
+        view_inverse_sig = ViewInverseSignature(g.view)
+        return view_inverse_sig.decl()
+
+    return emit_decl_helper(g)
+
+
+@with_native_function_and_selector_and_index
 def gen_functionalization_registration(
     selector: SelectiveBuilder,
-    f: NativeFunction,
+    g: Union[NativeFunction, NativeFunctionsViewGroup],
     composite_implicit_autograd_index: BackendIndex
-) -> Optional[str]:
-    @with_native_function
-    def emit_registration_helper(f: NativeFunction) -> Optional[str]:
-        # Note: for now, this logic is meant to avoid registering functionalization kernels for mobile.
-        # At some point, Vulkan we'll want to use functionalization and we'll need to change this.
-        if not needs_functionalization(selector, f):
-            return None
-        if f.is_view_op and f.has_composite_implicit_autograd_kernel:
+) -> List[str]:
+    def emit_registration_helper(f: NativeFunction, *, is_view: bool) -> str:
+        if is_view and f.has_composite_implicit_autograd_kernel:
             metadata = composite_implicit_autograd_index.get_kernel(f)
             assert metadata is not None
             native_api_name = metadata.kernel
@@ -317,49 +443,42 @@ def gen_functionalization_registration(
             # because we don't want to decompose non-view ops that are composite, like `at::ones`.
             registration_str = f'static_cast<{sig.ptr_type()}>(at::native::{native_api_name})'
         else:
+            # non-composite view ops (and inplace ops) get a normal registration.
             registration_str = f'TORCH_FN(functionalization::{wrapper_name(f.func)})'
-
         return f'm.impl("{f.func.name}", {registration_str});'
 
-    return emit_registration_helper(f)
+    # Note: for now, this logic is meant to avoid registering functionalization kernels for mobile.
+    # At some point, Vulkan we'll want to use functionalization and we'll need to change this.
+    if not needs_functionalization(selector, g):
+        return []
+
+    if isinstance(g, NativeFunctionsViewGroup):
+        view_str = [emit_registration_helper(g.view, is_view=True)]
+        if g.view_inplace is not None:
+            view_str.append(emit_registration_helper(g.view_inplace, is_view=True))
+        return view_str
+    else:
+        f = g
+        return [emit_registration_helper(f, is_view=False)]
 
 def gen_functionalization_definition(
     selector: SelectiveBuilder,
-    f: NativeFunction,
+    g: Union[NativeFunction, NativeFunctionsViewGroup],
     functional_op: Optional[NativeFunction]
-) -> Optional[str]:
-    @with_native_function
-    def emit_definition_helper(f: NativeFunction) -> Optional[str]:
-        if not needs_functionalization(selector, f):
-            return None
-        if f.is_view_op and f.has_composite_implicit_autograd_kernel:
-            # See Note [Composite view ops in the functionalization pass]
-            return None
-        # order is important here, ops that are both views and mutations should hit the view path.
-        if f.is_view_op:
-            # Every view op is expected to have a functional counterpart (e.g. transpose_() -> transpose())
-            assert functional_op is not None
-            body_str = emit_view_functionalization_body(f, functional_op)
-        else:
-            # inplace op
-            assert modifies_arguments(f)
-            body_str = emit_inplace_functionalization_body(f, functional_op)
-        sig = DispatcherSignature.from_schema(f.func)
-        return f"""
-    {sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-    {body_str}
-    }}
-    """
-
-    return emit_definition_helper(f)
-
-# See Note [Functionalization Pass: View Inverses].
-@with_native_function
-def gen_functionalization_view_inverse_declaration(f: NativeFunction) -> Optional[str]:
-    # We only need to generate view_inverse declarations for view ops that:
-    # - aren't composite (since they'll decompose and we'll get them for free).
-    # - aren't inplace (since they should have a corresponding functional version, which we call instead).
-    if f.is_view_op and not f.has_composite_implicit_autograd_kernel and not modifies_arguments(f):
-        output = emit_declaration_for_noncomposite_views(f)
-        return output
-    return None
+) -> List[str]:
+    if not needs_functionalization(selector, g):
+        return []
+    if isinstance(g, NativeFunctionsViewGroup):
+        view_defs = []
+        if not g.view.has_composite_implicit_autograd_kernel:
+            # For now I'm just asserting this - later, the view functionalization kernels
+            # should be updated to redispatch to view_copy().
+            assert g.view_copy is not None
+            view_defs.append(emit_view_functionalization_body(g.view, g.view))
+        if g.view_inplace is not None and not g.view_inplace.has_composite_implicit_autograd_kernel:
+            view_defs.append(emit_view_functionalization_body(g.view_inplace, g.view))
+        return view_defs
+    else:
+        f = g
+        assert modifies_arguments(f)
+        return [emit_inplace_functionalization_body(f, functional_op)]

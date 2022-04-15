@@ -126,7 +126,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                 if (!is_transformer_mask) {
                     idx += i*element_count;
                 }
-                if (mask[idx]) {
+                if (!mask[idx]) {
                     max_value[i] = (is_meaningful_max && max_value[i] > elements[i][it]) ? max_value[i] : elements[i][it];
                     is_meaningful_max = true;
                 }
@@ -160,7 +160,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                     idx += i*element_count;
                 }
 
-                if (mask[idx]) {
+                if (!mask[idx]) {
                     if (is_log_softmax) {
                         sum[i] += std::exp(elements[i][it] - max_value[i]);
                     } else {
@@ -188,7 +188,7 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                     if (!is_transformer_mask) {
                         idx += i*element_count;
                     }
-                    if (!mask[idx]) {
+                    if (mask[idx]) {
                         dst[i*element_count+it*WARP_SIZE] = 0;
                         continue;
                     }
@@ -297,7 +297,8 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
         const int next_power_of_two = 1 << log2_elements;
 
         // This value must match the WARP_SIZE constexpr value computed inside softmax_warp_forward.
-        int warp_size = (next_power_of_two < C10_WARP_SIZE) ? next_power_of_two : C10_WARP_SIZE;
+        int warp_size = at::cuda::warp_size();
+        warp_size = (next_power_of_two < warp_size) ? next_power_of_two : warp_size;
 
         // This value must match the WARP_BATCH constexpr value computed inside softmax_warp_forward.
         int batches_per_warp = (next_power_of_two <= 128) ? 2 : 1;
@@ -346,7 +347,8 @@ void dispatch_softmax_backward(output_t *grad_input, const input_t *grad, const 
         const int next_power_of_two = 1 << log2_elements;
 
         // This value must match the WARP_SIZE constexpr value computed inside softmax_warp_backward.
-        int warp_size = (next_power_of_two < C10_WARP_SIZE) ? next_power_of_two : C10_WARP_SIZE;
+        int warp_size = at::cuda::warp_size();
+        warp_size = (next_power_of_two < warp_size) ? next_power_of_two : warp_size;
 
         // This value must match the WARP_BATCH constexpr value computed inside softmax_warp_backward.
         int batches_per_warp = (next_power_of_two <= 128) ? 2 : 1;

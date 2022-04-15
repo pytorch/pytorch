@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <c10/core/Storage.h>
 #include <c10/core/TensorImpl.h>
 
 #include <torch/csrc/lazy/core/tensor.h>
@@ -13,12 +12,13 @@ namespace lazy {
 // Its scope is just to handle an LazyTensor.
 class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
  public:
+  explicit LTCTensorImpl(const LazyTensorPtr& tensor);
   explicit LTCTensorImpl(const LazyTensor& tensor);
   explicit LTCTensorImpl(LazyTensor&& tensor);
 
-  LazyTensor& tensor() { return tensor_; }
+  LazyTensorPtr tensor() { return tensor_; }
 
-  void set_tensor(const LazyTensor& lazy_tensor);
+  void set_tensor(const LazyTensorPtr& lazy_tensor);
 
   void force_refresh_sizes() { generation_ = 0; }
 
@@ -43,14 +43,14 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   int64_t numel() const override;
 
   bool is_contiguous(at::MemoryFormat memory_format) const override;
-  const at::Storage& storage() const override;
-  bool has_storage() const override { return false; }
+  const at::Storage& storage() const override { return tensor_->Storage(); }
+  bool has_storage() const override { return tensor_->Storage(); }
 #endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 
  private:
   void setup_size_properties();
 
-  LazyTensor tensor_;
+  LazyTensorPtr tensor_;
   size_t generation_ {0};
 };
 

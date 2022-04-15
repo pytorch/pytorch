@@ -45,6 +45,19 @@ namespace native {
 DEFINE_DISPATCH(sort_stub);
 DEFINE_DISPATCH(topk_stub);
 
+void _fill_indices(const TensorBase &indices, int64_t dim) {
+  auto ndim = indices.dim();
+  assert(0 <= dim && dim < ndim);
+  auto dim_size = indices.size(dim);
+  auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
+  auto idx_dim_sizes = std::vector<int64_t>(ndim, 1);
+  auto idx_dim_strides = std::vector<int64_t>(ndim, 0);
+  idx_dim_sizes[dim] = dim_size;
+  idx_dim_strides[dim] = 1;
+  auto idx_dim_restrided = idx_dim.as_strided(idx_dim_sizes, idx_dim_strides);
+  OptionalTensorRef(indices)->copy_(idx_dim_restrided);
+}
+
 namespace {
 
 /* Note from TH:
@@ -86,7 +99,7 @@ void quick_select_template(
     }
 
     // Use median of three for pivot choice
-    P = (L + R) >> 1;
+    P = L + (R - L) / 2;
     swap_fn(P, L + 1);
     if (gt_or_nan(arr[L + 1], arr[R])) {
       swap_fn(L + 1, R);

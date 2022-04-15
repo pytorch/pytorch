@@ -6,6 +6,7 @@
 #include <ATen/core/custom_class.h>
 #include <ATen/core/ivalue_to.h>
 #include <ATen/core/jit_type_base.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
@@ -91,7 +92,24 @@ struct OptionalArray {
     return *this;
   }
 
+  // Used when saving an argument for the backwards pass.
+  OptionalArray& operator=(c10::OptionalArrayRef<T> ref) {
+    if (ref) {
+      list = std::vector<T>(ref->begin(), ref->end());
+    } else {
+      list = nullopt;
+    }
+    return *this;
+  }
+
   operator c10::optional<c10::ArrayRef<T>>() {
+    if (!list) {
+      return nullopt;
+    }
+    return *list;
+  }
+
+  operator c10::OptionalArrayRef<T>() {
     if (!list) {
       return nullopt;
     }
@@ -126,6 +144,7 @@ struct Capsule {
   _(Double)                  \
   _(ComplexDouble)           \
   _(Int)                     \
+  _(SymInt)   \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -286,12 +305,6 @@ struct TORCH_API IValue final {
 
 private:
   static bool isAliasOf(const at::Tensor& a, const at::Tensor& b) {
-    // mkldnn tensors dont have views or storage, so we compare
-    // based on tensor impl. //TODO: find a way to use mkldnn storage
-    if (a.is_mkldnn() || b.is_mkldnn()) {
-      return a.unsafeGetTensorImpl() == b.unsafeGetTensorImpl();
-    }
-
     if (a.is_sparse()) {
       return isAliasOf(a._values(), b) || isAliasOf(a._indices(), b);
     }
@@ -307,6 +320,13 @@ private:
       return isAliasOf(a, b.values()) ||
              isAliasOf(a, b.crow_indices()) ||
              isAliasOf(a, b.col_indices());
+    }
+
+    // Opaque tensors such as the ones constructed by the MKL-DNN backend
+    // don't have storage so we just compare their TensorImpls.
+    // TODO: Find way to expose alias info for opaque tensors.
+    if (!a.has_storage() || !b.has_storage()) {
+      return a.unsafeGetTensorImpl() == b.unsafeGetTensorImpl();
     }
 
     return a.is_alias_of(b);
@@ -541,6 +561,18 @@ public:
     payload.u.as_int = i;
   }
 
+  IValue(c10::SymInt i) : tag(Tag::SymInt), is_intrusive_ptr(false) {
+    payload.u.as_int = i.data();
+  }
+
+  bool isSymInt() const {
+    return Tag::SymInt == tag;
+  }
+
+  c10::SymInt toSymInt() const {
+    return c10::SymInt(payload.u.as_int);
+  }
+
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
 
@@ -664,6 +696,8 @@ public:
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  IValue(c10::OptionalArrayRef<T> v);
   IValue(c10::nullopt_t);
 
   // ClassType
@@ -894,18 +928,13 @@ public:
     }
   }
 
-  template <typename T = c10::Type>
-  typename T::Ptr type() const;
+  template <typename T = c10::PlatformType>
+  TypePtr type() const;
 
   // Detect aliased tensors.
   struct HashAliasedIValue {
     size_t hashTensor(const at::Tensor& ten) const {
-      if (ten.is_mkldnn()) {
-        // MKLDNN tensors dont have storage and dont create views
-        // or aliasing so we can just use Tensor pointer, TODO: find way
-        // to use mkldnn storage
-        return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
-      } else if (ten.is_sparse()) {
+      if (ten.is_sparse()) {
         // COO sparse tensors have a "values" tensor and an "indices" tensor
         // so this will detect overlap of sparse tensors that share a values
         // tensor, but not sparse tensors that share an indices tensor.
@@ -915,6 +944,11 @@ public:
         // so this will detect overlap of sparse tensors that share a values
         // tensor, but not sparse tensors that share an indices tensor.
         return hashTensor(ten.values());
+      }  else if (!ten.has_storage()) {
+        // Opaque tensors such as the ones constructed by the MKL-DNN backend
+        // don't have storage so we just use their TensorImpls.
+        // TODO: Find way to expose alias info for opaque tensors.
+        return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
       } else {
         return reinterpret_cast<size_t>(
             ten.storage().unsafeGetStorageImpl());
@@ -1267,4 +1301,4 @@ struct TORCH_API WeakOrStrongTypePtr {
 
 } // namespace c10
 
-#include <ATen/core/ivalue_inl.h>
+#include <ATen/core/ivalue_inl.h>  // IWYU pragma: keep
