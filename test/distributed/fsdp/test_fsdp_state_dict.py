@@ -118,9 +118,8 @@ class TestFSDPStateDict(FSDPTest):
         if state_dict_rank0_and_offload:
             if self.rank == 0:
                 self.assertNotEqual(fsdp_state_dict, {})
-                # TODO: add tests for buffers
                 for key, tensor in fsdp_state_dict.items():
-                    if key in ignore_keys:
+                    if ignore_keys and key in ignore_keys:
                         continue
                     self.assertEqual(
                         tensor.device, torch.device("cpu"),
