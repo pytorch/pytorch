@@ -3038,20 +3038,21 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& A, bool full_matrice
 }
 
 // See note in linalg_svd for why this function does not have an _ex variant
-Tensor& linalg_svdvals_out(const Tensor& A, Tensor & S) {
+Tensor& linalg_svdvals_out(const Tensor& A, c10::optional<c10::string_view> driver, Tensor & S) {
   // Dummies
   auto U = at::empty({0}, A.options());
   auto Vh = at::empty({0}, A.options());
-  at::_linalg_svd_out(U, S, Vh, A, /*full_matrices=*/false, /*comptue_uv=*/false);
+  at::_linalg_svd_out(U, S, Vh, A, /*full_matrices=*/false, /*comptue_uv=*/false, /*driver=*/driver);
   return S;
 }
 
-Tensor linalg_svdvals(const Tensor& A) {
+Tensor linalg_svdvals(const Tensor& A, c10::optional<c10::string_view> driver) {
   // NB: Why do we need isTensorSubclassLike check for linalg_svdvals but not linalg_eigvals?
   //     svdvals is decomposed at the vmap level in functorch so A can be a BatchedTensor wrapping
   //     a TensorWrapper requiring fw or bw grad.
   return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false,
-                     /*comptue_uv=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A)));
+                     /*comptue_uv=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A),
+                     /*driver=*/driver));
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv,
@@ -3074,7 +3075,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
     TORCH_CHECK(self.scalar_type() == V.scalar_type(),
     "torch.svd: Expected out tensor to have dtype ", self.scalar_type(), " but got ", V.scalar_type(), " instead");
 
-    at::linalg_svdvals_out(S, self);
+    at::linalg_svdvals_out(S, self, driver);
     // some == false returns U, Vh of size (m, m), (n, n) full of zeros
     const auto m = self.size(-2);
     const auto n = self.size(-1);
@@ -3113,7 +3114,7 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
   if (compute_uv) {
     std::tie(U, S, Vh) = at::linalg_svd(self, /*full_matrices=*/!some, driver);
   } else {
-    S = at::linalg_svdvals(self);
+    S = at::linalg_svdvals(self, driver);
     // some == false returns U, Vh of size (m, m), (n, n) full of zeros
     const auto m = self.size(-2);
     const auto n = self.size(-1);

@@ -11139,11 +11139,11 @@
   python_module: linalg
   variants: function
 
-- func: linalg_svdvals(Tensor A) -> Tensor
+- func: linalg_svdvals(Tensor A, *, str? driver=None) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_svdvals.out(Tensor A, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_svdvals.out(Tensor A, *, str? driver=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
