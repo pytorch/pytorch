@@ -17,7 +17,7 @@ bool resize_output_check(const Tensor& output, IntArrayRef shape) {
     TORCH_WARN(
       "An output with one or more elements was resized since it had ",
       "shape ", output.sizes(), ", which does not match the required ",
-      "output shape ", shape, ".",
+      "output shape ", shape, ". ",
       "This behavior is deprecated, and in a future PyTorch release outputs ",
       "will not be resized unless they have zero elements. You can explicitly ",
       "reuse an out tensor t by resizing it, inplace, to zero elements with ",

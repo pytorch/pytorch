@@ -1,5 +1,6 @@
 #include <functional>
 #include <torch/csrc/lazy/core/config.h>
+#include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 
 namespace torch {
@@ -89,23 +90,13 @@ std::string GetCurrentScope() {
   return scope;
 }
 
-
-std::vector<SourceLocation> GetFrameInfoDefault() {
-  return std::vector<SourceLocation>();
-}
-
-std::function <std::vector<SourceLocation> ()> GetFrameInfo = GetFrameInfoDefault;
-void RegisterGetFrameInfo(const std::function <std::vector<SourceLocation> ()>& getFrameInfo) {
-  GetFrameInfo = getFrameInfo;
-}
-
 MetaData GetMetaDataIfDebugging() {
   if (!FLAGS_torch_lazy_ir_debug) {
     return MetaData();
   }
   MetaData meta;
   meta.scope = GetCurrentScope();
-  meta.frame_info = GetFrameInfo();
+  meta.frame_info = torch::lazy::GetPythonFramesFunction()();
   return meta;
 }
 

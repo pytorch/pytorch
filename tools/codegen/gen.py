@@ -16,7 +16,11 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  TensorOptionsArguments, Type, Variant,
                                  is_cuda_dispatch_key,
                                  is_generic_dispatch_key,
-                                 Tag, BaseOperatorName)
+                                 is_ufunc_dispatch_key,
+                                 NativeFunctionsViewGroup,
+                                 ViewSchemaKind,
+                                 BaseOperatorName,
+                                 Tag)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
                                      DispatcherSignature, NativeSignature)
 from tools.codegen.api import cpp
@@ -25,9 +29,10 @@ import tools.codegen.api.native as native
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
+from tools.codegen.code_template import CodeTemplate
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import (
-    Target, concatMap, context, mapMaybe, YamlDumper, YamlLoader, FileManager, assert_never
+    Target, concatMap, context, mapMaybe, YamlDumper, YamlLoader, FileManager, assert_never, make_file_manager
 )
 from tools.codegen.context import (method_with_native_function,
                                    native_function_manager,
@@ -38,7 +43,8 @@ from tools.codegen.gen_functionalization_type import (
     needs_functionalization,
     gen_functionalization_definition,
     gen_functionalization_registration,
-    gen_functionalization_view_inverse_declaration
+    gen_functionalization_view_inverse_declaration,
+    gen_composite_view_copy_kernel,
 )
 
 T = TypeVar('T')
@@ -71,6 +77,33 @@ T = TypeVar('T')
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+class NamespaceHelper():
+    """ A helper for constructing the namespace open and close strings for a nested set of namespaces.
+
+        e.g. for namespace_str torch::lazy,
+
+        prologue:
+        namespace torch {
+        namespace lazy {
+
+        epilogue:
+        } // namespace lazy
+        } // namespace torch
+    """
+    def __init__(self, namespace_str: str):
+        # cpp_namespace can be a colon joined string such as torch::lazy
+        cpp_namespaces = namespace_str.split("::")
+        self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
+        self.epilogue_ = "\n".join([f"}} // namespace {n}" for n in reversed(cpp_namespaces)])
+
+    @property
+    def prologue(self) -> str:
+        return self.prologue_
+
+    @property
+    def epilogue(self) -> str:
+        return self.epilogue_
+
 # A custom loader for YAML to let us also keep track of line numbers
 # of each entry in the YAML file
 class LineLoader(YamlLoader):
@@ -84,40 +117,44 @@ _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple('ParsedYaml', ['native_functions', 'backend_indices'])
+
+def parse_native_yaml_struct(es: object, path: str = "<stdin>") -> ParsedYaml:
+    assert isinstance(es, list)
+    rs: List[NativeFunction] = []
+    bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = defaultdict(dict)
+    for e in es:
+        assert isinstance(e.get('__line__'), int), e
+        loc = Location(path, e['__line__'])
+        funcs = e.get('func')
+        with context(lambda: f'in {loc}:\n  {funcs}'):
+            func, m = NativeFunction.from_yaml(e, loc)
+            rs.append(func)
+            BackendIndex.grow_index(bs, m)
+    error_check_native_functions(rs)
+    # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
+    indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
+        dispatch_key=DispatchKey.Undefined,
+        use_out_as_primary=True,
+        external=False,
+        device_guard=False,
+        index={}))
+    for k, v in bs.items():
+        # All structured in-tree operators are implemented in terms of their out operator.
+        indices[k] = BackendIndex(
+            dispatch_key=k,
+            use_out_as_primary=True,
+            external=False,
+            # Only cuda-like devices in tree require device guards
+            device_guard=is_cuda_dispatch_key(k),
+            index=v)
+    return ParsedYaml(rs, indices)
+
 def parse_native_yaml(path: str) -> ParsedYaml:
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         with open(path, 'r') as f:
             es = yaml.load(f, Loader=LineLoader)
-        assert isinstance(es, list)
-        rs: List[NativeFunction] = []
-        bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = defaultdict(dict)
-        for e in es:
-            assert isinstance(e.get('__line__'), int), e
-            loc = Location(path, e['__line__'])
-            funcs = e.get('func')
-            with context(lambda: f'in {loc}:\n  {funcs}'):
-                func, m = NativeFunction.from_yaml(e, loc)
-                rs.append(func)
-                BackendIndex.grow_index(bs, m)
-        error_check_native_functions(rs)
-        # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
-        indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
-            dispatch_key=DispatchKey.Undefined,
-            use_out_as_primary=True,
-            external=False,
-            device_guard=False,
-            index={}))
-        for k, v in bs.items():
-            # All structured in-tree operators are implemented in terms of their out operator.
-            indices[k] = BackendIndex(
-                dispatch_key=k,
-                use_out_as_primary=True,
-                external=False,
-                # Only cuda-like devices in tree require device guards
-                device_guard=is_cuda_dispatch_key(k),
-                index=v)
-        _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = ParsedYaml(rs, indices)
+        _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(es, path=path)
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
 
@@ -218,8 +255,8 @@ def static_dispatch_extra_headers(backend: Optional[BackendIndex], skip_tensor_i
 
 
 def static_dispatch(
-    f: NativeFunction, cpp_sig: CppSignature,
-    *, method: bool, backend_index: Optional[BackendIndex]
+        f: NativeFunction, cpp_sig: CppSignature,
+        *, method: bool, backend_index: Optional[BackendIndex]
 ) -> Optional[str]:
     if backend_index is None or f.manual_kernel_registration:
         return None
@@ -337,7 +374,7 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
             assert_never(self.target)
 
 
-# Generates Function.h, which provides the functional public C++ API,
+# Generates Functions.h, which provides the functional public C++ API,
 # and the scaffolding to call into the dispatcher from these functions.
 @dataclass(frozen=True)
 class ComputeFunction:
@@ -508,7 +545,8 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
             # Generate the template declaration with one bool parameter for each
             # precomputed element. Each parameter is true if the corresponding (in
             # terms of position) precomputed element has been set.
-            precomputed_elements = [elem for replace_list in precomputed.replace.values() for elem in replace_list]
+            precomputed_values = [*precomputed.replace.values(), precomputed.add]
+            precomputed_elements = [elem for replace_list in precomputed_values for elem in replace_list]
             precomputed_template_parameters = [elem.name.upper() for elem in precomputed_elements]
             precomputed_template_params_str = ", ".join(f"bool {param} = false" for param in precomputed_template_parameters)
             precompute_template_decl = f"template <{precomputed_template_params_str}>"
@@ -596,6 +634,16 @@ struct TORCH_API structured_{name} : public {parent_class} {{
 }};
 """
 
+
+def needs_backend_select(f: NativeFunction, selector: SelectiveBuilder) -> bool:
+    name = str(f.func.name.name)
+    if name.endswith('_like') or name.startswith('new_'):
+        return False
+    if f.func.arguments.tensor_options is None:
+        return False
+    return selector.is_native_function_selected(f)
+
+
 # Generates RegisterBackendSelect.cpp, a series of kernels which provide
 # specialized computation of dispatch key for operator signatures which cannot
 # be easily done automatically using templating.
@@ -612,17 +660,11 @@ class ComputeBackendSelect:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        if str(f.func.name.name).endswith('_like') or str(f.func.name.name).startswith('new_'):
+        if not needs_backend_select(f, self.selector):
             return None
 
         name = native.name(f.func)
         native_sig = NativeSignature(f.func)
-
-        if not any(isinstance(a.argument, TensorOptionsArguments) for a in native_sig.arguments()):
-            return None
-
-        if not self.selector.is_native_function_selected(f):
-            return None
 
         native_tensor_args = [
             a for a in native_sig.arguments()
@@ -653,11 +695,9 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 // aten::{f.func}
 C10_ALWAYS_INLINE
 {sig.defn(name)} {{
-  static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-    .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  return op.redispatch(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  return at::_ops::{f.func.name.unambiguous_name()}::redispatch(
+      _dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif self.target is Target.REGISTRATION:
@@ -917,7 +957,8 @@ def compute_registration_declarations(f: NativeFunction, backend_indices: Dict[D
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?
-        'dispatch': str({k for k, v in backend_indices.items() if v.has_kernel(f)} != {DispatchKey.CompositeImplicitAutograd}),
+        'dispatch': str(
+            {k for k, v in backend_indices.items() if v.has_kernel(f)} != {DispatchKey.CompositeImplicitAutograd}),
         'default': str(f.has_composite_kernel or has_autogenerated_composite_kernel(f))
     }
     return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
@@ -965,6 +1006,43 @@ def pre_group_native_functions(
         d[f.func.kind()] = f
     return pre_grouped_native_functions
 
+def get_grouped_by_view_native_functions(
+        native_functions: Sequence[NativeFunction]
+) -> Sequence[Union[NativeFunction, NativeFunctionsViewGroup]]:
+    def maybe_create_view_group(d: Dict[ViewSchemaKind, NativeFunction]) -> List[Union[NativeFunction, NativeFunctionsViewGroup]]:
+        funcs: List[Union[NativeFunction, NativeFunctionsViewGroup]] = []
+        if ViewSchemaKind.aliasing not in d:
+            # Case 1: this op / op group is not aliasing, so we don't create a view group.
+            # return the original (ungrouped) native functions instead.
+            for func in d.values():
+                funcs.append(func)
+        else:
+            # Case 2: this op group contains an aliasing op, so we create a ViewGroup for it.
+            # The handling for out= ops here is unfortunate.
+            # out= ops don't really make sense for view operators.
+            # However, we have at least one existing {view}_copy.out operator in native_functions.yaml.
+            # It shouldn't be part of a view group, so we explicitly don't group it.
+            # There currently aren't any out= view ops (and there probably shouldn't be).
+            # We also expect that when we hit this case, the `non_aliasing` op in the dict
+            # *must* be a view_copy op (this is asserted in the NativeFunctionsViewGroup constructor)
+            if ViewSchemaKind.out in d:
+                funcs.append(d[ViewSchemaKind.out])
+
+            funcs.append(NativeFunctionsViewGroup(
+                view=d[ViewSchemaKind.aliasing],
+                view_copy=d.get(ViewSchemaKind.non_aliasing, None),
+                view_inplace=d.get(ViewSchemaKind.inplace, None),
+            ))
+        return funcs
+
+    grouped_by_views: Dict[FunctionSchema, Dict[ViewSchemaKind, NativeFunction]] = defaultdict(dict)
+    for f in native_functions:
+        schema = f.func.view_signature()
+        assert f.view_schema_kind not in grouped_by_views[schema]
+        grouped_by_views[schema][f.view_schema_kind] = f
+
+    return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
+
 def get_grouped_native_functions(
         native_functions: Sequence[NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
     def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
@@ -982,6 +1060,7 @@ def gen_aggregated_headers(
         *,
         native_functions: Sequence[NativeFunction],
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+        structured_native_functions: Sequence[NativeFunctionsGroup],
         static_dispatch_idx: Optional[BackendIndex],
         selector: SelectiveBuilder,
         backend_indices: Dict[DispatchKey, BackendIndex],
@@ -993,8 +1072,6 @@ def gen_aggregated_headers(
 ) -> None:
     # Buck doesn't support dynamic output files, so we aggregate all operator
     # headers into a single file
-    structured_native_functions = [g for g in grouped_native_functions
-                                   if isinstance(g, NativeFunctionsGroup)]
     cpu_fm.write('NativeMetaFunctions.h', lambda: {
         'NativeMetaFunctions_includes': [],
         'NativeMetaFunctions_declarations': list(
@@ -1055,7 +1132,8 @@ def gen_aggregated_headers(
                         selector,
                         rocm=rocm,
                         cpp_namespace='at::native',
-                        class_method_name=None),
+                        class_method_name=None,
+                        skip_dispatcher_op_registration=False),
                     grouped_native_functions
                 )),
             })
@@ -1163,7 +1241,8 @@ def gen_per_operator_headers(
                     selector,
                     rocm=rocm,
                     cpp_namespace='at::native',
-                    class_method_name=None),
+                    class_method_name=None,
+                    skip_dispatcher_op_registration=False),
                 grouped_functions
             ))
 
@@ -1212,6 +1291,7 @@ def gen_headers(
         *,
         native_functions: Sequence[NativeFunction],
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+        structured_native_functions: Sequence[NativeFunctionsGroup],
         static_dispatch_idx: Optional[BackendIndex],
         selector: SelectiveBuilder,
         backend_indices: Dict[DispatchKey, BackendIndex],
@@ -1242,6 +1322,7 @@ def gen_headers(
         gen_aggregated_headers(
             native_functions=native_functions,
             grouped_native_functions=grouped_native_functions,
+            structured_native_functions=structured_native_functions,
             static_dispatch_idx=static_dispatch_idx,
             selector=selector,
             backend_indices=backend_indices,
@@ -1274,10 +1355,6 @@ def gen_headers(
 
     cpu_fm.write('RegistrationDeclarations.h', lambda: {
         'registration_declarations': [compute_registration_declarations(f, backend_indices) for f in native_functions],
-    })
-
-    cpu_fm.write('FunctionalInverses.h', lambda: {
-        'view_inverse_declarations': list(mapMaybe(gen_functionalization_view_inverse_declaration, native_functions))
     })
 
 
@@ -1313,17 +1390,20 @@ def gen_source_files(
         *,
         native_functions: Sequence[NativeFunction],
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
-        static_dispatch_idx: Optional[BackendIndex],
+        structured_native_functions: Sequence[NativeFunctionsGroup],
+        native_functions_with_view_groups: Sequence[Union[NativeFunction, NativeFunctionsViewGroup]],
         selector: SelectiveBuilder,
         backend_indices: Dict[DispatchKey, BackendIndex],
         core_fm: FileManager,
         cpu_fm: FileManager,
+        cpu_vec_fm: FileManager,
         cuda_fm: FileManager,
         dispatch_keys: Sequence[DispatchKey],
         functions_keys: Set[DispatchKey],
         rocm: bool,
         force_schema_registration: bool,
         per_operator_headers: bool,
+        skip_dispatcher_op_registration: bool,
 ) -> None:
     extra_cuda_headers = '''\
 #include <c10/cuda/CUDAGuard.h>
@@ -1343,19 +1423,30 @@ def gen_source_files(
         if per_operator_headers:
             def operator_headers() -> List[str]:
                 headers = []
-                for fn in native_functions:
-                    is_registered = backend_index.has_kernel(fn) or (
-                        fn.structured and dispatch_key in
-                        (DispatchKey.Meta, DispatchKey.CompositeExplicitAutograd))
+                for g in grouped_native_functions:
+                    is_registered = False
+                    if backend_index.has_kernel(g):
+                        is_registered = True
+                    # The above has_kernel test on a group will only test for
+                    # the existence of out dispatch, because that's how
+                    # structured kernels work. But sometimes functions can be
+                    # grouped but not be structured, and then you need to check
+                    # each individual piece, as they may have manual dispatch
+                    # entries.
+                    elif isinstance(g, NativeFunctionsGroup) and any(backend_index.has_kernel(fn) for fn in g.functions()):
+                        is_registered = True
+                    # TODO: this condition is a bit questionable
+                    elif g.structured and dispatch_key in (DispatchKey.Meta, DispatchKey.CompositeExplicitAutograd):
+                        is_registered = True
                     if not is_registered:
                         continue
 
-                    headers.append(f"#include <ATen/ops/{fn.root_name}_native.h>")
+                    headers.append(f"#include <ATen/ops/{g.root_name}_native.h>")
                     if dispatch_key == DispatchKey.CompositeExplicitAutograd:
-                        headers.append(f"#include <ATen/ops/{fn.root_name}.h>")
+                        headers.append(f"#include <ATen/ops/{g.root_name}.h>")
                     if dispatch_key in functions_keys:
                         headers.append(
-                            f"#include <ATen/ops/{fn.root_name}_{dispatch_namespace}_dispatch.h>")
+                            f"#include <ATen/ops/{g.root_name}_{dispatch_namespace}_dispatch.h>")
 
                 return sorted(set(headers))
         else:
@@ -1368,11 +1459,30 @@ def gen_source_files(
                 return headers
 
         backend_index = backend_indices[dispatch_key]
+        dispatch_registrations_body = "" if skip_dispatcher_op_registration else "\n".join(list(concatMap(
+            dest.RegisterDispatchKey(
+                backend_index,
+                Target.REGISTRATION,
+                selector,
+                rocm=rocm,
+                cpp_namespace='at::native',
+                class_method_name=None,
+                skip_dispatcher_op_registration=skip_dispatcher_op_registration),
+            grouped_native_functions
+        )))
+        static_template = CodeTemplate("""\
+TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
+    $dispatch_registrations_body
+};""")
+        static_init_dispatch_registrations = static_template.substitute(
+            dispatch_key=dispatch_key,
+            dispatch_registrations_body=dispatch_registrations_body
+        )
         dispatch_namespace = str(dispatch_key).lower()
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'external_backend_headers': '',
-            'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers),
+            'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers, rocm),
             'ops_headers': operator_headers(),
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
@@ -1384,7 +1494,8 @@ def gen_source_files(
                     selector,
                     rocm=rocm,
                     cpp_namespace='at::native',
-                    class_method_name=None),
+                    class_method_name=None,
+                    skip_dispatcher_op_registration=skip_dispatcher_op_registration),
                 grouped_native_functions
             )),
             'dispatch_anonymous_definitions': list(concatMap(
@@ -1394,37 +1505,68 @@ def gen_source_files(
                     selector,
                     rocm=rocm,
                     cpp_namespace='at::native',
-                    class_method_name=None),
+                    class_method_name=None,
+                    skip_dispatcher_op_registration=skip_dispatcher_op_registration),
                 grouped_native_functions
             )),
-            'dispatch_registrations': list(concatMap(
-                dest.RegisterDispatchKey(
-                    backend_index,
-                    Target.REGISTRATION,
-                    selector,
-                    rocm=rocm,
-                    cpp_namespace='at::native',
-                    class_method_name=None),
-                grouped_native_functions
-            )),
+            'static_init_dispatch_registrations': static_init_dispatch_registrations,
+            'deferred_dispatch_registrations': "",
         })
 
+        for g in structured_native_functions:
+            if not g.out.ufunc_inner_loop or not is_ufunc_dispatch_key(dispatch_key):
+                continue
+            name = g.functional.func.name.name
+            if dispatch_key is DispatchKey.CPU:
+                assert fm is cpu_fm
+                fm.write_with_template(f'UfuncCPU_{name}.cpp', 'UfuncCPU.cpp', lambda: {
+                    'meta_declaration': compute_meta_function_declaration(g),
+                    'native_declaration':
+                        dest.compute_native_function_declaration(g, backend_indices[dispatch_key]),
+                    'native_definitions': dest.compute_ufunc_cpu(g),
+                })
+                cpu_vec_fm.write_with_template(f'UfuncCPUKernel_{name}.cpp', 'UfuncCPUKernel.cpp', lambda: {
+                    'name': name,
+                    'native_definitions': dest.compute_ufunc_cpu_kernel(g),
+                })
+            elif dispatch_key is DispatchKey.CUDA:
+                cuda_headers = "#include <ATen/native/cuda/Loops.cuh>"
+                if rocm:
+                    cuda_headers = "#include <ATen/native/hip/Loops.cuh>"
+                fm.write_with_template(f'UfuncCUDA_{name}.cu', 'UfuncCUDA.cu', lambda: {
+                    'name': name,
+                    'cuda_headers': cuda_headers,
+                    'meta_declaration': compute_meta_function_declaration(g),
+                    'native_declaration':
+                        dest.compute_native_function_declaration(g, backend_indices[dispatch_key]),
+                    'native_definitions': dest.compute_ufunc_cuda(g),
+                })
+            else:
+                raise AssertionError(f'unrecognized {dispatch_key} for ufunc')
+
+        del fm
+
     # BackendSelect is generated specially
-    cpu_fm.write('RegisterBackendSelect.cpp', lambda: {
-        'backend_select_method_definitions':
-            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION, selector), native_functions)),
-        'backend_select_function_registrations':
-            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), native_functions)),
-    })
+    def gen_backend_select() -> Dict[str, List[str]]:
+        relevant_fns = [fn for fn in native_functions if needs_backend_select(fn, selector)]
+        return {
+            'ops_headers': [f'#include <ATen/ops/{fn.root_name}_ops.h>' for fn in relevant_fns],
+            'backend_select_method_definitions':
+                list(mapMaybe(ComputeBackendSelect(Target.DEFINITION, selector), relevant_fns)),
+            'backend_select_function_registrations':
+                list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), relevant_fns)),
+        }
+    cpu_fm.write('RegisterBackendSelect.cpp', gen_backend_select)
 
     schema_selector = selector
     if force_schema_registration:
         schema_selector = SelectiveBuilder.get_nop_selector()
     cpu_fm.write('RegisterSchema.cpp', lambda: {
-        'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
+        'schema_registrations': [] if skip_dispatcher_op_registration
+        else list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
     })
 
-    def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
+    def key_func(fn: Union[NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup]) -> str:
         return fn.root_name
 
     cpu_fm.write_sharded(
@@ -1460,20 +1602,43 @@ def gen_source_files(
 
 
     def functionalization_env_callable(
-            g: Union[NativeFunction, NativeFunctionsGroup]
+            g: Union[NativeFunction, NativeFunctionsViewGroup]
     ) -> Dict[str, List[str]]:
-        functions = [g] if isinstance(g, NativeFunction) else list(g.functions())
-        functions_needing_functionalization = [
-            fn for fn in functions if needs_functionalization(selector, fn)]
+        functions_needing_functionalization = [g] if needs_functionalization(selector, g) else []
+
+        def gen_op_headers(g: Union[NativeFunction, NativeFunctionsViewGroup]) -> List[str]:
+            if not needs_functionalization(selector, g):
+                return []
+            if isinstance(g, NativeFunctionsViewGroup):
+                # view ops always get a functionalization kernel
+                headers = [
+                    f"#include <ATen/ops/{g.view.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.view.root_name}_ops.h>",
+                ]
+                if g.view_copy is not None:
+                    headers += [
+                        f"#include <ATen/ops/{g.view_copy.root_name}_native.h>",
+                        f"#include <ATen/ops/{g.view_copy.root_name}_ops.h>",
+                    ]
+                return headers
+            else:
+                f = g
+                return [
+                    f"#include <ATen/ops/{f.root_name}_native.h>",
+                    f"#include <ATen/ops/{f.root_name}_ops.h>",
+                ]
+
         return {
-            'ops_headers': ([
-                f"#include <ATen/ops/{functions[0].root_name}_native.h>",
-                f"#include <ATen/ops/{functions[0].root_name}_ops.h>",
-            ] if functions_needing_functionalization else []),
-            'func_definitions': list(mapMaybe(
-                lambda f: gen_functionalization_definition(selector, f, to_functional_op[f.func.name]),
+            'ops_headers': gen_op_headers(g),
+            'func_definitions': list(concatMap(
+                lambda f: gen_functionalization_definition(
+                    selector,
+                    g,
+                    # We need to manually map inplace ops to their out-of-place variants
+                    # (we can't do this with NativeFunctionsGroup today because not all inplace ops have out= variants)
+                    None if isinstance(g, NativeFunctionsViewGroup) else to_functional_op.get(g.func.name, None)),
                 functions_needing_functionalization)),
-            'func_registrations': list(mapMaybe(
+            'func_registrations': list(concatMap(
                 lambda f: gen_functionalization_registration(
                     selector, f, backend_indices[DispatchKey.CompositeImplicitAutograd]),
                 functions_needing_functionalization)),
@@ -1482,12 +1647,45 @@ def gen_source_files(
 
     cpu_fm.write_sharded(
         'RegisterFunctionalization.cpp',
-        grouped_native_functions,
+        native_functions_with_view_groups,
         key_fn=key_func,
         env_callable=functionalization_env_callable,
         num_shards=4,
         sharded_keys={'ops_headers', 'func_definitions', 'func_registrations'}
     )
+
+    cpu_fm.write('FunctionalInverses.h', lambda: {
+        'view_inverse_declarations': list(mapMaybe(
+            lambda g: gen_functionalization_view_inverse_declaration(selector, g),
+            [g for g in native_functions_with_view_groups if isinstance(g, NativeFunctionsViewGroup)]))
+    })
+
+    # Note [view_copy NativeFunctions]
+    # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
+    # needs to have a corresponding non-aliasing {view}_copy variant.
+    # Backends that use functionalization and don't know how to handle aliasing ops
+    # are expected to implement kernels for these {view}_copy kernels instead.
+    # The code for {view}_copy operators in core is pretty boilerplate-heavy however,
+    # so we codegen the following:
+    # (1) A CompositeExplicitAutograd kernel for every {view}_copy operator.
+    #     These are never explicitly invoked by the functionalization pass,
+    #     but they could theoretically be called from user code (I added these kernels for completeness,
+    #     since the ops are part of the public API).
+    # (2) A derivative formula for every {view}_copy operator
+    #     {view}_copy operators can re-use the same derivative formulas as their {view} op counterparts,
+    #     so rather than stamping all of the entries out in derivatives.yaml,
+    #     we codegen them in.
+    #     This is similar to how autograd codegen doesn't require inplace ops to have a derivatives.yaml entry.
+    cpu_fm.write('CompositeViewCopyKernels.cpp', lambda: {
+        'ops_headers': [
+            '\n'.join(f'#include <ATen/ops/{f.root_name}_ops.h>' for f in
+                      ([g.view] if g.view_copy is None else [g.view, g.view_copy]))
+            for g in native_functions_with_view_groups if isinstance(g, NativeFunctionsViewGroup)
+        ],
+        'CompositeViewCopyKernel_Definitions': list(mapMaybe(
+            gen_composite_view_copy_kernel,
+            [g for g in native_functions_with_view_groups if isinstance(g, NativeFunctionsViewGroup)]))
+    })
 
 
 def gen_declarations_yaml(
@@ -1545,6 +1743,10 @@ def main() -> None:
         '--static_dispatch_backend',
         help='generate static dispatch code for the specific backend (if set)')
     parser.add_argument(
+        '--skip_dispatcher_op_registration',
+        action='store_true',
+        help='Avoid registering operators into the dispatcher.')
+    parser.add_argument(
         '--force_schema_registration',
         action='store_true',
         help='force it to generate schema-only registrations for all ops, including'
@@ -1566,7 +1768,11 @@ def main() -> None:
     native_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
     parsed_yaml = parse_native_yaml(native_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
+
     grouped_native_functions = get_grouped_native_functions(native_functions)
+    structured_native_functions = [g for g in grouped_native_functions
+                                   if isinstance(g, NativeFunctionsGroup)]
+    native_functions_with_view_groups = get_grouped_by_view_native_functions(native_functions)
 
     template_dir = os.path.join(options.source_path, "templates")
 
@@ -1585,13 +1791,11 @@ def main() -> None:
     ops_install_dir = f'{options.install_dir}/ops'
     pathlib.Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
 
-    def make_file_manager(install_dir: str) -> FileManager:
-        return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run)
-
-    core_fm = make_file_manager(core_install_dir)
-    cpu_fm = make_file_manager(options.install_dir)
-    cuda_fm = make_file_manager(options.install_dir)
-    ops_fm = make_file_manager(ops_install_dir)
+    core_fm = make_file_manager(options=options, install_dir=core_install_dir)
+    cpu_fm = make_file_manager(options=options)
+    cpu_vec_fm = make_file_manager(options=options)
+    cuda_fm = make_file_manager(options=options)
+    ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
 
     extra_cuda_headers = '''\
 #include <c10/cuda/CUDAGuard.h>
@@ -1605,23 +1809,8 @@ def main() -> None:
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>'''
 
-    dispatch_keys = [
-        DispatchKey.CPU,
-        DispatchKey.SparseCPU,
-        DispatchKey.SparseCsrCPU,
-        DispatchKey.MkldnnCPU,
-        DispatchKey.CUDA,
-        DispatchKey.SparseCUDA,
-        DispatchKey.SparseCsrCUDA,
-        DispatchKey.QuantizedCPU,
-        DispatchKey.QuantizedCUDA,
-        DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.CompositeExplicitAutograd,
-        # Meta is a magic key: it is automatically generated for structured
-        # kernels
-        DispatchKey.Meta,
-        DispatchKey.ZeroTensor,
-    ]
+    from tools.codegen.model import dispatch_keys
+
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
     functions_keys = {
@@ -1642,23 +1831,27 @@ def main() -> None:
         gen_source_files(
             native_functions=native_functions,
             grouped_native_functions=grouped_native_functions,
-            static_dispatch_idx=static_dispatch_idx,
+            structured_native_functions=structured_native_functions,
+            native_functions_with_view_groups=native_functions_with_view_groups,
             selector=selector,
             backend_indices=backend_indices,
             core_fm=core_fm,
             cpu_fm=cpu_fm,
+            cpu_vec_fm=cpu_vec_fm,
             cuda_fm=cuda_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
             rocm=options.rocm,
             force_schema_registration=options.force_schema_registration,
             per_operator_headers=options.per_operator_headers,
+            skip_dispatcher_op_registration=options.skip_dispatcher_op_registration,
         )
 
     if 'headers' in options.generate:
         gen_headers(
             native_functions=native_functions,
             grouped_native_functions=grouped_native_functions,
+            structured_native_functions=structured_native_functions,
             static_dispatch_idx=static_dispatch_idx,
             selector=selector,
             backend_indices=backend_indices,
@@ -1684,6 +1877,7 @@ def main() -> None:
 
         for fm, prefix in [
                 (cpu_fm, ""),
+                (cpu_vec_fm, "cpu_vec_"),
                 (core_fm, "core_"),
                 (cuda_fm, "cuda_"),
                 (ops_fm, "ops_"),

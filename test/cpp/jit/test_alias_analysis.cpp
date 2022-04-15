@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <ATen/TensorOperators.h>
+
 namespace torch {
 namespace jit {
 

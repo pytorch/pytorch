@@ -151,17 +151,19 @@ class Optimizer(object):
                   zip(chain.from_iterable((g['params'] for g in saved_groups)),
                       chain.from_iterable((g['params'] for g in groups)))}
 
-        def cast(param, value):
+        def cast(param, value, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""
             if isinstance(value, torch.Tensor):
                 # Floating-point types are a bit special here. They are the only ones
                 # that are assumed to always match the type of params.
-                if param.is_floating_point():
-                    value = value.to(param.dtype)
-                value = value.to(param.device)
+                # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
+                if (key != "step"):
+                    if param.is_floating_point():
+                        value = value.to(param.dtype)
+                    value = value.to(param.device)
                 return value
             elif isinstance(value, dict):
-                return {k: cast(param, v) for k, v in value.items()}
+                return {k: cast(param, v, key=k) for k, v in value.items()}
             elif isinstance(value, container_abcs.Iterable):
                 return type(value)(cast(param, v) for v in value)
             else:
