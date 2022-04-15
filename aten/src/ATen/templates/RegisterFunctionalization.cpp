@@ -26,22 +26,12 @@ namespace functionalization {
 
 ${func_definitions}
 
-namespace addbackviews {
-
-${func_add_back_views_definitions}
-
-} // namespace addbackviews
-
 }  // namespace functionalization
 
 namespace {
 
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   ${func_registrations};
-}
-
-TORCH_LIBRARY_IMPL(aten, FunctionalizeAddBackViews, m) {
-  ${func_add_back_views_registrations};
 }
 
 }  // namespace
