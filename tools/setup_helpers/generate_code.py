@@ -3,7 +3,7 @@ import os
 import pathlib
 import sys
 import yaml
-from typing import Any, List, Optional, cast
+from typing import Any, Optional, cast
 
 try:
     # use faster C loader if available
@@ -11,25 +11,11 @@ try:
 except ImportError:
     from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
 
-source_files = {'.py', '.cpp', '.h'}
-
 NATIVE_FUNCTIONS_PATH = 'aten/src/ATen/native/native_functions.yaml'
 
-# TODO: This is a little inaccurate, because it will also pick
-# up setup_helper scripts which don't affect code generation
-def all_generator_source() -> List[str]:
-    r = []
-    for directory, _, filenames in os.walk('tools'):
-        for f in filenames:
-            if os.path.splitext(f)[1] in source_files:
-                full = os.path.join(directory, f)
-                r.append(full)
-    return sorted(r)
 
-
-def generate_code(ninja_global: Optional[str] = None,
-                  native_functions_path: Optional[str] = None,
-                  install_dir: Optional[pathlib.Path] = None,
+def generate_code(native_functions_path: Optional[str] = None,
+                  install_dir: Optional[str] = None,
                   subset: Optional[str] = None,
                   disable_autograd: bool = False,
                   force_schema_registration: bool = False,
@@ -41,19 +27,20 @@ def generate_code(ninja_global: Optional[str] = None,
 
     # Build ATen based Variable classes
     if install_dir is None:
-        install_dir = pathlib.Path('torch/csrc')
-        python_install_dir = pathlib.Path('torch/testing/_internal/generated')
+        install_dir = 'torch/csrc'
+        python_install_dir = 'torch/testing/_internal/generated'
     else:
         python_install_dir = install_dir
-    autograd_gen_dir = install_dir / 'autograd/generated'
+    autograd_gen_dir = os.path.join(install_dir, 'autograd', 'generated')
     for d in (autograd_gen_dir, python_install_dir):
-        d.mkdir(exist_ok=True, parents=True)
+        if not os.path.exists(d):
+            os.makedirs(d)
     autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
-            os.fspath(autograd_gen_dir),
+            autograd_gen_dir,
             autograd_dir)
 
     if operator_selector is None:
@@ -63,7 +50,7 @@ def generate_code(ninja_global: Optional[str] = None,
 
         gen_autograd(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
-            os.fspath(autograd_gen_dir),
+            autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
             operator_selector=operator_selector,
@@ -72,7 +59,7 @@ def generate_code(ninja_global: Optional[str] = None,
     if subset == "python" or not subset:
         gen_annotated(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
-            os.fspath(python_install_dir),
+            python_install_dir,
             autograd_dir)
 
 
@@ -130,8 +117,7 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description='Autogenerate code')
     parser.add_argument('--native-functions-path')
-    parser.add_argument('--ninja-global')
-    parser.add_argument('--install_dir', type=pathlib.Path)
+    parser.add_argument('--install_dir')
     parser.add_argument(
         '--subset',
         help='Subset of source files to generate. Can be "libtorch" or "pybindings". Generates both when omitted.'
@@ -169,7 +155,6 @@ def main() -> None:
     options = parser.parse_args()
 
     generate_code(
-        options.ninja_global,
         options.native_functions_path,
         options.install_dir,
         options.subset,
