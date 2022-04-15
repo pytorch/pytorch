@@ -18,7 +18,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
-    IS_WINDOWS)
+    IS_WINDOWS, first_sample)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyNativeDeviceTypes, onlyCUDA, largeTensorTest, ops, precisionOverride)
@@ -203,13 +203,15 @@ class TestReductions(TestCase):
         with self.assertRaises(IndexError):
             self._test_dim_keepdim(op, device, ndim=2, dim=2)
 
-    @ops(reduction_ops, dtypes=OpDTypes.none)
-    def test_dim_ndim_limit(self, device, op: ReductionOpInfo):
+    @ops(reduction_ops, dtypes=OpDTypes.any_one)
+    def test_dim_ndim_limit(self, device, dtype, op: ReductionOpInfo):
         """Tests that an exception is raised when reducing a tensor with more
         than 64 dims along some specific dimensions. dim=None is ok"""
-        t = make_tensor([1] * 65, dtype=torch.float, device=device)
+        t = make_tensor([1] * 65, dtype=dtype, device=device)
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+        sample.kwargs["dim"] = 0
         with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
-            op(t, dim=0)
+            op(t, *sample.args, **sample.kwargs)
 
     @ops(filter(lambda op: op.identity is not None, reduction_ops), dtypes=OpDTypes.supported)
     def test_identity(self, device, dtype, op: ReductionOpInfo):
@@ -1739,7 +1741,8 @@ class TestReductions(TestCase):
     # TODO: part of this test covers torch.norm, with should be covered by test_linalg
     @onlyNativeDeviceTypes
     def test_repeated_dim(self, device):
-        ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.norm]
+        ops = [torch.mean, torch.sum, torch.nansum, torch.logsumexp, torch.norm,
+               partial(torch.std, correction=1), partial(torch.var, correction=1)]
         x = torch.randn(3, 3, 3, 3, device=device)
 
         error_msg = r'appears multiple times in the list of dims'
