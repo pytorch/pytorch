@@ -15,7 +15,7 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
-     parametrize, subtest, instantiate_parametrized_tests, dtype_name)
+     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
@@ -287,7 +287,7 @@ class TestTesting(TestCase):
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
-    @skipIfRocm
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
@@ -321,7 +321,7 @@ if __name__ == '__main__':
         self.assertIn('errors=1', stderr)
 
 
-    @skipIfRocm
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
@@ -362,7 +362,7 @@ if __name__ == '__main__':
         self.assertIn('errors=1', stderr)
 
 
-    @skipIfRocm
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
