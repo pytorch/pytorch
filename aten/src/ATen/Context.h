@@ -83,6 +83,9 @@ class TORCH_API Context {
   static bool hasIPU() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::IPU);
   }
+  static bool hasNPU() {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::NPU);
+  }
   static bool hasXLA() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
@@ -300,6 +303,10 @@ static inline bool hasHIP() {
 
 static inline bool hasIPU() {
   return globalContext().hasIPU();
+}
+
+static inline bool hasNPU() {
+  return globalContext().hasNPU();
 }
 
 static inline bool hasXLA() {

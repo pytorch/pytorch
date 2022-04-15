@@ -357,6 +357,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::CUDA;
       case c10::DeviceType::IPU:
         return c10::DispatchKey::IPU;
+      case c10::DeviceType::NPU:
+        return c10::DispatchKey::NPU;
       case c10::DeviceType::XLA:
         return c10::DispatchKey::XLA;
       case c10::DeviceType::Lazy:

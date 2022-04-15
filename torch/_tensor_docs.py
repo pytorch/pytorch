@@ -1078,6 +1078,24 @@ Args:
     {memory_format}
 """.format(**common_args))
 
+add_docstr_all('npu',
+               r"""
+npu(device=None, non_blocking=False, memory_format=torch.preserve_format) -> Tensor
+
+Returns a copy of this object in NPU memory.
+
+If this object is already in NPU memory and on the correct device,
+then no copy is performed and the original object is returned.
+
+Args:
+    device (:class:`torch.device`): The destination NPU device.
+        Defaults to the current NPU device.
+    non_blocking (bool): If ``True`` and the source is in pinned memory,
+        the copy will be asynchronous with respect to the host.
+        Otherwise, the argument has no effect. Default: ``False``.
+    {memory_format}
+""".format(**common_args))
+
 add_docstr_all('xpu',
                r"""
 xpu(device=None, non_blocking=False, memory_format=torch.preserve_format) -> Tensor
@@ -4967,6 +4985,11 @@ Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 add_docstr_all('is_ipu',
                r"""
 Is ``True`` if the Tensor is stored on the IPU, ``False`` otherwise.
+""")
+
+add_docstr_all('is_npu',
+               r"""
+Is ``True`` if the Tensor is stored on the NPU, ``False`` otherwise.
 """)
 
 add_docstr_all('is_xpu',

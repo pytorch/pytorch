@@ -706,6 +706,25 @@ class Module:
         """
         return self._apply(lambda t: t.ipu(device))
 
+    def npu(self: T, device: Optional[Union[int, device]] = None) -> T:
+        r"""Moves all model parameters and buffers to the NPU.
+
+        This also makes associated parameters and buffers different objects. So
+        it should be called before constructing optimizer if the module will
+        live on NPU while being optimized.
+
+        .. note::
+            This method modifies the module in-place.
+
+        Arguments:
+            device (int, optional): if specified, all parameters will be
+                copied to that device
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: t.npu(device))
+
     def xpu(self: T, device: Optional[Union[int, device]] = None) -> T:
         r"""Moves all model parameters and buffers to the XPU.
 

@@ -18,23 +18,15 @@ DeviceType parse_type(const std::string& device_string) {
       std::pair<const char*, DeviceType>,
       static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
       types = {{
-          {"cpu", DeviceType::CPU},
-          {"cuda", DeviceType::CUDA},
-          {"ipu", DeviceType::IPU},
-          {"xpu", DeviceType::XPU},
-          {"mkldnn", DeviceType::MKLDNN},
-          {"opengl", DeviceType::OPENGL},
-          {"opencl", DeviceType::OPENCL},
-          {"ideep", DeviceType::IDEEP},
-          {"hip", DeviceType::HIP},
-          {"ve", DeviceType::VE},
-          {"fpga", DeviceType::FPGA},
-          {"ort", DeviceType::ORT},
-          {"xla", DeviceType::XLA},
-          {"lazy", DeviceType::Lazy},
-          {"vulkan", DeviceType::Vulkan},
-          {"mlc", DeviceType::MLC},
-          {"meta", DeviceType::Meta},
+          {"cpu", DeviceType::CPU},       {"cuda", DeviceType::CUDA},
+          {"ipu", DeviceType::IPU},       {"npu", DeviceType::NPU},
+          {"xpu", DeviceType::XPU},       {"mkldnn", DeviceType::MKLDNN},
+          {"opengl", DeviceType::OPENGL}, {"opencl", DeviceType::OPENCL},
+          {"ideep", DeviceType::IDEEP},   {"hip", DeviceType::HIP},
+          {"ve", DeviceType::VE},         {"fpga", DeviceType::FPGA},
+          {"ort", DeviceType::ORT},       {"xla", DeviceType::XLA},
+          {"lazy", DeviceType::Lazy},     {"vulkan", DeviceType::Vulkan},
+          {"mlc", DeviceType::MLC},       {"meta", DeviceType::Meta},
           {"hpu", DeviceType::HPU},
       }};
   auto device = std::find_if(
@@ -48,7 +40,7 @@ DeviceType parse_type(const std::string& device_string) {
   }
   TORCH_CHECK(
       false,
-      "Expected one of cpu, cuda, ipu, xpu, mkldnn, opengl, opencl, ideep, hip, ve, ort, mlc, xla, lazy, vulkan, meta, hpu device type at start of device string: ",
+      "Expected one of cpu, cuda, ipu, npu, xpu, mkldnn, opengl, opencl, ideep, hip, ve, ort, mlc, xla, lazy, vulkan, meta, hpu device type at start of device string: ",
       device_string);
 }
 enum DeviceStringParsingState { START, INDEX_START, INDEX_REST, ERROR };

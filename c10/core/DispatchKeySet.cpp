@@ -81,6 +81,8 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::HPU);
     case DispatchKey::AutogradIPU:
       return DispatchKeySet(DispatchKey::IPU);
+    case DispatchKey::AutogradNPU:
+      return DispatchKeySet(DispatchKey::NPU);
     case DispatchKey::AutogradXPU:
       return DispatchKeySet(DispatchKey::XPU);
     case DispatchKey::AutogradPrivateUse1:

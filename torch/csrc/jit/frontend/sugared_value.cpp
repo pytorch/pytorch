@@ -122,6 +122,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
            {"is_ipu", "prim"},
+           {"is_npu", "prim"},
            {"is_meta", "prim"},
            {"is_leaf", "aten"},
            {"is_nested", "prim"},

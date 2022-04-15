@@ -742,6 +742,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has_all(ipu_ks);
   }
 
+  bool is_npu() const {
+    constexpr auto npu_ks = DispatchKeySet(BackendComponent::NPUBit);
+    return key_set_.has_all(npu_ks);
+  }
+
   bool is_xla() const {
     constexpr auto xla_ks = DispatchKeySet(BackendComponent::XLABit);
     return key_set_.has_all(xla_ks);

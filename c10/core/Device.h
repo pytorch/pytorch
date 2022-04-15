@@ -101,6 +101,11 @@ struct C10_API Device final {
     return type_ == DeviceType::IPU;
   }
 
+  /// Return true if the device is of NPU type.
+  bool is_npu() const noexcept {
+    return type_ == DeviceType::NPU;
+  }
+
   /// Return true if the device is of HPU type.
   bool is_hpu() const noexcept {
     return type_ == DeviceType::HPU;

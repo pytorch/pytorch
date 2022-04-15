@@ -1204,7 +1204,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     //
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
-    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
+    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu() && !self.is_npu()) {
       return self._reshape_alias(shape, stride.value());
     } else {
       return self.view(shape);
