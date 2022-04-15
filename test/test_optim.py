@@ -626,20 +626,24 @@ class TestOptim(TestCase):
         self.rel_tol = 4e-3
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias])
+                lambda weight, bias, maximize: optimizer([weight, bias], maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95))
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95), maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, rho=0.95)),
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95), maximize=maximize),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], weight_decay=1)
+                lambda weight, bias, maximize: optimizer([weight, bias], weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)

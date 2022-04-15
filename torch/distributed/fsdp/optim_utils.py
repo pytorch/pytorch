@@ -787,7 +787,6 @@ def _broadcast_sharded_pos_dim_tensor_state(
     if rank == 0:
         assert unsharded_tensor is not None, \
             "Expects rank 0 to pass in the unsharded tensor"
-        unsharded_tensor = unsharded_tensor.to(broadcast_device)
         get_shard = functools.partial(
             FSDP.FullyShardedDataParallel._get_shard_functional,
             unsharded_tensor,
@@ -811,7 +810,7 @@ def _broadcast_sharded_pos_dim_tensor_state(
     # Lastly, shard on rank 0
     if rank != 0:
         return
-    param_state[state_name] = get_shard(0, world_size)[0]  # type: ignore[misc]
+    param_state[state_name] = get_shard(0, world_size)[0].to(broadcast_device)  # type: ignore[misc]
 
 
 def _broadcast_unsharded_pos_dim_tensor_state(
