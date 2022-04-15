@@ -1204,7 +1204,7 @@ class TestDistributions(TestCase):
         samples = bin1.sample(torch.Size((100000,)))
         self.assertTrue((samples <= total_count.type_as(samples)).all())
         self.assertEqual(samples.mean(dim=0), bin1.mean, atol=0.02, rtol=0)
-        self.assertEqual(samples.var(dim=0), bin1.variance, atol=0.02, rtol=0)
+        self.assertEqual(samples.var(correction=1, dim=0), bin1.variance, atol=0.02, rtol=0)
 
     def test_negative_binomial(self):
         p = torch.arange(0.05, 1, 0.1).requires_grad_()
@@ -2074,7 +2074,7 @@ class TestDistributions(TestCase):
         samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
         self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
-        empirical_var = samples.var(0)
+        empirical_var = samples.var(correction=1, dim=0)
         self.assertEqual(d.variance, empirical_var, atol=0.02, rtol=0)
 
     def test_multivariate_normal_shape(self):
@@ -2216,7 +2216,7 @@ class TestDistributions(TestCase):
         samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
         self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
-        empirical_var = samples.var(0)
+        empirical_var = samples.var(correction=1, dim=0)
         self.assertEqual(d.variance, empirical_var, atol=0.05, rtol=0)
 
     # We applied same tests in Multivariate Normal distribution for Wishart distribution
@@ -2376,7 +2376,7 @@ class TestDistributions(TestCase):
         samples = d.rsample((ndim * ndim * 100000,))
         empirical_mean = samples.mean(0)
         self.assertEqual(d.mean, empirical_mean, atol=0.5, rtol=0)
-        empirical_var = samples.var(0)
+        empirical_var = samples.var(correction=1, dim=0)
         self.assertEqual(d.variance, empirical_var, atol=0.5, rtol=0)
 
     def test_exponential(self):
@@ -2617,7 +2617,7 @@ class TestDistributions(TestCase):
             max_error = max(error[error == error])
             self.assertLess(max_error, 0.01,
                             "Kumaraswamy example {}/{}, incorrect .mean".format(i + 1, len(cases)))
-            expected = samples.var(0)
+            expected = samples.var(correction=1, dim=0)
             actual = m.variance
             error = (expected - actual).abs()
             max_error = max(error[error == error])

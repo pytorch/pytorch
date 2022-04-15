@@ -453,7 +453,9 @@ class TestReductions(TestCase):
     def test_dim_reduction_less_than_64(self, device):
         sizes = [1] * 65
         x = torch.randn(sizes, device=device)
-        ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.norm]
+        ops = [torch.mean, torch.sum, torch.nansum, torch.logsumexp, torch.norm,
+               partial(torch.std, correction=0), partial(torch.var, correction=0),
+               partial(torch.std_mean, correction=0), partial(torch.var_mean, correction=0)]
         for op in ops:
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
                 op(x, 64)
