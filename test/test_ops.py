@@ -110,7 +110,6 @@ class TestCommon(TestCase):
                     # NOTE: some ops will fail in forward if their inputs
                     #   require grad but they don't support computing the gradient
                     #   in that type! This is a bug in the op!
-                    print("dtype", dtype, e)
                     unsupported(dtype)
 
                 # Short-circuits testing this dtype -- it doesn't work
