@@ -6,7 +6,7 @@ from itertools import chain, product
 import itertools
 import torch.nn.functional as F
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import TEST_CUDNN
+from torch.testing._internal.common_cuda import TEST_CUDNN, tf32_is_not_fp32
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, skipIf, toleranceOverride, tol,
@@ -1200,8 +1200,14 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_Linear,
                skips=(
                    # No channels_last support for Linear currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                ),
+               decorators=(
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=0.003, rtol=0.01)})
+                       if (torch.backends.cudnn.allow_tf32 and tf32_is_not_fp32) else tol(atol=1e-5, rtol=1e-5),
+                       'TestModule', 'test_forward', device_type='cuda'),
+               )),
     ModuleInfo(torch.nn.Bilinear,
                module_inputs_func=module_inputs_torch_nn_Bilinear,
                decorators=[
@@ -1209,7 +1215,12 @@ module_db: List[ModuleInfo] = [
                        toleranceOverride({
                            torch.float32: tol(atol=1e-4, rtol=1e-4),
                            torch.float64: tol(atol=1e-4, rtol=1e-4)}),
-                       'TestModule', 'test_forward', device_type='cpu')
+                       'TestModule', 'test_forward', device_type='cpu'),
+                   DecorateInfo(
+                       toleranceOverride({
+                           torch.float32: tol(atol=5e-2, rtol=0.0005 if (torch.backends.cudnn.allow_tf32 and
+                                                                         tf32_is_not_fp32) else 0)}),
+                       'TestModule', 'test_cpu_gpu_parity'),
                ],
                skips=(
                    # No channels_last support for Bilinear currently.
@@ -1244,14 +1255,28 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
                skips=(
                    # No channels_last support for TransformerEncoderLayer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                ),
+               decorators=(
+                   DecorateInfo(
+                       toleranceOverride({
+                           torch.float32: tol(atol=5e-2, rtol=0.005 if (torch.backends.cudnn.allow_tf32 and
+                                                                        tf32_is_not_fp32) else 0)}),
+                       'TestModule', 'test_cpu_gpu_parity'),
+               )),
     ModuleInfo(torch.nn.TransformerDecoderLayer,
                module_inputs_func=module_inputs_torch_nn_TransformerDecoderLayer,
                skips=(
                    # No channels_last support for TransformerDecoderLayer currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                ),
+               decorators=(
+                   DecorateInfo(
+                       toleranceOverride({
+                           torch.float32: tol(atol=5e-2, rtol=0.008 if (torch.backends.cudnn.allow_tf32 and
+                                                                        tf32_is_not_fp32) else 0)}),
+                       'TestModule', 'test_cpu_gpu_parity'),
+               )),
     ModuleInfo(torch.nn.Transformer,
                module_inputs_func=module_inputs_torch_nn_Transformer,
                skips=(
@@ -1262,8 +1287,16 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
                skips=(
                    # No channels_last support for MultiheadAttention currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                ),
+               decorators=(
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({
+                           torch.float32: tol(atol=5e-2, rtol=0.02 if (torch.backends.cudnn.allow_tf32 and
+                                                                       tf32_is_not_fp32) else 0)}),
+                       'TestModule', 'test_cpu_gpu_parity'),
+               )),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
                skips=(

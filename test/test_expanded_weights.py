@@ -246,7 +246,7 @@ class TestExpandedWeightFunctional(TestCase):
 
         expected = [torch.stack(grad) for grad in zip(*expected)]
         for (res, exp) in zip(result, expected):
-            self.assertEqual(res, exp, atol=1e-4, rtol=5e-5)
+            self.assertEqual(res, exp, atol=2e-4, rtol=5e-5)
 
     def test_group_norm_error(self, device):
         # group norm has to call native_group_norm. This checks that it hits the same errors
