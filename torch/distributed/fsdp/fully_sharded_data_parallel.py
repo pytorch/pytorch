@@ -44,7 +44,7 @@ from .flatten_params_wrapper import (
     FlatParameter,
     FlattenParamsWrapper,
 )
-from .optim_utils import (
+from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
     _flatten_full_optim_state_dict,
