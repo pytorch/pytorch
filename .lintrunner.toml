@@ -20,7 +20,6 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/flake8_linter.py',
-    '--binary=flake8',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -110,7 +109,6 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
-    '--binary=mypy',
     '--config=mypy.ini',
     '--',
     '@{{PATHSFILE}}'
@@ -141,7 +139,6 @@ include_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
-    '--binary=mypy',
     '--config=mypy-strict.ini',
     '--',
     '@{{PATHSFILE}}'
@@ -473,4 +470,48 @@ init_command = [
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
     'cmakelint==1.4.1',
+]
+
+[[linter]]
+code = 'SHELLCHECK'
+include_patterns = [
+    '.jenkins/pytorch/**/*.sh'
+]
+command = [
+    'python3',
+    'tools/linter/adapters/shellcheck_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'shellcheck-py==0.7.2.1',
+]
+
+[[linter]]
+code = 'ACTIONLINT'
+include_patterns = [
+    '.github/workflows/*.yml',
+    '.github/workflows/*.yaml',
+    # actionlint does not support composite actions yet
+    # '.github/actions/**/*.yml',
+    # '.github/actions/**/*.yaml',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/actionlint_linter.py',
+    '--binary=.lintbin/actionlint',
+    '--',
+    '@{{PATHSFILE}}',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=actionlint',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=actionlint',
 ]
