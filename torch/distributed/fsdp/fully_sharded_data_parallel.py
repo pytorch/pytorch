@@ -385,10 +385,7 @@ class FullyShardedDataParallel(nn.Module):
         # Only handle params which are not already sharded. This enables
         # sharding individual layers of a Module, with an outer wrapper to
         # shard any leftover parameters.
-        params = []
-        for param_name, param in module.named_parameters():
-            if not isinstance(param, FlatParameter):
-                params.append(param)
+        params = [p for p in module.parameters() if not isinstance(p, FlatParameter)]
 
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
             module, param_list=params
@@ -929,9 +926,8 @@ class FullyShardedDataParallel(nn.Module):
         # For children instances, if they are checkpointed, state will not be reset to
         # IDLE after each inner forward/backward.
         self._assert_state(TrainingState_.IDLE)
-        for n, m in self.named_modules():
-            # `n != ""` excludes self.
-            if n != "" and isinstance(m, FullyShardedDataParallel):
+        for m in self.modules():
+            if m is not self and isinstance(m, FullyShardedDataParallel):
                 # We relax the assert for non-root instance, when the nested initialized module is wrapped
                 # again in FSDP later, for example after training to run inference.
                 assert (
@@ -959,8 +955,8 @@ class FullyShardedDataParallel(nn.Module):
         # We share streams with all children instances, which allows them to
         # overlap transfers across the forward pass without synchronizing with
         # the default stream.
-        for n, m in self.named_modules():
-            if n != "" and isinstance(m, FullyShardedDataParallel):
+        for m in self.modules():
+            if m is not self and isinstance(m, FullyShardedDataParallel):
                 m._streams = self._streams
                 m._fsdp_graph_order = self._fsdp_graph_order
 
