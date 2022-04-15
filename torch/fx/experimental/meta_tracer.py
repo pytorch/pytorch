@@ -3,6 +3,8 @@ import torch.fx
 import warnings
 import functools
 
+from typing import Dict
+
 def gen_constructor_wrapper(target):
     @functools.wraps(target)
     def wrapper(*args, **kwargs):
@@ -73,8 +75,15 @@ class MetaTracer(torch.fx.Tracer):
     def create_proxy(self, kind, target, args, kwargs, name=None, type_expr=None, proxy_factory_fn=None):
         rv = super().create_proxy(kind, target, args, kwargs, name, type_expr, proxy_factory_fn)
 
+        if kind == 'placeholder' and target in self.meta_args:
+            rv.install_tensor_meta(self.meta_args[target])
+
         if target in self.orig_fns:
-            # TODO: pull out schema and also support positional args
+            # NOTE: tensor constructors in PyTorch define the `device` argument as
+            # *kwargs-only*. That is why this works. If you add methods to
+            # _TORCH_METHODS_TO_PATCH that do not define `device` as kwarg-only,
+            # this will break and you will likely see issues where we cannot infer
+            # the size of the output.
             if 'device' in kwargs:
                 kwargs['device'] = 'meta'
 
@@ -84,9 +93,12 @@ class MetaTracer(torch.fx.Tracer):
                 kwargs_metas = torch.fx.node.map_aggregate(kwargs, proxys_to_metas)
 
                 meta_out = target(*args_metas, **kwargs_metas)
+                # TODO
                 assert isinstance(rv, torch.fx.Proxy), 'Dont support composite output yet'
+
                 rv.install_tensor_meta(meta_out)
             else:
+                # TODO: call_method, call_module
                 assert kind in ['placeholder'], f'Unsupported node kind {kind}'
         except AssertionError as e:
             warnings.warn(f'Could not compute metadata for target {target}: {e}')
@@ -96,15 +108,8 @@ class MetaTracer(torch.fx.Tracer):
     def proxy(self, node):
         return MetaProxy(node, self)
 
-    def create_args_for_root(self, root_fn, is_module, concrete_args=None):
-        root_fn, args = super().create_args_for_root(root_fn, is_module, concrete_args)
-        # HACK: supporting subset of args. Do this more systematically w/ signature
-        for p, meta in zip(args, self.meta_args):
-            if isinstance(p, torch.fx.Proxy):
-                p.install_tensor_meta(meta)
-        return root_fn, args
-
-    def trace(self, root, meta_args, concrete_args=None):
+    def trace(self, root, meta_args : Dict[str, torch.Tensor], concrete_args=None):
+        assert isinstance(meta_args, dict)
         self.meta_args = meta_args
 
         self.patched_torch_methods = {
