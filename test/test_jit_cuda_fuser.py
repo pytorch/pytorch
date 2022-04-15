@@ -4558,20 +4558,22 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
     def test_nvfuser_extremal_values(self, device, dtype, op):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
-        def _get_extremal_tensor(x, val):
+        def _get_extremal_tensor(x, val, dtype):
+            if x.dtype != dtype:
+                return x
             return x.fill_(val)
 
-        def _get_extremal_input(x, val):
+        def _get_extremal_input(x, val, dtype):
             if isinstance(x, torch.Tensor):
-                return _get_extremal_tensor(x, val)
+                return _get_extremal_tensor(x, val, dtype)
             elif is_iterable_of_tensors(x):
-                return [_get_extremal_tensor(y, val) for y in x]
+                return [_get_extremal_tensor(y, val, dtype) for y in x]
             return x
 
-        def _get_extremal_sample(sample: SampleInput, val):
-            sample.input = _get_extremal_input(sample.input, val)
-            sample.args = [_get_extremal_input(x, val) for x in sample.args]
-            sample.kwargs = {k: _get_extremal_input(v, val) for k, v in sample.kwargs.items()}
+        def _get_extremal_sample(sample: SampleInput, val, dtype):
+            sample.input = _get_extremal_input(sample.input, val, dtype)
+            sample.args = [_get_extremal_input(x, val, dtype) for x in sample.args]
+            sample.kwargs = {k: _get_extremal_input(v, val, dtype) for k, v in sample.kwargs.items()}
             return sample
 
         def _get_extremal_samples(sample: SampleInput, dtype):
@@ -4580,7 +4582,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
                 complex_vals = itertools.product(vals, vals)
                 vals = list(map(lambda x: complex(*x), complex_vals))
             for val in vals:
-                yield _get_extremal_sample(sample, val)
+                yield _get_extremal_sample(sample, val, dtype)
 
         for variant, sample in variant_sample_pairs:
             trace = create_traced_fn(self, variant)
