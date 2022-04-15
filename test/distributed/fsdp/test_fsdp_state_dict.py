@@ -343,14 +343,42 @@ class TestFSDPStateDict(FSDPTest):
             with torch.no_grad():
                 param.zero_()
 
-        with fsdp.summon_full_params():
+        with fsdp.summon_full_params(fsdp):
             for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
                 self.assertNotEqual(p1, p2)
 
         local.load_state_dict(deepcopy(state_dict))
-        with fsdp.summon_full_params():
+        with fsdp.summon_full_params(fsdp):
             for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
                 self.assertEqual(p1, p2)
+
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_with_ignored_modules(self):
+        # Initialize an FSDP-wrapped model with an ignored module
+        model = Model(wrap_fsdp=True).cuda()
+        ignored_modules = [model.outer]
+        ignored_param_to_param_name = {
+            model.outer.bias: "outer.bias", model.outer.weight: "outer.weight",
+        }
+        fsdp_model = FSDP(model, ignored_modules=ignored_modules)
+        with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
+            sd = fsdp_model.state_dict()
+        with FSDP.summon_full_params(fsdp_model):
+            fsdp_params = deepcopy(list(fsdp_model.parameters()))
+        # Check that the ignored parameters are not cloned
+        for param, param_name in ignored_param_to_param_name.items():
+            self.assertTrue(param_name in sd)
+            self.assertEqual(param.data_ptr(), sd[param_name].data_ptr())
+        # Check that the state dict can be loaded into a non-wrapped version of
+        # the model
+        nonwrapped_model = Model(wrap_fsdp=False).cuda()
+        for param in nonwrapped_model.parameters():
+            with torch.no_grad():
+                param.zero_()
+        nonwrapped_model.load_state_dict(sd)
+        local_params = list(nonwrapped_model.parameters())
+        for fsdp_param, local_param in zip(fsdp_params, local_params):
+            self.assertEqual(fsdp_param, local_param)
 
 
 instantiate_parametrized_tests(TestFSDPStateDict)
