@@ -979,7 +979,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 futures.append(pg.gather([], input, opts).get_future())
 
         # Wait for work to complete
-        expected = [torch.tensor([rank]) for rank in range(self.world_size)]
+        expected = [fn(torch.tensor([rank])) for rank in range(self.world_size)]
         for i in range(self.world_size):
             futures[i].wait()
             result = futures[i].value()
@@ -994,6 +994,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_gather_basics_cuda(self):
         self._test_gather_basics(lambda t: t.clone().cuda())
+
+    @requires_gloo()
+    def test_gather_noncontiguous_input(self):
+        # Take a column of 2D tensor, such that memory is not dense
+        self._test_gather_basics(lambda t: t.expand(2, 2).contiguous()[:, 0])
 
     def _test_gather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1103,7 +1108,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 for _ in range(n)
             ]
             expected_output = [
-                [torch.tensor([i]) for i in range(n * self.world_size)]
+                [fn(torch.tensor([i])) for i in range(n * self.world_size)]
                 for _ in range(n)
             ]
             fut = pg.allgather(output, input).get_future()
@@ -1121,6 +1126,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_allgather_basics_cuda(self):
         self._test_allgather_basics(lambda t: t.clone().cuda())
+
+    @requires_gloo()
+    def test_allgather_noncontiguous_input(self):
+        # Take a column of 2D tensor, such that memory is not dense
+        self._test_allgather_basics(lambda t: t.expand(2, 2).contiguous()[:, 0])
 
     def _test_allgather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
