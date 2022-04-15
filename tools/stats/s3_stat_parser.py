@@ -1,13 +1,12 @@
 import bz2
 import json
 import logging
+import os
 import subprocess
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Union, Any, cast
 from typing_extensions import Literal, TypedDict
-
-from tools.testing.test_selections import _get_stripped_CI_job
 
 try:
     import boto3  # type: ignore[import]
@@ -144,6 +143,19 @@ def get_cases(
         else:
             raise RuntimeError(f'Unknown format version: {version}')
     return cases
+
+
+def _get_stripped_CI_job() -> str:
+    """E.g. convert 'pytorch_windows_vs2019_py36_cuda10.1_build' to 'pytorch_windows_vs2019_py36_cuda10.1'.
+    """
+    job = os.environ.get("JOB_BASE_NAME", "").rstrip('0123456789')
+    if job.endswith('_slow_test'):
+        job = job[:len(job) - len('_slow_test')]
+    elif job.endswith('_test') or job.endswith('-test'):
+        job = job[:len(job) - len('_test')]
+    elif job.endswith('_build') or job.endswith('-build'):
+        job = job[:len(job) - len('_build')]
+    return job
 
 
 def _parse_master_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[Report]]:
