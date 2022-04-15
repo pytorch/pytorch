@@ -476,56 +476,6 @@ static inline bool svd_uses_cusolver(const Tensor& A) {
          && at::globalContext().linalgPreferredBackend() != at::LinalgBackend::Magma;
 }
 
-static inline std::vector<std::vector<int64_t>> _get_svd_outputs_sizes_and_strides(
-    const Tensor& A,
-    bool full_matrices,
-    bool compute_uv) {
-
-  std::vector<std::vector<int64_t>> res(6, std::vector<int64_t>());
-
-  auto sizes = A.sizes().vec();
-  const auto m = sizes.cend()[-2];
-  const auto n = sizes.cend()[-1];
-  const auto k = std::min(m, n);
-
-  // Prepare sizes for U
-  if (compute_uv) {
-    sizes.back() = full_matrices ? m : k;
-    auto U_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
-    // set_output(0, sizes, U_strides, A.options(), {});
-    res[0] = sizes;
-    res[1] = std::vector<int64_t>(U_strides.begin(), U_strides.end());
-
-    // Prepare sizes for Vh
-    sizes.end()[-2] = full_matrices ? n : k;
-    sizes.end()[-1] = n;
-
-    // We need to distinguish the cuSOLVER case, as the cuSOLVER algorithms we use
-    // expect F-contig matrices, but they compute V rather than Vh
-    const bool use_cusolver = at::native::svd_uses_cusolver(A);
-    auto Vh_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
-    // set_output(2, sizes, Vh_strides, A.options(), {});
-    res[4] = sizes;
-    res[5] = std::vector<int64_t>(Vh_strides.begin(), Vh_strides.end());
-  } else {
-    // set_output(0, {0}, {}, A.options(), {});
-    res[0] = {0};
-    res[1] = {};
-    // set_output(2, {0}, {}, A.options(), {});
-    res[4] = {0};
-    res[5] = {};
-  }
-
-  // Prepare sizes for S. S is always real, even when A is complex.
-  sizes.pop_back();
-  sizes.end()[-1] = k;
-  // set_output(1, sizes, {}, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
-  res[2] = sizes;
-  res[3] = {};
-
-  return res;
-}
-
 
 // Function used instead of .to so that the original strides are retained
 // .to doesn't retain strides and make the output tensor contiguous

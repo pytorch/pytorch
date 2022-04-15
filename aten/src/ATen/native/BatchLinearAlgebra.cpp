@@ -262,11 +262,35 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              c10::optional<c10::string_view> driver) {
   TORCH_CHECK(A.dim() >= 2, "linalg.svd: input should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
 
-  auto sizes_and_strides = ::at::native::_get_svd_outputs_sizes_and_strides(A, full_matrices, compute_uv);
+  auto sizes = A.sizes().vec();
+  const auto m = sizes.cend()[-2];
+  const auto n = sizes.cend()[-1];
+  const auto k = std::min(m, n);
 
-  set_output(0, sizes_and_strides[0], sizes_and_strides[1], A.options(), {});
-  set_output(1, sizes_and_strides[2], sizes_and_strides[3], A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
-  set_output(2, sizes_and_strides[4], sizes_and_strides[5], A.options(), {});
+  // Prepare sizes for U
+  if (compute_uv) {
+    sizes.back() = full_matrices ? m : k;
+    auto U_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
+    set_output(0, sizes, U_strides, A.options(), {});
+
+    // Prepare sizes for Vh
+    sizes.end()[-2] = full_matrices ? n : k;
+    sizes.end()[-1] = n;
+
+    // We need to distinguish the cuSOLVER case, as the cuSOLVER algorithms we use
+    // expect F-contig matrices, but they compute V rather than Vh
+    const bool use_cusolver = at::native::svd_uses_cusolver(A);
+    auto Vh_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
+    set_output(2, sizes, Vh_strides, A.options(), {});
+  } else {
+    set_output(0, {0}, {}, A.options(), {});
+    set_output(2, {0}, {}, A.options(), {});
+  }
+
+  // Prepare sizes for S. S is always real, even when A is complex.
+  sizes.pop_back();
+  sizes.end()[-1] = k;
+  set_output(1, sizes, {}, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
 }
 } // namespace meta
 
