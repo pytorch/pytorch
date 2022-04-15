@@ -2375,11 +2375,20 @@ class FullyShardedDataParallel(nn.Module):
         first iteration sequence (for ``FULL_SHARD``) or the first iteration
         sequence's prefix (for ``SHARD_GRAD_OP``).
         """
+        # Only check all-gathers when rebuilding the full parameters in the
+        # forward pass and in the beginning of the backward pass
+        if self.training_state not in (
+            TrainingState_.FORWARD, TrainingState_.BACKWARD_PRE,
+        ):
+            return
         eod = self._exec_order_data
         param_index = eod.param_to_param_index[param]
         if not eod.is_first_iter:
             # Warn possibly multiple times for the same iteration since the
             # number of warnings may be informative in debugging
+            if eod.index >= len(eod.param_order) and self.rank == 0:
+                print("eod.index:", eod.index)
+                print("eod.param_order:", eod.param_order)
             if param_index != eod.param_order[eod.index]:
                 warnings.warn(
                     "Execution order differs from that of the first iteration "
