@@ -4554,7 +4554,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     @ops(op_db, allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32,
-                                 torch.float64, torch.complex64, torch.complex128))
+                                torch.float64, torch.complex64, torch.complex128))
     def test_nvfuser_extremal_values(self, device, dtype, op):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
