@@ -146,6 +146,7 @@ supported:
   - clone
   - _copy_from
   - _copy_from_and_resize
+  - diagonal
   - empty.memory_format
   - empty_strided
   - expand
