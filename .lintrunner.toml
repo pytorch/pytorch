@@ -269,6 +269,7 @@ exclude_patterns=[
     'third_party/**',
     '**/*.expect',
     '**/*.ipynb',
+    '**/*.ptl',
     'tools/clang_format_hash/**',
 ]
 command = [
@@ -304,7 +305,6 @@ command = [
 code = 'TABS'
 include_patterns = ['**']
 exclude_patterns = [
-    '**/*.ptl',
     '**/*.svg',
     '**/*Makefile',
     '**/contrib/**',
