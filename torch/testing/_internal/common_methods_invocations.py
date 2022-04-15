@@ -7973,7 +7973,6 @@ def sample_inputs_allclose(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
-
 def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7997,6 +7996,22 @@ def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
         )
     return sample_inputs
+
+def sample_inputs_pdist(op_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    yield from (SampleInput(make_input((n, m))) for n, m in itertools.product((1, S), repeat=2))
+    yield from (SampleInput(make_input((S, S)), kwargs=dict(p=p)) for p in (0.0, 1.0, 2.0, 10.0, float("inf")))
+
+def reference_pdist(input, p=2):
+    pdist = scipy.spatial.distance.pdist
+    if p == 0:
+        output = pdist(input, "hamming") * input.shape[1]
+    elif p == float("inf"):
+        output = pdist(input, lambda x, y: np.abs(x - y).max())
+    else:
+        output = pdist(input, "minkowski", p=p)
+    return output.astype(input.dtype)
 
 def sample_inputs_diagflat(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -16287,6 +16302,13 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
         )
     ),
+    OpInfo(
+        "nn.functional.pdist",
+        ref=reference_pdist,
+        sample_inputs_func=sample_inputs_pdist,
+        dtypes=floating_types(),
+        supports_autograd=False,
+        supports_out=False),
     OpInfo(
         "nn.functional.poisson_nll_loss",
         ref=_NOTHING,
