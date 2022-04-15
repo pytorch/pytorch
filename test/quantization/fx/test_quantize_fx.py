@@ -1818,6 +1818,7 @@ class TestQuantizeFx(QuantizationTestCase):
             for relu in [torch.nn.ReLU(), torch.nn.functional.relu, torch.relu]:
                 m = model(relu).eval()
                 qconfig_dict = torch.ao.quantization.get_default_qconfig_dict("fbgemm")
+                # should not crash as in https://github.com/pytorch/pytorch/issues/75825
                 prepare_fx(m, qconfig_dict)
 
     def test_qconfig_dict_validity(self):
