@@ -15,20 +15,6 @@ namespace at { namespace native {
 
 namespace {
 
-// microsoft compilers do not have an overload for fpclassify that accepts an integral
-// type: https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/fpclassify?view=msvc-170
-// resulting in failures in CIs that use MS compilers when compiling std::isnan(integral variable)
-// To remedy that, we neglect compilation of std::isnan when the input type is an integral type
-// TODO: we can simply use if constexpr when C++17 is supported
-
-template <typename scalar_t>
-bool maybe_eval_rhs(scalar_t val) {
-  return c10::guts::if_constexpr<std::is_integral<scalar_t>::value> (
-    [] (auto _) { return false; }, // if integral type
-    [&val] (auto _) { return _(std::isnan(val)); }  // if not integral type
-  );
-};
-
 template <typename scalar_t, typename accscalar_t>
 void cpu_max_pool(
     const Tensor& output_,
@@ -80,7 +66,17 @@ void cpu_max_pool(
         for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
           int64_t index = ih * input_width + iw;
           accscalar_t val = accscalar_t(input_ptr[index]);
-
+          // microsoft compilers do not have an overload for fpclassify that accepts an integral
+          // type: https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/fpclassify?view=msvc-170
+          // resulting in failures in CIs that use MS compilers when compiling std::isnan(integral variable)
+          // To remedy that, we neglect compilation of std::isnan when accscalar_t is an integral type
+          // TODO: change c10::guts::if_constexpr to if constexpr when C++17 is available
+          auto maybe_eval_rhs = [](accscalar_t val) {
+            return c10::guts::if_constexpr<!std::is_integral<accscalar_t>::value> (
+              [] (auto _) { return false; }, // if integral type
+              [&val] (auto _) { return _(std::isnan(val)); }  // if not integral type
+            );
+          };
           if ((val > maxval) || maybe_eval_rhs(val)) {
             maxval = val;
             maxindex = index;
@@ -201,6 +197,7 @@ void cpu_max_pool_channels_last(
             scalar_t val = in[d2];
             int64_t maxindex = ind[d2];
             scalar_t maxval = out[d2];
+            // microsoft compilers do not have an overload for fpclassify that accepts an integral
             // type: https://docs.microsoft.com/en-us/cpp/c-runtime-library/reference/fpclassify?view=msvc-170
             // resulting in failures in CIs that use MS compilers when compiling std::isnan(integral variable)
             // To remedy that, we neglect compilation of std::isnan when accscalar_t is an integral type
