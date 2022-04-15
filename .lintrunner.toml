@@ -1,3 +1,6 @@
+[init_config]
+last_hash = "7d8b366223b22aaab788b0a7efec064dfef38b24"
+
 [[linter]]
 code = 'FLAKE8'
 include_patterns = ['**/*.py']
