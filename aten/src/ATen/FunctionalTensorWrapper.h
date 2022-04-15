@@ -150,6 +150,32 @@ void mutate_view_meta(const Tensor& self, functionalization::ViewMeta meta);
 void set_sizes_strides_offset(const Tensor& out, const Tensor& meta_out);
 void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector<Tensor>& meta_outs);
 
+
+//  ~~~~~ TLS used in functionalization ~~~~~
+
+TORCH_API bool getFunctionalizationReapplyViewsTLS();
+TORCH_API void setFunctionalizationReapplyViewsTLS(bool reapply_views);
+
+class TORCH_API FunctionalizationReapplyViewsGuard {
+ public:
+  FunctionalizationReapplyViewsGuard(bool reapply_views) {
+    prev_ = getFunctionalizationReapplyViewsTLS();
+    setFunctionalizationReapplyViewsTLS(reapply_views);
+  }
+
+  ~FunctionalizationReapplyViewsGuard() {
+    setFunctionalizationReapplyViewsTLS(prev_);
+  }
+
+  FunctionalizationReapplyViewsGuard(const FunctionalizationReapplyViewsGuard&) = delete;
+  FunctionalizationReapplyViewsGuard operator=(const FunctionalizationReapplyViewsGuard&) = delete;
+  FunctionalizationReapplyViewsGuard(FunctionalizationReapplyViewsGuard&&) = delete;
+  FunctionalizationReapplyViewsGuard operator=(FunctionalizationReapplyViewsGuard&&) = delete;
+
+ private:
+  bool prev_;
+};
+
 } // namespace impl
 } // namespace functionalization
 } // namespace at
