@@ -1093,6 +1093,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto in_avg = wop->inAvg();
     const auto in_N = wop->inN();
 
+    // inVar was allowed to be nullptr. Make sure it isn't.
+    TORCH_INTERNAL_ASSERT(
+        in_var != nullptr, "Welford var input nullptr not allowed");
+
     const bool has_block_reduce = domain->hasBlockReduction();
     const bool has_grid_reduce = domain->hasGridReduction();
 
@@ -1100,17 +1104,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (!has_block_reduce && !has_grid_reduce) {
       indent() << "welfordCombine ("
                << "\n";
-      indent() << " " << gen(out_avg) << ",\n";
-      indent() << " " << gen(out_var) << ",\n";
-      indent() << " " << gen(out_N) << ",\n";
-      indent() << " " << gen(in_avg) << ",\n";
-      if (in_var) {
-        indent() << " " << gen(in_var) << ",\n";
-      } else {
-        indent() << " (" << in_avg->dtype() << ") 0"
-                 << ",\n";
-      }
-      indent() << " (" << out_N->dtype() << ")" << gen(in_N) << ");\n";
+      indent() << kTab << gen(out_avg) << ",\n";
+      indent() << kTab << gen(out_var) << ",\n";
+      indent() << kTab << gen(out_N) << ",\n";
+      indent() << kTab << gen(in_avg) << ",\n";
+      indent() << kTab << "(" << out_avg->dtype() << ")" << gen(in_var)
+               << ",\n";
+      indent() << kTab << "(" << out_N->dtype() << ")" << gen(in_N) << ");\n";
       return;
     }
 
@@ -1145,22 +1145,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
                << ">(\n";
       if (has_grid_reduce) {
-        indent() << kTab << "block_result_avg_" << block_reduce_name_ << ",\n"
-                 << kTab << "block_result_var_" << block_reduce_name_ << ",\n"
-                 << kTab << "block_result_n_" << block_reduce_name_ << ",\n";
+        indent() << kTab << "block_result_avg_" << block_reduce_name_ << ",\n";
+        indent() << kTab << "block_result_var_" << block_reduce_name_ << ",\n";
+        indent() << kTab << "block_result_n_" << block_reduce_name_ << ",\n";
       } else {
         indent() << kTab << gen(wop->outAvg()) << ",\n";
         indent() << kTab << gen(wop->outVar()) << ",\n";
         indent() << kTab << gen(wop->outN()) << ",\n";
       }
-      indent() << " " << gen(in_avg) << ",\n";
-      if (in_var) {
-        indent() << " " << gen(in_var) << ",\n";
-      } else {
-        indent() << " (" << in_avg->dtype() << ") 0"
-                 << ",\n";
-      }
-      indent() << out_N->dtype() << "(" << gen(in_N) << "),\n";
+      indent() << kTab << gen(in_avg) << ",\n";
+      indent() << kTab << out_avg->dtype() << "(" << gen(in_var) << "),\n";
+      indent() << kTab << out_N->dtype() << "(" << gen(in_N) << "),\n";
       indent() << kTab << "threadIdx,\n";
       indent() << kTab << "blockDim,\n";
       indent() << kTab << "reinterpret_cast<" << data_type
@@ -1450,21 +1445,20 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // with tidx/y/z being true do not participate in the grid reduction.
     indent() << "welford::gridWelford<" << flags_str << ", "
              << (persistent_sync ? "true" : "false") << ">(\n";
-    indent() << kTab << gen(wop->outAvg()) << ",\n"
-             << kTab << gen(wop->outVar()) << ",\n"
-             << kTab << gen(wop->outN()) << ",\n";
+    indent() << kTab << gen(wop->outAvg()) << ",\n";
+    indent() << kTab << gen(wop->outVar()) << ",\n";
+    indent() << kTab << gen(wop->outN()) << ",\n";
     if (domain->hasBlockReduction()) {
-      indent() << kTab << "block_result_avg_" << block_reduce_name_ << ",\n"
-               << kTab << "block_result_var_" << block_reduce_name_ << ",\n"
-               << kTab << "block_result_n_" << block_reduce_name_ << ",\n";
+      indent() << kTab << "block_result_avg_" << block_reduce_name_ << ",\n";
+      indent() << kTab << "block_result_var_" << block_reduce_name_ << ",\n";
+      indent() << kTab << "block_result_n_" << block_reduce_name_ << ",\n";
       block_reduce_name_++;
     } else {
       indent() << kTab << gen(wop->inAvg()) << ",\n";
-      if (wop->inVar() == nullptr) {
-        indent() << kTab << "(" << data_type << ") 0,\n";
-      } else {
-        indent() << kTab << gen(wop->inVar()) << ",\n";
-      }
+      TORCH_INTERNAL_ASSERT(
+          wop->inVar() != nullptr, "Welford var input nullptr not allowed");
+      indent() << kTab << "(" << wop->outVar()->dtype() << ")"
+               << gen(wop->inVar()) << ",\n";
       indent() << kTab << "(" << wop->outN()->dtype() << ")" << gen(wop->inN())
                << ",\n";
     }

@@ -909,7 +909,7 @@ WelfordResult Welford(
       init_var_val,
       init_N, /*init var/avg/count */
       tv,
-      nullptr,
+      FusionGuard::getCurFusion()->zeroVal(),
       FusionGuard::getCurFusion()->oneVal()); /*in var/avg/count */
 
   return WelfordResult(out_avg, out_var, out_N);

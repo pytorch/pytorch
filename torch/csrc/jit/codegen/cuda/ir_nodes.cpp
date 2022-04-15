@@ -436,7 +436,7 @@ WelfordOp::WelfordOp(
       init_var_(init_var),
       init_N_(init_N),
       in_avg_(in_avg),
-      in_var_(in_var),
+      in_var_(in_var == nullptr ? in_avg->container()->zeroVal() : in_var),
       in_N_(in_N),
       is_fused_(is_fused) {
   // Check output type
@@ -483,18 +483,22 @@ WelfordOp::WelfordOp(
         in_var &&
         (in_var->getValType().value() == ValType::TensorView ||
          in_var->getValType().value() == ValType::TensorIndex));
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        in_var == nullptr || in_var->isZeroInt(),
+        "Invalid var input, which must be either nullptr or scalar zero when the N input is one.");
   }
 
-  addOutput(out_avg);
-  addOutput(out_var);
-  addOutput(out_N);
+  addOutput(out_avg_);
+  addOutput(out_var_);
+  addOutput(out_N_);
 
-  addInput(in_avg);
-  // Conditionally adding this input?
-  if (!in_N->isOneInt()) {
-    addInput(in_var);
-  }
-  addInput(in_N);
+  addInput(in_avg_);
+  // Previously in_var_ was allowed to be null
+  TORCH_INTERNAL_ASSERT(
+      in_var_ != nullptr, "Welford var input nullptr not allowed");
+  addInput(in_var_);
+  addInput(in_N_);
 }
 
 WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
