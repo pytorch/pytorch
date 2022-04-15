@@ -649,65 +649,6 @@ ExprGroup* getProducer(ExprGroup* sg1, ExprGroup* sg2) {
   return nullptr;
 }
 
-// Go through all expressions and compute a local ordering of loops. operator<
-// is implemented based on the concrete_id_dependencies analysis done. If
-// there's no dependency between two IDs then order doesn't mater, otherwise we
-// can tell which is inner most by checking if there's any dependency
-// relationships.
-//
-// Dependency relationships in concrete_id_dependencies has a "global" view in
-// the fusion, so it can resolve ordering by only looking at id's and the
-// dependency map.
-//
-// For example two expressions may have domains: [I0], [I1] Yet we
-// won't know the ordering unless we see a domain with: [I0, I1]. This happened
-// in advancedIndexing9 (also see AdvancedLowering6) test when merging T5 with
-// the group containing T10 (cache of T5, which is post broadcasted output) and
-// T6(pre broadcasted output).
-// T5 had the domain [0, 1, 2, 3, 4] produce at 3
-// T6 had the domain [0, 3, 4] compute at 3
-// Merging [0, 1, 2] and [0, 3, 4] resulted in the domain [0, 3, 4, 1, 2]
-//
-// If ID's are not in filter, we don't care about their ordering and ignore
-// them. This is because we're only focused on loops we will have to merge
-// across groups. If the domain is not in a produce at position in the producer
-// edges, or a compute at position in the consumer edges, the expressions we
-// look at may not have a unique ordering.
-
-struct LocalDomainSorter {
-  LocalDomainSorter(
-      const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
-          concrete_id_dependencies)
-      : concrete_id_dependencies_(concrete_id_dependencies) {}
-
-  // Return if id0 should be before id1
-  inline bool operator()(IterDomain* id0, IterDomain* id1) {
-    auto concrete_id_0 =
-        GpuLower::current()->caParallelMap().getConcreteMappedID(id0);
-    auto concrete_id_1 =
-        GpuLower::current()->caParallelMap().getConcreteMappedID(id1);
-
-    if (concrete_id_dependencies_.find(concrete_id_0) !=
-        concrete_id_dependencies_.end()) {
-      const auto& dependencies_0 = concrete_id_dependencies_.at(concrete_id_0);
-      // if id0 depends on id1 it means id1 is inside id0, so id0 < id1
-      return dependencies_0.count(concrete_id_1);
-    }
-
-    if (concrete_id_dependencies_.find(concrete_id_1) !=
-        concrete_id_dependencies_.end()) {
-      const auto& dependencies_1 = concrete_id_dependencies_.at(concrete_id_1);
-      // if id1 depends on id0 it means id0 is inside id1, so id1 < id0
-      return !dependencies_1.count(concrete_id_0);
-    }
-
-    return true;
-  }
-
-  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
-      concrete_id_dependencies_;
-};
-
 std::vector<IterDomain*> getLocalDomainOrdering(
     const std::vector<Expr*>& exprs,
     const ComputeAtMap& map,
@@ -755,7 +696,8 @@ std::vector<IterDomain*> getLocalDomainOrdering(
   std::sort(
       merged_domain.begin(),
       merged_domain.end(),
-      LocalDomainSorter(concrete_id_dependencies));
+      IterDomainDependencySorter(
+          concrete_id_dependencies, GpuLower::current()->caParallelMap()));
   return merged_domain;
 }
 } // namespace
