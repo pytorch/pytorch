@@ -10691,6 +10691,7 @@ class _TestONNXRuntime:
     def test_quantized_arithmetic(self):
         x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)
         y = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)
+
         class ArithmeticModel2(torch.nn.Module):
             def forward(self, x, y):
                 o = torch.ops.quantized.add(x, y, 0.4, 100)

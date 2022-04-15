@@ -503,7 +503,7 @@ def _pre_trace_quant_model(model, args):
     be handled by `torch.jit.trace` to be exportable to ONNX.
     """
     if (any([hasattr(m, "_packed_params") for m in model.modules()]) or
-        any([getattr(arg, "is_quantized", False) for arg in args])):
+            any([getattr(arg, "is_quantized", False) for arg in args])):
         return torch.jit.trace(model, args)
     return model
 
