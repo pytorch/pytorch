@@ -1075,7 +1075,7 @@ class TestNN(NNTestCase):
 
     def _test_alpha_dropout(self, cls, input):
         mean = input.mean()
-        std = input.std()
+        std = input.std(correction=1)
 
         for p in [0.2, 0.5, 0.8]:
             module = cls(p)
@@ -1084,7 +1084,7 @@ class TestNN(NNTestCase):
             # output mean should be close to input mean
             self.assertLess(abs(output.data.mean() - mean), 0.1)
             # output std should be close to input std
-            self.assertLess(abs(output.data.std() - std), 0.1)
+            self.assertLess(abs(output.data.std(correction=1) - std), 0.1)
             output.backward(input)
 
     def test_parameters_and_named_parameters(self):
@@ -2327,7 +2327,7 @@ class TestNN(NNTestCase):
         def compare_scaling(grads):
             p_scale = [p.grad.data.div(g).view(-1) for p, g in zip(l.parameters(), grads)]
             scale = torch.cat(p_scale)
-            self.assertEqual(scale.std(), 0)
+            self.assertEqual(scale.std(correction=1), 0)
             return scale[0]
 
         grads = torch.arange(1., 101).view(10, 10), torch.ones(10).div(1000)

@@ -2704,8 +2704,8 @@ class TestAutograd(TestCase):
         keepdim = False
         input1 = torch.randn(3, 4, 5, 6, 2, 3, requires_grad=True)
         input2 = deepcopy(input1)
-        var1, mean1 = torch.var_mean(input1, dim=dim, keepdim=keepdim)
-        var2 = input2.var(dim=dim, keepdim=keepdim)
+        var1, mean1 = torch.var_mean(input1, dim=dim, keepdim=keepdim, correction=1)
+        var2 = input2.var(dim=dim, keepdim=keepdim, correction=1)
         mean2 = input2.mean(dim=dim, keepdim=keepdim)
         grad = torch.randn(3, 4, 6, 3, requires_grad=True)
 

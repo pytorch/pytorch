@@ -3220,17 +3220,17 @@ class TestRandomTensorCreation(TestCase):
 
             q.normal_()
             self.assertEqual(t_transform(q).mean(), 0, atol=0.2, rtol=0)
-            self.assertEqual(t_transform(q).std(), std_transform(1), atol=0.2, rtol=0)
+            self.assertEqual(t_transform(q).std(correction=1), std_transform(1), atol=0.2, rtol=0)
 
             q.normal_(2, 3)
             self.assertEqual(t_transform(q).mean(), 2, atol=0.3, rtol=0)
-            self.assertEqual(t_transform(q).std(), std_transform(3), atol=0.3, rtol=0)
+            self.assertEqual(t_transform(q).std(correction=1), std_transform(3), atol=0.3, rtol=0)
 
             q = torch.empty(100, 100, dtype=dtype, device=device)
             q_row1 = q[0:1].clone()
             q[99:100].normal_()
             self.assertEqual(t_transform(q[99:100]).mean(), 0, atol=0.2, rtol=0)
-            self.assertEqual(t_transform(q[99:100]).std(), std_transform(1), atol=0.2, rtol=0)
+            self.assertEqual(t_transform(q[99:100]).std(correction=1), std_transform(1), atol=0.2, rtol=0)
             self.assertEqual(t_transform(q[0:1]).clone(), t_transform(q_row1))
 
             mean = torch.empty(100, 100, dtype=dtype, device=device)
@@ -3246,7 +3246,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r[:50]).mean(), 0, atol=0.2, rtol=0)
             self.assertEqual(t_transform(r[50:]).mean(), 1, atol=0.2, rtol=0)
-            self.assertEqual(t_transform(r).std(), std_transform(1), atol=0.2, rtol=0)
+            self.assertEqual(t_transform(r).std(correction=1), std_transform(1), atol=0.2, rtol=0)
 
             r.fill_(42)
             r = torch.normal(mean, 3)
@@ -3254,7 +3254,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r[:50]).mean(), 0, atol=0.2, rtol=0)
             self.assertEqual(t_transform(r[50:]).mean(), 1, atol=0.2, rtol=0)
-            self.assertEqual(t_transform(r).std(), std_transform(3), atol=0.2, rtol=0)
+            self.assertEqual(t_transform(r).std(correction=1), std_transform(3), atol=0.2, rtol=0)
 
             r.fill_(42)
             torch.normal(mean, 3, out=r)
@@ -3262,23 +3262,23 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r[:50]).mean(), 0, atol=0.2, rtol=0)
             self.assertEqual(t_transform(r[50:]).mean(), 1, atol=0.2, rtol=0)
-            self.assertEqual(t_transform(r).std(), std_transform(3), atol=0.2, rtol=0)
+            self.assertEqual(t_transform(r).std(correction=1), std_transform(3), atol=0.2, rtol=0)
 
             r.fill_(42)
             r = torch.normal(2, std)
             self.assertFalse(r.dtype.is_complex)
             self.assertEqual(str(r.device), device)
             self.assertEqual(r.mean(), 2, atol=0.2, rtol=0)
-            self.assertEqual(r[:, :50].std(), 4, atol=0.3, rtol=0)
-            self.assertEqual(r[:, 50:].std(), 1, atol=0.2, rtol=0)
+            self.assertEqual(r[:, :50].std(correction=1), 4, atol=0.3, rtol=0)
+            self.assertEqual(r[:, 50:].std(correction=1), 1, atol=0.2, rtol=0)
 
             r.fill_(42)
             torch.normal(2, std, out=r)
             self.assertFalse(r.dtype.is_complex)
             self.assertEqual(str(r.device), device)
             self.assertEqual(r.mean(), 2, atol=0.2, rtol=0)
-            self.assertEqual(r[:, :50].std(), 4, atol=0.3, rtol=0)
-            self.assertEqual(r[:, 50:].std(), 1, atol=0.2, rtol=0)
+            self.assertEqual(r[:, :50].std(correction=1), 4, atol=0.3, rtol=0)
+            self.assertEqual(r[:, 50:].std(correction=1), 1, atol=0.2, rtol=0)
 
             r.fill_(42)
             r = torch.normal(mean, std)
@@ -3286,8 +3286,8 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r[:50]).mean(), 0, atol=0.2, rtol=0)
             self.assertEqual(t_transform(r[50:]).mean(), 1, atol=0.2, rtol=0)
-            self.assertEqual(t_transform(r[:, :50]).std(), std_transform(4), atol=0.3, rtol=0)
-            self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), atol=0.2, rtol=0)
+            self.assertEqual(t_transform(r[:, :50]).std(correction=1), std_transform(4), atol=0.3, rtol=0)
+            self.assertEqual(t_transform(r[:, 50:]).std(correction=1), std_transform(1), atol=0.2, rtol=0)
 
             r.fill_(42)
             torch.normal(mean, std, out=r)
@@ -3295,8 +3295,8 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r[:50]).mean(), 0, atol=0.2, rtol=0)
             self.assertEqual(t_transform(r[50:]).mean(), 1, atol=0.2, rtol=0)
-            self.assertEqual(t_transform(r[:, :50]).std(), std_transform(4), atol=0.3, rtol=0)
-            self.assertEqual(t_transform(r[:, 50:]).std(), std_transform(1), atol=0.2, rtol=0)
+            self.assertEqual(t_transform(r[:, :50]).std(correction=1), std_transform(4), atol=0.3, rtol=0)
+            self.assertEqual(t_transform(r[:, 50:]).std(correction=1), std_transform(1), atol=0.2, rtol=0)
 
             # test empty mean/std
             out = torch.normal(mean=torch.empty((0, 2)), std=torch.empty((0, 1)))
@@ -3307,14 +3307,14 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(r.dtype, dtype)
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r).mean(), 2, atol=0.3, rtol=0)
-            self.assertEqual(t_transform(r).std(), std_transform(3), atol=0.3, rtol=0)
+            self.assertEqual(t_transform(r).std(correction=1), std_transform(3), atol=0.3, rtol=0)
 
             r.fill_(42)
             torch.normal(2, 3, (100, 100), dtype=dtype, device=device, out=r)
             self.assertEqual(r.dtype, dtype)
             self.assertEqual(str(r.device), device)
             self.assertEqual(t_transform(r).mean(), 2, atol=0.3, rtol=0)
-            self.assertEqual(t_transform(r).std(), std_transform(3), atol=0.3, rtol=0)
+            self.assertEqual(t_transform(r).std(correction=1), std_transform(3), atol=0.3, rtol=0)
 
             # float std 0 with float mean
             r.fill_(42)
