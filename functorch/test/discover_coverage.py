@@ -713,6 +713,12 @@ class Operator:
             return Support.YES
         if self.name in JVP_EXEMPTIONS:
             return Support.YES
+        VMAPJVP_EXEMPTIONS = {
+            'prod',  # dynamic (backward)
+            'nn.functional.batch_norm',  # testing problem
+        }
+        if self.name in VMAPJVP_EXEMPTIONS:
+            return Support.YES
         if not self.has_opinfo():
             return Support.UNKNOWN
         if self.any_opinfo_attr('supports_autograd') and \
@@ -834,13 +840,16 @@ pprint.pprint(result)
 print("supports_vmapjvp")
 result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
 pprint.pprint(result)
+print("supports_jvpvjp")
+result = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
+pprint.pprint(result)
 # result = opset.query(Operator.supports_fast_vmapjvp, (Support.NO, Support.UNKNOWN))
 # pprint.pprint(result)
 # pprint.pprint(result)
 print(opset.summary())
 
-print("=" * 30 + " Top 160 Summary " + "=" * 30)
-opset = OperatorSet.from_top160()
-result = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
-pprint.pprint(result)
-print(opset.summary())
+# print("=" * 30 + " Top 160 Summary " + "=" * 30)
+# opset = OperatorSet.from_top160()
+# result = opset.query(Operator.supports_jvpvjp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
+# print(opset.summary())

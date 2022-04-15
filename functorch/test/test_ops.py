@@ -591,7 +591,6 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
-        xfail('norm', 'nuc'),
         xfail('prod'),
         xfail('put'),
         xfail('quantile'),
@@ -749,7 +748,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.hinge_embedding_loss', device_type='cpu'),
 
         # xfail list
-        xfail('norm', 'nuc'),
         xfail('linalg.inv'),
         xfail('linalg.tensorinv'),
         xfail('linalg.matrix_power'),
@@ -933,7 +931,6 @@ class TestOperators(TestCase):
         xfail('masked_select'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
-        xfail('norm', 'nuc'),
         xfail('pinverse'),
         xfail('prod'),
         xfail('put'),
