@@ -51,6 +51,8 @@ jobs:
 
       - name: Store annotatations
         if: always() && github.event_name == 'pull_request'
+        # Don't show this as an error; the above step will have already failed.
+        continue-on-error: true
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -59,8 +61,9 @@ jobs:
           # output.
           echo "::add-matcher::.github/lintrunner_problem_matcher.json"
 
-          # `|| true` because we don't want this step to error
-          lintrunner --merge-base-with "${PR_BASE_SHA}" --json || true
+          # Use jq to massage the output to look a little nicer in GitHub.
+          lintrunner --merge-base-with "${PR_BASE_SHA}" --json \
+            | jq '{file: .path, line: .line, column: .char, severity: .severity, code: .code, message: ("["+.code+"] "+ .name + ": " +.description)}' -c
 
   quick-checks:
     name: quick-checks

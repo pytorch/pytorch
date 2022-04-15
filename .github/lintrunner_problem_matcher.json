@@ -5,12 +5,12 @@
             "owner": "eslint-stylish",
             "pattern": [
                 {
-                    "regexp": "{\"path\":\"(.*)\",\"line\":(\\d+),\"char\":(\\d+),\"code\":\"(.*)\",\"severity\":\"(.*)\",\"name\":\"(.*)\",\"description\":\"(.*)\"}",
+                    "regexp": "{\"file\":\"(.*)\",\"line\":(\\d+),\"column\":(\\d+),\"severity\":\"(.*)\",\"code\":\"(.*)\",\"message\":\"(.*)\"}",
                     "file": 1,
                     "line": 2,
                     "column": 3,
-                    "code": 4,
-                    "severity": 5,
+                    "severity": 4,
+                    "code": 5,
                     "message": 6
                 }
             ]
