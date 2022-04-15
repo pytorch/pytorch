@@ -7,7 +7,7 @@ import types
 
 import torch.jit
 import torch._utils_internal
-
+from .custom_libraries import get_library, remove_library
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
 
@@ -24,41 +24,6 @@ def dl_open_guard():
     yield
     if _SET_GLOBAL_FLAGS:
         sys.setdlopenflags(old_flags)
-
-libraries = {}
-
-class Library:
-    # kind can be DEF, IMPL, FRAGMENT
-    def __init__(self, kind, ns, dispatch_key=""):
-       # also prevent users from creating libraries with existing C++ libraries, e.g., aten
-       if ns in libraries:
-          raise ValueError("A library with name ", ns, " already exists. " \
-                            "It's not allowed to have more than one library with the same name")
-       else:
-          self.m = torch._C._dispatch_library(kind, ns, dispatch_key)
-          self.name = ns
-          libraries[ns] = self
-
-    def impl(self, name, dispatch_key, fn):
-        self.m.impl(name, dispatch_key, fn)
-        return
-
-    def __del__(self):
-        print("Entering destructor")
-        del self.m
-
-class Libraries:
-    def __init__(self):
-        pass
-    def get_library(self, ns):
-        print("Entering")
-        if ns not in libraries:
-            libraries[ns] = Library("FRAGMENT", ns)
-        return libraries[ns]
-    def remove_library(self, ns):
-        if ns in libraries:
-            del libraries[ns]
-        return
 
 # Each OpOverload object contains pointer to a a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
@@ -102,12 +67,12 @@ class OpOverload:
 
     def impl(self, dispatch_key, fn):
         name = self.__name__ if self._overloadname != 'default' else self.__name__.split(".")[0]
-        Libraries().get_library(self._schema.name.split("::")[0]).impl(name, dispatch_key, fn)
+        get_library(self._schema.name.split("::")[0]).impl(name, dispatch_key, fn)
         return
 
     # TODO: move this method outside of OpOverload
     def remove_impl(self):
-        Libraries().remove_library(self._schema.name.split("::")[0])
+        remove_library(self._schema.name.split("::")[0])
         return
 
     # TODO: add more methods to expose information about input and output arguments

@@ -28,7 +28,9 @@ class TestPythonRegistration(TestCase):
         def my_neg(*args, **kwargs):
             return args[0]._neg_view()
 
-        torch.ops.aten.neg.default.impl("CPU", my_neg)
+        # Now we are secretly making the operator a view op so autograd needs to know how
+        # to handle it
+        torch.ops.aten.neg.default.impl("AutogradCPU", my_neg)
 
         self.assertTrue(torch.neg(x).is_neg())
 
@@ -43,6 +45,10 @@ class TestPythonRegistration(TestCase):
 
         # Remove the custom registrations
         # End state: torch.remove_custom_library('aten')
+        # Concerns: you could be importing a library "foo" that's also registering stuff
+        # And say you wanna register something for the same op, dispatch key and
+        # then wanna delete the implementations at the end to fallback foo's implementations
+        # and not aten's for instance. This call will not do that and also remove foo's implementations.
         torch.ops.aten.sum.default.remove_impl()
 
         # Validate that the old behavior is restored
