@@ -767,13 +767,16 @@ void svd_cusolver(const Tensor& A,
     const auto svd_non_converging_batches = _check_gesvdj_convergence(info, k + 1);
 
     if (!svd_non_converging_batches.empty()) {
-      TORCH_WARN_ONCE("During SVD computation with the selected cusolver driver, ",
-                      _format_non_converging_batches(svd_non_converging_batches),
-                      " failed to converge. ",
-                      (driver.has_value()
-                        ?  "It is recommended to redo this SVD with another driver. "
-                        : "A more accurate method will be used to calculate the SVD as a fallback. "),
-                      check_svd_doc);
+      TORCH_WARN("During SVD computation with the selected cusolver driver, ",
+                 _format_non_converging_batches(svd_non_converging_batches),
+                 " failed to converge. ",
+                 (driver.has_value()
+                   ?  "It is recommended to redo this SVD with another driver. "
+                   : "A more accurate method will be used to calculate the SVD as a fallback. "),
+                 check_svd_doc);
+
+      // We'll do the fallback if user doesn't specify a driver and the default heuristic doesn't converge well.
+      // However, if user manually chooses a driver, should we just do a warning or a hard crash?
       if (!driver.has_value()) {
         svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv, false, svd_non_converging_batches);
       }
