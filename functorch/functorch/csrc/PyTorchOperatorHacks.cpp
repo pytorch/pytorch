@@ -9,6 +9,7 @@
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 
 namespace at { namespace functorch {
 
@@ -126,6 +127,31 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const c10::optiona
     return output.add(*bias);
   }
   return output;
+}
+
+Tensor nuclear_norm_dim_hack(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
+  auto dim_ = dim.vec();
+  maybe_wrap_dims(dim_, self.dim());
+
+  auto permutation = at::native::create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
+  Tensor p = self.permute(permutation);
+  Tensor result = at::sum(at::linalg_svdvals(p), -1, keepdim);
+  if (keepdim) {
+    result = result.unsqueeze(-1);
+    auto permutation_reverse = at::native::create_reverse_permutation(permutation);
+    result = result.permute(permutation_reverse);
+  }
+  return result;
+}
+
+Tensor nuclear_norm_hack(const Tensor& self, bool keepdim) {
+  TORCH_CHECK(
+    self.dim() == 2,
+    "Expected a tensor with 2 dimensions, but got a tensor with ",
+    self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
+
+  return nuclear_norm_dim_hack(self, {0, 1}, keepdim);
 }
 
 Tensor binary_cross_entropy_with_logits_backward_hack(
@@ -356,6 +382,9 @@ TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   m.impl("feature_dropout_", dropout_hack::feature_dropout_);
   m.impl("alpha_dropout_", dropout_hack::alpha_dropout_);
   m.impl("feature_alpha_dropout_", dropout_hack::feature_alpha_dropout_);
+
+  m.impl("nuclear_norm", nuclear_norm_hack);
+  m.impl("nuclear_norm.dim", nuclear_norm_dim_hack);
 }
 
 }}
