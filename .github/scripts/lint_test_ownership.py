@@ -22,7 +22,7 @@ from typing import List, Any
 # Team/owner labels usually start with "module: " or "oncall: ", but the following are acceptable exceptions
 ACCEPTABLE_OWNER_LABELS = ["NNC", "high priority"]
 GLOB_EXCEPTIONS = [
-    "test/run_test.py"
+    "**/test/run_test.py"
 ]
 
 PYTORCH_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -35,7 +35,7 @@ S3_RESOURCE_READ_ONLY = boto3.resource("s3", config=botocore.config.Config(signa
 def get_all_test_files() -> List[Path]:
     test_files = list(TEST_DIR.glob("**/test_*.py"))
     test_files.extend(list(TEST_DIR.glob("**/*_test.py")))
-    return [f for f in test_files if any([fnmatch.fnmatch(str(f), g) for g in GLOB_EXCEPTIONS])]
+    return [f for f in test_files if not any([fnmatch.fnmatch(str(f), g) for g in GLOB_EXCEPTIONS])]
 
 
 def get_pytorch_labels() -> Any:

@@ -1,7 +1,7 @@
 import contextlib
 
 import torch
-from typing import List
+from typing import List, Tuple
 
 @contextlib.contextmanager
 def optimized_execution(should_optimize):
@@ -38,8 +38,8 @@ def fuser(name):
         torch._C._jit_set_nvfuser_enabled(False)
     elif name == 'fuser1':  # NNC
         old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-        torch._C._jit_override_can_fuse_on_cpu(False)
+        old_profiling_mode = torch._C._get_graph_executor_optimize(True)
+        torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
         torch._C._jit_set_texpr_fuser_enabled(True)
         torch._C._jit_set_nvfuser_enabled(False)
@@ -55,7 +55,7 @@ def fuser(name):
     finally:
         if name == 'fuser1':  # NNC
             torch._C._jit_set_profiling_executor(old_profiling_executor)
-            torch._C._jit_set_profiling_mode(old_profiling_mode)
+            torch._C._get_graph_executor_optimize(old_profiling_mode)
         # recover the previous values
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
         torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
@@ -105,3 +105,36 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
         # graph
         self(*args, **kwargs)
         return last_executed_optimized_graph()
+
+def set_fusion_strategy(strategy: List[Tuple[str, int]]):
+    """
+    Sets the type and number of specializations that can occur during fusion.
+
+    Usage: provide a list of pairs (type, depth) where type is one of "STATIC" or "DYNAMIC"
+    and depth is an integer.
+
+    Behavior - static vs dynamic:
+        In STATIC fusion, fused ops are compiled to have fixed input shapes. The shape is determined
+        based on some initial profiling runs.
+        In DYNAMIC fusion, fused ops are compiled to have variable input shapes, so that multiple
+        shapes are possible.
+
+    In both cases, we also recompile on new striding behavior, device, or dtype.
+
+    Behavior - fallback functions & depth:
+        When an input doesn't match the format required by the specialized compiled op, it will run
+        a fallback function. Fallback functions are recursively be compiled and specialized based
+        on the observed tensor shapes. Since compilation can be slow, the "depth" parameter is provided to
+        limit the number of specializations that can be compiled, before giving up on recompiling and
+        falling back to a completely un-fused, un-specialized implementation.
+
+    The list of (type, depth) pairs controls the type of specializations and the number of
+    specializations. For example: [("STATIC", 2), ("DYNAMIC", 2)] indicates that the first
+    two specializations will use static fusions, the following two specializations will use
+    dynamic fusion, and any inputs that satisfy none of the 4 options will run an
+    unfused implementation.
+
+    NB: in the future, if more as more fusion backends are added there may be more granular
+    apis for specific fusers.
+    """
+    return torch._C._jit_set_fusion_strategy(strategy)

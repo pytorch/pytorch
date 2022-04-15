@@ -43,7 +43,51 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   const Tensor& crow_indices() const { return crow_indices_; }
   const Tensor& col_indices() const { return col_indices_; }
   const Tensor& values() const { return values_; }
-  int nnz() { return values_.size(0); }
+  int nnz() { return col_indices_.size(-1); }
+
+  IntArrayRef strides() const override;
+  int64_t stride(int64_t d) const override;
+  void set_size(int64_t dim, int64_t new_size) override;
+  void set_stride(int64_t dim, int64_t new_stride) override;
+  void set_storage_offset(int64_t storage_offset) override;
+
+  /**
+   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    auto impl = c10::make_intrusive<SparseCsrTensorImpl>(key_set(), dtype());
+    copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/version_counter,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    impl->refresh_numel();
+    return impl;
+  }
+
+  /**
+   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    auto impl = c10::make_intrusive<SparseCsrTensorImpl>(key_set(), dtype());
+    copy_tensor_metadata(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/std::move(version_counter),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    impl->refresh_numel();
+    return impl;
+  }
 
  private:
   explicit SparseCsrTensorImpl(
@@ -52,5 +96,26 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       at::Tensor crow_indices,
       at::Tensor col_indices,
       at::Tensor values);
+
+  const char* tensorimpl_type_name() const override;
+
+  /**
+   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  static void copy_tensor_metadata(
+      const SparseCsrTensorImpl* src_sparse_impl,
+      SparseCsrTensorImpl* dest_sparse_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) {
+    TensorImpl::copy_tensor_metadata(src_sparse_impl, dest_sparse_impl, version_counter, allow_tensor_metadata_change);
+
+    // Sparse-specific fields
+    dest_sparse_impl->crow_indices_ = src_sparse_impl->crow_indices();
+    dest_sparse_impl->col_indices_ = src_sparse_impl->col_indices();
+    dest_sparse_impl->values_ = src_sparse_impl->values();
+  }
 };
 } // namespace at

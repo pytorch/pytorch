@@ -1,11 +1,12 @@
-#include<ATen/native/ReduceOps.h>
-#include<ATen/native/ReduceAllOps.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/native/ReduceOps.h>
+#include <ATen/native/ReduceAllOps.h>
+#include <ATen/native/ReduceOpsUtils.h>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/SharedReduceOps.h>
-#include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
@@ -30,7 +31,7 @@ inline void reduce_all_impl_vec(
   auto input_data = input.data_ptr<scalar_t>();
   // NOTE: parallel_reduce not support bool type
   scalar_t result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
-    [&](int64_t start, int64_t end, const scalar_t ident) -> scalar_t {
+    [&](int64_t start, int64_t end, const scalar_t /*ident*/) -> scalar_t {
       scalar_t partial_out = vec::reduce_all<scalar_t>(
         [=](Vec x, Vec y) { return vop(x, y); },
         input_data + start,

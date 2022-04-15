@@ -6,6 +6,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+import torch.nn.quantized._reference as nnqr
 import torch.ao.quantization
 
 from torch.ao.quantization import (
@@ -13,6 +14,7 @@ from torch.ao.quantization import (
     default_float_qparams_observer,
     PerChannelMinMaxObserver,
 )
+from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     prepare_dynamic,
@@ -25,6 +27,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     override_qengines,
     qengine_is_qnnpack,
+    qengine_is_onednn,
 )
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -97,7 +100,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                                              zero_points=zero_point_tensor,
                                              axis=0, dtype=torch.qint8)
         else:
-            W_q = torch.quantize_per_tensor(W, 0.1, 4, torch.qint8)
+            # ONEDNN only supports symmetric quantization of weight
+            W_zp = 0 if qengine_is_onednn() else 4
+            W_q = torch.quantize_per_tensor(W, 0.1, W_zp, torch.qint8)
 
         X = torch.rand(batch_size, in_features).float()
         X_q = torch.quantize_per_tensor(X, 0.2, 10, torch.quint8)
@@ -107,6 +112,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qlinear = class_map[use_fused](in_features, out_features)
 
         qlinear_copy = copy.deepcopy(qlinear)
+        # set random quantized weight and bias before test torch scriptable
+        qlinear_copy.set_weight_bias(W_q, B)
         self.checkScriptable(qlinear_copy, [[X_q]], check_save_load=True)
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
@@ -174,6 +181,22 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
+
+        # Test torch.package
+        buffer = io.BytesIO()
+        with PackageExporter(buffer) as pe:
+            pe.save_pickle("module", "qlinear.pkl", qlinear)
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+        loaded_from_package = importer.load_pickle("module", "qlinear.pkl")
+        self.assertEqual(qlinear.weight(), loaded_from_package.weight())
+        self.assertEqual(qlinear.scale, loaded_from_package.scale)
+        self.assertEqual(qlinear.zero_point, loaded_from_package.zero_point)
+
+        for name, module in loaded_from_package.named_modules():
+            # noop, just make sure attribute "_modules" is restored correctly during torch.package import
+            assert(name is not None)
 
         # Test copy and deepcopy
         copied_linear = copy.copy(qlinear)
@@ -414,7 +437,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             X_scale = 1.3
             X_zero_point = 2
             W_scale = [0.5]
-            W_zero_point = [3]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
             Y_scale = 5.0
             Y_zero_point = 4
             if torch.backends.quantized.engine == 'qnnpack':
@@ -481,7 +504,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             X_scale = 1.3
             X_zero_point = 2
             W_scale = [0.5]
-            W_zero_point = [3]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
             Y_scale = 5.0
             Y_zero_point = 4
             # use_fused -> quantized class
@@ -550,7 +573,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             X_scale = 1.3
             X_zero_point = 2
             W_scale = [0.5]
-            W_zero_point = [3]
+            W_zero_point = [0] if qengine_is_onednn() else [3]
             Y_scale = 5.0
             Y_zero_point = 4
             # use_fused -> quantized class
@@ -914,23 +937,27 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         obs = default_float_qparams_observer()
         obs(weights)
         qparams = obs.calculate_qparams()
-        # Quantize the weights to 8bits
-        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
-        qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
-        qemb.set_weight(qweight)
-        qemb(indices)
 
-        # Ensure the module has the correct weights
-        self.assertEqual(qweight, qemb.weight())
+        dtypes = [torch.quint4x2, torch.quint8]
+        embedding_funcs = [torch.ops.quantized.embedding_4bit, torch.ops.quantized.embedding_byte]
 
-        w_packed = qemb._packed_params._packed_weight
-        module_out = qemb(indices)
+        for dtype, embedding_func in zip(dtypes, embedding_funcs):
+            # Quantize the weights
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=dtype)
+            qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim, dtype=dtype)
+            qemb.set_weight(qweight)
+            qemb(indices)
 
-        # Call the qembedding operator directly
-        ref = torch.ops.quantized.embedding_byte(w_packed, indices, pruned_weights=False)
-        self.assertEqual(module_out, ref)
-        self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices, None, set_qconfig=False, is_emb_bag=False)
+            # Ensure the module has the correct weights
+            self.assertEqual(qweight, qemb.weight())
+            w_packed = qemb._packed_params._packed_weight
+            module_out = qemb(indices)
 
+            # Call the bit qembedding operator directly
+            ref = embedding_func(w_packed, indices, pruned_weights=False)
+            self.assertEqual(module_out, ref)
+            self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices, None, set_qconfig=False,
+                                             is_emb_bag=False, dtype=dtype)
 
     @given(
         num_embeddings=st.integers(10, 50),
@@ -1176,7 +1203,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
     def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_default_observer):
         """test API functionality for nn.quantized.dynamic.Linear"""
         W = torch.rand(out_features, in_features).float()
-        W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8)
+        qscheme = torch.per_tensor_symmetric if qengine_is_onednn() else torch.per_tensor_affine
+        W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8, qscheme=qscheme)
         W_q = torch.quantize_per_tensor(W, W_scale, W_zp, torch.qint8)
         X = torch.rand(batch_size, in_features).float()
         B = torch.rand(out_features).float() if use_bias else None
@@ -1287,8 +1315,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 bias_keys.append(key_name1)
                 bias_keys.append(key_name2)
 
-        if not (dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack"):
-            # fp16 dynamic quant is not supported for qnnpack
+        if not (dtype == torch.float16 and torch.backends.quantized.engine in ("qnnpack", "onednn")):
+            # fp16 dynamic quant is not supported for qnnpack or onednn
             x = torch.randn(seq_len, batch, input_size)
             h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
             c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
@@ -1338,8 +1366,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # instantiated for all engines and dtypes
 
         for dtype in [torch.qint8, torch.float16]:
-            if dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack":
-                # fp16 dynamic quant is not supported for qnnpack
+            if dtype == torch.float16 and torch.backends.quantized.engine in ("qnnpack", "onednn"):
+                # fp16 dynamic quant is not supported for qnnpack or onednn
                 continue
                 # Test default instantiation
             seq_len = 4
@@ -1411,8 +1439,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                     'RNNReLU': torch.ops.quantized.quantized_rnn_relu_cell_dynamic}
 
         for rnn_type in cell_dict.keys():
-            if not (dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack"):
-                # fp16 dynamic quant is not supported for qnnpack
+            if not (dtype == torch.float16 and torch.backends.quantized.engine in ("qnnpack", "onednn")):
+                # fp16 dynamic quant is not supported for qnnpack or onednn
                 kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias, 'dtype': dtype}
                 if rnn_type == 'RNNReLU':
                     kwargs['nonlinearity'] = "relu"
@@ -1430,3 +1458,204 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 bias_keys = ['bias_ih', 'bias_hh']
                 self.check_eager_serialization(cell_dq, cell_dict[rnn_type](**kwargs), [x])
                 self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
+
+class TestReferenceQuantizedModule(QuantizationTestCase):
+    def _quant_dequant_weight(self, weight, weight_qparams):
+        qscheme = weight_qparams["qscheme"]
+        scale = weight_qparams["scale"]
+        zero_point = weight_qparams["zero_point"]
+        dtype = weight_qparams["dtype"]
+        if qscheme == torch.per_tensor_affine:
+            weight = torch.quantize_per_tensor(weight, scale, zero_point, dtype)
+        else:
+            # per channel affine
+            axis = weight_qparams["axis"]
+            weight = torch.quantize_per_channel(weight, scale, zero_point, axis, dtype)
+        weight = weight.dequantize()
+        return weight
+
+    # TODO: add tests for conv and linear
+    def test_rnn_cell(self):
+        """ Checks the rnn cell reference quantized modules has correct numerics
+        This includes LSTMCell, GRUCell, RNNCell
+        """
+        batch = 7
+        input_size = 3
+        hidden_size = 7
+        bias = True
+
+        x = torch.rand(batch, input_size)
+        h = torch.rand(batch, hidden_size)
+        cell_dict = {'LSTMCell': torch.nn.LSTMCell,
+                     'GRUCell': torch.nn.GRUCell,
+                     'RNNTanh': torch.nn.RNNCell,
+                     'RNNReLU': torch.nn.RNNCell
+                     }
+        state = {'LSTMCell': (h, h),
+                 'GRUCell': h,
+                 'RNNTanh': h,
+                 'RNNReLU': h}
+
+        qfn_dict = {'LSTMCell': nnqr.LSTMCell,
+                    'GRUCell': nnqr.GRUCell,
+                    'RNNTanh': nnqr.RNNCell,
+                    'RNNReLU': nnqr.RNNCell}
+
+        for rnn_type in cell_dict.keys():
+            kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias}
+            if rnn_type == 'RNNReLU':
+                kwargs['nonlinearity'] = "relu"
+            elif rnn_type == 'RNNTanh':
+                kwargs['nonlinearity'] = "tanh"
+
+            fp_cell = cell_dict[rnn_type](**kwargs)
+            # initialize ref rnn cell module
+            weight_qparams = {
+                'qscheme': torch.per_tensor_affine,
+                'dtype': torch.quint8,
+                'scale': 2.0,
+                'zero_point': 5
+            }
+            weight_qparams_dict = {
+                "weight_ih": weight_qparams,
+                "weight_hh": weight_qparams,
+            }
+            ref_kwargs = kwargs.copy()
+            ref_kwargs["weight_qparams_dict"] = weight_qparams_dict
+            ref_cell = qfn_dict[rnn_type](**ref_kwargs)
+            # reassign the weights from fp32 rnn cell modulea
+            ref_cell.weight_ih = fp_cell.weight_ih
+            ref_cell.weight_hh = fp_cell.weight_hh
+            ref_cell.bias_ih = fp_cell.bias_ih
+            ref_cell.bias_hh = fp_cell.bias_hh
+
+            ref_res = ref_cell(x, state[rnn_type])
+
+            # change the weight of fp_res, we first want to run a quantie and
+            # dequantize on the weight
+            fp_cell.weight_ih = torch.nn.Parameter(self._quant_dequant_weight(fp_cell.weight_ih, weight_qparams_dict["weight_ih"]))
+            fp_cell.weight_hh = torch.nn.Parameter(self._quant_dequant_weight(fp_cell.weight_hh, weight_qparams_dict["weight_hh"]))
+            fp_res = fp_cell(x, state[rnn_type])
+            self.assertEqual(ref_res[0], fp_res[0], msg="RNNCell module API failed")
+            self.assertEqual(ref_res[1], fp_res[1], msg="RNNCell module API failed")
+
+    def test_rnn(self):
+        """ Checks the rnn reference quantized modules has correct numerics
+        This includes LSTM
+        """
+        seq_len = 4
+        batch = 2
+        input_size = 3
+        hidden_size = 7
+        num_layers = 2
+        bias = True
+        for bidirectional in [True, False]:
+            x = torch.randn(seq_len, batch, input_size)
+            h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
+            c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
+            fp32_rnn = torch.nn.LSTM(
+                input_size=input_size,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                bias=bias,
+                batch_first=False,
+                dropout=0.0,
+                bidirectional=bidirectional)
+            # initialize ref rnn module
+            weight_qparams = {
+                'qscheme': torch.per_tensor_affine,
+                'dtype': torch.qint8,
+                'scale': 2.0,
+                'zero_point': 5
+            }
+            weight_qparams_dict = {key: weight_qparams for key in fp32_rnn._flat_weights_names if key.startswith("weight")}
+            ref_rnn = nnqr.LSTM(
+                input_size=input_size,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                bias=bias,
+                batch_first=False,
+                dropout=0.0,
+                bidirectional=bidirectional,
+                weight_qparams_dict=weight_qparams_dict)
+            for wn in fp32_rnn._flat_weights_names:
+                setattr(ref_rnn, wn, copy.deepcopy(getattr(fp32_rnn, wn)))
+
+            ref_rnn._flat_weights = copy.deepcopy(fp32_rnn._flat_weights)
+
+            # quantize and dequantize the weights for fp32_rnn module
+            flat_weights = []
+            for wn in fp32_rnn._flat_weights_names:
+                if wn.startswith("weight"):
+                    weight = self._quant_dequant_weight(getattr(fp32_rnn, wn), weight_qparams)
+                else:
+                    weight = getattr(fp32_rnn, wn)
+                flat_weights.append(weight)
+            fp32_rnn._flat_weights = flat_weights
+
+            fp32_res = fp32_rnn(x, (h, c))
+            ref_res = ref_rnn(x, (h, c))
+            self.assertEqual(fp32_res, ref_res)
+
+    def test_sparse(self):
+        """ Embedding and EmbeddingBag
+        """
+        num_embeddings = 10
+        embedding_dim = 3
+        # embedding input
+        ex = torch.LongTensor([[1, 2, 4, 5], [4, 3, 2, 9]])
+
+        # embedding bag input
+        ebx = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9], dtype=torch.long)
+        offsets = torch.tensor([0, 4], dtype=torch.long)
+
+        fp_to_ref = {
+            nn.Embedding: (nnqr.Embedding, (ex,)),
+            nn.EmbeddingBag: (nnqr.EmbeddingBag, (ebx, offsets)),
+        }
+
+        per_tensor_weight_qparams = {
+            'qscheme': torch.per_tensor_affine,
+            'dtype': torch.quint8,
+            'scale': 2.0,
+            'zero_point': 5,
+        }
+
+        per_channel_weight_qparams = {
+            'qscheme': torch.per_channel_affine,
+            'dtype': torch.quint8,
+            'scale': torch.randn(10),
+            'zero_point': torch.randint(0, 255, (10,)),
+            'axis': 0,
+        }
+
+        per_channel_weight_qparams_quint4x2 = {
+            'qscheme': torch.per_channel_affine_float_qparams,
+            'dtype': torch.quint4x2,
+            'scale': torch.randn(10),
+            'zero_point': torch.randint(0, 255, (10,)),
+            'axis': 0,
+        }
+
+        weight_qparams_options = [
+            per_tensor_weight_qparams,
+            per_channel_weight_qparams,
+            per_channel_weight_qparams_quint4x2,
+        ]
+        for fp_cls, weight_qparams in itertools.product([nn.Embedding, nn.EmbeddingBag], weight_qparams_options):
+            # TODO: torch.quint4x2 not supported in quantize_per_channel, need to add support
+            if weight_qparams['dtype'] == torch.quint4x2:
+                continue
+            ref_cls, args = fp_to_ref[fp_cls]
+
+            fp32_embedding = fp_cls(num_embeddings, embedding_dim)
+
+            ref_embedding = ref_cls(num_embeddings, embedding_dim, weight_qparams=weight_qparams)
+            ref_embedding.weight = fp32_embedding.weight
+
+            # quantize and dequantize the weight for fp32 module
+            fp32_embedding.weight = torch.nn.Parameter(self._quant_dequant_weight(fp32_embedding.weight, weight_qparams))
+
+            fp32_res = fp32_embedding(*args)
+            ref_res = ref_embedding(*args)
+            self.assertEqual(fp32_res, ref_res)

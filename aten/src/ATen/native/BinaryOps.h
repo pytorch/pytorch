@@ -50,7 +50,9 @@ using binary_fn = void(*)(TensorIterator&);
 using binary_clamp_fn_alpha =
     void(*)(TensorIterator&, const Scalar& alpha, const Scalar& min_val, const Scalar& max_val);
 
+// NB: codegenned
 DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
+
 DECLARE_DISPATCH(binary_clamp_fn_alpha, add_clamp_stub);
 DECLARE_DISPATCH(structured_binary_fn_alpha, sub_stub);
 DECLARE_DISPATCH(structured_binary_fn, mul_stub);
@@ -84,7 +86,7 @@ DECLARE_DISPATCH(binary_fn_double, huber_stub);
 DECLARE_DISPATCH(structured_binary_fn, sigmoid_backward_stub);
 DECLARE_DISPATCH(binary_fn_alpha, logit_backward_stub);
 DECLARE_DISPATCH(structured_binary_fn, tanh_backward_stub);
-DECLARE_DISPATCH(binary_fn, mse_stub);
+DECLARE_DISPATCH(structured_binary_fn, mse_stub);
 DECLARE_DISPATCH(structured_binary_fn, fmod_stub);
 DECLARE_DISPATCH(structured_binary_fn, logaddexp_stub);
 DECLARE_DISPATCH(structured_binary_fn, logaddexp2_stub);
