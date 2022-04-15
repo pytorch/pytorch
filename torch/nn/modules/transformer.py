@@ -102,8 +102,8 @@ class Transformer(Module):
               `(N, S, E)` if `batch_first=True`.
             - tgt: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if `batch_first=False` or
               `(N, T, E)` if `batch_first=True`.
-            - src_mask: :math:`(S, S)`.
-            - tgt_mask: :math:`(T, T)`.
+            - src_mask: :math:`(S, S)` or :math:`(N\cdot\text{num\_heads}, S, S)`.
+            - tgt_mask: :math:`(T, T)` or :math:`(N\cdot\text{num\_heads}, T, T)`.
             - memory_mask: :math:`(T, S)`.
             - src_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
             - tgt_key_padding_mask: :math:`(T)` for unbatched input otherwise :math:`(N, T)`.

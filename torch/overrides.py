@@ -246,6 +246,9 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._conj_physical,
         Tensor._neg_view,
         Tensor._is_zerotensor,
+        Tensor._addmm_activation,
+        Tensor._nested_tensor_layer_norm,
+        Tensor.to_padded_tensor,
     }
 
 
@@ -777,7 +780,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda query, key, value, embed_dim_to_check, num_heads, in_proj_weight, in_proj_bias, bias_k, bias_v,
             add_zero_attn, dropout_p, out_proj_weight, out_proj_bias, training=True, key_padding_mask=None,
             need_weights=True, attn_mask=None, use_separate_proj_weight=False, q_proj_weight=None, k_proj_weight=None,
-            v_proj_weight=None, static_k=None, static_v=None: -1),
+            v_proj_weight=None, static_k=None, static_v=None, average_attn_weights=None: -1),
         torch.nn.functional.multi_margin_loss: (lambda input, target, p=1, margin=1.0, weight=None, size_average=None,
                                                 reduce=None, reduction='mean': -1),
         torch.nn.functional.multilabel_margin_loss: (lambda input, target, size_average=None, reduce=None,
@@ -1013,6 +1016,40 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.vstack: lambda tensors, out=None: -1,
         torch.where: lambda condition, x=None, y=None: -1,
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
+        torch._fw_primal_copy: lambda self, level: -1,
+        torch._make_dual_copy: lambda primal, tangent, level: -1,
+        torch.view_as_real_copy: lambda self: -1,
+        torch.view_as_complex_copy: lambda self: -1,
+        torch._conj_copy: lambda self: -1,
+        torch._neg_view_copy: lambda self: -1,
+        torch.as_strided_copy: lambda self, size, stride, storage_offset=None: -1,
+        torch._sparse_broadcast_to_copy: lambda self, size: -1,
+        torch.diagonal_copy: lambda self, offset=0, dim1=0, dim2=1: -1,
+        torch.expand_copy: lambda self, size, *, implicit=False: -1,
+        torch.narrow_copy: lambda self, dim, start, length: -1,
+        torch.permute_copy: lambda self, dims: -1,
+        torch._reshape_alias_copy: lambda self, size, stride: -1,
+        torch.select_copy: lambda self, dim, index: -1,
+        torch.detach_copy: lambda self: -1,
+        torch.slice_copy: lambda self, dim=0, start=None, end=None, step=1: -1,
+        torch.split_copy: lambda self, split_size, dim=0: -1,
+        torch.split_with_sizes_copy: lambda self, split_sizes, dim=0: -1,
+        torch.squeeze_copy: lambda self: -1,
+        torch.squeeze_copy: lambda self, dim: -1,
+        torch.t_copy: lambda self: -1,
+        torch.transpose_copy: lambda self, dim0, dim1: -1,
+        torch.unsqueeze_copy: lambda self, dim: -1,
+        torch._indices_copy: lambda self: -1,
+        torch._values_copy: lambda self: -1,
+        torch.indices_copy: lambda self: -1,
+        torch.values_copy: lambda self: -1,
+        torch.crow_indices_copy: lambda self: -1,
+        torch.col_indices_copy: lambda self: -1,
+        torch.unbind_copy: lambda self, dim=0: -1,
+        torch.view_copy: lambda self, size: -1,
+        torch.view_copy: lambda self, dtype: -1,
+        torch.unfold_copy: lambda self, dimension, size, step: -1,
+        torch.alias_copy: lambda self: -1,
         Tensor.__floordiv__: lambda self, other: -1,
         Tensor.__rfloordiv__: lambda self, other: -1,
         Tensor.__ifloordiv__: lambda self, other: -1,
@@ -1313,6 +1350,9 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     .. _NEP-0018:
        https://numpy.org/neps/nep-0018-array-function-protocol.html
     """
+    # If torch function is not enabled, there are no overloaded types
+    if not torch._C._is_torch_function_enabled():
+        return []
     # Runtime is O(num_arguments * num_unique_types)
     overloaded_types: Set[Type] = set()
     overloaded_args: List[Any] = []
@@ -1424,8 +1464,11 @@ def handle_torch_function(
 
 has_torch_function = _add_docstr(
     _has_torch_function,
-    r"""Check for __torch_function__ implementations in the elements of an iterable.
-    Considers exact ``Tensor`` s and ``Parameter`` s non-dispatchable.
+    r"""Check for __torch_function__ implementations in the elements of an iterable
+    or if a __torch_function__ mode is enabled.  Considers exact ``Tensor`` s
+    and ``Parameter`` s non-dispatchable.  Use this to guard a call to
+    :func:`handle_torch_function`; don't use it to test if something
+    is Tensor-like, use :func:`is_tensor_like` instead.
     Arguments
     ---------
     relevant_args : iterable
