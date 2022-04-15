@@ -474,3 +474,21 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'cmakelint==1.4.1',
 ]
+
+[[linter]]
+code = 'SHELLCHECK'
+include_patterns = [
+    '.jenkins/pytorch/**/*.sh'
+]
+command = [
+    'python3',
+    'tools/linter/adapters/shellcheck_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'shellcheck-py==0.7.2.1',
+]
