@@ -284,7 +284,7 @@ auto handle_torch_function_no_python_arg_parser(
 
       // See https://github.com/pytorch/pytorch/issues/63767
       if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(arg) &&
-        torch_function.ptr() == torch::disabled_torch_function_impl()) {
+          torch_function.ptr() != torch::disabled_torch_function_impl()) {
         TORCH_WARN("Defining your `__torch_function__` as a plain method is deprecated and ",
                    "will be an error in future, please define it as a classmethod.");
       }
@@ -547,11 +547,15 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
     }
     auto item = py::reinterpret_steal<py::object>(
         PySequence_GetItem(obj, 0));
+    if (THPUtils_checkIndex(item.ptr())) {
+      return true;
+    }
+    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+    // in an intlist argument. Even float or complex scalar tensors.
     return (
-      THPUtils_checkIndex(item.ptr()) ||
-      // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-      // in an intlist argument. Even float or complex scalar tensors.
-      (jit::tracer::isTracing() && THPVariable_Check(item.ptr())));
+        jit::tracer::isTracing() &&
+        THPVariable_Check(item.ptr()) &&
+        THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
   return broadcast_size > 0 && THPUtils_checkLong(obj);
