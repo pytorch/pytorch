@@ -329,6 +329,10 @@ def _is_scalar_list(x):
         element_type in scalar_name_to_pytorch.keys() and \
         (scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys())
 
+def is_caffe2_aten_fallback():
+    return (_operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and
+            torch.onnx._CAFFE2_ATEN_FALLBACK)
+
 def _get_tensor_rank(x):
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -969,6 +973,12 @@ def requantize_bias_helper(g, bias, input_scale, weight_scale):
                   g.op("Div", bias, bias_scale),
                   to_i=torch.onnx.TensorProtoDataType.INT32)
     return g.op("prim::TupleConstruct", q_bias, bias_scale, bias_zero_point)
+
+def args_have_same_dtype(args):
+    assert args
+    base_dtype = args[0].type().scalarType()
+    has_same_dtype = all(elem.type().scalarType() == base_dtype for elem in args)
+    return has_same_dtype
 
 _default_onnx_opset_version = 13
 _onnx_main_opset = 15
