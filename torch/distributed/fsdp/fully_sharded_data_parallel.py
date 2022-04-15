@@ -5,7 +5,6 @@ import itertools
 import traceback
 import warnings
 from contextlib import contextmanager
-import warnings
 from dataclasses import dataclass
 from enum import Enum, auto
 from math import inf
@@ -472,12 +471,15 @@ class FullyShardedDataParallel(nn.Module):
             the corresponding module is currently on the meta device.
             The same ``Callable`` is applied to initialize all meta modules. Note that this
             initialization function is applied before doing any FSDP sharding
-            logic, so if a module is not going to be wrapped with FSDP, FSDP
-            will not initialize this module onto a compute device. For example,
-            if wrapping with ``auto_wrap_policy``, if a particular module ends
-            up not contained in any FSDP instance, it will not be initialized
-            with this function by FSDP, and the user is responsible for this
-            initialization. Please see example below for details on how this can be done.
+            logic.
+
+            Example::
+
+                >>> module = MyModule(device="meta")
+                >>> def my_init_fn(module):
+                >>>     # responsible for initializing a module, such as with reset_parameters
+                >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=default_auto_wrap_policy)
+                >>> print(next(fsdp_model.parameters()).device) # current CUDA devic
     """
 
     def __init__(
