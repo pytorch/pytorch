@@ -1178,17 +1178,11 @@ def broadcast(tensor, src, group=None, async_op=False):
         _warn_not_in_group("broadcast")
         return
 
-    opts = BroadcastOptions()
-    opts.rootRank = src
-    opts.rootTensor = 0
-
     if group is None or group is GroupMember.WORLD:
-        default_pg = _get_default_group()
-        work = default_pg.broadcast([tensor], opts)
+        work = torch.ops.c10d.broadcast(_get_default_group(), tensor, src)
     else:
-        group_src_rank = _get_group_rank(group, src)
-        opts.rootRank = group_src_rank
-        work = group.broadcast([tensor], opts)
+        work = torch.ops.c10d.broadcast(group, tensor, _get_group_rank(group, src))
+
     if async_op:
         return work
     else:
