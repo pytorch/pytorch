@@ -3270,7 +3270,7 @@
   dispatch:
     CPU: narrow_copy_dense_cpu
     SparseCPU, SparseCUDA: narrow_copy_sparse
-    CompositeExplicitAutograd: narrow_copy_dense
+    CompositeImplicitAutograd: narrow_copy_dense
   tags: view_copy
 
 - func: narrow_copy.SymInt(Tensor self, int dim, int start, SymInt length) -> Tensor
@@ -5100,6 +5100,11 @@
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
     SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_csr_
+
+- func: zero(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: zero
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator

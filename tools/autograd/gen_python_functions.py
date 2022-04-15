@@ -96,6 +96,7 @@ _SKIP_PYTHON_BINDINGS = [
     '_new_zeros_with_same_feature_meta', '_has_same_storage_numel',  # used for forward AD internals
     '_reshape_alias',
     'replace_',  # only used by the functionalization pass, doesn't need to be exposed to python
+    'zero',  # only used by the functionalization pass, doesn't need to be exposed to python
 ]
 
 SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))

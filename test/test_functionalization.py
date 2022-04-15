@@ -281,11 +281,23 @@ $2 = torch._ops.aten.add.Tensor($1, tensor(1))
 $3 = torch._ops.aten.mul.Tensor($2, tensor(2))
 $4 = torch._ops.aten.div.Tensor($3, tensor(1))""")
 
+    def test_only_one_view(self):
+        def f(x):
+            # This tests that we don't have any unnecessary views in the trace.
+            # If the input wasn't mutated, we don't need to regenerate it,
+            # so there should be a total of 1 op in the output trace.
+            return x.view(4, 2)
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.view_copy.default($0, [4, 2])""")
+
     def test_everything(self):
         def f(x):
             # test: everything
             tmp = torch.ones(2, 2)
-            y = x.view(8)
+            x2 = x + x
+            y = x2.view(8)
             z0 = y.reshape(2, 4)
             z1 = z0.transpose(1, 0)
             z1.unsqueeze_(0)
@@ -298,39 +310,40 @@ $4 = torch._ops.aten.div.Tensor($3, tensor(1))""")
         logs = self.get_logs(f, torch.ones(4, 2))
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
-$1 = torch._ops.aten.view_copy.default($0, [8])
-$2 = torch._ops.aten._reshape_alias_copy.default($1, [2, 4], [4, 1])
-$3 = torch._ops.aten.transpose_copy.int($2, 1, 0)
-$4 = torch._ops.aten.view_copy.default($0, [8])
-$5 = torch._ops.aten._reshape_alias_copy.default($4, [2, 4], [4, 1])
-$6 = torch._ops.aten.transpose_copy.int($5, 1, 0)
-$7 = torch._ops.aten.unsqueeze_copy.default($6, 0)
-$8 = torch._ops.aten.view_copy.default($0, [8])
-$9 = torch._ops.aten._reshape_alias_copy.default($8, [2, 4], [4, 1])
-$10 = torch._ops.aten.transpose_copy.int($9, 1, 0)
-$11 = torch._ops.aten.unsqueeze_copy.default($10, 0)
-$12 = torch._ops.aten.squeeze_copy.default($11)
-$13, $14 = torch._ops.aten.split_copy.Tensor($12, 2)
-$15 = torch._ops.aten.add.Tensor($13, tensor([[1., 1.],
+$1 = torch._ops.aten.add.Tensor($0, $0)
+$2 = torch._ops.aten.view_copy.default($1, [8])
+$3 = torch._ops.aten._reshape_alias_copy.default($2, [2, 4], [4, 1])
+$4 = torch._ops.aten.transpose_copy.int($3, 1, 0)
+$5 = torch._ops.aten.view_copy.default($1, [8])
+$6 = torch._ops.aten._reshape_alias_copy.default($5, [2, 4], [4, 1])
+$7 = torch._ops.aten.transpose_copy.int($6, 1, 0)
+$8 = torch._ops.aten.unsqueeze_copy.default($7, 0)
+$9 = torch._ops.aten.view_copy.default($1, [8])
+$10 = torch._ops.aten._reshape_alias_copy.default($9, [2, 4], [4, 1])
+$11 = torch._ops.aten.transpose_copy.int($10, 1, 0)
+$12 = torch._ops.aten.unsqueeze_copy.default($11, 0)
+$13 = torch._ops.aten.squeeze_copy.default($12)
+$14, $15 = torch._ops.aten.split_copy.Tensor($13, 2)
+$16 = torch._ops.aten.add.Tensor($14, tensor([[1., 1.],
         [1., 1.]]))
-$16 = torch._ops.aten.select_copy.int($2, 0, 0)
-$17 = torch._ops.aten.clone.default($15, memory_format=0)
-$18 = torch._ops.aten._unsafe_view.default($17, [4])
-$19 = torch._ops.aten.view_copy.default($0, [8])
-$20 = torch._ops.aten._reshape_alias_copy.default($19, [2, 4], [4, 1])
-$21 = torch._ops.aten.transpose_copy.int($20, 1, 0)
-$22 = torch._ops.aten.unsqueeze_copy.default($21, 0)
-$23 = torch._ops.aten.squeeze_copy.default($22)
-$24 = torch._ops.aten.slice_scatter.default($23, $15, 0, 0, 2)
-$25 = torch._ops.aten.unsqueeze_copy.default($24, 0)
-$26 = torch._ops.aten.squeeze_copy.dim($25, 0)
-$27 = torch._ops.aten.transpose_copy.int($26, 1, 0)
-$28 = torch._ops.aten._reshape_alias_copy.default($27, [8], [1])
-$29 = torch._ops.aten.view_copy.default($28, [4, 2])
-$30 = torch._ops.aten.view_copy.default($29, [8])
-$31 = torch._ops.aten._reshape_alias_copy.default($30, [2, 4], [4, 1])
-$32 = torch._ops.aten.select_copy.int($31, 0, 0)
-$33 = torch._ops.aten.add.Tensor($32, $18)""")
+$17 = torch._ops.aten.select_copy.int($3, 0, 0)
+$18 = torch._ops.aten.clone.default($16, memory_format=0)
+$19 = torch._ops.aten._unsafe_view.default($18, [4])
+$20 = torch._ops.aten.view_copy.default($1, [8])
+$21 = torch._ops.aten._reshape_alias_copy.default($20, [2, 4], [4, 1])
+$22 = torch._ops.aten.transpose_copy.int($21, 1, 0)
+$23 = torch._ops.aten.unsqueeze_copy.default($22, 0)
+$24 = torch._ops.aten.squeeze_copy.default($23)
+$25 = torch._ops.aten.slice_scatter.default($24, $16, 0, 0, 2)
+$26 = torch._ops.aten.unsqueeze_copy.default($25, 0)
+$27 = torch._ops.aten.squeeze_copy.dim($26, 0)
+$28 = torch._ops.aten.transpose_copy.int($27, 1, 0)
+$29 = torch._ops.aten._reshape_alias_copy.default($28, [8], [1])
+$30 = torch._ops.aten.view_copy.default($29, [4, 2])
+$31 = torch._ops.aten.view_copy.default($30, [8])
+$32 = torch._ops.aten._reshape_alias_copy.default($31, [2, 4], [4, 1])
+$33 = torch._ops.aten.select_copy.int($32, 0, 0)
+$34 = torch._ops.aten.add.Tensor($33, $19)""")
 
     def test_reapply_views_simple(self):
         def f(x):
@@ -419,6 +432,22 @@ $0 = input('input')
 $1 = torch._ops.aten._to_copy.default($0, dtype=6, layout=0, device=device(type='cpu'), pin_memory=False)
 $2 = torch._ops.aten.expand_copy.default($1, [2])
 $3 = torch._ops.aten.add.Tensor($2, $0)""")
+
+    # zero_ gets its own test because of the newly added at::zero operator.
+    def test_zero_(self):
+        def f(x):
+            y = x + x
+            z = y.diagonal()
+            z.zero_()
+            return y
+
+        self.assert_functionalization(f, torch.ones(2, 2))
+        logs = self.get_logs(f, torch.ones(2, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.add.Tensor($0, $0)
+$2 = torch._ops.aten.diagonal_copy.default($1)
+$3 = torch._ops.aten.zero.default($2)""")
 
     def test_nested_functions_propagate_updates(self):
         def g(x):

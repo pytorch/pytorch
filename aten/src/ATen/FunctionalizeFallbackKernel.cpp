@@ -126,9 +126,6 @@ at::Tensor _to_copy_functionalize(
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
-TORCH_LIBRARY_IMPL(_, FunctionalizeAddBackViews, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
-}
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   // Note [Lazy Tensor Functionalization]
   // LazyTensor uses the functionalization pass from core.
