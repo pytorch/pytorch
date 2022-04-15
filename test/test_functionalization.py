@@ -433,6 +433,22 @@ $1 = torch._ops.aten._to_copy.default($0, dtype=6, layout=0, device=device(type=
 $2 = torch._ops.aten.expand_copy.default($1, [2])
 $3 = torch._ops.aten.add.Tensor($2, $0)""")
 
+    # zero_ gets its own test because of the newly added at::zero operator.
+    def test_zero_(self):
+        def f(x):
+            y = x + x
+            z = y.diagonal()
+            z.zero_()
+            return y
+
+        self.assert_functionalization(f, torch.ones(2, 2))
+        logs = self.get_logs(f, torch.ones(2, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.add.Tensor($0, $0)
+$2 = torch._ops.aten.diagonal_copy.default($1)
+$3 = torch._ops.aten.zero.default($2)""")
+
     def test_nested_functions_propagate_updates(self):
         def g(x):
             # Create a view of x
