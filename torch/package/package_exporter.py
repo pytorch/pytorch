@@ -140,7 +140,10 @@ class PackagingError(Exception):
         for reason, module_names in broken.items():
             message.write(f"* {reason.value}\n")
             for module_name in module_names:
-                message.write(f"    {module_name}\n")
+                first_path = dependency_graph.first_path(module_name)
+                message.write(
+                    f"    {module_name} (first_path: {'->'.join(first_path)})\n"
+                )
 
                 # Print additional context if it's provided.
                 error_context = dependency_graph.nodes[module_name].get("error_context")
