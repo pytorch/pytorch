@@ -333,7 +333,7 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  if (owns_pyobj_) {
+  if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
     pyobj_interpreter_.load(std::memory_order_acquire)

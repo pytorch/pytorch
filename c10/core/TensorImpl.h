@@ -1572,7 +1572,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   PyObject* _unchecked_untagged_pyobj() const {
-    return reinterpret_cast<PyObject*>(reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
+    return reinterpret_cast<PyObject*>(
+        reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
   }
 
   // Test the interpreter tag.  If tagged for the current interpreter, return
@@ -2291,7 +2292,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_owns_pyobj(bool b) {
-    pyobj_ = reinterpret_cast<PyObject*>(reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
+    pyobj_ = reinterpret_cast<PyObject*>(
+        reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
   }
 
  protected:
@@ -2379,22 +2381,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // care)
   std::atomic<impl::PyInterpreter*> pyobj_interpreter_;
 
-  // This field contains a weak reference to a PyObject representing
-  // this Tensor.  It MUST NOT be a strong reference, as that would
-  // create a reference cycle between Tensor and the PyObject.  If
-  // pyobj is nullptr, when we transfer Tensor to Python, we allocate
-  // a new PyObject for it and set this field.  This field does not
-  // have to be protected by an atomic as it is only allowed to be
-  // accessed when you hold the GIL.
+  // This field contains a reference to a PyObject representing this Tensor.
+  // If pyobj is nullptr, when we transfer Tensor to Python, we allocate a new
+  // PyObject for it and set this field.  This field does not have to be
+  // protected by an atomic as it is only allowed to be accessed when you hold
+  // the GIL, or during destruction of the tensor.
   //
   // When a PyObject dies, you are obligated to clear this field
   // (otherwise, you will try to use-after-free the pyobj); this currently
   // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
   //
-  // NB: this has a single pointer tag indicating whether or not the
+  // NB: Ordinarily, this should not be a strong reference, as if the
+  // PyObject owns the Tensor, this would create a reference cycle.
+  // However, sometimes this ownership flips.  To track who owns
+  // who, this has a single pointer tag indicating whether or not the
   // C++ object owns the PyObject (the common case, zero, means PyObject
   // owns the C++ object); see _unchecked_untagged_pyobj for raw access
-  // or check_pyobj for checked access
+  // or check_pyobj for checked access.  See references to PyObject
+  // resurrection in torch/csrc/autograd/python_variable.cpp
   PyObject* pyobj_;
 
   c10::impl::SizesAndStrides sizes_and_strides_;
