@@ -3,14 +3,13 @@ from torch.fx.graph import (
     Node,
 )
 
-from .pattern_utils import (
-    register_quant_pattern,
-    Pattern,
-)
 from .utils import (
     all_node_args_have_no_tensors,
 )
-from .quantization_types import NodePattern
+from .quantization_types import (
+    Pattern,
+    NodePattern,
+)
 
 from abc import ABC
 from typing import Any, Callable, Dict, Optional
@@ -126,19 +125,11 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 class BatchNormQuantizeHandler(QuantizeHandler):
     pass
 
-@register_quant_pattern(torch.nn.qat.Embedding)
-@register_quant_pattern(torch.nn.qat.EmbeddingBag)
-@register_quant_pattern(torch.nn.Embedding)
-@register_quant_pattern(torch.nn.EmbeddingBag)
+# TODO: remove this class
 class EmbeddingQuantizeHandler(QuantizeHandler):
-    def input_output_observed(self) -> bool:
-        return False
+    pass
 
-# TODO (maybe): merge with embedding quantize handler
-@register_quant_pattern(torch.nn.GRUCell)
-@register_quant_pattern(torch.nn.LSTMCell)
-@register_quant_pattern(torch.nn.RNNCell)
-@register_quant_pattern(torch.nn.LSTM)
+# TODO: remove this class
 class RNNDynamicQuantizeHandler(QuantizeHandler):
     pass
 
