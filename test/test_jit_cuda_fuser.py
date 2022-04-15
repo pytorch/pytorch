@@ -4577,7 +4577,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
         def _get_extremal_samples(sample: SampleInput, dtype):
             vals = [float('inf'), float('-inf'), float('nan')]
             if dtype.is_complex:
-                complex_vals = product(vals, vals)
+                complex_vals = itertools.product(vals, vals)
                 vals = list(map(lambda x: complex(*x), complex_vals))
             for val in vals:
                 yield _get_extremal_sample(sample, val)
