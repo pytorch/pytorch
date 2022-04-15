@@ -968,8 +968,7 @@ std::string generate_reduction_code(
         env.s("complex_math_string", "");
         env.s("complex", std::to_string(0));
       }
-      if (f_inputs_type == "std::complex<at::Half>" ||
-          result_type == "std::complex<at::Half>") {
+      if (f_inputs_type == "std::complex<at::Half>") {
         TORCH_CHECK(
             false, "complex<Half> reduction not supported by JITERATOR");
       } else {
