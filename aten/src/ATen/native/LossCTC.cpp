@@ -118,7 +118,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
 
       // now the loop over the inputs
       for (const auto t : c10::irange(1, input_length)) {
-        for (int64_t s=0; s<2*target_length+1; s++) {
+        for (const auto s : c10::irange(2*target_length+1)) {
           auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
           // this loop over s could be parallel/vectorized, too, but the required items are one index apart
           // alternatively, one might consider moving s to the outer loop to cache current_target_prime more (but then it needs to be descending)

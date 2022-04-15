@@ -550,42 +550,6 @@ graph(%input, %linear, %relu):
     return (%second_output) )",
       {is_linear_module});
 
-  // F.linear + nn.ReLU
-  const PatternInfo f_linear_nn_relu = PatternInfo::parse_from_str(
-      R"(
-graph(%input, %weight, %bias, %linear, %relu):
-    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
-    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
-    return (%second_output) )",
-      {is_functional_linear, is_relu_module});
-
-  // F.linear + F.relu
-  const PatternInfo f_linear_f_relu = PatternInfo::parse_from_str(
-      R"(
-graph(%input, %weight, %bias, %linear, %relu, %inplace):
-    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
-    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
-    return (%second_output) )",
-      {is_functional_linear, is_functional_relu});
-
-  // F.linear + aten::relu
-  const PatternInfo f_linear_aten_relu = PatternInfo::parse_from_str(
-      R"(
-graph(%input, %weight, %bias, %linear, %relu):
-    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
-    %second_output = aten::relu(%first_output)
-    return (%second_output) )",
-      {is_functional_linear});
-
-  // F.linear + aten::relu_
-  const PatternInfo f_linear_aten_relu_ = PatternInfo::parse_from_str(
-      R"(
-graph(%input, %weight, %bias, %linear, %relu):
-    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
-    %second_output = aten::relu_(%first_output)
-    return (%second_output) )",
-      {is_functional_linear});
-
   // aten::linear + nn.ReLU
   const PatternInfo aten_linear_nn_relu = PatternInfo::parse_from_str(
       R"(
@@ -896,8 +860,6 @@ graph(%self, %a, %b):
       {
           nn_linear_f_relu,      nn_linear_nn_relu,
           nn_linear_aten_relu,   nn_linear_aten_relu_,
-          f_linear_f_relu,       f_linear_nn_relu,
-          f_linear_aten_relu,    f_linear_aten_relu_,
           aten_linear_f_relu,    aten_linear_nn_relu,
           aten_linear_aten_relu, aten_linear_aten_relu_,
 
@@ -1606,6 +1568,7 @@ Module InsertObservers(
   fillQConfigMap(input_module, qconfig_dict, map_before_clone);
   ModuleCloneHelper mh;
   Module module = mh.clone(input_module, map_before_clone, inplace);
+  SwapFunctionalLinear(module);
   ModuleQConfigMap module_qconfig_map;
   // Since the types are changed after clone, we need to fill
   // the qconfig map again

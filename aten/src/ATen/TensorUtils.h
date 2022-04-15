@@ -138,13 +138,6 @@ TORCH_API void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layo
 TORCH_API void* maybe_data_ptr(const Tensor& tensor);
 TORCH_API void* maybe_data_ptr(const TensorArg& tensor);
 
-// Return if the tensor geometry represented by `sizes` and `strides` is contiguous
-// Although we cache is_contiguous in tensor now, this is till useful because it
-// allows checking if a particular geometry is contiguous without explicitly
-// constructing a tensor, e.g., when you want to choose a kernel strategy based
-// on whether a subgeometry is contiguous.
-TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
-
 TORCH_API void check_dim_size(
     const Tensor& tensor,
     int64_t dim,

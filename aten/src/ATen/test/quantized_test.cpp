@@ -288,7 +288,7 @@ TEST(TestQTensor, TestArmVectorizedQuantizeDequantize) {
   const int numel = 132;
 
   std::vector<float> x_values;
-  for (int i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
     x_values.push_back(9 * i);
   }
 
@@ -303,14 +303,14 @@ TEST(TestQTensor, TestArmVectorizedQuantizeDequantize) {
     for (int zero_point : {zero_point_min, 10, zero_point_max}) {
       const Tensor q = at::quantize_per_tensor(x, scale, zero_point, scalar_type);
       auto* q_data = get_data_ptr(q);
-      for (int i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         ASSERT_EQ(
           q_data[i].val_,
           quantize_val_with_datatype(scale, zero_point, x_values[i]).val_);
       }
       const Tensor r = q.dequantize();
       const float* r_data = r.data_ptr<float>();
-      for (int i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         ASSERT_FLOAT_EQ(
           r_data[i],
           native::dequantize_val(scale, zero_point, q_data[i]));

@@ -2,7 +2,7 @@
 
 #include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Generator.h>
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)

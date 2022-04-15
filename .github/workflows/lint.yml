@@ -8,6 +8,7 @@ on:
 
 jobs:
   quick-checks:
+    name: quick-checks
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -15,8 +16,15 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Install requirements
         id: requirements
         run: pip3 install -r requirements.txt --user
@@ -109,6 +117,7 @@ jobs:
           .github/scripts/lint_test_ownership.py
 
   clang-format:
+    name: clang-format
     runs-on: ubuntu-18.04
     if: ${{ github.event_name == 'pull_request' }}
     steps:
@@ -117,10 +126,12 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
-      - name: Fetch PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0 required to use git merge-base)
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
-          fetch-depth: 0 # deep clone, to allow us to use git merge-base
+          submodules: false
       - name: Run clang-format
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -149,6 +160,7 @@ jobs:
           exit 1
 
   py2-setup-validate-errormsg:
+    name: py2-setup-validate-errormsg
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -156,8 +168,11 @@ jobs:
         with:
           python-version: 2.x
           architecture: x64
+      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
       - name: Attempt to run setup.py
         run: |
           if ! python2 setup.py | grep -q "Python 2 has reached end-of-life and is no longer supported by PyTorch."; then
@@ -168,6 +183,7 @@ jobs:
         run: python2 -m py_compile torch/utils/collect_env.py
 
   shellcheck:
+    name: shellcheck
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -175,8 +191,11 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
       - name: Install requirements
         id: requirements
         run: |
@@ -184,8 +203,6 @@ jobs:
       - name: Install Jinja2
         run: |
           pip3 install Jinja2==3.0.1 --user
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       - name: Regenerate workflows
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
@@ -238,15 +255,20 @@ jobs:
         if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
           .github/scripts/ensure_actions_will_cancel.py
-      - name: Run actionlint
-        shell: bash
-        run: |
-          set -eux
-          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          ./actionlint --color
-          rm actionlint
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Run actionlint
+        with:
+          timeout_minutes: 1
+          max_attempts: 3
+          command: |
+            set -eux
+            bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+            ./actionlint --color
+            rm actionlint
+
 
   toc:
+    name: toc
     runs-on: ubuntu-18.04
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
     env:
@@ -254,8 +276,11 @@ jobs:
     steps:
       - name: Setup Node
         uses: actions/setup-node@v2
+      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -283,6 +308,7 @@ jobs:
           fi
 
   flake8-py3:
+    name: flake8-py3
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -290,10 +316,12 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
-      - name: Fetch PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      # [see note: pytorch repo ref]
+      # fetch-depth 2 required to allow us to use github.event.pull_request.head.sha
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
-          fetch-depth: 2 # to allow us to use github.event.pull_request.head.sha
+          submodules: false
       - name: Prepare output dir with HEAD commit SHA
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -343,15 +371,23 @@ jobs:
           mode: json
 
   clang-tidy:
-    runs-on: linux.2xlarge
+    name: clang-tidy
+    runs-on: [self-hosted, linux.2xlarge]
     container:
       # ubuntu20.04-cuda11.2-py3.8-tidy11
       image: ghcr.io/pytorch/cilint-clang-tidy:d8f0c777964d0dd8a147360de80aed1a13eb613a
     steps:
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) to allow tools/linter/clang_tidy.py to do its thing
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
-          fetch-depth: 0 # to allow tools/linter/clang_tidy.py to do its thing
+          no-sudo: true
+          submodules: false
       - name: Prepare output dir with HEAD commit SHA
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -390,10 +426,12 @@ jobs:
 
           python3 -m tools.linter.clang_tidy \
             --paths \
+              torch/csrc/cuda \
               torch/csrc/fx \
               torch/csrc/utils \
               torch/csrc/generic \
               torch/csrc/deploy \
+              torch/csrc/onnx \
               torch/csrc/tensor \
             --clang-tidy-exe "$(which clang-tidy)" \
             --disable-progress-bar 2>&1 | tee -a "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
@@ -432,6 +470,7 @@ jobs:
           mode: json
 
   cmakelint:
+    name: cmakelint
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -439,8 +478,11 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
-      - name: Fetch PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
       - name: Install dependencies
         run: |
           set -eux
@@ -454,6 +496,7 @@ jobs:
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
 
   mypy:
+    name: mypy
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -461,8 +504,11 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
-      - name: Fetch PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
       - name: Install dependencies
         run: |
           set -eux
@@ -494,6 +540,64 @@ jobs:
             false
           fi
 
+  test-tools:
+    name: Test tools
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) required, to allow us to use git log
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+      - name: Install dependencies
+        # mypy and boto3 versions copied from
+        # .circleci/docker/common/install_conda.sh
+        run: |
+          set -eux
+          python3 -mpip install -r requirements.txt
+          python3 -mpip install boto3==1.16.34
+          make setup_lint
+      - name: Test tools
+        run: |
+          python3 -m unittest discover -vs tools/test -p 'test_*.py'
+          python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
+
+  test_collect_env:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    name: Test collect_env
+    runs-on: ubuntu-18.04
+    strategy:
+      matrix:
+        with_torch: [with_torch, without_torch]
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) required, to allow us to use git log
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+      - name: Install torch
+        if: matrix.with_torch == 'with_torch'
+        run: |
+          # Doesn't really matter what torch version, we just need ANY torch installed
+          pip install 'torch==1.*'
+      - name: Run collect_env.py
+        run: |
+          # All we need to see is that it passes
+          python3 torch/utils/collect_env.py
+
 concurrency:
-  group: lint-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

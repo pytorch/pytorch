@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
@@ -6,8 +7,11 @@
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
+#include <ATen/cuda/llvm_jit_strings.h>
+#include <ATen/native/cuda/reduction_template.cuh>
 
 #include <sstream>
 #include <fstream>
@@ -16,19 +20,29 @@
 #include <cstdlib>
 #include <string>
 
-#if BUILD_JITERATOR_WITH_CACHE
-  // Uses POSIX headers, which is why these are guarded behind BUILD_JITERATOR_WITH_CACHE
-  // TODO: C++17 has the fileystem header, which may replace these
+// TODO: C++17 has the fileystem header, which may replace these
+#ifdef _WIN32
+  // On Windows, the POSIX implementations are considered deprecated. We simply map to the newer variant.
+  #include <process.h>
+  #include <direct.h>
+  #include <io.h>
+  #define access _access
+  #define getpid _getpid
+  #define R_OK    4
+  #define W_OK    2
+  #define F_OK    0
+#else
   #include <sys/types.h>
   #include <sys/stat.h> // mkdir
   #include <unistd.h>
-#endif // BUILD_JITERATOR_WITH_CACHE
+#endif
 
 
 namespace at { namespace cuda { namespace jit {
 
 const std::string jit_common_types = R"ESCAPE(
   #define POS_INFINITY __int_as_float(0x7f800000)
+  #define INFINITY POS_INFINITY
   #define NEG_INFINITY __int_as_float(0xff800000)
   #define NAN __int_as_float(0x7fffffff)
 
@@ -46,6 +60,8 @@ const std::string jit_common_types = R"ESCAPE(
   //TODO use _assert_fail, because assert is disabled in non-debug builds
   #define ERROR_UNSUPPORTED_CAST assert(false);
 
+  ${traits_string}
+  ${cmath_string}
 
   // NB: Order matters for this macro; it is relied upon in
   // _promoteTypesLookup and the serialization format.
@@ -59,28 +75,28 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::Half, Half) /* 5 */                                  \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
-  _(c10::complex<float>, ComplexFloat) /* 9 */                          \
-  _(c10::complex<double>, ComplexDouble) /* 10 */                         \
+  _(std::complex<at::Half>, ComplexHalf) /* 8 */        \
+  _(std::complex<float>, ComplexFloat) /* 9 */                          \
+  _(std::complex<double>, ComplexDouble) /* 10 */                         \
   _(bool, Bool) /* 11 */                                 \
   _(void, QInt8) /* 12 */                          \
   _(void, QUInt8) /* 13 */                        \
   _(void, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                             \
 
-  #define AT_FORALL_SCALAR_TYPES(_) \
-  _(uint8_t, Byte)                \
-  _(int8_t, Char)                 \
-  _(int16_t, Short)               \
-  _(int, Int)                     \
-  _(int64_t, Long)                \
-  _(float, Float)                 \
-  _(at::Half, Half)               \
-  _(at::BFloat16, BFloat16)       \
-  _(double, Double)               \
-  _(bool, Bool)                   \
-  _(c10::complex<float>, ComplexFloat)   \
-  _(c10::complex<double>, ComplexDouble)
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
+  _(uint8_t, Byte)                                                 \
+  _(int8_t, Char)                                                  \
+  _(int16_t, Short)                                                \
+  _(int, Int)                                                      \
+  _(int64_t, Long)                                                 \
+  _(at::Half, Half)                                                \
+  _(float, Float)                                                  \
+  _(double, Double)                                                \
+  _(std::complex<float>, ComplexFloat)                             \
+  _(std::complex<double>, ComplexDouble)                           \
+  _(bool, Bool)                                                    \
+  _(at::BFloat16, BFloat16)
 
 
   enum class ScalarType : int8_t {
@@ -104,11 +120,17 @@ const std::string jit_common_types = R"ESCAPE(
   Array() = default;
   Array(const Array&) = default;
   Array& operator=(const Array&) = default;
+  __device__ Array(T x) {
+    for (int i = 0; i < size; i++) {
+      data[i] = x;
+    }
+  }
   };
 
   ${half_string}
   ${bfloat16_string}
-  ${complex_string}
+  ${complex_body_string}
+  ${complex_math_string}
 
 
 )ESCAPE";
@@ -186,41 +208,62 @@ struct alignas(2) BFloat16 {
 }
 )ESCAPE";
 
-//copy-pasted from util/complex.h
-const std::string jiterator_complex_support_literal = R"ESCAPE(
-//a very limited complex class, the only thing it currently allows is implicit conversion
-//to complex, and complex -> real that is unused
-namespace c10 {
-  template<typename T>
-  struct alignas(sizeof(T) * 2) complex {
-    using value_type = T;
+// copy-pasted from c10/util/TypeCast.h
+const std::string dynamic_cast_support_literal = R"ESCAPE(
 
-    T real_ = T(0);
-    T imag_ = T(0);
-    constexpr complex() = default;
-    inline __host__ __device__ constexpr complex(const T& re, const T& im = T())
-      : real_(re), imag_(im) {}
+  template <typename T>
+  struct is_complex : public std::false_type {};
 
-    //FIXME I didn't find how complex -> real conversion is done in eager
-    //we are not going to use it, but it's needed for compilation
-    inline __host__ __device__ operator T() const{
-      return real_;
-    }
+  template <typename T>
+  struct is_complex<std::complex<T>> : public std::true_type {};
 
+  template <typename dest_t, typename src_t>
+  struct needs_real {
+    constexpr static bool value =
+        (is_complex<src_t>::value && !is_complex<dest_t>::value);
   };
-}
-)ESCAPE";
 
+  template <bool, typename src_t>
+  struct maybe_real {
+    static inline src_t apply(src_t src) {
+      return src;
+    }
+  };
 
-const std::string jit_code_template = R"ESCAPE(
+  template <typename src_t>
+  struct maybe_real<true, src_t> {
+    static inline decltype(auto) apply(src_t src) {
+      return src.real();
+    }
+  };
+
+  template <typename dest_t, typename src_t>
+  struct static_cast_with_inter_type {
+    static inline dest_t apply(
+        src_t src) {
+      constexpr bool real = needs_real<dest_t, src_t>::value;
+      return static_cast<dest_t>(maybe_real<real, src_t>::apply(src));
+    }
+  };
+
+  template <typename src_t>
+  struct static_cast_with_inter_type<uint8_t, src_t> {
+    static inline uint8_t apply(
+        src_t src) {
+      constexpr bool real = needs_real<uint8_t, src_t>::value;
+      return static_cast<uint8_t>(
+          static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
+    }
+  };
 
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
-  // For now, simplified version that does not handle complex and special casting to uint8
-  #define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast<dest_t>(*(const type *)ptr);
+  #define FETCH_AND_CAST_CASE(type, scalartype) \
+    case ScalarType::scalartype:                \
+      return static_cast_with_inter_type<dest_t, type>::apply(*(const type*)ptr);
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
-        AT_FORALL_SCALAR_TYPES(FETCH_AND_CAST_CASE)
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
         default:
           ERROR_UNSUPPORTED_CAST
     }
@@ -228,22 +271,18 @@ const std::string jit_code_template = R"ESCAPE(
   }
 
   // Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
-  #define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast<type>(value); return;
+  #define CAST_AND_STORE_CASE(type, scalartype)                             \
+    case ScalarType::scalartype:                                            \
+      *(type*)ptr = static_cast_with_inter_type<type, src_t>::apply(value); \
+      return;
   template<typename src_t>
   __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-      AT_FORALL_SCALAR_TYPES(CAST_AND_STORE_CASE)
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
       default:;
   }
   ERROR_UNSUPPORTED_CAST
   }
-
-  struct LoadWithoutCast {
-  template <typename scalar_t>
-  __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
-      return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
-  }
-  };
 
   template <int N>
   struct LoadWithCast {
@@ -259,13 +298,6 @@ const std::string jit_code_template = R"ESCAPE(
   }
   };
 
-  struct StoreWithoutCast {
-  template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
-      *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
-  }
-  };
-
   struct StoreWithCast {
   ScalarType dtype;
   uint32_t element_size;
@@ -277,6 +309,27 @@ const std::string jit_code_template = R"ESCAPE(
   }
   };
 
+)ESCAPE";
+
+const std::string no_dynamic_cast_support_literal = R"ESCAPE(
+
+  struct LoadWithoutCast {
+  template <typename scalar_t>
+  __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
+    return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+  }
+  };
+
+  struct StoreWithoutCast {
+  template<typename scalar_t>
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+    *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
+  }
+  };
+
+)ESCAPE";
+
+const std::string offset_calc_template = R"ESCAPE(
   template <typename T>
   struct DivMod {
   T div;
@@ -360,6 +413,14 @@ const std::string jit_code_template = R"ESCAPE(
     ${index_type} strides_[25][NARGS];
   };
 
+
+)ESCAPE";
+
+const std::string jit_code_template = R"ESCAPE(
+
+  ${dynamic_casting_string}
+
+
   ${functor}
 
   // TODO: setup grid-stride loop
@@ -371,7 +432,7 @@ const std::string jit_code_template = R"ESCAPE(
       ${offset_calculator}<1> output_calculator,
       ${loader} l,
       ${storer} s,
-      ${compute_type} scalar_val) {
+      ${compute_type} scalar_val${extra_params}) {
     ${declare_load_arrays}
     ${declare_store_arrays}
 
@@ -397,7 +458,7 @@ const std::string jit_code_template = R"ESCAPE(
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++) {
       if ((threadIdx.x  + j*num_threads) < remaining) {
-        out[j] = ${name}<${compute_type}>(${args});
+        out[j] = ${name}<${compute_type}>(${args}${extra_args});
       }
     }
 
@@ -445,7 +506,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   void ${name}_vectorized${vec_size}_kernel(
       const int N,
       Array<char*, ${nInputs}+1> data,
-      ${compute_type} scalar_val) //[${nInputs}+1],
+      ${compute_type} scalar_val${extra_params}) //[${nInputs}+1],
       {
       constexpr int vec_size = ${vec_size};
       int remaining = N - block_work_size * blockIdx.x;
@@ -467,7 +528,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
           if ((threadIdx.x  + j*num_threads) < remaining) {
-            out[j] = ${name}<${compute_type}>(${args});
+            out[j] = ${name}<${compute_type}>(${args} ${extra_args});
           }
         }
         thread_idx = threadIdx.x;
@@ -495,7 +556,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
 
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
-          out[j] = ${name}<${compute_type}>(${args});
+          out[j] = ${name}<${compute_type}>(${args}${extra_args});
         }
         using vec_t_output = aligned_vector<${result_type}, vec_size>;
         vec_t_output * to_ = reinterpret_cast<vec_t_output *>(data[0]) + block_work_size / vec_size * idx;
@@ -604,9 +665,11 @@ std::string generate_code(
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
+    c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized,
     int vec_size) {
   at::jit::TemplateEnv env;
+
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
   env.s("nInputs", std::to_string(nInputs));
@@ -614,6 +677,23 @@ std::string generate_code(
   env.s("compute_type", compute_type);
   env.s("functor", func);
   env.s("name", name);
+  env.s("cmath_string", get_cmath_string());
+
+  // Generate `extra_params` for function signature
+  // and `extra_args` for computation call if
+  // extra arguments to capture runtime state are passed.
+  // (look at polygamma for example).
+  std::string extra_params = "";
+  std::string extra_args = "";
+  for (size_t i = 0; i < extra_args_typenames.size(); i++) {
+    auto type = std::string(extra_args_typenames[i]);
+    auto name = "extra_arg_" + std::string(to_string(i));
+    extra_params += "," + type + " " + name;
+    extra_args += ", " + name;
+  }
+  env.s("extra_params", extra_params);
+  env.s("extra_args", extra_args);
+
   std::stringstream declare_load_arrays;
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
@@ -651,20 +731,33 @@ std::string generate_code(
   } else {
     env.s("bfloat16_string", "");
   }
-  if (dynamic_casting) {
-    env.s("complex_string", jiterator_complex_support_literal);
+  // the definition of complex math functions is only needed when the compute type is complex
+  // but the definition of std::complex is needed for dynamic casting even if the compute type is not complex
+  if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
+      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>") {
+    env.s("traits_string", get_traits_string());
+    env.s("complex_body_string", get_complex_body_string());
+    env.s("complex_math_string", get_complex_math_string());
+  } else if (dynamic_casting) {
+    env.s("traits_string", get_traits_string());
+    env.s("complex_body_string", get_complex_body_string());
+    env.s("complex_math_string", "");
   } else {
-    env.s("complex_string", "");
+    env.s("traits_string", "");
+    env.s("complex_body_string", "");
+    env.s("complex_math_string", "");
   }
 
   if (!vectorized) {
     if (!dynamic_casting) {
       env.s("loader", "LoadWithoutCast");
       env.s("storer", "StoreWithoutCast");
+      env.s("dynamic_casting_string", no_dynamic_cast_support_literal);
     } else {
       env.s(
           "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
       env.s("storer", "StoreWithCast");
+      env.s("dynamic_casting_string", dynamic_cast_support_literal);
     }
 
     if (contiguous) {
@@ -688,7 +781,7 @@ std::string generate_code(
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
 
-    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_code_template);
+    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + offset_calc_template + jit_code_template);
     const auto code = cuda_template.format(env);
     return code;
   }
@@ -727,8 +820,127 @@ std::string generate_code(
   return code;
 }
 
+// Creates directories recursively
+bool _r_mkdir(const std::string& dir) {
+  // Check if current dir exists
+  const char* p_dir = dir.c_str();
+  const bool dir_exists = (access(p_dir, F_OK) == 0);
+  if (dir_exists) {
+    return true;
+  }
 
-#if BUILD_JITERATOR_WITH_CACHE
+  // Try to create current directory
+#ifdef _WIN32
+  int ret = _mkdir(dir.c_str());
+#else
+  int ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+#endif
+  // Success
+  if (ret == 0) {
+    return true;
+  }
+
+  // Find folder separator and check if we are at the top
+  auto  pos = dir.find_last_of("/\\");
+  if (pos == std::string::npos) {
+    return false;
+  }
+
+  // Try to create parent directory
+  if (!(_r_mkdir(dir.substr(0, pos)))) {
+    return false;
+  }
+
+  // Try to create complete path again
+#ifdef _WIN32
+  ret = _mkdir(dir.c_str());
+#else
+  ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+#endif
+  return ret == 0;
+}
+
+// Creates directories recursively assuming that base exists
+bool r_mkdir_with_base(std::string& base, std::string& dir){
+  const char* p_base = base.c_str();
+  const bool base_exists = (access(p_base, F_OK) == 0);
+  if (!base_exists) {
+    return false;
+  }
+
+  // remove trailing '/' or '\\'
+  if ((base[base.size()-1]=='/') || base[base.size()-1]=='\\') {
+    base.pop_back();
+  }
+  if ((dir[dir.size()-1]=='/') || dir[dir.size()-1]=='\\') {
+    dir.pop_back();
+  }
+
+  return _r_mkdir(base+dir);
+
+}
+
+std::string load_code_template(const std::string& path) {
+  std::ifstream ifs{path};
+  std::string s{
+    std::istreambuf_iterator<char>(ifs),
+    std::istreambuf_iterator<char>()};
+  return s;
+}
+
+std::string generate_reduction_code(
+    int nOutputs,
+    const std::string& func,
+    const std::string& name,
+    const int vt0,
+    const std::string& f_inputs_type,
+    const std::string& reduction_accum_type,
+    const std::string& result_type,
+    bool contiguous,
+    bool vectorized,
+    int vec_size,
+    int max_threads_codegen) {
+      at::jit::TemplateEnv env;
+      env.s("index_type", "unsigned int");
+      env.s("scalar_type", f_inputs_type);
+      env.s("result_type", result_type);
+      env.s("reduction_accum_type", reduction_accum_type);
+      env.s("vt0", std::to_string(vt0));
+      env.s("name", name);
+      env.s("max_threads_lb", std::to_string(max_threads_codegen));
+      // reductions don't support dynamic casting, so the only way to get nonstandard types
+      // is through input
+      if (f_inputs_type == "at::Half") {
+        env.s("half_string", jiterator_half_support_literal);
+      } else {
+        env.s("half_string", "");
+      }
+      if (f_inputs_type == "at::BFloat16") {
+        env.s("bfloat16_string", jiterator_bfloat16_support_literal);
+      } else {
+        env.s("bfloat16_string", "");
+      }
+      if (f_inputs_type == "std::complex<float>" ||
+          f_inputs_type == "std::complex<double>" ) {
+        env.s("traits_string", get_traits_string());
+        env.s("complex_body_string", get_complex_body_string());
+        env.s("complex_math_string", get_complex_math_string());
+        env.s("complex", std::to_string(1));
+      } else {
+        env.s("traits_string", "");
+        env.s("complex_body_string", "");
+        env.s("complex_math_string", "");
+        env.s("complex", std::to_string(0));
+      }
+      env.s("cmath_string", get_cmath_string());
+      env.s("functor", func);
+      env.s("output_vec_size", std::to_string(vec_size));
+      static auto cuda_template = at::jit::CodeTemplate(
+        jit_common_types + offset_calc_template + get_reduction_template());
+      const auto code = cuda_template.format(env);
+      return code;
+}
+
 // Acquires (possibly creating) the kernel cache directory
 c10::optional<std::string> get_cache_dir() {
   // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
@@ -739,16 +951,23 @@ c10::optional<std::string> get_cache_dir() {
     return {};
   }
 
-  // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then XDG_CACHE_HOME, then HOME environment variables
+  // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then TEMP (Windows) or XDG_CACHE_HOME (Linux), then HOME environment variables
   std::string cache_dir;
   char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
+  // Create kernel_cache_dir if needed as we do not want to create the base directory passed by the user
+  std::string kernels_cache_dir = "";
   if (ptkcp != nullptr) {
     cache_dir = std::string(ptkcp);
   } else {
+#ifdef _WIN32
+    ptkcp = std::getenv("TEMP");
+#else
     // USES XDG_CACHE_HOME if it's set
     ptkcp = std::getenv("XDG_CACHE_HOME");
+#endif
     if (ptkcp != nullptr) {
-      cache_dir = std::string(ptkcp) + "/torch/kernels";
+      kernels_cache_dir = "/torch/kernels";
+      cache_dir = std::string(ptkcp) + kernels_cache_dir;
     } else {
       // Falls back to HOME/.cache
       ptkcp = std::getenv("HOME");
@@ -757,7 +976,8 @@ c10::optional<std::string> get_cache_dir() {
                         " This disables kernel caching.");
         return {};
       } else {
-        cache_dir = std::string(ptkcp) + "/.cache/torch/kernels";
+        kernels_cache_dir = "/.cache/torch/kernels";
+        cache_dir = std::string(ptkcp) + kernels_cache_dir;
       }
     }
   }
@@ -766,7 +986,8 @@ c10::optional<std::string> get_cache_dir() {
   const char* p_cache_dir = cache_dir.c_str();
   const bool cache_dir_exists = (access(p_cache_dir, F_OK) == 0);
   if (!cache_dir_exists) {
-    if (mkdir(p_cache_dir, S_IRWXU | S_IRWXG | S_IRWXO) != 0) {
+    std::string s_ptkcp = std::string(ptkcp);
+    if (!r_mkdir_with_base(s_ptkcp, kernels_cache_dir)) {
       TORCH_WARN_ONCE("Specified kernel cache directory could not be created! This disables kernel caching.",
                       " Specified directory is ", cache_dir, ".",
                       " This warning will appear only once per process.");
@@ -793,15 +1014,12 @@ c10::optional<std::string> get_cache_dir() {
 
   return cache_dir;
 }
-#endif // BUILD_JITERATOR_WITH_CACHE
 
 // Compiles the kernel, or acquires if from the cache if caching
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name) {
-
   initializeCudaContext();
-
   // Acquires CUDA and nvrtc versions and whether we're compiling to ptx or SASS
   const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int cuda_major = 0, cuda_minor = 0, nvrtc_major = 0, nvrtc_minor = 0;
@@ -814,48 +1032,46 @@ NvrtcFunction jit_pwise_function(
   NvrtcFunction compiled_kernel_;
   std::string name = kernel_name + "_kernel";
 
-  #if BUILD_JITERATOR_WITH_CACHE
-    static const c10::optional<std::string> cache_dir = get_cache_dir();
+  static const c10::optional<std::string> cache_dir = get_cache_dir();
 
-    std::string file_path;
-    if (cache_dir.has_value()) {
-      // Attemps to read from the cache.
-      // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
-      // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
-      //   because we hash on the CUDA code, but we save the compiled ptx or sass
+  std::string file_path;
+  if (cache_dir.has_value()) {
+    // Attemps to read from the cache.
+    // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
+    // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
+    //   because we hash on the CUDA code, but we save the compiled ptx or sass
 
-      // Acquires SHA1 hash
-      c10::sha1 sha1_hash{code};
-      const auto hash_code = sha1_hash.str();
+    // Acquires SHA1 hash
+    c10::sha1 sha1_hash{code};
+    const auto hash_code = sha1_hash.str();
 
-      // Constructs file path by appending constructed cubin name to cache path
-      std::stringstream ss;
-      ss << *cache_dir << "/";
-      ss << kernel_name;
-      ss << "_arch" << cuda_major << "." << cuda_minor;
-      ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
-      ss << (compile_to_sass ? "_sass" : "_ptx");
-      ss << "_" << code.length();
-      ss << "_" << hash_code;
-      file_path = ss.str();
+    // Constructs file path by appending constructed cubin name to cache path
+    std::stringstream ss;
+    ss << *cache_dir << "/";
+    ss << kernel_name;
+    ss << "_arch" << cuda_major << "." << cuda_minor;
+    ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
+    ss << (compile_to_sass ? "_sass" : "_ptx");
+    ss << "_" << code.length();
+    ss << "_" << hash_code;
+    file_path = ss.str();
 
-      std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
-      if (readin.fail()) {
-        // NOTE: this does not warn because the file might not exist
-        // TODO: consider if this should explicilty check for the file's existence or not to throw
-        //   an informative warning
-        readin.close();
-      } else {
-        // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
-        std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
-        AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
-        AT_CUDA_DRIVER_CHECK(
-          nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-        readin.close();
-        return compiled_kernel_;
-      }
+    std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
+    if (readin.fail()) {
+      // NOTE: this does not warn because the file might not exist
+      // TODO: consider if this should explicilty check for the file's existence or not to throw
+      //   an informative warning
+      readin.close();
+    } else {
+      // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
+      std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+      AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
+      AT_CUDA_DRIVER_CHECK(
+        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+      readin.close();
+      return compiled_kernel_;
     }
-  #endif // BUILD_JITERATOR_WITH_CACHE
+  }
 
   // Just-in-time compiles the program
 
@@ -898,7 +1114,7 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
     cu << log.data();
-    throw std::runtime_error(cu.str() + code);
+    throw std::runtime_error(code + cu.str());
   }
 
   size_t ptx_size = 0;
@@ -928,36 +1144,34 @@ NvrtcFunction jit_pwise_function(
   // TODO: use guards to avoid leaking
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
-  #if BUILD_JITERATOR_WITH_CACHE
-    if (cache_dir.has_value()) {
-      // Writes the program to the cache if caching
-      // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
-      //   The temporary file is then renamed to the actual file.
-      //   If the actual file already exists then the rename may fail or replace the actual file,
-      //     the behavior is implementation-specific.
-      //   Files replaced through this process should remain extant if they are being read because
-      //     of UNIX filesystem properties, but this behavior is unverified and may require
-      //     additional review in the future.
-      // TODO: In C++17 we should be able to use the filesystem header.
-      const auto pid = getpid();
-      std::stringstream tmp_file_path_ss;
-      tmp_file_path_ss << file_path << "_tmp_" << pid;
-      const std::string tmp_file_path = tmp_file_path_ss.str();
-      std::ofstream cubin(tmp_file_path, std::ios::out | std::ofstream::binary);
-      if (cubin.fail()) {
-        TORCH_WARN_ONCE("Failed to write temporarily kernel cache file!",
-                        " File path was ", tmp_file_path, ".",
-                        " This warning will only appear once per process.");
-      } else {
-        std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
-        if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
-          // Removes tmp file if the rename failed
-          std::remove(tmp_file_path.c_str());
-        }
+  if (cache_dir.has_value()) {
+    // Writes the program to the cache if caching
+    // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
+    //   The temporary file is then renamed to the actual file.
+    //   If the actual file already exists then the rename may fail or replace the actual file,
+    //     the behavior is implementation-specific.
+    //   Files replaced through this process should remain extant if they are being read because
+    //     of UNIX filesystem properties, but this behavior is unverified and may require
+    //     additional review in the future.
+    // TODO: In C++17 we should be able to use the filesystem header.
+    const auto pid = getpid();
+    std::stringstream tmp_file_path_ss;
+    tmp_file_path_ss << file_path << "_tmp_" << pid;
+    const std::string tmp_file_path = tmp_file_path_ss.str();
+    std::ofstream cubin(tmp_file_path, std::ios::out | std::ofstream::binary);
+    if (cubin.fail()) {
+      TORCH_WARN_ONCE("Failed to write temporarily kernel cache file!",
+                      " File path was ", tmp_file_path, ".",
+                      " This warning will only appear once per process.");
+    } else {
+      std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
+      if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
+        // Removes tmp file if the rename failed
+        std::remove(tmp_file_path.c_str());
       }
-      cubin.close();
     }
-  #endif // BUILD_JITERATOR_WITH_CACHE
+    cubin.close();
+  }
 
   return compiled_kernel_;
 }
@@ -965,25 +1179,27 @@ NvrtcFunction jit_pwise_function(
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 7>& args,
-    const int nBlocks,
-    const int kBlockSize) {
+    void* args[],
+    const dim3 nBlocks,
+    const dim3 kBlockSize,
+    const int smem) {
   initializeCudaContext();
   const auto& nvrtc = at::globalContext().getNVRTC();
   // Launches kernel on current stream
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_CUDA_DRIVER_CHECK(nvrtc.cuLaunchKernel(
     function.function,
-    nBlocks,
-    1,
-    1,
-    kBlockSize,
-    1,
-    1,
-    0,
+    nBlocks.x,
+    nBlocks.y,
+    nBlocks.z,
+    kBlockSize.x,
+    kBlockSize.y,
+    kBlockSize.z,
+    smem,
     stream,
-    args.data(),
+    args,
     nullptr));
 }
+
 
 }}} // at::cuda::jit

@@ -107,7 +107,10 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     scalar_t *p = output_data;
     int64_t *q = counts_data;
     int64_t last = 0;
-    for (const auto i : c10::irange(numel)) {
+    if (return_inverse) {
+      inverse_data[0] = 0;
+    }
+    for (const auto i : c10::irange(1, numel)) {
       if (input_data[i] != *p) {
         *(++p) = input_data[i];
         if (return_counts) {
@@ -149,7 +152,8 @@ ForwardIt _unique_dim_cpu_impl(ForwardIt first, ForwardIt last,
     ForwardIt result = first;
     ForwardIt previous = first;
     int64_t *current_counts = counts_data;
-    for (ForwardIt current = first; current != last; current++) {
+    inverse_data[*(indices_data++)] = 0;
+    for (ForwardIt current = std::next(first); current != last; current++) {
       if (!at::equal(*current, *result)) {
         *(++result) = std::move(*current);
         *(current_counts++) = std::distance(previous, current);
