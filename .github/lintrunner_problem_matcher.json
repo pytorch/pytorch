@@ -5,7 +5,7 @@
             "owner": "eslint-stylish",
             "pattern": [
                 {
-                    "regexp": "^{\"path\":\"(.*)\",\"line\":(\\d+),\"char\":(\\d+),\"code\":\"(.*)\",\"severity\":\"(.*)\",\"name\":\"(.*)\",\"description\":\"(.*)\"}$",
+                    "regexp": "{\"path\":\"(.*)\",\"line\":(\\d+),\"char\":(\\d+),\"code\":\"(.*)\",\"severity\":\"(.*)\",\"name\":\"(.*)\",\"description\":\"(.*)\"}",
                     "file": 1,
                     "line": 2,
                     "column": 3,
