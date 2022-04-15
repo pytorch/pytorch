@@ -5,23 +5,57 @@
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 
+#define AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(LAYOUT, NAME, ...)    \
+  [&] {                                                                 \
+    const auto& the_layout = LAYOUT;                                    \
+    switch (the_layout) {                                               \
+    case kSparseCsr:                                                    \
+    case kSparseCsc:                                                    \
+    case kSparseBsr:                                                    \
+    case kSparseBsc:                                                    \
+      return __VA_ARGS__();                                             \
+    default:                                                            \
+      AT_ERROR(#NAME, " expected sparse compressed tensor layout but got ", the_layout); \
+    }                                                                   \
+  } ()
+
+#define AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(LAYOUT, NAME, ROW_DIM_ACTION, COLUMN_DIM_ACTION) \
+  [&]() {                                                               \
+    const auto& the_layout = LAYOUT;                                    \
+    switch (the_layout) {                                               \
+    case kSparseCsr:                                                    \
+    case kSparseBsr:                                                    \
+      return (ROW_DIM_ACTION)();                                        \
+    case kSparseCsc:                                                    \
+    case kSparseBsc:                                                    \
+      return (COLUMN_DIM_ACTION)();                                     \
+    default:                                                            \
+      AT_ERROR(#NAME, " expected sparse compressed tensor layout but got ", the_layout); \
+    }                                                                   \
+  } ()
+
+#define AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(LAYOUT, NAME, NO_BLOCK_ACTION, BLOCK_ACTION) \
+  [&]() {                                                               \
+    const auto& the_layout = LAYOUT;                                    \
+    switch (the_layout) {                                               \
+    case kSparseCsr:                                                    \
+    case kSparseCsc:                                                    \
+      return (NO_BLOCK_ACTION)();                                       \
+    case kSparseBsr:                                                    \
+    case kSparseBsc:                                                    \
+      return (BLOCK_ACTION)();                                          \
+    default:                                                            \
+      AT_ERROR(#NAME, " expected sparse compressed tensor layout but got ", the_layout); \
+    }                                                                   \
+  } ()
+
 namespace at {
 namespace sparse_csr {
 
 using SparseCsrTensor = Tensor;
 
 inline SparseCsrTensorImpl* get_sparse_csr_impl(const SparseCsrTensor& self) {
-  switch (self.layout()) {
-  case kSparseCsr:
-  case kSparseCsc:
-  case kSparseBsr:
-  case kSparseBsc:
-    break;
-  default:
-    AT_ASSERTM(
-               false,
-               "_internal_get_SparseCsrTensorImpl: expected sparse compressed tensor layout but got ", self.layout());
-  }
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "get_sparse_csr_impl", [&] {});
   return static_cast<SparseCsrTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
@@ -38,39 +72,19 @@ inline std::string layoutToString(Layout layout, bool upper=false, bool lower=fa
 }
 
 inline bool isCompressedRow(Layout layout) {
-  return (layout == kSparseCsr || layout == kSparseBsr);
+  return AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "isCompressedRow", [&]{ return true; }, [&]{ return false; });
 }
 
 inline bool isCompressedColumn(Layout layout) {
-  return (layout == kSparseCsc || layout == kSparseBsc);
+  return AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "isCompressedColumn", [&]{ return false; }, [&]{ return true; });
 }
 
 inline std::string compressedIndicesName(Layout layout) {
-  switch (layout) {
-  case kSparseCsr:
-  case kSparseBsr:
-    return "crow_indices";
-  case kSparseCsc:
-  case kSparseBsc:
-    return "ccol_indices";
-  default:
-    TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
-    return "";
-  }
+  return AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "compressedIndicesName", [&]{ return "crow_indices"; }, [&]{ return "ccol_indices"; });
 }
 
 inline std::string plainIndicesName(Layout layout) {
-  switch (layout) {
-  case kSparseCsr:
-  case kSparseBsr:
-    return "col_indices";
-  case kSparseCsc:
-  case kSparseBsc:
-    return "row_indices";
-  default:
-    TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
-    return "";
-  }
+  return AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "plainIndicesName", [&]{ return "col_indices"; }, [&]{ return "row_indices"; });
 }
 
 inline int rowDimension(Layout layout, IntArrayRef size) {

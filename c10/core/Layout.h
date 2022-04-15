@@ -69,23 +69,4 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
   }
 }
 
-inline std::string layoutToString(
-    Layout layout,
-    bool upper = false,
-    bool lower = false) {
-  switch (layout) {
-    case kSparseCsr:
-      return (upper ? "CSR" : (lower ? "csr" : "Csr"));
-    case kSparseCsc:
-      return (upper ? "CSC" : (lower ? "csc" : "Csc"));
-    case kSparseBsr:
-      return (upper ? "BSR" : (lower ? "bsr" : "Bsr"));
-    case kSparseBsc:
-      return (upper ? "BSC" : (lower ? "bsc" : "Bsc"));
-    default:
-      TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
-      return "";
-  }
-}
-
 } // namespace c10
