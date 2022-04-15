@@ -2442,6 +2442,25 @@ class IrParser {
     }
 
     {
+      // We are not fusing `linear` yet, because we can't codegen efficient gemm
+      // However, we still need this here, so PE would insert profile node for
+      // this node.
+      // During fusion pass, We decompose linear into gemm + elementwise.
+      auto ptr_op = getOperatorForLiteral(
+          "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            // this entry is created so we do profile input tensors;
+            TORCH_INTERNAL_ASSERT(false, "not implemented yet");
+          },
+          [](const Node* node) -> bool {
+            // We only profile `linear` layer but not fusing it.
+            return false;
+          });
+    }
+
+    {
       auto ptr_op = getOperatorForLiteral(
           "prim::add_optional(Tensor(a) input, Tensor? bias) -> Tensor(a)");
       REGISTER_PARSE_RULE(
