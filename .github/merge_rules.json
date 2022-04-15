@@ -91,7 +91,6 @@
          "aten/src/ATen/native/ao_sparse/**",
          "aten/src/ATen/native/sparse/**",
          "aten/src/ATen/**/*Sparse*",
-         "aten/src/ATen/*Sparse*",
          "torch/_masked/**",
          "test/*_masked*",
          "test/**/*sparse*"
