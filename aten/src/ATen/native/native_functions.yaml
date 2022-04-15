@@ -1081,12 +1081,19 @@
     SparseCPU, SparseCUDA: sparse_broadcast_to
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
+  structured_delegate: cat.out
   dispatch:
-    CompositeExplicitAutograd: cat
+    SparseCPU, SparseCUDA: cat_sparse
+    QuantizedCPU: cat_quantized_cpu
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  precomputed:
+  - dim -> int dim, int valid, bool all_contiguous, bool all_same_dtype, bool all_same_sizes_and_stride, MemoryFormat memory_format
   dispatch:
-    CompositeExplicitAutograd: cat_out
+    CPU: cat_out_cpu
+    CUDA: cat_out_cuda
+    QuantizedCPU: cat_out_quantized_cpu
 
 - func: cat.names(Tensor[] tensors, Dimname dim) -> Tensor
 
@@ -1803,6 +1810,7 @@
 - func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   dispatch:
     CompositeExplicitAutograd: embedding
+    NestedTensor: NestedTensor_embedding
 
 - func: embedding_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
 
@@ -4625,6 +4633,18 @@
 - func: trapz.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
 
 - func: trapz.dx(Tensor y, *, float dx=1, int dim=-1) -> Tensor
+
+- func: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
+  device_check: NoCheck # cpu_nested_shape_example will always be on CPU
+  dispatch:
+    CPU: nested_from_padded_generic
+    CUDA: nested_from_padded_cuda
+
+# _nested_from_padded is not usable from Python, so
+# _nested_from_padded_and_nested_example is available for testing.
+- func: _nested_from_padded_and_nested_example(Tensor padded, Tensor nt_example) -> Tensor
+  dispatch:
+    NestedTensor: NestedTensor_from_padded_and_nested_example
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
@@ -7950,18 +7970,6 @@
   variants: function
   dispatch:
     CUDA: _amp_update_scale_cuda_
-
-- func: _cat(Tensor[] tensors, int dim=0) -> Tensor
-  dispatch:
-    CPU: _cat_cpu
-    CUDA: cat_cuda
-    QuantizedCPU: cat_quantized_cpu
-
-- func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: _cat_out_cpu
-    CUDA: cat_out_cuda
-    QuantizedCPU: cat_out_quantized_cpu
 
 - func: _foreach_add.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -11548,3 +11556,13 @@
   dispatch:
     CompositeExplicitAutograd: alias_copy
   tags: view_copy
+
+- func: to_padded_tensor(Tensor self, float padding) -> Tensor
+  variants: method
+  dispatch:
+    NestedTensor: NestedTensor_to_padded_tensor
+
+- func: _nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
+  variants: method
+  dispatch:
+    NestedTensor: NestedTensor_layer_norm
