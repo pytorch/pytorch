@@ -16,7 +16,7 @@ from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithS
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
 from torch.testing._internal.common_jit import JitCommonTestCase
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, generate_elementwise_binary_extremal_value_tensors, BinaryUfuncInfo
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, IS_WINDOWS, slowTest
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
@@ -4526,6 +4526,12 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
             self.cuda_fuser_options.restore()
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
 
+        # https://github.com/pytorch/pytorch/issues/35600
+        # each torch.jit.trace adds state to the _python_cu compilation unit
+        # since this test traces a lot of functions, out-of-memory can occur
+        # if the CU is not cleared.
+        torch.jit._state._python_cu.drop_all_functions()
+
     @slowTest
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @ops(op_db, dtypes=OpDTypes.supported)
@@ -4542,11 +4548,26 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
 
             self.assertEqual(ref, val)
 
-        # https://github.com/pytorch/pytorch/issues/35600
-        # each torch.jit.trace adds state to the _python_cu compilation unit
-        # since this test traces a lot of functions, out-of-memory can occur
-        # if the CU is not cleared.
-        torch.jit._state._python_cu.drop_all_functions()
+    @slowTest
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    @ops([op for op in op_db if isinstance(op, BinaryUfuncInfo)], allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32,
+                                                                                  torch.float64, torch.complex64, torch.complex128))
+    def test_binary_ops_extremal_values(self, device, dtype, op):
+        gen = generate_elementwise_binary_extremal_value_tensors(op, device=device, dtype=dtype)
+
+        for sample in gen:
+            l = sample.input
+            r = sample.args[0]
+
+            ref = op(l, r)
+
+            trace = create_traced_fn(self, op)
+            trace(*clone_inputs((l, r)))
+            val = trace(*clone_inputs((l, r)))
+
+            self.assertEqual(val, ref, equal_nan=True, exact_device=True)
 
 instantiate_device_type_tests(TestCudaFuserOpInfo, globals(), only_for=("cuda"))
 
