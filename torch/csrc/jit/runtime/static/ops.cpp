@@ -712,7 +712,7 @@ void varstackNonserialOut(
   std::vector<at::Tensor> inputs_unsqueezed =
       unsqueezeVarStackInputs(inputs, dim);
   fastResizeToZero(result);
-  at::native::_cat_out_cpu(inputs_unsqueezed, dim, result);
+  at::cpu::cat_outf(inputs_unsqueezed, dim, result);
 }
 
 void varStackFastOut(
@@ -2177,7 +2177,11 @@ void apply_dynamic_out_functor<true>(
     const at::Tensor& input,
     at::Tensor& out,
     bool reduce_range) {
-  packed_weight->apply_dynamic_relu_out(input, out, reduce_range);
+  // The implementation of PackedLinearWeightFp16::apply_dynamic_impl does not
+  // handle relu. Currently, it ignores the `ReluFused` template parameter.
+  // So, we explicitly do the relu here.
+  packed_weight->apply_dynamic_out(input, out, reduce_range);
+  out.relu_();
 }
 
 template <bool has_relu>
@@ -2300,9 +2304,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
   return [](ProcessedNode* p_node) {
     const auto in1_s = p_node->Input(1).toScalar();
     const auto& in0_t = p_node->Input(0).toTensor();
-    if (p_node->Output(0).isNone()) {
-      const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
-      const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+    const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+    const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+    if (!hasTensorWithOptions(p_node->Output(0), dtype, layout)) {
       const auto device = p_node->Input(4).toOptional<c10::Device>();
       const auto pin_memory = p_node->Input(5).toOptional<bool>();
       const auto memory_format =
@@ -2468,12 +2472,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
     TORCH_CHECK(inputs.size() > 0, "concat expects non-empty tensor list");
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
+      p_node->Output(0) = at::cpu::cat(inputs, dim);
       return;
     }
     auto& output = p_node->Output(0).toTensor();
     fastResizeToZero(output);
-    at::native::_cat_out_cpu(inputs, dim, output);
+    at::cpu::cat_outf(inputs, dim, output);
   };
 });
 
@@ -2530,12 +2534,12 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto dim = p_node->Input(num_inputs - 1).toInt();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
+          p_node->Output(0) = at::cpu::cat(inputs, dim);
           return;
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        at::native::_cat_out_cpu(inputs, dim, out_t);
+        at::cpu::cat_outf(inputs, dim, out_t);
       };
     });
 
