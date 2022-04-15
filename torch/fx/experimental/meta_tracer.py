@@ -26,10 +26,10 @@ class MetaProxy(torch.fx.Proxy):
     def install_tensor_meta(self, tensor_meta):
         self._tensor_meta = tensor_meta
 
-    def size(self):
+    def size(self, dim=None):
         if hasattr(self, '_tensor_meta') and self._tensor_meta is not None:
-            return self._tensor_meta.size()
-        return self.tracer.create_proxy('call_method', 'size', (self,), {})
+            return self._tensor_meta.size(*[dim] if dim else [])
+        return self.tracer.create_proxy('call_method', 'size', (self, dim) if dim else (self,), {})
 
     def dim(self):
         if hasattr(self, '_tensor_meta') and self._tensor_meta is not None:
@@ -70,6 +70,8 @@ def proxys_to_metas(v):
     return v
 
 class MetaTracer(torch.fx.Tracer):
+    allow_insert_stateless_mods : bool = True
+
     _TORCH_METHODS_TO_PATCH = ['arange', 'zeros', 'ones', 'full_like', 'eye']
 
     def create_proxy(self, kind, target, args, kwargs, name=None, type_expr=None, proxy_factory_fn=None):
@@ -77,6 +79,7 @@ class MetaTracer(torch.fx.Tracer):
 
         if kind == 'placeholder' and target in self.meta_args:
             rv.install_tensor_meta(self.meta_args[target])
+            return rv
 
         if target in self.orig_fns:
             # NOTE: tensor constructors in PyTorch define the `device` argument as
@@ -88,22 +91,55 @@ class MetaTracer(torch.fx.Tracer):
                 kwargs['device'] = 'meta'
 
         try:
-            if kind == 'call_function' and target != torch.fx._symbolic_trace._assert_is_none:
-                args_metas = torch.fx.node.map_aggregate(args, proxys_to_metas)
-                kwargs_metas = torch.fx.node.map_aggregate(kwargs, proxys_to_metas)
+            args_metas = torch.fx.node.map_aggregate(args, proxys_to_metas)
+            kwargs_metas = torch.fx.node.map_aggregate(kwargs, proxys_to_metas)
 
+            if kind == 'call_function':
                 meta_out = target(*args_metas, **kwargs_metas)
-                # TODO
-                assert isinstance(rv, torch.fx.Proxy), 'Dont support composite output yet'
-
-                rv.install_tensor_meta(meta_out)
+            elif kind == 'call_method':
+                meta_out = getattr(args_metas[0], target)(*args_metas[1:], **kwargs_metas)
+            elif kind == 'call_module':
+                assert hasattr(self, 'orig_forward')
+                meta_out = self.orig_forward(*args_metas, **kwargs_metas)
             else:
-                # TODO: call_method, call_module
                 assert kind in ['placeholder'], f'Unsupported node kind {kind}'
+                return rv
+
+            # TODO
+            assert isinstance(rv, torch.fx.Proxy), 'Dont support composite output yet'
+            rv.install_tensor_meta(meta_out)
         except AssertionError as e:
             warnings.warn(f'Could not compute metadata for target {target}: {e}')
 
         return rv
+
+    def call_module(self, m, forward, args, kwargs):
+        self.orig_forward = forward
+        return super().call_module(m, forward, args, kwargs)
+
+    def _insert_module_as_submodule(self, mod: torch.nn.Module) -> str:
+        """
+        Helper method which tries to insert a module that was not declared as submodule.
+        """
+        idx = 0
+        mod_name = mod.__class__.__name__.lower()
+        path = f"{mod_name}_{idx}"
+        while hasattr(self.root, path):
+            path = f"{mod_name}_{idx}"
+            idx += 1
+
+        self.root.add_module(path, mod)
+        return path
+
+    def path_of_module(self, mod: torch.nn.Module) -> str:
+        try:
+            return super().path_of_module(mod)
+        except NameError as e:
+            if self.allow_insert_stateless_mods and len(list(mod.parameters())) == 0 and len(list(mod.buffers())) == 0:
+                path = self._insert_module_as_submodule(mod)
+                self.prev_module = path
+                return path
+            raise
 
     def proxy(self, node):
         return MetaProxy(node, self)
