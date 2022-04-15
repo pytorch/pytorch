@@ -3,6 +3,9 @@
 Quantization
 ============
 
+.. automodule:: torch.quantization
+.. automodule:: torch.quantization.fx
+
 .. warning ::
      Quantization is in beta and subject to change.
 
@@ -100,7 +103,7 @@ The following table compares the differences between Eager Mode Quantization and
 There are three types of quantization supported:
 
 1. dynamic quantization (weights quantized with activations read/stored in
-   floating point and quantized for compute.)
+   floating point and quantized for compute)
 2. static quantization (weights quantized, activations quantized, calibration
    required post training)
 3. static quantization aware training (weights quantized, activations quantized,
@@ -152,7 +155,7 @@ This is the simplest to apply form of quantization where the weights are
 quantized ahead of time but the activations are dynamically quantized
 during inference. This is used for situations where the model execution time
 is dominated by loading weights from memory rather than computing the matrix
-multiplications. This is true for for LSTM and Transformer type models with
+multiplications. This is true for LSTM and Transformer type models with
 small batch size.
 
 Diagram::
@@ -485,6 +488,17 @@ and supported quantized modules and functions.
     quantization-support
     torch.ao.ns._numeric_suite
     torch.ao.ns._numeric_suite_fx
+
+Quantization Backend Configuration
+----------------------------------
+
+The :doc:`Quantization Backend Configuration <quantization-backend-configuration>` contains documentation
+on how to configure the quantization workflows for various backends.
+
+.. toctree::
+    :hidden:
+
+    quantization-backend-configuration
 
 Quantized Tensors
 ---------------------------------------
@@ -883,3 +897,22 @@ Numerical Debugging (prototype)
   Eager mode numeric suite
 * :ref:`torch_ao_ns_numeric_suite_fx`
   FX numeric suite
+
+
+.. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
+.. They are here for tracking purposes until they are more permanently fixed.
+.. py:module:: torch.ao
+.. py:module:: torch.ao.nn
+.. py:module:: torch.ao.nn.sparse
+.. py:module:: torch.ao.nn.sparse.quantized
+.. py:module:: torch.ao.nn.sparse.quantized.dynamic
+.. py:module:: torch.ao.ns
+.. py:module:: torch.ao.ns.fx
+.. py:module:: torch.ao.quantization
+.. py:module:: torch.ao.quantization.fx
+.. py:module:: torch.ao.quantization.fx.backend_config
+.. py:module:: torch.ao.sparsity
+.. py:module:: torch.ao.sparsity.experimental
+.. py:module:: torch.ao.sparsity.experimental.pruner
+.. py:module:: torch.ao.sparsity.scheduler
+.. py:module:: torch.ao.sparsity.sparsifier

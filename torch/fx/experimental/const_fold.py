@@ -1,7 +1,7 @@
+import re
 from typing import Callable, Dict, Set, Optional, Union
 
 import torch.fx
-import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 from torch.fx.node import map_arg
 from torch.fx.passes.split_module import split_module
 
@@ -59,9 +59,11 @@ class FoldedGraphModule(torch.fx.GraphModule):
         # Tuple[Tensor,].
         folded_attrs = self.const_subgraph_module()
         params = (
-            torch.nn.ParameterList([torch.nn.Parameter(i) for i in folded_attrs])
+            torch.nn.ParameterList([torch.nn.Parameter(
+                i if not isinstance(i, int) else torch.Tensor([i]).cuda()) for i in folded_attrs])
             if isinstance(folded_attrs, tuple)
-            else torch.nn.Parameter(folded_attrs)
+            else torch.nn.Parameter(
+                folded_attrs if not isinstance(folded_attrs, int) else torch.Tensor([folded_attrs]).cuda())
         )
         setattr(self, self.fx_const_folded_attrs_name, params)
 
@@ -109,6 +111,26 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
         replacement_mapping[inline_node] = new_node
 
     gm.graph.eliminate_dead_code()
+
+
+def get_unique_attr_name_in_module(mod_traced: torch.fx.GraphModule, name: str) -> str:
+    """
+    Make sure the name is unique (in a module) and can represents an attr.
+    """
+    # Delete all characters that are illegal in a Python identifier.
+    name = re.sub("[^0-9a-zA-Z_]+", "_", name)
+    if name[0].isdigit():
+        name = f"_{name}"
+    # Now make sure it is in fact unique to the module by incrementing suffix value.
+    while hasattr(mod_traced, name):
+        match = re.match(r"(.*)_(\d+)$", name)
+        if match is None:
+            name = name + "_1"
+        else:
+            base, num = match.group(1, 2)
+            name = f"{base}_{int(num) + 1}"
+
+    return name
 
 
 def split_const_subgraphs(
@@ -222,7 +244,7 @@ def split_const_subgraphs(
     # folded tensor(s) that result from constant folding. Note that we don't need to
     # worry about whether this is one or more tensors because the original graph
     # correctly uses getitem to extract individual tensors if there are multiple folded.
-    fx_const_folded_attrs_name = acc_utils.get_unique_attr_name_in_module(
+    fx_const_folded_attrs_name = get_unique_attr_name_in_module(
         split, "_FX_CONST_FOLDED_ATTRS"
     )
     setattr(

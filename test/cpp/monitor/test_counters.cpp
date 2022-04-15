@@ -8,9 +8,10 @@
 using namespace torch::monitor;
 
 TEST(MonitorTest, CounterDouble) {
-  FixedCountStat<double> a{
+  Stat<double> a{
       "a",
       {Aggregation::MEAN, Aggregation::COUNT},
+      std::chrono::milliseconds(100000),
       2,
   };
   a.add(5.0);
@@ -27,9 +28,10 @@ TEST(MonitorTest, CounterDouble) {
 }
 
 TEST(MonitorTest, CounterInt64Sum) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
       {Aggregation::SUM},
+      std::chrono::milliseconds(100000),
       2,
   };
   a.add(5);
@@ -42,9 +44,10 @@ TEST(MonitorTest, CounterInt64Sum) {
 }
 
 TEST(MonitorTest, CounterInt64Value) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
       {Aggregation::VALUE},
+      std::chrono::milliseconds(100000),
       2,
   };
   a.add(5);
@@ -57,9 +60,10 @@ TEST(MonitorTest, CounterInt64Value) {
 }
 
 TEST(MonitorTest, CounterInt64Mean) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
       {Aggregation::MEAN},
+      std::chrono::milliseconds(100000),
       2,
   };
   {
@@ -84,9 +88,10 @@ TEST(MonitorTest, CounterInt64Mean) {
 }
 
 TEST(MonitorTest, CounterInt64Count) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
       {Aggregation::COUNT},
+      std::chrono::milliseconds(100000),
       2,
   };
   ASSERT_EQ(a.count(), 0);
@@ -103,9 +108,10 @@ TEST(MonitorTest, CounterInt64Count) {
 }
 
 TEST(MonitorTest, CounterInt64MinMax) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
       {Aggregation::MIN, Aggregation::MAX},
+      std::chrono::milliseconds(100000),
       6,
   };
   {
@@ -134,9 +140,10 @@ TEST(MonitorTest, CounterInt64MinMax) {
 }
 
 TEST(MonitorTest, CounterInt64WindowSize) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
       {Aggregation::COUNT, Aggregation::SUM},
+      std::chrono::milliseconds(100000),
       /*windowSize=*/3,
   };
   a.add(1);
@@ -145,8 +152,34 @@ TEST(MonitorTest, CounterInt64WindowSize) {
   a.add(3);
   ASSERT_EQ(a.count(), 0);
 
+  // after logging max for window, should be zero
   a.add(4);
-  ASSERT_EQ(a.count(), 1);
+  ASSERT_EQ(a.count(), 0);
+
+  auto stats = a.get();
+  std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
+      {Aggregation::COUNT, 3},
+      {Aggregation::SUM, 6},
+  };
+  ASSERT_EQ(stats, want);
+}
+
+TEST(MonitorTest, CounterInt64WindowSizeHuge) {
+  Stat<int64_t> a{
+      "a",
+      {Aggregation::COUNT, Aggregation::SUM},
+      std::chrono::hours(24 * 365 * 10), // 10 years
+      /*windowSize=*/3,
+  };
+  a.add(1);
+  a.add(2);
+  ASSERT_EQ(a.count(), 2);
+  a.add(3);
+  ASSERT_EQ(a.count(), 0);
+
+  // after logging max for window, should be zero
+  a.add(4);
+  ASSERT_EQ(a.count(), 0);
 
   auto stats = a.get();
   std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
@@ -157,14 +190,15 @@ TEST(MonitorTest, CounterInt64WindowSize) {
 }
 
 template <typename T>
-struct TestIntervalStat : public IntervalStat<T> {
-  uint64_t mockWindowId{0};
+struct TestStat : public Stat<T> {
+  uint64_t mockWindowId{1};
 
-  TestIntervalStat(
+  TestStat(
       std::string name,
       std::initializer_list<Aggregation> aggregations,
-      std::chrono::milliseconds windowSize)
-      : IntervalStat<T>(name, aggregations, windowSize) {}
+      std::chrono::milliseconds windowSize,
+      int64_t maxSamples = std::numeric_limits<int64_t>::max())
+      : Stat<T>(name, aggregations, windowSize, maxSamples) {}
 
   uint64_t currentWindowId() const override {
     return mockWindowId;
@@ -192,10 +226,10 @@ struct HandlerGuard {
   }
 };
 
-TEST(MonitorTest, IntervalStat) {
+TEST(MonitorTest, Stat) {
   HandlerGuard<AggregatingEventHandler> guard;
 
-  IntervalStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
       {Aggregation::COUNT, Aggregation::SUM},
       std::chrono::milliseconds(1),
@@ -213,10 +247,10 @@ TEST(MonitorTest, IntervalStat) {
   ASSERT_LE(guard.handler->events.size(), 2);
 }
 
-TEST(MonitorTest, IntervalStatEvent) {
+TEST(MonitorTest, StatEvent) {
   HandlerGuard<AggregatingEventHandler> guard;
 
-  TestIntervalStat<int64_t> a{
+  TestStat<int64_t> a{
       "a",
       {Aggregation::COUNT, Aggregation::SUM},
       std::chrono::milliseconds(1),
@@ -245,71 +279,15 @@ TEST(MonitorTest, IntervalStatEvent) {
   ASSERT_EQ(e.data, data);
 }
 
-TEST(MonitorTest, IntervalStatEventDestruction) {
+TEST(MonitorTest, StatEventDestruction) {
   HandlerGuard<AggregatingEventHandler> guard;
 
   {
-    TestIntervalStat<int64_t> a{
+    TestStat<int64_t> a{
         "a",
         {Aggregation::COUNT, Aggregation::SUM},
         std::chrono::hours(10),
     };
-    a.add(1);
-    ASSERT_EQ(a.count(), 1);
-    ASSERT_EQ(guard.handler->events.size(), 0);
-  }
-  ASSERT_EQ(guard.handler->events.size(), 1);
-
-  Event e = guard.handler->events.at(0);
-  ASSERT_EQ(e.name, "torch.monitor.Stat");
-  ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, data_value_t> data{
-      {"a.sum", 1L},
-      {"a.count", 1L},
-  };
-  ASSERT_EQ(e.data, data);
-}
-
-TEST(MonitorTest, FixedCountStatEvent) {
-  HandlerGuard<AggregatingEventHandler> guard;
-
-  FixedCountStat<int64_t> a{
-      "a",
-      {Aggregation::COUNT, Aggregation::SUM},
-      3,
-  };
-  ASSERT_EQ(guard.handler->events.size(), 0);
-
-  a.add(1);
-  ASSERT_EQ(a.count(), 1);
-  a.add(2);
-  ASSERT_EQ(a.count(), 2);
-  ASSERT_EQ(guard.handler->events.size(), 0);
-
-  a.add(1);
-  ASSERT_EQ(a.count(), 0);
-  ASSERT_EQ(guard.handler->events.size(), 1);
-
-  Event e = guard.handler->events.at(0);
-  ASSERT_EQ(e.name, "torch.monitor.Stat");
-  ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, data_value_t> data{
-      {"a.sum", 4L},
-      {"a.count", 3L},
-  };
-  ASSERT_EQ(e.data, data);
-}
-
-TEST(MonitorTest, FixedCountStatEventDestruction) {
-  HandlerGuard<AggregatingEventHandler> guard;
-
-  {
-    FixedCountStat<int64_t> a{
-        "a",
-        {Aggregation::COUNT, Aggregation::SUM},
-        3,
-    };
-    ASSERT_EQ(guard.handler->events.size(), 0);
     a.add(1);
     ASSERT_EQ(a.count(), 1);
     ASSERT_EQ(guard.handler->events.size(), 0);

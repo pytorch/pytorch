@@ -40,7 +40,7 @@ from .gen_inplace_or_view_type import (
 from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
                                      tensorT, tensorListT, MutRefCType, OptionalCType,
                                      ListCType, SpecialArgName, scalarT, stringT,
-                                     VectorCType)
+                                     TupleCType, VectorCType)
 from tools.codegen.api.autograd import (
     DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
@@ -52,7 +52,7 @@ from tools.codegen.utils import mapMaybe, FileManager
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
-from typing import Callable, List, Optional, Sequence, Union, Dict
+from typing import Callable, List, Optional, Sequence, Tuple, Union, Dict
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -85,19 +85,19 @@ DONT_REQUIRE_DERIVATIVE = {
 # but will not error out.
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
-    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
+    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone', 'diag_embed',
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril',
     'triu', 'chunk', 'zero_', 'eq_', 'ne_', 'add', '__radd__', 'sum',
     '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh', 'cosh', '__rmul__',
-    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
-    'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
+    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex', 'index_put',
+    'neg', 'complex', 'select', 'where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'outer',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
+    'matrix_exp', 'linalg_matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_linalg_svd', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'reflection_pad3d', 'linalg_cholesky_ex', 'linalg_eig',
@@ -111,10 +111,11 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve',
     'linalg_solve_triangular', 'linalg_pinv', 'linalg_lstsq', 'col2im', 'col2im_backward', 'im2col', 'im2col_backward',
+    'cholesky_inverse',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
-    'to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
+    '_to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
     'sparse_mask_helper_cuda', '_sparse_addmm',
 }
 
@@ -337,6 +338,12 @@ if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value()
 }
 """)
 
+FW_DERIVATIVE_SETTER_MULTI_OUTPUT = CodeTemplate("""\
+if (${all_res}_new_fw_grad_opt.has_value() && std::get<${idx}>(${all_res}_new_fw_grad_opt.value()).defined()) {
+  ${out_arg}._set_fw_grad(std::get<${idx}>(${all_res}_new_fw_grad_opt.value()), /* level */ 0, /* is_inplace_op */ false);
+}
+""")
+
 FW_DERIVATIVE_SETTER_TENSOR_LIST = CodeTemplate("""\
 if (${out_arg}_new_fw_grad_opt.has_value()) {
   auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value();
@@ -359,12 +366,12 @@ if (${requires_fw_grad}) {
 """)
 
 FW_DERIVATIVE_FORBID_TEMPLATE = CodeTemplate("""\
-TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${name} that does not support it ${msg}");
 """)
 
 FW_DERIVATIVE_FORBID_LIST_TEMPLATE = CodeTemplate("""\
 for (const auto& _t: ${arg}) {
-    TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${msg} that does not support it.");
+    TORCH_CHECK_NOT_IMPLEMENTED(!(${cond}), "Trying to use forward AD with ${name} that does not support it ${msg}");
 }
 """)
 
@@ -654,7 +661,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             all_forward_grad_cond = []
             for derivative in fw_derivatives:
                 if derivative.required_original_self_value:
-                    all_forward_grad_cond.append(get_any_has_forward_grad_name(derivative.var_name))
+                    all_forward_grad_cond.append(get_any_has_forward_grad_name(derivative.var_names))
 
             if all_forward_grad_cond:
                 body.append(f'if ({" || ".join(all_forward_grad_cond)}) {{')
@@ -862,8 +869,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             args_with_derivatives=[arg.name for arg in args_with_derivatives],
             extra_differentiability_conditions=extra_condition)]
 
-    def get_any_has_forward_grad_name(var_name: str) -> str:
-        return f'_any_has_forward_grad_{var_name}'
+    def get_any_has_forward_grad_name(var_names: Tuple[str, ...]) -> str:
+        if len(var_names) == 1:
+            return f'_any_has_forward_grad_{var_names[0]}'
+        else:
+            return f'_any_has_forward_grad_{"_".join(var_names)}'
 
     def emit_any_has_forward_grad() -> List[str]:
         content: List[str] = []
@@ -886,8 +896,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 requires_fw_grad = \
                     f'({fn.info.output_differentiability_conditions[0]}) && ({requires_fw_grad})'
 
-            content.append(f"auto {get_any_has_forward_grad_name(derivative.var_name)} = {requires_fw_grad};\n"
-                           f"(void){get_any_has_forward_grad_name(derivative.var_name)};")
+            content.append(f"auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};\n"
+                           f"(void){get_any_has_forward_grad_name(derivative.var_names)};")
 
         return content
 
@@ -900,10 +910,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         content: List[str] = []
         fw_grad_setters: List[str] = []
         for derivative in fw_derivatives:
-            res = derivative.var_name
+            res = derivative.var_names
             if f.func.name.name.inplace:
+                assert len(res) == 1, "Expected number of outputs to be 1 if function is inplace"
                 # TODO update this when inplace namings are unified
-                res = "self"
+                res = ("self",)
 
             assert derivative.required_inputs_fw_grad is not None
 
@@ -926,24 +937,33 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             else:
                 is_inplace_str = "false"
 
-            if isinstance(derivative.var_type, BaseType) and derivative.var_type.is_tensor_like():
+            if all((isinstance(var_type, BaseType) and var_type.is_tensor_like()) for var_type in derivative.var_types):
                 # Is there a way to get from BaseType to BaseCType
-                opt_res_grad_type = OptionalCType(BaseCType(tensorT)).cpp_type()
-                fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR.substitute(out_arg=res, is_inplace=is_inplace_str)
-            elif isinstance(derivative.var_type, ListType) and derivative.var_type.is_tensor_like():
+                if len(derivative.var_types) == 1:
+                    opt_res_grad_type = OptionalCType(BaseCType(tensorT)).cpp_type()
+                    fw_grad_setters.append(FW_DERIVATIVE_SETTER_TENSOR.substitute(out_arg=res[0], is_inplace=is_inplace_str))
+                else:
+                    tuple_type = TupleCType([BaseCType(tensorT)] * len(derivative.var_types))
+                    opt_res_grad_type = OptionalCType(tuple_type).cpp_type()
+                    for idx, single_res in enumerate(res):
+                        fw_grad_setters.append(FW_DERIVATIVE_SETTER_MULTI_OUTPUT.substitute(idx=idx, all_res='_'.join(res),
+                                                                                            out_arg=single_res))
+            elif isinstance(derivative.var_types[0], ListType) and derivative.var_types[0].is_tensor_like():
+                assert len(derivative.var_types) == 1, "Expected number of outputs to be 1 if function returns ListType"
                 opt_res_grad_type = OptionalCType(VectorCType(BaseCType(tensorT))).cpp_type()
-                fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR_LIST.substitute(out_arg=res, is_inplace=is_inplace_str)
+                fw_grad_setters.append(FW_DERIVATIVE_SETTER_TENSOR_LIST.substitute(out_arg=res[0], is_inplace=is_inplace_str))
             else:
                 raise RuntimeError("Unsupported output type for forward derivative")
 
-            fw_grad_opt_definition = f"{opt_res_grad_type} {res}_new_fw_grad_opt = c10::nullopt;"
+            fw_grad_opt_definition = f"{opt_res_grad_type} {'_'.join(res)}_new_fw_grad_opt = c10::nullopt;"
 
             # View ops create fw_grad that already is a view of the base's fw_grad so just use that
             content.append(FW_DERIVATIVE_TEMPLATE.substitute(
                 fw_grad_opt_definition=fw_grad_opt_definition,
-                requires_fw_grad=get_any_has_forward_grad_name(derivative.var_name), formula=derivative.formula, out_arg=res,
+                requires_fw_grad=get_any_has_forward_grad_name(derivative.var_names),
+                formula=derivative.formula,
+                out_arg='_'.join(res),
                 unpacked_arguments=unpacked_arguments))
-            fw_grad_setters.append(fw_grad_setter)
 
         # Set all the grads at the end to avoid: https://github.com/pytorch/pytorch/issues/67367
         content.append('\n'.join(fw_grad_setters))
@@ -952,9 +972,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     def emit_forbid_fw_derivatives(is_out_fn: bool = False) -> str:
         def get_msg() -> str:
             if is_out_fn:
-                msg = name + " (because it is an out= function)"
+                msg = "because it is an out= function"
             else:
-                msg = name
+                msg = ("because it has not been implemented yet.\\nPlease file an issue "
+                       "to PyTorch at https://github.com/pytorch/pytorch/issues/new?template=feature-request.yml "
+                       "so that we can prioritize its implementation.")
             return msg
         res = ""
         to_check: List[str] = []
@@ -964,13 +986,13 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 to_check.append(FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name))
             elif is_tensor_list_type(inp.type):
                 cond = FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp="_t")
-                res += FW_DERIVATIVE_FORBID_LIST_TEMPLATE.substitute(arg=inp.name, cond=cond, msg=get_msg())
+                res += FW_DERIVATIVE_FORBID_LIST_TEMPLATE.substitute(arg=inp.name, cond=cond, name=name, msg=get_msg())
             else:
                 raise RuntimeError(f'Unsupported input type for "{name}" when forbidding forward AD usage.')
 
         if len(to_check) > 0:
             cond = " || ".join(to_check)
-            res += FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, msg=get_msg())
+            res += FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, name=name, msg=get_msg())
         return res
 
     body: List[str] = []
@@ -1000,7 +1022,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             if len(fw_derivatives) == 0:
                 body.append(emit_forbid_fw_derivatives())
             else:
-                assert len(fw_derivatives) == len(differentiable_outputs), (
+                assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(differentiable_outputs), (
                     "Expected the number of forward derivatives implemented to match the "
                     "number of differentiable outputs. NB: This only applies when at least "
                     "one forward derivative is implemented. Not implementing any forward "

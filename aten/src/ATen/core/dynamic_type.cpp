@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include <ATen/core/class_type.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
@@ -198,6 +199,11 @@ TypePtr DynamicType::containedType(size_t i) const {
   return arguments_.elems.at(i).ty;
 }
 
+size_t DynamicType::containedTypeSize() const {
+  TORCH_INTERNAL_ASSERT(tag_ != Tag::Class);
+  return arguments_.elems.size();
+}
+
 TypeKind DynamicType::dynamicKind() const {
   switch (tag_) {
 #define CASE_TYPE(T, _, __) \
@@ -221,6 +227,8 @@ TypePtr DynamicType::fallback() const {
       return BoolType::get();
     case Tag::Int:
       return IntType::get();
+    case Tag::SymInt:
+      return SymIntType::get();
     case Tag::Float:
       return FloatType::get();
     case Tag::Complex:
@@ -271,6 +279,16 @@ TypePtr DynamicType::fallback() const {
       return VarType::create(*name_);
     case Tag::AnyClass:
       return AnyClassType::get();
+    case Tag::QScheme:
+      return QSchemeType::get();
+    case Tag::Quantizer:
+      return QuantizerType::get();
+    case Tag::AnyEnum:
+      return AnyEnumType::get();
+    case Tag::RRef:
+      return RRefType::create(arguments_.elems[0].ty->fallback());
+    case Tag::Future:
+      return FutureType::create(arguments_.elems[0].ty->fallback());
     case Tag::Any:
       return AnyType::get();
   }
@@ -304,6 +322,8 @@ DynamicType::Ptr IValue::TagType<c10::DynamicType>::get(const c10::IValue& v) {
       return DynamicTypeTrait<ComplexType>::getBaseType();
     case Tag::Int:
       return DynamicTypeTrait<IntType>::getBaseType();
+    case Tag::SymInt:
+      return DynamicTypeTrait<SymIntType>::getBaseType();
     case Tag::Bool:
       return DynamicTypeTrait<BoolType>::getBaseType();
     case Tag::String:

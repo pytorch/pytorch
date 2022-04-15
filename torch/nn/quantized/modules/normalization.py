@@ -37,6 +37,12 @@ class LayerNorm(torch.nn.LayerNorm):
             int(zero_point), mod.eps, mod.elementwise_affine)
         return new_mod
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(
+            mod.normalized_shape, mod.weight, mod.bias, float(scale),
+            int(zero_point), mod.eps, mod.elementwise_affine)
+
 class GroupNorm(torch.nn.GroupNorm):
     r"""This is the quantized version of :class:`~torch.nn.GroupNorm`.
 
@@ -108,6 +114,12 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
             mod.eps, mod.affine)
         return new_mod
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
+            mod.eps, mod.affine)
+
 class InstanceNorm2d(torch.nn.InstanceNorm2d):
     r"""This is the quantized version of :class:`~torch.nn.InstanceNorm2d`.
 
@@ -143,6 +155,12 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
             mod.eps, mod.affine)
         return new_mod
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
+            mod.eps, mod.affine)
+
 class InstanceNorm3d(torch.nn.InstanceNorm3d):
     r"""This is the quantized version of :class:`~torch.nn.InstanceNorm3d`.
 
@@ -177,3 +195,9 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
             mod.eps, mod.affine)
         return new_mod
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(
+            mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
+            mod.eps, mod.affine)

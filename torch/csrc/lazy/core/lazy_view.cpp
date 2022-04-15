@@ -11,6 +11,8 @@
 #include <torch/csrc/lazy/core/view_ops/permute.h>
 #include <torch/csrc/lazy/core/view_ops/resize.h>
 #include <torch/csrc/lazy/core/view_ops/select.h>
+#include <torch/csrc/lazy/core/view_ops/squeeze.h>
+#include <torch/csrc/lazy/core/view_ops/unsqueeze.h>
 #include <torch/csrc/lazy/core/view_ops/select_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/view.h>
 
@@ -43,6 +45,10 @@ Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
       return MakeNode<View>(ir_value, view_info.shape.sizes().vec());
     case ViewInfo::Type::kResize:
       return MakeNode<Resize>(ir_value, view_info.shape.sizes().vec());
+    case ViewInfo::Type::kSqueeze:
+      return MakeNode<torch::lazy::Squeeze>(ir_value, view_info.squeeze_index);
+    case ViewInfo::Type::kUnsqueeze:
+      return MakeNode<torch::lazy::Unsqueeze>(ir_value, view_info.squeeze_index);
     case ViewInfo::Type::kAsStrided:
       return MakeNode<AsStrided>(
           ir_value,
@@ -61,6 +67,16 @@ Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
   }
 }
 
+// Here we are trying to populate inplace updated values from the latest view
+// all the way back to the original tensor.
+// For example:
+//     a = torch.diagonal(b)
+//     b.add_(1) # a should be updated as well.
+//
+// Ideally we should all have a *ViewUpdate IR which updates the original tensor/view
+// withe current value. See DiagonalViewUpdate and corresponding LowerDiagonalViewUpdate
+// in ts_node_lowering.cpp. There are some "edge cases" here simply because they can
+// smartly reuse some other ops to undo themselves.
 Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
   // We first bring the source IR value forward, by reshaping and slicing.
   std::vector<Value> tmp_values({ir_value});
@@ -98,6 +114,12 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
       case ViewInfo::Type::kResize:
         result = MakeNode<Resize>(result, view_info.source_shape.sizes().vec());
         break;
+      case ViewInfo::Type::kSqueeze:
+          result = MakeNode<torch::lazy::Unsqueeze>(ir_value, view_info.squeeze_index);
+          break;
+      case ViewInfo::Type::kUnsqueeze:
+          result = MakeNode<torch::lazy::Squeeze>(ir_value, view_info.squeeze_index);
+          break;
       case ViewInfo::Type::kAsStrided:
         result = MakeNode<AsStridedViewUpdate>(
             tmp_values[i - 1],
@@ -129,6 +151,15 @@ ViewInfo::ViewInfo(Type view_type, Shape shape, Shape source_shape)
       shape(std::move(shape)),
       indices(source_shape.dim(), 0),
       source_shape(std::move(source_shape)) {}
+
+ViewInfo::ViewInfo(Type view_type, Shape shape, Shape source_shape, int64_t sqi)
+    : view_type(view_type),
+      shape(std::move(shape)),
+      source_shape(std::move(source_shape)),
+      squeeze_index(sqi)
+{
+  TORCH_CHECK(view_type == Type::kSqueeze);
+}
 
 ViewInfo::ViewInfo(
     Type view_type,
