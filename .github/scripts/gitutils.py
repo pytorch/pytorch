@@ -212,7 +212,7 @@ class GitRepo:
                 to_commits.remove(commit)
         return (from_commits, to_commits)
 
-    def cherry_pick_commits(self, from_branch: str, to_branch: str) -> None:
+    def cherry_pick_commits(self, from_branch: str, to_branch: str, skip_commits: List[str]) -> None:
         orig_branch = self.current_branch()
         self.checkout(to_branch)
         from_commits, to_commits = self.compute_branch_diffs(from_branch, to_branch)
@@ -221,7 +221,10 @@ class GitRepo:
             self.checkout(orig_branch)
             return
         for commit in reversed(from_commits):
-            print(f"Cherry picking commit {commit}")
+            if commit in skip_commits:
+                print(f"- Manually skipping commit {commit}")
+                continue
+            print(f"+ Cherry picking commit {commit}")
             self.cherry_pick(commit)
         self.checkout(orig_branch)
 

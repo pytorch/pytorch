@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import os
+
 from gitutils import get_git_repo_dir, get_git_remote_name, GitRepo
 from typing import Any
 
@@ -11,13 +13,18 @@ def parse_args() -> Any:
     parser.add_argument("--default-branch", type=str, default="main")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "--skip-commits",
+        type=str,
+        default=os.environ.get("PYTORCH_SYNC_SKIP_COMMITS", "")
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name(), debug=args.debug)
-    repo.cherry_pick_commits(args.sync_branch, args.default_branch)
+    repo.cherry_pick_commits(args.sync_branch, args.default_branch, args.skip_commits.split(","))
     repo.push(args.default_branch, args.dry_run)
 
 
