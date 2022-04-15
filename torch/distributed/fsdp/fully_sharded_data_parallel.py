@@ -479,7 +479,7 @@ class FullyShardedDataParallel(nn.Module):
                 >>> def my_init_fn(module):
                 >>>     # responsible for initializing a module, such as with reset_parameters
                 >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=default_auto_wrap_policy)
-                >>> print(next(fsdp_model.parameters()).device) # current CUDA devic
+                >>> print(next(fsdp_model.parameters()).device) # current CUDA device
     """
 
     def __init__(
