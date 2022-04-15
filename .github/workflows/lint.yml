@@ -170,25 +170,6 @@ jobs:
           cp "shellcheck-${scversion}/shellcheck" ~/.local/bin/
           rm -r "shellcheck-${scversion}"
           ~/.local/bin/shellcheck --version
-      - name: Extract scripts from GitHub Actions workflows
-        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
-        run: |
-          # For local lints, remove the .extracted_scripts folder if it was already there
-          rm -rf .extracted_scripts
-          tools/extract_scripts.py --out=.extracted_scripts
-      - name: Run ShellCheck
-        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
-        run: |
-          if ! tools/linter/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
-            echo
-            echo 'ShellCheck gave a nonzero exit code. Please fix the warnings'
-            echo 'listed above. Note that if a path in one of the above warning'
-            echo 'messages starts with .extracted_scripts/ then that means it'
-            echo 'is referring to a shell script embedded within another file,'
-            echo 'whose path is given by the path components immediately'
-            echo 'following the .extracted_scripts/ prefix.'
-            false
-          fi
       - name: Check that jobs will be cancelled
         if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
