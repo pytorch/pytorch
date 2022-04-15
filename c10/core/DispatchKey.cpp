@@ -160,8 +160,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Named:
       return "Named";
 
-    case DispatchKey::FunctionalizeAddBackViews:
-      return "FunctionalizeAddBackViews";
     case DispatchKey::Functionalize:
       return "Functionalize";
 
