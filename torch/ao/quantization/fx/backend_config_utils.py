@@ -4,6 +4,7 @@ from .fuse_handler import get_fuse_handler_cls
 from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns, sorted_patterns_dict
 from torch.ao.quantization.backend_config import get_native_backend_config_dict
 from typing import Dict, Any, Callable
+from torch.ao.quantization.utils import get_combined_dict
 
 def get_pattern_to_quantize_handlers(
         backend_config_dict: Dict[str, Any]) -> Dict[Pattern, QuantizerCls]:

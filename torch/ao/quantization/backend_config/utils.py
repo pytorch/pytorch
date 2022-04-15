@@ -1,9 +1,8 @@
 from typing import Dict, Any, List, Callable, Union, Tuple
 
 import torch
-from torch.ao.quantization.utils import get_combined_dict
 import torch.nn as nn
-from ..quantization_types import Pattern, QuantizerCls
+from ..quantization_types import Pattern
 
 def get_pattern_to_dtype_configs(
         backend_config_dict: Dict[str, Any]) -> Dict[Pattern, List[Dict[str, Any]]]:
