@@ -2086,7 +2086,7 @@ void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> alias_to_copy_mapping(
       // TODO: revert disabled aten::view
       {// {aten::view, prim::view_copy},
-       {aten::reshape, prim::reshape_copy},
+       // {aten::reshape, prim::reshape_copy},
        {aten::squeeze, prim::squeeze_copy},
        {aten::unsqueeze, prim::unsqueeze_copy}});
 
@@ -2135,7 +2135,7 @@ void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
   static std::unordered_map<Symbol, Symbol> copy_to_alias_mapping(
       // TODO: revert disabled aten::view
       {// {prim::view_copy, aten::view},
-       {prim::reshape_copy, aten::reshape},
+       // {prim::reshape_copy, aten::reshape},
        {prim::squeeze_copy, aten::squeeze},
        {prim::unsqueeze_copy, aten::unsqueeze}});
 
