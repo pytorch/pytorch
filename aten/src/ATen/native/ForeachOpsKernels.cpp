@@ -223,4 +223,13 @@ void foreach_tensor_zero_slow_(TensorList tensors) {
   }
 }
 
+std::vector<Tensor> foreach_tensor_norm_slow(TensorList tensors, const Scalar& ord) {
+  check_foreach_api_restrictions(tensors);
+  std::vector<Tensor> result;
+  for (const auto& t : tensors) {
+    result.emplace_back(at::linalg_vector_norm(t, ord));
+  }
+  return result;
+}
+
 }} // namespace at::native

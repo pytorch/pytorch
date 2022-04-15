@@ -130,7 +130,9 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
         LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
   } else if (proto_version >= 3) {
     LEGACY_pickled_ivalues_ =
-        LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
+        std::move(*LEGACY_loadPickleArchive("attributes.pkl").toTuple())
+            .elements()
+            .vec();
   }
   LEGACY_moduleStack_.emplace_back("__torch__");
   const auto& module_def = model_def.main_module();
@@ -292,12 +294,12 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
   auto module =
       Module(c10::QualifiedName(LEGACY_moduleStack_), compilation_unit_);
-  for (int i = 0; i < module_def.submodules_size(); ++i) {
+  for (const auto i : c10::irange(module_def.submodules_size())) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
     auto submodule = LEGACY_convertModule(sub_def);
     module.register_module(sub_def.name(), submodule);
   }
-  for (int i = 0; i < module_def.parameters_size(); ++i) {
+  for (const auto i : c10::irange(module_def.parameters_size())) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
     at::Tensor tensor = constant_table_.at(param_def.tensor_id()).toTensor();
     if (param_def.is_buffer()) {
@@ -308,7 +310,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
   ScriptTypeParser typeParser(
       std::make_shared<ClassResolver>(source_importer_));
-  for (int i = 0; i < module_def.attributes_size(); ++i) {
+  for (const auto i : c10::irange(module_def.attributes_size())) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
     if (module.hasattr(attr_def.name())) {
       // this attribute was already registered as a buffer above.
@@ -380,6 +382,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
 
   for (const auto i : c10::irange(numPushed)) {
+    (void)i; // Suppress unused variable warning
     LEGACY_moduleStack_.pop_back();
   }
   return module;

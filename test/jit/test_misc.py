@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 from typing import Any, Dict, List, Optional, Tuple
 
 from torch.testing._internal.jit_utils import JitTestCase, make_global
@@ -79,8 +81,10 @@ class TestMisc(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "missing value for argument 'n_tokens'"):
             sm()
 
-        input = (3, 'hello')
-        self.assertEqual(sm(*input), input)
+        with self.assertRaisesRegex(RuntimeError, "positional arg"):
+            sm(3, 'hello')
+
+        self.assertEqual(sm(n_tokens=3, device_name='hello'), (3, 'hello'))
 
     def test_tuple_subscripted_assign(self):
         with self.assertRaisesRegex(RuntimeError, "subscripted assignment"):
@@ -215,17 +219,99 @@ class TestMisc(JitTestCase):
         def use_module_interface(mod_list: List[OneTwoModule], x: torch.Tensor):
             return mod_list[0].forward(x) + mod_list[1].forward(x)
 
+        torch._C._enable_mobile_interface_call_export()
         scripted_M_mod = torch.jit.script(M())
-        # Temporarily test empty output because lite interpreter does not support interface call
-        # Replace it with the issubset call when interface call is supported.
-        self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
-        # self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
-        #     set(torch.jit.export_opnames(scripted_M_mod))))
+        self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
+            set(torch.jit.export_opnames(scripted_M_mod))))
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
-        self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
-        # self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
-        #     set(torch.jit.export_opnames(scripted_M_mod))))
+        self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
+            set(torch.jit.export_opnames(scripted_M_mod))))
+
+    def test_math_inf(self):
+        from math import inf
+
+        def foo():
+            return inf
+
+        self.checkScript(foo, ())
+
+    def test_list_literal_infer(self):
+        def expects_intlist(x: List[int]):
+            x.append(3)
+            return x
+
+        def foo():
+            return expects_intlist([])
+
+        self.checkScript(foo, ())
+
+        def annotated_list_fail():
+            return expects_intlist(torch.jit.annotate([], List[Tensor]))
+
+        with self.assertRaises(RuntimeError):
+            torch.jit.script(annotated_list_fail)
+
+        def non_temporary_fail():
+            a = []
+            return expects_intlist(a)
+
+        with self.assertRaises(RuntimeError):
+            torch.jit.script(non_temporary_fail)
+
+
+        @torch.jit.script
+        def test_return():
+            return []
+
+        FileCheck().check("Tensor[] = prim::ListConstruct").run(test_return.graph)
+
+    def test_legacy_tensor_constructor(self):
+        # testing PyObject overload
+        def test_all_dtypes():
+            return (
+                torch.BoolTensor([2]),
+                torch.LongTensor([3]),
+                torch.ByteTensor([4]),
+                torch.CharTensor([5]),
+                torch.DoubleTensor([6]),
+                torch.FloatTensor([7]),
+                torch.IntTensor([8]),
+                torch.ShortTensor([1]),
+                torch.HalfTensor([1]),
+            )
+
+        self.checkScript(test_all_dtypes, ())
+
+        # now test empty overload
+        def empty_overload():
+            return torch.LongTensor(2, 3, 4)
+
+        eager = empty_overload()
+        jit = torch.jit.script(empty_overload)()
+        eager[:] = 1
+        jit[:] = 1
+        self.assertEqual(eager, jit)
+
+        def no_inputs():
+            return torch.DoubleTensor()
+
+        self.checkScript(no_inputs, ())
+
+        # bad schema
+        def multiple_args():
+            return torch.LongTensor(1, [2])
+
+        with self.assertRaisesRegex(RuntimeError, "multiple positional arguments that were not all integers"):
+            torch.jit.script(multiple_args)
+
+        # kwarg bad schema
+        def bad_kwarg():
+            return torch.LongTensor(hello="1")
+
+        with self.assertRaisesRegex(RuntimeError, "hello"):
+            torch.jit.script(bad_kwarg)
+
 
     def test_broadcasting_list(self):
         """

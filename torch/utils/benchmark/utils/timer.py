@@ -250,6 +250,11 @@ class Timer(object):
             num_threads=num_threads,
         )
 
+    def _timeit(self, number: int) -> float:
+        # Even calling a timer in C++ takes ~50 ns, so no real operation should
+        # take less than 1 ns. (And this prevents divide by zero errors.)
+        return max(self._timer.timeit(number), 1e-9)
+
     def timeit(self, number: int = 1000000) -> common.Measurement:
         """Mirrors the semantics of timeit.Timer.timeit().
 
@@ -258,11 +263,11 @@ class Timer(object):
         """
         with common.set_torch_threads(self._task_spec.num_threads):
             # Warmup
-            self._timer.timeit(number=max(int(number // 100), 2))
+            self._timeit(number=max(int(number // 100), 2))
 
             return common.Measurement(
                 number_per_run=number,
-                raw_times=[self._timer.timeit(number=number)],
+                raw_times=[self._timeit(number=number)],
                 task_spec=self._task_spec
             )
 
@@ -300,10 +305,10 @@ class Timer(object):
         with common.set_torch_threads(self._task_spec.num_threads):
             # Estimate the block size needed for measurement to be negligible
             # compared to the inner loop. This also serves as a warmup.
-            overhead = torch.tensor([self._timer.timeit(0) for _ in range(5)]).median().item()
+            overhead = torch.tensor([self._timeit(0) for _ in range(5)]).median().item()
             number = 1
             while True:
-                time_taken = self._timer.timeit(number)
+                time_taken = self._timeit(number)
                 relative_overhead = overhead / time_taken
                 if relative_overhead <= 1e-4 and time_taken >= min_run_time / 1000:
                     break
@@ -326,7 +331,7 @@ class Timer(object):
         number = self._estimate_block_size(min_run_time=0.05)
 
         def time_hook() -> float:
-            return self._timer.timeit(number)
+            return self._timeit(number)
 
         def stop_hook(times: List[float]) -> bool:
             if len(times) > 3:
@@ -389,7 +394,7 @@ class Timer(object):
         number = self._estimate_block_size(min_run_time)
 
         def time_hook() -> float:
-            return self._timer.timeit(number)
+            return self._timeit(number)
 
         def stop_hook(times: List[float]) -> bool:
             return True
@@ -475,7 +480,7 @@ class Timer(object):
         # Check that the statement is valid. It doesn't guarantee success, but it's much
         # simpler and quicker to raise an exception for a faulty `stmt` or `setup` in
         # the parent process rather than the valgrind subprocess.
-        self._timer.timeit(1)
+        self._timeit(1)
         is_python = (self._language == Language.PYTHON)
         assert is_python or not self._globals
         result = valgrind_timer_interface.wrapper_singleton().collect_callgrind(

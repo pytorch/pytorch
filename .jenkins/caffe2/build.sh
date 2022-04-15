@@ -29,7 +29,8 @@ if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   ln -sf "$(which ccache)" ./ccache/g++
   ln -sf "$(which ccache)" ./ccache/x86_64-linux-gnu-gcc
   if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-    ln -sf "$(which ccache)" ./ccache/nvcc
+    mkdir -p ./ccache/cuda
+    ln -sf "$(which ccache)" ./ccache/cuda/nvcc
   fi
   export CACHE_WRAPPER_DIR="$PWD/ccache"
   export PATH="$CACHE_WRAPPER_DIR:$PATH"
@@ -84,20 +85,6 @@ build_args+=("BUILD_TEST=ON")
 build_args+=("INSTALL_TEST=ON")
 build_args+=("USE_ZSTD=ON")
 
-if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
-  # removing http:// duplicate in favor of nvidia-ml.list
-  # which is https:// version of the same repo
-  sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
-  curl --retry 3 -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-  sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-  sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
-  sudo apt-get -qq update
-  sudo apt-get install -y --no-install-recommends libnvinfer5=5.0.2-1+cuda9.0 libnvinfer-dev=5.0.2-1+cuda9.0
-  rm ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-
-  build_args+=("USE_TENSORRT=ON")
-fi
-
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   build_args+=("USE_CUDA=ON")
   build_args+=("USE_NNPACK=OFF")
@@ -107,7 +94,8 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
 
   # Explicitly set path to NVCC such that the symlink to ccache or sccache is used
   if [ -n "${CACHE_WRAPPER_DIR}" ]; then
-    build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
+    build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/cuda/nvcc")
+    build_args+=("CMAKE_CUDA_COMPILER_LAUNCHER=${CACHE_WRAPPER_DIR}/ccache")
   fi
 
   # Ensure FindCUDA.cmake can infer the right path to the CUDA toolkit.

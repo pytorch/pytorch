@@ -208,7 +208,7 @@ vTensor::Buffer allocate_buffer(
     };
   }();
 
-  return pool->buffer({
+  return pool->create_buffer({
       buffer_bytes(sizes, options.dtype()),
       // Usage
       {
@@ -272,14 +272,16 @@ vTensor::Image allocate_image(
 
   verify(options);
 
-  return pool->image({
-      extents.depth == 1 ? VK_IMAGE_TYPE_2D : VK_IMAGE_TYPE_3D,
+  return pool->create_image({
+      VK_IMAGE_TYPE_3D,
       vk_format(options.dtype()),
       extents,
       // Usage
       {
         VK_IMAGE_USAGE_SAMPLED_BIT |
-            VK_IMAGE_USAGE_STORAGE_BIT,
+            VK_IMAGE_USAGE_STORAGE_BIT |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT | // for vkCmdCopyImage
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT,  // for vkCmdCopyImage
         {
           VMA_MEMORY_USAGE_GPU_ONLY,
           0u,
@@ -288,7 +290,7 @@ vTensor::Image allocate_image(
       },
       // View
       {
-        extents.depth == 1 ? VK_IMAGE_VIEW_TYPE_2D : VK_IMAGE_VIEW_TYPE_3D,
+        VK_IMAGE_VIEW_TYPE_3D,
         vk_format(options.dtype()),
       },
       // Sampler
@@ -325,7 +327,7 @@ vTensor::Buffer allocate_staging(
   TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
 
-  return pool->buffer({
+  return pool->create_buffer({
       buffer_bytes(sizes, options.dtype()),
       // Usage
       {
@@ -503,6 +505,18 @@ vTensor::View::View(
     sizes_(sizes),
     strides_(sizes.size()) {
   ops::verify(options);
+}
+
+vTensor::View::~View() {
+  release();
+}
+
+void vTensor::View::release() {
+  pool_->register_image_cleanup(image_);
+  pool_->register_buffer_cleanup(buffer_);
+  if (staging_) {
+      pool_->register_buffer_cleanup(staging_);
+  }
 }
 
 class vTensor::View::CMD final {

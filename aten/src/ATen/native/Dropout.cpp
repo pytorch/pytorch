@@ -1,8 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
+#include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -16,13 +18,15 @@ Tensor make_feature_noise(const Tensor& input) {
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
-  for (int64_t i = 2; i < input.dim(); ++i)
+  for (const auto i : c10::irange(2, input.dim())) {
+    (void)i; //Suppress unused variable warning
     sizes.push_back(1);
-  return at::empty(sizes, input.options());
+  }
+  return input.new_empty(sizes);
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return (input.is_cuda() || input.is_xpu()) && p > 0 && p < 1 && input.numel() > 0;
+  return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure
@@ -82,11 +86,39 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
 } // anomymous namepsace
 
+std::tuple<Tensor,Tensor>
+native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
+  if (input.numel() == 0) {
+    return std::make_tuple(input, at::empty_like(input, input.options()));
+  }
+
+  Tensor mask;
+  Tensor output;
+
+  if (!train.has_value() || *train) {
+    double p1m = 1. - p;
+    // Check for probability of zero to avoid divide by zero and NaN results
+    double scale = p1m == 0 ? 0. : 1. / p1m;
+    mask = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    mask.bernoulli_(p1m);
+    output = input.mul(mask).mul_(scale);
+  } else {
+    mask = at::ones_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    output = input.clone();
+  }
+  return std::make_tuple(output, mask);
+}
+
+Tensor native_dropout_backward_cpu(const Tensor& grad, const Tensor& mask, double scale) {
+  Tensor result = grad * mask * scale;
+  return result;
+}
+
 Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (train && is_fused_kernel_acceptable(input, p)) {
-      return std::get<0>(at::_fused_dropout(input, 1 - p));
+      return std::get<0>(at::native_dropout(input, p, train));
     }
     return _dropout<false>(input, p, train);
   }();
@@ -122,4 +154,5 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
   return _feature_alpha_dropout<true>(input, p, train);
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

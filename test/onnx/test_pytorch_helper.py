@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 # Some standard imports
 import numpy as np
 from torch import nn

@@ -1,10 +1,16 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#endif
 
 namespace at { namespace native {
 
@@ -24,7 +30,7 @@ namespace {
 // grad_in does not mean that it is a gradient wrt to input,
 // grad_in/grad_out is just an input/output of unfold_backward kernel.
 
-static TensorIterator _make_unfold_backward_iter_over_grad_out(
+static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_out(
   Tensor& grad_out,
   const Tensor& grad_in,
   int64_t dim,
@@ -102,12 +108,12 @@ static TensorIterator _make_unfold_backward_iter_over_grad_out(
   return iter;
 }
 
-static TensorIterator _make_unfold_backward_iter_over_grad_in(
+static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_in(
   Tensor& grad_out,
   const Tensor& grad_in,
   int64_t dim,
-  int64_t size,
-  int64_t step
+  int64_t /*size*/,
+  int64_t /*step*/
 ) {
   dim = maybe_wrap_dim(dim, grad_out.dim());
   // last dim stores the folds

@@ -1,7 +1,13 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/result_type_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -34,10 +40,6 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
-
-  for (const auto i : c10::irange(tensors1.size())) {
-    TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
-  }
 }
 
 void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3) {
@@ -46,11 +48,6 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
   TORCH_CHECK(tensors3.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
   TORCH_CHECK(tensors1.size() == tensors3.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors3.size());
-
-  for (const auto i : c10::irange(tensors1.size())) {
-    TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
-    TORCH_CHECK(tensors1[i].sizes() == tensors3[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors3[i].sizes());
-  }
 }
 
 void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<Scalar> scalars) {
@@ -89,9 +86,12 @@ bool check_fast_path_restrictions(
       }
     }
 
-    // Check if corresponding tensors in tensor lists have the same strides.
+    // Check if corresponding tensors in tensor lists have the same sizes and strides.
     for (const auto& tensor_list : tensorLists) {
       for (const auto j : c10::irange(tensorLists[0].size())) {
+        if (tensorLists[0][j].sizes() != tensor_list[j].sizes()) {
+          return false;
+        }
         if (tensorLists[0][j].strides() != tensor_list[j].strides()) {
           return false;
         }
@@ -126,19 +126,11 @@ bool check_fast_path_restrictions(
 bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
                         ArrayRef<Scalar> scalarList = {},
                         bool does_op_promote_integer_inputs_to_float = false) {
-#ifdef __HIP_PLATFORM_HCC__
-  return false;
-#else
   return check_fast_path_restrictions(tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
-#endif
 }
 
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool does_op_promote_integer_inputs_to_float = false) {
-#ifdef __HIP_PLATFORM_HCC__
-  return false;
-#else
   return can_use_fast_route({tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
-#endif
 }
 
 }

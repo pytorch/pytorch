@@ -1,3 +1,6 @@
+.. automodule:: torch.package
+.. py:module:: torch.package.analyze
+
 .. currentmodule:: torch.package
 
 torch.package
@@ -13,7 +16,7 @@ will help you learn more about ``torch.package`` and how to use it.
 
 .. warning::
 
-    This module depends on the ``pickle`` module which is is not secure. Only unpackage data you trust.
+    This module depends on the ``pickle`` module which is not secure. Only unpackage data you trust.
 
     It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
     Never unpackage data that could have come from an untrusted source, or that could have been tampered with.
@@ -145,6 +148,18 @@ You can also query ``Folder`` objects with the ``has_file()`` method.
 
     exporter_file_structure = exporter.file_structure()
     found: bool = exporter_file_structure.has_file("package_a/subpackage.py")
+
+See why a given module was included as a dependency?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Say there is a given module ``foo``, and you want to know why your :class:`PackageExporter` is pulling in ``foo`` as a dependency.
+
+:meth:`PackageExporter.get_rdeps` will return all modules that directly depend on ``foo``.
+
+If you would like to see how a given module ``src`` depends on ``foo``, the :meth:`PackageExporter.all_paths` method will
+return a DOT-formatted graph showing all the dependency paths between ``src`` and ``foo``.
+
+If you would just like to see the whole dependency graph of your :class:`PackageExporter`, you can use :meth:`PackageExporter.dependency_graph_string`.
 
 
 Include arbitrary resources with my package and access them later?
@@ -687,7 +702,7 @@ When specifying actions, you can pass multiple patterns, e.g.
 
 A module will match against this action if it matches any of the patterns.
 
-You can also specify patterns to exlcude, e.g.
+You can also specify patterns to exclude, e.g.
 
 
 ::

@@ -55,8 +55,6 @@ static void max_pooling_u8(benchmark::State& state, const char* net) {
   status = pytorch_qnnp_create_max_pooling2d_nhwc_u8(
       paddingSize,
       paddingSize,
-      paddingSize,
-      paddingSize,
       poolingSize,
       poolingSize,
       stride,

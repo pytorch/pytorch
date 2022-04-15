@@ -61,9 +61,9 @@ at::Tensor clamp(
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("hardtanh_", TORCH_FN(hardtanh_));
-  m.impl("hardtanh", TORCH_FN(hardtanh));
-  m.impl("clamp", TORCH_FN(clamp));
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardtanh_"), TORCH_FN(hardtanh_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardtanh"), TORCH_FN(hardtanh));
+  m.impl(TORCH_SELECTIVE_NAME("aten::clamp"), TORCH_FN(clamp));
 };
 
 }

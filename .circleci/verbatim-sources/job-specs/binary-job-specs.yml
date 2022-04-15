@@ -1,3 +1,4 @@
+jobs:
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
@@ -161,6 +162,7 @@
     <<: *binary_mac_params
     macos:
       xcode: "12.0"
+      resource_class: "large"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -239,7 +241,7 @@
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -266,7 +268,7 @@
   binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
     - attach_workspace:
         at: ~/workspace

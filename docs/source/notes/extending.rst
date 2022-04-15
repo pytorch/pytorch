@@ -13,60 +13,114 @@ Extending :mod:`torch.autograd`
 .. currentmodule:: torch.autograd
 
 Adding operations to :mod:`~torch.autograd` requires implementing a new
-:class:`Function` subclass for each operation. Recall that :class:`Function` s
-are what :mod:`~torch.autograd` uses to compute the results and gradients, and
-encode the operation history. Every new function requires you to implement 2 methods:
+:class:`Function` subclass for each operation. Recall that Functions
+are what :mod:`~torch.autograd` uses to encode the operation history and compute
+gradients.
 
-- :meth:`~Function.forward` - the code that performs the operation. It can take
+The first part of this doc is focused on backward mode AD as it is the most widely used
+feature. A section at the end discusses the extensions for forward mode AD.
+
+When to use
+^^^^^^^^^^^
+In general, implement a custom function if you want to perform computations in your model
+that are not differentiable or rely on non-Pytorch libraries (e.g., NumPy), but
+still wish for your operation to chain with other ops and work with the autograd engine.
+
+In some situations, custom functions can also be used to improve performance and
+memory usage: If you implemented your forward and backward passes using a
+`C++ extension <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_,
+you can wrap them in :class:`~Function` to interface with the autograd
+engine. If you'd like to reduce the number of buffers saved for the backward pass,
+custom functions can be used to combine ops together.
+
+When not to use
+^^^^^^^^^^^^^^^
+If you can already write your function in terms of PyTorch's built-in ops, its
+backward graph is (most likely) already able to be recorded by autograd. In this case, you do
+not need to implement the backward function yourself. Consider using a plain
+old Python function.
+
+If you need to maintain state, i.e., trainable parameters, you should (also) use a
+custom module. See the section below for more information on extending :mod:`torch.nn`.
+
+If you'd like to alter the gradients during the backward pass or perform a side
+effect, consider registering a
+`tensor <https://pytorch.org/docs/stable/generated/torch.Tensor.register_hook.html#torch.Tensor.register_hook>`_ or
+`Module <https://pytorch.org/docs/stable/notes/modules.html#module-hooks>`_ hook.
+
+How to use
+^^^^^^^^^^
+Take the following steps:
+1. Subclass :class:`~Function` and implement the :meth:`~Function.forward` and
+:meth:`~Function.backward` methods.
+2. Call the proper methods on the `ctx` argument.
+3. Declare whether your function supports
+`double backward <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_.
+4. Validate whether your gradients are correct using gradcheck.
+
+**Step 1:** After subclassing :class:`Function`, you'll need to define 2 methods:
+
+- :meth:`~Function.forward` is the code that performs the operation. It can take
   as many arguments as you want, with some of them being optional, if you
   specify the default values. All kinds of Python objects are accepted here.
   :class:`Tensor` arguments that track history (i.e., with
   ``requires_grad=True``) will be converted to ones that don't track history
   before the call, and their use will be registered in the graph. Note that this
   logic won't traverse lists/dicts/any other data structures and will only
-  consider :class:`Tensor` s that are direct arguments to the call. You can
+  consider tensors that are direct arguments to the call. You can
   return either a single :class:`Tensor` output, or a :class:`tuple` of
-  :class:`Tensor` s if there are multiple outputs. Also, please refer to the
+  tensors if there are multiple outputs. Also, please refer to the
   docs of :class:`Function` to find descriptions of useful methods that can be
   called only from :meth:`~Function.forward`.
-- :meth:`~Function.backward` - gradient formula. It will be given
-  as many :class:`Tensor` arguments as there were outputs, with each of them
-  representing gradient w.r.t. that output. It should return as many
-  :class:`Tensor` s as there were inputs, with each of them containing the
-  gradient w.r.t. its corresponding input. If your inputs didn't require
-  gradient (:attr:`~ctx.needs_input_grad` is a tuple of booleans indicating
+- :meth:`~Function.backward` (or :meth:`~Function.vjp`) defines the gradient formula.
+  It will be given as many :class:`Tensor` arguments as there were outputs, with each
+  of them representing gradient w.r.t. that output. It is important NEVER to modify
+  these in-place. It should return as many tensors as there
+  were inputs, with each of them containing the gradient w.r.t. its
+  corresponding input. If your inputs didn't require gradient
+  (:attr:`~ctx.needs_input_grad` is a tuple of booleans indicating
   whether each input needs gradient computation), or were non-:class:`Tensor`
   objects, you can return :class:`python:None`. Also, if you have optional
   arguments to :meth:`~Function.forward` you can return more gradients than there
   were inputs, as long as they're all :any:`python:None`.
 
-.. note::
+**Step 2:** It is your responsibility to use the functions in the forward's `ctx`
+properly in order to ensure that the new :class:`Function` works properly with
+the autograd engine.
 
-  It's the user's responsibility to use the special functions in the forward's `ctx`
-  properly in order to ensure that the new :class:`Function` works properly with
-  the autograd engine.
+- :meth:`~torch.autograd.function.FunctionCtx.save_for_backward` must be
+  used when saving input or output tensors of the forward to be used later in the backward.
+  Anything else, i.e., non-tensors and tensors that are neither input nor output
+  should be stored directly on `ctx`.
+- :meth:`~torch.autograd.function.FunctionCtx.mark_dirty` must be used to
+  mark any input that is modified inplace by the forward function.
+- :meth:`~torch.autograd.function.FunctionCtx.mark_non_differentiable` must
+  be used to tell the engine if an output is not differentiable. By
+  default all output tensors that are of differentiable type will be set
+  to require gradient. Tensors of non-differentiable type (i.e., integral types)
+  are never marked as requiring gradients.
+- :meth:`~torch.autograd.function.FunctionCtx.set_materialize_grads` can be
+  used to tell the autograd engine to optimize gradient computations in the cases where
+  the output does not depend on the input by not materializing grad tensors given to backward
+  function. That is, if set to False, None object in python or "undefined tensor" (tensor x for
+  which x.defined() is False) in C++ will not be converted to a tensor filled with zeros prior
+  to calling backward, and so your code will need to handle such objects as if they were
+  tensors filled with zeros. The default value of this setting is True.
 
-  - :meth:`~torch.autograd.function._ContextMethodMixin.save_for_backward` must be
-    used when saving input or output of the forward to be used later in the backward.
-  - :meth:`~torch.autograd.function._ContextMethodMixin.mark_dirty` must be used to
-    mark any input that is modified inplace by the forward function.
-  - :meth:`~torch.autograd.function._ContextMethodMixin.mark_non_differentiable` must
-    be used to tell the engine if an output is not differentiable.
-  - :meth:`~torch.autograd.function._ContextMethodMixin.set_materialize_grads` can be
-    used to tell the autograd engine to optimize gradient computations in the cases where
-    the output does not depend on the input by not materializing grad tensors given to backward
-    function. That is, if set to False, None object in python or "undefined tensor" (tensor x for
-    which x.defined() is False) in C++ will not be converted to a tensor filled with zeros prior
-    to calling backward. However, supporting this optimization means your custom autograd function
-    has to handle gradients that are represented in this way and is thus opt-in. Default value is True.
+**Step 3:** If your :class:`~Function` does not support double backward
+you should explicitly declare this by decorating backward with the
+:func:`~function.once_differentiable`. With this decorator, attempts to
+perform double backward through your function will produce an error.
+See our double backward tutorial for more information on double backward.
 
-.. note::
+**Step 4:** It is recommended that you use :func:`torch.autograd.gradcheck`
+to check whether your backward function correctly computes gradients of the
+forward by computing the Jacobian matrix using your backward function and
+comparing the value element-wise with the Jacobian computed numerically using
+finite-differencing.
 
-  By default, all the output Tensors that are of differentiable type will be set to
-  require gradient and have all autograd metadata set for them. If you don't want
-  them to require gradients, you can use the `mark_non_differentiable` method mentioned
-  above. For output Tensors that are not of differentiable type (integer types for example),
-  they won't be marked as requiring gradients.
+Example
+^^^^^^^
 
 Below you can find code for a ``Linear`` function from :mod:`torch.nn`, with
 additional comments::
@@ -151,12 +205,12 @@ And here, we optimize the above example by calling set_materialize_grads(False):
             return grad_output * ctx.constant, None
 
 .. note::
-    Inputs to ``backward``, i.e., :attr:`grad_output`, can also be Tensors that
+    Inputs to ``backward``, i.e., :attr:`grad_output`, can also be tensors that
     track history. So if ``backward`` is implemented with differentiable
     operations, (e.g., invocation of another custom
-    :class:`~torch.autograd.function`), higher order derivatives will work.
-    In this case, the Tensors saved with ``save_for_backward`` can also be used
-    in the backward and have gradients flowing back but Tensors saved in the ``ctx``
+    :class:`~torch.autograd.Function`), higher order derivatives will work.
+    In this case, the tensors saved with ``save_for_backward`` can also be used
+    in the backward and have gradients flowing back but tensors saved in the ``ctx``
     won't have gradients flowing back for them.
     If you need gradients to flow back for a Tensor saved in the ``ctx``, you should
     make it an output of the custom ``Function`` and save it with ``save_for_backward``.
@@ -177,6 +231,35 @@ numerical approximations using small finite differences::
 See :ref:`grad-check` for more details on finite-difference gradient comparisons.
 If your function is used in higher order derivatives (differentiating the backward pass) you
 can use the ``gradgradcheck`` function from the same package to check higher order derivatives.
+
+Forward mode AD
+^^^^^^^^^^^^^^^
+
+Overriding the forward mode AD formula has a very similar API with some different subtleties.
+You can implement the :meth:`~Function.jvp` function.
+
+It will be given as many :class:`Tensor` arguments as there were inputs, with each
+of them representing gradient w.r.t. that input. It should return as many tensors as there
+were outputs, with each of them containing the gradient w.r.t. its corresponding output.
+The :meth:`~Function.jvp` will be called just after the :meth:`~Function.forward`
+method, before the :meth:`~Function.apply` returns.
+
+:meth:`~Function.jvp` has a few subtle differences with the :meth:`~Function.backward` function:
+
+- You can use the `ctx` to pass any data from the :meth:`~Function.forward` to the :meth:`~Function.jvp` function.
+  If that state will not be needed for the :meth:`~Function.backward`,
+  you can explicitly free it by doing ``del ctx.foo`` at the end of the :meth:`~Function.jvp` function.
+- The implementation of :meth:`~Function.jvp` must be backward differentiable or explicitly check that
+  none of the given forward mode gradient has ``requires_grad`` set.
+- The :meth:`~Function.jvp` function must match the view/inplace behavior of :meth:`~Function.forward`.
+  For example, if the ``i`` th input is modified inplace, then the ``i`` th gradient must be updated inplace.
+  Similarly, if the ``j`` th output is a view of the ``k`` th input. Then the returned ``j`` th output gradient must be
+  a view of the given ``k`` th input gradient.
+- Because the user cannot specify which gradient needs to be computed, the :meth:`~Function.jvp` function should
+  always compute gradients for all the outputs.
+- The forward mode gradients do respect the flag set by :meth:`~torch.autograd.function.FunctionCtx.set_materialize_grads`
+  and you can get `None` input gradients when this is disabled.
+
 
 Extending :mod:`torch.nn`
 -------------------------
@@ -232,9 +315,9 @@ This is how a ``Linear`` module can be implemented::
                 self.register_parameter('bias', None)
 
             # Not a very smart way to initialize weights
-            self.weight.data.uniform_(-0.1, 0.1)
+            nn.init.uniform_(self.weight, -0.1, 0.1)
             if self.bias is not None:
-                self.bias.data.uniform_(-0.1, 0.1)
+                nn.init.uniform_(self.bias, -0.1, 0.1)
 
         def forward(self, input):
             # See the autograd section for explanation of what happens here.
@@ -272,7 +355,7 @@ Extending :mod:`torch` with a :class:`Tensor`-like type
 
 .. note:: This functionality is inspired by the NumPy ``__array_function__``
           protocol. See `the NumPy documentation
-          <https://docs.scipy.org/doc/numpy/user/basics.dispatch.html#basics-dispatch>`_
+          <https://numpy.org/doc/stable/user/basics.dispatch.html#basics-dispatch>`_
           and `NEP-0018
           <https://numpy.org/neps/nep-0018-array-function-protocol.html>`_ for
           more details.
@@ -330,7 +413,8 @@ this time adding a ``__torch_function__`` implementation::
       def tensor(self):
           return self._value * torch.eye(self._N)
 
-      def __torch_function__(self, func, types, args=(), kwargs=None):
+      @classmethod
+      def __torch_function__(cls, func, types, args=(), kwargs=None):
           if kwargs is None:
               kwargs = {}
           if func not in HANDLED_FUNCTIONS or not all(
@@ -450,7 +534,8 @@ handled but to instead pass a :class:`Tensor` to the original :mod:`torch`
 function when no override is available. For example, if we change our
 implementation of ``__torch_function__`` for ``ScalarTensor`` to the one below::
 
-  def __torch_function__(self, func, types, args=(), kwargs=None):
+  @classmethod
+  def __torch_function__(cls, func, types, args=(), kwargs=None):
       if kwargs is None:
           kwargs = {}
       if func not in HANDLED_FUNCTIONS or not all(
@@ -554,12 +639,15 @@ implementation more permissive about what operations are allowed::
       def __repr__(self):
           return "Metadata:\n{}\n\ndata:\n{}".format(self._metadata, self._t)
 
-      def __torch_function__(self, func, types, args=(), kwargs=None):
+      @classmethod
+      def __torch_function__(cls, func, types, args=(), kwargs=None):
           if kwargs is None:
               kwargs = {}
           args = [a._t if hasattr(a, '_t') else a for a in args]
+          metadatas = tuple(a._metadata if hasattr(a, '_metadata') for a in args)
+          assert len(metadatas) > 0
           ret = func(*args, **kwargs)
-          return MetadataTensor(ret, metadata=self._metadata)
+          return MetadataTensor(ret, metadata=metadatas[0])
 
 This simple implementation won't necessarily work with every function in the
 :mod:`torch` API but it is good enough to capture most common operations::

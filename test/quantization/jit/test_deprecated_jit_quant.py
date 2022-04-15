@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 import torch
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM
@@ -99,7 +101,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
 
             self.assertEqual(len(outs), len(ref_outs))
             for out, ref_out in zip(outs, ref_outs):
-                torch.testing.assert_allclose(out, ref_out)
+                torch.testing.assert_close(out, ref_out)
 
     @skipIfNoFBGEMM
     def test_rnn_quantized(self):
@@ -165,32 +167,32 @@ class TestDeprecatedJitQuantized(JitTestCase):
             # Compare int8 quantized to unquantized
             output_int8, final_hiddens_int8 = cell_int8(x, hiddens)
 
-            torch.testing.assert_allclose(output_int8, ref_out)
+            torch.testing.assert_close(output_int8, ref_out)
             for out, ref in zip(final_hiddens_int8, ref_hid):
-                torch.testing.assert_allclose(out, ref)
+                torch.testing.assert_close(out, ref)
 
             # Compare fp16 quantized to unquantized
             output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
 
-            torch.testing.assert_allclose(output_fp16, ref_out)
+            torch.testing.assert_close(output_fp16, ref_out)
             for out, ref in zip(final_hiddens_fp16, ref_hid):
-                torch.testing.assert_allclose(out, ref)
+                torch.testing.assert_close(out, ref)
 
             def compare_quantized_unquantized(ScriptWrapper, cell):
                 wrapper = ScriptWrapper(cell)
 
                 # Compare quantize scripted module to unquantized
                 script_out, script_hid = wrapper(x, hiddens)
-                torch.testing.assert_allclose(script_out, ref_out)
+                torch.testing.assert_close(script_out, ref_out)
                 for out, ref in zip(script_hid, ref_hid):
-                    torch.testing.assert_allclose(out, ref)
+                    torch.testing.assert_close(out, ref)
 
                 # Compare export/import to unquantized
                 export_import_wrapper = self.getExportImportCopyWithPacking(wrapper)
                 ei_out, ei_hid = export_import_wrapper(x, hiddens)
-                torch.testing.assert_allclose(ei_out, ref_out)
+                torch.testing.assert_close(ei_out, ref_out)
                 for out, ref in zip(ei_hid, ref_hid):
-                    torch.testing.assert_allclose(out, ref)
+                    torch.testing.assert_close(out, ref)
 
             if isinstance(cell, torch.jit.quantized.QuantizedGRU):
                 class ScriptWrapper(torch.jit.ScriptModule):
@@ -252,8 +254,8 @@ class TestDeprecatedJitQuantized(JitTestCase):
             fb_fp16 = self.getExportImportCopyWithPacking(traced_fp16)
             y_fp16 = fb_fp16(value)
 
-            torch.testing.assert_allclose(y_int8, y_ref, rtol=0.0001, atol=1e-3)
-            torch.testing.assert_allclose(y_fp16, y_ref, rtol=0.0001, atol=1e-3)
+            torch.testing.assert_close(y_int8, y_ref, rtol=0.0001, atol=1e-3)
+            torch.testing.assert_close(y_fp16, y_ref, rtol=0.0001, atol=1e-3)
 
     @skipIfNoFBGEMM
     def test_erase_class_tensor_shapes(self):

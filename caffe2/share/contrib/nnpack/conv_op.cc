@@ -3,7 +3,6 @@
 
 #include "caffe2/core/common.h"
 
-
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -131,10 +130,9 @@ NNPACKConvOp::getConvolutionTransformStrategy() const {
   return nnp_convolution_transform_strategy_compute;
 }
 
-nnp_activation
-NNPACKConvOp::getActivationType() const {
-  auto activation = OperatorBase::GetSingleArgument<std::string>(
-    "activation", "identity");
+nnp_activation NNPACKConvOp::getActivationType() const {
+  auto activation =
+      OperatorBase::GetSingleArgument<std::string>("activation", "identity");
   if (activation == "identity") {
     return nnp_activation_identity;
   } else if (activation == "Relu") {
@@ -152,8 +150,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   auto& filter = Input(1);
   auto* Y = Output(0);
   CAFFE_ENFORCE(X.ndim() == 4, "Input dim should be 4");
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
+  const int C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "");
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(C % this->group_ == 0, "");
@@ -181,25 +178,23 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
     biasData = dummyBias_.data();
   }
 
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  const size_t batch_size = X.dim32(0);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  const size_t input_channels = X.dim32(1);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  const size_t output_channels = Y->dim32(1);
-  const nnp_size input_size = {.width = static_cast<size_t>(X.dim32(3)),
-                               .height = static_cast<size_t>(X.dim32(2))};
+  const nnp_size input_size = {
+      .width = static_cast<size_t>(X.dim32(3)),
+      .height = static_cast<size_t>(X.dim32(2))};
   // filter is MCHW
-  const nnp_size kernel_size = {.width = static_cast<size_t>(filter.dim32(3)),
-                                .height = static_cast<size_t>(filter.dim32(2))};
+  const nnp_size kernel_size = {
+      .width = static_cast<size_t>(filter.dim32(3)),
+      .height = static_cast<size_t>(filter.dim32(2))};
   // pad is tblr
-  const nnp_padding padding = {.top = static_cast<size_t>(pad_t()),
-                               .right = static_cast<size_t>(pad_r()),
-                               .bottom = static_cast<size_t>(pad_b()),
-                               .left = static_cast<size_t>(pad_l())};
+  const nnp_padding padding = {
+      .top = static_cast<size_t>(pad_t()),
+      .right = static_cast<size_t>(pad_r()),
+      .bottom = static_cast<size_t>(pad_b()),
+      .left = static_cast<size_t>(pad_l())};
 
-  const nnp_size output_subsample = {.width = static_cast<size_t>(stride_w()),
-                                     .height = static_cast<size_t>(stride_h())};
+  const nnp_size output_subsample = {
+      .width = static_cast<size_t>(stride_w()),
+      .height = static_cast<size_t>(stride_h())};
   initNNPACK();
 
 #if !defined(USE_INTERNAL_PTHREADPOOL_IMPL)

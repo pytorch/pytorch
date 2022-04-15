@@ -3,8 +3,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
-
-#include <THC/THCReduceApplyUtils.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 
 namespace at {
 namespace native {
@@ -88,11 +87,10 @@ __device__ T reduceBlockWithNThreadLocalReductions(
   for (int i = 1; i < N; ++i) {
     ++offset;
     T next = offset < numVals ? threadVals[i] : init;
-    local = reduceOp(local, next);
+    local = reduceOp.combine(local, next);
   }
 
-  return reduceBlock<T, ReduceOp>(
-      smem, blockDim.x < numVals ? blockDim.x : numVals, local, reduceOp, init);
+  return cuda_utils::BlockReduce(local, reduceOp, init, smem);
 }
 
 template <typename T>
@@ -145,13 +143,13 @@ __device__ inline void bitonicSortKeys(
     K keys[Power2SortSize],
     bool valid[Power2SortSize],
     const Comparator& comp) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
   for (unsigned int size = 2; size < Power2SortSize; size *= 2) {
     bool flag = ((threadIdx.x & (size / 2)) != 0);
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
     for (unsigned int stride = size / 2; stride > 0; stride /= 2) {
@@ -168,7 +166,7 @@ __device__ inline void bitonicSortKeys(
     }
   }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
 #pragma unroll
 #endif
   for (unsigned int stride = Power2SortSize / 2; stride > 0; stride /= 2) {
@@ -354,13 +352,24 @@ __global__ void compute_mode(
 
   struct ModeUnsignedPair max = {0, 0};
 
+  struct MaxOp {
+    inline __device__ ModeUnsignedPair combine(ModeUnsignedPair a, ModeUnsignedPair b) const {
+      return b.val > a.val ? b : a;
+    }
+
+    inline __device__ ModeUnsignedPair warp_shfl_down(ModeUnsignedPair acc, int offset) const {
+      ModeUnsignedPair ret;
+      ret.index = WARP_SHFL_DOWN(acc.index, offset);
+      ret.val = WARP_SHFL_DOWN(acc.val, offset);
+      return ret;
+    }
+  } max_op;
+
   max = reduceBlockWithNThreadLocalReductions<2>(
       uupmem,
       uup,
       sliceSize,
-      [=] GPU_LAMBDA(const auto& a, const auto& b) {
-        return b.val > a.val ? b : a;
-      },
+      max_op,
       max);
 
   // Store the mode in shared memory for use in finding the mode in the input
@@ -374,43 +383,43 @@ __global__ void compute_mode(
   }
   __syncthreads(); // broadcast mode
 
-  // Finally, we need to find the "an" index of the mode in the input Tensor.
-  // The API does not constrain which index we pick, so it can be any of the
-  // indices that contain the mode. We will do a reduction to find the index. We
-  // go back to using the (index, flag) buffer arrangement. First, we mark
-  // indices that are equal to the mode, i.e B[i] = true if input[i] == mode,
-  // and initialize C[i] to be the index
+  // Finally, we need to find "an" index of the mode in the input
+  // Tensor. The API does not constrain which index we pick, but here
+  // we always pick the largest index. We store the index if the value
+  // is the mode, or 0 otherwise. Then find the maximum value.
   //
   // Again we reduce 2 elements in the thread's registers prior to the
   // block-wide reduction
-  struct ModeUnsignedBoolPair ubpp[2];
+  unsigned mode_index[2] = {0u, 0u};
   if (tidx * 2 < sliceSize) {
-    ubpp[0].flag = input[linearOffset + (tidx * 2)] == mode;
-    ubpp[0].val = tidx * 2;
+    const unsigned idx = tidx * 2;
+    mode_index[0] = input[linearOffset + idx] == mode ? idx : 0u;
   }
   if (tidx * 2 + 1 < sliceSize) {
-    ubpp[1].flag = input[linearOffset + (tidx * 2 + 1)] == mode;
-    ubpp[1].val = tidx * 2 + 1;
+    const unsigned idx = tidx * 2 + 1;
+    mode_index[1] = input[linearOffset + idx] == mode ? idx : 0u;
   }
 
-  // Then we perform a similar reduction to the one above, except this time we
-  // update the element if the element at the base position is not equal to the
-  // mode and the element at the offset position is. At the end, C[0] will
-  // contain an index with the mode.
-  struct ModeUnsignedBoolPair match = {0, false};
+  struct MaxIndexOp {
+    inline __device__ unsigned combine(unsigned a, unsigned b) const {
+      return b > a ? b : a;
+    }
 
-  match = reduceBlockWithNThreadLocalReductions<2>(
-      ubpmem,
-      ubpp,
+    inline __device__ unsigned warp_shfl_down(unsigned acc, int offset) const {
+      return WARP_SHFL_DOWN(acc, offset);
+    }
+  } max_index_op;
+
+  int64_t index = reduceBlockWithNThreadLocalReductions<2>(
+      reinterpret_cast<unsigned*>(&shmem[0]),
+      mode_index,
       sliceSize,
-      [=] GPU_LAMBDA(const auto& a, const auto& b) { return b.flag ? b : a; },
-      match);
+      max_index_op,
+      0u);
 
   // Finally, we have the mode, and an index where it occurs. We use a single
   // thread to place this in the appropriate output position
   if (tidx == 0) {
-    int64_t index = match.val;
-
     unsigned int outputOffset =
         at::cuda::detail::IndexToOffset<T, unsigned int, -1>::get(
             blockId, values);

@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
+#include <ATen/core/boxing/impl/test_helpers.h>
 
 #include <torch/torch.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <torch/csrc/autograd/functions/basic_ops.h>
 
@@ -665,7 +667,7 @@ TEST(CustomAutogradTest, DeepReentrant) {
     }
 
     static variable_list backward(AutogradContext*ctx, variable_list grad_output) {
-      if (!ctx->saved_data["x"].toTensor().is_nonzero()) {
+      if (!at::native::is_nonzero(ctx->saved_data["x"].toTensor())) {
         return grad_output;
       }
       {
@@ -706,7 +708,7 @@ TEST(CustomAutogradTest, ReentrantPriority) {
 
     static variable_list backward(AutogradContext*ctx, variable_list grad_output) {
       order.push_back(1);
-      if (!ctx->saved_data["x"].toTensor().is_nonzero()) {
+      if (!at::native::is_nonzero(ctx->saved_data["x"].toTensor())) {
         return grad_output;
       }
       {
@@ -868,6 +870,345 @@ TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
         warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
   }
 }
+
+/**
+ * Tests for AutogradNotImplementedFallback
+ * - Check that we created the NotImplemented kernel when inputs require grad
+ *   but when no inputs require grad, we should not create this node
+ * - check_inplace logic
+ * - view ops
+ * - TODO: Tests for debug-only checks? Don't need for now because CI doesn't test non-NDEBUG builds.
+ * - tensorlist input and output
+ * - multiple outputs / non-tensor output
+ * - rebase_history vs set_history
+ */
+namespace {
+
+torch::Tensor inplace_op(const torch::Tensor& self, const torch::Tensor& other) {
+  return self.add_(other);
+}
+
+std::tuple<torch::Tensor, torch::Tensor> two_arg_inplace_op(const torch::Tensor& self, const torch::Tensor& other) {
+  other.add_(self);
+  self.add_(other);
+  return std::tuple<torch::Tensor, torch::Tensor>(self, other);
+}
+
+std::tuple<torch::Tensor, torch::Tensor> two_pairs_of_view_op(const torch::Tensor& self, const torch::Tensor& other) {
+  // This is not allowed. We test below that this calling into the boxed kernel will raise an error
+  return std::tuple<torch::Tensor, torch::Tensor>(self, other);
+}
+
+std::tuple<torch::Tensor, torch::Tensor> non_first_view_op(const torch::Tensor& self, const torch::Tensor& other) {
+  // This is not allowed. We test below that this calling into the boxed kernel will raise an error
+  return std::tuple<torch::Tensor, torch::Tensor>(self.clone(), other);
+}
+
+int64_t ret_single_non_tensor(const torch::Tensor& self, const torch::Tensor& other) {
+  return 12;
+}
+
+torch::Tensor opt_op(const torch::Tensor& self, const c10::optional<at::Tensor>& other) {
+  if (other.has_value()) {
+      return self + other.value();
+  } else {
+      return self.clone();
+  }
+}
+
+torch::Tensor my_custom_op(const torch::Tensor& self, const torch::Tensor& other) {
+  return self + other;
+}
+
+std::tuple<torch::Tensor, torch::Tensor, int64_t> ret_tuple_non_tensor(const torch::Tensor& self, const torch::Tensor& other) {
+  auto a = self - other;
+  auto b = self + other;
+  return std::tuple<torch::Tensor, torch::Tensor, int64_t>(a, b, 12);
+}
+
+torch::Tensor view_op(const torch::Tensor& self) {
+  return self;
+}
+
+torch::Tensor view_op_with_extra_arg(const torch::Tensor& self, const torch::Tensor& other) {
+  return self;
+}
+
+std::vector<torch::Tensor> ret_tensor_vector_view(const torch::Tensor& self, const torch::Tensor& other) {
+  return {self, self};
+}
+
+std::vector<at::Tensor> ret_tensor_vector(const torch::Tensor& self, const torch::Tensor& other) {
+  std::vector<at::Tensor> out;
+  out.push_back(self + other);
+  out.push_back(self - other);
+  return out;
+}
+
+torch::Tensor tensorlist_op(const torch::Tensor& self, at::TensorList other) {
+  const auto& res = self.clone();
+  for (const auto& t : other) {
+      res.add_(t);
+  }
+  return res;
+}
+
+#define REGISTER_TEST_OP(name, schema, fn)                                               \
+  auto m = MAKE_TORCH_LIBRARY(_test);                                                    \
+  m.def(schema);                                                                         \
+  auto m_autograd = MAKE_TORCH_LIBRARY_IMPL(_test, Autograd);                            \
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);                                      \
+  auto m_inplaceorview = MAKE_TORCH_LIBRARY_IMPL(_test, ADInplaceOrView);                \
+  m_cpu.impl(name, c10::DispatchKey::CPU, TORCH_FN(fn));                                 \
+  m_autograd.impl(name, c10::DispatchKey::Autograd, autogradNotImplementedFallback());   \
+  m_inplaceorview.impl(name, c10::DispatchKey::ADInplaceOrView, autogradNotImplementedInplaceOrViewFallback());
+
+template <typename F>
+void assertBasicChecks(F op) {
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  auto c = torch::tensor({1.}, {torch::kFloat32});
+
+  // If any inputs require grad,
+  auto out1 = op(a, b);
+  ASSERT_THROWS_WITH(out1.backward(), "is not implemented");
+
+  // # Should not have grad_fn if none require grad
+  auto out2 = op(b, c);
+  ASSERT_THROWS_WITH(out2.backward(), "element 0 of tensors does not require grad and does not have a grad_fn");
+
+  // TODO: Forward AD Tests?
+}
+
+} // namespace
+
+// These tests trigger an MSVC bug in the internal arvr build
+// Reproduce with: buck build @arvr/mode/win/opt //xplat/caffe2:autograd_libtorch_test_ovrsource
+// It is probably caused by the lambda, see https://github.com/pytorch/pytorch/issues/48763
+#if !defined(_MSC_VER)
+
+TEST(TestAutogradNotImplementedFallback, RetSingleNonTensor) {
+  REGISTER_TEST_OP("ret_single_non_tensor", "_test::ret_single_non_tensor(Tensor self, Tensor other) -> int", ret_single_non_tensor);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::ret_single_non_tensor", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<int64_t, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+
+  ASSERT_EQ(op(a, b), ret_single_non_tensor(a, b));
+}
+
+TEST(TestAutogradNotImplementedFallback, InplaceOp) {
+  REGISTER_TEST_OP("inplace_op", "_test::inplace_op(Tensor(a!) self, Tensor other) -> Tensor(a!)", inplace_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::inplace_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+
+  // Check in-place
+  ASSERT_THROWS_WITH(op(a, b),
+    "a leaf Variable that requires grad is being used in an in-place operation");
+  op(b, a);
+  a = a.clone();
+  b = b.clone();
+  auto c = op(a, b);
+  ASSERT_TRUE(torch::allclose(c, inplace_op(a, b)));
+
+  // Test in-place on view
+  auto base = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true).clone();
+  auto view = base.view(-1);
+  auto t = torch::tensor({1.}, {torch::kFloat32});
+
+  torch::Tensor v_nograd;
+  {
+    c10::NoGradGuard guard;
+    v_nograd = base.view(-1);
+    op(v_nograd, t);
+  }
+
+  ASSERT_THROWS_WITH(op(v_nograd, t), "A view was created in no_grad mode");
+  ASSERT_EQ(op(view, t).unsafeGetTensorImpl(), view.unsafeGetTensorImpl());
+  ASSERT_THAT(op(view, t).grad_fn()->name(), ::testing::HasSubstr("AsStridedBackward"));
+}
+
+TEST(TestAutogradNotImplementedFallback, DoubleInplaceOp) {
+  REGISTER_TEST_OP("two_arg_inplace_op", "_test::two_arg_inplace_op(Tensor(a!) self, Tensor(b!) other) -> (Tensor(a!), Tensor(b!))", two_arg_inplace_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::two_arg_inplace_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+
+  // Both are modified in-place!
+  ASSERT_THROWS_WITH(op(a, b),
+    "a leaf Variable that requires grad is being used in an in-place operation");
+  ASSERT_THROWS_WITH(op(b, a),
+    "a leaf Variable that requires grad is being used in an in-place operation");
+
+  auto c = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true).clone();
+  auto d = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true).clone();
+
+  auto saved_version_c = c._version();
+  auto saved_version_d = d._version();
+  op(c, d);
+  ASSERT_NE(c._version(), saved_version_c);
+  ASSERT_NE(d._version(), saved_version_d);
+}
+
+TEST(TestAutogradNotImplementedFallback, OptOp) {
+  REGISTER_TEST_OP("opt_op", "_test::opt_op(Tensor self, Tensor? other) -> Tensor", opt_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::opt_op", "");
+  auto op = [&](const torch::Tensor& _1, const c10::optional<torch::Tensor>& _2) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&, const c10::optional<torch::Tensor>&>(opHandle, _1, _2);
+  };
+
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+
+  ASSERT_TRUE(torch::allclose(op(a, b), opt_op(a, b)));
+  ASSERT_TRUE(torch::allclose(op(a, {}), opt_op(a, {})));
+}
+
+TEST(TestAutogradNotImplementedFallback, OutOfPlaceAddition) {
+  REGISTER_TEST_OP("my_custom_op", "_test::my_custom_op(Tensor self, Tensor other) -> Tensor", my_custom_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::my_custom_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+
+  assertBasicChecks(op);
+}
+
+TEST(TestAutogradNotImplementedFallback, RetTupleNonTensor) {
+  REGISTER_TEST_OP("ret_tuple_non_tensor", "_test::ret_tuple_non_tensor(Tensor self, Tensor other) -> (Tensor, Tensor, int)", ret_tuple_non_tensor);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::ret_tuple_non_tensor", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    torch::Tensor out0;
+    torch::Tensor out1;
+    int64_t out2;
+    auto out = callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor, int64_t>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+    std::tie(out0, out1, out2) = std::move(out);
+    return out0;
+  };
+
+  assertBasicChecks(op);
+}
+
+TEST(TestAutogradNotImplementedFallback, ViewOp) {
+  REGISTER_TEST_OP("view_op", "_test::view_op(Tensor(a) self) -> Tensor(a)", view_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::view_op", "");
+  auto op = [&](const torch::Tensor& _1) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&>(opHandle, _1);
+  };
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  auto v = op(b);
+  ASSERT_TRUE(v.is_view());
+  ASSERT_EQ(v._base().unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
+
+  auto b1 = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true).clone();
+  auto v1 = op(b1);
+  ASSERT_TRUE(v1.is_view());
+  ASSERT_EQ(v1._base().unsafeGetTensorImpl(), b1.unsafeGetTensorImpl());
+
+  // Test inplace on view
+  auto t = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+
+  // raise on rebase_history when it refreshes grad_fn
+  ASSERT_THROWS_WITH(v1.add_(t), "which does not have a derivative implemented is forbidden");
+  // base should not be aware of the views, so this is still okay
+  b1.add_(t);
+  ASSERT_THROWS_WITH(v1.grad_fn(), "which does not have a derivative implemented is forbidden");
+}
+
+TEST(TestAutogradNotImplementedFallback, ViewOpWithExtraArg) {
+  REGISTER_TEST_OP("view_op_with_extra_arg", "_test::view_op_with_extra_arg(Tensor(a) self, Tensor other) -> Tensor(a)", view_op_with_extra_arg);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::view_op_with_extra_arg", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  assertBasicChecks(op);
+  auto a = torch::tensor({1.}, {torch::kFloat32});
+  auto b = torch::tensor({2.}, {torch::kFloat32});
+  auto out1 = op(a, b);
+  ASSERT_TRUE(out1.is_view());
+  ASSERT_EQ(out1._base().unsafeGetTensorImpl(), a.unsafeGetTensorImpl());
+}
+
+TEST(TestAutogradNotImplementedFallback, RetTensorVectorView) {
+  REGISTER_TEST_OP("ret_tensor_vector_view", "_test::ret_tensor_vector_view(Tensor(a) self, Tensor other) -> Tensor[](a)", ret_tensor_vector_view);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::ret_tensor_vector_view", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::vector<at::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32});
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  auto out = op(a, b);
+  ASSERT_TRUE(out[0].is_view());
+  ASSERT_EQ(out[0]._base().unsafeGetTensorImpl(), a.unsafeGetTensorImpl());
+  ASSERT_TRUE(out[1].is_view());
+  ASSERT_EQ(out[1]._base().unsafeGetTensorImpl(), a.unsafeGetTensorImpl());
+}
+
+TEST(TestAutogradNotImplementedFallback, DoubleViewOP) {
+  REGISTER_TEST_OP("two_pairs_of_view_op", "_test::two_pairs_of_view_op(Tensor(a) self, Tensor(b) other) -> (Tensor(a), Tensor(b))", two_pairs_of_view_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::two_pairs_of_view_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  ASSERT_THROWS_WITH(op(a, b),
+    "Expected only a single output in the operator schema to have a non-write alias annotation");
+}
+
+TEST(TestAutogradNotImplementedFallback, NonFirstViewOP) {
+  REGISTER_TEST_OP("non_first_view_op", "_test::non_first_view_op(Tensor self, Tensor(b) other) -> (Tensor, Tensor(b))", non_first_view_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::non_first_view_op", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::tuple<torch::Tensor, torch::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2);
+  };
+  auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  ASSERT_THROWS_WITH(op(a, b),
+    "can only create view relationships between the first");
+}
+
+TEST(TestAutogradNotImplementedFallback, RetTensorVector) {
+  REGISTER_TEST_OP("ret_tensor_vector", "_test::ret_tensor_vector(Tensor self, Tensor other) -> Tensor[]", ret_tensor_vector);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::ret_tensor_vector", "");
+  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
+    return callOpUnboxed<std::vector<at::Tensor>, const torch::Tensor&, const torch::Tensor&>(opHandle, _1, _2)[0];
+  };
+  assertBasicChecks(op);
+}
+
+TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
+  REGISTER_TEST_OP("tensorlist_op", "_test::tensorlist_op(Tensor self, Tensor[] other) -> Tensor", tensorlist_op);
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow("_test::tensorlist_op", "");
+  auto op = [&](torch::Tensor _1, at::TensorList _2) {
+    return callOpUnboxed<torch::Tensor, const torch::Tensor&, at::TensorList>(opHandle, _1, _2);
+  };
+
+  auto a = torch::tensor({1.}, {torch::kFloat32});
+  auto b = torch::tensor({1.}, {torch::kFloat32});
+  auto c = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
+  std::vector<torch::Tensor> vec = {b, c};
+  auto out = op(a, vec);
+
+  ASSERT_THROWS_WITH(torch::autograd::grad({out}, {vec[0]}), "One of the differentiated Tensors does not require grad");
+  ASSERT_THROWS_WITH(torch::autograd::grad({out}, {vec[1]}), "is not implemented");
+
+  ASSERT_TRUE(at::allclose(op(a, vec), tensorlist_op(a, vec)));
+}
+
+#endif
+
 
 // TODO add these tests if needed
 // test_once_differentiable

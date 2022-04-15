@@ -1,15 +1,18 @@
 #pragma once
 
+#include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/sparse_bitset.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 // Uses a compressed index representation for faster comparisons
 typedef c10::SparseBitVector<256> MemoryLocations;
@@ -19,6 +22,8 @@ namespace jit {
 struct Element;
 struct Value;
 class MemoryDAG;
+
+using AliasTypeSet = std::vector<TypePtr>;
 
 /**
  * Helper to build up the points-to graph.
@@ -38,13 +43,15 @@ class TORCH_API MemoryDAGBuilder {
 
   void addToContainedElements(Element* contained, Element* container);
 
-  // Make a fresh element (i.e. an element that doesn't point to anything) and
+  // Make a fresh Element (i.e. an Element that doesn't point to anything) and
   // return it.
   Element* makeFreshValue(const Value* v);
 
   friend MemoryDAG;
 
  private:
+  // `MemoryDAGBuilder` builds up `indexToElementMap_`, then uses
+  // the map to construct the `MemoryDAG`
   std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
 
@@ -54,8 +61,8 @@ class TORCH_API MemoryDAGBuilder {
 // AliasDb to provide a higher-level API.
 //
 // We maintain a DAG where:
-//   - Vertices (called "elements") represent values and
-//     other aliasing entities (e.g. like the stuff inside a list)
+//   - Vertices (called "Elements") represent Values and
+//     other aliasing entities (e.g. the stuff inside a list)
 //   - Edges represent a "points-to" relationship.
 //
 // Leaves in this DAG are entities that don't point to anything, and thus
@@ -78,11 +85,11 @@ class TORCH_API MemoryDAG {
 
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Element* a, const Element* b) const;
-  bool mayAlias(Element* a, Element* b) const;
 
-  // Does a hold reference to any memory that is stored in elem, or vice versa?
+  // Does `a` hold reference to any memory that is stored in `b`, or vice versa?
   bool mayContainAlias(const Element* a, const Element* b) const;
-  bool mayContainAlias(Element* a, Element* b) const;
+
+  bool mayContainAlias(const Element* a, const at::ArrayRef<Element*> b) const;
 
   bool mayContainAlias(
       const at::ArrayRef<Element*> a,
@@ -96,12 +103,13 @@ class TORCH_API MemoryDAG {
       MemoryLocations& cont) const;
 
   /**
-   * The following methods are special cases where we need to reach mutate the
+   * The following methods are special cases where we need to mutate the
    * internals of MemoryDAG for efficiency reasons. Don't call them unless you
    * know what you're doing! In particular, don't add new mutating methods
    * without ensuring that you are maintaining cache consistency for memory
    * locations.
    */
+
   // Adding wildcards can trigger extremely expensive cache invalidations. This
   // method adds them in a more efficient cache-aware way.
   void setWildcards(
@@ -111,15 +119,18 @@ class TORCH_API MemoryDAG {
   Element* unsafeMakeFreshValue(const Value* v);
 
  private:
-  bool mayAliasImpl(const Element* a, const Element* b) const;
-  bool mayContainAliasImpl(const Element* contained, const Element* container)
-      const;
+  const MemoryLocations& getAllContainedMemoryLocations(
+      const Element* elem) const;
+  void collectAllContainedMemoryLocationsImpl(
+      const Element* elem,
+      MemoryLocations& cont) const;
   std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
 
-// `Element` represents the vertex in the points-to graph. It represents
-// anything that could have an aliasing relationship, mostly IR `Value`s, but
-// also the "inside of a list", or wildcards.
+// `Element` represents a vertex in the points-to graph. It represents
+// anything that could have an aliasing relationship--mostly IR
+// `Value`s, but also wildcards or the type inside a container (e.g. `T`
+// in `List[T]`)
 struct Element {
   Element(const Value* value_, unsigned index_);
   // wildcard constructor
@@ -156,6 +167,8 @@ struct Element {
   // A nullopt means that this cache is not yet populated. Since `MemoryDAG` is
   // immutable, this cache should never need to be invalidated.
   mutable c10::optional<MemoryLocations> cachedMemoryLocations_;
+
+  mutable c10::optional<MemoryLocations> cachedAllContainedMemoryLocations_;
 };
 
 } // namespace jit

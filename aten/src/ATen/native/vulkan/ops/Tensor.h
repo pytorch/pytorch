@@ -240,7 +240,9 @@ class vTensor final {
     View& operator=(const View&) = delete;
     View(View&&) = default;
     View operator=(View&&) = delete;
-    ~View() = default;
+    ~View();
+
+    void release();
 
     /*
       Buffer

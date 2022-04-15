@@ -2,6 +2,8 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <algorithm>
 #include <bitset>
@@ -31,7 +33,7 @@ RegisterOperators reg(
     {Operator(
          prim::profile,
          [](const Node* node) -> Operation {
-           return [](Stack* stack) {
+           return [](Stack& stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
            };
@@ -40,7 +42,7 @@ RegisterOperators reg(
      Operator(
          prim::profile_ivalue,
          [](const Node* node) -> Operation {
-           return [](Stack* stack) {
+           return [](Stack& stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
            };
@@ -50,9 +52,9 @@ RegisterOperators reg(
          prim::FusionGroup,
          [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
-           return [key](Stack* stack) {
+           return [key](Stack& stack) {
              RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
-             runFusion(key, *stack);
+             runFusion(key, stack);
            };
          },
          aliasAnalysisSpecialCase()),
@@ -67,7 +69,7 @@ RegisterOperators reg(
                      t->castRaw<TensorType>()->requiresGrad().has_value());
                  return *t->castRaw<TensorType>()->requiresGrad();
                });
-           return [rg_props](Stack* stack) {
+           return [rg_props](Stack& stack) {
              auto num_inputs = rg_props.size();
              // Check every input's shape against profiled (expected) shape.
              for (const auto i : c10::irange(num_inputs)) {
@@ -91,14 +93,14 @@ RegisterOperators reg(
            auto outputs_used = fmap(node->outputs(), [](const Value* v) {
              return v->uses().size() > 0;
            });
-           return [=](Stack* stack) {
+           return [=](Stack& stack) {
              RECORD_FUNCTION("chunk", last(stack, 1));
 
              at::Tensor t;
              pop(stack, t);
              auto result = at::chunk(t, chunks, dim);
-             stack->insert(
-                 stack->end(),
+             stack.insert(
+                 stack.end(),
                  std::make_move_iterator(result.begin()),
                  std::make_move_iterator(result.end()));
              // NB: Chunk can sometimes return a smaller number of outputs.
@@ -112,7 +114,7 @@ RegisterOperators reg(
                      " outputs, but got ",
                      num_results);
                }
-               for (int64_t i = num_results; i < chunks; ++i) {
+               for (const auto i : c10::irange(num_results, chunks)) {
                  TORCH_CHECK(
                      !outputs_used[i],
                      "Expected chunk to return at least ",
@@ -121,7 +123,7 @@ RegisterOperators reg(
                      num_results);
                  // We know that the output is unused, so it's ok to push
                  // anything on the stack.
-                 stack->emplace_back();
+                 stack.emplace_back();
                }
              }
            };
@@ -132,7 +134,7 @@ RegisterOperators reg(
          [](const Node* node) -> Operation {
            int64_t raw_dim = node->i(attr::dim);
            int64_t chunks = node->i(attr::chunks);
-           return [raw_dim, chunks](Stack* stack) {
+           return [raw_dim, chunks](Stack& stack) {
              c10::List<int64_t> shape = pop(stack).toIntList();
              c10::List<int64_t> regular_shape = shape.copy();
              c10::List<int64_t> last_shape = shape.copy();
@@ -158,29 +160,15 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
-         [](Stack* stack) {
+         [](Stack& stack) {
            RECORD_FUNCTION("_grad_sum_to_size", std::vector<c10::IValue>());
            IValue self, size;
            pop(stack, self, size);
            if (size.isNone()) {
              push(stack, std::move(self));
            } else {
-             push(stack, at::sum_to(self.toTensor(), size.toIntVector()));
+             push(stack, at::sum_to(self.toTensor(), size.toDimVector()));
            }
-         },
-         aliasAnalysisFromSchema()),
-     // This operator is generated inside the compiler for indexing into
-     // ModuleList without a statically determinable key. Accordingly,
-     // self must be a ModuleType and the output must be an InterfaceType.
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "prim::ModuleContainerIndex.list(Any self, int ind) -> Any"),
-         [](Stack* stack) {
-           IValue ind = pop(stack);
-           IValue module_dict = pop(stack);
-           std::stringstream ss;
-           ss << ind.toInt();
-           push(stack, module_dict.toModule().attr(ss.str()));
          },
          aliasAnalysisFromSchema()),
      // This operator is generated inside the compiler for indexing into
@@ -189,7 +177,7 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "prim::ModuleContainerIndex.dict(Any self, str ind) -> Any"),
-         [](Stack* stack) {
+         [](Stack& stack) {
            IValue ind = pop(stack);
            IValue module_dict = pop(stack);
            push(stack, module_dict.toModule().attr(ind.toStringRef()));
@@ -198,7 +186,7 @@ RegisterOperators reg(
      Operator(
          prim::TypeCheck /* (...)  -> (..., bool) */,
          [](const Node* /* node */) -> Operation {
-           return [](Stack* /* stack */) {
+           return [](Stack& /* stack */) {
              AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
            };
          },
@@ -206,7 +194,7 @@ RegisterOperators reg(
      Operator(
          prim::FallbackGraph,
          [](const Node* node) -> Operation {
-           return [](Stack* stack) {
+           return [](Stack& stack) {
              AT_ERROR(
                  "Must be converted to prim::FunctionCall by replaceFallbackGraphWithFallbackFunction"); // NOLINT
            };
@@ -214,17 +202,17 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::Guard(Tensor(a) t) -> Tensor(a)",
-         [](Stack* stack) { AT_ERROR("Should be replaced by prim::BailOut"); },
+         [](Stack& stack) { AT_ERROR("Should be replaced by prim::BailOut"); },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailOut(...) -> Tensor(a)",
-         [](Stack* /* stack */) {
+         [](Stack& /* stack */) {
            AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
          },
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailoutTemplate() -> int",
-         [](Stack* stack) {
+         [](Stack& stack) {
            // TODO: today, we put a single bailout template at the front to
            // carry the un-optimized graph for bailout nodes to use. Ideally
            // this should never run, but we haven't written the code to remove
@@ -237,7 +225,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? retain_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor?[]",
-         [](Stack* stack) {
+         [](Stack& stack) {
            bool allow_unused = pop(stack).toBool();
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
@@ -277,7 +265,7 @@ RegisterOperators reg(
      // create_graph=True so we use aliasAnalysisConservative for these two OPs
      Operator(
          "aten::backward.TensorList(Tensor[] tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
-         [](Stack* stack) {
+         [](Stack& stack) {
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
            auto grad_tensors = pop(stack);
@@ -298,7 +286,7 @@ RegisterOperators reg(
          aliasAnalysisConservative()),
      Operator(
          "aten::save(t item, str filename) -> ()",
-         [](Stack* stack) {
+         [](Stack& stack) {
            auto filename = pop(stack).toStringRef();
            auto ivalue = pop(stack);
 
@@ -312,7 +300,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::IgnoredPythonOp(...) -> None",
-         [](Stack* stack) {
+         [](Stack& stack) {
            throw JITException(
                "This Python function is annotated to be ignored"
                " and cannot be and has not been included in the exported"
@@ -323,7 +311,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "aten::wait(Future(t) self) -> t",
-         [](Stack* stack) {
+         [](Stack& stack) {
            TORCH_CHECK(
                false, "wait is implemented directly in the interpreter");
          },
@@ -332,7 +320,7 @@ RegisterOperators reg(
 RegisterOperators logging_operators(
     {Operator(
          "prim::AddStatValue(str key, int val) -> ()",
-         [](Stack* stack) {
+         [](Stack& stack) {
            auto val = pop(stack).toInt();
            auto key = pop(stack).toString();
 
@@ -353,7 +341,7 @@ RegisterOperators logging_operators(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::TimePoint() -> int",
-         [](Stack* stack) {
+         [](Stack& stack) {
            auto schema = parseSchema("prim::TimePoint() -> int");
            Node* node = nullptr;
            // TODO: remove this custom tracing code once the custom op bugfix
@@ -364,7 +352,8 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output = autograd::profiler::getTime(/*allow_monotonic=*/true);
+           auto output =
+               torch::profiler::impl::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);
@@ -372,8 +361,7 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-void hashValue(Stack* stack) {
+C10_UNUSED void hashValue(Stack& stack) {
   auto value = pop(stack);
   push(stack, value.hash());
 }
@@ -424,7 +412,7 @@ bool isSortableListOfObjectsOrTuples(
   // best sorting methods. If in the future we need to support heterogenous
   // types inside list, then sorting needs to have runtime sortable checks.
   const size_t n = ivalues.size();
-  for (size_t i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     const IValue& v = ivalues.get(i);
     auto curr_type = v.type();
     if (*curr_type != *type) {
@@ -454,7 +442,7 @@ bool isSortableListOfObjectsOrTuples(
 }
 
 template <bool has_reverse_arg, bool copy_return_list>
-void sort_op(Stack* stack) {
+void sort_op(Stack& stack) {
   bool reverse = has_reverse_arg ? pop(stack).toBool() : false;
   auto g_list = pop(stack).toList();
 
@@ -517,7 +505,7 @@ std::vector<int64_t> _output_size(
     scale_repeated = scale_factors.toDoubleVector();
   }
   std::vector<int64_t> ret;
-  for (size_t i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     ret.push_back(std::floor(input.size(i + 2) * scale_repeated[i]));
   }
   return ret;
@@ -698,20 +686,25 @@ at::Tensor interpolate(
       ") ");
 }
 
-void interpolate_op(Stack* stack) {
+void interpolate_op(Stack& stack) {
   at::Tensor input;
   IValue size;
   IValue scale_factors;
   std::string mode;
   IValue align_corners;
   IValue recompute_scale_factor;
+  bool antialias = false;
   pop(stack,
       input,
       size,
       scale_factors,
       mode,
       align_corners,
-      recompute_scale_factor);
+      recompute_scale_factor,
+      antialias);
+  if (antialias) {
+    throw std::runtime_error("Antialias is not yet supported");
+  }
   at::Tensor res = interpolate(
       input,
       size,
@@ -730,7 +723,7 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   if (int_ivalue.isInt()) {
     scale_factor_double = static_cast<double>(int_ivalue.toInt());
   } else if (int_ivalue.isIntList()) {
-    auto int_list = int_ivalue.toIntVector();
+    auto int_list = int_ivalue.toDimVector();
     std::vector<double> double_vec(int_list.begin(), int_list.end());
     scale_factor_double = double_vec;
   } else if (int_ivalue.isNone()) {
@@ -744,7 +737,7 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   return scale_factor_double;
 }
 
-void upsample_nearest_op(Stack* stack) {
+void upsample_nearest_op(Stack& stack) {
   at::Tensor input;
   IValue size;
   IValue scale_factor_int;
@@ -755,7 +748,7 @@ void upsample_nearest_op(Stack* stack) {
   push(stack, std::move(res));
 }
 
-void upsample_op(Stack* stack) {
+void upsample_op(Stack& stack) {
   at::Tensor input;
   IValue size;
   IValue scale_factor_int;
@@ -773,7 +766,7 @@ void upsample_op(Stack* stack) {
   push(stack, std::move(res));
 }
 
-void upsample_bilinear_op(Stack* stack) {
+void upsample_bilinear_op(Stack& stack) {
   at::Tensor input;
   IValue size;
   IValue scale_factor_int;
@@ -787,19 +780,19 @@ void upsample_bilinear_op(Stack* stack) {
 // These ops are no longer generated, but remain here for BC
 RegisterOperators reg3({
     Operator(
-        "aten::__interpolate.scale_list(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
+        "aten::__interpolate.scale_list(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate.size_list_scale_list(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
+        "aten::__interpolate.size_list_scale_list(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate.size_list(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
+        "aten::__interpolate.size_list(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None, bool antialias = False) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
 

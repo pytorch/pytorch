@@ -6,7 +6,7 @@ from torch import Tensor
 
 class PairwiseDistance(Module):
     r"""
-    Computes the batchwise pairwise distance between vectors :math:`v_1`, :math:`v_2` using the p-norm:
+    Computes the pairwise distance between vectors :math:`v_1`, :math:`v_2` using the p-norm:
 
     .. math ::
         \Vert x \Vert _p = \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}.
@@ -18,9 +18,10 @@ class PairwiseDistance(Module):
         keepdim (bool, optional): Determines whether or not to keep the vector dimension.
             Default: False
     Shape:
-        - Input1: :math:`(N, D)` where `D = vector dimension`
-        - Input2: :math:`(N, D)`, same shape as the Input1
-        - Output: :math:`(N)`. If :attr:`keepdim` is ``True``, then :math:`(N, 1)`.
+        - Input1: :math:`(N, D)` or :math:`(D)` where `N = batch dimension` and `D = vector dimension`
+        - Input2: :math:`(N, D)` or :math:`(D)`, same shape as the Input1
+        - Output: :math:`(N)` or :math:`()` based on input dimension.
+          If :attr:`keepdim` is ``True``, then :math:`(N, 1)` or :math:`(1)` based on input dimension.
     Examples::
         >>> pdist = nn.PairwiseDistance(p=2)
         >>> input1 = torch.randn(100, 128)
@@ -43,7 +44,7 @@ class PairwiseDistance(Module):
 
 
 class CosineSimilarity(Module):
-    r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along dim.
+    r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along `dim`.
 
     .. math ::
         \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}.
@@ -54,7 +55,8 @@ class CosineSimilarity(Module):
             Default: 1e-8
     Shape:
         - Input1: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`
-        - Input2: :math:`(\ast_1, D, \ast_2)`, same shape as the Input1
+        - Input2: :math:`(\ast_1, D, \ast_2)`, same number of dimensions as x1, matching x1 size at dimension `dim`,
+              and broadcastable with x1 at other dimensions.
         - Output: :math:`(\ast_1, \ast_2)`
     Examples::
         >>> input1 = torch.randn(100, 128)

@@ -12,6 +12,15 @@
 #include <hip/hip_fp16.h>
 #endif
 
+#ifdef __SYCL_DEVICE_ONLY__
+#include <CL/sycl.hpp>
+#endif
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
+
 namespace c10 {
 
 /// Constructors
@@ -19,6 +28,8 @@ namespace c10 {
 inline C10_HOST_DEVICE Half::Half(float value) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   x = __half_as_short(__float2half(value));
+#elif defined(__SYCL_DEVICE_ONLY__)
+  x = sycl::bit_cast<uint16_t>(sycl::half(value));
 #else
   x = detail::fp16_ieee_from_fp32_value(value);
 #endif
@@ -29,6 +40,8 @@ inline C10_HOST_DEVICE Half::Half(float value) {
 inline C10_HOST_DEVICE Half::operator float() const {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   return __half2float(*reinterpret_cast<const __half*>(&x));
+#elif defined(__SYCL_DEVICE_ONLY__)
+  return float(sycl::bit_cast<sycl::half>(x));
 #else
   return detail::fp16_ieee_to_fp32_value(x);
 #endif
@@ -294,3 +307,5 @@ class numeric_limits<c10::Half> {
 };
 
 } // namespace std
+
+C10_CLANG_DIAGNOSTIC_POP()

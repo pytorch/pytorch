@@ -129,22 +129,27 @@ void PyTorchStreamReader::init() {
   }
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   version_ = caffe2::stoull(version);
-  AT_ASSERTM(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      version_ >= kMinSupportedFileFormatVersion,
-      "Attempted to read a PyTorch file with version ",
-      c10::to_string(version_),
-      ", but the minimum supported version for reading is ",
-      c10::to_string(kMinSupportedFileFormatVersion),
-      ". Your PyTorch script module file is too old. Please re-export it again.");
-  AT_ASSERTM(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      version_ <= kMaxSupportedFileFormatVersion,
-      "Attempted to read a PyTorch file with version ",
-      version_,
-      ", but the maximum supported version for reading is ",
-      kMaxSupportedFileFormatVersion,
-      ". Your PyTorch installation may be too old.");
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  if (version_ < kMinSupportedFileFormatVersion) {
+    CAFFE_THROW(
+        "Attempted to read a PyTorch file with version ",
+        c10::to_string(version_),
+        ", but the minimum supported version for reading is ",
+        c10::to_string(kMinSupportedFileFormatVersion),
+        ". Your PyTorch script module file is too old. Please regenerate it",
+        " with latest version of PyTorch to mitigate this issue.");
+  }
+
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  if (version_ > kMaxSupportedFileFormatVersion) {
+    CAFFE_THROW(
+        "Attempted to read a PyTorch file with version ",
+        version_,
+        ", but the maximum supported version for reading is ",
+        kMaxSupportedFileFormatVersion,
+        ". The version of your PyTorch installation may be too old, ",
+        "please upgrade PyTorch to latest version to mitigate this issue.");
+  }
 }
 
 void PyTorchStreamReader::valid(const char* what, const char* info) {
@@ -384,13 +389,16 @@ void PyTorchStreamWriter::writeRecord(
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
-  // Rewrites version info
-  std::string version = c10::to_string(version_);
-  version.push_back('\n');
-  if (version_ >= 0x6L) {
-    writeRecord(".data/version", version.c_str(), version.size());
-  } else {
-    writeRecord("version", version.c_str(), version.size());
+  auto allRecords = getAllWrittenRecords();
+  // If no ".data/version" or "version" record in the output model, rewrites version info
+  if(allRecords.find(".data/version") == allRecords.end() && allRecords.find("version") == allRecords.end()) {
+    std::string version = c10::to_string(version_);
+    version.push_back('\n');
+    if (version_ >= 0x6L) {
+      writeRecord(".data/version", version.c_str(), version.size());
+    } else {
+      writeRecord("version", version.c_str(), version.size());
+    }
   }
 
   AT_ASSERT(!finalized_);

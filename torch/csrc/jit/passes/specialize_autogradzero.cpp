@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/irange.h>
 
 namespace torch {
@@ -90,7 +90,7 @@ struct AutogradZeroSpecializer {
     if (!isBackwardGraph()) {
       return;
     }
-    if (getProfilingMode()) {
+    if (getExecutorMode()) {
       if (auto versioning_if = guardSpecializations()) {
         specializeAutogradOps(versioning_if->blocks()[0]);
         GRAPH_DUMP("After versioning graph", graph_);
@@ -142,8 +142,8 @@ struct AutogradZeroSpecializer {
           state_[input] = State::Unknown;
         }
       } else if (
-          tp->isSubtypeOf(TensorType::get()) ||
-          tp->isSubtypeOf(ListType::ofTensors())) {
+          tp->isSubtypeOf(*TensorType::get()) ||
+          tp->isSubtypeOf(*ListType::ofTensors())) {
         state_[input] = State::Nonzero;
       } else {
         state_[input] = State::Unknown;
@@ -446,7 +446,15 @@ struct AutogradZeroSpecializer {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       Node* n = *it;
       if (n->kind() == aten::_grad_sum_to_size) {
-        if (n->input(1)->mustBeNone() || profiled_none_.count(n->input(1))) {
+        bool profiled_none_flag = profiled_none_.count(n->input(1));
+        const Node* node = n->input(1)->node();
+        // propagate profiled none through other profile_ivalue nodes;
+        while (!profiled_none_flag && node->kind() == prim::profile_ivalue) {
+          profiled_none_flag =
+              profiled_none_flag || profiled_none_.count(node->input(0));
+          node = node->input(0)->node();
+        }
+        if (n->input(1)->mustBeNone() || profiled_none_flag) {
           n->output()->replaceAllUsesWith(n->input(0));
           it.destroyCurrent();
         }

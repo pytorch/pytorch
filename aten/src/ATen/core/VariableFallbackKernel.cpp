@@ -65,4 +65,8 @@ TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
       m.fallback(torch::CppFunction::makeFallthrough());
 }
 
+TORCH_LIBRARY_IMPL(_, AutogradHPU, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
 }

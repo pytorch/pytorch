@@ -10,7 +10,7 @@ size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
       std::hash<size_t>()(key.start()) ^ std::hash<size_t>()(key.end()));
 }
 
-c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
+c10::optional<SourceRange> SourceView::findSourceRangeThatGenerated(
     const SourceRange& range) {
   if (!gen_ranges_) {
     return c10::nullopt;
@@ -18,7 +18,7 @@ c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
   return gen_ranges_->findSourceRangeThatGenerated(range);
 }
 
-C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
+void SourceRange::highlight(std::ostream& out) const {
   // Retrieve original SourceRange, if present.
   if (auto orig_source_range = findSourceRangeThatGenerated()) {
     orig_source_range->highlight(out);
@@ -27,7 +27,7 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   print_with_context(out, CONTEXT, true, "");
 }
 
-C10_EXPORT void format_stack_trace(
+void format_stack_trace(
     std::ostream& out,
     const std::vector<StackEntry>& entries) {
   bool has_orig_ranges = false;
@@ -63,17 +63,17 @@ C10_EXPORT void format_stack_trace(
   }
 }
 
-C10_EXPORT void SourceRange::print_with_context(
+void SourceRange::print_with_context(
     std::ostream& out,
     size_t context,
     bool highlight,
     const std::string& funcname) const {
   // This is an empty SourceRange, used as a sentinel value.
-  if (!source_) {
+  if (!source_view_) {
     return;
   }
 
-  const std::string& str = source_->text();
+  c10::string_view str = source_view_->text();
   if (size() == str.size()) {
     // this is just the entire file, not a subset, so print it out.
     // primarily used to print out python stack traces

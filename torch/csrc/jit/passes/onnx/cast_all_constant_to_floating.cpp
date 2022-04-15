@@ -62,6 +62,7 @@ void CastAllConstantToFloating(Block* block) {
         node->outputs().at(0)->replaceAllUsesWith(cast_node->outputs().at(0));
         // add input from constant to cast node
         cast_node->addInput(node->outputs().at(0));
+        cast_node->copyMetadata(node);
       }
     }
   }

@@ -1,14 +1,22 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCGeneral.h>
-#include <THC/THCNumerics.cuh>
-#include <THC/THCAtomics.cuh>  // for gpuAtomicAdd
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/adaptive_avg_pool3d_backward_native.h>
+#include <ATen/ops/adaptive_avg_pool3d_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 #include <algorithm>
 #include <cfloat>
@@ -333,17 +341,17 @@ void adaptive_avg_pool3d_out_cuda_template(
 
   checkAllSameGPU("adaptive_avg_pool3d_cuda", {output_arg, input_arg});
 
-  for (int64_t i = 0; i < input_.ndimension(); i++) {
+  for (int64_t i = 1; i < input_.ndimension(); i++) {
     TORCH_CHECK(
         input_.size(i) > 0,
-        "adaptive_avg_pool3d_cuda(): expected input to have non-empty spatial dimensions, "
+        "adaptive_avg_pool3d_cuda(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input_.sizes(),
         " with dimension ", i, " being empty");
   }
 
   TORCH_CHECK(
       (input_.ndimension() == 4 || input_.ndimension() == 5),
-      "non-empty 4D or 5D (batch mode) tensor expected for input");
+      "adaptive_avg_pool3d_cuda(): Expected 4D or 5D tensor, but got ", input_.sizes());
 
   // the jit sometimes passes output_size.size() == 1
   TORCH_CHECK(
@@ -391,6 +399,10 @@ void adaptive_avg_pool3d_out_cuda_template(
     totalZ = sizeB * sizeD * osizeT;
   }
 
+  if (output.numel() == 0) {
+    return;
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "adaptive_avg_pool3d_cuda", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
@@ -421,6 +433,10 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   const Tensor gradOutput = gradOutput_.contiguous();
 
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return;
+  }
+
   gradInput.zero_();
 
   int64_t sizeD, isizeT, isizeH, isizeW;

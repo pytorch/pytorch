@@ -25,7 +25,7 @@ __global__ void ChannelStatsNCHWCUDAKernel(
   for (int n = threadIdx.x; n < N; n += blockDim.x) {
     for (int hw = threadIdx.y; hw < HxW; hw += blockDim.y) {
       const int index = (n * C + c) * HxW + hw;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
       m_val += __ldg(X + index);
       v_val += __ldg(X + index) * __ldg(X + index);
 #else
@@ -58,7 +58,7 @@ __global__ void ChannelStatsNHWCCUDAKernel(
   T v_val = 0;
   for (int i = threadIdx.x; i < inner_size; i += blockDim.x) {
     const int index = i * C + c;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     m_val += __ldg(X + index);
     v_val += __ldg(X + index) * __ldg(X + index);
 #else

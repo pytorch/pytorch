@@ -12,6 +12,7 @@
 
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
+#include <c10d/debug.h>
 #include <c10d/sequence_num.hpp>
 
 // *************************************************************************
@@ -27,7 +28,7 @@ constexpr auto kProcessGroupDefaultTimeout =
 
 namespace c10d {
 
-constexpr const char * const kSeqNumStoreKey = "SEQ_NUM_STORE_KEY";
+constexpr const char* const kSeqNumStoreKey = "SEQ_NUM_STORE_KEY";
 
 enum class OpType : std::uint8_t {
   BROADCAST = 0,
@@ -54,7 +55,7 @@ enum class OpType : std::uint8_t {
 TORCH_API std::string opTypeToString(OpType opType);
 
 // Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
-TORCH_API bool isP2POp(OpType opType);
+TORCH_API bool isP2POp(OpType opType, bool batchP2P = false);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -201,98 +202,165 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return size_;
   }
 
-  virtual const std::string getBackendName() const {
-    return "undefined";
-  }
+  // Subclasses must override this method to return the backend name
+  virtual const std::string getBackendName() const = 0;
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
-      std::vector<at::Tensor>& data,
-      const BroadcastOptions& opts = BroadcastOptions()) = 0;
+      std::vector<at::Tensor>& /* tensors */,
+      const BroadcastOptions& /* opts */ = BroadcastOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ", getBackendName(), "does not support broadcast"));
+  }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce(
-      std::vector<at::Tensor>& data,
-      const AllreduceOptions& opts = AllreduceOptions()) = 0;
+      std::vector<at::Tensor>& /* tensors */,
+      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ", getBackendName(), "does not support allreduce"));
+  }
 
-  // This will be moved out of ProcessGroup, do not add dependencies on this
-  // function.
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
-      std::vector<at::Tensor>& tensors,
-      const AllreduceCoalescedOptions& opts = AllreduceCoalescedOptions()) = 0;
+      std::vector<at::Tensor>& /* tensors */,
+      const AllreduceCoalescedOptions& /* opts */ = AllreduceCoalescedOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            "does not support allreduce_coalesced"));
+  }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> reduce(
-      std::vector<at::Tensor>& tensors,
-      const ReduceOptions& opts = ReduceOptions()) = 0;
+      std::vector<at::Tensor>& /* tensors */,
+      const ReduceOptions& /* opts */ = ReduceOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str("ProcessGroup ", getBackendName(), "does not support reduce"));
+  }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> allgather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const AllgatherOptions& opts = AllgatherOptions()) = 0;
+      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
+      std::vector<at::Tensor>& /* inputTensors */,
+      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ", getBackendName(), "does not support allgather"));
+  }
 
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
   // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
   // Note: this function will be deprecated in near future.
   virtual c10::intrusive_ptr<ProcessGroup::Work> _allgather_base(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const AllgatherOptions& opts = AllgatherOptions()) = 0;
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            "does not support _allgather_base"));
+  }
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
   // * do not add dependencies on this function,
   // * do not implement it in your ProcessGroup, implement _allgather_base
   //   instead.
   virtual c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
-      std::vector<std::vector<at::Tensor>>& outputTensorLists,
-      std::vector<at::Tensor>& inputTensors,
-      const AllgatherOptions& opts = AllgatherOptions());
-
-  virtual c10::intrusive_ptr<ProcessGroup::Work> gather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const GatherOptions& opts = GatherOptions()) = 0;
-
-  virtual c10::intrusive_ptr<ProcessGroup::Work> scatter(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ScatterOptions& opts = ScatterOptions()) = 0;
-
-  virtual c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ReduceScatterOptions& opts = ReduceScatterOptions()) = 0;
-
-  virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
-      at::Tensor&,
-      at::Tensor&,
-      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
-    TORCH_CHECK(false, "ProcessGroup does not support reduce_scatter_base");
+      std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
+      std::vector<at::Tensor>& /* inputTensors */,
+      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            "does not support allgather_coalesced"));
   }
 
+  virtual c10::intrusive_ptr<ProcessGroup::Work> gather(
+      std::vector<std::vector<at::Tensor>>& /* outputTensors */,
+      std::vector<at::Tensor>& /* inputTensors */,
+      const GatherOptions& /* opts */ = GatherOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str("ProcessGroup ", getBackendName(), "does not support gather"));
+  }
+
+  virtual c10::intrusive_ptr<ProcessGroup::Work> scatter(
+      std::vector<at::Tensor>& /* outputTensors */,
+      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
+      const ScatterOptions& /* opts */ = ScatterOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ", getBackendName(), "does not support scatter"));
+  }
+
+  virtual c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+      std::vector<at::Tensor>& /* outputTensors */,
+      std::vector<std::vector<at::Tensor>>& /* inputTensors */,
+      const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            "does not support reduce_scatter"));
+  }
+
+  virtual c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      const ReduceScatterOptions& /* opts */ = ReduceScatterOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            "does not support _reduce_scatter_base"));
+  }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
-      at::Tensor& outputTensor,
-      at::Tensor& inputTensor,
-      std::vector<int64_t>& outputSplitSizes,
-      std::vector<int64_t>& inputSplitSizes,
-      const AllToAllOptions& opts = AllToAllOptions()) {
-    TORCH_CHECK(false, "ProcessGroup does not support alltoall");
+      at::Tensor& /* outputBuffer */,
+      at::Tensor& /* inputBuffer */,
+      std::vector<int64_t>& /* outputSplitSizes */,
+      std::vector<int64_t>& /* inputSplitSizes */,
+      const AllToAllOptions& /* opts */ = AllToAllOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            "does not support alltoall_base"));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> alltoall(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
+      std::vector<at::Tensor>& /* outputTensors */,
+      std::vector<at::Tensor>& /* inputTensors */,
       const AllToAllOptions& opts = AllToAllOptions()) {
-    TORCH_CHECK(false, "ProcessGroup does not support alltoall");
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ", getBackendName(), "does not support alltoall"));
   }
 
   virtual void monitoredBarrier(
-      const BarrierOptions& /* unused */, bool /* unused */ = false ) {
+      const BarrierOptions& /* unused */,
+      bool /* unused */ = false) {
     auto backendName = getBackendName();
-    TORCH_CHECK(false,
-        c10::str("ProcessGroup ",
-        backendName,
-        " does not support monitoredBarrier, only GLOO supports monitored barrier.")
-    );
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            backendName,
+            " does not support monitoredBarrier, only GLOO supports monitored barrier."));
   }
 
   // Agrees on an initial sequence number for the whole group by having rank 0
@@ -300,50 +368,76 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // for GLOO and NCCL backends currently.
   virtual void setSequenceNumberForGroup() {
     auto backendName = getBackendName();
-    TORCH_CHECK(false,
-        c10::str("ProcessGroup ",
-        backendName,
-        " does not yet support sequence numbers.")
-    );
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            backendName,
+            " does not yet support sequence numbers."));
   }
 
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
   virtual uint64_t getSequenceNumberForGroup() {
-      auto backendName = getBackendName();
-    TORCH_CHECK(false,
-        c10::str("ProcessGroup ",
-        backendName,
-        " does not yet support sequence numbers.")
-    );
+    auto backendName = getBackendName();
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            backendName,
+            " does not yet support sequence numbers."));
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> send(
-      std::vector<at::Tensor>& tensors,
-      int dstRank,
-      int tag) = 0;
+      std::vector<at::Tensor>& /* tensors */,
+      int /* dstRank */,
+      int /* tag */) {
+    TORCH_CHECK(
+        false,
+        c10::str("ProcessGroup ", getBackendName(), "does not support send"));
+  }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> recv(
-      std::vector<at::Tensor>& tensors,
-      int srcRank,
-      int tag) = 0;
+      std::vector<at::Tensor>& /* tensors */,
+      int /* srcRank */,
+      int /* tag */) {
+    TORCH_CHECK(
+        false,
+        c10::str("ProcessGroup ", getBackendName(), "does not support recv"));
+  }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
-      std::vector<at::Tensor>& tensors,
-      int tag) = 0;
+      std::vector<at::Tensor>& /* tensors */,
+      int /* tag */) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ",
+            getBackendName(),
+            "does not support recvAnysource"));
+  }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> barrier(
-      const BarrierOptions& opts = BarrierOptions()) = 0;
+      const BarrierOptions& /* opts */ = BarrierOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ", getBackendName(), "does not support barrier"));
+  }
 
  protected:
+  // Implementations of this interface need to call this to setup
+  // appropriate logging etc.
+  void init();
+
   const int rank_;
   const int size_;
   // Optional sequence number structure for matching collectives.
   c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
-  DistributedDebugLevel dist_debug_level_;
+  DebugLevel dist_debug_level_;
 };
 
 } // namespace c10d

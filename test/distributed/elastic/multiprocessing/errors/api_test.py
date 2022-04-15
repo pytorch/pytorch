@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
+
 import json
 import os
 import shutil
@@ -12,8 +14,7 @@ from torch.distributed.elastic.multiprocessing.errors import (
     ProcessFailure,
     record,
 )
-from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
+from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler
 
 
 class SentinelError(Exception):
@@ -35,7 +36,8 @@ def good_fn():
 @record
 def raise_child_failure_error_fn(name, child_error_file=""):
     if child_error_file:
-        _write_error(SentinelError("foobar"), child_error_file)
+        with mock.patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": child_error_file}):
+            ErrorHandler().record_exception(SentinelError("foobar"))
     pf = ProcessFailure(local_rank=0, pid=997, exitcode=1, error_file=child_error_file)
     raise ChildFailedError(name, {0: pf})
 
@@ -44,10 +46,6 @@ def read_resource_file(resource_file: str) -> str:
     with open(os.path.join(os.path.dirname(__file__), resource_file), "r") as fp:
         return "".join(fp.readlines())
 
-
-if TEST_WITH_TSAN:
-    print("test incompatible with tsan", file=sys.stderr)
-    sys.exit(0)
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
@@ -67,7 +65,10 @@ class ApiTest(unittest.TestCase):
             )
 
     def failure_with_error_file(self, exception):
-        _write_error(exception, self.test_error_file)
+        with mock.patch.dict(
+            os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
+        ):
+            ErrorHandler().record_exception(exception)
         return ProcessFailure(
             local_rank=0, pid=997, exitcode=1, error_file=self.test_error_file
         )
@@ -120,7 +121,10 @@ class ApiTest(unittest.TestCase):
         pf = self.failure_without_error_file(exitcode=138)
         self.assertEqual("<N/A>", pf.signal_name())
         self.assertEqual("<N/A>", pf.error_file)
-        self.assertEqual("Process failed with exitcode 138", pf.message)
+        self.assertEqual(
+            "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html",
+            pf.message,
+        )
 
     def test_child_failed_error(self):
         pf0 = self.failure_with_error_file(exception=SentinelError("rank 0"))
@@ -139,7 +143,7 @@ class ApiTest(unittest.TestCase):
           rank: 0 (local_rank: 0)
           exitcode: 1 (pid: 997)
           error_file: /tmp/ApiTesttbb37ier/error.json
-          msg: "SentinelError: rank 0"
+          traceback: "SentinelError: rank 0"
         =============================================
         Other Failures:
         [1]:
@@ -153,7 +157,7 @@ class ApiTest(unittest.TestCase):
           rank: 2 (local_rank: 0)
           exitcode: 138 (pid: 997)
           error_file: <N/A>
-          msg: "Process failed with exitcode 138"
+          traceback: To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
         *********************************************
         """
         print(ex)

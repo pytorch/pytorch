@@ -7,15 +7,34 @@ import torch.distributed as dist
 
 from . import default_hooks as default
 
+logger = logging.getLogger(__name__)
+
 
 def _orthogonalize(matrix, epsilon=0):
+    """
+    Decide between Gram-Schmidt or QR factorization to orthogonalize the matrix.
+    QR factorization doesn't work with half-precision, but it is usually faster with a rank > 2.
+    """
+    assert len(matrix.shape) == 2 and matrix.shape[1] <= matrix.shape[0]
+
+    rank = matrix.shape[1]
+    dtype = matrix.dtype
+    if rank <= 2 or dtype in [torch.float16, torch.bfloat16]:
+        _orthogonalize_gram_schmidt(matrix, epsilon=epsilon)
+    else:
+        torch.linalg.qr(
+            matrix,
+            out=(
+                matrix,
+                torch.empty(rank, rank, device=matrix.device, dtype=dtype)
+            )
+        )
+
+def _orthogonalize_gram_schmidt(matrix, epsilon=0):
     """
     Applies Gram-Schmidt procedure to orthogonalize a given 2D tensor.
     If epsilon is 0, this is equivalent to `torch.qr(matrix, out=(matrix, _))`,
     """
-    # TODO Consider using Q = torch.orgqr(*torch.geqrf(A)) to compute the Q of the QR _much_ faster
-    # and more reliably.
-    # Works on FP32/64 or complex numbers (does not work for half precision)
     num_cols = matrix.shape[1]
     for i in range(num_cols):
         # Normalize the i'th column.
@@ -28,7 +47,7 @@ def _orthogonalize(matrix, epsilon=0):
             try:
                 col /= torch.norm(col)
             except ZeroDivisionError:
-                logging.error(
+                logger.error(
                     "The matrix to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
                     "as `orthogonalization_epsilon` in PowerSGD state."
                 )
@@ -74,11 +93,11 @@ def _report_compression_stats(bucket, state):
     Report compression stats at the frequency of `compression_stats_logging_frequency` specified in PowerSGD state.
     """
     if (
-        bucket.is_the_last_bucket_to_allreduce()
+        bucket.is_last()
         and state.iter >= state.next_stats_report
     ):
         stats = state.compression_stats()
-        logging.info(
+        logger.info(
             "Compression stats: iter {}, total before compression {}, total after compression {}, "
             "rate {}".format(state.iter, stats[1], stats[2], stats[0])
         )
@@ -151,7 +170,7 @@ class PowerSGDState(object):
         random_seed=0,
         compression_stats_logging_frequency=10_000,
     ):
-        logging.info(
+        logger.info(
             "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; "
             "min_compression_rate = {}; orthogonalization_epsilon = {}; use_error_feedback = {}; warm_start = {}; "
             "random_seed = {}; compression_stats_logging_frequency = {}".format(
@@ -229,11 +248,11 @@ class PowerSGDState(object):
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
-        if bucket.is_the_last_bucket_to_allreduce():
+        if bucket.is_last():
             self.iter += 1
 
         if self.iter == self.start_powerSGD_iter:
-            logging.info(
+            logger.info(
                 "Start to apply PowerSGD after {} iterations.".format(self.iter)
             )
 
@@ -261,7 +280,7 @@ class PowerSGDState(object):
 
 def powerSGD_hook(
     state: PowerSGDState, bucket: dist.GradBucket
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     r"""
     This DDP communication hook implements PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
@@ -306,7 +325,7 @@ def powerSGD_hook(
             To tune the compression configs, mainly need to tune ``matrix_approximation_rank``, ``start_powerSGD_iter``
             and ``min_compression_rate``.
         bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
-            Note that since DDP comm hook only supports single process single device mode at this time,
+            Note that since DDP comm hook only supports single process single device mode,
             only exactly one tensor is stored in this bucket.
 
     Returns:
@@ -322,7 +341,7 @@ def powerSGD_hook(
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensor()
+    input_tensor = bucket.buffer()
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
@@ -334,14 +353,14 @@ def powerSGD_hook(
     dtype = input_tensor.dtype
 
     # Incorporate the error from the previous state into the gradients.
-    bucket_index = bucket.get_index()
+    bucket_index = bucket.index()
     input_tensor_cp = None
     total_length = input_tensor.shape[0]
     if state.use_error_feedback:
         if bucket_index in state.error_dict:
             input_tensor.add_(state.error_dict[bucket_index])
         else:
-            logging.info(
+            logger.info(
                 "A zero tensor of length {} that represents local error is created.".format(
                     total_length
                 )
@@ -356,7 +375,7 @@ def powerSGD_hook(
         input_tensor_cp = torch.clone(input_tensor).detach()
 
     # Unflatten the input tensor into per-parameter tensors, for layer-wise compression.
-    tensors = bucket.get_per_parameter_tensors()
+    tensors = bucket.gradients()
 
     # Step I: Divide all the tensors into two groups,
     # one will be compressed before allreduce and the other will be directly allreduced without compression.
@@ -400,7 +419,7 @@ def powerSGD_hook(
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
-            logging.info(
+            logger.info(
                 "Allocating contiguous memory of length {} for Ps, and of length {} for Qs, respectively.".format(
                     total_Ps_size, total_Qs_size
                 )
@@ -537,7 +556,7 @@ def powerSGD_hook(
 
 def batched_powerSGD_hook(
     state: PowerSGDState, bucket: dist.GradBucket
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     r"""
     This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
@@ -581,7 +600,7 @@ def batched_powerSGD_hook(
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
             To tune the compression configs, mainly need to tune ``matrix_approximation_rank`` and ``start_powerSGD_iter``.
         bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
-            Note that since DDP comm hook only supports single process single device mode at this time,
+            Note that since DDP comm hook only supports single process single device mode,
             only exactly one tensor is stored in this bucket.
 
     Returns:
@@ -596,7 +615,7 @@ def batched_powerSGD_hook(
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
-    input_tensor = bucket.get_tensor()
+    input_tensor = bucket.buffer()
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
@@ -620,13 +639,13 @@ def batched_powerSGD_hook(
     _report_compression_stats(bucket, state)
 
     # Incorporate the error from the previous state into the gradients.
-    bucket_index = bucket.get_index()
+    bucket_index = bucket.index()
     input_tensor_cp = None
     if state.use_error_feedback:
         if bucket_index in state.error_dict:
             input_tensor.add_(state.error_dict[bucket_index])
         else:
-            logging.info(
+            logger.info(
                 "A zero tensor of length {} that represents local error is created.".format(
                     padded_total_length
                 )
@@ -647,7 +666,7 @@ def batched_powerSGD_hook(
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
-            logging.info(
+            logger.info(
                 "Initializing low-rank tensors P and Q, each of which has a shape of {} x {}.".format(
                     square_side_length, state.matrix_approximation_rank
                 )

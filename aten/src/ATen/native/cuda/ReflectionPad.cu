@@ -1,11 +1,26 @@
-#include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
+#include <ATen/cuda/Atomic.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-// keeping THC headers for gpuAtomicAdd
-#include <THC/THCAtomics.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/reflection_pad1d_native.h>
+#include <ATen/ops/reflection_pad2d_native.h>
+#include <ATen/ops/reflection_pad3d_native.h>
+#include <ATen/ops/reflection_pad1d_backward_native.h>
+#include <ATen/ops/reflection_pad2d_backward_native.h>
+#include <ATen/ops/reflection_pad3d_backward_native.h>
+#endif
 
 #include <thrust/pair.h>
 
@@ -328,7 +343,7 @@ void reflection_pad2d_out_template(
         for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
           int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
 
-          dim3 grid_size(at::cuda::ATenCeilDiv(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
+          dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
 
           reflection_pad2d_out_kernel<<<
             grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -400,7 +415,7 @@ void reflection_pad2d_backward_out_template(
         for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
           int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
 
-          dim3 grid_size(at::cuda::ATenCeilDiv(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
+          dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), block_y_size, block_z_size);
 
           reflection_pad2d_backward_out_kernel<<<
             grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -597,7 +612,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
           for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
             int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
 
-            dim3 grid_size(at::cuda::ATenCeilDiv(output_plane_size, static_cast<int64_t>(256)), \
+            dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), \
                            block_y_size, block_z_size);
 
             reflection_pad3d_out_kernel<<<
@@ -650,7 +665,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
           for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
             int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
 
-            dim3 grid_size(at::cuda::ATenCeilDiv(output_plane_size, static_cast<int64_t>(256)), \
+            dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), \
                            block_y_size, block_z_size);
 
             reflection_pad3d_backward_out_kernel<<<

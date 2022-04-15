@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 #include <cmath>
 
@@ -174,7 +175,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
 
 // This function helps to convert the Conv1D dimensions usable by the Conv2d op.
 constexpr int64_t kConv1dSqueezeDim = 0;
-static torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
+static C10_UNUSED torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
                                              int64_t base_value) {
   TORCH_CHECK(arg.size() > 0, "Argument must have elements.");
   torch::List<int64_t> result({arg.get(0), base_value});
@@ -193,7 +194,7 @@ static torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
 inline void HandleWeightsSaturation(int64_t N, float* weight) {
   const float kFp16Max = RawUint16ToFp16(0x7BFF);
   bool found_out_of_range = false;
-  for (int64_t i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     bool saturate = CheckAndSaturate<float>(kFp16Max, weight + i);
     if (saturate) {
       found_out_of_range = true;

@@ -61,7 +61,8 @@ Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
       schema.is_vararg(),
       schema.is_varret());
   function->setSchema(new_schema);
-  return function->graph()->addInput(name)->setType(attr.type());
+  return toGraphFunction(*function).graph()->addInput(name)->setType(
+      attr.type());
 }
 
 std::vector<IValue> getParamAttributes(
@@ -76,6 +77,7 @@ std::vector<IValue> getParamAttributes(
   WithInsertPoint guard(m);
 
   std::vector<IValue> parameterIValues = {};
+  std::unordered_set<Node*> nodesToDestroy;
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // node n can be destroyed
@@ -142,7 +144,7 @@ std::vector<IValue> getParamAttributes(
           // This attr is constant for ONNX.
           auto attrVal = tryInsertConstant(*graph, attr);
           n->output()->replaceAllUsesWith(*attrVal);
-          n->destroy();
+          nodesToDestroy.emplace(n);
         }
       }
     }
@@ -155,6 +157,9 @@ std::vector<IValue> getParamAttributes(
           std::begin(nextParameterIValues),
           std::end(nextParameterIValues));
     }
+  }
+  for (auto n : nodesToDestroy) {
+    n->destroy();
   }
   return parameterIValues;
 }
@@ -173,7 +178,7 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
   Module moduleClone = module.clone(true);
   Method method = moduleClone.get_method("forward");
   auto function = &method.function();
-  auto graph = function->graph();
+  auto graph = toGraphFunction(*function).graph();
   // A map of names and values of referenced attributes, to avoid duplicates.
   std::unordered_map<std::string, Value*> attrValues = {};
 

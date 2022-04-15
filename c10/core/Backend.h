@@ -32,6 +32,7 @@ enum class Backend {
   HIP,
   VE,
   FPGA,
+  IPU,
   XPU,
   SparseCPU,
   SparseCUDA,
@@ -40,7 +41,7 @@ enum class Backend {
   SparseHIP,
   SparseVE,
   SparseXPU,
-  MSNPU,
+  ORT,
   XLA,
   Vulkan,
   Metal,
@@ -66,8 +67,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::VE;
   } else if (t == DispatchKey::FPGA) {
     return Backend::FPGA;
-  } else if (t == DispatchKey::MSNPU) {
-    return Backend::MSNPU;
+  } else if (t == DispatchKey::ORT) {
+    return Backend::ORT;
   } else if (t == DispatchKey::XLA || t == DispatchKey::AutogradXLA) {
     return Backend::XLA;
   } else if (t == DispatchKey::Lazy || t == DispatchKey::AutogradLazy) {
@@ -96,6 +97,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedCPU;
   } else if (t == DispatchKey::QuantizedCUDA) {
     return Backend::QuantizedCUDA;
+  } else if (t == DispatchKey::IPU || t == DispatchKey::AutogradIPU) {
+    return Backend::IPU;
   } else if (t == DispatchKey::XPU || t == DispatchKey::AutogradXPU) {
     return Backend::XPU;
   } else if (t == DispatchKey::SparseXPU) {
@@ -123,12 +126,14 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::VE;
     case Backend::FPGA:
       return DispatchKey::FPGA;
-    case Backend::MSNPU:
-      return DispatchKey::MSNPU;
+    case Backend::ORT:
+      return DispatchKey::ORT;
     case Backend::XLA:
       return DispatchKey::XLA;
     case Backend::Lazy:
       return DispatchKey::Lazy;
+    case Backend::IPU:
+      return DispatchKey::IPU;
     case Backend::XPU:
       return DispatchKey::XPU;
     case Backend::SparseXPU:
@@ -178,8 +183,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::VE;
     case Backend::FPGA:
       return DeviceType::FPGA;
-    case Backend::MSNPU:
-      return DeviceType::MSNPU;
+    case Backend::ORT:
+      return DeviceType::ORT;
     case Backend::XLA:
       return DeviceType::XLA;
     case Backend::Lazy:
@@ -196,6 +201,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CPU;
     case Backend::SparseCsrCUDA:
       return DeviceType::CUDA;
+    case Backend::IPU:
+      return DeviceType::IPU;
     case Backend::XPU:
     case Backend::SparseXPU:
     case Backend::QuantizedXPU:
@@ -235,8 +242,10 @@ static inline const char* toString(Backend b) {
       return "FPGA";
     case Backend::XPU:
       return "XPU";
-    case Backend::MSNPU:
-      return "MSNPU";
+    case Backend::IPU:
+      return "IPU";
+    case Backend::ORT:
+      return "ORT";
     case Backend::XLA:
       return "XLA";
     case Backend::Lazy:

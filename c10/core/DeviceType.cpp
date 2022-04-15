@@ -25,8 +25,8 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "ve" : "VE";
     case DeviceType::FPGA:
       return lower_case ? "fpga" : "FPGA";
-    case DeviceType::MSNPU:
-      return lower_case ? "msnpu" : "MSNPU";
+    case DeviceType::ORT:
+      return lower_case ? "ort" : "ORT";
     case DeviceType::XLA:
       return lower_case ? "xla" : "XLA";
     case DeviceType::Lazy:
@@ -43,6 +43,8 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "meta" : "META";
     case DeviceType::HPU:
       return lower_case ? "hpu" : "HPU";
+    case DeviceType::IPU:
+      return lower_case ? "ipu" : "IPU";
     default:
       TORCH_CHECK(
           false,
@@ -75,7 +77,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::HIP:
     case DeviceType::VE:
     case DeviceType::FPGA:
-    case DeviceType::MSNPU:
+    case DeviceType::ORT:
     case DeviceType::XLA:
     case DeviceType::Lazy:
     case DeviceType::MLC:
@@ -84,6 +86,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::XPU:
     case DeviceType::Meta:
     case DeviceType::HPU:
+    case DeviceType::IPU:
       return true;
     default:
       return false;

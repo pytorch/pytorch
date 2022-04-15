@@ -2,6 +2,7 @@
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -48,7 +49,7 @@ bool needTrimGrad(Node* n) {
 bool isDifferentiable(const Node* n) {
   // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
-      "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
+      "aten::_slow_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> Tensor",
       "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
   };
 
@@ -59,7 +60,7 @@ bool isDifferentiable(const Node* n) {
 
   if (n->kind() == prim::Constant || n->kind() == prim::AutogradZero ||
       n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk ||
-      n->kind() == prim::profile)
+      n->kind() == prim::profile || n->kind() == prim::profile_ivalue)
     return true;
 
   if (n->isMemberOf(differentiable_ops))
@@ -157,7 +158,7 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     new_outputs = unpackOutputs(new_outputs);
     auto outputs = node->outputs();
     AT_ASSERT(new_outputs.size() == outputs.size() + 1);
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       new_outputs.at(i)->setType(outputs[i]->type());
       outputs[i]->replaceAllUsesWith(new_outputs.at(i));
     }
@@ -217,7 +218,7 @@ class GradientHelper {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* input_list;
       if (grad_values.size() == 1 &&
-          grad_values[0]->type()->isSubtypeOf(ListType::ofTensors())) {
+          grad_values[0]->type()->isSubtypeOf(*ListType::ofTensors())) {
         input_list = grad_values[0];
       } else {
         input_list =
@@ -235,18 +236,16 @@ class GradientHelper {
       return {};
     } else if (
         node->matches(
-            "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)")) {
+            "aten::_slow_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> Tensor")) {
       auto graph = node->owningGraph();
       auto backward_value = graph->insert(
-          aten::thnn_conv2d_backward,
+          aten::_slow_conv2d_backward,
           {grad_values.at(0),
            inputs.at(0),
            inputs.at(1),
            node->namedInput(attr::kernel_size),
            node->namedInput(attr::stride),
            node->namedInput(attr::padding),
-           outputs.at(1),
-           outputs.at(2),
            graph->insertConstant(c10::List<bool>({true, true, true}))});
       // graph->insert returns a tuple automatically if multiple outputs are
       // returned. So unpack them again.

@@ -56,6 +56,7 @@ cc_library(
             "onnx/defs/math/*.cc",
             "onnx/defs/nn/*.cc",
             "onnx/defs/object_detection/*.cc",
+            "onnx/defs/optional/*.cc",
             "onnx/defs/quantization/*.cc",
             "onnx/defs/reduction/*.cc",
             "onnx/defs/rnn/*.cc",

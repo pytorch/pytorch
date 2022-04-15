@@ -124,4 +124,4 @@ either as an input blob with blob names or as an argument.
     .Arg("blob_names", "names of the blobs to wait for (optional)")
     .Input(0, "handler", "unique_ptr<StoreHandler>")
     .Input(1, "names", "names of the blobs to wait for (optional)");
-}
+} // namespace caffe2

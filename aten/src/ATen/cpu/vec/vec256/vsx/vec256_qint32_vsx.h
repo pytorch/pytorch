@@ -29,7 +29,7 @@
 
 namespace at {
 namespace vec {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 template <>
 struct Vectorized<c10::qint32> {
@@ -194,18 +194,6 @@ struct Vectorized<c10::qint32> {
     veci1 = vec_min(veci1, vmax);
 
     return {veci0, veci1};
-  }
-
-  void dump() const {
-    std::cout << _vec0[0] << " ";
-    std::cout << _vec0[1] << " ";
-    std::cout << _vec0[2] << " ";
-    std::cout << _vec0[3] << " ";
-    std::cout << _vec1[0] << " ";
-    std::cout << _vec1[1] << " ";
-    std::cout << _vec1[2] << " ";
-    std::cout << _vec1[3] << " ";
-    std::cout << std::endl;
   }
 
   DEFINE_MEMBER_OP(operator==, c10::qint32, vec_cmpeq)

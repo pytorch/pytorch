@@ -34,7 +34,31 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
+  if (input.dim() == 3 && bias->defined() && input.is_contiguous()) {
+    // Also hit the fused path for contiguous 3D input.
+    const auto input_sizes = input.sizes();
+    const auto result = at::addmm(*bias, input.view({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
+    return result.view({input_sizes[0], input_sizes[1], result.size(1)});
+  }
   auto output = at::matmul(input, weight.t());
+  if (bias->defined()) {
+    output.add_(*bias);
+  }
+  return output;
+}
+
+Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, Tensor& output) {
+  TORCH_CHECK(!input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
+  // See [Note: hacky wrapper removal for optional tensor]
+  auto bias = bias_opt.has_value()
+              ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+              : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+
+  if (input.dim() == 2 && bias->defined()) {
+    // Fused op is marginally faster.
+    return at::addmm_out(output, *bias, input, weight.t());
+  }
+  output = at::matmul_out(output, input, weight.t());
   if (bias->defined()) {
     output.add_(*bias);
   }

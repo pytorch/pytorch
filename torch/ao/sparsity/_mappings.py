@@ -1,4 +1,5 @@
 import torch
+import torch.ao.nn
 
 def get_static_sparse_quantized_mapping():
     _static_sparse_quantized_mapping = dict({

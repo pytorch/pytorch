@@ -1,7 +1,10 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 
 import torch
+import warnings
 from typing import List, Any, Dict, Tuple, Optional
 
 # Make the helper files in test/ importable
@@ -271,3 +274,50 @@ class TestIsinstance(JitTestCase):
             torch.jit.script(dict_no_contained_type)
         with self.assertRaisesRegex(RuntimeError, err_msg,):
             dict_no_contained_type(x)
+
+    def test_tuple_rhs(self):
+        def fn(x: Any):
+            assert torch.jit.isinstance(x, (int, List[str]))
+            assert not torch.jit.isinstance(x, (List[float], Tuple[int, str]))
+            assert not torch.jit.isinstance(x, (List[float], str))
+
+        self.checkScript(fn, (2,))
+        self.checkScript(fn, (["foo", "bar", "baz"],))
+
+    def test_nontuple_container_rhs_throws_in_eager(self):
+        def fn1(x: Any):
+            assert torch.jit.isinstance(x, [int, List[str]])
+
+        def fn2(x: Any):
+            assert not torch.jit.isinstance(x, {List[str], Tuple[int, str]})
+
+        err_highlight = "must be a type or a tuple of types"
+
+        with self.assertRaisesRegex(RuntimeError, err_highlight):
+            fn1(2)
+
+        with self.assertRaisesRegex(RuntimeError, err_highlight):
+            fn2(2)
+
+    def test_empty_container_throws_warning_in_eager(self):
+        def fn(x: Any):
+            torch.jit.isinstance(x, List[int])
+
+        with warnings.catch_warnings(record=True) as w:
+            x: List[int] = []
+            fn(x)
+            self.assertEqual(len(w), 1)
+
+        with warnings.catch_warnings(record=True) as w:
+            x: int = 2
+            fn(x)
+            self.assertEqual(len(w), 0)
+
+    def test_empty_container_special_cases(self):
+        # Should not throw "Boolean value of Tensor with no values is
+        # ambiguous" error
+        torch._jit_internal.check_empty_containers(torch.Tensor([]))
+
+        # Should not throw "Boolean value of Tensor with more than
+        # one value is ambiguous" error
+        torch._jit_internal.check_empty_containers(torch.rand(2, 3))

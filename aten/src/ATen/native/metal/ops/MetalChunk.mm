@@ -60,7 +60,7 @@ std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("chunk", TORCH_FN(chunk));
+  m.impl(TORCH_SELECTIVE_NAME("aten::chunk"), TORCH_FN(chunk));
 };
 
 }

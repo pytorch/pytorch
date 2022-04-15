@@ -17,21 +17,15 @@ static inline void trim(std::string& s) {
           [](unsigned char ch) { return !std::isspace(ch); })
           .base(),
       s.end());
-  for (int64_t i = 0; i < s.size(); ++i) {
-    if (s[i] == '\n') {
+  for (size_t i = 0; i < s.size(); ++i) {
+    while (i < s.size() && s[i] == '\n') {
       s.erase(i, 1);
-      i--;
     }
   }
-  for (int64_t i = 0; i < s.size(); ++i) {
+  for (size_t i = 0; i < s.size(); ++i) {
     if (s[i] == ' ') {
-      for (int64_t j = i + 1; j < s.size(); j++) {
-        if (s[j] == ' ') {
-          s.erase(j, 1);
-          j--;
-        } else {
-          break;
-        }
+      while (i + 1 < s.size() && s[i + 1] == ' ') {
+        s.erase(i + 1, 1);
       }
     }
   }
@@ -74,6 +68,7 @@ std::pair<tensor_list, tensor_list> runGradient(
 
 std::shared_ptr<Graph> build_lstm();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph();
+std::shared_ptr<Graph> build_mobile_export_with_out();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_with_vararg();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_nested();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_non_const();
@@ -88,6 +83,13 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs);
 bool almostEqual(const at::Tensor& a, const at::Tensor& b);
 
 bool exactlyEqual(const at::Tensor& a, const at::Tensor& b);
+bool exactlyEqual(
+    const std::vector<at::Tensor>& a,
+    const std::vector<at::Tensor>& b);
+
+std::vector<at::Tensor> runGraph(
+    std::shared_ptr<Graph> graph,
+    const std::vector<at::Tensor>& inputs);
 
 std::pair<at::Tensor, at::Tensor> lstm(
     at::Tensor input,

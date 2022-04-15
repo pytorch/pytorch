@@ -8,7 +8,7 @@ steps:
     connectionType: 'connectedServiceName'
     serviceConnection: circleciconn
     method: 'POST'
-    headers: '{"Content-Type":"application/json", "BranchName":"$(_TARGET_BRANCH_TO_CHECK)", "JobName":"$(TARGET_CIRCLECI_BUILD_PR)", "PRNumber":"$(_NUMBER_BUILD_PR)", "TargetCommit":"$(_TARGET_COMMIT)", "PlanUrl":"$(System.CollectionUri)", "ProjectId":"$(System.TeamProjectId)", "HubName":"$(System.HostType)", "PlanId":"$(System.PlanId)", "JobId":"$(System.JobId)", "TimelineId":"$(System.TimelineId)", "TaskInstanceId":"$(System.TaskInstanceId)", "AuthToken":"$(System.AccessToken)"}'
+    headers: '{"Content-Type":"application/json", "BranchName":"$(_TARGET_BRANCH_TO_CHECK)", "JobName":"$(TARGET_CIRCLECI_BUILD_PR)", "PRNumber":"$(_TARGET_PR_NUMBER)", "TargetCommit":"$(_TARGET_COMMIT)", "PlanUrl":"$(System.CollectionUri)", "ProjectId":"$(System.TeamProjectId)", "HubName":"$(System.HostType)", "PlanId":"$(System.PlanId)", "JobId":"$(System.JobId)", "TimelineId":"$(System.TimelineId)", "TaskInstanceId":"$(System.TaskInstanceId)", "AuthToken":"$(System.AccessToken)"}'
     body: ''
     urlSuffix: 'api/JobStatus'
     waitForCompletion: true

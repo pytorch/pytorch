@@ -1,5 +1,9 @@
 #pragma once
 
+#include <c10/core/ScalarType.h>
+#include <c10/core/QScheme.h>
+#include <c10/util/intrusive_ptr.h>
+
 namespace at {
 
 class Tensor;
@@ -51,7 +55,7 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
    */
   virtual QScheme qscheme() const = 0;
 
-  ScalarType scalar_type() {
+  ScalarType scalar_type() const {
     return scalar_type_;
   }
 
@@ -66,9 +70,14 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
   virtual Tensor dequantize(const Tensor& t) = 0;
 
   /**
+   * dequantize a quantized Tensor into a float Tensor, out= variant
+   */
+  virtual Tensor& dequantize_out(Tensor& out, const Tensor& t) = 0;
+
+  /**
    * Compare against `other` for equality.
    */
-  virtual bool equalTo(QuantizerPtr other) = 0;
+  virtual bool equalTo(QuantizerPtr other) const = 0;
 };
 
 } // namespace at

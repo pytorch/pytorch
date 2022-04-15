@@ -51,19 +51,19 @@ Tensor& neuronKernel_(Tensor& input, MPSCNNNeuron* neuron) {
   return input;
 }
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor relu(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   return neuronKernel(input, [MPSCNNNeuronOp relu]);
 }
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor& relu_(Tensor& input) {
   TORCH_CHECK(input.is_metal());
   return neuronKernel_(input, [MPSCNNNeuronOp relu]);
 }
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor sigmoid(const Tensor& input) {
   return neuronKernel(input, [MPSCNNNeuronOp sigmoid]);
 }
@@ -74,20 +74,18 @@ Tensor& hardsigmoid_(Tensor& input) {
   return neuronKernel_(input, [MPSCNNNeuronOp hardSigmoid]);
 }
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor tanh(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   return neuronKernel(input, [MPSCNNNeuronOp tanh]);
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("tanh", tanh);
-  m.impl("relu", TORCH_FN(relu));
-  m.impl("relu_", TORCH_FN(relu_));
-  m.impl("sigmoid", TORCH_FN(sigmoid));
-  if (@available(iOS 11.0, *)) {
-    m.impl("hardsigmoid_", TORCH_FN(hardsigmoid_));
-  }
+  m.impl(TORCH_SELECTIVE_NAME("aten::tanh"), tanh);
+  m.impl(TORCH_SELECTIVE_NAME("aten::relu"), TORCH_FN(relu));
+  m.impl(TORCH_SELECTIVE_NAME("aten::relu_"), TORCH_FN(relu_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sigmoid"), TORCH_FN(sigmoid));
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid_"), TORCH_FN(hardsigmoid_));
 };
 
 }

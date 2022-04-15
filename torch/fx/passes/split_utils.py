@@ -5,8 +5,29 @@ import torch.fx
 import torch.nn as nn
 from torch.fx.graph import map_arg
 from .tools_common import NodeList, NodeSet
+from torch.fx._compatibility import compatibility
 
 
+@compatibility(is_backward_compatible=False)
+def getattr_recursive(obj, name):
+    for layer in name.split("."):
+        if hasattr(obj, layer):
+            obj = getattr(obj, layer)
+        else:
+            return None
+    return obj
+
+
+@compatibility(is_backward_compatible=False)
+def setattr_recursive(obj, attr, value):
+    if "." not in attr:
+        setattr(obj, attr, value)
+    else:
+        layer = attr.split(".")
+        setattr_recursive(getattr(obj, layer[0]), ".".join(layer[1:]), value)
+
+
+@compatibility(is_backward_compatible=False)
 @dataclass
 class Component:
     """
@@ -32,6 +53,7 @@ class Component:
     gm: Optional[torch.fx.GraphModule] = None
 
 
+@compatibility(is_backward_compatible=False)
 class HolderModule(nn.Module):
     """
     HolderModule is used to copy all the attributes from original module to submodules
@@ -44,6 +66,7 @@ class HolderModule(nn.Module):
             self.add_module(k, v)
 
 
+@compatibility(is_backward_compatible=False)
 def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphModule:
     """
     Splits a GraphModule using tags on its graph nodes. We honor the order of
@@ -291,6 +314,6 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
     # then we need to make sure get_attr is copied to the new graph.
     for x in flatten(output_node.args[0]):
         if x.op == "get_attr":
-            setattr(main_root, x.name, getattr(gm, x.name))
+            setattr(main_root, x.name, getattr(gm, x.target))  # type: ignore[arg-type]
 
     return torch.fx.GraphModule(main_root, main_g)

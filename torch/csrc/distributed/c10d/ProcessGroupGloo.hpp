@@ -91,9 +91,13 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
    private:
     void finishWorkGloo();
     void finishWorkGlooError(std::exception_ptr eptr);
+    inline void recordAsyncWorkProfilingInfo(
+        const char* profilingTitle,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors);
 
     const std::vector<std::vector<at::Tensor>> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
+    std::function<void()> recordFunctionBeforeCallback_;
   };
 
   // Wrap c10d store as Gloo store
@@ -313,6 +317,10 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
+
+  int getNumThreads() {
+    return options_->threads;
+  }
 
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;

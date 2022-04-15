@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 import re
-from typing import Optional, Sequence, List, Tuple, Match
+from typing import Optional, Sequence, Set, List, Tuple, Match
 
 from tools.codegen.api import cpp
 from tools.codegen.api.types import Binding, NamedCType
-from tools.codegen.model import NativeFunction, Type, SchemaKind
+from tools.codegen.model import NativeFunction, Type, SchemaKind, NativeFunctionsViewGroup
 from tools.codegen.utils import IDENT_REGEX
 
 # Represents a saved attribute involved in backward calculation.
@@ -44,6 +44,9 @@ class Derivative:
     # Saved outputs that are referenced by the formula.
     saved_outputs: Tuple[SavedAttribute, ...]
 
+    # Gradients that are referenced by name in the formula.
+    named_gradients: Set[str]
+
 # Represents a forward formula that calculates forward derivatives
 # for one tensor.
 @dataclass(frozen=True)
@@ -53,13 +56,13 @@ class ForwardDerivative:
     # replaced by the automatically generated formula.
     formula: str
 
-    # Name of the output argument for which this formula calculates forward
+    # Name of the output arguments for which this formula calculates forward
     # derivatives
-    var_name: str
+    var_names: Tuple[str, ...]
 
-    # Type of the output argument for which this formula calculates forward
+    # Type of the output arguments for which this formula calculates forward
     # derivatives
-    var_type: Type
+    var_types: Tuple[Type, ...]
 
     # Inputs for which the forward derivatives are required for this formula
     required_inputs_fw_grad: Optional[Tuple[str, ...]]
@@ -115,6 +118,14 @@ class DifferentiabilityInfo:
     # The union of 'saved_outputs' of all 'derivatives'.
     all_saved_outputs: Sequence[SavedAttribute]
 
+    # All named gradients that are available for use, in the same
+    # order as in the grads vector.
+    available_named_gradients: Sequence[str]
+
+    # The named gradients that are used in any of the derivatives.
+    # Invariant: all(name in available_named_gradients for name in used_named_gradients)
+    used_named_gradients: Set[str]
+
     # The function's input arguments for which it calculates derivatives.
     # It's the union of 'var_names' of all 'derivatives', sorted by the
     # argument order in the function schema.
@@ -126,9 +137,50 @@ class DifferentiabilityInfo:
     # Raw data read from derivatives.yaml.
     output_differentiability: Optional[List[bool]]
 
+    # output_differentiability in derivatives.yaml can be a list of
+    # conditions that express if the output is differentiable. In this case,
+    # the number of conditions must match the number of outputs
+    # (NB: we only support one condition right now).
+    # output_differentiability gets populated with True for each condition,
+    # while output_differentiability_conditions gets populated with the conditions
+    output_differentiability_conditions: Optional[List[str]]
+
     @property
     def has_derivatives(self) -> bool:
         return len(self.args_with_derivatives) > 0
+
+    # Generates a new DifferentiabilityInfo using the exact same set of derivative information,
+    # but with a new operator name.
+    # This is used when generating "copy" variants of view ops,
+    # which are able to use the exact same derivative formula as the original view op
+    # See Note [Codegen'd {view}_copy Operators]
+    def create_view_copy_from_view_derivative(self, g: NativeFunctionsViewGroup) -> Optional['DifferentiabilityInfo']:
+        if g.view_copy is None:
+            return None
+        f = g.view_copy
+
+        name_split_by_period = self.name.split('.', maxsplit=2)
+        # Append a "_copy" to the base name of the operator (but keep the overload name the same)
+        view_copy_name = f'{name_split_by_period[0]}_copy.' + '.'.join(name_split_by_period[1:])
+        view_copy_op_name = None if self.op is None else f'{self.op}_copy'
+
+        return DifferentiabilityInfo(
+            # Use the "_copy" version of name/func/op
+            name=view_copy_name,
+            func=f,
+            op=view_copy_op_name,
+            # But keep all derivative info the same
+            derivatives=self.derivatives,
+            forward_derivatives=self.forward_derivatives,
+            all_saved_inputs=self.all_saved_inputs,
+            all_saved_outputs=self.all_saved_outputs,
+            available_named_gradients=self.available_named_gradients,
+            used_named_gradients=self.used_named_gradients,
+            args_with_derivatives=self.args_with_derivatives,
+            non_differentiable_arg_names=self.non_differentiable_arg_names,
+            output_differentiability=self.output_differentiability,
+            output_differentiability_conditions=self.output_differentiability_conditions,
+        )
 
 def uses_ident(info: Optional[DifferentiabilityInfo], ident: str) -> bool:
     if info is None:
@@ -316,16 +368,51 @@ def match_differentiability_info(
                     required_primals = required_primals + ("self",) if required_primals else ("self",)
 
                 if not is_exact_match:
-                    # Make sure that the forward grad is modified inplace when the original formula
-                    # is out of place
-                    formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
+                    # NOTE [In-place forward AD formula Optimization]
+                    #
+                    # This optimization transforms the formula to directly do inplace, i.e.
+                    # instead of self_t.copy_(self_t.op()) we do self_t.op_() when the following are met:
+                    #
+                    # 1) the formula satisfies the pattern: "self_t.op(*args)"
+                    # 2) "op" in (1) needs to be the same as the op the derivative is for
+                    #
+                    # (2) may seem too strict, but currently the only ops that satisfy (1) also satisfy (2)
+                    # If there is a need, we can relax (2) to allow any op that has an in-place variant
+                    is_single_method_on_self_t = False
+                    match = re.fullmatch(r'self_t.([\w]*)\((.*)\)', formula)
+                    if match:
+                        op_name, between_parens = match.group(1), match.group(2)
+
+                        # We want to...
+                        #   Match: self_t.op1(other_p.op2(arg))
+                        #   Avoid: self_t.op1(args) + self_t.op2(args)
+                        #   Avoid: self_t.op1(other_p.op2(arg)) + self_t.op2(args)
+                        def check_parens_nest_level_gt_zero(s: str) -> bool:
+                            level = 1
+                            for ch in s:
+                                if ch == ")":
+                                    level -= 1
+                                    if level == 0:
+                                        return False
+                                if ch == "(":
+                                    level += 1
+                            return True
+                        is_single_method_on_self_t = check_parens_nest_level_gt_zero(between_parens)
+                    directly_do_inplace = is_single_method_on_self_t and op_name == info.name
+
+                    if directly_do_inplace:
+                        formula = f"self_t_raw.defined() ? self_t_raw.{op_name}_({between_parens}) : {formula}"
+                    else:
+                        # Make sure that the forward grad is modified inplace when the original formula
+                        # is out of place
+                        formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
 
                 required_original_self_value = bool(re.search(IDENT_REGEX.format("original_self_p"), formula))
 
                 forward_derivatives = [ForwardDerivative(
                     formula=formula,
-                    var_name="self",
-                    var_type=fw_info.var_type,
+                    var_names=("self",),
+                    var_types=fw_info.var_types,
                     required_inputs_fw_grad=fw_info.required_inputs_fw_grad,
                     required_inputs_primal=required_primals,
                     required_original_self_value=required_original_self_value,
@@ -352,6 +439,9 @@ def gen_differentiable_outputs(fn: NativeFunctionWithDifferentiabilityInfo) -> L
         for name, ret in zip(cpp.return_names(f), f.func.returns)]
     output_differentiability = info.output_differentiability if info else None
     if output_differentiability is not None:
+        if len(output_differentiability) != len(outputs):
+            raise RuntimeError(f"The length of output_differentiability ({len(output_differentiability)}), "
+                               f"does not match the number of outputs ({len(outputs)}).")
         differentiable_outputs: List[DifferentiableOutput] = []
         if False in output_differentiability and f.func.kind() == SchemaKind.inplace:
             raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")

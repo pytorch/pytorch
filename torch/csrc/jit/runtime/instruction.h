@@ -52,6 +52,24 @@ namespace jit {
   _(CREATE_OBJECT, "T") /* create an object of type X */                       \
   _(ISINSTANCE, "TI") /* check object is one of  types[X:X+N]  */              \
   _(TUPLE_SLICE, "II") /* slice tup[X:(X+N)] */                                \
+  _(TUPLE_INDEX, "") /* get the value from a tuple at that index */            \
+  _(RAISE_EXCEPTION, "") /* throws the exception from Python */                \
+  _(DICT_INDEX, "") /* gets the value from the dict for given key */           \
+  _(UNCHECKED_CAST, "") /* perform an unchecked cast operation */              \
+  _(__IS__, "") /* performs `is` operator from Python */                       \
+  _(UN_INITIALIZED,                                                            \
+    "") /* sets default values to varaibles that are  un initialized */        \
+  _(__ISNOT__, "") /* performs `is not` operator from Python  */               \
+  _(FORMAT, "I") /* performs string format function `f strings` or `{}.format` \
+                     the number of inputs in stored in X */                    \
+  _(DEVICE, "") /* invokes aten::device for a Tensor */                        \
+  _(DTYPE, "") /* invokes aten::dtype for a Tensor */                          \
+  _(DIM, "") /* invokes aten::dim for a Tensor */                              \
+  _(__NOT__, "") /* performs `not` operator from Python  */                    \
+  _(TO_LIST, "") /* convert the input to a list */                             \
+  _(NUM_TO_TENSOR,                                                             \
+    "") /* performs the conversion of a number/scalar to Tensor */             \
+  _(IS_CUDA, "") /* invokes aten::is_cuda for a Tensor */                      \
   _(FORK, "CN") /* launch a thread to run code entry x with N inputs  */       \
   _(WARN, "I") /* emit a warning with line information */                      \
   _(ENTER, "EN") /* enter scope of a contextmanager */                         \
@@ -72,8 +90,11 @@ struct Instruction {
   Instruction(OpCode op, int32_t X, uint16_t N)
       : op(op), unused(0), N(N), X(X) {}
 };
+std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 bool isOpSupportedInMobile(OpCode op);
+char const* toString(OpCode op);
+std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 } // namespace jit
 } // namespace torch

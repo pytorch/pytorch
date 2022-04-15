@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/GridSamplerUtils.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -30,6 +31,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 #include <ATen/cuda/Exceptions.h>
 
 #include <ATen/TensorUtils.h>
+#include <c10/util/irange.h>
 
 // TODO: descriptor checking
 
@@ -41,7 +43,7 @@ namespace {
 void setSamplerDescriptor(SpatialTransformerDescriptor& desc, cudnnDataType_t dataType, const at::Tensor& tensor)
 {
   int inputSize[4] = {0};
-  for (int i = 0; i < tensor.dim(); ++i) {
+  for (const auto i : c10::irange(tensor.dim())) {
     inputSize[i] = (int) tensor.size(i);
   }
   desc.set(dataType, 4, inputSize);
@@ -66,6 +68,13 @@ void checkGridSize(CheckedFrom c, TensorArg grid, TensorArg input)
 Tensor cudnn_grid_sampler_forward(
     const Tensor& input_t, const Tensor& grid_t)
 {
+  // See NOTE [ grid_sampler Native Functions ].
+  // Add checks here in case this is called instead of grid_sampler.
+  check_grid_sampler_common(input_t, grid_t);
+  TORCH_CHECK(
+    cond_cudnn_grid_sampler(input_t, grid_t),
+    "Invalid arguments to cudnn_grid_sampler_forward");
+
   auto input_contig = contiguousIfZeroInStrides(input_t);
   auto grid_contig = grid_t.contiguous();
   TensorArg input{ input_contig, "input", 1 },
@@ -105,6 +114,13 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
     const Tensor& input_t, const Tensor& grid_t,
     const Tensor& grad_output_t)
 {
+  // See NOTE [ grid_sampler Native Functions ].
+  // Add checks here in case this is called instead of grid_sampler.
+  check_grid_sampler_common(input_t, grid_t);
+  TORCH_CHECK(
+    cond_cudnn_grid_sampler(input_t, grid_t),
+    "Invalid arguments to cudnn_grid_sampler_backward");
+
   auto input_contig = contiguousIfZeroInStrides(input_t);
   auto grid_contig = grid_t.contiguous();
   auto grad_output_contig = contiguousIfZeroInStrides(grad_output_t);

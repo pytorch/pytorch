@@ -89,8 +89,10 @@ struct IntegerValueRefiner {
         }
         // one constant value one not - we are looking for the pattern
         // where y.1 is refined to the existing block output %one_constant
-        auto other_const_value =
-            constant_as<int64_t>(other_if_block->outputs().at(i));
+        auto other_output = other_if_block->outputs().at(i);
+        auto other_const_value = other_output->type()->cast<IntType>()
+            ? constant_as<int64_t>(other_output)
+            : c10::nullopt;
         if (!other_const_value ||
             block_output->node()->kind() == prim::Constant) {
           continue;

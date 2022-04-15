@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -28,7 +29,7 @@ static c10::optional<std::vector<ChunkOutput>> getChunkOutputs(Node* chunk) {
         return c10::nullopt;
       }
       auto unpack_outputs = list_use.user->outputs();
-      for (size_t i = 0; i < unpack_outputs.size(); ++i) {
+      for (const auto i : c10::irange(unpack_outputs.size())) {
         outputs.emplace_back(unpack_outputs[i], i);
       }
     } else {
@@ -59,6 +60,7 @@ static void CanonicalizeOps(Block* block) {
           inputs.at(1) = new_other;
           Value* new_output =
               graph->insertNode(graph->create(it->kind(), inputs))->output();
+          new_output->node()->copyMetadata(*it);
           new_output->copyMetadata(it->output());
           it->output()->replaceAllUsesWith(new_output);
         }
@@ -78,6 +80,7 @@ static void CanonicalizeOps(Block* block) {
             graph->insertNode(graph->create(prim::ConstantChunk, chunks));
         node->addInput(self);
         node->i_(attr::chunks, chunks)->i_(attr::dim, dim);
+        node->copyMetadata(*it);
         for (const auto& orig_out : *orig_outputs) {
           orig_out.val->replaceAllUsesWith(node->outputs()[orig_out.offset]);
           node->outputs()[orig_out.offset]->setType(orig_out.val->type());

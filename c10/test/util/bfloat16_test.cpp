@@ -1,4 +1,8 @@
+// clang-format off
 #include <c10/util/BFloat16.h>
+#include <c10/util/BFloat16-math.h>
+#include <c10/util/irange.h>
+// clang-format on
 #include <gtest/gtest.h>
 
 namespace {
@@ -21,7 +25,7 @@ float float_from_bytes(uint32_t sign, uint32_t exponent, uint32_t fraction) {
 TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float in[100];
-  for (int i = 0; i < 100; ++i) {
+  for (const auto i : c10::irange(100)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
     in[i] = i + 1.25;
   }
@@ -31,7 +35,7 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float out[100];
 
-  for (int i = 0; i < 100; ++i) {
+  for (const auto i : c10::irange(100)) {
     bfloats[i].x = c10::detail::bits_from_f32(in[i]);
     out[i] = c10::detail::f32_from_bits(bfloats[i].x);
 
@@ -44,7 +48,7 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
 TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float in[100];
-  for (int i = 0; i < 100; ++i) {
+  for (const auto i : c10::irange(100)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
     in[i] = i + 1.25;
   }
@@ -54,7 +58,7 @@ TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   float out[100];
 
-  for (int i = 0; i < 100; ++i) {
+  for (const auto i : c10::irange(100)) {
     bfloats[i].x = c10::detail::round_to_nearest_even(in[i]);
     out[i] = c10::detail::f32_from_bits(bfloats[i].x);
 
@@ -137,6 +141,22 @@ TEST(BFloat16Math, Subtraction) {
 
   float res = c10::detail::f32_from_bits(b.x);
   EXPECT_EQ(res, expected);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BFloat16Math, NextAfterZero) {
+  const c10::BFloat16 zero{0};
+
+  auto check_nextafter =
+      [](c10::BFloat16 from, c10::BFloat16 to, c10::BFloat16 expected) {
+        c10::BFloat16 actual = std::nextafter(from, to);
+        // Check for bitwise equality!
+        ASSERT_EQ(actual.x ^ expected.x, uint16_t{0});
+      };
+  check_nextafter(zero, zero, /*expected=*/zero);
+  check_nextafter(zero, -zero, /*expected=*/-zero);
+  check_nextafter(-zero, zero, /*expected=*/zero);
+  check_nextafter(-zero, -zero, /*expected=*/-zero);
 }
 
 float BinaryToFloat(uint32_t bytes) {

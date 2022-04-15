@@ -227,6 +227,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         dc,
     ):
         assume(group == 1 or dilation == 1)
+        assume(order == "NHWC" or input_channels_per_group <= 8 and output_channels_per_group <= 8)
 
         X, W, b = generate_conv_inputs(
             stride,

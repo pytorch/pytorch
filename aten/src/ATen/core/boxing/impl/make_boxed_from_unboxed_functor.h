@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
@@ -79,7 +80,7 @@ class OperatorHandle;
  *
  * See below for how to register this kernel with PyTorch.
  */
-struct TORCH_API OperatorKernel {
+struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
   virtual ~OperatorKernel() = default;
 };
 
@@ -179,6 +180,13 @@ namespace impl {
       "You tried to register a kernel with an unsupported input type: ArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<c10::OptionalArrayRef<T>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value,
+      "You tried to register a kernel with an unsupported input type: OptionalArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
+  };
+
   template<class T, size_t N, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<std::array<T, N>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
@@ -230,6 +238,10 @@ namespace impl {
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<c10::optional<T>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<c10::OptionalArrayRef<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
 
   template<class Key, class Value, bool AllowDeprecatedTypes>
@@ -360,8 +372,19 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
     // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that
-    // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but impliticly convertible
+    // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but implicitly convertible
     // to optional<ArrayRef<T>>.
+    static OptionalArray<T> call(IValue& v) {
+      return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
+    }
+  };
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<OptionalArrayRef<T>, AllowDeprecatedTypes> final {
+    // If an argument is OptionalArrayRef<T>, convert the IValue to an
+    // optional<std::vector<T>> and pass that to the operator. OptionalArray<T>
+    // is basically a optional<std::vector<T>> but implicitly convertible to
+    // OptionalArrayRef<T>
     static OptionalArray<T> call(IValue& v) {
       return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
     }

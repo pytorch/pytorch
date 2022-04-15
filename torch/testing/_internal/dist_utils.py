@@ -7,7 +7,7 @@ from typing import Tuple
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import _rref_context_get_debug_info
-from torch.testing._internal.common_utils import FILE_SCHEMA
+from torch.testing._internal.common_utils import FILE_SCHEMA, TEST_WITH_TSAN
 
 
 if not dist.is_available():
@@ -16,30 +16,6 @@ if not dist.is_available():
 
 
 INIT_METHOD_TEMPLATE = FILE_SCHEMA + "{file_name}"
-
-
-def single_threaded_process_group_agent(f):
-    """
-    Forces ProcessGroupAgent to use only a single thread in the ThreadPool for
-    sending and processing requests.
-    """
-
-    @wraps(f)
-    def wrapper(self, *args, **kwargs):
-        backend_type = self.rpc_backend
-        if backend_type == rpc.backend_registry.BackendType["PROCESS_GROUP"]:
-            self.rpc_backend_options = (
-                rpc.backend_registry.construct_rpc_backend_options(
-                    self.rpc_backend,
-                    init_method=self.init_method,
-                    num_send_recv_threads=1,
-                )
-            )
-        return_value = f(self, *args, **kwargs)
-        return return_value
-
-    return wrapper
-
 
 def dist_init(
     old_test_method=None,
@@ -85,13 +61,19 @@ def dist_init(
         self.worker_id = self.rank
         self.setup_fault_injection(faulty_messages, messages_to_delay)
 
+        rpc_backend_options = self.rpc_backend_options
         if setup_rpc:
+            if TEST_WITH_TSAN:
+                # TSAN runs much slower.
+                rpc_backend_options.rpc_timeout = rpc.constants.DEFAULT_RPC_TIMEOUT_SEC * 5
+                rpc.constants.DEFAULT_SHUTDOWN_TIMEOUT = 60
+
             rpc.init_rpc(
                 name="worker%d" % self.rank,
                 backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
-                rpc_backend_options=self.rpc_backend_options,
+                rpc_backend_options=rpc_backend_options,
             )
 
         return_value = old_test_method(self, *arg, **kwargs)
@@ -195,8 +177,6 @@ def wait_until_owners_and_forks_on_rank(
 
 def initialize_pg(init_method, rank: int, world_size: int) -> None:
     # This is for tests using `dist.barrier`.
-    # For `RpcAgent` other than `ProcessGroupAgent`,
-    # no `_default_pg` is initialized.
     if not dist.is_initialized():
         dist.init_process_group(
             backend="gloo",

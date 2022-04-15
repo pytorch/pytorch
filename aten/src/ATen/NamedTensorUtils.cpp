@@ -225,7 +225,7 @@ std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor) {
   }
   std::vector<Dimname> outnames;
   auto tensor_names = tensor.names();
-  for (int64_t d = 0; d < tensor.dim(); d++) {
+  for (const auto d : c10::irange(tensor.dim())) {
     if (tensor.sizes()[d] != 1) {
       outnames.push_back(tensor_names[d]);
     }
@@ -242,7 +242,7 @@ std::vector<Dimname> compute_diagonal_outnames(
   }
   std::vector<Dimname> outnames;
   auto tensor_names = tensor.names();
-  for (int64_t d = 0; d < tensor.dim(); d++) {
+  for (const auto d : c10::irange(tensor.dim())) {
     if (d == dim1 || d == dim2) {
       continue;
     }
@@ -459,7 +459,7 @@ std::vector<Dimname> broadcast_to_outnames(
   return unify_from_right(reference_names, tensor_names);
 }
 
-std::vector<Dimname> compute_cat_outnames(TensorList tensors) {
+std::vector<Dimname> compute_cat_outnames(ITensorListRef tensors) {
   if (!at::has_names(tensors)) {
     return {};
   }
@@ -511,7 +511,7 @@ std::vector<Dimname> compute_cdist_outnames(
 }
 
 std::vector<Dimname> compute_bmm_outnames(
-    Tensor& result,
+    const Tensor& result,
     const Tensor& self,
     const Tensor& other) {
   if (!result.has_names() && !self.has_names() && !other.has_names()) {
@@ -521,7 +521,7 @@ std::vector<Dimname> compute_bmm_outnames(
 }
 
 std::vector<Dimname> compute_baddbmm_outnames(
-    Tensor& result,
+    const Tensor& result,
     const Tensor& self,
     const Tensor& other,
     const Tensor& bias) {

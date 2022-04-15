@@ -21,6 +21,8 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
+from torch.autograd.profiler_legacy import profile as _profile
+
 def rref_isinstance(rref, cls_to_check):
     return isinstance(rref.local_value(), cls_to_check)
 
@@ -151,8 +153,11 @@ def record_function_on_caller_rpc_async(dst_worker_name: str, block: str) -> Ten
     t: Tensor = torch.ones(1)
     with record_function(block) as rf:
         fut1 = rpc.rpc_async(dst_worker_name, script_add_ones, (t, ))
+        # Extra operator call to avoid de-duplication of the next async call
+        # see https://github.com/pytorch/pytorch/pull/62710#discussion_r694680279
+        zero = torch.zeros_like(t)
         fut2 = rpc.rpc_async(dst_worker_name, script_add_ones, (t, ))
-        res = fut1.wait() + fut2.wait()
+        res = fut1.wait() + fut2.wait() + zero
     return res
 
 
@@ -189,12 +194,12 @@ def script_fork_wait_throw(invalue):
 
 
 @torch.jit.script
-def call_rpc_with_profiling(handle: Tensor, dst_worker_name: str) -> Tensor:
+def call_rpc_with_profiling(record: torch.classes.profiler._RecordFunction, dst_worker_name: str) -> Tensor:
     # Call rpc_async from within ScriptFunction and ensure that we can attach
     # profiling callbacks. Note that handle here is a Tensor representation of
     # RecordFunction.
     fut = rpc.rpc_async(dst_worker_name, one_arg, (torch.tensor(1),))
-    torch.ops.profiler._call_end_callbacks_on_jit_fut(handle, fut)
+    torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
     ret = fut.wait()
     return ret
 
@@ -205,12 +210,12 @@ def call_rpc_torchscript_with_record_function(dst_worker_name: str, block: str) 
 
 
 @torch.jit.script
-def call_fork_with_profiling(handle: Tensor) -> Tensor:
+def call_fork_with_profiling(record: torch.classes.profiler._RecordFunction) -> Tensor:
     # Call fork from within ScriptFunction and ensure that we can attach profiling
     # callbacks to the resulting future. Note that handle here is a Tensor
     # representation of RecordFunction.
     fut = torch.jit._fork(one_arg, torch.tensor(1))
-    torch.ops.profiler._call_end_callbacks_on_jit_fut(handle, fut)
+    torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
     ret = fut.wait()
     return ret
 
@@ -1133,7 +1138,7 @@ class JitRpcTest(
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
         # future from within a script function that calls rpc_async
         if self.rank == 0:
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 prof_key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
                     torch._jit_internal._qualified_name(one_arg),
@@ -1141,7 +1146,7 @@ class JitRpcTest(
                     "worker1",
                 )
                 with torch.autograd.profiler.record_function(prof_key) as rf:
-                    ret = call_rpc_with_profiling(rf.handle, "worker1")
+                    ret = call_rpc_with_profiling(rf.record, "worker1")
             # TODO: Can't get a reliable time for this profiling event since
             # it's hard to estimate the execution time on the remote end for non-UDFs.
             # This can be resolved by https://github.com/pytorch/pytorch/issues/36272.
@@ -1159,7 +1164,7 @@ class JitRpcTest(
             dst_worker_name = worker_name(dst_rank)
             args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
             kwargs = {}
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 script_rpc_async_call(
                     dst_worker_name, args, kwargs
                 )
@@ -1203,7 +1208,7 @@ class JitRpcTest(
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker_name = worker_name(dst_rank)
             block_scope = "foo"
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 # Runs 2 rpc_async calls within JIT under record_function.
                 record_function_on_caller_rpc_async(dst_worker_name, block_scope)
 
@@ -1243,7 +1248,7 @@ class JitRpcTest(
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker_name = worker_name(dst_rank)
             block_scope = "foo"
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 call_rpc_torchscript_with_record_function(dst_worker_name, block_scope)
 
             # Need to call below to populate CPU children.
@@ -1272,7 +1277,7 @@ class JitRpcTest(
         # Ensures that we can call rf._call_end_callbacks_on_future on a jit
         # future in python eager mode with torch.jit.fork
         sleep_interval = 1
-        with torch.autograd.profiler.profile() as prof:
+        with _profile() as prof:
             with torch.autograd.profiler.record_function("foo") as rf:
                 fut = torch.jit._fork(sleep, sleep_interval)
                 rf._call_end_callbacks_on_future(fut)
@@ -1288,9 +1293,9 @@ class JitRpcTest(
     def test_call_fork_in_jit_with_profiling(self):
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
         # future from within a script function with torch.jit.fork
-        with torch.autograd.profiler.profile() as prof:
+        with _profile() as prof:
             with torch.autograd.profiler.record_function("foo") as rf:
-                ret = call_fork_with_profiling(rf.handle)
+                ret = call_fork_with_profiling(rf.record)
 
         events = prof.function_events
         function_event = get_function_event(events, "foo")
