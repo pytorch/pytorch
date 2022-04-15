@@ -114,7 +114,7 @@ class TestFSDPExecOrder(FSDPTest):
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
-    @parametrize("iters_before_flip", [1, 3])
+    @parametrize("iters_before_path_change", [1, 3])
     def test_invalid_later_iter_fwd_order(
         self,
         sharding_strategy: ShardingStrategy,

@@ -2271,15 +2271,18 @@ class FullyShardedDataParallel(nn.Module):
         and on subsequent iterations, this warns the user if the forward pass
         execution order differs from that of the first iteration, meaning that
         we can no longer guarantee correct execution.
+
+        Executing in ``no_sync()`` does not affect the execution order check
+        for ``FULL_SHARD`` and ``SHARD_GRAD_OP``: (1) Being in ``no_sync()``
+        in the first iteration does not yield a different all-gather sequence,
+        and (2) being in ``no_sync()`` in a later iteration does not give
+        false positive warnings since the all-gather sequence still matches the
+        first iteration sequence (for ``FULL_SHARD``) or the first iteration
+        sequence's prefix (for ``SHARD_GRAD_OP``).
         """
-        # if not self._require_backward_grad_sync:
-        #     # TODO: Not yet implemented
-        #     return
         eod = self._exec_order_data
         param_index = eod.param_to_param_index[param]
         if not eod.is_first_iter:
-            if self._require_backward_grad_sync:
-                return
             # Warn possibly multiple times for the same iteration since the
             # number of warnings may be informative in debugging
             if param_index != eod.param_order[eod.index]:
