@@ -92,4 +92,7 @@ _GENERATED_CPP = [
     "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
     "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
     "torch/csrc/autograd/generated/python_variable_methods.cpp",
+    "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
+    "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
+    "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ]
