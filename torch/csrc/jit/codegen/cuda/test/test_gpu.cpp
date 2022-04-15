@@ -16927,6 +16927,55 @@ TEST_F(NVFuserTest, FusionWarpReduceUnrollOuterLoop_CUDA) {
       fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
 }
 
+// Repro of issue #1579
+TEST_F(NVFuserTest, FusionWarpReducePredication_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> shape1 = {1024};
+  std::vector<int64_t> shape2 = {50};
+
+  auto tv0 = makeConcreteTensor(shape1);
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {0});
+  fusion.addOutput(tv1);
+
+  auto tv2 = makeConcreteTensor(shape2);
+  fusion.addInput(tv2);
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+  auto tv4 = sum(tv3, {0});
+  auto tv5 = add(tv4, IrBuilder::create<Double>(1));
+  fusion.addOutput(tv5);
+
+  // Just to fill the smem buffer by a thread block of 1024 threads
+  // with some values
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // Make the tv4_rf reduction a warp reduction to trigger the
+  // bug. Since the smem buffer is filled with some values due to the
+  // reduction of tv1, those values would be used by predicated-out
+  // threads.
+  tv4->split(-1, 10);
+  auto tv4_rf = tv4->rFactor({-1});
+  tv4_rf->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4_rf->axis(-1)->padToMultipleOfWarp();
+
+  tv4_rf->computeAt(tv4, 1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape1, options);
+  auto t2 = at::randn(shape2, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t2});
+  auto cg_outputs = fe.runFusion({t0, t2});
+
+  auto t1 = t0.sum({0});
+  auto t4 = (t2 + 1).sum({0}) + 1;
+
+  testValidate(&fusion, cg_outputs, {t0, t2}, {t1, t4}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionSegfaultReduction_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
