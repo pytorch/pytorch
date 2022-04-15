@@ -30,8 +30,8 @@ from torch.distributed.elastic.multiprocessing import (
     SignalException,
     Std,
 )
+from torch.distributed.elastic.utils.common import _get_host_address
 from torch.distributed.elastic.utils.logging import get_logger
-
 
 _TERMINAL_STATE_SYNC_ID = "torchelastic/agent/terminal_state"
 
@@ -381,10 +381,6 @@ def _get_socket_with_port() -> socket.socket:
     raise RuntimeError("Failed to create a socket")
 
 
-def _get_fq_hostname() -> str:
-    return socket.getfqdn(socket.gethostname())
-
-
 class ElasticAgent(abc.ABC):
     """
     Agent process responsible for managing one or more worker processes.
@@ -512,7 +508,7 @@ class SimpleElasticAgent(ElasticAgent):
                 master_port = sock.getsockname()[1]
 
         if master_addr is None:
-            master_addr = _get_fq_hostname()
+            master_addr = _get_host_address()
 
         store.set("MASTER_ADDR", master_addr.encode(encoding="UTF-8"))
         store.set("MASTER_PORT", str(master_port).encode(encoding="UTF-8"))
@@ -781,7 +777,7 @@ class SimpleElasticAgent(ElasticAgent):
             "group_rank": wg.group_rank,
             "worker_id": worker_id,
             "role": spec.role,
-            "hostname": _get_fq_hostname(),
+            "hostname": _get_host_address(),
             "state": state,
             "total_run_time": self._total_execution_time,
             "rdzv_backend": spec.rdzv_handler.get_backend(),

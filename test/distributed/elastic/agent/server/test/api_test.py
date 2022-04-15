@@ -21,12 +21,12 @@ from torch.distributed.elastic.agent.server.api import (
     WorkerGroup,
     WorkerSpec,
     WorkerState,
-    _get_fq_hostname,
     _RoleInstanceInfo,
 )
 from torch.distributed.elastic.multiprocessing import SignalException
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure
 from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
+from torch.distributed.elastic.utils.common import _get_host_address
 from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.testing._internal.common_utils import run_tests
 
@@ -300,7 +300,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
 
         master_addr, master_port = agent._get_master_addr_port(worker_group.store)
 
-        self.assertEqual(_get_fq_hostname(), master_addr)
+        self.assertEqual(_get_host_address(), master_addr)
         self.assertTrue(master_port > 0)
 
         rank_set = {w.global_rank for w in worker_group.workers}
