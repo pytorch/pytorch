@@ -1,8 +1,9 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/CUDAFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/EmptyTensor.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -10,6 +11,16 @@
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/CUDAFunctions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/cumsum_cuda_dispatch.h>
+#include <ATen/ops/uniform_native.h>
+#endif
 
 #include <curand.h>
 #include <curand_kernel.h>
