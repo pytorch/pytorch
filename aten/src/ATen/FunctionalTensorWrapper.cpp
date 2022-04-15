@@ -315,13 +315,17 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
   }
 }
 
-c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
-  c10::List<c10::optional<Tensor>> outputs;
-  outputs.reserve(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(from_functional_tensor(t_list[i]));
+bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
+  if (t_list.size() == 0) return false;
+  bool any_functional = isFunctionalTensor(t_list[0]);
+  for (const auto i : c10::irange(1, t_list.size())) {
+    auto curr_functional = isFunctionalTensor(t_list[i]);
+    TORCH_INTERNAL_ASSERT(
+         curr_functional == any_functional,
+        "Functionalization encountered a list of tensors where some are functional",
+        "and some are not, which is not currently unsupported.");
   }
-  return outputs;
+  return any_functional;
 }
 
 bool isFunctionalTensor(ITensorListRef list) {
