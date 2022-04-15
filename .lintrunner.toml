@@ -491,3 +491,29 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'shellcheck-py==0.7.2.1',
 ]
+
+[[linter]]
+code = 'ACTIONLINT'
+include_patterns = [
+    '.github/workflows/*.yml',
+    '.github/workflows/*.yaml',
+    # actionlint does not support composite actions yet
+    # '.github/actions/**/*.yml',
+    # '.github/actions/**/*.yaml',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/actionlint_linter.py',
+    '--binary=.lintbin/actionlint',
+    '--',
+    '@{{PATHSFILE}}',
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=actionlint',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=actionlint',
+]
