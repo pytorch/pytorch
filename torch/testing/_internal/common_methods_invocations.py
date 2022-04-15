@@ -16562,8 +16562,10 @@ op_db: List[OpInfo] = [
         ref=reference_pdist,
         sample_inputs_func=sample_inputs_pdist,
         dtypes=floating_types(),
-        supports_autograd=False,
-        supports_out=False),
+        supports_out=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
+        )),
     OpInfo(
         "nn.functional.poisson_nll_loss",
         ref=_NOTHING,
