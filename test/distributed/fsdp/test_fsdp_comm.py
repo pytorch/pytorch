@@ -89,6 +89,7 @@ class TestCommunication(FSDPTest):
         self,
         num_fsdp: int,
         sharding_strategy: Optional[ShardingStrategy],
+        is_first_iter: bool,
         is_last_iter_no_sync: bool,
     ) -> int:
         """Returns the reference number of all-gathers in an iteration, summing
@@ -98,6 +99,7 @@ class TestCommunication(FSDPTest):
                 num_fsdp,
                 sharding_strategy,
                 pass_type,
+                is_first_iter,
                 is_last_iter_no_sync,
             ) for pass_type in PassType
         )
@@ -107,6 +109,7 @@ class TestCommunication(FSDPTest):
         num_fsdp: int,
         sharding_strategy: Optional[ShardingStrategy],
         pass_type: PassType,
+        is_first_iter: bool,
         is_last_iter_no_sync: bool,
     ):
         """Returns the reference number of all-gathers for a given setting."""
@@ -136,8 +139,13 @@ class TestCommunication(FSDPTest):
             num_all_gathers = 0
         else:
             assert 0, f"Unsupported: add a branch for pass_type={pass_type} " \
+                f"is_first_iter={is_first_iter} " \
                 f"is_last_iter_no_sync={is_last_iter_no_sync} " \
                 f"sharding_strategy={sharding_strategy}"
+        if is_first_iter:
+            # With execution order validation, on the first iteration, we have
+            # an additional all-gather before every actual all-gather
+            num_all_gathers *= 2
         return num_all_gathers
 
     def _print_ref_num_all_gathers_in_pass(
@@ -145,6 +153,7 @@ class TestCommunication(FSDPTest):
         num_fsdp: int,
         sharding_strategy: ShardingStrategy,
         pass_type: PassType,
+        is_first_iter: bool,
         is_last_iter_no_sync: bool,
     ):
         """Helper method for printing the number of all-gathers for a specific
@@ -152,10 +161,12 @@ class TestCommunication(FSDPTest):
         if self.rank != 0:
             return  # only print on one rank
         num_all_gathers = self._get_ref_num_all_gathers_in_pass(
-            num_fsdp, sharding_strategy, pass_type, is_last_iter_no_sync,
+            num_fsdp, sharding_strategy, pass_type, is_first_iter,
+            is_last_iter_no_sync,
         )
         print(
             f"Pass: {pass_type}\n"
+            f"Is First Iteration: {is_first_iter}\n"
             f"Sharding Strategy: {sharding_strategy}\n"
             f"Last iteration in `no_sync()`: {is_last_iter_no_sync}\n"
             f"Number of all-gathers: {num_all_gathers}"
@@ -216,7 +227,7 @@ class TestCommunication(FSDPTest):
                     num_all_gathers = mock_all_gather.call_count
                     num_reduce_scatters = mock_reduce_scatter.call_count
                     ref_num_all_gathers = self._get_ref_num_all_gathers(
-                        num_fsdp, sharding_strategy,
+                        num_fsdp, sharding_strategy, is_first_iter=i == 0,
                         is_last_iter_no_sync=i > 0,
                     )
                     ref_num_reduce_scatters = self._get_ref_num_reduce_scatters(
@@ -232,6 +243,7 @@ class TestCommunication(FSDPTest):
                 num_reduce_scatters = mock_reduce_scatter.call_count
                 ref_num_all_gathers = self._get_ref_num_all_gathers(
                     num_fsdp, sharding_strategy,
+                    is_first_iter=not use_no_sync and i == 0,
                     is_last_iter_no_sync=use_no_sync and i == 0,
                 )
                 ref_num_reduce_scatters = self._get_ref_num_reduce_scatters(
