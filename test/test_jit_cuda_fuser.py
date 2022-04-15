@@ -16,8 +16,9 @@ from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithS
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
 from torch.testing._internal.common_jit import JitCommonTestCase
-from torch.testing._internal.common_methods_invocations import op_db, generate_elementwise_binary_extremal_value_tensors, BinaryUfuncInfo
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, IS_WINDOWS, slowTest
+from torch.testing._internal.common_methods_invocations import op_db, SampleInput
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, IS_WINDOWS, \
+    slowTest, is_iterable_of_tensors
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
@@ -4552,22 +4553,46 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @ops([op for op in op_db if isinstance(op, BinaryUfuncInfo)], allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32,
-                                                                                  torch.float64, torch.complex64, torch.complex128))
-    def test_binary_ops_extremal_values(self, device, dtype, op):
-        gen = generate_elementwise_binary_extremal_value_tensors(op, device=device, dtype=dtype)
+    @ops(op_db, allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32,
+                                 torch.float64, torch.complex64, torch.complex128))
+    def test_nvfuser_extremal_values(self, device, dtype, op):
+        variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
-        for sample in gen:
-            l = sample.input
-            r = sample.args[0]
+        def _get_extremal_tensor(x, val):
+            return x.fill_(val)
 
-            ref = op(l, r)
+        def _get_extremal_input(x, val):
+            if isinstance(x, torch.Tensor):
+                return _get_extremal_tensor(x, val)
+            elif is_iterable_of_tensors(x):
+                return [_get_extremal_tensor(y, val) for y in x]
+            return x
 
-            trace = create_traced_fn(self, op)
-            trace(*clone_inputs((l, r)))
-            val = trace(*clone_inputs((l, r)))
+        def _get_extremal_sample(sample: SampleInput, val):
+            sample.input = _get_extremal_input(sample.input, val)
+            sample.args = [_get_extremal_input(x, val) for x in sample.args]
+            sample.kwargs = {k: _get_extremal_input(v, val) for k, v in sample.kwargs.items()}
+            return sample
 
-            self.assertEqual(val, ref, equal_nan=True, exact_device=True)
+        def _get_extremal_samples(sample: SampleInput, dtype):
+            vals = [float('inf'), float('-inf'), float('nan')]
+            if dtype.is_complex:
+                complex_vals = product(vals, vals)
+                vals = list(map(lambda x: complex(*x), complex_vals))
+            for val in vals:
+                yield _get_extremal_sample(sample, val)
+
+        for variant, sample in variant_sample_pairs:
+            trace = create_traced_fn(self, variant)
+            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            for extremal_sample in _get_extremal_samples(sample, dtype):
+                ref = variant(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+
+                val = trace(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+
+                self.assertEqual(val, ref, equal_nan=True, exact_device=True)
 
 instantiate_device_type_tests(TestCudaFuserOpInfo, globals(), only_for=("cuda"))
 
