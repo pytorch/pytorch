@@ -15,3 +15,12 @@ from torch.ao.quantization.fx.pattern_utils import (
     get_default_quant_patterns,
     get_default_output_activation_post_process_map
 )
+
+_NAMESPACE = 'torch.quantization.fx.pattern_utils'
+# QuantizeHandler.__module__ = _NAMESPACE
+MatchResult.__module__ = _NAMESPACE
+register_fusion_pattern.__module__ = _NAMESPACE
+get_default_fusion_patterns.__module__ = _NAMESPACE
+register_quant_pattern.__module__ = _NAMESPACE
+get_default_quant_patterns.__module__ = _NAMESPACE
+get_default_output_activation_post_process_map.__module__ = _NAMESPACE

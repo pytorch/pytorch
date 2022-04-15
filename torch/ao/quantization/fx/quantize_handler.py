@@ -65,3 +65,8 @@ def get_quantize_handler_cls(
 
 
     return ConfigurableQuantizeHandler
+
+
+__all__ = [
+    "get_quantize_handler_cls",
+]

@@ -2,7 +2,7 @@ from collections import namedtuple
 from typing import List, Dict, Any
 import operator
 import torch
-from .observation_type import ObservationType
+from torch.ao.quantization.backend_config.observation_type import ObservationType
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.intrinsic as nni
@@ -711,3 +711,7 @@ def get_native_backend_config_dict():
             *_get_embedding_op_configs(),
         ],
     }
+
+__all__ = [
+    "get_native_backend_config_dict",
+]
