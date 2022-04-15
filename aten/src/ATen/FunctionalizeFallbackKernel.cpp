@@ -65,6 +65,3 @@ namespace {
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
-TORCH_LIBRARY_IMPL(_, FunctionalizeAddBackViews, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
-}

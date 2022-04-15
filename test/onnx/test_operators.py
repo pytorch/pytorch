@@ -20,12 +20,15 @@ import os
 import shutil
 import tempfile
 import torch.testing._internal.common_utils as common
+from torch.testing._internal.common_utils import skipIfCaffe2
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
           --produce-onnx-test-data: generate onnx test data
           --accept: accept onnx updates and overwrite models
 '''
+import unittest
+unittest.TestCase.maxDiff = None
 
 _onnx_test = False  # flag to produce onnx test cases.
 _onnx_dep = True  # flag to import onnx package.
@@ -322,6 +325,7 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
 
+    @skipIfCaffe2
     def test_at_op(self):
         x = torch.randn(3, 4)
 
@@ -339,7 +343,8 @@ class TestOperators(TestCase):
             def forward(self, x):
                 return MyFun.apply(x)
 
-        self.assertONNX(MyModule(), x)
+        self.assertONNX(MyModule(), x,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_clip(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -588,6 +593,7 @@ class TestOperators(TestCase):
         self.assertONNX(nn.BatchNorm2d(128, affine=False, momentum=0.3), x,
                         keep_initializers_as_inputs=True)
 
+    @skipIfCaffe2
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
@@ -787,6 +793,7 @@ class TestOperators(TestCase):
         input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.assertONNX(BitshiftModel(), (input, input2), opset_version=11)
 
+    @skipIfCaffe2
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
@@ -954,7 +961,7 @@ class TestOperators(TestCase):
                 f'"sparse":{str(sparse).lower()}'
                 '}'
             )
-            output = g.op("com.microsoft::ATenOp", weight, indices, name_s='aten::embedding',
+            output = g.at("embedding", weight, indices,
                           custom_attributes_json_s=custom_attributes_json)
             return output
 
@@ -978,6 +985,7 @@ class TestOperators(TestCase):
         unregister_custom_op_symbolic('::embedding', _onnx_opset_version)
 
     # This is test_aten_embedding_1 with shape inference on custom symbolic aten::embedding.
+    @skipIfCaffe2
     def test_aten_embedding_2(self):
         _onnx_opset_version = 12
 
@@ -990,7 +998,7 @@ class TestOperators(TestCase):
                 f'"sparse":{str(sparse).lower()}'
                 '}'
             )
-            output = g.op("com.microsoft::ATenOp", weight, indices, name_s='aten::embedding',
+            output = g.at("embedding", weight, indices,
                           custom_attributes_json_s=custom_attributes_json)
 
             # do shape inference and set it via setType
@@ -1016,7 +1024,9 @@ class TestOperators(TestCase):
         x = torch.ones(32, dtype=torch.long)
         y = torch.randn(1, 8)
         self.assertONNX(model, (x, y), opset_version=_onnx_opset_version, input_names=['input_1', 'input_2'],
-                        dynamic_axes={"input_1": {0: "dim_0"}, 'input_2': {0: "dim_1", 1: "dim_2"}})
+                        dynamic_axes={"input_1": {0: "dim_0"}, 'input_2': {0: "dim_1", 1: "dim_2"}},
+                        keep_initializers_as_inputs=False,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
         unregister_custom_op_symbolic('::embedding', _onnx_opset_version)
 
