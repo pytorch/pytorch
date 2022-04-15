@@ -23,7 +23,7 @@ from torch.ao.quantization.fx.quantization_patterns import (
     StandaloneModuleQuantizeHandler
 )
 
-_NAMESPACE = 'torch.quantization.fx.quantization_patterns'
+_NAMESPACE = "torch.quantization.fx.quantization_patterns"
 QuantizeHandler.__module__ = _NAMESPACE
 BinaryOpQuantizeHandler.__module__ = _NAMESPACE
 CatQuantizeHandler.__module__ = _NAMESPACE

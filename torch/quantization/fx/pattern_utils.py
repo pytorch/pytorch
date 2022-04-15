@@ -16,7 +16,7 @@ from torch.ao.quantization.fx.pattern_utils import (
     get_default_output_activation_post_process_map
 )
 
-_NAMESPACE = 'torch.quantization.fx.pattern_utils'
+_NAMESPACE = "torch.quantization.fx.pattern_utils"
 # QuantizeHandler.__module__ = _NAMESPACE
 MatchResult.__module__ = _NAMESPACE
 register_fusion_pattern.__module__ = _NAMESPACE

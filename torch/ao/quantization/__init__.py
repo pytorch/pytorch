@@ -11,7 +11,6 @@ from .quantization_mappings import *  # noqa: F403
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
-from .quantization_types import Pattern, NodePattern, QuantizerCls  # noqa: F403
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -20,10 +19,3 @@ def default_eval_fn(model, calib_data):
     """
     for data, target in calib_data:
         model(data)
-
-
-__all__ = [
-    "Pattern",
-    "NodePattern",
-    "QuantizerCls",
-]

@@ -10,3 +10,9 @@ NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
 # Define separately to prevent circular imports.
 # TODO(future PR): improve this.
 QuantizerCls = Any
+
+__all__ = [
+    "Pattern",
+    "NodePattern",
+    "QuantizerCls",
+]
