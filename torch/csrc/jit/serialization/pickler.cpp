@@ -575,7 +575,11 @@ void Pickler::endTypeTag(const IValue& ivalue) {
 
   // Push the dict type
   TORCH_INTERNAL_ASSERT(ivalue.type());
-  pushString(ivalue.type()->annotation_str());
+  auto type = ivalue.type();
+  if (auto dyn = type->castRaw<c10::DynamicType>()) {
+    type = dyn->fallback();
+  }
+  pushString(type->annotation_str());
 
   // Pop the dict and type into a tuple
   push<PickleOpCode>(PickleOpCode::TUPLE2);

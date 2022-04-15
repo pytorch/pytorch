@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
 
 /*
@@ -8,6 +7,8 @@
 */
 
 namespace at {
+class Tensor;
+
 namespace native {
 
 using convolution_depthwise3x3_winograd_fn =
