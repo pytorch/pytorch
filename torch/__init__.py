@@ -233,7 +233,7 @@ for name in dir(_C):
     if name[0] != '_' and not name.endswith('Base'):
         __all__.append(name)
         obj = getattr(_C, name)
-        if (isinstance(obj, Callable) or inspect.isclass(obj)): # type: ignore[arg-type]
+        if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
             if (obj.__module__ != 'torch'):
                 # TODO: fix their module from C++ side
                 if name not in ['DisableTorchFunction', 'Generator']:
