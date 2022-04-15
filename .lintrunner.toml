@@ -269,6 +269,7 @@ exclude_patterns=[
     'third_party/**',
     '**/*.expect',
     '**/*.ipynb',
+    '**/*.ptl',
     'tools/clang_format_hash/**',
 ]
 command = [
