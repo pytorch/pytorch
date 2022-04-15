@@ -491,8 +491,8 @@ inline static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, c
   TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
 
   // Todo: expose the following two parameters to users
-  // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
-  // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 15));
+  TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, std::numeric_limits<scalar_t>::epsilon()));
+  TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 400));
 
   int lwork = -1;
   at::cuda::solver::gesvdj_buffersize<scalar_t>(
@@ -516,6 +516,11 @@ inline static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, c
       infos.data_ptr<int>() + i,
       gesvdj_params
     );
+
+    // The following code can be used to check or report the gesvdj residual.
+    // double residual = 0;
+    // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjGetResidual(handle, gesvdj_params, &residual));
+    // printf("gesvdj residual = %.6e\n", residual);
   }
 
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyGesvdjInfo(gesvdj_params));
@@ -563,8 +568,8 @@ inline static void apply_svd_cusolver_gesvdjBatched(const Tensor& A, const Tenso
   TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
 
   // Todo: expose the following two parameters to users
-  // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
-  // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 15));
+  TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, std::numeric_limits<scalar_t>::epsilon()));
+  TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetMaxSweeps(gesvdj_params, 400));
   TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetSortEig(gesvdj_params, 1));
 
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
@@ -723,13 +728,11 @@ void svd_cusolver(const Tensor& A,
     if (gesvdj_batched_requirements) {
       svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
       convergence_check_needed = true;
-    } else if (m <= 1024 && n <= 1024) {
+    } else {
       // gesvdj driver may be numerically unstable for large sized matrix
       // Todo: Expose/adjust cusolver options of gesvdj number of iterations and numerical tolerance
       svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
       convergence_check_needed = true;
-    } else {
-      svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
     }
     // DO NOT use gesvdaStridedBatched as a default SVD backend driver since it may be inaccurate.
   } else {
