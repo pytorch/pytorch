@@ -26,12 +26,13 @@ import collections
 import functools
 import types
 import warnings
-from typing import Dict, Set, List, Any, Callable, Iterable, Type
+from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator
 
 import torch
 from torch._C import (
     _has_torch_function, _has_torch_function_unary,
-    _has_torch_function_variadic, _add_docstr)
+    _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
+import contextlib
 
 __all__ = [
     "get_ignored_functions",
@@ -245,6 +246,9 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._conj_physical,
         Tensor._neg_view,
         Tensor._is_zerotensor,
+        Tensor._addmm_activation,
+        Tensor._nested_tensor_layer_norm,
+        Tensor.to_padded_tensor,
     }
 
 
@@ -541,7 +545,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.hinge_embedding_loss: lambda input, target, margin=1.0, size_average=None, reduce=None, reduction='mean': -1,
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
         torch.histogram: lambda input, bins=100, min=None, max=None, weight=None, density=False, out=None: -1,
-        torch.histogramdd: lambda input, bins, weight=None, density=False: -1,
+        torch.histogramdd: lambda input, bins, range=None, weight=None, density=False: -1,
         torch.linalg.householder_product: lambda input, tau: -1,
         torch.hspmm: lambda mat1, mat2, out=None: -1,
         torch.hsplit: lambda input, indices_or_sections: -1,
@@ -776,7 +780,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda query, key, value, embed_dim_to_check, num_heads, in_proj_weight, in_proj_bias, bias_k, bias_v,
             add_zero_attn, dropout_p, out_proj_weight, out_proj_bias, training=True, key_padding_mask=None,
             need_weights=True, attn_mask=None, use_separate_proj_weight=False, q_proj_weight=None, k_proj_weight=None,
-            v_proj_weight=None, static_k=None, static_v=None: -1),
+            v_proj_weight=None, static_k=None, static_v=None, average_attn_weights=None: -1),
         torch.nn.functional.multi_margin_loss: (lambda input, target, p=1, margin=1.0, weight=None, size_average=None,
                                                 reduce=None, reduction='mean': -1),
         torch.nn.functional.multilabel_margin_loss: (lambda input, target, size_average=None, reduce=None,
@@ -898,12 +902,12 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.saddmm: lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1,
         torch.scatter: lambda input, dim, index, src: -1,
         torch.scatter_add: lambda input, dim, index, src: -1,
-        torch.scatter_reduce: lambda input, dim, index, src, reduce: -1,
+        torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
         torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
-        torch.slice_scatter: lambda input, src, dim, start, end, step: -1,
+        torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
         torch.selu: lambda input, inplace=False: -1,
         torch.sigmoid: lambda input, out=None: -1,
         torch.sign: lambda input, out=None: -1,
@@ -1012,6 +1016,40 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.vstack: lambda tensors, out=None: -1,
         torch.where: lambda condition, x=None, y=None: -1,
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
+        torch._fw_primal_copy: lambda self, level: -1,
+        torch._make_dual_copy: lambda primal, tangent, level: -1,
+        torch.view_as_real_copy: lambda self: -1,
+        torch.view_as_complex_copy: lambda self: -1,
+        torch._conj_copy: lambda self: -1,
+        torch._neg_view_copy: lambda self: -1,
+        torch.as_strided_copy: lambda self, size, stride, storage_offset=None: -1,
+        torch._sparse_broadcast_to_copy: lambda self, size: -1,
+        torch.diagonal_copy: lambda self, offset=0, dim1=0, dim2=1: -1,
+        torch.expand_copy: lambda self, size, *, implicit=False: -1,
+        torch.narrow_copy: lambda self, dim, start, length: -1,
+        torch.permute_copy: lambda self, dims: -1,
+        torch._reshape_alias_copy: lambda self, size, stride: -1,
+        torch.select_copy: lambda self, dim, index: -1,
+        torch.detach_copy: lambda self: -1,
+        torch.slice_copy: lambda self, dim=0, start=None, end=None, step=1: -1,
+        torch.split_copy: lambda self, split_size, dim=0: -1,
+        torch.split_with_sizes_copy: lambda self, split_sizes, dim=0: -1,
+        torch.squeeze_copy: lambda self: -1,
+        torch.squeeze_copy: lambda self, dim: -1,
+        torch.t_copy: lambda self: -1,
+        torch.transpose_copy: lambda self, dim0, dim1: -1,
+        torch.unsqueeze_copy: lambda self, dim: -1,
+        torch._indices_copy: lambda self: -1,
+        torch._values_copy: lambda self: -1,
+        torch.indices_copy: lambda self: -1,
+        torch.values_copy: lambda self: -1,
+        torch.crow_indices_copy: lambda self: -1,
+        torch.col_indices_copy: lambda self: -1,
+        torch.unbind_copy: lambda self, dim=0: -1,
+        torch.view_copy: lambda self, size: -1,
+        torch.view_copy: lambda self, dtype: -1,
+        torch.unfold_copy: lambda self, dimension, size, step: -1,
+        torch.alias_copy: lambda self: -1,
         Tensor.__floordiv__: lambda self, other: -1,
         Tensor.__rfloordiv__: lambda self, other: -1,
         Tensor.__ifloordiv__: lambda self, other: -1,
@@ -1063,13 +1101,14 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
         Tensor._version.__get__: lambda self: -1,
-        Tensor._autocast_to_reduced_precision: lambda self: -1,
-        Tensor._autocast_to_full_precision: lambda self: -1,
+        Tensor._autocast_to_reduced_precision: lambda self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype: -1,
+        Tensor._autocast_to_full_precision: lambda self, cuda_enabled, cpu_enabled: -1,
         Tensor.data.__get__: lambda self: -1,
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,
         Tensor.is_cuda.__get__: lambda self: -1,
         Tensor.is_xpu.__get__: lambda self: -1,
+        Tensor.is_ipu.__get__: lambda self: -1,
         Tensor.is_leaf.__get__: lambda self: -1,
         Tensor.retains_grad.__get__: lambda self: -1,
         Tensor.is_meta.__get__: lambda self: -1,
@@ -1122,6 +1161,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.cpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cuda: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.xpu: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.ipu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.data_ptr: lambda self: -1,
         Tensor.dense_dim: lambda self: -1,
         Tensor.diagonal_scatter: lambda self, src, offset=0, dim1=0, dim2=1: -1,
@@ -1182,7 +1222,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.share_memory_: lambda self: -1,
         Tensor.short: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.size: lambda self: -1,
-        Tensor.slice_scatter: lambda self, src, dim, start, end, step: -1,
+        Tensor.slice_scatter: lambda self, src, dim=0, start=None, end=None, step=1: -1,
         Tensor.sparse_dim: lambda self: -1,
         Tensor.sparse_mask: lambda self, mask: -1,
         Tensor.sparse_resize_: lambda self, size1, size2, dense_dim: -1,
@@ -1310,6 +1350,9 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     .. _NEP-0018:
        https://numpy.org/neps/nep-0018-array-function-protocol.html
     """
+    # If torch function is not enabled, there are no overloaded types
+    if not torch._C._is_torch_function_enabled():
+        return []
     # Runtime is O(num_arguments * num_unique_types)
     overloaded_types: Set[Type] = set()
     overloaded_args: List[Any] = []
@@ -1384,6 +1427,15 @@ def handle_torch_function(
     # overloaded_args already have unique types.
     types = tuple(map(type, overloaded_args))
 
+    # Check for __torch_function__ mode.
+    mode = _get_torch_function_mode()
+    if mode is not None:
+        # NB: unlike on tensors, modes are instances
+        with _no_torch_function_mode():
+            result = mode.__torch_function__(public_api, types, args, kwargs)
+        if result is not NotImplemented:
+            return result
+
     # Call overrides
     for overloaded_arg in overloaded_args:
         # This call needs to become a classmethod call in the future.
@@ -1391,7 +1443,7 @@ def handle_torch_function(
         torch_func_method = overloaded_arg.__torch_function__
         if hasattr(torch_func_method, "__self__") and torch_func_method.__self__ is overloaded_arg:
             warnings.warn("Defining your `__torch_function__ as a plain method is deprecated and "
-                          "will be an error in PyTorch 1.11, please define it as a classmethod.",
+                          "will be an error in future, please define it as a classmethod.",
                           DeprecationWarning)
 
         # Use `public_api` instead of `implementation` so __torch_function__
@@ -1402,14 +1454,21 @@ def handle_torch_function(
             return result
 
     func_name = '{}.{}'.format(public_api.__module__, public_api.__name__)
-    raise TypeError("no implementation found for '{}' on types that implement "
-                    '__torch_function__: {}'
-                    .format(func_name, [type(arg) for arg in overloaded_args]))
+    msg = (
+        "no implementation found for '{}' on types that implement "
+        '__torch_function__: {}'
+    ).format(func_name, [type(arg) for arg in overloaded_args])
+    if mode is not None:
+        msg += f" nor in mode {mode}"
+    raise TypeError(msg)
 
 has_torch_function = _add_docstr(
     _has_torch_function,
-    r"""Check for __torch_function__ implementations in the elements of an iterable.
-    Considers exact ``Tensor`` s and ``Parameter`` s non-dispatchable.
+    r"""Check for __torch_function__ implementations in the elements of an iterable
+    or if a __torch_function__ mode is enabled.  Considers exact ``Tensor`` s
+    and ``Parameter`` s non-dispatchable.  Use this to guard a call to
+    :func:`handle_torch_function`; don't use it to test if something
+    is Tensor-like, use :func:`is_tensor_like` instead.
     Arguments
     ---------
     relevant_args : iterable
@@ -1587,3 +1646,235 @@ def is_tensor_like(inp):
     True
     """
     return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
+
+def _wrap_init(f):
+    undef = object()
+
+    @functools.wraps(f)
+    def wrapped(self, *args, inner=undef, **kwargs):
+        if inner is undef:
+            raise TypeError(
+                "missing inner keyword argument; instead of constructing a TorchModeFunction directly, "
+                "pass the constructor to push_torch_function_mode"
+            )
+        self.inner = inner
+        return f(self, *args, **kwargs)
+    return wrapped
+
+
+def _wrap_torch_function(f):
+    @functools.wraps(f)
+    def wrapped(self, *args, **kwargs):
+        with enable_torch_function_mode(self.inner):
+            return f(self, *args, **kwargs)
+    return wrapped
+
+
+# Implementation note: I had a choice about how much of mode stacks
+# to implement in Python versus in C++.  At time of writing, I did not care
+# too much about implementation efficiency; however, I do care about making it
+# hard for users to implement modes in the wrong way.  In the end, it turned
+# out to be possible to implement mode stacks entirely from userland, with the
+# C++ API providing only _get_torch_function_mode() and
+# _set_torch_function_mode(), so I opted to provide some unsafe C++ bindings and
+# have the bulk of the logic for managing the stack in Python, which helped
+# simplify the C++ API surface.  It would also have been valid to build in the
+# notion of mode stack directly into C++ but in this design it's substantially
+# more difficult to interact with TorchFunctionModeMeta.
+
+
+class TorchFunctionModeMeta(type):
+    """
+    Metaclass for :class:`TorchFunctionMode`; it does two things:
+
+        * Adds an implicit ``inner`` kwarg to ``__init__``, to
+          allow the modes to be chained together to form a stack.
+
+        * Reenables the inner mode, so that by default PyTorch API calls
+          will compositionally proceed to the next mode on the stack.
+
+    The default behavior for the second bullet is important, as it is easy to
+    accidentally write ``__torch_function__`` implementations that are not
+    compositional, and the wrapping here makes the obvious code do the
+    right thing (aka, this is why there is a metaclass).
+    """
+    def __new__(metacls, name, bases, dct):
+        if '__init__' in dct:
+            dct['__init__'] = _wrap_init(dct['__init__'])
+        if '__torch_function__' in dct:
+            dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
+        return super().__new__(metacls, name, bases, dct)
+
+
+class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
+    """
+    A ``TorchFunctionMode`` allows you to override the meaning of all
+    ``__torch_function__`` overrideable functions within a dynamic scope,
+    without having to actually create a tensor subclass or manually
+    monkey-patch functions in the PyTorch API.  Some common situations
+    where you should use a mode:
+
+        * You want to override the meaning of factory functions, or other
+          functions that do not otherwise take a tensor as an argument
+          (these cannot be overridden with tensor subclasses).
+
+        * You want to override the behavior of all functions without needing
+          to wrap your inputs in tensor subclasses; e.g., if you are just
+          interested in logging intermediate computations.
+
+        * You want to control the order of execution of various tensor
+          subclasses explicitly, rather than implicitly via the return of
+          ``NotImplemented``.
+
+    Independent subclasses of :class:`TorchFunctionMode` are compositional:
+    modes can be pushed onto a stack with :func:`push_torch_function_mode`.
+    When you call functions in the PyTorch API inside your
+    ``__torch_function__`` implementation, by default, they will forward on to
+    the next mode on the mode stack.  If you want recursively call back into
+    your current ``__torch_function__`` implementation, either explicitly
+    invoke ``self.__torch_function__(...)``, or use the context manager
+    ``enable_torch_function_mode(self, replace=self.inner)`` to make PyTorch
+    API self-referential (beware of infinite loops, in this case!)
+    """
+    # Force metaclass to generate constructor at the base of the hierarchy
+    def __init__(self):
+        pass
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        raise NotImplementedError()
+
+
+class BaseTorchFunctionMode(TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        return func(*args, **kwargs)
+
+
+# This is private API as I'm not sure it's possible for users to use this
+# compositionally (easy to discard too many modes).  It is useful for
+# library code though, e.g., in handle_torch_function
+@contextlib.contextmanager
+def _no_torch_function_mode() -> Iterator[None]:
+    old = _get_torch_function_mode()
+    _set_torch_function_mode(None)
+    try:
+        yield
+    finally:
+        _set_torch_function_mode(old)
+
+
+@contextlib.contextmanager
+def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
+    """
+    Context manager that sets the current :class:`TorchFunctionMode`; see the
+    class for more information on what modes are.  This function is
+    non-compositional; if there is already an existing mode, it will raise an
+    error; prefer using :func:`push_torch_function_mode` if your
+    ``__torch_function__`` implementation can defer to an inner mode.
+
+    This function is safe to use inside a ``__torch_function__`` mode handler,
+    as the mode is guaranteed to be disabled in this context.  You can use
+    this context manager to reinstate the mode so that calls to overridable
+    APIs recursively call back into your mode handler (this can easily cause
+    infinite loops, so use with care!)
+
+    Args:
+        mode (:class:`TorchFunctionMode`, Tensor-like class or None): the
+            mode to set as current mode.  If you pass a Tensor-like class,
+            it will be treated as a non-compositional mode with no state,
+            which is convenient if you have an existing tensor subclass
+            that you'd like to apply globally in a quick and dirty way.
+            Passing None will disable the current mode.
+        replace (:class:`TorchFunctionMode` or Tensor-like class): the
+            mode to replace.  You can use this argument to change the mode in
+            a situation where you know what the current mode is (and you are
+            intentionally overwriting it.)  If you don't know what the current
+            mode is, use ``ignore_preexisting`` instead.
+        ignore_preexisting (bool): if True, ignore any preexisting mode
+            and overwrite it with the passed mode.
+    """
+    if not (
+        mode is None or
+        isinstance(mode, TorchFunctionMode) or
+        (isinstance(mode, type) and not issubclass(mode, TorchFunctionMode))
+    ):
+        raise TypeError(
+            "expected to get TorchFunctionMode, Tensor-like class or None as argument, got "
+            f"{type(mode)} instead"
+        )
+    old = _get_torch_function_mode()
+    # Short circuit.  It is valid to reset a mode to yourself, we won't error
+    # here
+    if old is mode:
+        yield
+        return
+    if old is not None and not ignore_preexisting and old is not replace:
+        if isinstance(mode, TorchFunctionMode):
+            help_text = (
+                'Use push_torch_function_mode instead.'
+            )
+        else:
+            help_text = (
+                'If you intended to completely override the preexisting mode, '
+                'pass ignore_preexisting=True.  This can result in unexpected '
+                'behavior; please consider rewriting your mode to be a subclass '
+                'of TorchFunctionMode to make it compositional!'
+            )
+        raise ValueError(
+            'Attempted to enable_torch_function_mode, but there is already an '
+            f'active mode {old}.  {help_text}'
+        )
+    # NB: we don't require TorchFunctionMode since this is intended to also
+    # let you directly pass a Tensor subclass type to "mode-ify" it.
+    if not hasattr(mode, '__torch_function__'):
+        raise ValueError(
+            'The argument passed to enable_torch_function_mode must implement '
+            '__torch_function__'
+        )
+    _set_torch_function_mode(mode)
+    try:
+        yield
+    finally:
+        _set_torch_function_mode(old)
+
+
+@contextlib.contextmanager
+def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
+    """
+    Context manager that pushes a :class:`TorchFunctionMode` onto the current
+    mode stack; see the class for more information on what modes are.  Stacked
+    modes can delegate to each other by invoking the ``__torch_function__``
+    method for the ``inner`` mode.
+
+    Args:
+        ctor: a function that when invoked as ``ctor(inner=...)`` produces
+            a :class:`TorchFunctionMode`.  If your :class:`TorchFunctionMode`
+            has no ``__init__`` implementation, you can simply pass the class
+            itself (e.g., ``push_torch_function_mode(MyMode)``); otherwise,
+            use ``functools.partial`` to partially apply the constructor with all
+            non-inner arguments (e.g.,
+            ``push_torch_function_mode(partial(MyMode, arg))``)
+    """
+    if isinstance(ctor, TorchFunctionMode):
+        raise ValueError(
+            'Expected a TorchFunctionMode constructor function, but got an '
+            f'instance of TorchFunctionMode {ctor}.  Consider using '
+            'enable_torch_function_mode instead.'
+        )
+    old = _get_torch_function_mode()
+    if old is None:
+        inner = BaseTorchFunctionMode(inner=None)
+    else:
+        inner = old
+    mode = ctor(inner=inner)
+    if not isinstance(mode, TorchFunctionMode):
+        raise ValueError(
+            'The callable passed to push_torch_function_mode must return '
+            'a TorchFunctionMode'
+        )
+    _set_torch_function_mode(mode)
+    try:
+        yield mode
+    finally:
+        _set_torch_function_mode(old)
