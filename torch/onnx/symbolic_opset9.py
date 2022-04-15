@@ -565,7 +565,7 @@ def transpose(g, self, dim0, dim1):
         # if we don't have dim information we cannot
         # output a permute so use ATen instead
         if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            return g.at("transpose", self, dim0_i=dim0, dim1_i=dim1, overload_name="int")
+            return g.at("transpose", self, overload_name="int", dim0_i=dim0, dim1_i=dim1)
         else:
             raise RuntimeError("Unsupported: ONNX export of transpose for tensor "
                                "of unknown rank.")
@@ -1581,7 +1581,8 @@ def index_put(g, self, indices_list_value, values, accumulate):
 def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, "i")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.at("index_fill", self, index, value, dim_i=dim_value, overload_name="int_Scalar")
+        return g.at("index_fill", self, index, value, overload_name="int_Scalar", dim_i=dim_value)
+
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, self)
@@ -1647,9 +1648,7 @@ def type_as(g, self, other):
 
 @parse_args("v", "v", "i", "f")
 def cosine_similarity(g, x1, x2, dim, eps):
-    # preserve legacy behavior for Caffe2
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and \
-       torch.onnx._CAFFE2_ATEN_FALLBACK:
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.at("cosine_similarity", x1, x2, dim_i=dim, eps_f=eps)
     cross = sym_help._reducesum_helper(g, mul(g, x1, x2),
                                        axes_i=[dim], keepdims_i=0)
@@ -2599,10 +2598,7 @@ rnn_relu = _one_hidden_rnn("RNN_RELU")
 def _dim_arange(g, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
-    # Caffe2-specific op
-    is_caffe2_aten_fallback = (sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and
-                               torch.onnx._CAFFE2_ATEN_FALLBACK)
-    if is_caffe2_aten_fallback:
+    if sym_help.is_caffe2_aten_fallback():
         return g.op("_caffe2::Range", stop)
     else:
         # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
