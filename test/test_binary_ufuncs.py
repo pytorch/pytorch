@@ -384,7 +384,6 @@ class TestBinaryUfuncs(TestCase):
 
                     out = torch.empty_like(lhs_i16)
                     self.assertEqual(op(lhs_i32, rhs_i64, out=out).dtype, torch.int16)
-                    self.assertEqual(op(lhs_i32, rhs_i64), out, exact_dtype=False)
                 else:
                     # Float outs cannot be safely cast to integer types
                     with self.assertRaisesRegex(RuntimeError, "can't be cast"):
@@ -398,11 +397,9 @@ class TestBinaryUfuncs(TestCase):
                 # All these output types can be cast to any float or complex type
                 out = torch.empty_like(lhs_i64, dtype=torch.float16)
                 self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.float16)
-                self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_i64, dtype=torch.bfloat16)
                 self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.bfloat16)
-                self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_i64, dtype=torch.float32)
                 self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.float32)
@@ -430,7 +427,6 @@ class TestBinaryUfuncs(TestCase):
                 # All these output types can be cast to any float or complex type
                 out = torch.empty_like(lhs_f64, dtype=torch.float16)
                 self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.float16)
-                self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_f64, dtype=torch.bfloat16)
                 self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.bfloat16)
