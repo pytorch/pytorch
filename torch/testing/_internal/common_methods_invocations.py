@@ -11316,6 +11316,52 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_adaptive_max_pool3d),
+    OpInfo(
+        "nn.functional.alpha_dropout",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs),
+        variant_test_name="without_train",
+        ref=_NOTHING,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        skips=(
+            # Because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            # Op implemented with a lambda, see similar issue: https://github.com/pytorch/pytorch/issues/64997
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        sample_inputs_func=partial(sample_inputs_dropout, train=False),
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs, inplace=True)),
+    # In training mode, alpha_dropout currently doesn't support inputs of complex dtype
+    # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
+    OpInfo(
+        "nn.functional.alpha_dropout",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs),
+        variant_test_name="with_train",
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+            # vmap: We do not yet support calling random operations inside of vmap.
+            # Please perform random operations outside of vmap as a workaround
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),
+            # Because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            # Op implemented with a lambda, see similar issue: https://github.com/pytorch/pytorch/issues/64997
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        sample_inputs_func=partial(sample_inputs_dropout, train=True),
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs, inplace=True)),
     OpInfo('nn.functional.avg_pool1d',
            aten_name='avg_pool1d',
            supports_autograd=True,
