@@ -445,8 +445,6 @@
   structured_delegate: add.out
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: add_sparse
-    SparseCsrCPU, SparseCsrCUDA: add_sparse_csr
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
 
@@ -455,13 +453,12 @@
   variants: method
   structured_delegate: add.out
   dispatch:
-    SparseCPU, SparseCUDA: add_sparse_
-    SparseCsrCPU, SparseCsrCUDA: add_sparse_csr_
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
+  structured_sparse: True
   structured_inherits: TensorIteratorBase
   ufunc_inner_loop:
     Generic: add (AllAndComplex, BFloat16, Half)

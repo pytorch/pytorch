@@ -420,30 +420,16 @@ Tensor mv_sparse(const SparseTensor& self, const Tensor& vec)
 // add(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 
-Tensor add_sparse(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  // TODO: Why?! Can't we just flip the order here...
-  TORCH_CHECK(!(self.is_sparse() && !other.is_sparse()),
-              "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
-  auto commonDtype = at::result_type(self, other);
-  alpha_check(commonDtype, alpha);
-  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return at::add_out(result, self, other, alpha);  // redispatch!
-}
-
-Tensor& add_sparse_(Tensor& self, const Tensor& other, const Scalar& alpha) {
-  return at::add_out(self, self, other, alpha);  // redispatch!
-}
-
 // There's actually nothing sparse specific about these implementations
 
 Tensor sub_sparse(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   sub_check(self, other);
-  return native::add_sparse(self, other, -alpha);
+  return at::add(self, other, -alpha);  // redispatch!
 }
 
 Tensor& sub_sparse_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   sub_check(self, other);
-  return native::add_sparse_(self, other, -alpha);
+  return self.add_(other, -alpha);  // redispatch!
 }
 
 Tensor& sub_out_sparse(const Tensor& self, const Tensor& other, const Scalar& alpha, Tensor& r) {
@@ -569,27 +555,28 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
 
 Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, const Scalar& value);
 
-SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src, const Scalar& value, SparseTensor& r) {
+TORCH_IMPL_FUNC(add_out_sparse_cpu)(
+  const SparseTensor& t, const SparseTensor& src, const Scalar& value, const SparseTensor& r_
+) {
+  // TODO: make this unnecessary
+  SparseTensor& r = const_cast<SparseTensor&>(r_);
   if (!t.is_sparse()) {
-    return add_out_dense_sparse_cpu(r, t, src, value);
+    add_out_dense_sparse_cpu(r, t, src, value);
+    return;
   }
-  // TODO: This test seems a bit goofy
-  TORCH_CHECK(src.is_sparse(), "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
-  AT_ASSERT(!t.is_cuda());  // the dispatch argument
-  TORCH_CHECK(!r.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!src.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");
-
-  TORCH_CHECK(t.sizes().equals(src.sizes()), "add: expected sizes of 'self' and 'other' to match, but ", t.sizes(), " != ", src.sizes());
+  TORCH_INTERNAL_ASSERT(!t.is_cuda());  // the dispatch argument
+  TORCH_INTERNAL_ASSERT(!r.is_cuda());
+  TORCH_INTERNAL_ASSERT(!src.is_cuda());
 
   auto commonDtype = promoteTypes(t.scalar_type(), src.scalar_type());
 
-  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in add operation");
-
   if (src._nnz() == 0) {
-    return copy_sparse_to_sparse_(r, t);
+    copy_sparse_to_sparse_(r, t);
+    return;
   }
   if (t._nnz() == 0) {
-    return mul_out_sparse_scalar(r, src, value);
+    mul_out_sparse_scalar(r, src, value);
+    return;
   }
 
   TORCH_CHECK(is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t.sparse_dim(), " sparse dimensions while 'other' has ", src.sparse_dim(), " sparse dimensions");
@@ -597,9 +584,9 @@ SparseTensor& add_out_sparse_cpu(const SparseTensor& t, const SparseTensor& src,
   r.resize_as_(src);
 
   if (src._values().is_contiguous() && t._values().is_contiguous()) {
-    return add_out_sparse_contiguous(r, t, src, value, commonDtype);
+    add_out_sparse_contiguous(r, t, src, value, commonDtype);
   } else {
-    return add_out_sparse_non_contiguous(r, t, src, value, commonDtype);
+    add_out_sparse_non_contiguous(r, t, src, value, commonDtype);
   }
 }
 
@@ -630,21 +617,17 @@ void add_dense_sparse_worker_cpu(Tensor& r, const Scalar& value, const SparseTen
 }
 
 Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, const Scalar& value) {
-  AT_ASSERT(!r.is_sparse());
-  AT_ASSERT(!dense.is_sparse());
-  AT_ASSERT(sparse_.is_sparse());
+  TORCH_INTERNAL_ASSERT(!r.is_sparse());
+  TORCH_INTERNAL_ASSERT(!dense.is_sparse());
+  TORCH_INTERNAL_ASSERT(sparse_.is_sparse());
 
-  AT_ASSERT(!dense.is_cuda()); // dispatch argument
-  TORCH_CHECK(!r.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!sparse_.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_INTERNAL_ASSERT(!dense.is_cuda());
+  TORCH_INTERNAL_ASSERT(!r.is_cuda());
+  TORCH_INTERNAL_ASSERT(!sparse_.is_cuda());
 
-  TORCH_CHECK(dense.sizes().equals(sparse_.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
-    dense.sizes(), " while other has size ", sparse_.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
-
+  // Recomputed form meta
   auto commonDtype = promoteTypes(dense.scalar_type(), sparse_.scalar_type());
-  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in add operation");
 
-  r.resize_as_(dense);
   SparseTensor sparse = sparse_.coalesce();
 
   Tensor indices = sparse._indices();

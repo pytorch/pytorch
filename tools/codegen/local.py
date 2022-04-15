@@ -16,6 +16,7 @@ from typing import Optional, Iterator
 
 class Locals(threading.local):
     use_const_ref_for_mutable_tensors: Optional[bool] = None
+    structured_sparse: Optional[bool] = None
 
 _locals = Locals()
 
@@ -25,11 +26,23 @@ def use_const_ref_for_mutable_tensors() -> bool:
         "local.parametrize"
     return _locals.use_const_ref_for_mutable_tensors
 
+def structured_sparse() -> bool:
+    assert _locals.structured_sparse is not None, \
+        "need to initialize local.structured_sparse with " \
+        "local.parametrize"
+    return _locals.structured_sparse
+
+def structured_sparse_allow_uninit() -> bool:
+    return _locals.structured_sparse
+
 @contextmanager
-def parametrize(*, use_const_ref_for_mutable_tensors: bool) -> Iterator[None]:
+def parametrize(*, use_const_ref_for_mutable_tensors: bool, structured_sparse: bool) -> Iterator[None]:
     old_use_const_ref_for_mutable_tensors = _locals.use_const_ref_for_mutable_tensors
+    old_structured_sparse = _locals.structured_sparse
     try:
         _locals.use_const_ref_for_mutable_tensors = use_const_ref_for_mutable_tensors
+        _locals.structured_sparse = structured_sparse
         yield
     finally:
         _locals.use_const_ref_for_mutable_tensors = old_use_const_ref_for_mutable_tensors
+        _locals.structured_sparse = old_structured_sparse

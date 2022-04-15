@@ -1,6 +1,7 @@
 import re
 
 from tools.codegen.utils import assert_never
+import tools.codegen.local as local
 
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Iterator, Tuple, Set, Sequence, Callable, Union
@@ -134,7 +135,14 @@ class DispatchKey(Enum):
                 return v
         raise AssertionError(f'unknown dispatch key {value}')
 
-STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
+def get_structured_dispatch_keys():
+    r = {DispatchKey.CUDA, DispatchKey.CPU}
+    if local.structured_sparse():
+        r |= {
+            DispatchKey.SparseCUDA, DispatchKey.SparseCPU,
+        }
+    # TODO: do quantized here too
+    return r
 
 # Set of supported dispatch keys
 dispatch_keys = [
@@ -175,11 +183,15 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
 # Structured kernel generation is only supported for certain key types;
 # otherwise use old-style
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
-    return dk in STRUCTURED_DISPATCH_KEYS
+    return dk in get_structured_dispatch_keys()
+
+UFUNC_DISPATCH_KEYS = {
+    DispatchKey.CPU,
+    DispatchKey.CUDA,
+}
 
 def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
-    # For now, ufunc dispatch keys coincide with structured keys
-    return dk in STRUCTURED_DISPATCH_KEYS
+    return dk in UFUNC_DISPATCH_KEYS
 
 # This is oddly named ScalarType and not DType for symmetry with C++
 class ScalarType(Enum):
@@ -357,6 +369,10 @@ class NativeFunction:
     # variant.
     structured: bool
 
+    # Whether or not to generate structured kernels for sparse.  Ideally,
+    # we port all sparse kernels to structured and then remove this.
+    structured_sparse: bool
+
     # Whether or not this non-out function is a structured kernel, defined
     # in terms of the out kernel referenced by the string here.
     structured_delegate: Optional['OperatorName']
@@ -456,6 +472,11 @@ class NativeFunction:
         structured = e.pop('structured', False)
         assert isinstance(structured, bool), f'not a bool: {structured}'
 
+        structured_sparse = e.pop('structured_sparse', False)
+        assert isinstance(structured_sparse, bool), f'not a bool: {structured_sparse}'
+        if structured_sparse:
+            assert structured, "cannot have structured sparse without everything structured"
+
         structured_delegate_s = e.pop('structured_delegate', None)
         assert structured_delegate_s is None or isinstance(structured_delegate_s, str), f'not a str: {structured_delegate}'
         structured_delegate: Optional[OperatorName] = None
@@ -501,8 +522,11 @@ class NativeFunction:
                     # Why is 'structured' included? External backends (e.g.
                     # XLA) opt into which ops are structured independently
                     # of which in-tree ops are structured
-                    dispatch[dispatch_key] = BackendMetadata(
-                        v, structured=structured and is_structured_dispatch_key(dispatch_key))
+                    with local.parametrize(
+                        use_const_ref_for_mutable_tensors=None, structured_sparse=structured_sparse
+                    ):
+                        dispatch[dispatch_key] = BackendMetadata(
+                            v, structured=structured and is_structured_dispatch_key(dispatch_key))
                     if dispatch_key is DispatchKey.CompositeImplicitAutograd and v == cpp.name(func):
                         redundant_composite_implicit_autograd = True
 
@@ -540,7 +564,7 @@ class NativeFunction:
         # Program the BackendIndex for the implicit dispatch entry from ufunc
         if ufunc_inner_loop:
             assert structured, "ufunc must be structured"
-            for dispatch_key in STRUCTURED_DISPATCH_KEYS:
+            for dispatch_key in UFUNC_DISPATCH_KEYS:
                 assert dispatch_key not in dispatch, \
                     f"ufunc should not have explicit dispatch entry for {dispatch_key}"
                 dispatch[dispatch_key] = BackendMetadata(
@@ -568,18 +592,24 @@ class NativeFunction:
         e.pop('__line__', None)
         assert not e, f"leftover entries: {e}"
 
+        # TODO: this assert no longer works, cannot do it until we have
+        # grouped things up but also need backend metadata; find a place
+        # for this kind of validation
+        """
         # Asserts that we can't do in post_init, because they rely on backend-specific info
         if structured_delegate is not None:
-            for key in STRUCTURED_DISPATCH_KEYS:
+            for key in get_structured_dispatch_keys():
                 assert key not in dispatch, \
                     f"if structured_delegate, then must not have {key} in dispatch dictionary " \
                     "(it is delegated!)"
+        """
 
         return NativeFunction(
             func=func,
             use_const_ref_for_mutable_tensors=use_const_ref_for_mutable_tensors,
             variants=variants,
             structured=structured,
+            structured_sparse=structured_sparse,
             structured_delegate=structured_delegate,
             structured_inherits=structured_inherits,
             precomputed=precomputed,
@@ -883,7 +913,7 @@ class BackendIndex:
         elif isinstance(g, NativeFunctionsGroup):
             f = self.primary(g)
         else:
-            assert_never(f)
+            assert_never(g)
         if f.func.name not in self.index:
             return None
         return self.index[f.func.name]

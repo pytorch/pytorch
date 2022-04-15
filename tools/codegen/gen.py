@@ -1516,6 +1516,10 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
         for g in structured_native_functions:
             if not g.out.ufunc_inner_loop or not is_ufunc_dispatch_key(dispatch_key):
                 continue
+            # A structured kernel may still not have kernels for all backend
+            # types
+            if not backend_indices[dispatch_key].has_kernel(g):
+                continue
             name = g.functional.func.name.name
             if dispatch_key is DispatchKey.CPU:
                 assert fm is cpu_fm

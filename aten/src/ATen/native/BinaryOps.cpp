@@ -44,6 +44,37 @@ namespace meta {
 TORCH_META_FUNC2(add, Tensor) (
   const Tensor& self, const Tensor& other, const Scalar& alpha
 ) {
+  // TODO: Why?! Can't we just flip the order here...
+  TORCH_CHECK(!(self.is_sparse() && !other.is_sparse()),
+  "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
+  if (self.is_sparse() || other.is_sparse()) {
+    const Tensor& out = maybe_get_output();
+    ScalarType out_dtype;
+    if (!out.defined()) {
+      auto out_dtype = at::result_type(self, other);
+      native::alpha_check(out_dtype, alpha);
+    } else {
+      out_dtype = out.scalar_type();
+    }
+    auto commonDtype = promoteTypes(self.scalar_type(), other.scalar_type());
+    TORCH_CHECK(canCast(commonDtype, out_dtype), "Can't convert result type ", commonDtype, " to output ", out_dtype, " in add operation");
+    if (!self.is_sparse()) {
+      // dense-sparse addition
+      TORCH_CHECK(self.sizes().equals(other.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
+        self.sizes(), " while other has size ", other.sizes(), " (FYI: self-other addition does not currently support broadcasting)");
+      set_output(0, self.sizes(), {}, self.options().dtype(scalarTypeToTypeMeta(out_dtype)), {});
+      return;
+    } else {
+      // sparse-sparse addition
+      // TODO: dedup this
+      TORCH_CHECK(self.sizes().equals(other.sizes()), "add: expected sizes of 'self' and 'other' to match, but ", self.sizes(), " != ", other.sizes());
+      // It would appear that sparse doesn't require the nnz structure,
+      // so it's ok to initialize an nnz=0 to start and expect the
+      // kernel to deal with it.  This is... a bit unsavory
+      set_output(0, self.sizes(), {}, self.options().dtype(scalarTypeToTypeMeta(out_dtype)), {});
+      return;
+    }
+  }
   build_borrowing_binary_op(maybe_get_output(), self, other);
   native::alpha_check(dtype(), alpha);
 }

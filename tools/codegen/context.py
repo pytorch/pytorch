@@ -40,7 +40,16 @@ def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunctionsViewGr
     else:
         f = g
     with context(lambda: f'in native_functions.yaml line {f.loc}:\n  {f.func}'):
-        with local.parametrize(use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors):
+        with local.parametrize(
+            use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
+            # When we do structured kernels, we first enter the context for
+            # the group, and then we enter the context for the individual
+            # function on the inside.  We MUST NOT override structured_sparse
+            # for the individual function, as in general it won't be defined
+            # on the other pieces
+            structured_sparse=f.structured_sparse if isinstance(g, NativeFunctionsGroup)
+                else local.structured_sparse_allow_uninit(),
+        ):
             yield
 
 # Given a function that operates on NativeFunction, wrap it into a new function

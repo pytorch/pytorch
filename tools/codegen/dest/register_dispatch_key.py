@@ -11,7 +11,8 @@ from tools.codegen.model import (DispatchKey, NativeFunction,
                                  TensorOptionsArguments,
                                  DeviceCheckType, Argument,
                                  is_cuda_dispatch_key, BackendIndex,
-                                 gets_generated_out_inplace_wrapper)
+                                 gets_generated_out_inplace_wrapper,
+                                 get_structured_dispatch_keys)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      CppSignature, CppSignatureGroup,
                                      Expr, MutRefCType, kernel_signature,
@@ -65,6 +66,11 @@ def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     elif backend_index.dispatch_key in (
             DispatchKey.CompositeExplicitAutograd, DispatchKey.QuantizedCPU, DispatchKey.QuantizedCUDA):
         empty_impl = "at::empty"
+        empty_strided_impl = "at::empty_strided"
+    elif backend_index.dispatch_key in (
+            DispatchKey.SparseCPU, DispatchKey.SparseCUDA):
+        empty_impl = "at::empty"
+        # TODO: make this an error instead
         empty_strided_impl = "at::empty_strided"
     else:
         return []
@@ -462,9 +468,9 @@ if (C10_UNLIKELY(current_device.has_value())) {
             maybe_set_guard_line = maybe_set_guard = ''
 
         if k is SchemaKind.functional:
-            assert self.backend_index.dispatch_key in (
-                DispatchKey.Meta, DispatchKey.CPU, DispatchKey.CUDA,
-                DispatchKey.CompositeExplicitAutograd)
+            assert self.backend_index.dispatch_key in get_structured_dispatch_keys() or \
+                self.backend_index.dispatch_key in (
+                    DispatchKey.Meta, DispatchKey.CompositeExplicitAutograd)
             return f"""{maybe_set_guard_line}
 outputs_[output_idx] = create_out(sizes, strides, options);"""
         elif k is SchemaKind.inplace:
