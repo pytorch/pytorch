@@ -7316,7 +7316,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         if self.device_type == 'cuda':
             sub_test(False)
 
-    @skipCUDAIfRocm # ROCm: test was exceptionally slow, even for slow tests. Skip until triage.
+    @skipCUDAIfRocm  # ROCm: test was exceptionally slow, even for slow tests. Skip until triage.
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
