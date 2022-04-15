@@ -3,7 +3,6 @@ from tools.codegen.model import (
     NativeFunction, NativeFunctionsGroup, NativeFunctionsViewGroup, BackendIndex, DispatchKey
 )
 import tools.codegen.local as local
-from tools.codegen.selective_build.selector import SelectiveBuilder
 
 import functools
 from typing import TypeVar, Union, Iterator, Callable, Dict, Optional

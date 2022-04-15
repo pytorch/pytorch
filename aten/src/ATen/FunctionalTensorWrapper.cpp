@@ -443,6 +443,14 @@ void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector
   }
 }
 
+thread_local bool _functionalizationReapplyViews;
+
+bool getFunctionalizationReapplyViewsTLS() {
+  return _functionalizationReapplyViews;
+}
+void setFunctionalizationReapplyViewsTLS(bool reapply_views) {
+  _functionalizationReapplyViews = reapply_views;
+}
 
 } // namespace impl
 } // namespace functionalization

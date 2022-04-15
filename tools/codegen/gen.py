@@ -40,8 +40,6 @@ from tools.codegen.context import (method_with_native_function,
                                    with_native_function)
 import tools.codegen.dest as dest
 from tools.codegen.gen_functionalization_type import (
-    needs_functionalization,
-    FunctionalizationTarget,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
@@ -1607,10 +1605,6 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
     ) -> Dict[str, List[str]]:
 
         def gen_op_headers(g: Union[NativeFunction, NativeFunctionsViewGroup]) -> List[str]:
-            if not needs_functionalization(selector, g, Target.REGISTRATION, FunctionalizationTarget.FUNCTIONALIZATION) \
-                    and not needs_functionalization(
-                    selector, g, Target.ANONYMOUS_DEFINITION, FunctionalizationTarget.FUNCTIONALIZATION):
-                return []
             if isinstance(g, NativeFunctionsViewGroup):
                 # view ops always get a functionalization kernel
                 headers = [
@@ -1638,27 +1632,11 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                 # We need to manually map inplace ops to their out-of-place variants
                 # (we can't do this with NativeFunctionsGroup today because not all inplace ops have out= variants)
                 None if isinstance(g, NativeFunctionsViewGroup) else to_functional_op.get(g.func.name, None),
-                FunctionalizationTarget.FUNCTIONALIZATION,
-            ),
-            'func_add_back_views_definitions': gen_functionalization_definition(
-                selector,
-                g,
-                # We need to manually map inplace ops to their out-of-place variants
-                # (we can't do this with NativeFunctionsGroup today because not all inplace ops have out= variants)
-                None if isinstance(g, NativeFunctionsViewGroup) else to_functional_op.get(g.func.name, None),
-                FunctionalizationTarget.ADD_BACK_VIEWS,
             ),
             'func_registrations': gen_functionalization_registration(
                 selector,
                 g,
                 backend_indices[DispatchKey.CompositeImplicitAutograd],
-                FunctionalizationTarget.FUNCTIONALIZATION,
-            ),
-            'func_add_back_views_registrations': gen_functionalization_registration(
-                selector,
-                g,
-                backend_indices[DispatchKey.CompositeImplicitAutograd],
-                FunctionalizationTarget.ADD_BACK_VIEWS,
             ),
         }
 
