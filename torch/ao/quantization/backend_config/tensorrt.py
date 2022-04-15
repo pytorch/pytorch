@@ -218,3 +218,7 @@ def get_tensorrt_backend_config_dict():
             identity_config,
         ]
     }
+
+__all__ = [
+    "get_tensorrt_backend_config_dict",
+]
