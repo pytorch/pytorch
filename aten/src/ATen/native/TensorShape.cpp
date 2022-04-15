@@ -5,6 +5,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/DimVector.h>
+#include <ATen/core/ITensorListRef.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
@@ -28,6 +29,140 @@
 #include <vector>
 
 namespace at {
+namespace meta {
+inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
+  size_t i = 0;
+  for (const Tensor& t : tensors) {
+    TORCH_CHECK(
+        t.dim() > 0,
+        "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
+    i++;
+  }
+}
+
+inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITensorListRef& inputs) {
+  c10::optional<c10::MemoryFormat> format = c10::nullopt;
+  auto it = inputs.begin();
+  for (const Tensor& t : inputs) {
+    auto f = t.suggest_memory_format();
+    if (f == c10::MemoryFormat::Contiguous) {
+        return f;
+    }
+    if (format.has_value() && format.value() != f) {
+        return c10::MemoryFormat::Contiguous;
+    }
+    format = f;
+  }
+  return format.value();
+}
+
+TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
+  // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
+  // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
+  // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
+  // size (i.e. other empty sizes are not skipped).
+  auto materialized = tensors.materialize();
+
+  cat_check_no_zero_dim(materialized);
+  dim = at::legacy_cat_wrap_dim(dim, tensors);
+
+  // Checking names before the actual dimensions.
+  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
+
+  TORCH_CHECK(
+      materialized.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
+
+  // Look for the first valid tensor.
+  size_t valid = materialized.size();
+  for (const auto i : c10::irange(materialized.size())) {
+    if (!at::native::cat_should_skip_tensor(materialized[i].get())) {
+      valid = i;
+      break;
+    }
+  }
+
+  bool all_contiguous = true;
+  bool all_same_dtype = true;
+  bool all_same_sizes_and_stride = true;
+  auto memory_format = cat_compute_output_memory_format(materialized);
+
+  // Compute what the output dtype should be:
+  const auto& result = maybe_get_output();
+  auto is_out_defined = result.defined();
+  auto out_dtype = at::native::result_type(tensors);
+
+  // If the output tensor is defined, we need to take it into account
+  // when computing the actual output dtype and the flags.
+  if (is_out_defined) {
+    // Check for type promotion, if the output tensor is defined.
+    TORCH_CHECK(
+        canCast(out_dtype, result.scalar_type()),
+        "torch.cat(): input types can't be cast to the desired output type ",
+        result.scalar_type());
+    out_dtype = result.scalar_type();
+    all_contiguous = result.is_contiguous(memory_format);
+  }
+
+  // Fallback 'set_output' parameters.
+  // (in case we don't find a valid tensor)
+  DimVector sizes {0};
+  TensorOptions options = materialized[0].get().options()
+      .dtype(out_dtype)
+      .memory_format(memory_format);
+
+  // If we found a valid tensor, check whether the input tensors
+  // are compatible, i.e. we can execute `cat` on them.
+  bool found_valid_tensor = valid < materialized.size();
+  if (found_valid_tensor) {
+    TORCH_CHECK(
+        dim <= materialized[valid].get().dim(), "torch.cat(): dimension ", dim, "out of range");
+
+    // Compute the output tensor size.
+    // It should have the same shape as any other valid tensor,
+    // except in the dimension 'dim'.
+    size_t size_at_dim = 0;
+    for (const auto i : c10::irange(materialized.size())) {
+      const Tensor& t = materialized[i];
+      if (!at::native::cat_should_skip_tensor(t)) {
+        at::native::check_cat_shape_except_dim(materialized[valid], t, dim, i);
+        size_at_dim += t.size(dim);
+        all_contiguous = all_contiguous && t.is_contiguous(memory_format);
+        all_same_dtype = all_same_dtype && out_dtype == t.scalar_type();
+        all_same_sizes_and_stride = all_same_sizes_and_stride &&
+            t.sizes() == materialized[valid].get().sizes() &&
+            t.strides() == materialized[valid].get().strides();
+      } else {
+        all_contiguous = false;
+      }
+    }
+
+    // Actually set the output.
+    sizes = materialized[valid].get().sizes().vec();
+    sizes[dim] = size_at_dim;
+    options = materialized[valid].get().options()
+        .dtype(out_dtype)
+        .memory_format(memory_format);
+  }
+
+  set_output(0, sizes, {}, options, maybe_outnames);
+  // Checks for overlaps between the inputs and the output tensor.
+  if (is_out_defined && found_valid_tensor) {
+    at::assert_no_internal_overlap(result);
+    for (const Tensor& t : materialized) {
+      at::assert_no_overlap(result, t);
+    }
+  }
+
+  return TORCH_PRECOMPUTE_STRUCT(cat)()
+      .set_dim(dim)
+      .set_valid(valid)
+      .set_all_contiguous(all_contiguous)
+      .set_all_same_dtype(all_same_dtype)
+      .set_all_same_sizes_and_stride(all_same_sizes_and_stride)
+      .set_memory_format(memory_format);
+}
+} // namespace meta
+
 namespace native {
 
 DEFINE_DISPATCH(cat_serial_stub);
@@ -186,132 +321,49 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
 
-static bool should_skip(const Tensor& t) {
-  return t.numel() == 0 && t.dim() == 1;
-}
-
-Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
-  check_cat_no_zero_dim(tensors);
-  dim = legacy_cat_wrap_dim(dim, tensors);
-  // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
-  // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
-  // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
-  // size (i.e. other empty sizes are not skipped).
-
-  bool allContiguous = true;
-
-  // Inputs cannot alias the output tensor
-  for (const auto i : c10::irange(tensors.size())) {
-    auto lap = at::get_overlap_status(result, tensors[i]);
-    TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
-        lap != at::MemOverlapStatus::FULL, 0,
-        "unsupported operation: the input tensors cannot refer to any of the "
-        "output memory locations. Found overlap in input tensor ", i);
-  }
-  at::assert_no_internal_overlap(result);
-
-  const Tensor* pnotSkippedTensor = [](const TensorList &tensors) -> const Tensor* {
-    for (auto const &tensor : tensors) {
-      if (should_skip(tensor)) {
-        continue;
-      }
-      // we've found a non-empty tensor
-      return &tensor;
-    }
-    return nullptr;
-  }(tensors);
-
-  if (!pnotSkippedTensor) {
-    // FIXME: warn if this is the case -- see comment about skipped
-    // tensors at top of function.
-    return result;
-  }
-  const Tensor& notSkippedTensor = *pnotSkippedTensor;
-
-  TORCH_CHECK(tensors.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
-  TORCH_CHECK(dim <= notSkippedTensor.dim(), "torch.cat(): dimension ", dim, "out of range");
-
-  // when the input tensors are of the same size and strides,
-  // reuse the same iterator for all input tensors
-  bool reuse_iterator = true;
-  bool no_type_promotion = true;
-  // Check the type of the result
-  no_type_promotion = result.dtype() == notSkippedTensor.dtype();
-
-  // compute size of the result in the cat dimension
-  int64_t cat_dim_size = 0;
-  auto first_tensor_mem_format = tensors[0].suggest_memory_format();
-  for (const auto i : c10::irange(tensors.size())) {
-    auto const &tensor = tensors[i];
-    if (should_skip(tensor)) {
-      // don't use fast path for empty tensor
-      allContiguous = false;
-      continue;
-    }
-    check_cat_shape_except_dim(notSkippedTensor, tensor, dim, i);
-    cat_dim_size += tensor.sizes()[dim];
-
-    if (!tensor.is_contiguous(first_tensor_mem_format)) {
-      allContiguous = false;
-    }
-
-    if (tensor.sizes() != notSkippedTensor.sizes() ||
-        tensor.strides() != notSkippedTensor.strides()) {
-      reuse_iterator = false;
-    }
-    if (tensor.dtype() != notSkippedTensor.dtype()) {
-      no_type_promotion = false;
-    }
-  }
-  // compute the size of the result
-  auto result_size = notSkippedTensor.sizes().vec();
-  result_size[dim] = cat_dim_size;
-
-  // skip resizing if size of result is same as expected
-  // raise a warning while resizing if output has one or more elements
-  // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
-  // for understanding why at::native::resize_output is not called directly.
-  // if (at::native::resize_output_check(result, result_size)) {
-  // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
-
-  if (result.sizes() != result_size) {
-    result.resize_(result_size, first_tensor_mem_format);
-  }
-
+TORCH_IMPL_FUNC(cat_out_cpu)
+(ITensorListRef tensors,
+ int64_t dim,
+ int64_t valid,
+ bool all_contiguous,
+ bool all_same_dtype,
+ bool all_same_sizes_and_stride,
+ MemoryFormat memory_format,
+ const Tensor& result) {
   if (result.numel() == 0) {
-    return result;
+    return;
   }
+
+  auto materialized = tensors.materialize();
 
   // fast path for single thread when both inputs and result are contiguous and not empty
-  allContiguous = allContiguous && result.is_contiguous(first_tensor_mem_format);
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
-  ScalarType dtype = notSkippedTensor.scalar_type();
+  ScalarType dtype = materialized[valid].get().scalar_type();
   bool serial_dtype = (dtype == ScalarType::Double || dtype == ScalarType::Float || dtype == ScalarType::BFloat16);
-  if (use_serial_kernel && allContiguous && no_type_promotion && serial_dtype) {
-    cat_serial_stub(kCPU, result, tensors, dim);
-    return result;
+  if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
+    cat_serial_stub(kCPU, result, materialized, dim);
+    return;
   }
 
   int64_t offset = 0;
-  if (reuse_iterator &&
-      result.is_contiguous(first_tensor_mem_format) &&
-      no_type_promotion) {
-    const auto& source_slice = notSkippedTensor;
+  if (all_same_sizes_and_stride && result.is_contiguous(memory_format) &&
+      all_same_dtype) {
+    const Tensor& source_slice = materialized[valid];
     auto slice_dim_size = source_slice.sizes()[dim];
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
     auto result_slice_data = result_slice.data_ptr();
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
 
     auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(false)  // Already checked above
+      .set_check_mem_overlap(false)
       .resize_outputs(false)
       .add_output(result_slice)
       .add_input(source_slice)
       .enforce_safe_casting_to_output(true)
       .build();
 
-    for (auto const &tensor : tensors) {
-      if (should_skip(tensor)) {
+    for (const Tensor& tensor : materialized) {
+      if (cat_should_skip_tensor(tensor)) {
         continue;
       }
       auto source_data = static_cast<char*>(tensor.data_ptr());
@@ -322,8 +374,8 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
       offset += slice_dim_size;
     }
   } else {
-    for (auto const &tensor: tensors) {
-      if (should_skip(tensor)) {
+    for (const Tensor& tensor: materialized) {
+      if (cat_should_skip_tensor(tensor)) {
         continue;
       }
       auto slice_dim_size = tensor.sizes()[dim];
@@ -342,24 +394,6 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
       offset += slice_dim_size;
     }
   }
-
-  return result;
-}
-
-Tensor _cat_cpu(TensorList tensors, int64_t dim) {
-  ScalarType high_type = result_type(tensors);
-  Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
-  return native::_cat_out_cpu(tensors, dim, result);
-}
-
-Tensor & cat_out(TensorList tensors, int64_t dim, Tensor & result) {
-  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
-  {
-    NoNamesGuard guard;
-    at::_cat_out(result, tensors, dim);
-  }
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-  return result;
 }
 
 Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
@@ -419,7 +453,7 @@ static void check_cat_sparse_dims(Tensor const &t,
             ", but tensor at position ", pos, " has ", t.sparse_dim(), ", ", t.dense_dim(), ".");
 }
 
-static Tensor cat_sparse(TensorList tensors, int64_t dim) {
+static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
   std::vector<Tensor> indices;
   std::vector<Tensor> values;
   int64_t wrapped = maybe_wrap_dim(dim, tensors[0].dim());
@@ -516,15 +550,15 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
           t._values().options().layout_opt(),
           t._values().options().device_opt(),
           t._values().options().pinned_memory_opt());
-      vals_pieces.push_back(native::cat({z1, t._values(), z2}, values_dim));
+      vals_pieces.push_back(at::cat({z1, t._values(), z2}, values_dim));
       idxs_pieces.push_back(t._indices());
     }
     auto sizes_copy = sizes.vec();
     sizes_copy[wrapped] = total_size;
     // This can create an uncoalesced tensor
     return native::sparse_coo_tensor(
-        native::cat(idxs_pieces, 1),
-        native::cat(vals_pieces),
+        at::cat(idxs_pieces, 1),
+        at::cat(vals_pieces),
         sizes_copy,
         optTypeMetaToScalarType(tensors[0].options().dtype_opt()),
         tensors[0].options().layout_opt(),
@@ -533,18 +567,9 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
   }
 }
 
-Tensor cat(TensorList tensors, int64_t dim) {
-  if (tensors.size() > 0 &&
-        tensors[0].is_sparse()) {
-    return cat_sparse(tensors, dim);
-  }
-
+Tensor cat_sparse(TensorList tensors, int64_t dim) {
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
-  Tensor result;
-  {
-    NoNamesGuard guard;
-    result = at::_cat(tensors, dim);
-  }
+  auto result = cat_sparse_impl(tensors, at::legacy_cat_wrap_dim(dim, tensors));
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
@@ -892,6 +917,19 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
   return self;
 }
 
+Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length) {
+  return narrow_copy(self, dim, start, sym_length.expect_int());
+}
+
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
+}
+
+Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
+  auto output = at::empty_like(self);
+  return narrow_copy_dense_cpu_out(self, dim, start, length, output);
+}
+
 Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   int64_t allDim = self.dim();
   int64_t end = start+length;
@@ -929,6 +967,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
 Tensor& narrow_copy_dense_cpu_out(
   const Tensor& self, int64_t dim, int64_t start, int64_t length, Tensor& output
 ) {
+
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   TORCH_CHECK(self.dtype() == output.dtype());
 
@@ -1004,15 +1043,6 @@ Tensor& narrow_copy_dense_cpu_out(
         local_dst_offset_bytes, local_src_offset_bytes, dst_block_size_bytes);
   }
   return output;
-}
-
-Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
-}
-
-Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-  auto output = at::empty_like(self);
-  return narrow_copy_dense_cpu_out(self, dim, start, length, output);
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
@@ -1174,7 +1204,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     //
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
-    if (!self.is_xla() && !self.is_lazy()) {
+    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
       return self._reshape_alias(shape, stride.value());
     } else {
       return self.view(shape);
@@ -1477,6 +1507,10 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
     splits[i] = self.narrow(dim, i * split_size, length);
   }
   return splits;
+}
+
+std::vector<Tensor> split(const Tensor& self, IntArrayRef sizes, int64_t dim) {
+  return at::split_with_sizes(self, sizes, dim);
 }
 
 std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
@@ -2114,7 +2148,7 @@ Tensor unsqueeze_sparse(Tensor const &self, int64_t dim) {
   auto sizes = self.sizes().vec();
   sizes.insert(sizes.begin() + dim, 1);
   if (dim <= sparse_dim) {
-    auto new_indices = native::cat(
+    auto new_indices = at::cat(
         {indices.narrow(0, 0, dim),
          native::zeros(
              {1, indices.size(1)},

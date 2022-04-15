@@ -135,12 +135,21 @@ class TORCH_API Module {
     mem_to_delete_ = delete_mem;
   }
 
+  void set_bytecode_version(int64_t version) {
+    bytecode_version_ = version;
+  }
+
+  int64_t bytecode_version() const {
+    return bytecode_version_;
+  }
+
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
   bool has_debug_handles_ = false;
+  int64_t bytecode_version_;
 
   // Extra handle for the module to delete when itself is deleted
   std::shared_ptr<char> mem_to_delete_;
