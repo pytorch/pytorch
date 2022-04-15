@@ -85,6 +85,7 @@ default_op_fp16_dtype_config = {
 default_dynamic_int8_dtype_config = {
     "input_dtype": torch.quint8,
     "weight_dtype": torch.qint8,
+    "bias_dtype": torch.float,
     "output_dtype": torch.float,
     # currently the dtype check is not yet enabled, so we provided the dtype_configs but
     # it is not really used yet,
@@ -95,6 +96,7 @@ default_dynamic_int8_dtype_config = {
 default_dynamic_float16_dtype_config = {
     "input_dtype": torch.float16,
     "weight_dtype": torch.float16,
+    "bias_dtype": torch.float,
     "output_dtype": torch.float,
     # currently the dtype check is not yet enabled, so we provided the dtype_configs but
     # it is not really used yet,
@@ -150,9 +152,10 @@ def _get_linear_configs():
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
     dtype_configs = [
         weighted_op_int8_dtype_config,
-        default_op_fp16_dtype_config,
         default_dynamic_int8_dtype_config,
         default_dynamic_float16_dtype_config,
+        # TODO: maybe remove this since fbgemm/qnnpack doesn't have kernels for it
+        default_op_fp16_dtype_config,
     ]
     linear_configs = []
 
@@ -194,12 +197,14 @@ def _get_linear_configs():
         "pattern": (torch.nn.ReLU, torch.nn.Linear),
         "dtype_configs": dtype_configs,
         "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
+        "fused_module": nni.LinearReLU,
     })
     # linear relu, linear module + functional relu
     linear_configs.append({
         "pattern": (torch.nn.functional.relu, torch.nn.Linear),
         "dtype_configs": dtype_configs,
         "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
+        "fused_module": nni.LinearReLU,
     })
 
     # 2.2 linear module + relu, fused module configs
@@ -240,7 +245,8 @@ def _get_linear_configs():
     linear_configs.append({
         "pattern": (nn.BatchNorm1d, nn.Linear),
         "dtype_configs": dtype_configs,
-        "fuser_method": reverse2(fuse_linear_bn)
+        "fuser_method": reverse2(fuse_linear_bn),
+        "fused_module": nni.LinearBn1d,
     })
 
     # 3.2 linear bn fused
@@ -306,12 +312,14 @@ def _get_conv_configs():
             "pattern": (torch.nn.ReLU, convs.root),
             "dtype_configs": dtype_configs,
             "fuser_method": reverse_sequential_wrapper2(convs.fused_conv_relu),
+            "fused_module": convs.fused_conv_relu,
         })
         # conv relu fusion, conv module + functional relu
         conv_configs.append({
             "pattern": (F.relu, convs.root),
             "dtype_configs": dtype_configs,
             "fuser_method": reverse_sequential_wrapper2(convs.fused_conv_relu),
+            "fused_module": convs.fused_conv_relu,
         })
         # 2.2 conv module + relu fused module configs
         # conv relu, fused module
@@ -367,12 +375,14 @@ def _get_conv_configs():
             "pattern": (convs.bn, convs.root),
             "dtype_configs": dtype_configs,
             "fuser_method": reverse2(fuse_conv_bn),
+            "fused_module": convs.fused_conv_bn,
         })
         # conv + bn + relu module fusion
         conv_configs.append({
             "pattern": (nn.ReLU, (convs.bn, convs.root)),
             "dtype_configs": dtype_configs,
             "fuser_method": reverse3(fuse_conv_bn_relu),
+            "fused_module": convs.fused_conv_bn_relu,
         })
         # conv + bn + relu functional fusion
         conv_configs.append({
@@ -380,6 +390,7 @@ def _get_conv_configs():
             "dtype_configs": dtype_configs,
             "root_module": convs.root,
             "fuser_method": reverse3(fuse_conv_bn_relu),
+            "fused_module": convs.fused_conv_bn_relu,
         })
         # TODO: we can add fusion for torch.relu as well
 
@@ -525,17 +536,20 @@ def _get_bn_configs():
         torch.nn.BatchNorm3d: nni.BNReLU3d,
     }
     for bn in bn_to_fused_bn.keys():
+        fused_bn = bn_to_fused_bn[bn]
         # bn module + relu module fusion config
         bn_configs.append({
             "pattern": (torch.nn.ReLU, bn),
             "dtype_configs": [default_op_quint8_dtype_config],
-            "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
+            "fuser_method": reverse_sequential_wrapper2(fused_bn),
+            "fused_module": fused_bn,
         })
         # bn module + F.relu fusion config
         bn_configs.append({
             "pattern": (torch.nn.functional.relu, bn),
             "dtype_configs": [default_op_quint8_dtype_config],
             "fuser_method": reverse_sequential_wrapper2(bn_to_fused_bn[bn]),
+            "fused_module": fused_bn,
         })
         bn_configs.append({
             "pattern": bn,
