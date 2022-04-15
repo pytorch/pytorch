@@ -254,6 +254,18 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
     }
 };
 
+at::Tensor LazyNativeFunctions::diagonal(const at::Tensor& self, int64_t offset, int64_t dim1, int64_t dim2) {
+  TORCH_LAZY_FN_COUNTER("lazy::");
+
+  auto input = GetLtcTensor(self);
+  auto input_shape = input->shape();
+  dim1 = at::maybe_wrap_dim(dim1, self);
+  dim2 = at::maybe_wrap_dim(dim2, self);
+  auto diagonal_info = DiagonalInfo {offset, dim1, dim2};
+  auto view_info = ViewInfo(ViewInfo::Type::kDiagonal, input_shape, diagonal_info);
+
+  return CreateAtenFromLtcTensor(input->CreateViewTensor(std::move(view_info)));
+}
 
 at::Tensor LazyNativeFunctions::empty(
     at::IntArrayRef size, c10::optional<at::ScalarType> dtype,
