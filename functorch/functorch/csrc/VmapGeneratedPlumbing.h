@@ -11599,6 +11599,42 @@ at::Tensor trapz_dx_generated_plumbing(const at::Tensor & y, double dx, int64_t 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor _nested_from_padded_generated_plumbing(const at::Tensor & padded, const at::Tensor & cpu_nested_shape_example, bool fuse_transform_0213) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(padded, cur_level) && !isBatchedAtLevel(cpu_nested_shape_example, cur_level)) {
+    return at::_ops::_nested_from_padded::call(padded, cpu_nested_shape_example, fuse_transform_0213);
+  }
+  Tensor padded_value;
+  optional<int64_t> padded_bdim;
+  std::tie(padded_value, padded_bdim) = unwrapTensorAtLevel(padded, cur_level);
+  Tensor cpu_nested_shape_example_value;
+  optional<int64_t> cpu_nested_shape_example_bdim;
+  std::tie(cpu_nested_shape_example_value, cpu_nested_shape_example_bdim) = unwrapTensorAtLevel(cpu_nested_shape_example, cur_level);
+  auto results = batch_rule(padded_value, padded_bdim, cpu_nested_shape_example_value, cpu_nested_shape_example_bdim, fuse_transform_0213);
+  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor _nested_from_padded_and_nested_example_generated_plumbing(const at::Tensor & padded, const at::Tensor & nt_example) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(padded, cur_level) && !isBatchedAtLevel(nt_example, cur_level)) {
+    return at::_ops::_nested_from_padded_and_nested_example::call(padded, nt_example);
+  }
+  Tensor padded_value;
+  optional<int64_t> padded_bdim;
+  std::tie(padded_value, padded_bdim) = unwrapTensorAtLevel(padded, cur_level);
+  Tensor nt_example_value;
+  optional<int64_t> nt_example_bdim;
+  std::tie(nt_example_value, nt_example_bdim) = unwrapTensorAtLevel(nt_example, cur_level);
+  auto results = batch_rule(padded_value, padded_bdim, nt_example_value, nt_example_bdim);
+  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _trilinear_generated_plumbing(const at::Tensor & i1, const at::Tensor & i2, const at::Tensor & i3, at::IntArrayRef expand1, at::IntArrayRef expand2, at::IntArrayRef expand3, at::IntArrayRef sumdim, int64_t unroll_dim) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -19813,19 +19849,6 @@ at::Tensor alias_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor _cat_generated_plumbing(at::TensorList tensors, int64_t dim) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  if (!isBatchedAtLevel(tensors, cur_level)) {
-    return at::_ops::_cat::call(tensors, dim);
-  }
-
-  auto results = batch_rule(tensors, dim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 ::std::vector<at::Tensor> _foreach_add_Scalar_generated_plumbing(at::TensorList tensors, const at::Scalar & scalar) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -25817,6 +25840,46 @@ at::Tensor alias_copy_generated_plumbing(const at::Tensor & self) {
   optional<int64_t> self_bdim;
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
+  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor to_padded_tensor_generated_plumbing(const at::Tensor & self, double padding) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level)) {
+    return at::_ops::to_padded_tensor::call(self, padding);
+  }
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto results = batch_rule(self_value, self_bdim, padding);
+  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor _nested_tensor_layer_norm_generated_plumbing(const at::Tensor & self, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, double eps) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(weight, cur_level) && !isBatchedAtLevel(bias, cur_level)) {
+    return at::_ops::_nested_tensor_layer_norm::call(self, weight, bias, eps);
+  }
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  optional<Tensor> weight_value;
+  optional<int64_t> weight_bdim;
+  if (weight) {
+      std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight.value(), cur_level);
+  }
+  optional<Tensor> bias_value;
+  optional<int64_t> bias_bdim;
+  if (bias) {
+      std::tie(bias_value, bias_bdim) = unwrapTensorAtLevel(bias.value(), cur_level);
+  }
+  auto results = batch_rule(self_value, self_bdim, weight_value, weight_bdim, bias_value, bias_bdim, eps);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
