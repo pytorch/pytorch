@@ -10,6 +10,20 @@ from torch.utils._python_dispatch import enable_python_mode
 
 import logging
 
+class TestPythonRegistration(TestCase):
+    def test_override_cpu_sum(self) -> None:
+        run = [False]
+        def my_sum(*args, **kwargs):
+            run[0] = True
+            return args[0]
+        torch.ops.aten.sum.default.impl("CPU", my_sum)
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.sum(x), x)
+        self.assertTrue(run[0])
+
+        torch.ops.aten.sum.default.remove_impl()
+        self.assertEqual(torch.sum(x), torch.tensor(3))
+
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
