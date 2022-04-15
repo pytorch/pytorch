@@ -36,11 +36,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           no-sudo: true
-
-      - name: Checkout the rest of history and master
-        env:
-          HASH: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.sha }}
-        run: git fetch --no-tags --prune --no-recurse-submodules origin --unshallow "${HASH}" master
+          needs-history-and-master: true
 
       - name: Setup Windows
         uses: ./.github/actions/setup-win
