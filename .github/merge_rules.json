@@ -78,6 +78,27 @@
       "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
+      "name": "Sparse",
+      "patterns": [
+         "benchmarks/sparse",
+         "c10/util/sparse_bitset.h",
+         "docs/source/sparse.rst",
+         "torch/**/sparse/**",
+         "torch/**/*sparse*",
+         "torch/include/**/*Sparse*",
+         "torch/include/**/*sparse*",
+         "torch/optim/sparse*",
+         "torch/ao/nn/sparse/**",
+         "torch/utils/benchmark/**/*sparse*",
+         "aten/src/ATen/native/ao_sparse/**",
+         "aten/src/ATen/native/sparse/**",
+         "aten/src/ATen/**/*Sparse*",
+         "test/**/*sparse*"
+      ],
+      "approved_by": ["nikitaved", "cpuhrsch", "pearu", "IvanYashchuk"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
       "name": "superuser",
       "patterns": ["*"],
       "approved_by": ["pytorch/metamates"],
