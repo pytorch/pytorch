@@ -11577,13 +11577,13 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestNNCOpInfo",
-                "test_nnc_correctness",
+                "test_nc_correctness",
             ),
-            # Adding OpInfo to existing operator
+            # The Weight tensor requires_grad = False
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestCompositeCompliance",
-                "test_backward",
+                "TestCommon",
+                "test_floating_inputs_are_differentiable",
                 dtypes=(torch.float32,)
             ),
             DecorateInfo(
