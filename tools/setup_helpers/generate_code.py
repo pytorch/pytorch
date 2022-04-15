@@ -177,37 +177,27 @@ def main() -> None:
     )
 
     if options.gen_lazy_ts_backend:
-        # Note that we must be careful here. In the Bazel and Buck
-        # build systems the working directory and the source tree are
-        # different so we generally need to have distinguish the
-        # source paths from the generated paths.
-        #
-        # Bazel and Buck do this by using the working directory for
-        # the generated path and using absolute paths to the source
-        # files.
-        aten_path = pathlib.Path(options.native_functions_path).parent.parent
-        lazy_dir = aten_path.parent.parent.parent / "torch/csrc/lazy"
-        ts_backend_yaml = aten_path / 'native/ts_native_functions.yaml'
-        ts_native_functions = lazy_dir / "ts_backend/ts_native_functions.cpp"
+        aten_path = os.path.dirname(os.path.dirname(options.native_functions_path))
+        ts_backend_yaml = os.path.join(aten_path, 'native/ts_native_functions.yaml')
+        ts_native_functions = "torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
         ts_node_base = "torch/csrc/lazy/ts_backend/ts_node.h"
         install_dir = options.install_dir or os.fspath(options.gen_dir / "torch/csrc")
         lazy_install_dir = os.path.join(install_dir, "lazy/generated")
         if not os.path.exists(lazy_install_dir):
             os.makedirs(lazy_install_dir)
 
-        assert ts_backend_yaml.is_file(), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
-        assert ts_native_functions.is_file(), f"Unable to access {ts_native_functions}"
+        assert os.path.isfile(ts_backend_yaml), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
+        assert os.path.isfile(ts_native_functions), f"Unable to access {ts_native_functions}"
         from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
         from tools.codegen.dest.lazy_ir import TSLazyIR
-        run_gen_lazy_tensor(aten_path=os.fspath(aten_path),
-                            source_yaml=os.fspath(ts_backend_yaml),
+        run_gen_lazy_tensor(aten_path=aten_path,
+                            source_yaml=ts_backend_yaml,
                             backend_name="TorchScript",
                             output_dir=lazy_install_dir,
                             dry_run=False,
-                            impl_path=os.fspath(ts_native_functions),
+                            impl_path=ts_native_functions,
                             node_base="TsNode",
                             node_base_hdr=ts_node_base,
-                            shape_inference_hdr=os.fspath(lazy_dir / "core/shape_inference.h"),
                             build_in_tree=True,
                             lazy_ir_cls=TSLazyIR,
                             per_operator_headers=options.per_operator_headers,
