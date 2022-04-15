@@ -1,11 +1,9 @@
 from functools import partial
-import itertools
 
 import torch
 
 from torch.testing import \
-    (floating_types, floating_types_and, floating_and_complex_types_and,
-     all_types_and_complex_and)
+    (floating_types, floating_types_and, all_types_and_complex_and)
 from torch.testing._internal.common_utils import make_tensor
 from torch.testing._internal.common_methods_invocations import OpInfo, SampleInput
 
