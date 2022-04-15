@@ -25,7 +25,9 @@ jobs:
       matrix:
         include:
           - docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
+          - docker-image-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
           - docker-image-name: pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
+          - docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
           - docker-image-name: pytorch-linux-bionic-py3.7-clang9
           - docker-image-name: pytorch-linux-bionic-rocm4.5-py3.7
           - docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
@@ -47,13 +49,10 @@ jobs:
           sudo rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
+      # [see note: pytorch repo ref]
+      # deep clone (fetch-depth 0) required for git merge-base
       - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-          submodules: recursive
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux

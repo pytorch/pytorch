@@ -1,34 +1,34 @@
-#include <torch/csrc/THP.h>
+#include <ATen/NamedTensorUtils.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/SafePyObject.h>
+#include <c10/util/DeadlockDetection.h>
+#include <c10/util/irange.h>
+#include <pybind11/pybind11.h>
+#include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/Device.h>
 #include <torch/csrc/Size.h>
+#include <torch/csrc/THP.h>
 #include <torch/csrc/Types.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/python_variable_indexing.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/autograd/functions/accumulate_grad.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <pybind11/pybind11.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
-#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/jit/frontend/tracer.h>
-#include <ATen/NamedTensorUtils.h>
-#include <c10/core/DeviceType.h>
-#include <c10/util/DeadlockDetection.h>
-#include <c10/util/irange.h>
-
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -102,7 +102,7 @@ void concrete_dispatch_fn(
     const c10::impl::PyInterpreter*,
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type);
+    const std::shared_ptr<SafePyObject>& type);
 
 class PyInterpreterHolder {
  public:
@@ -899,6 +899,16 @@ PyObject *THPVariable_is_cuda(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_is_ipu(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "is_ipu");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_ipu());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPVariable_is_xpu(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1128,6 +1138,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
   {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
+  {"is_ipu", (getter)THPVariable_is_ipu, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"is_sparse_csr", (getter)THPVariable_is_sparse_csr, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
@@ -1684,7 +1695,7 @@ void concrete_dispatch_fn(
     const c10::impl::PyInterpreter*,
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type) {
+    const std::shared_ptr<SafePyObject>& type) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
@@ -1769,7 +1780,7 @@ void concrete_dispatch_fn(
   py::dict kwargs;
 
   if (type) {
-    append_overloaded_type(&overloaded_args, type->ptr());
+    append_overloaded_type(&overloaded_args, type->ptr(getPyInterpreter()));
   }
 
   // Find overloaded tensors
@@ -1807,15 +1818,15 @@ void concrete_dispatch_fn(
     kwargs[py::cast(arg.name())] = torch::jit::toPyObject(std::move(arguments[idx]));
   }
 
-  auto out = py::reinterpret_steal<py::object>(handle_torch_function_no_python_arg_parser(
-    overloaded_args,
-    args.ptr(),
-    kwargs.ptr(),
-    func_name,
-    torch_api_function_overload.ptr(),
-    module_name_str.c_str(),
-    "__torch_dispatch__"
-  ));
+  auto out = py::reinterpret_steal<py::object>(
+      handle_torch_function_no_python_arg_parser(
+          overloaded_args,
+          args.ptr(),
+          kwargs.ptr(),
+          func_name,
+          torch_api_function_overload.ptr(),
+          module_name_str.c_str(),
+          TorchFunctionName::TorchDispatch));
 
   if (num_returns == 0) {
     // Check that we got a None return from Python. Anything else is an error.
@@ -1847,15 +1858,20 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
 
   py::dict kwargs;
 
-  auto out = py::reinterpret_steal<py::object>(handle_torch_function_no_python_arg_parser(
-    overloaded_args,
-    args.ptr(),
-    kwargs.ptr(),
-    "detach",
-    py::module::import("torch").attr("ops").attr("aten").attr("detach").attr("default").ptr(),
-    "torch.ops.aten",
-    "__torch_dispatch__"
-  ));
+  auto out = py::reinterpret_steal<py::object>(
+      handle_torch_function_no_python_arg_parser(
+          overloaded_args,
+          args.ptr(),
+          kwargs.ptr(),
+          "detach",
+          py::module::import("torch")
+              .attr("ops")
+              .attr("aten")
+              .attr("detach")
+              .attr("default")
+              .ptr(),
+          "torch.ops.aten",
+          TorchFunctionName::TorchDispatch));
 
   TORCH_CHECK(THPVariable_Check(out.ptr()), "detach returned invalid type ", py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())), ", expected Tensor");
   const Tensor& res_t = THPVariable_Unpack(out.ptr());

@@ -1,7 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <thrust/execution_policy.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_unique2_native.h>
+#include <ATen/ops/_unique_native.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/unique_consecutive_native.h>
+#include <ATen/ops/unique_dim_consecutive_native.h>
+#include <ATen/ops/unique_dim_native.h>
+#endif
 
 #include <tuple>
 #include <iterator>

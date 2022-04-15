@@ -1675,7 +1675,6 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/73173")
     def test_sparse_mask(self, device, dtype, coalesced):
         def _test_sparse_mask_fixed():
             i = self.index_tensor([
@@ -3402,21 +3401,21 @@ class TestSparseOneOff(TestCase):
     def test_cuda_from_cpu(self):
         with self.assertRaisesRegex(
                 RuntimeError,
-                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
             torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                      torch.randn(4, 4, 4),
                                      [3, 4, 4])
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
             torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                      torch.randn(4, 4, 4, 0),
                                      [3, 4, 4, 0])
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
             torch.sparse.FloatTensor(torch.LongTensor(1, 0).cuda(),
                                      torch.randn(0, 4, 4, 0),
                                      [0, 4, 4, 0])

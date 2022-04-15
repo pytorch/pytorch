@@ -18,16 +18,17 @@ from torch.overrides import (
 import torch.utils.hooks as hooks
 
 
-def _wrap_type_error_to_not_implemented(f):
+def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
     # functools.wraps doesn't work well with methods in python 2
     method_assignments = ('__name__', '__doc__')
     assigned = functools.WRAPPER_ASSIGNMENTS
 
     @functools.wraps(f, assigned=assigned)
     def wrapped(*args, **kwargs):
-        if has_torch_function(args):
-            return handle_torch_function(wrapped, args, *args, **kwargs)
         try:
+            # See https://github.com/pytorch/pytorch/issues/75462
+            if has_torch_function(args):
+                return handle_torch_function(wrapped, args, *args, **kwargs)
             return f(*args, **kwargs)
         except TypeError:
             return NotImplemented
@@ -219,7 +220,7 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ['xla', 'ort', 'mlc']:
+        if self.device.type in ['xla', 'ort', 'mlc', 'hpu']:
             return (torch._utils._rebuild_device_tensor_from_numpy, (self.cpu().numpy(),
                                                                      self.dtype,
                                                                      str(self.device),
@@ -595,27 +596,21 @@ class Tensor(torch._C._TensorBase):
             )
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rsub__(self, other):
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__rsub__, (self, other), self, other)
         return _C._VariableFunctions.rsub(self, other)
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rdiv__(self, other):
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__rdiv__, (self, other), self, other)
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
 
-    __pow__ = _wrap_type_error_to_not_implemented(_C._TensorBase.pow)
+    __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(_C._TensorBase.pow)
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other):
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__rmod__, (self, other), self, other)
         return torch.remainder(other, self)
 
     def __format__(self, format_spec):
@@ -625,17 +620,16 @@ class Tensor(torch._C._TensorBase):
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __ipow__(self, other):  # type: ignore[misc]
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__ipow__, (self, other), self, other)
         return NotImplemented
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
         dtype = torch.result_type(other, self)
         return torch.tensor(other, dtype=dtype, device=self.device) ** self
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
         warnings.warn("__floordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
                       "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
@@ -644,7 +638,7 @@ class Tensor(torch._C._TensorBase):
                       "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
         return torch.div(self, other, rounding_mode='trunc')
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
         warnings.warn("__rfloordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
                       "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
@@ -653,18 +647,16 @@ class Tensor(torch._C._TensorBase):
                       "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
         return torch.div(other, self, rounding_mode='trunc')
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rlshift__(self, other):
         return torch.bitwise_left_shift(other, self)
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rrshift__(self, other):
         return torch.bitwise_right_shift(other, self)
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmatmul__(self, other):
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__rmatmul__, (self, other), self, other)
         return torch.matmul(other, self)
 
     __pos__ = _C._TensorBase.positive
@@ -828,6 +820,9 @@ class Tensor(torch._C._TensorBase):
         Returns the type of the underlying storage.
 
         """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.storage_type, (self,), self)
+
         return self.storage()._get_legacy_storage_class()
 
     def refine_names(self, *names):

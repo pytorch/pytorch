@@ -4325,6 +4325,8 @@ Examples::
     torch.Size([3, 9, 7, 3])
 
 """)
+# TODO: Fix via https://github.com/pytorch/pytorch/issues/75798
+pad.__module__ = "torch.nn.functional"
 
 # distance
 
@@ -4789,9 +4791,11 @@ def _scaled_dot_product_attention(
     B, Nt, E = q.shape
     q = q / math.sqrt(E)
     # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
-    attn = torch.bmm(q, k.transpose(-2, -1))
     if attn_mask is not None:
-        attn += attn_mask
+        attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
+    else:
+        attn = torch.bmm(q, k.transpose(-2, -1))
+
     attn = softmax(attn, dim=-1)
     if dropout_p > 0.0:
         attn = dropout(attn, p=dropout_p)
@@ -4963,6 +4967,7 @@ def multi_head_attention_forward(
             v_proj_weight=v_proj_weight,
             static_k=static_k,
             static_v=static_v,
+            average_attn_weights=average_attn_weights,
         )
 
     is_batched = _mha_shape_check(query, key, value, key_padding_mask, attn_mask, num_heads)
