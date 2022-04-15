@@ -2799,6 +2799,24 @@ def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
             kwargs=sample.kwargs))
     return tuple(samples)
 
+# TODO: add reduction kwargs
+def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes = (
+        (),
+        (S,),
+        (S, S),
+        (S, S, S),
+    )
+
+    for shape in shapes:
+        for kwargs in [{}, {'margin': 1.0}]:
+            yield SampleInput(_make_tensor(shape),
+                              args=(_make_tensor(shape, requires_grad=False),
+                                    _make_tensor(shape, requires_grad=False)),
+                              kwargs=kwargs)
+
 def sample_inputs_new_fns(self, device, dtype, requires_grad, **kwargs):
     inputs = [
         ((), (), {}),
@@ -11899,6 +11917,19 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False),
+    OpInfo(
+        "nn.functional.margin_ranking_loss",
+        ref=_NOTHING,
+        dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_margin_ranking_loss,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            # target doesn't require grad
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_floating_inputs_are_differentiable'),
+        )),
     OpInfo(
         "nn.functional.multi_margin_loss",
         ref=_NOTHING,
