@@ -1825,11 +1825,7 @@ class NativeFunctionsViewGroup:
             if self.view_inplace is not None:
                 assert self.view_inplace.has_composite_implicit_autograd_kernel, \
                     f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either" \
-                    " both has CompositeImplicitAutograd kernels, or both not have composite kernels."
-            if self.view_copy is not None:
-                assert self.view_copy.has_composite_implicit_autograd_kernel, \
-                    f"{str(self.view.func.name)} and {str(self.view_copy.func.name)} must either" \
-                    " both has CompositeImplicitAutograd kernels, or both not have composite kernels."
+                    " both have CompositeImplicitAutograd kernels, or both not have composite kernels."
 
     def functions(self, *, include_copy: bool = True) -> Iterator[NativeFunction]:
         yield self.view
