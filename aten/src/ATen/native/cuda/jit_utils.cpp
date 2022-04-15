@@ -971,6 +971,18 @@ std::string generate_reduction_code(
         env.s("complex_math_string", "");
         env.s("complex", std::to_string(0));
       }
+      if (f_inputs_type == "std::complex<at::Half>" ||
+          result_type == "std::complex<at::Half>") {
+        // complex<Half> depends on complex<T> and Half dtypes.
+        env.s("traits_string", get_traits_string());
+        env.s("half_string", jiterator_half_support_literal);
+        env.s("complex_body_string", get_complex_body_string());
+        env.s("complex_math_string", get_complex_math_string());
+
+        env.s("complex_half_body_string", get_complex_half_body_string());
+      } else {
+        env.s("complex_half_body_string", "");
+      }
       env.s("cmath_string", get_cmath_string());
       env.s("functor", func);
       env.s("output_vec_size", std::to_string(vec_size));
