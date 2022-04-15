@@ -22,7 +22,7 @@ jobs:
           submodules: false
 
       - name: Install lintrunner
-        run: pip install lintrunner==0.5.*
+        run: pip install lintrunner==0.6.*
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -43,10 +43,8 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          MERGE_BASE=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")
-          lintrunner -vv --force-color --revision "${MERGE_BASE}"
+          lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}"
           echo ""
           echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
           echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
