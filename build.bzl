@@ -22,6 +22,7 @@ def define_targets(rules):
             "//third-party/glog:glog",
             "//xplat/caffe2/c10:c10",
         ],
+    )
 
     rules.genrule(
         name = "version_h",
