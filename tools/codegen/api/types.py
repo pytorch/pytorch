@@ -54,6 +54,7 @@ tensorT = BaseCppType('at', 'Tensor')
 optionalTensorRefT = BaseCppType('at', 'OptionalTensorRef')
 tensorListT = BaseCppType('at', 'TensorList')
 iTensorListRefT = BaseCppType('at', 'ITensorListRef')
+iOptTensorListRefT = BaseCppType('at', 'IOptTensorListRef')
 dimnameT = BaseCppType('at', 'Dimname')
 dimnameListT = BaseCppType('at', 'DimnameList')
 layoutT = BaseCppType('at', 'Layout')
@@ -579,7 +580,7 @@ class ViewInverseSignature:
 
     def name(self) -> str:
         assert self.g.view_copy is not None
-        return functionalization.name(self.g.view_copy, is_reverse=True, include_namespace=False)
+        return functionalization.name(self.g, is_reverse=True, include_namespace=False)
 
     def decl(self) -> str:
         assert self.g.view_copy is not None
@@ -589,44 +590,39 @@ class ViewInverseSignature:
 
 @dataclass(frozen=True)
 class FunctionalizationLambda:
-    # The NativeFunction this signature is derived from
-    # either a view op or a view_inplace op
-    f: NativeFunction
-
-    # The corresponding out-of-place, non-aliasing variant of the above NativeFunction
-    # e.g. transpose_() -> transpose_copy().
-    # (we could store the NativeFunctionsViewGroup directly here,
-    # but we want to output a separate lambda for the view case and the (optional) inplace_view case.
-    view_copy: NativeFunction
+    g: NativeFunctionsViewGroup
 
     # are we generating the forward lambda or the reverse lambda?
     is_reverse: bool
 
     def captures(self) -> List[Expr]:
         # The lambda lives inside of a kernel following the dispatcher API, so its outer context is the dispatcher arguments
-        outer_ctx = dispatcher.arguments(self.f.func)
-        capture_bindings = functionalization.capture_arguments(self.f.func, is_reverse=self.is_reverse)
+        # We also need to read the "reapply views" TLS at the time that the functionalization kernel was executed,
+        # and plumb it into the lambda.
+        outer_ctx = dispatcher.arguments(self.g.view.func) + [functionalization.reapply_views_binding]
+        capture_bindings = functionalization.capture_arguments(self.g.view.func, is_reverse=self.is_reverse)
         # allow_expensive_conversions is set because we want to convert
         # some reference types (IntArrayRef) to value types (vector<int64_t>).
         capture_exprs = translate.translate(outer_ctx, capture_bindings, method=False, allow_expensive_conversions=True)
         return capture_exprs
 
     def decl(self) -> str:
-        return_type = functionalization.returns_type(self.f.func)
+        return_type = functionalization.returns_type(self.g.view.func)
         capture_str = ', '.join(f'{val.type.name} = {val.expr}' for val in self.captures())
         decls = [a.decl() for a in functionalization.outer_arguments(is_reverse=self.is_reverse)]
         return f"[{capture_str}]({', '.join(decls)}) -> {return_type.cpp_type()}"
 
-    def inner_call(self) -> str:
+    def inner_call(self, *, reapply_views: Optional[bool] = None) -> str:
         inner_call_name = functionalization.name(
-            self.view_copy, is_reverse=self.is_reverse, include_namespace=True)
+            self.g, is_reverse=self.is_reverse, include_namespace=True, reapply_views=reapply_views)
 
         arg_ctx = functionalization.outer_arguments(is_reverse=self.is_reverse)
-        capture_ctx = functionalization.capture_arguments(self.f.func, is_reverse=self.is_reverse)
+        capture_ctx = functionalization.capture_arguments(self.g.view.func, is_reverse=self.is_reverse)
         full_ctx = arg_ctx + capture_ctx
 
-        call_bindings = functionalization.inner_arguments(self.view_copy.func, is_reverse=self.is_reverse)
-        maybe_index = functionalization.inner_call_index(self.view_copy.func)
+        assert self.g.view_copy is not None
+        call_bindings = functionalization.inner_arguments(self.g.view_copy.func, is_reverse=self.is_reverse)
+        maybe_index = functionalization.inner_call_index(self.g.view_copy.func)
         call_exprs = [e.expr for e in translate.translate(full_ctx, call_bindings, method=False)]
         if not self.is_reverse and maybe_index is not None:
             return f'{inner_call_name}({", ".join(call_exprs)})[{maybe_index.name}];'
@@ -634,13 +630,8 @@ class FunctionalizationLambda:
             return f'{inner_call_name}({", ".join(call_exprs)});'
 
     @staticmethod
-    def from_func(f: NativeFunction, *, functional_op: NativeFunction, is_reverse: bool) -> 'FunctionalizationLambda':
-        # Some assertions: lambdas are only used for view ops
-        assert f.is_view_op
-        assert not functional_op.is_view_op
-        # functional_op corresponds to the functional-variant of f, and is only actually used if f itself is an inplace_view op.
-        assert f.func.view_signature() == functional_op.func.view_signature()
-        return FunctionalizationLambda(f, functional_op, is_reverse)
+    def from_func(g: NativeFunctionsViewGroup, *, is_reverse: bool) -> 'FunctionalizationLambda':
+        return FunctionalizationLambda(g, is_reverse)
 
 
 @dataclass(frozen=True)

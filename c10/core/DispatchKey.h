@@ -353,7 +353,6 @@ enum class DispatchKey : uint16_t {
   // removal,
   // we can consider adding separate keys dedicated to those individual passes.
   // See Note [Functionalization Pass In Core] for details.
-  FunctionalizeAddBackViews,
   Functionalize,
 
   // Used by Python key logic to know the set of tls on entry to the dispatcher
