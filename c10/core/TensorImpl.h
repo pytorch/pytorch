@@ -687,17 +687,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
 
+  virtual Layout layout_impl() const {
+    TORCH_CHECK(
+        false, "layout_impl is only implemented for TensorImpl subclasses.");
+  }
+
  public:
+  // Whether a tensor is sparse COO or not.
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
     return key_set_.has_all(c10::sparse_ks);
   }
 
-  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
-  // format.
+  // Whether a tensor is sparse CSR or not.
   bool is_sparse_csr() const {
-    return key_set_.has_any(c10::sparse_csr_ks);
+    return layout() == kSparseCsr;
   }
 
   bool is_quantized() const {
@@ -844,8 +849,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return kStrided;
     } else if (is_sparse()) {
       return kSparse;
-    } else if (is_sparse_csr()) {
-      return kSparseCsr;
+    } else if (key_set_.has_any(c10::sparse_csr_ks)) {
+      // Typically, the tensor dispatch keys define the tensor layout
+      // uniquely. This allows using non-virtual layout method for
+      // better performance. However, when tensor's layout depends,
+      // say, on tensor attributes, one must use this execution path
+      // where the corresponding tensor impl class overwrites virtual
+      // layout_impl() method.
+      //
+      // TODO: implement layout() as native function/method so that
+      // __torch_dispatch__ users will be able to redefine the
+      // layout() method.
+      return layout_impl();
     } else {
       TORCH_INTERNAL_ASSERT(
           is_mkldnn(), "There is an error in the layout calculation logic.");
