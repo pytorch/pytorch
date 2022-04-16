@@ -10,7 +10,7 @@ import torch.onnx.utils
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
-from torch.onnx.symbolic_opset9 import linear, conv2d, add, mul, hardswish, relu
+from torch.onnx.symbolic_opset9 import linear, conv2d, add, mul, hardswish, relu, op_with_optional_float_cast
 
 from sys import maxsize
 
@@ -129,10 +129,8 @@ def _avg_pool(name, tuple_fn):
             stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if count_include_pad:
-            input = g.op("Pad", input,
-                         pads_i=((0,) * 2 + padding) * 2,
-                         mode_s="constant",
-                         value_f=0.)
+            input = op_with_optional_float_cast(g, "Pad", input, pads_i=((0,) * 2 + padding) * 2,
+                                                mode_s="constant", value_f=0., opset_before=11)
             padding = (0,) * len(padding)
         output = g.op("AveragePool", input,
                       kernel_shape_i=tuple_fn(kernel_size),
@@ -168,9 +166,10 @@ upsample_linear1d = _interpolate("upsample_linear1d", 3, "linear")
 upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor, antialias):
+
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias):
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
-                                                             mode , align_corners)
+                                                             mode, align_corners)
     return g.op("Resize", input, scales, mode_s=mode)
 
 
@@ -299,14 +298,20 @@ def embedding_bag(g,
                                           "please use opset 11 or higher.")
 
 
-@parse_args("v", "t", "i", "i", "i")
+@parse_args("v", "v", "v", "i", "i")
 def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128, quant_max=127):
-    if quant_min not in [0, -128] or quant_max not in [127, 255]:
+    if (quant_min, quant_max) not in [(0, 255), (-128, 127)]:
         raise RuntimeError(
-            "ONNX defines [0, 255] for quint8 and [-128, 127] for qint8, got [{}, {}]".format(quant_min, quant_max))
+            "For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
+            "Got ({}, {})".format(quant_min, quant_max))
+    scale = sym_help._maybe_get_scalar(scale)
+    if scale is None:
+        sym_help._onnx_opset_unsupported_detailed("fake_quantize_per_tensor_affine", 10, 13, "Non-constant scale not supported")
     scale = scale.float().data  # Avoid exporter generating double type
-    zero_point_dtype = torch.int8 if quant_min == -128 else torch.uint8
-    zero_point = torch.tensor(zero_point, dtype=zero_point_dtype)  # ONNX requires zero_point to be tensor
+    if quant_min == 0:
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
+    else:
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
     return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
 
 
