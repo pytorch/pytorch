@@ -4,7 +4,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/util/irange.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/IListRef.h>
+#include <ATen/core/ITensorListRef.h>
 
 namespace at {
 
