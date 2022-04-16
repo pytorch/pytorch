@@ -643,7 +643,7 @@ def convert_fx(
             operators should be quantized in the backend, this includes quantization
             mode support (static/dynamic/weight_only), dtype support (quint8/qint8 etc.),
             observer placement for each operators and fused operators. Detailed
-            documentation can be found in torch/ao/quantization/fx/backend_config/README.md
+            documentation can be found in torch/ao/quantization/backend_config/README.md
 
     Return:
         A quantized model (GraphModule)

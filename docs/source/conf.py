@@ -133,7 +133,7 @@ coverage_ignore_functions = [
     "unregister_custom_op_symbolic",
     # torch.ao.quantization
     "default_eval_fn",
-    # torch.ao.quantization.fx.backend_config
+    # torch.ao.quantization.backend_config
     "validate_backend_config_dict",
     # torch.backends
     "disable_global_flags",
