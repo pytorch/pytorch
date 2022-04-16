@@ -4584,17 +4584,20 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
             for val in vals:
                 yield _get_extremal_sample(sample, val, dtype)
 
-        for variant, sample in variant_sample_pairs:
-            trace = create_traced_fn(self, variant)
-            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
-            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+        # just take the first sample input, or else the tests take too long
+        gen = op.sample_inputs(device, dtype, requires_grad=False)
+        sample = next(iter(gen))
 
-            for extremal_sample in _get_extremal_samples(sample, dtype):
-                ref = variant(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+        trace = create_traced_fn(self, op)
+        trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+        trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-                val = trace(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+        for extremal_sample in _get_extremal_samples(sample, dtype):
+            ref = op(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
 
-                self.assertEqual(val, ref, equal_nan=True, exact_device=True)
+            val = trace(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+
+            self.assertEqual(val, ref, equal_nan=True, exact_device=True)
 
 instantiate_device_type_tests(TestCudaFuserOpInfo, globals(), only_for=("cuda"))
 
