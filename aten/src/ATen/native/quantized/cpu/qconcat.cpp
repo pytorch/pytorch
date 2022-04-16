@@ -14,8 +14,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_cat_native.h>
 #include <ATen/ops/cat.h>
+#include <ATen/ops/cat_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/quantize_per_tensor.h>
 #include <ATen/ops/zeros_like_ops.h>
