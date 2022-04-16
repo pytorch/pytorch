@@ -415,21 +415,6 @@ class TestSaveLoad(JitTestCase):
         with self.assertRaises(RuntimeError):
             script_module.save("NonExist/path/test.pt")
 
-    def test_save_dir_exists(self):
-        class Foo(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                return 2 * x
-
-        foo = Foo()
-        with TemporaryDirectoryName() as dirname:
-            path = pathlib.Path(f"{dirname}/../../{dirname}/test.pt")
-            foo.save(path)
-            foo_saved = torch.load(path)
-
-        x = torch.tensor([1., 2., 3., 4.])
-        self.assertTrue(torch.equal(foo(x), foo_saved(x)))
-
     def test_save_namedtuple_input_only(self):
         """
         Even if a NamedTuple is only used as an input argument, saving and
