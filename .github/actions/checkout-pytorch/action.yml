@@ -10,6 +10,16 @@ inputs:
     description: Works as stated in actions/checkout, but the default value is recursive
     required: false
     default: recursive
+  needs-history-and-master:
+    description: If history of this commit and master should be checked out.  Usually used because the job calls git merge-base
+    required: false
+    default: false
+    type: boolean
+  needs-viable-strict:
+    description: If viable/strict should be checked out.  Usually used because the job queries for test stats
+    required: false
+    type: boolean
+    default: false
 
 runs:
   using: composite
@@ -31,6 +41,18 @@ runs:
       uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
       with:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        # deep clone, to allow use of git merge-base
-        fetch-depth: 0
+        # --depth=1 for speed, manually fetch history and other refs as necessary
+        fetch-depth: 1
         submodules: ${{ inputs.submodules }}
+
+    - name: Checkout the rest of history and master
+      shell: bash
+      if: ${{ inputs.needs-history-and-master }}
+      env:
+        HASH: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.sha }}
+      run: git fetch --no-tags --prune --no-recurse-submodules origin --unshallow "${HASH}" master
+
+    - name: Checkout viable/strict
+      shell: bash
+      if: ${{ inputs.needs-viable-strict }}
+      run: git fetch --no-tags --prune --no-recurse-submodules origin viable/strict
