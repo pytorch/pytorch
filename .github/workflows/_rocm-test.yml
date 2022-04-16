@@ -40,6 +40,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           no-sudo: true
+          needs-history-and-master: true
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
