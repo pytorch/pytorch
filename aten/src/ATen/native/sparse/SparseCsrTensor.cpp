@@ -172,7 +172,8 @@ SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor
   // constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  TORCH_INTERNAL_ASSERT(options.layout() == kSparseCsr);
+  Layout layout = options.layout();
+  TORCH_INTERNAL_ASSERT(layout == kSparseCsr);
   DispatchKey dispatch_key;
 
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -186,7 +187,7 @@ SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
   }
 
   return detail::make_tensor<SparseCsrTensorImpl>(
-      DispatchKeySet(dispatch_key), options.dtype());
+      DispatchKeySet(dispatch_key), layout, options.dtype());
 }
 
 Tensor _sparse_csr_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_indices,

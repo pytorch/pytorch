@@ -274,8 +274,7 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 
 inline bool PythonArgs::has_torch_function(){
   return !this->signature.overloaded_args.empty() ||
-      (torch::torch_function_enabled() &&
-       at::impl::PythonTorchFunctionTLS::get_mode());
+       at::impl::PythonTorchFunctionTLS::get_mode();
 }
 
 inline std::string PythonArgs::get_func_name(){
@@ -791,10 +790,10 @@ inline PyObject* PythonArgs::pyobject(int i) {
  *
  */
 // Used for Tensor methods with arguments.
-auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
+auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name, const char* func_name_override = nullptr) -> PyObject*;
 
 // Used for functions which needs to parse python args.
-auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name, const char* func_name_override = nullptr) -> PyObject*;
 
 // Used for functions that have no argument parsing.
 auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args=nullptr, PyObject* kwargs=nullptr, PyObject* torch_api=THPVariableClass, const std::string& module_name="torch.Tensor") -> PyObject*;
