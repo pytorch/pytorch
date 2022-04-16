@@ -96,13 +96,6 @@ class ShardingStrategy(Enum):
     # NO_SHARD = auto()
     # HYBRID_SHARD = auto()
 
-    def __repr__(self) -> str:
-        if self == ShardingStrategy.FULL_SHARD:
-            return "FULL_SHARD"
-        elif self == ShardingStrategy.SHARD_GRAD_OP:
-            return "SHARD_GRAD_OP"
-        raise ValueError()
-
 
 @dataclass
 class MixedPrecision:
