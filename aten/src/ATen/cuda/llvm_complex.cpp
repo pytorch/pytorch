@@ -843,6 +843,15 @@ __sqr(const complex<_Tp>& __x)
                         _Tp(2) * __x.real() * __x.imag());
 }
 
+// where
+
+template<class _Tp>
+complex<_Tp>
+where(bool cond_val, const complex<_Tp>& __x, const complex<_Tp>& __y)
+{
+    return cond_val ? __x : __y;
+}
+
 // asinh
 
 template<class _Tp>
