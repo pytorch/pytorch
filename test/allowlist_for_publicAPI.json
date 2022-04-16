@@ -2438,8 +2438,6 @@
     "linear",
     "logsigmoid",
     "native_channel_shuffle",
-    "native_pixel_shuffle",
-    "native_pixel_unshuffle",
     "one_hot",
     "pairwise_distance",
     "pdist",
