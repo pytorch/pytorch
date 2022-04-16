@@ -1276,6 +1276,8 @@ class FullyShardedDataParallel(nn.Module):
         .. warning:: This needs to be called on all ranks, since synchronization
             primitives may be used.
         """
+        # TODO (rohan-varma): separate these out once a state_dict pre-hook
+        # is available.
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
@@ -1380,7 +1382,11 @@ class FullyShardedDataParallel(nn.Module):
         is called. ``self._state_dict_type`` is used to decide what preprocessing
         will be done.
         """
+        # Code that is common for all state_dict impls
         self = cast(FullyShardedDataParallel, module)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        # Dispatch into state_dict specific implementation of pre-hook.
         self._pre_load_state_dict_hook_fn[self._state_dict_type](state_dict, prefix)
 
     def load_state_dict(
@@ -1427,7 +1433,6 @@ class FullyShardedDataParallel(nn.Module):
         .. warning:: This needs to be called on all ranks, since synchronization
             primitives may be used.
         """
-        torch.cuda.synchronize()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             # Note that it needs writeback=True to persist
             with self._summon_full_params(writeback=True):
