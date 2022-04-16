@@ -18,7 +18,7 @@ jobs:
           architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -127,7 +127,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0 required to use git merge-base)
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Run clang-format
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -143,7 +143,7 @@ jobs:
           echo "| clang-format failures found! Run: "
           echo "|    tools/linter/clang_format_ci.sh ${BASE_SHA} "
           echo "| to fix this error. "
-          echo "| For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format "
+          echo "| For more info, see: https://github.com/csarofeen/pytorch/wiki/clang-format "
           echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 
           tools/linter/clang_format_ci.sh "${BASE_SHA}"
@@ -166,7 +166,7 @@ jobs:
           architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Attempt to run setup.py
         run: |
           if ! python2 setup.py | grep -q "Python 2 has reached end-of-life and is no longer supported by PyTorch."; then
@@ -187,7 +187,7 @@ jobs:
           architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Install requirements
         id: requirements
         run: |
@@ -197,7 +197,7 @@ jobs:
           pip3 install Jinja2==3.0.1 --user
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Regenerate workflows
         id: generate_workflows
         run: .github/scripts/generate_ci_workflows.py
@@ -269,7 +269,7 @@ jobs:
         uses: actions/setup-node@v2
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -308,7 +308,7 @@ jobs:
       # [see note: pytorch repo ref]
       # fetch-depth 2 required to allow us to use github.event.pull_request.head.sha
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Prepare output dir with HEAD commit SHA
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -371,7 +371,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) to allow tools/linter/clang_tidy.py to do its thing
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
         with:
           no-sudo: true
       - name: Prepare output dir with HEAD commit SHA
@@ -466,7 +466,7 @@ jobs:
           architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Install dependencies
         run: |
           set -eux
@@ -490,7 +490,7 @@ jobs:
           architecture: x64
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Install dependencies
         run: |
           set -eux
@@ -524,7 +524,7 @@ jobs:
 
   test-tools:
     name: Test tools
-    if: ${{ github.repository == 'pytorch/pytorch' }}
+    if: ${{ github.repository == 'csarofeen/pytorch' }}
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -535,7 +535,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Install dependencies
         # mypy and boto3 versions copied from
         # .circleci/docker/common/install_conda.sh
@@ -550,7 +550,7 @@ jobs:
           python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
 
   test_collect_env:
-    if: ${{ github.repository == 'pytorch/pytorch' }}
+    if: ${{ github.repository == 'csarofeen/pytorch' }}
     name: Test collect_env
     runs-on: ubuntu-18.04
     strategy:
@@ -565,7 +565,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
       - name: Install torch
         if: matrix.with_torch == 'with_torch'
         run: |
