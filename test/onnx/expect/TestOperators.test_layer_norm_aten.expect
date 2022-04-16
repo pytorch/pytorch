@@ -7,6 +7,7 @@ graph {
     input: "weight"
     input: "bias"
     output: "3"
+    name: "ATen_0"
     op_type: "ATen"
     attribute {
       name: "cudnn_enable"
@@ -34,6 +35,7 @@ graph {
       s: ""
       type: STRING
     }
+    domain: "org.pytorch.aten"
   }
   name: "torch_jit"
   initializer {
@@ -129,4 +131,8 @@ graph {
 }
 opset_import {
   version: 13
+}
+opset_import {
+  domain: "org.pytorch.aten"
+  version: 1
 }
