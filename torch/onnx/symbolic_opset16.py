@@ -28,8 +28,9 @@
 from torch.onnx.symbolic_helper import parse_args
 
 
+# note (mkozuki): `torch.nn.functional.grid_sample` calls `torch.grid_sampler`.
 @parse_args("v", "v", "s", "s", "b")
-def gridsample2d(g, input, grid, mode, padding_mode, align_corners):
+def grid_sampler(g, input, grid, mode, padding_mode, align_corners):
     return g.op(
         "GridSample",
         input,
