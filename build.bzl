@@ -11,6 +11,7 @@ def define_targets(rules):
         # by calling the function when translating in to buck/bazel.
         # TODO: find a better way to do this.
         copts = ["get_c2_fbandroid_xplat_compiler_flags()", "-frtti"],
+        restricted_to = [],
         tags = [
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",
