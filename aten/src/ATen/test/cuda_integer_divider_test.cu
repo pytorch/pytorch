@@ -9,9 +9,11 @@
 #include <vector>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCIntegerDivider.cuh>
+#include <ATen/cuda/detail/IntegerDivider.cuh>
 
 using std::vector;
+using at::cuda::detail::IntDivider;
+using at::cuda::detail::DivMod;
 
 template<typename Value>
 struct TestCase {

@@ -92,9 +92,10 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         bwd_end_event.record()
 
         if modeldef.backward is not None:
-            for param in modeldef.params:
-                assert param.grad is not None
-                param.grad.data.zero_()
+            with torch.no_grad():
+                for param in modeldef.params:
+                    assert param.grad is not None
+                    param.grad.zero_()
 
         if device == 'cuda':
             torch.cuda.synchronize()
@@ -244,7 +245,7 @@ if __name__ == '__main__':
     vlrnns = ['vl_cudnn', 'vl_jit', 'vl_py']
 
     if args.print_json:
-        print_stderr = lambda *args, **kwargs: None    # noqa
+        print_stderr = lambda *args, **kwargs: None    # noqa: E731,F811
     print_stderr(args)
 
     bench_args = copy.deepcopy(vars(args))

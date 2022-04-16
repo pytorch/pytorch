@@ -2,6 +2,7 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Formatting.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/StorageImpl.h>
@@ -9,6 +10,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <sstream>
@@ -51,7 +53,7 @@ static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const 
 static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
-  for (unsigned int i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
       AT_ERROR("Expected dense tensor but got ", expr.layout(),
@@ -89,39 +91,9 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
   return res;
 }
 
-/**
- * Utility function to static cast input Generator* to
- * the backend generator type (CPU/CUDAGeneratorImpl etc.)
- */
-template <typename T>
-static inline T * check_generator(c10::optional<Generator> gen) {
-  TORCH_CHECK(gen.has_value(), "Expected Generator but received nullopt");
-  TORCH_CHECK(gen->defined(), "Generator with undefined implementation is not allowed");
-  TORCH_CHECK(T::device_type() == gen->device().type(), "Expected a '", T::device_type(), "' device type for generator but found '", gen->device().type(), "'");
-  return gen->get<T>();
-}
-
-/**
- * Utility function used in tensor implementations, which
- * supplies the default generator to tensors, if an input generator
- * is not supplied. The input Generator* is also static casted to
- * the backend generator type (CPU/CUDAGeneratorImpl etc.)
- */
-template <typename T>
-static inline T* get_generator_or_default(const c10::optional<Generator>& gen, const Generator& default_gen) {
-  return gen.has_value() && gen->defined() ? check_generator<T>(gen) : check_generator<T>(default_gen);
-}
-
-inline void check_size_nonnegative(IntArrayRef size) {
-  for (auto x: size) {
-    TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
-  }
-}
+using at::detail::check_size_nonnegative;
 
 namespace detail {
-TORCH_API
-Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
-                 c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt);
 
 template <typename T>
 TORCH_API

@@ -1,17 +1,19 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10d/Utils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/TCPStore.hpp>
+#include <c10d/Utils.hpp>
 #ifndef _WIN32
 #include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroupRoundRobin.hpp>
 #endif
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/PyProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
+#include <c10d/ProcessGroupWrapper.hpp>
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -27,9 +29,10 @@
 #include <pybind11/chrono.h>
 
 #include <c10d/comm.hpp>
-#include <c10d/frontend.hpp>
+#include <c10d/debug.h>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
+
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -38,15 +41,64 @@
 
 #include <torch/custom_class.h>
 
+namespace {
+
+// Wrapper to ensure GIL is released before destructing ProcessGroupGloo
+// TODO: move this somewhere more generally useful
+template <typename T>
+class IntrusivePtrNoGilDestructor {
+  c10::intrusive_ptr<T> impl_;
+
+ public:
+  IntrusivePtrNoGilDestructor() = default;
+  IntrusivePtrNoGilDestructor(const IntrusivePtrNoGilDestructor&) = default;
+  IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) = default;
+  IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) =
+      default;
+  IntrusivePtrNoGilDestructor& operator=(IntrusivePtrNoGilDestructor&&) =
+      default;
+  /* implicit */ IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl)
+      : impl_(std::move(impl)) {}
+  // This ctor is very important; see
+  // https://github.com/pybind/pybind11/issues/2957
+  explicit IntrusivePtrNoGilDestructor(T* impl)
+      : impl_(c10::intrusive_ptr<T>::unsafe_steal_from_new(impl)) {}
+  ~IntrusivePtrNoGilDestructor() {
+    if (impl_) {
+      if (PyGILState_Check()) {
+        pybind11::gil_scoped_release release;
+        impl_.reset();
+      } else {
+        impl_.reset();
+      }
+    }
+  }
+  T& operator*() const noexcept {
+    return *impl_;
+  }
+  T* operator->() const noexcept {
+    return impl_.get();
+  }
+  C10_NODISCARD T* get() const noexcept {
+    return impl_.get();
+  }
+  void reset() noexcept {
+    impl_.reset();
+  }
+  operator bool() const noexcept {
+    return impl_;
+  }
+};
+
+} // anonymous namespace
+
+PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true);
+
 namespace torch {
 namespace distributed {
 namespace c10d {
 
 namespace {
-
-#ifdef USE_C10D_GLOO
-constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
-#endif
 
 std::vector<std::string> split(char separator, const std::string& string) {
   std::vector<std::string> pieces;
@@ -67,6 +119,10 @@ constexpr auto kDeprecationWarning =
     "if you see this warning";
 template <typename T>
 using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
+
+template <typename T>
+using intrusive_ptr_no_gil_destructor_class_ =
+    py::class_<T, IntrusivePtrNoGilDestructor<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -102,6 +158,27 @@ class PythonStore : public ::c10d::Store {
     // std::vector<uint8_t>. There is no API for directly accessing
     // the contents of the py::bytes object.
     std::string str = pybind11::cast<py::bytes>(fn(key));
+    return std::vector<uint8_t>(str.begin(), str.end());
+  }
+
+  // Note: this function manually calls the Python-side overload
+  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // macros. This is done so that the Python-side function can
+  // return a py::bytes instead of a std::vector<uint8_t>.
+  std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& expectedValue,
+      const std::vector<uint8_t>& desiredValue) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function fn = pybind11::get_overload(
+        static_cast<const ::c10d::Store*>(this), "compare_set");
+    TORCH_INTERNAL_ASSERT(fn);
+    // Cast return value from Python to py::bytes, then implicitly
+    // convert that to a std::string, so that we can construct a
+    // std::vector<uint8_t>. There is no API for directly accessing
+    // the contents of the py::bytes object.
+    std::string str =
+        pybind11::cast<py::bytes>(fn(key, expectedValue, desiredValue));
     return std::vector<uint8_t>(str.begin(), str.end());
   }
 
@@ -154,6 +231,7 @@ void _register_builtin_comm_hook(
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
+
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
@@ -184,21 +262,19 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           py::arg("reducer"),
           py::arg("comm_hook_type"));
 
-  shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
+  shared_ptr_class_<::c10d::GradBucket>(
+      module,
+      "GradBucket",
+      R"(
+This class mainly passes a flattened gradient tensor
+(returned by :meth:`~torch.distributed.GradBucket.buffer`)
+to DDP communication hook.
+This tensor can be further decomposed into a list of per-parameter tensors within this bucket
+(returned by :meth:`~torch.distributed.GradBucket.get_per_parameter_tensors`)
+to apply layer-wise operations.
+)")
       .def(
-          py::init<
-              size_t,
-              const std::vector<Tensor>&,
-              const std::vector<size_t>&,
-              const std::vector<size_t>&,
-              const std::vector<c10::IntArrayRef>&>(),
-          py::arg("index"),
-          py::arg("tensors"),
-          py::arg("offsets"),
-          py::arg("lengths"),
-          py::arg("sizes_list"))
-      .def(
-          "get_index",
+          "index",
           &::c10d::GradBucket::getIndex,
           py::call_guard<py::gil_scoped_release>(),
           R"(
@@ -210,31 +286,47 @@ Returns:
     All the gradients are bucketized.
 )")
       .def(
-          "get_tensors",
-          &::c10d::GradBucket::getTensors,
+          "buffer",
+          &::c10d::GradBucket::getBuffer,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
-    A list of ``torch.Tensor``. Each tensor in the list refers to the replica on each device.
-    Since DDP communication hook only supports single process single device mode at this time,
-    only exactly one tensor is stored in this bucket.
+    A flattened 1D ``torch.Tensor`` buffer,
+    which can be further decomposed into a list of per-parameter tensors within this bucket.
 )")
       .def(
-          "get_per_parameter_tensors",
-          &::c10d::GradBucket::getPerParameterTensors,
+          "gradients",
+          &::c10d::GradBucket::getGradients,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
-    A list of ``torch.Tensor``. Each tensor in the list corresponds to a parameter.
+    A list of ``torch.Tensor``. Each tensor in the list corresponds to a gradient.
 )")
       .def(
-          "is_the_last_bucket_to_allreduce",
-          &::c10d::GradBucket::isTheLastBucketToAllreduce,
+          "parameters",
+          &::c10d::GradBucket::getParameters,
+          py::call_guard<py::gil_scoped_release>(),
+                    R"(
+Returns:
+    A list of ``torch.Tensor``. Each tensor in the list corresponds to a model
+    parameter.
+)")
+      .def(
+          "is_last",
+          &::c10d::GradBucket::isLast,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
     Whether this bucket is the last bucket to allreduce in an iteration.
     This also means that this bucket corresponds to the first few layers in the forward pass.
+)")
+      .def(
+          "set_buffer",
+          &::c10d::GradBucket::setBuffer,
+          py::arg("buffer"),
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Replaces the tensor in the bucket with the input tensor buffer.
 )");
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
@@ -245,24 +337,27 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
           py::init<
-              std::vector<std::vector<torch::autograd::Variable>>,
+              std::vector<at::Tensor>,
               std::vector<std::vector<size_t>>,
+              std::vector<size_t>,
               c10::intrusive_ptr<::c10d::ProcessGroup>,
-              std::vector<std::vector<bool>>,
+              std::vector<bool>,
               int64_t,
               bool,
-              bool>(),
-          py::arg("replicas"),
+              bool,
+              std::unordered_map<size_t, std::string>,
+              int64_t>(),
+          py::arg("params"),
           py::arg("bucket_indices"),
+          py::arg("per_bucket_size_limits"),
           py::arg("process_group"),
-          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
+          py::arg("expect_sparse_gradients") = std::vector<bool>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
           py::arg("find_unused_parameters") = false,
           py::arg("gradient_as_bucket_view") = false,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "initialize_buckets",
-          &::c10d::Reducer::initialize_buckets,
+          py::arg("param_to_name_mapping") =
+              std::unordered_map<size_t, std::string>(),
+          py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_forward",
@@ -274,17 +369,28 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
-          [](::c10d::Reducer& reducer, const torch::autograd::Variable& output)
-              -> void { reducer.prepare_for_backward({output}); },
+          [](::c10d::Reducer& reducer, const at::Tensor& output) -> void {
+            reducer.prepare_for_backward({output});
+          },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
+      .def("_install_post_backward_futures", [](::c10d::Reducer& reducer, const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futs) {
+              c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futures(c10::FutureType::create(c10::TensorType::get()));
+              for (const auto & fut : futs) {
+              futures.push_back(fut->fut);
+              }
+              reducer.install_futures(std::move(futures));
+          },
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "_rebuild_buckets",
           &::c10d::Reducer::rebuild_buckets,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "get_bucket_tensors",
-          &::c10d::Reducer::get_bucket_tensors,
+          "_get_zeros_like_grad_buckets",
+          [](::c10d::Reducer& reducer) {
+            return reducer.get_grad_buckets(/* return_zero_tensors */ true);
+          },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_push_all_rebuilt_params",
@@ -295,12 +401,41 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Reducer::set_forward_pass_work_handle,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_get_local_used_maps",
-          &::c10d::Reducer::get_local_used_maps_on_device)
+          "_get_local_used_map",
+          &::c10d::Reducer::get_local_used_map_on_device)
       .def(
-          "save_thread_local_state",
-          &::c10d::Reducer::save_thread_local_state,
-          py::call_guard<py::gil_scoped_release>());
+          "_set_ddp_runtime_logging_sample_rate",
+          &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
+          py::arg("sample_rate"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_static_graph",
+          &::c10d::Reducer::set_static_graph,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+      "_ddp_graph_static",
+      &::c10d::Reducer::ddp_graph_static,
+      py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_delay_all_reduce",
+          &::c10d::Reducer::delay_all_reduce,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_run_comm_hook",
+          [](::c10d::Reducer& reducer, ::c10d::GradBucket& bucket)
+              -> std::shared_ptr<jit::PythonFutureWrapper> {
+            c10::intrusive_ptr<c10::ivalue::Future> fut =
+                reducer.run_comm_hook(bucket);
+            return std::make_shared<jit::PythonFutureWrapper>(fut);
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_logger",
+          [](::c10d::Reducer& reducer,
+             const std::shared_ptr<::c10d::Logger> logger) {
+            std::weak_ptr<::c10d::Logger> logger_weakref = logger;
+            reducer.set_logger(logger_weakref);
+          });
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
@@ -314,42 +449,66 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("device_ids"),
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
+          py::arg("has_sync_bn"),
+          py::arg("static_graph"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_runtime_stats_and_log",
           &::c10d::Logger::set_runtime_stats_and_log,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "get_ddp_logging_data",
+          "set_error_and_log",
+          [](::c10d::Logger& logger, const std::string& error) {
+            logger.set_error_and_log(error);
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_ddp_logging_data",
           &::c10d::Logger::get_ddp_logging_data,
           py::call_guard<py::gil_scoped_release>())
-        .def(
-            "_set_comm_hook_name",
-            &::c10d::Logger::set_comm_hook,
-            py::arg("comm_hook"),
-            py::call_guard<py::gil_scoped_release>());
+      .def(
+          "_set_comm_hook_name",
+          &::c10d::Logger::set_comm_hook,
+          py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_uneven_input_join",
+          &::c10d::Logger::set_uneven_input_join,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_static_graph",
+          &::c10d::Logger::set_static_graph,
+          py::call_guard<py::gil_scoped_release>());
 
-  py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
-      An enum whose values correspond to different debug settings of the
-      torch.distributed package. Currently supporting settings are OFF, INFO,
-      and DETAIL, which can be set via the TORCH_DISTRIBUTED_DEBUG environment
-      variable.
+  py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
+      An enum whose values correspond to different debug levels of the
+      torch.distributed package. Currently supporting OFF, INFO, and DETAIL,
+      which can be set via the TORCH_DISTRIBUTED_DEBUG environment variable
+      or via ``set_debug_level()`` function.
   )")
-  .value("OFF", ::c10d::DistributedDebugLevel::OFF)
-  .value("INFO", ::c10d::DistributedDebugLevel::INFO)
-  .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
+      .value("OFF", ::c10d::DebugLevel::Off)
+      .value("INFO", ::c10d::DebugLevel::Info)
+      .value("DETAIL", ::c10d::DebugLevel::Detail);
 
-  module.def(
-      "_get_debug_mode",
-      &::c10d::parseDistDebugLevel,
-      py::call_guard<py::gil_scoped_release>());
+  module
+      .def("get_debug_level", ::c10d::debug_level,
+          R"(Gets the debug level of the torch.distributed package.)")
+      .def("set_debug_level", ::c10d::setDebugLevel,
+          R"(Sets the debug level of the torch.distributed package.)")
+      .def("set_debug_level_from_env", ::c10d::setDebugLevelFromEnvironment,
+          R"(Sets the debug level of the torch.distributed package from the
+          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
-An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
-``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+An enum-like class for available reduction operations: ``SUM``, ``AVG``,
+``PRODUCT``, ``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
 
-Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
+``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
+
+``AVG`` divides values by the world size before summing across ranks.
+``AVG`` is only available with the ``NCCL`` backend,
+and only for NCCL versions 2.10 or later.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
@@ -357,6 +516,7 @@ The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
       .value("SUM", ::c10d::ReduceOp::SUM)
+      .value("AVG", ::c10d::ReduceOp::AVG)
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
       .value("MAX", ::c10d::ReduceOp::MAX)
@@ -458,50 +618,50 @@ Example::
               "compare_set",
               [](::c10d::Store& store,
                  const std::string& key,
-                 const std::string& current_value,
-                 const std::string& new_value) -> py::bytes {
-                std::vector<uint8_t> currentValue_(
-                    current_value.begin(), current_value.end());
-                std::vector<uint8_t> newValue_(
-                    new_value.begin(), new_value.end());
-                auto value = store.compareSet(key, currentValue_, newValue_);
+                 const std::string& expected_value,
+                 const std::string& desired_value) -> py::bytes {
+                std::vector<uint8_t> expectedValue_(
+                    expected_value.begin(), expected_value.end());
+                std::vector<uint8_t> desiredValue_(
+                    desired_value.begin(), desired_value.end());
+                auto value =
+                    store.compareSet(key, expectedValue_, desiredValue_);
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
-performs comparison between ``new_value`` and ``current_value`` before inserting. ``new_value``
-will only be placed if ``current_value`` for the ``key`` already exists in the store.
-
-.. warning::
-    The ``compare_set`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
-    with the :class:`~torch.distributed.FileStore` or class:`~torch.distributed.HashStore` will result in an exception.
+performs comparison between ``expected_value`` and ``desired_value`` before inserting. ``desired_value``
+will only be set if ``expected_value`` for the ``key`` already exists in the store or if ``expected_value``
+is an empty string.
 
 Arguments:
     key (str): The key to be checked in the store.
-    current_value (str): The value associated with ``key`` to be checked before insertion.
-    new_value (str): The value associated with ``key`` to be added to the store.
+    expected_value (str): The value associated with ``key`` to be checked before insertion.
+    desired_value (str): The value associated with ``key`` to be added to the store.
 
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
     >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
-    >>> store.set("first_key", "first_value")
-    >>> store.compare_set("first_key", "second_value", "first_value")
+    >>> store.set("key", "first_value")
+    >>> store.compare_set("key", "first_value", "second_value")
     >>> # Should return "second_value"
-    >>> store.get("first_key")
+    >>> store.get("key")
 )")
           // Convert from std::vector<uint8_t> to py::bytes.
           // The returned value is not guaranteed to be valid UTF-8.
           .def(
               "get",
               [](::c10d::Store& store, const std::string& key) -> py::bytes {
-                auto value = store.get(key);
+                auto value = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.get(key);
+                }();
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
-              py::call_guard<py::gil_scoped_release>(),
               R"(
 Retrieves the value associated with the given ``key`` in the store. If ``key`` is not
 present in the store, the function will wait for ``timeout``, which is defined
@@ -681,7 +841,7 @@ A store implementation that uses a file to store the underlying key-value pairs.
 
 Arguments:
     file_name (str): path of the file in which to store the key-value pairs
-    world_size (int): The total number of processes using the store
+    world_size (int, optional): The total number of processes using the store. Default is -1 (a negative value indicates a non-fixed number of store users).
 
 Example::
     >>> import torch.distributed as dist
@@ -692,7 +852,14 @@ Example::
     >>> store2.get("first_key")
 
       )")
-      .def(py::init<const std::string&, int>());
+      .def(
+          py::init<const std::string&, int>(),
+          py::arg("file_name"),
+          py::arg("world_size") = -1)
+      .def_property_readonly(
+          "path",
+          &::c10d::FileStore::getPath,
+          R"(Gets the path of the file used by FileStore to store key-value pairs.)");
 
 #ifndef _WIN32
   intrusive_ptr_class_<::c10d::HashStore>(
@@ -728,7 +895,7 @@ the server to establish a connection.
 Arguments:
     host_name (str): The hostname or IP Address the server store should run on.
     port (int): The port on which the server store should listen for incoming requests.
-    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates an non-fixed number of store users).
+    world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is -1 (a negative value indicates a non-fixed number of store users).
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
     wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
@@ -745,13 +912,23 @@ Example::
     >>> client_store.get("first_key")
       )")
       .def(
-          py::init<
-              const std::string&,
-              int,
-              int,
-              bool,
-              std::chrono::milliseconds,
-              bool>(),
+          py::init([](const std::string& host,
+                      uint16_t port,
+                      int worldSize,
+                      bool isServer,
+                      std::chrono::milliseconds timeout,
+                      bool waitWorkers,
+                      bool multiTenant) {
+            c10::optional<std::size_t> numWorkers = c10::nullopt;
+            if (worldSize > -1) {
+              numWorkers = static_cast<std::size_t>(worldSize);
+            }
+
+            ::c10d::TCPStoreOptions opts{
+                port, isServer, numWorkers, waitWorkers, timeout, multiTenant};
+
+            return c10::make_intrusive<::c10d::TCPStore>(host, opts);
+          }),
           py::arg("host_name"),
           py::arg("port"),
           py::arg("world_size") = -1,
@@ -760,7 +937,8 @@ Example::
           py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
-          py::arg("wait_for_workers") = true)
+          py::arg("wait_for_workers") = true,
+          py::arg("multi_tenant") = false)
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
@@ -787,9 +965,13 @@ Arguments:
       .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
 
   auto processGroup =
-      intrusive_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
+      py::class_<::c10d::ProcessGroup,
+                 c10::intrusive_ptr<::c10d::ProcessGroup>,
+                 ::c10d::PyProcessGroup>(module, "ProcessGroup")
+          .def(py::init<int, int>())
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
+          .def("name", &::c10d::ProcessGroup::getBackendName)
 
           .def(
               "broadcast",
@@ -886,6 +1068,14 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "_allgather_base",
+              &::c10d::ProcessGroup::_allgather_base,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "allgather",
               [](::c10d::ProcessGroup& pg,
                  std::vector<at::Tensor>& output,
@@ -969,14 +1159,25 @@ Arguments:
               "reduce_scatter",
               [](::c10d::ProcessGroup& pg,
                  at::Tensor& output,
-                 std::vector<at::Tensor>& input) {
+                 std::vector<at::Tensor>& input,
+                 ::c10d::ReduceOp op) {
                 std::vector<at::Tensor> outputs = {output};
                 std::vector<std::vector<at::Tensor>> inputs = {input};
-                return pg.reduce_scatter(
-                    outputs, inputs, ::c10d::ReduceScatterOptions());
+                ::c10d::ReduceScatterOptions opts;
+                opts.reduceOp = op;
+                return pg.reduce_scatter(outputs, inputs, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "_reduce_scatter_base",
+              &::c10d::ProcessGroup::_reduce_scatter_base,
+              py::arg("outputTensor"),
+              py::arg("inputTensor"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -1047,7 +1248,43 @@ Arguments:
               "barrier",
               &::c10d::ProcessGroup::barrier,
               py::arg("opts") = ::c10d::BarrierOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_set_sequence_number_for_group",
+              &::c10d::ProcessGroup::setSequenceNumberForGroup,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_sequence_number_for_group",
+              &::c10d::ProcessGroup::getSequenceNumberForGroup,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "monitored_barrier",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::chrono::milliseconds& timeout,
+                 bool waitAllRanks) {
+                ::c10d::BarrierOptions opts;
+                opts.timeout = timeout;
+                return self->monitoredBarrier(opts, waitAllRanks);
+              },
+              py::arg("timeout") = ::c10d::kUnsetTimeout,
+              py::arg("wait_all_ranks") = false,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_backend_name",
+              &::c10d::ProcessGroup::getBackendName,
               py::call_guard<py::gil_scoped_release>());
+
+  // base ProcessGroup::Options binding
+  auto processGroupOptions =
+      intrusive_ptr_class_<::c10d::ProcessGroup::Options>(
+          processGroup,
+          "Options",
+          R"(
+Base class for all processs group options implementations, such as the nccl
+options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
+)")
+          .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
+          .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
 
 #ifndef _WIN32
   module.def(
@@ -1066,33 +1303,41 @@ Arguments:
 #endif
 
 #ifdef USE_C10D_GLOO
-  auto processGroupGloo = intrusive_ptr_class_<::c10d::ProcessGroupGloo>(
-      module, "ProcessGroupGloo", processGroup);
+  static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+
+  auto processGroupGloo =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
+          module, "ProcessGroupGloo", processGroup);
 
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
 
-  shared_ptr_class_<::c10d::ProcessGroupGloo::Options>(
-      processGroupGloo, "Options")
+  intrusive_ptr_class_<::c10d::ProcessGroupGloo::Options>(
+      processGroupGloo, "_Options", processGroupOptions)
       .def(py::init<>())
-      .def_readwrite("devices", &::c10d::ProcessGroupGloo::Options::devices)
-      .def_readwrite("timeout", &::c10d::ProcessGroupGloo::Options::timeout)
-      .def_readwrite("threads", &::c10d::ProcessGroupGloo::Options::threads);
+      .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
+      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
 
-  processGroupGloo.def_static(
-      "create_device",
-      [](const std::string& hostname, const std::string& interface)
-          -> std::shared_ptr<::gloo::transport::Device> {
-        if (!hostname.empty()) {
-          return ::c10d::ProcessGroupGloo::createDeviceForHostname(hostname);
-        }
-        if (!interface.empty()) {
-          return ::c10d::ProcessGroupGloo::createDeviceForInterface(interface);
-        }
-        throw std::invalid_argument(
-            "Specify either `hostname` or `interface` argument.");
-      },
-      py::arg("hostname") = "",
-      py::arg("interface") = "");
+  processGroupGloo
+      .def_static(
+          "create_device",
+          [](const std::string& hostname, const std::string& interface)
+              -> std::shared_ptr<::gloo::transport::Device> {
+            if (!hostname.empty()) {
+              return ::c10d::ProcessGroupGloo::createDeviceForHostname(
+                  hostname);
+            }
+            if (!interface.empty()) {
+              return ::c10d::ProcessGroupGloo::createDeviceForInterface(
+                  interface);
+            }
+            throw std::invalid_argument(
+                "Specify either `hostname` or `interface` argument.");
+          },
+          py::arg("hostname") = "",
+          py::arg("interface") = "")
+      .def_static(
+          "create_default_device",
+          &::c10d::ProcessGroupGloo::createDefaultDevice);
 
   processGroupGloo
       .def(
@@ -1100,45 +1345,67 @@ Arguments:
               const c10::intrusive_ptr<::c10d::Store>&,
               int,
               int,
-              ::c10d::ProcessGroupGloo::Options>(),
+              c10::intrusive_ptr<::c10d::ProcessGroupGloo::Options>>(),
           py::call_guard<py::gil_scoped_release>())
       .def(
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       int rank,
                       int size,
                       std::chrono::milliseconds timeout) {
-            ::c10d::ProcessGroupGloo::Options options;
+            auto options = ::c10d::ProcessGroupGloo::Options::create();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(::c10d::GLOO_SOCKET_IFNAME_ENV);
-            if (ifnameEnv) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
-                options.devices.push_back(
+            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
+            if (ifnameEnv && strlen(ifnameEnv) > 1) {
+              for (const auto& iface : split(',', ifnameEnv)) {
+                options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }
             } else {
               // If no hostname is specified, this function looks up
               // the machine's hostname and returns a device instance
               // associated with the address that the hostname resolves to.
-              options.devices.push_back(
+              options->devices.push_back(
                   ::c10d::ProcessGroupGloo::createDefaultDevice());
             }
 
-            options.timeout = timeout;
-            options.threads = options.devices.size() * 2;
+            options->timeout = timeout;
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+            options->threads = options->devices.size() * 2;
             return c10::make_intrusive<::c10d::ProcessGroupGloo>(
                 store, rank, size, options);
           }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000), // NOLINT
-          py::call_guard<py::gil_scoped_release>());
+          py::arg("timeout") = kProcessGroupDefaultTimeout,
+          py::call_guard<py::gil_scoped_release>())
+      .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
+
+  // ProcessGroupWrapper is a wrapper pg that includes a helper gloo process
+  // group. It can be used to validate collective calls across processes by
+  // checking the op type and input tensor shapes.
+  auto processGroupWrapper =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupWrapper>(
+          module, "_ProcessGroupWrapper", processGroup)
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+                          const c10::intrusive_ptr<::c10d::ProcessGroupGloo>&
+                              gloo_pg) {
+                return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
+                    pg, gloo_pg);
+              }),
+              py::arg("pg"),
+              py::arg("gloo_pg"),
+              py::call_guard<py::gil_scoped_release>())
+         .def_property_readonly(
+              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg
+         );
 #endif
 
 #ifdef USE_C10D_NCCL
   auto processGroupNCCL =
-      intrusive_ptr_class_<::c10d::ProcessGroupNCCL>(
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL", processGroup)
           .def(
               py::init<
@@ -1153,26 +1420,43 @@ Arguments:
                           int size,
                           const std::chrono::milliseconds& timeout) {
                 auto options = ::c10d::ProcessGroupNCCL::Options::create();
-                options->isHighPriorityStream = false;
-                options->opTimeout = timeout;
+                options->is_high_priority_stream = false;
+                options->timeout = timeout;
                 return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
                     store, rank, size, options);
               }),
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
-              py::arg("timeout") = std::chrono::milliseconds(
-                  ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
-              py::call_guard<py::gil_scoped_release>());
+              py::arg("timeout") = kProcessGroupDefaultTimeout,
+              py::call_guard<py::gil_scoped_release>())
+          .def_property_readonly(
+              "options", &::c10d::ProcessGroupNCCL::getOptions);
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
-      processGroupNCCL, "Options")
-      .def(py::init<>())
+      processGroupNCCL,
+      "Options",
+      processGroupOptions,
+      R"(
+ProcessGroup options for the NCCL backend
+
+Arguments:
+    is_high_priority_stream (bool, optional): flag to enable/disable process
+            group to pick up high priority cuda streams. It lets CUDA driver
+            to prioritize NCCL kernels when there are compute kernels waiting.
+            Default is False.
+
+Example::
+    >>> import torch.distributed as dist
+    >>>
+    >>> nccl_options = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+    >>> # initialize a nccl process group with the options just created
+    >>> dist.init_process_group("nccl", pg_options=nccl_options)
+      )")
+      .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
       .def_readwrite(
-          "is_high_priority",
-          &::c10d::ProcessGroupNCCL::Options::isHighPriorityStream)
-      .def_readwrite(
-          "op_timeout", &::c10d::ProcessGroupNCCL::Options::opTimeout);
+          "is_high_priority_stream",
+          &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
   processGroupNCCL.def_static(
       "_group_start", []() { ::c10d::ProcessGroupNCCL::groupStart(); });
   processGroupNCCL.def_static(
@@ -1180,8 +1464,9 @@ Arguments:
 #endif
 
 #ifdef USE_C10D_MPI
-  auto processGroupMPI = intrusive_ptr_class_<::c10d::ProcessGroupMPI>(
-      module, "ProcessGroupMPI", processGroup);
+  auto processGroupMPI =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupMPI>(
+          module, "ProcessGroupMPI", processGroup);
 
   // Define static create function instead of a constructor, because
   // this function may return null. This happens if this process is not
@@ -1194,7 +1479,10 @@ Arguments:
       py::call_guard<py::gil_scoped_release>());
 #endif
 
-  intrusive_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+  py::class_<::c10d::ProcessGroup::Work,
+             c10::intrusive_ptr<::c10d::ProcessGroup::Work>,
+             ::c10d::PyProcessGroup::PyWork>(module, "Work")
+      .def(py::init<>())
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def(
           "is_success",
@@ -1243,27 +1531,24 @@ Arguments:
           },
           R"(
             Returns:
-                A ``torch._C.Future`` object which is associated with the completion of
+                A ``torch.futures.Future`` object which is associated with the completion of
                 the ``ProcessGroup::Work``. As an example, a future object can be retrieved
                 by ``fut = process_group.allreduce(tensors).get_future()``.
 
             Example::
                 Below is an example of a simple allreduce DDP communication hook that uses
                 ``get_future` API to retrieve a Future associated with the completion of
-                ``allreduce`` work.
+                ``allreduce``.
 
-                >>> def allreduce(state: object, bucket: dist.GradBucket): -> torch._C.Future
-                >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
-                >>>     work = process_group.allreduce(tensors)
-                >>>     return work.get_future()
-
-                >>> ddp_model._egister_comm_hook(state = None, hook = allreduce)
+                >>> def allreduce(process_group: dist.ProcessGroup, bucket: dist.GradBucket): -> torch.futures.Future
+                >>>     group_to_use = process_group if process_group is not None else torch.distributed.group.WORLD
+                >>>     tensor = bucket.buffer().div_(group_to_use.size())
+                >>>     return torch.distributed.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
+                >>> ddp_model.register_comm_hook(state=None, hook=allreduce)
 
             .. warning ::
-                ``get_future`` API supports only NCCL backend.
-                The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
-                features on top of ``torch.futures.Future``.
+                ``get_future`` API supports NCCL, and partially GLOO and MPI backends
+                (no support for peer-to-peer operations like send/recv) and will return a ``torch.futures.Future``.
 
                 In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
@@ -1276,91 +1561,55 @@ Arguments:
                 ``fut.then()`` will return another ``CUDAFuture`` that holds the return value of the
                 callback and a ``CUDAEvent`` that recorded the callback stream.
 
-                Note that ``fut.done()`` returns only whether the operation has been enqueued on the GPU.
+                    1. For CPU work, ``fut.done()`` returns true when work has been complted and value()
+                       tensors are ready.
+                    2. For GPU work, ``fut.done()`` returns true only whether the operation has been enqueued.
+                    3. For mixed CPU-GPU work (e.g. sending GPU tensors with GLOO), ``fut.done()`` returns
+                       true when tensors have arrived on respective nodes, but not yet necessarily synched on
+                       respective GPUs (similarly to GPU work).
            )");
 
-py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
+  py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
-      .def_readwrite("world_size", &c10::DDPLoggingData::world_size)
-      .def_readwrite("rank", &c10::DDPLoggingData::rank)
-      .def_readwrite("module_name", &c10::DDPLoggingData::module_name)
-      .def_readwrite("device_ids", &c10::DDPLoggingData::device_ids)
-      .def_readwrite("output_device", &c10::DDPLoggingData::output_device)
-      .def_readwrite(
-          "broadcast_buffers", &c10::DDPLoggingData::broadcast_buffers)
-      .def_readwrite("bucket_cap_mb", &c10::DDPLoggingData::bucket_cap_mb)
-      .def_readwrite(
-          "find_unused_parameters",
-          &c10::DDPLoggingData::find_unused_parameters)
-      .def_readwrite(
-          "gradient_as_bucket_view",
-          &c10::DDPLoggingData::gradient_as_bucket_view)
-      .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name)
-      .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
-      .def_readwrite("dtype", &c10::DDPLoggingData::dtype)
-      .def_readwrite(
-          "total_parameter_size_bytes",
-          &c10::DDPLoggingData::total_parameter_size_bytes)
-      .def_readwrite(
-          "num_parameter_tensors", &c10::DDPLoggingData::num_parameter_tensors)
-      .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
-      .def_readwrite("master_port", &c10::DDPLoggingData::master_port)
-      .def_readwrite("master_addr", &c10::DDPLoggingData::master_addr)
-      .def_readwrite(
-          "cuda_visible_devices", &c10::DDPLoggingData::cuda_visible_devices)
-      .def_readwrite(
-          "gloo_socket_ifname", &c10::DDPLoggingData::gloo_socket_ifname)
-      .def_readwrite(
-          "gloo_device_transport", &c10::DDPLoggingData::gloo_device_transport)
-      .def_readwrite(
-          "nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
-      .def_readwrite(
-          "nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
-      .def_readwrite("nccl_async_error_handling", &c10::DDPLoggingData::nccl_async_error_handling)
-      .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
-      .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
-      .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout)
-      .def_readwrite(
-          "unused_parameter_size", &c10::DDPLoggingData::unused_parameter_size)
-      .def_readwrite(
-          "has_rebuilt_buckets", &c10::DDPLoggingData::has_rebuilt_buckets)
-      .def_readwrite(
-          "rebuilt_bucket_sizes", &c10::DDPLoggingData::rebuilt_bucket_sizes)
-      .def_readwrite(
-          "avg_forward_compute_time",
-          &c10::DDPLoggingData::avg_forward_compute_time)
-      .def_readwrite(
-          "avg_backward_compute_time",
-          &c10::DDPLoggingData::avg_backward_compute_time)
-      .def_readwrite(
-          "avg_backward_comm_time",
-          &c10::DDPLoggingData::avg_backward_comm_time)
-      .def_readwrite(
-          "avg_backward_compute_comm_overlap_time",
-          &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
-      .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook);
+      .def_readwrite("strs_map", &c10::DDPLoggingData::strs_map)
+      .def_readwrite("ints_map", &c10::DDPLoggingData::ints_map);
 
   module.def(
       "_compute_bucket_assignment_by_size",
-      &::c10d::compute_bucket_assignment_by_size,
+      [](const std::vector<at::Tensor>& tensors,
+            const std::vector<size_t>& bucket_size_limits,
+            const std::vector<bool>& expect_sparse_gradient,
+            const std::vector<int64_t>& tensor_indices,
+            const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
+             if (logger.has_value()) {
+                std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
+                return ::c10d::compute_bucket_assignment_by_size(tensors, bucket_size_limits, expect_sparse_gradient, tensor_indices, {logger_weakref});
+             } else {
+                return ::c10d::compute_bucket_assignment_by_size(tensors, bucket_size_limits, expect_sparse_gradient, tensor_indices, {});
+             }
+      },
       py::arg("tensors"),
       py::arg("bucket_size"),
       py::arg("expect_sparse_gradient") = std::vector<bool>(),
       py::arg("tensor_indices") = std::vector<int64_t>(),
+      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
-      "_verify_replicas_within_process",
-      &::c10d::verify_replicas_within_process,
-      py::arg("replicas"),
-      py::arg("expect_sparse_gradient"),
-      py::call_guard<py::gil_scoped_release>());
-
-  module.def(
-      "_verify_model_across_ranks",
-      &::c10d::verify_replica0_across_processes,
+      "_verify_params_across_processes",
+      [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+         const std::vector<at::Tensor>& params,
+         const c10::optional<std::shared_ptr<::c10d::Logger>>& logger) {
+             if (logger.has_value()) {
+                std::weak_ptr<::c10d::Logger> logger_weakref = logger.value();
+                verify_params_across_processes(process_group, params, {logger_weakref});
+             } else {
+                verify_params_across_processes(process_group, params, {});
+             }
+      },
       py::arg("process_group"),
-      py::arg("replicas"),
+      py::arg("params"),
+      py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -1417,24 +1666,25 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
         add("key3", 3);
         add("key3", 2);
         if (get("key") != "6") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key0") != "value0") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key1") != "value1") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key2") != "value2") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
         if (get("key3") != "15") {
-          throw std::runtime_error("assertion failed");
+          TORCH_CHECK(false, "assertion failed");
         }
       },
       py::call_guard<py::gil_scoped_release>());
 
   module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
+  module.attr("_DEFAULT_PG_TIMEOUT") = py::cast(kProcessGroupDefaultTimeout);
   module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
 
   Py_RETURN_TRUE;
@@ -1442,427 +1692,6 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
 
 #undef PROCESS_GROUP_DEPRECATION_WARNING
 
-// NOTE: Below are TorchBind bindings for c10d, these bindings will
-// live together with those pybind11 bindings above until we resolve
-// all the TorchBind issues and merge these two together. we shouldn't
-// document this until we finish the migration.
-
-static const auto StoreTorchBind =
-    torch::class_<::c10d::Store>("dist_c10d", "Store");
-
-static const auto FileStoreTorchBind =
-    torch::class_<::c10d::FileStore>("dist_c10d", "FileStore")
-        .def(torch::init([](const std::string& path, int64_t num_workers) {
-          return c10::make_intrusive<::c10d::FileStore>(path, num_workers);
-        }));
-
-static const auto TCPStoreTorchBind =
-    torch::class_<::c10d::TCPStore>("dist_c10d", "TCPStore")
-        .def(torch::init([](const std::string& host_name,
-                            int64_t port,
-                            int64_t world_size,
-                            bool is_master,
-                            int64_t timeout) {
-          auto timeout_miliseconds = std::chrono::milliseconds(timeout);
-          return c10::make_intrusive<::c10d::TCPStore>(
-              host_name, port, world_size, is_master, timeout_miliseconds);
-        }));
-
-// TODO: This should really take Store as constructor argument instead of
-// TCPStore, but the fact that TorchScript does not support polymorphism
-// forced us to cast in C++ instead of automatic casting
-static const auto PrefixStoreTorchBind =
-    torch::class_<::c10d::PrefixStore>("dist_c10d", "PrefixStore")
-        .def(torch::init([](const std::string& prefix,
-                            const c10::intrusive_ptr<::c10d::Store>& store) {
-          return c10::make_intrusive<::c10d::PrefixStore>(prefix, store);
-        }));
-
-// Torchbind the ProcessGroup to make it available in TorchScript
-static const auto ProcessGroupWorkTorchBind =
-    torch::class_<::c10d::ProcessGroup::Work>("dist_c10d", "Work")
-        .def(torch::init<>())
-        .def(
-            "wait",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup::Work>& work)
-                -> bool {
-              // TODO: make std::chrono::millisecond works with TorchBind to
-              // provide the full API in python
-              return work->wait();
-            })
-        .def("result", &::c10d::ProcessGroup::Work::result);
-
-// TODO: Support argument names in Python API.
-static const auto ProcessGroupTorchBind =
-    torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup")
-        .def_pickle(
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self) {
-              auto name =
-                  ::c10d::DistributedC10d::get()->getNameOfProcessGroup(self);
-              return std::vector<std::string>{name};
-            },
-            [](std::vector<std::string> state) {
-              TORCH_CHECK(
-                  state.size() == 1,
-                  "Expecting exactly 1 state when restoring ProcessGroup, got: ",
-                  state.size());
-              const auto& process_group_name = state.front();
-              auto process_group =
-                  ::c10d::DistributedC10d::get()->getProcessGroupByName(
-                      process_group_name);
-              TORCH_CHECK(
-                  process_group.defined(),
-                  "Needed process group not found, ",
-                  "please create a process group with name: ",
-                  process_group_name);
-              return process_group;
-            })
-        .def(
-            "rank",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self) {
-              return static_cast<int64_t>(self->getRank());
-            })
-        .def(
-            "size",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self) {
-              return static_cast<int64_t>(self->getSize());
-            })
-        // TODO: make BroadcastOptions compatible with TorchBind to provide
-        // the full API in python.
-        /*
-        // TODO: Enable this method when TorchBind supports overloading.
-        .def(
-            "broadcast",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> data) { return self->broadcast(data); })
-        */
-        .def(
-            "broadcast",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               at::Tensor tensor,
-               int64_t rootRank) {
-              ::c10d::BroadcastOptions opts;
-              opts.rootRank = rootRank;
-              std::vector<at::Tensor> tensors = {std::move(tensor)};
-              return self->broadcast(tensors, opts);
-            })
-        // TODO: make AllreduceOptions compatible with TorchBind to provide
-        // the full API in python.
-        .def(
-            "allreduce",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> tensors) {
-              return self->allreduce(tensors);
-            })
-        /*
-        // TODO: Enable these methods when TorchBind supports overloading.
-        // TODO: Enable these methods when ReduceOp can be torchbinded.
-        .def(
-            "allreduce",
-            [](c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                std::vector<at::Tensor>& tensors,
-                c10::intrusive_ptr<::c10d::ReduceOp> op) {
-                    ::c10d::AllreduceOptions opts;
-                    opts.reduceOp = *op;
-                    return self->allreduce(tensors, opts);
-                }
-        )
-        .def(
-            "allreduce",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               at::Tensor& tensor,
-               c10::intrusive_ptr<::c10d::ReduceOp> op) {
-                    ::c10d::AllreduceOptions opts;
-                    opts.reduceOp = *op;
-                    std::vector<at::Tensor> tensors = {tensor};
-                    return self->allreduce(tensors, opts);
-               }
-         )
-        */
-        // TODO: make AllreduceCoalescedOptions compatible with TorchBind to
-        // provide the full API in python.
-        .def(
-            "allreduce_coalesced",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> tensors) {
-              ::c10d::AllreduceCoalescedOptions opts;
-              return self->allreduce_coalesced(tensors, opts);
-            })
-        .def(
-            "reduce",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> tensors) {
-              ::c10d::ReduceOptions opts;
-              return self->reduce(tensors, opts);
-            })
-        /*
-        // TODO: Enable this when c10d::ReduceOp is TorchBind compatible.
-        .def(
-            "reduce",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-            at::Tensor& tensor,
-            int rootRank,
-            c10::intrusive_ptr<::c10d::ReduceOp> op) {
-            ::c10d::ReduceOptions opts;
-            opts.reduceOp = *op;
-            opts.rootRank = rootRank;
-            std::vector<at::Tensor> tensors = {tensor};
-            return self->reduce(tensors, opts);
-            })
-        */
-        .def(
-            "allgather",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<std::vector<at::Tensor>> outputTensors,
-               std::vector<at::Tensor> inputTensors) {
-              ::c10d::AllgatherOptions opts;
-              return self->allgather(outputTensors, inputTensors, opts);
-            })
-        /*
-        // TODO: Enable these methods when TorchBind supports overloading.
-        .def(
-            "allgather",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> output,
-               at::Tensor input) {
-              std::vector<std::vector<at::Tensor>> outputs = {
-                  std::move(output)};
-              std::vector<at::Tensor> inputs = {std::move(input)};
-              ::c10d::AllgatherOptions opts;
-              return self->allgather(outputs, inputs, opts);
-            })
-        */
-        .def(
-            "allgather_coalesced",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<std::vector<at::Tensor>> output_lists,
-               std::vector<at::Tensor> input_list) {
-              ::c10d::AllgatherOptions opts;
-              return self->allgather_coalesced(output_lists, input_list, opts);
-            })
-        /*
-        // TODO: Enable this method when TorchBind supports overloading.
-        .def(
-            "gather",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<std::vector<at::Tensor>> output_tensors,
-               std::vector<at::Tensor> input_tensors) {
-              ::c10d::GatherOptions opts;
-              return self->gather(output_tensors, input_tensors, opts);
-            })
-        */
-        .def(
-            "gather",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> output,
-               at::Tensor input,
-               int64_t rootRank) {
-              ::c10d::GatherOptions opts;
-              opts.rootRank = rootRank;
-              std::vector<std::vector<at::Tensor>> outputs = {
-                  std::move(output)};
-              std::vector<at::Tensor> inputs = {std::move(input)};
-              return self->gather(outputs, inputs, opts);
-            })
-        /*
-        // TODO: Enable this method when TorchBind supports overloading.
-        .def(
-            "scatter",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> outputTensors,
-               std::vector<std::vector<at::Tensor>> inputTensors) {
-              ::c10d::ScatterOptions opts;
-              self->scatter(outputTensors, inputTensors, opts);
-            })
-        */
-        .def(
-            "scatter",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               at::Tensor output,
-               std::vector<at::Tensor> input,
-               int64_t rootRank) {
-              ::c10d::ScatterOptions opts;
-              opts.rootRank = rootRank;
-              std::vector<std::vector<at::Tensor>> inputs = {std::move(input)};
-              std::vector<at::Tensor> outputs = {std::move(output)};
-              return self->scatter(outputs, inputs, opts);
-            })
-        /*
-        // TODO: Enable this method when TorchBind supports overloading.
-        // TODO: Enable this method when TorchBind supports
-        ReduceScatterOptions. .def( "reduce_scatter",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> outputTensors,
-               std::vector<std::vector<at::Tensor>> inputTensors) {
-              ::c10d::ReduceScatterOptions opts;
-              return self->reduce_scatter(outputTensors, inputTensors, opts);
-            })
-        */
-        .def(
-            "reduce_scatter",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               at::Tensor output,
-               std::vector<at::Tensor> input) {
-              std::vector<at::Tensor> outputs = {std::move(output)};
-              std::vector<std::vector<at::Tensor>> inputs = {std::move(input)};
-              ::c10d::ReduceScatterOptions opts;
-              return self->reduce_scatter(outputs, inputs, opts);
-            })
-        .def(
-            "alltoall_base",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               at::Tensor outputTensor,
-               at::Tensor inputTensor,
-               std::vector<int64_t> outputSplitSizes,
-               std::vector<int64_t> inputSplitSizes) {
-              ::c10d::AllToAllOptions opts;
-              return self->alltoall_base(
-                  outputTensor,
-                  inputTensor,
-                  outputSplitSizes,
-                  inputSplitSizes,
-                  opts);
-            })
-        .def(
-            "alltoall",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> outputTensors,
-               std::vector<at::Tensor> inputTensors) {
-              ::c10d::AllToAllOptions opts;
-              return self->alltoall(outputTensors, inputTensors, opts);
-            })
-        .def(
-            "send",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> tensors,
-               int64_t dstRank,
-               int64_t tag) {
-              return self->send(
-                  tensors, static_cast<int>(dstRank), static_cast<int>(tag));
-            })
-        .def(
-            "recv",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> tensors,
-               int64_t srcRank,
-               int64_t tag) {
-              return self->recv(
-                  tensors, static_cast<int>(srcRank), static_cast<int>(tag));
-            })
-        .def(
-            "recv_anysource",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-               std::vector<at::Tensor> tensors,
-               int64_t tag) {
-              return self->recvAnysource(tensors, static_cast<int>(tag));
-            })
-        .def(
-            "barrier",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self) {
-              ::c10d::BarrierOptions opts;
-              return self->barrier(opts);
-            });
-
-#ifdef USE_C10D_NCCL
-// XXX: Ideally the Options of ProcessGroupNCCL should be
-// bound using `def_readwrite` like in pybind11, but we
-// didn't do that because: 1. no milisecond support yet
-// 2. no def_readwrite or property support yet.
-// TODO: make this binding the same as pybind11
-static const auto ProcessGroupNCCLOptionsTorchBind =
-    torch::class_<::c10d::ProcessGroupNCCL::Options>(
-        "dist_c10d",
-        "ProcessGroupNCCLOptions")
-        .def(torch::init([](int64_t timeout, bool isHighPriorityStream) {
-          auto opTimeout = std::chrono::milliseconds(timeout);
-          return ::c10d::ProcessGroupNCCL::Options::create(
-              opTimeout, isHighPriorityStream);
-        }));
-
-static const auto ProcessGroupNCCLTorchBind =
-    torch::class_<::c10d::ProcessGroupNCCL>("dist_c10d", "ProcessGroupNCCL")
-        .def_pickle(
-            [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
-              auto base_process_group =
-                  static_intrusive_pointer_cast<::c10d::ProcessGroup>(self);
-              auto name =
-                  ::c10d::DistributedC10d::get()->getNameOfProcessGroup(self);
-              return std::vector<std::string>{name};
-            },
-            [](std::vector<std::string> state) {
-              TORCH_CHECK(
-                  state.size() == 1,
-                  "Expecting exactly 1 state when restoring ProcessGroupNCCL, got: ",
-                  state.size());
-              const auto& process_group_name = state.front();
-              auto base_process_group =
-                  ::c10d::DistributedC10d::get()->getProcessGroupByName(
-                      process_group_name);
-              TORCH_CHECK(
-                  base_process_group.defined(),
-                  "Needed process group not found, ",
-                  "please create a process group with name: ",
-                  process_group_name);
-              c10::intrusive_ptr<::c10d::ProcessGroupNCCL> process_group_nccl =
-                  dynamic_intrusive_pointer_cast<::c10d::ProcessGroupNCCL>(
-                      base_process_group);
-              TORCH_CHECK(
-                  process_group_nccl.defined(),
-                  "Process group ",
-                  process_group_name,
-                  " isn't configured for NCCL backend");
-              return process_group_nccl;
-            })
-        .def(torch::init(
-            [](const c10::intrusive_ptr<::c10d::Store>& store,
-               int64_t rank,
-               int64_t size,
-               c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options> options,
-               const std::string& name) {
-              auto pg = c10::make_intrusive<::c10d::ProcessGroupNCCL>(
-                  store, rank, size, options);
-              ::c10d::DistributedC10d::get()->registerProcessGroupName(
-                  pg, name);
-              return pg;
-            }))
-        .def(
-            "alltoall_base",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-               at::Tensor output,
-               at::Tensor input,
-               std::vector<int64_t> outputSplitSizes,
-               std::vector<int64_t> inputSplitSizes) {
-              return self->alltoall_base(
-                  output,
-                  input,
-                  outputSplitSizes,
-                  inputSplitSizes,
-                  ::c10d::AllToAllOptions());
-            })
-        .def(
-            "size",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
-              return (int64_t)self->getSize();
-            })
-        .def(
-            "rank",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
-              return (int64_t)self->getRank();
-            });
-#endif
-
-static const auto DistributedC10dFrontendTorchBind =
-    torch::class_<::c10d::DistributedC10d>("dist_c10d", "frontend")
-        .def(torch::init([]() { return ::c10d::DistributedC10d::get(); }))
-        .def(
-            "new_process_group_helper",
-            &::c10d::DistributedC10d::newProcessGroupHelper)
-        .def(
-            "get_process_group_by_name",
-            &::c10d::DistributedC10d::getProcessGroupByName)
-        .def(
-            "get_name_of_process_group",
-            &::c10d::DistributedC10d::getNameOfProcessGroup);
 } // namespace
 
 // c10d methods on torch._C

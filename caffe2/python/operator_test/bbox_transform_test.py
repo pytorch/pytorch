@@ -214,7 +214,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
         **hu.gcs_cpu_only
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_bbox_transform(
         self,
         num_rois,
@@ -282,7 +282,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
         **hu.gcs_cpu_only
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_bbox_transform_batch(
         self,
         roi_counts,

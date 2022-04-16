@@ -21,7 +21,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
       ;;
   esac
 
-  mkdir /opt/conda
+  mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
 
   # Work around bug where devtoolset replaces sudo and breaks it.
@@ -69,53 +69,40 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  # DO NOT install cmake here as it would install a version newer than 3.5, but
-  # we want to pin to version 3.5.
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
+  # DO NOT install cmake here as it would install a version newer than 3.10, but
+  # we want to pin to version 3.10.
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
+    conda_install numpy=1.19.2 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 -c conda-forge
+  elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.7" ]; then
     # DO NOT install dataclasses if installing python-3.7, since its part of python-3.7 core packages
-    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six typing_extensions
+    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six typing_extensions
   else
-    conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
+    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
   fi
-  if [[ "$CUDA_VERSION" == 9.2* ]]; then
-    conda_install magma-cuda92 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.0* ]]; then
-    conda_install magma-cuda100 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.1* ]]; then
-    conda_install magma-cuda101 -c pytorch
-  elif [[ "$CUDA_VERSION" == 10.2* ]]; then
-    conda_install magma-cuda102 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.0* ]]; then
-    conda_install magma-cuda110 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.1* ]]; then
-    conda_install magma-cuda111 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.2* ]]; then
-    conda_install magma-cuda112 -c pytorch
+
+  # Magma package names are concatenation of CUDA major and minor ignoring revision
+  # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
+  if [ -n "$CUDA_VERSION" ]; then
+    conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
   fi
 
   # TODO: This isn't working atm
   conda_install nnpack -c killeent
 
   # Install some other packages, including those needed for Python test reporting
-  # TODO: Why is scipy pinned
-  # Pin MyPy version because new errors are likely to appear with each release
-  # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-  as_jenkins pip install --progress-bar off pytest \
-    scipy==1.1.0 \
-    scikit-image \
-    librosa>=0.6.2 \
-    psutil \
-    numba \
-    llvmlite \
-    unittest-xml-reporting \
-    boto3==1.16.34 \
-    coverage \
-    hypothesis==4.53.2 \
-    mypy==0.770 \
-    tb-nightly
+  as_jenkins pip install --progress-bar off -r /opt/conda/requirements-ci.txt
+
+  # Install numba only on python-3.8 or below
+  # For numba issue see https://github.com/pytorch/pytorch/issues/51511
+  if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
+    as_jenkins pip install --progress-bar off numba==0.54.1
+  else
+    as_jenkins pip install --progress-bar off numba==0.49.0
+  fi
 
   # Update scikit-learn to a python-3.8 compatible version
   if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then

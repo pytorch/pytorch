@@ -1,4 +1,5 @@
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/macros/Macros.h>
 
 #include <limits>
 
@@ -9,16 +10,13 @@ namespace {
 // returns -1 on failure
 int32_t driver_version() {
   int driver_version = -1;
-  cudaError_t err = cudaDriverGetVersion(&driver_version);
-  if (err != cudaSuccess) {
-    cudaError_t last_err C10_UNUSED = cudaGetLastError();
-  }
+  C10_CUDA_IGNORE_ERROR(cudaDriverGetVersion(&driver_version));
   return driver_version;
 }
 
 int device_count_impl(bool fail_if_no_driver) {
   int count;
-  auto err = cudaGetDeviceCount(&count);
+  auto err = C10_CUDA_ERROR_HANDLED(cudaGetDeviceCount(&count));
   if (err == cudaSuccess) {
     return count;
   }
@@ -101,7 +99,9 @@ DeviceIndex device_count() noexcept {
   static int count = []() {
     try {
       auto result = device_count_impl(/*fail_if_no_driver=*/false);
-      TORCH_INTERNAL_ASSERT(result <= std::numeric_limits<DeviceIndex>::max(), "Too many CUDA devices, DeviceIndex overflowed");
+      TORCH_INTERNAL_ASSERT(
+          result <= std::numeric_limits<DeviceIndex>::max(),
+          "Too many CUDA devices, DeviceIndex overflowed");
       return result;
     } catch (const c10::Error& ex) {
       // We don't want to fail, but still log the warning
@@ -133,6 +133,16 @@ void set_device(DeviceIndex device) {
 
 void device_synchronize() {
   C10_CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+// this function has to be called from callers performing cuda synchronizing
+// operations, to raise proper error or warning
+void warn_or_error_on_sync() {
+  if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_ERROR) {
+    TORCH_CHECK(false, "called a synchronizing CUDA operation");
+  } else if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_WARN) {
+    TORCH_WARN("called a synchronizing CUDA operation");
+  }
 }
 
 } // namespace cuda

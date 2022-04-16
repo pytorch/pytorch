@@ -14,17 +14,13 @@
 #include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
-#include <TH/TH.h> // for USE_LAPACK
-
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
 
 namespace at {
 
-Context::Context()
-    : thc_state(nullptr, [](THCState* p) { /* no-op */ }),
-      thh_state(nullptr, [](THHState* p) { /* no-op */ }) {}
+Context::Context() = default;
 
 // TODO: This could be bad juju if someone calls globalContext() in the
 // destructor of an object with static lifetime.
@@ -64,23 +60,32 @@ bool Context::deterministicAlgorithms() const {
   return _deterministic_algorithms;
 }
 
-void Context::setDeterministicAlgorithms(bool b) {
-  if (b) {
-    TORCH_WARN_ONCE("torch.use_deterministic_algorithms is in beta, and its design and"
-      " functionality may change in the future.");
-  }
+bool Context::deterministicAlgorithmsWarnOnly() const {
+  return _deterministic_algorithms_warn_only;
+}
 
+void Context::setDeterministicAlgorithms(bool b, bool warn_only=false) {
   _deterministic_algorithms = b;
+  _deterministic_algorithms_warn_only = warn_only;
 }
 
 void Context::alertNotDeterministic(c10::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
-    TORCH_CHECK(false,
-      caller, " does not have a deterministic implementation, but you set "
-      "'torch.use_deterministic_algorithms(True)'. You can turn off determinism ",
-      "just for this operation if that's acceptable for your application. You "
-      "can also file an issue at https://github.com/pytorch/pytorch/issues "
-      "to help us prioritize adding deterministic support for this operation.");
+    if (globalContext().deterministicAlgorithmsWarnOnly()) {
+      TORCH_WARN(
+        caller, " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True, warn_only=True)'. "
+        "You can file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
+    } else {
+      TORCH_CHECK(false,
+        caller, " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True)'. You can turn off "
+        "determinism just for this operation, or you can use the "
+        "'warn_only=True' option, if that's acceptable for your application. "
+        "You can also file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
+    }
   }
 }
 
@@ -92,7 +97,9 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
 
 bool Context::checkCuBLASConfigDeterministic() {
@@ -109,7 +116,7 @@ bool Context::checkCuBLASConfigDeterministic() {
   return cublas_config_deterministic;
 }
 
-void Context::alertCuBLASConfigNotDeterministic() {
+void Context::alertCuBLASConfigNotDeterministic() const {
   static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
   TORCH_CHECK(!deterministicAlgorithms() || cublas_config_deterministic,
     "Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or ",
@@ -138,7 +145,34 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
-bool Context::hasMKL() const {
+at::LinalgBackend Context::linalgPreferredBackend() const {
+  return linalg_preferred_backend;
+}
+
+void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
+  linalg_preferred_backend = b;
+  TORCH_CHECK((b != at::LinalgBackend::Cusolver) || hasCuSOLVER(),
+      "Cannot set preferred backend to cuSOLVER if PyTorch has not been compiled with cuSOLVER.");
+  TORCH_CHECK((b != at::LinalgBackend::Magma) || hasMAGMA(),
+      "Cannot set preferred backend to MAGMA if PyTorch has not been compiled with MAGMA.");
+  if (b != at::LinalgBackend::Default) {
+    TORCH_WARN_ONCE(
+      "torch.backends.cuda.preferred_linalg_library is an experimental feature. "
+      "If you see any error or unexpected behavior when this flag is set "
+      "please file an issue on GitHub."
+    );
+  }
+}
+
+bool Context::allowFP16ReductionCuBLAS() const {
+  return allow_fp16_reduction_cublas;
+}
+
+void Context::setAllowFP16ReductionCuBLAS(bool b) {
+  allow_fp16_reduction_cublas = b;
+}
+
+bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;
 #else
@@ -146,7 +180,7 @@ bool Context::hasMKL() const {
 #endif
 }
 
-bool Context::hasMKLDNN() const {
+bool Context::hasMKLDNN() {
 #if AT_MKLDNN_ENABLED()
   return true;
 #else
@@ -154,7 +188,7 @@ bool Context::hasMKLDNN() const {
 #endif
 }
 
-bool Context::hasOpenMP() const {
+bool Context::hasOpenMP() {
 #ifdef _OPENMP
   return true;
 #else
@@ -162,8 +196,8 @@ bool Context::hasOpenMP() const {
 #endif
 }
 
-bool Context::hasLAPACK() const {
-#ifdef USE_LAPACK
+bool Context::hasLAPACK() {
+#if AT_BUILD_WITH_LAPACK()
   return true;
 #else
   return false;
@@ -184,7 +218,7 @@ void Context::setQEngine(at::QEngine e) {
   TORCH_CHECK(false, "quantized engine ", toString(e), " is not supported");
 }
 
-const std::vector<at::QEngine>& Context::supportedQEngines() const {
+const std::vector<at::QEngine>& Context::supportedQEngines() {
   static auto supported_qengines = []() {
     std::vector<at::QEngine> engines = {};
     // Engines are listed in priority order: later one wins
@@ -202,6 +236,10 @@ const std::vector<at::QEngine>& Context::supportedQEngines() const {
     engines.push_back(at::kNoQEngine);
 #endif // C10_MOBILE
 
+#if AT_MKLDNN_ENABLED()
+    engines.push_back(at::kONEDNN);
+#endif
+
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
       engines.push_back(at::kFBGEMM);
@@ -212,7 +250,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() const {
   return supported_qengines;
 }
 
-bool Context::isXNNPACKAvailable() const {
+bool Context::isXNNPACKAvailable() {
 #ifdef USE_XNNPACK
   return true;
 #else

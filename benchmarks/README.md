@@ -1,7 +1,5 @@
 # PyTorch Benchmarks
 
-NOTE: This folder is currently work in progress.
-
 This folder contains scripts that produce reproducible timings of various PyTorch features.
 
 It also provides mechanisms to compare PyTorch with other frameworks.
@@ -26,4 +24,3 @@ python -c "import torch; print(torch.__version__)"
 Please refer to each subfolder to discover each benchmark suite
 
 * [Fast RNNs benchmarks](fastrnns/README.md)
-

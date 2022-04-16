@@ -13,13 +13,13 @@ There’s four main use cases
 * You’re writing a new operator that isn’t supposed to be part of the public PyTorch API.
 * You’re writing a new operator but don’t want to change the core pytorch code base, say you’re developing a shared library with operators.
 * You’re writing a C++ extension for PyTorch or you’re using inline c++ in your .py model files.
-* You’re writing a backend library like XLA or MSNPU that adds new kernels to all operators defined in `native_functions.yaml`.
+* You’re writing a backend library like XLA or ORT that adds new kernels to all operators defined in `native_functions.yaml`.
 
 For these use cases, the custom operator API is the better solution.
 
 ### What is the price for using the custom operator API instead of `native_functions.yaml`?
 
-If you’re just using the custom operator API to add new kernels for existing operators (e.g. the XLA/MSNPU example above), then you’re fine and don’t pay any price. If, however, you define a new operator purely using the custom op API, i.e. your operator never shows up in `native_functions.yaml`, then you need to be aware of a few caveats.
+If you’re just using the custom operator API to add new kernels for existing operators (e.g. the XLA/ORT example above), then you’re fine and don’t pay any price. If, however, you define a new operator purely using the custom op API, i.e. your operator never shows up in `native_functions.yaml`, then you need to be aware of a few caveats.
 
 * It will not get a C++ API generated. There will not be `Tensor::your_op()` methods or `at::your_op()` functions to call your operator.
 * The API for calling the operator from Python looks a little bit different. It needs to be called through `torch.ops.your_op()` instead of `torch._C`.
@@ -174,13 +174,13 @@ The kernel function can take any of the following types as inputs or outputs:
 * `double` (note: `float` is not supported)
 * `int64_t` (note: other integer types like `int`, `uint64_t`, `int32_t`, `...` are not supported)
 * `bool`
-* `std::string`
+* `c10::string_view`
 * `at::Scalar` (this is a type that can hold either an integer or a floating point value)
 * `at::optional<T>` with T being any type from the list above
 
 The kernel function can take and return list inputs by using `torch::List<T>`. `T` must be one of the supported types from above excluding `at::Scalar`.
 
-The kernel function can take and return dicts by using `torch::Dict<Key, Value>`. `Key` must be `int64_t`, `std::string`, `double` or `bool`, and `Value` must be from the list of supported types above excluding `at::Scalar`.
+The kernel function can take and return dicts by using `torch::Dict<Key, Value>`. `Key` must be `int64_t`, `c10::string_view`, `double` or `bool`, and `Value` must be from the list of supported types above excluding `at::Scalar`.
 
 When taken as input, any of these types can be taken by value (i.e. `Tensor`) or by const-reference (i.e. `const Tensor&`). We recommend taking all arguments by value, even Tensors. They will be moved in, so there is no performance overhead.
 

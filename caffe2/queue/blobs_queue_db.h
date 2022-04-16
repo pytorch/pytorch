@@ -22,7 +22,7 @@ const std::string& GetStringFromBlob(Blob* blob) {
     CAFFE_THROW("Unsupported Blob type");
   }
 }
-}
+} // namespace
 
 class BlobsQueueDBCursor : public Cursor {
  public:

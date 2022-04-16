@@ -260,6 +260,7 @@ struct HandleExecutorThreadExceptionsGuard {
   void globalInit(std::vector<std::string> args) {
     std::vector<char*> args_ptrs;
     for (auto& arg : args) {
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast,performance-inefficient-vector-operation)
       args_ptrs.push_back(const_cast<char*>(arg.data()));
     }
     char** new_argv = args_ptrs.data();
@@ -274,6 +275,7 @@ TEST(PlanExecutorTest, ErrorAsyncPlan) {
   cancelCount = 0;
   PlanDef plan_def = parallelErrorPlan();
   Workspace ws;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_EQ(cancelCount, 1);
 }
@@ -288,6 +290,9 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
 #endif
 #endif
 
+  testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_DEATH(
       [] {
         HandleExecutorThreadExceptionsGuard guard(/*timeout=*/1);
@@ -327,6 +332,7 @@ TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
   PlanDef plan_def = parallelErrorPlanWithCancellableStuckNet();
   Workspace ws;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_EQ(cancelCount, 1);
 }
@@ -338,6 +344,7 @@ TEST(PlanExecutorTest, ReporterErrorPlanWithCancellableStuckNet) {
   PlanDef plan_def = reporterErrorPlanWithCancellableStuckNet();
   Workspace ws;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_EQ(cancelCount, 1);
 }
@@ -397,6 +404,7 @@ TEST(PlanExecutorTest, ShouldStopWithCancel) {
   tensor->Resize(shape);
   tensor->mutable_data<bool>()[0] = false;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_TRUE(stuckRun);
 }

@@ -1,20 +1,34 @@
+# Owner(s): ["module: tests"]
+
+import collections
+import doctest
+import functools
+import itertools
+import math
+import os
+import re
+import unittest.mock
+from typing import Any, Callable, Iterator, List, Tuple
+
 import torch
 
-import math
-from pathlib import PurePosixPath
-
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (TestCase, make_tensor, run_tests, slowTest)
+    (IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
+     parametrize, subtest, instantiate_parametrized_tests, dtype_name)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
-from torch.testing._internal import mypy_wrapper
-from torch.testing._internal import print_test_stats
+    (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
+     deviceCountAtLeast, ops, expectedFailureMeta)
+from torch.testing._internal.common_methods_invocations import op_db
+import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._internal.common_dtype import all_types_and_complex_and
+from torch.testing._internal.common_modules import modules, module_db
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
     # Ensure that assertEqual handles numpy arrays properly
-    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                           include_bool=True, include_complex=True)))
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half))
     def test_assertEqual_numpy(self, device, dtype):
         S = 10
         test_sizes = [
@@ -25,206 +39,12 @@ class TestTesting(TestCase):
             (0, S),
             (S, 0)]
         for test_size in test_sizes:
-            a = make_tensor(test_size, device, dtype, low=-5, high=5)
+            a = make_tensor(test_size, dtype=dtype, device=device, low=-5, high=5)
             a_n = a.cpu().numpy()
             msg = f'size: {test_size}'
             self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
             self.assertEqual(a, a_n, rtol=0, atol=0, msg=msg)
             self.assertEqual(a_n, a_n, rtol=0, atol=0, msg=msg)
-
-    # Tests that when rtol or atol (including self.precision) is set, then
-    # the other is zeroed.
-    # TODO: this is legacy behavior and should be updated after test
-    # precisions are reviewed to be consistent with torch.isclose.
-    @onlyOnCPUAndCUDA
-    def test__comparetensors_legacy(self, device):
-        a = torch.tensor((10000000.,))
-        b = torch.tensor((10000002.,))
-
-        x = torch.tensor((1.,))
-        y = torch.tensor((1. + 1e-5,))
-
-        # Helper for reusing the tensor values as scalars
-        def _scalar_helper(a, b, rtol=None, atol=None):
-            return self._compareScalars(a.item(), b.item(), rtol=rtol, atol=atol)
-
-        for op in (self._compareTensors, _scalar_helper):
-            # Tests default
-            result, debug_msg = op(a, b)
-            self.assertTrue(result)
-
-            # Tests setting atol
-            result, debug_msg = op(a, b, atol=2, rtol=0)
-            self.assertTrue(result)
-
-            # Tests setting atol too small
-            result, debug_msg = op(a, b, atol=1, rtol=0)
-            self.assertFalse(result)
-
-            # Tests setting rtol too small
-            result, debug_msg = op(x, y, atol=0, rtol=1.05e-5)
-            self.assertTrue(result)
-
-            # Tests setting rtol too small
-            result, debug_msg = op(x, y, atol=0, rtol=1e-5)
-            self.assertFalse(result)
-
-    @onlyOnCPUAndCUDA
-    def test__comparescalars_debug_msg(self, device):
-        # float x float
-        result, debug_msg = self._compareScalars(4., 7.)
-        expected_msg = ("Comparing 4.0 and 7.0 gives a difference of 3.0, "
-                        "but the allowed difference with rtol=1.3e-06 and "
-                        "atol=1e-05 is only 1.9100000000000003e-05!")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # complex x complex, real difference
-        result, debug_msg = self._compareScalars(complex(1, 3), complex(3, 1))
-        expected_msg = ("Comparing the real part 1.0 and 3.0 gives a difference "
-                        "of 2.0, but the allowed difference with rtol=1.3e-06 "
-                        "and atol=1e-05 is only 1.39e-05!")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # complex x complex, imaginary difference
-        result, debug_msg = self._compareScalars(complex(1, 3), complex(1, 5.5))
-        expected_msg = ("Comparing the imaginary part 3.0 and 5.5 gives a "
-                        "difference of 2.5, but the allowed difference with "
-                        "rtol=1.3e-06 and atol=1e-05 is only 1.715e-05!")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # complex x int
-        result, debug_msg = self._compareScalars(complex(1, -2), 1)
-        expected_msg = ("Comparing the imaginary part -2.0 and 0.0 gives a "
-                        "difference of 2.0, but the allowed difference with "
-                        "rtol=1.3e-06 and atol=1e-05 is only 1e-05!")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # NaN x NaN, equal_nan=False
-        result, debug_msg = self._compareScalars(float('nan'), float('nan'), equal_nan=False)
-        expected_msg = ("Found nan and nan while comparing and either one is "
-                        "nan and the other isn't, or both are nan and equal_nan "
-                        "is False")
-        self.assertEqual(debug_msg, expected_msg)
-
-    # Checks that compareTensors provides the correct debug info
-    @onlyOnCPUAndCUDA
-    def test__comparetensors_debug_msg(self, device):
-        # Acquires atol that will be used
-        atol = max(1e-05, self.precision)
-
-        # Checks float tensor comparisons (2D tensor)
-        a = torch.tensor(((0, 6), (7, 9)), device=device, dtype=torch.float32)
-        b = torch.tensor(((0, 7), (7, 22)), device=device, dtype=torch.float32)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 2 element(s) (out of 4) "
-                        "whose difference(s) exceeded the margin of error (including 0 nan comparisons). "
-                        "The greatest difference was 13.0 (9.0 vs. 22.0), "
-                        "which occurred at index (1, 1).").format(atol)
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks float tensor comparisons (with extremal values)
-        a = torch.tensor((float('inf'), 5, float('inf')), device=device, dtype=torch.float32)
-        b = torch.tensor((float('inf'), float('nan'), float('-inf')), device=device, dtype=torch.float32)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 2 element(s) (out of 3) "
-                        "whose difference(s) exceeded the margin of error (including 1 nan comparisons). "
-                        "The greatest difference was nan (5.0 vs. nan), "
-                        "which occurred at index 1.").format(atol)
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks float tensor comparisons (with finite vs nan differences)
-        a = torch.tensor((20, -6), device=device, dtype=torch.float32)
-        b = torch.tensor((-1, float('nan')), device=device, dtype=torch.float32)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 2 element(s) (out of 2) "
-                        "whose difference(s) exceeded the margin of error (including 1 nan comparisons). "
-                        "The greatest difference was nan (-6.0 vs. nan), "
-                        "which occurred at index 1.").format(atol)
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks int tensor comparisons (1D tensor)
-        a = torch.tensor((1, 2, 3, 4), device=device)
-        b = torch.tensor((2, 5, 3, 4), device=device)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("Found 2 different element(s) (out of 4), "
-                        "with the greatest difference of 3 (2 vs. 5) "
-                        "occuring at index 1.")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks bool tensor comparisons (0D tensor)
-        a = torch.tensor((True), device=device)
-        b = torch.tensor((False), device=device)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("Found 1 different element(s) (out of 1), "
-                        "with the greatest difference of 1 (1 vs. 0) "
-                        "occuring at index 0.")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks complex tensor comparisons (real part)
-        a = torch.tensor((1 - 1j, 4 + 3j), device=device)
-        b = torch.tensor((1 - 1j, 1 + 3j), device=device)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("Real parts failed to compare as equal! "
-                        "With rtol=1.3e-06 and atol={0}, "
-                        "found 1 element(s) (out of 2) whose difference(s) exceeded the "
-                        "margin of error (including 0 nan comparisons). The greatest difference was "
-                        "3.0 (4.0 vs. 1.0), which occurred at index 1.").format(atol)
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks complex tensor comparisons (imaginary part)
-        a = torch.tensor((1 - 1j, 4 + 3j), device=device)
-        b = torch.tensor((1 - 1j, 4 - 21j), device=device)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("Imaginary parts failed to compare as equal! "
-                        "With rtol=1.3e-06 and atol={0}, "
-                        "found 1 element(s) (out of 2) whose difference(s) exceeded the "
-                        "margin of error (including 0 nan comparisons). The greatest difference was "
-                        "24.0 (3.0 vs. -21.0), which occurred at index 1.").format(atol)
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks size mismatch
-        a = torch.tensor((1, 2), device=device)
-        b = torch.tensor((3), device=device)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("Attempted to compare equality of tensors "
-                        "with different sizes. Got sizes torch.Size([2]) and torch.Size([]).")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks dtype mismatch
-        a = torch.tensor((1, 2), device=device, dtype=torch.long)
-        b = torch.tensor((1, 2), device=device, dtype=torch.float32)
-        result, debug_msg = self._compareTensors(a, b, exact_dtype=True)
-        expected_msg = ("Attempted to compare equality of tensors "
-                        "with different dtypes. Got dtypes torch.int64 and torch.float32.")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks device mismatch
-        if self.device_type == 'cuda':
-            a = torch.tensor((5), device='cpu')
-            b = torch.tensor((5), device=device)
-            result, debug_msg = self._compareTensors(a, b, exact_device=True)
-            expected_msg = ("Attempted to compare equality of tensors "
-                            "on different devices! Got devices cpu and cuda:0.")
-            self.assertEqual(debug_msg, expected_msg)
-
-    # Helper for testing _compareTensors and _compareScalars
-    # Works on single element tensors
-    def _comparetensors_helper(self, tests, device, dtype, equal_nan, exact_dtype=True, atol=1e-08, rtol=1e-05):
-        for test in tests:
-            a = torch.tensor((test[0],), device=device, dtype=dtype)
-            b = torch.tensor((test[1],), device=device, dtype=dtype)
-
-            # Tensor x Tensor comparison
-            compare_result, debug_msg = self._compareTensors(a, b, rtol=rtol, atol=atol,
-                                                             equal_nan=equal_nan,
-                                                             exact_dtype=exact_dtype)
-            self.assertEqual(compare_result, test[2])
-
-            # Scalar x Scalar comparison
-            compare_result, debug_msg = self._compareScalars(a.item(), b.item(),
-                                                             rtol=rtol, atol=atol,
-                                                             equal_nan=equal_nan)
-            self.assertEqual(compare_result, test[2])
 
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
@@ -235,9 +55,7 @@ class TestTesting(TestCase):
             expected = test[2]
             self.assertEqual(actual.item(), expected)
 
-    # torch.close is not implemented for bool tensors
-    # see https://github.com/pytorch/pytorch/issues/33048
-    def test_isclose_comparetensors_bool(self, device):
+    def test_isclose_bool(self, device):
         tests = (
             (True, True, True),
             (False, False, True),
@@ -245,14 +63,11 @@ class TestTesting(TestCase):
             (False, True, False),
         )
 
-        with self.assertRaises(RuntimeError):
-            self._isclose_helper(tests, device, torch.bool, False)
-
-        self._comparetensors_helper(tests, device, torch.bool, False)
+        self._isclose_helper(tests, device, torch.bool, False)
 
     @dtypes(torch.uint8,
             torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_isclose_comparetensors_integer(self, device, dtype):
+    def test_isclose_integer(self, device, dtype):
         tests = (
             (0, 0, True),
             (0, 1, False),
@@ -269,7 +84,6 @@ class TestTesting(TestCase):
         ]
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
-        self._comparetensors_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         if dtype is torch.uint8:
             tests = [
@@ -283,11 +97,10 @@ class TestTesting(TestCase):
             ]
 
         self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
-        self._comparetensors_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.float32, torch.float64)
-    def test_isclose_comparetensors_float(self, device, dtype):
+    def test_isclose_float(self, device, dtype):
         tests = (
             (0, 0, True),
             (0, -1, False),
@@ -300,7 +113,6 @@ class TestTesting(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False)
-        self._comparetensors_helper(tests, device, dtype, False)
 
         # atol and rtol tests
         eps = 1e-2 if dtype is torch.half else 1e-6
@@ -317,7 +129,6 @@ class TestTesting(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
-        self._comparetensors_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         # equal_nan = True tests
         tests = (
@@ -328,14 +139,9 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, True)
 
-        self._comparetensors_helper(tests, device, dtype, True)
-
-    # torch.close with equal_nan=True is not implemented for complex inputs
-    # see https://github.com/numpy/numpy/issues/15959
-    # Note: compareTensor will compare the real and imaginary parts of a
-    # complex tensors separately, unlike isclose.
+    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     @dtypes(torch.complex64, torch.complex128)
-    def test_isclose_comparetensors_complex(self, device, dtype):
+    def test_isclose_complex(self, device, dtype):
         tests = (
             (complex(1, 1), complex(1, 1 + 1e-8), True),
             (complex(0, 1), complex(1, 1), False),
@@ -351,7 +157,6 @@ class TestTesting(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False)
-        self._comparetensors_helper(tests, device, dtype, False)
 
         # atol and rtol tests
 
@@ -381,7 +186,6 @@ class TestTesting(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
-        self._comparetensors_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         # atol and rtol tests for isclose
         tests = (
@@ -396,29 +200,17 @@ class TestTesting(TestCase):
             (complex(2, 4), complex(1., 8.8523607 + eps), False),
             (complex(1, 99), complex(4, 100), True),
         )
-
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
-
-        # atol and rtol tests for compareTensors
-        tests = (
-            (complex(1, -1), complex(-1, 1), False),
-            (complex(1, -1), complex(2, -2), True),
-            (complex(1, 99), complex(4, 100), False),
-        )
-
-        self._comparetensors_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         # equal_nan = True tests
         tests = (
             (complex(1, 1), complex(1, float('nan')), False),
-            (complex(float('nan'), 1), complex(1, float('nan')), False),
+            (complex(1, 1), complex(float('nan'), 1), False),
             (complex(float('nan'), 1), complex(float('nan'), 1), True),
+            (complex(float('nan'), 1), complex(1, float('nan')), True),
+            (complex(float('nan'), float('nan')), complex(float('nan'), float('nan')), True),
         )
-
-        with self.assertRaises(RuntimeError):
-            self._isclose_helper(tests, device, dtype, True)
-
-        self._comparetensors_helper(tests, device, dtype, True)
+        self._isclose_helper(tests, device, dtype, True)
 
     # Tests that isclose with rtol or atol values less than zero throws a
     #   RuntimeError
@@ -435,11 +227,35 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
+    def test_isclose_equality_shortcut(self):
+        # For values >= 2**53, integers differing by 1 can no longer differentiated by torch.float64 or lower precision
+        # floating point dtypes. Thus, even with rtol == 0 and atol == 0, these tensors would be considered close if
+        # they were not compared as integers.
+        a = torch.tensor(2 ** 53, dtype=torch.int64)
+        b = a + 1
+
+        self.assertFalse(torch.isclose(a, b, rtol=0, atol=0))
+
+    @dtypes(torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_isclose_nan_equality_shortcut(self, device, dtype):
+        if dtype.is_floating_point:
+            a = b = torch.nan
+        else:
+            a = complex(torch.nan, 0)
+            b = complex(0, torch.nan)
+
+        expected = True
+        tests = [(a, b, expected)]
+
+        self._isclose_helper(tests, device, dtype, equal_nan=True, rtol=0, atol=0)
+
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
-        def check(size, low, high, requires_grad, discontiguous):
-            t = make_tensor(size, device, dtype, low=low, high=high,
-                            requires_grad=requires_grad, discontiguous=discontiguous)
+        def check(size, low, high, requires_grad, noncontiguous):
+            if dtype not in [torch.float, torch.cfloat]:
+                requires_grad = False
+            t = make_tensor(size, dtype=dtype, device=device, low=low, high=high,
+                            requires_grad=requires_grad, noncontiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
             self.assertEqual(t.device, torch.device(device))
@@ -451,13 +267,10 @@ class TestTesting(TestCase):
             if t.numel() > 0 and dtype in [torch.long, torch.float]:
                 self.assertTrue(t.le(high).logical_and(t.ge(low)).all().item())
 
-            if dtype in [torch.float, torch.cfloat]:
-                self.assertEqual(t.requires_grad, requires_grad)
-            else:
-                self.assertFalse(t.requires_grad)
+            self.assertEqual(t.requires_grad, requires_grad)
 
             if t.numel() > 1:
-                self.assertEqual(t.is_contiguous(), not discontiguous)
+                self.assertEqual(t.is_contiguous(), not noncontiguous)
             else:
                 self.assertTrue(t.is_contiguous())
 
@@ -465,11 +278,10 @@ class TestTesting(TestCase):
             check(size, None, None, False, False)
             check(size, 2, 4, True, True)
 
-    def test_assert_messages(self, device):
-        self.assertIsNone(self._get_assert_msg(msg=None))
-        self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
-        self.assertEqual("no_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
-        self.assertEqual("debug_msg\nuser_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
+    def test_make_tensor_complex32(self, device):
+        # verify that we can generate torch.complex32 tensor
+        t = make_tensor((1, 2, 3), dtype=torch.complex32, device=device)
+        self.assertEqual(t.dtype, torch.complex32)
 
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
@@ -480,7 +292,7 @@ class TestTesting(TestCase):
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
         # test to ensure common_utils.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
@@ -505,7 +317,7 @@ if __name__ == '__main__':
         # should capture CUDA error
         self.assertIn('CUDA error: device-side assert triggered', stderr)
         # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('Ran 1 test', stderr)
+        self.assertIn('errors=1', stderr)
 
 
     @onlyCUDA
@@ -513,7 +325,7 @@ if __name__ == '__main__':
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
         # test to ensure common_device_type.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
@@ -545,7 +357,7 @@ if __name__ == '__main__':
         # should capture CUDA error
         self.assertIn('CUDA error: device-side assert triggered', stderr)
         # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('Ran 1 test', stderr)
+        self.assertIn('errors=1', stderr)
 
 
     @onlyCUDA
@@ -553,7 +365,7 @@ if __name__ == '__main__':
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import torch
 from torch.testing._internal.common_utils import (run_tests, slowTest)
@@ -584,725 +396,1164 @@ if __name__ == '__main__':
     run_tests()
 """)
         # we are currently disabling CUDA early termination for distributed tests.
-        self.assertIn('Ran 2 test', stderr)
+        self.assertIn('errors=2', stderr)
 
+    @expectedFailureMeta  # This is only supported for CPU and CUDA
+    @onlyNativeDeviceTypes
+    def test_get_supported_dtypes(self, device):
+        # Test the `get_supported_dtypes` helper function.
+        # We acquire the dtypes for few Ops dynamically and verify them against
+        # the correct statically described values.
+        ops_to_test = list(filter(lambda op: op.name in ['atan2', 'topk', 'xlogy'], op_db))
+
+        for op in ops_to_test:
+            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
+            dynamic_dispatch = opinfo_helper.dtypes_dispatch_hint(dynamic_dtypes)
+            if self.device_type == 'cpu':
+                dtypes = op.dtypesIfCPU
+            else:  # device_type ='cuda'
+                dtypes = op.dtypesIfCUDA
+
+            self.assertTrue(set(dtypes) == set(dynamic_dtypes))
+            self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
 
 instantiate_device_type_tests(TestTesting, globals())
 
 
-class TestMypyWrapper(TestCase):
-    def test_glob(self):
-        # can match individual files
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename=PurePosixPath('test/test_torch.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename=PurePosixPath('test/test_testing.py'),
-        ))
+class TestFrameworkUtils(TestCase):
 
-        # dir matters
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/codegen/utils.py',
-            filename=PurePosixPath('torch/nn/modules.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename=PurePosixPath('setup.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename=PurePosixPath('foo/setup.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='foo/setup.py',
-            filename=PurePosixPath('foo/setup.py'),
-        ))
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+    def test_filtering_env_var(self):
+        # Test environment variable selected device type test generator.
+        test_filter_file_template = """\
+#!/usr/bin/env python3
 
-        # can match dirs
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('torch/random.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('torch/nn/cpp.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('tools/fast_nvcc/fast_nvcc.py'),
-        ))
+import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
-        # can match wildcards
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename=PurePosixPath('tools/autograd/gen_autograd.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename=PurePosixPath('tools/autograd/deprecated.yaml'),
-        ))
+class TestEnvironmentVariable(TestCase):
 
+    def test_trivial_passing_test(self, device):
+        x1 = torch.tensor([0., 1.], device=device)
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
 
-def fakehash(char):
-    return char * 40
+instantiate_device_type_tests(
+    TestEnvironmentVariable,
+    globals(),
+)
+
+if __name__ == '__main__':
+    run_tests()
+"""
+        test_bases_count = len(get_device_type_test_bases())
+        # Test without setting env var should run everything.
+        env = dict(os.environ)
+        for k in ['IN_CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
+            if k in env.keys():
+                del env[k]
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn(f'Ran {test_bases_count} test', stderr.decode('ascii'))
+
+        # Test with setting only_for should only run 1 test.
+        env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn('Ran 1 test', stderr.decode('ascii'))
+
+        # Test with setting except_for should run 1 less device type from default.
+        del env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY]
+        env[PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertIn(f'Ran {test_bases_count-1} test', stderr.decode('ascii'))
+
+        # Test with setting both should throw exception
+        env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
+        _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
+        self.assertNotIn('OK', stderr.decode('ascii'))
 
 
-def dummy_meta_meta() -> print_test_stats.ReportMetaMeta:
-    return {
-        'build_pr': '',
-        'build_tag': '',
-        'build_sha1': '',
-        'build_branch': '',
-        'build_job': '',
-        'build_workflow_id': '',
-    }
+def make_assert_close_inputs(actual: Any, expected: Any) -> List[Tuple[Any, Any]]:
+    """Makes inputs for :func:`torch.testing.assert_close` functions based on two examples.
+
+    Args:
+        actual (Any): Actual input.
+        expected (Any): Expected input.
+
+    Returns:
+        List[Tuple[Any, Any]]: Pair of example inputs, as well as the example inputs wrapped in sequences
+        (:class:`tuple`, :class:`list`), and mappings (:class:`dict`, :class:`~collections.OrderedDict`).
+    """
+    return [
+        (actual, expected),
+        # tuple vs. tuple
+        ((actual,), (expected,)),
+        # list vs. list
+        ([actual], [expected]),
+        # tuple vs. list
+        ((actual,), [expected]),
+        # dict vs. dict
+        ({"t": actual}, {"t": expected}),
+        # OrderedDict vs. OrderedDict
+        (collections.OrderedDict([("t", actual)]), collections.OrderedDict([("t", expected)])),
+        # dict vs. OrderedDict
+        ({"t": actual}, collections.OrderedDict([("t", expected)])),
+        # list of tuples vs. tuple of lists
+        ([(actual,)], ([expected],)),
+        # list of dicts vs. tuple of OrderedDicts
+        ([{"t": actual}], (collections.OrderedDict([("t", expected)]),)),
+        # dict of lists vs. OrderedDict of tuples
+        ({"t": [actual]}, collections.OrderedDict([("t", (expected,))])),
+    ]
 
 
-def makecase(name, seconds, *, errored=False, failed=False, skipped=False):
-    return {
-        'name': name,
-        'seconds': seconds,
-        'errored': errored,
-        'failed': failed,
-        'skipped': skipped,
-    }
+def assert_close_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
+    """Yields :func:`torch.testing.assert_close` with predefined positional inputs based on two examples.
+
+    .. note::
+
+        Every test that does not test for a specific input should iterate over this to maximize the coverage.
+
+    Args:
+        actual (Any): Actual input.
+        expected (Any): Expected input.
+
+    Yields:
+        Callable: :func:`torch.testing.assert_close` with predefined positional inputs.
+    """
+    for inputs in make_assert_close_inputs(actual, expected):
+        yield functools.partial(torch.testing.assert_close, *inputs)
 
 
-def make_report_v1(tests) -> print_test_stats.Version1Report:
-    suites = {
-        suite_name: {
-            'total_seconds': sum(case['seconds'] for case in cases),
-            'cases': cases,
-        }
-        for suite_name, cases in tests.items()
-    }
-    return {
-        **dummy_meta_meta(),
-        'total_seconds': sum(s['total_seconds'] for s in suites.values()),
-        'suites': suites,
-    }
+class TestAssertClose(TestCase):
+    def test_mismatching_types_subclasses(self):
+        actual = torch.rand(())
+        expected = torch.nn.Parameter(actual)
 
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
 
-def make_case_v2(seconds, status=None) -> print_test_stats.Version2Case:
-    return {
-        'seconds': seconds,
-        'status': status,
-    }
+    def test_mismatching_types_type_equality(self):
+        actual = torch.empty(())
+        expected = torch.nn.Parameter(actual)
 
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(TypeError, str(type(expected))):
+                fn(allow_subclasses=False)
 
-def make_report_v2(tests) -> print_test_stats.Version2Report:
-    files = {}
-    for file_name, file_suites in tests.items():
-        suites = {
-            suite_name: {
-                'total_seconds': sum(case['seconds'] for case in cases.values()),
-                'cases': cases,
-            }
-            for suite_name, cases in file_suites.items()
-        }
-        files[file_name] = {
-            'suites': suites,
-            'total_seconds': sum(suite['total_seconds'] for suite in suites.values()),
-        }
-    return {
-        **dummy_meta_meta(),
-        'format_version': 2,
-        'total_seconds': sum(s['total_seconds'] for s in files.values()),
-        'files': files,
-    }
+    def test_mismatching_types(self):
+        actual = torch.empty(2)
+        expected = actual.numpy()
 
+        for fn, allow_subclasses in itertools.product(assert_close_with_inputs(actual, expected), (True, False)):
+            with self.assertRaisesRegex(TypeError, str(type(expected))):
+                fn(allow_subclasses=allow_subclasses)
 
-class TestPrintTestStats(TestCase):
-    maxDiff = None
+    def test_unknown_type(self):
+        actual = "0"
+        expected = "0"
 
-    version1_report: print_test_stats.Version1Report = make_report_v1({
-        # input ordering of the suites is ignored
-        'Grault': [
-            # not printed: status same and time similar
-            makecase('test_grault0', 4.78, failed=True),
-            # status same, but time increased a lot
-            makecase('test_grault2', 1.473, errored=True),
-        ],
-        # individual tests times changed, not overall suite
-        'Qux': [
-            # input ordering of the test cases is ignored
-            makecase('test_qux1', 0.001, skipped=True),
-            makecase('test_qux6', 0.002, skipped=True),
-            # time in bounds, but status changed
-            makecase('test_qux4', 7.158, failed=True),
-            # not printed because it's the same as before
-            makecase('test_qux7', 0.003, skipped=True),
-            makecase('test_qux5', 11.968),
-            makecase('test_qux3', 23.496),
-        ],
-        # new test suite
-        'Bar': [
-            makecase('test_bar2', 3.742, failed=True),
-            makecase('test_bar1', 50.447),
-        ],
-        # overall suite time changed but no individual tests
-        'Norf': [
-            makecase('test_norf1', 3),
-            makecase('test_norf2', 3),
-            makecase('test_norf3', 3),
-            makecase('test_norf4', 3),
-        ],
-        # suite doesn't show up if it doesn't change enough
-        'Foo': [
-            makecase('test_foo1', 42),
-            makecase('test_foo2', 56),
-        ],
-    })
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(TypeError, str(type(actual))):
+                fn()
 
-    version2_report: print_test_stats.Version2Report = make_report_v2(
-        {
-            'test_a': {
-                'Grault': {
-                    'test_grault0': make_case_v2(4.78, 'failed'),
-                    'test_grault2': make_case_v2(1.473, 'errored'),
-                },
-                'Qux': {
-                    'test_qux1': make_case_v2(0.001, 'skipped'),
-                    'test_qux6': make_case_v2(0.002, 'skipped'),
-                    'test_qux4': make_case_v2(7.158, 'failed'),
-                    'test_qux7': make_case_v2(0.003, 'skipped'),
-                    'test_qux8': make_case_v2(11.968),
-                    'test_qux3': make_case_v2(23.496),
-                }
-            },
-            'test_b': {
-                'Bar': {
-                    'test_bar2': make_case_v2(3.742, 'failed'),
-                    'test_bar1': make_case_v2(50.447),
-                },
-                # overall suite time changed but no individual tests
-                'Norf': {
-                    'test_norf1': make_case_v2(3),
-                    'test_norf2': make_case_v2(3),
-                    'test_norf3': make_case_v2(3),
-                    'test_norf4': make_case_v2(3),
-                },
-            },
-            'test_c': {
-                'Foo': {
-                    'test_foo1': make_case_v2(42),
-                    'test_foo2': make_case_v2(56),
-                },
-            }
-        })
+    def test_mismatching_shape(self):
+        actual = torch.empty(())
+        expected = actual.clone().reshape((1,))
 
-    def test_simplify(self):
-        self.assertEqual(
-            {
-                '': {
-                    'Bar': {
-                        'test_bar1': {'seconds': 50.447, 'status': None},
-                        'test_bar2': {'seconds': 3.742, 'status': 'failed'},
-                    },
-                    'Foo': {
-                        'test_foo1': {'seconds': 42, 'status': None},
-                        'test_foo2': {'seconds': 56, 'status': None},
-                    },
-                    'Grault': {
-                        'test_grault0': {'seconds': 4.78, 'status': 'failed'},
-                        'test_grault2': {'seconds': 1.473, 'status': 'errored'},
-                    },
-                    'Norf': {
-                        'test_norf1': {'seconds': 3, 'status': None},
-                        'test_norf3': {'seconds': 3, 'status': None},
-                        'test_norf2': {'seconds': 3, 'status': None},
-                        'test_norf4': {'seconds': 3, 'status': None},
-                    },
-                    'Qux': {
-                        'test_qux1': {'seconds': 0.001, 'status': 'skipped'},
-                        'test_qux3': {'seconds': 23.496, 'status': None},
-                        'test_qux4': {'seconds': 7.158, 'status': 'failed'},
-                        'test_qux5': {'seconds': 11.968, 'status': None},
-                        'test_qux6': {'seconds': 0.002, 'status': 'skipped'},
-                        'test_qux7': {'seconds': 0.003, 'status': 'skipped'},
-                    },
-                },
-            },
-            print_test_stats.simplify(self.version1_report)
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "shape"):
+                fn()
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), reason="MKLDNN is not available.")
+    def test_unknown_layout(self):
+        actual = torch.empty((2, 2))
+        expected = actual.to_mkldnn()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(ValueError, "layout"):
+                fn()
+
+    def test_meta(self):
+        actual = torch.empty((2, 2), device="meta")
+        expected = torch.empty((2, 2), device="meta")
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_layout(self):
+        strided = torch.empty((2, 2))
+        sparse_coo = strided.to_sparse()
+        sparse_csr = strided.to_sparse_csr()
+
+        for actual, expected in itertools.combinations((strided, sparse_coo, sparse_csr), 2):
+            for fn in assert_close_with_inputs(actual, expected):
+                with self.assertRaisesRegex(AssertionError, "layout"):
+                    fn()
+
+    def test_mismatching_layout_no_check(self):
+        strided = torch.randn((2, 2))
+        sparse_coo = strided.to_sparse()
+        sparse_csr = strided.to_sparse_csr()
+
+        for actual, expected in itertools.combinations((strided, sparse_coo, sparse_csr), 2):
+            for fn in assert_close_with_inputs(actual, expected):
+                fn(check_layout=False)
+
+    def test_mismatching_dtype(self):
+        actual = torch.empty((), dtype=torch.float)
+        expected = actual.clone().to(torch.int)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "dtype"):
+                fn()
+
+    def test_mismatching_dtype_no_check(self):
+        actual = torch.ones((), dtype=torch.float)
+        expected = actual.clone().to(torch.int)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(check_dtype=False)
+
+    def test_mismatching_stride(self):
+        actual = torch.empty((2, 2))
+        expected = torch.as_strided(actual.clone().t().contiguous(), actual.shape, actual.stride()[::-1])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "stride"):
+                fn(check_stride=True)
+
+    def test_mismatching_stride_no_check(self):
+        actual = torch.rand((2, 2))
+        expected = torch.as_strided(actual.clone().t().contiguous(), actual.shape, actual.stride()[::-1])
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_only_rtol(self):
+        actual = torch.empty(())
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(ValueError):
+                fn(rtol=0.0)
+
+    def test_only_atol(self):
+        actual = torch.empty(())
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(ValueError):
+                fn(atol=0.0)
+
+    def test_mismatching_values(self):
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn()
+
+    def test_mismatching_values_rtol(self):
+        eps = 1e-3
+        actual = torch.tensor(1.0)
+        expected = torch.tensor(1.0 + eps)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn(rtol=eps / 2, atol=0.0)
+
+    def test_mismatching_values_atol(self):
+        eps = 1e-3
+        actual = torch.tensor(0.0)
+        expected = torch.tensor(eps)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaises(AssertionError):
+                fn(rtol=0.0, atol=eps / 2)
+
+    def test_matching(self):
+        actual = torch.tensor(1.0)
+        expected = actual.clone()
+
+        torch.testing.assert_close(actual, expected)
+
+    def test_matching_rtol(self):
+        eps = 1e-3
+        actual = torch.tensor(1.0)
+        expected = torch.tensor(1.0 + eps)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(rtol=eps * 2, atol=0.0)
+
+    def test_matching_atol(self):
+        eps = 1e-3
+        actual = torch.tensor(0.0)
+        expected = torch.tensor(eps)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(rtol=0.0, atol=eps * 2)
+
+    # TODO: the code that this test was designed for was removed in https://github.com/pytorch/pytorch/pull/56058
+    #  We need to check if this test is still needed or if this behavior is now enabled by default.
+    def test_matching_conjugate_bit(self):
+        actual = torch.tensor(complex(1, 1)).conj()
+        expected = torch.tensor(complex(1, -1))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_matching_nan(self):
+        nan = float("NaN")
+
+        tests = (
+            (nan, nan),
+            (complex(nan, 0), complex(0, nan)),
+            (complex(nan, nan), complex(nan, 0)),
+            (complex(nan, nan), complex(nan, nan)),
         )
 
-        self.assertEqual(
-            {
-                'test_a': {
-                    'Grault': {
-                        'test_grault0': {'seconds': 4.78, 'status': 'failed'},
-                        'test_grault2': {'seconds': 1.473, 'status': 'errored'},
-                    },
-                    'Qux': {
-                        'test_qux1': {'seconds': 0.001, 'status': 'skipped'},
-                        'test_qux3': {'seconds': 23.496, 'status': None},
-                        'test_qux4': {'seconds': 7.158, 'status': 'failed'},
-                        'test_qux6': {'seconds': 0.002, 'status': 'skipped'},
-                        'test_qux7': {'seconds': 0.003, 'status': 'skipped'},
-                        'test_qux8': {'seconds': 11.968, 'status': None},
-                    },
-                },
-                'test_b': {
-                    'Bar': {
-                        'test_bar1': {'seconds': 50.447, 'status': None},
-                        'test_bar2': {'seconds': 3.742, 'status': 'failed'},
-                    },
-                    'Norf': {
-                        'test_norf1': {'seconds': 3, 'status': None},
-                        'test_norf2': {'seconds': 3, 'status': None},
-                        'test_norf3': {'seconds': 3, 'status': None},
-                        'test_norf4': {'seconds': 3, 'status': None},
-                    },
-                },
-                'test_c': {
-                    'Foo': {
-                        'test_foo1': {'seconds': 42, 'status': None},
-                        'test_foo2': {'seconds': 56, 'status': None},
-                    },
-                },
-            },
-            print_test_stats.simplify(self.version2_report),
+        for actual, expected in tests:
+            for fn in assert_close_with_inputs(actual, expected):
+                with self.assertRaises(AssertionError):
+                    fn()
+
+    def test_matching_nan_with_equal_nan(self):
+        nan = float("NaN")
+
+        tests = (
+            (nan, nan),
+            (complex(nan, 0), complex(0, nan)),
+            (complex(nan, nan), complex(nan, 0)),
+            (complex(nan, nan), complex(nan, nan)),
         )
 
-    def test_analysis(self):
-        head_report = self.version1_report
+        for actual, expected in tests:
+            for fn in assert_close_with_inputs(actual, expected):
+                fn(equal_nan=True)
 
-        base_reports = {
-            # bbbb has no reports, so base is cccc instead
-            fakehash('b'): [],
-            fakehash('c'): [
-                make_report_v1({
-                    'Baz': [
-                        makecase('test_baz2', 13.605),
-                        # no recent suites have & skip this test
-                        makecase('test_baz1', 0.004, skipped=True),
-                    ],
-                    'Foo': [
-                        makecase('test_foo1', 43),
-                        # test added since dddd
-                        makecase('test_foo2', 57),
-                    ],
-                    'Grault': [
-                        makecase('test_grault0', 4.88, failed=True),
-                        makecase('test_grault1', 11.967, failed=True),
-                        makecase('test_grault2', 0.395, errored=True),
-                        makecase('test_grault3', 30.460),
-                    ],
-                    'Norf': [
-                        makecase('test_norf1', 2),
-                        makecase('test_norf2', 2),
-                        makecase('test_norf3', 2),
-                        makecase('test_norf4', 2),
-                    ],
-                    'Qux': [
-                        makecase('test_qux3', 4.978, errored=True),
-                        makecase('test_qux7', 0.002, skipped=True),
-                        makecase('test_qux2', 5.618),
-                        makecase('test_qux4', 7.766, errored=True),
-                        makecase('test_qux6', 23.589, failed=True),
-                    ],
-                }),
-            ],
-            fakehash('d'): [
-                make_report_v1({
-                    'Foo': [
-                        makecase('test_foo1', 40),
-                        # removed in cccc
-                        makecase('test_foo3', 17),
-                    ],
-                    'Baz': [
-                        # not skipped, so not included in stdev
-                        makecase('test_baz1', 3.14),
-                    ],
-                    'Qux': [
-                        makecase('test_qux7', 0.004, skipped=True),
-                        makecase('test_qux2', 6.02),
-                        makecase('test_qux4', 20.932),
-                    ],
-                    'Norf': [
-                        makecase('test_norf1', 3),
-                        makecase('test_norf2', 3),
-                        makecase('test_norf3', 3),
-                        makecase('test_norf4', 3),
-                    ],
-                    'Grault': [
-                        makecase('test_grault0', 5, failed=True),
-                        makecase('test_grault1', 14.325, failed=True),
-                        makecase('test_grault2', 0.31, errored=True),
-                    ],
-                }),
-            ],
-            fakehash('e'): [],
-            fakehash('f'): [
-                make_report_v1({
-                    'Foo': [
-                        makecase('test_foo3', 24),
-                        makecase('test_foo1', 43),
-                    ],
-                    'Baz': [
-                        makecase('test_baz2', 16.857),
-                    ],
-                    'Qux': [
-                        makecase('test_qux2', 6.422),
-                        makecase('test_qux4', 6.382, errored=True),
-                    ],
-                    'Norf': [
-                        makecase('test_norf1', 0.9),
-                        makecase('test_norf3', 0.9),
-                        makecase('test_norf2', 0.9),
-                        makecase('test_norf4', 0.9),
-                    ],
-                    'Grault': [
-                        makecase('test_grault0', 4.7, failed=True),
-                        makecase('test_grault1', 13.146, failed=True),
-                        makecase('test_grault2', 0.48, errored=True),
-                    ],
-                }),
-            ],
-        }
+    def test_numpy(self):
+        tensor = torch.rand(2, 2, dtype=torch.float32)
+        actual = tensor.numpy()
+        expected = actual.copy()
 
-        simpler_head = print_test_stats.simplify(head_report)
-        simpler_base = {}
-        for commit, reports in base_reports.items():
-            simpler_base[commit] = [print_test_stats.simplify(r) for r in reports]
-        analysis = print_test_stats.analyze(
-            head_report=simpler_head,
-            base_reports=simpler_base,
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_scalar(self):
+        number = torch.randint(10, size=()).item()
+        for actual, expected in itertools.product((int(number), float(number), complex(number)), repeat=2):
+            check_dtype = type(actual) is type(expected)
+
+            for fn in assert_close_with_inputs(actual, expected):
+                fn(check_dtype=check_dtype)
+
+    def test_bool(self):
+        actual = torch.tensor([True, False])
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_none(self):
+        actual = expected = None
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_none_mismatch(self):
+        expected = None
+
+        for actual in (False, 0, torch.nan, torch.tensor(torch.nan)):
+            for fn in assert_close_with_inputs(actual, expected):
+                with self.assertRaises(AssertionError):
+                    fn()
+
+
+    def test_docstring_examples(self):
+        finder = doctest.DocTestFinder(verbose=False)
+        runner = doctest.DocTestRunner(verbose=False, optionflags=doctest.NORMALIZE_WHITESPACE)
+        globs = dict(torch=torch)
+        doctests = finder.find(torch.testing.assert_close, globs=globs)[0]
+        failures = []
+        runner.run(doctests, out=lambda report: failures.append(report))
+        if failures:
+            raise AssertionError(f"Doctest found {len(failures)} failures:\n\n" + "\n".join(failures))
+
+    def test_default_tolerance_selection_mismatching_dtypes(self):
+        # If the default tolerances where selected based on the promoted dtype, i.e. float64,
+        # these tensors wouldn't be considered close.
+        actual = torch.tensor(0.99, dtype=torch.bfloat16)
+        expected = torch.tensor(1.0, dtype=torch.float64)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn(check_dtype=False)
+
+    class UnexpectedException(Exception):
+        """The only purpose of this exception is to test ``assert_close``'s handling of unexpected exceptions. Thus,
+        the test should mock a component to raise this instead of the regular behavior. We avoid using a builtin
+        exception here to avoid triggering possible handling of them.
+        """
+        pass
+
+    @unittest.mock.patch("torch.testing._comparison.TensorLikePair.__init__", side_effect=UnexpectedException)
+    def test_unexpected_error_originate(self, _):
+        actual = torch.tensor(1.0)
+        expected = actual.clone()
+
+        with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
+            torch.testing.assert_close(actual, expected)
+
+    @unittest.mock.patch("torch.testing._comparison.TensorLikePair.compare", side_effect=UnexpectedException)
+    def test_unexpected_error_compare(self, _):
+        actual = torch.tensor(1.0)
+        expected = actual.clone()
+
+        with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
+            torch.testing.assert_close(actual, expected)
+
+
+
+
+class TestAssertCloseMultiDevice(TestCase):
+    @deviceCountAtLeast(1)
+    def test_mismatching_device(self, devices):
+        for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
+            actual = torch.empty((), device=actual_device)
+            expected = actual.clone().to(expected_device)
+            for fn in assert_close_with_inputs(actual, expected):
+                with self.assertRaisesRegex(AssertionError, "device"):
+                    fn()
+
+    @deviceCountAtLeast(1)
+    def test_mismatching_device_no_check(self, devices):
+        for actual_device, expected_device in itertools.permutations(("cpu", *devices), 2):
+            actual = torch.rand((), device=actual_device)
+            expected = actual.clone().to(expected_device)
+            for fn in assert_close_with_inputs(actual, expected):
+                fn(check_device=False)
+
+
+instantiate_device_type_tests(TestAssertCloseMultiDevice, globals(), only_for="cuda")
+
+
+class TestAssertCloseErrorMessage(TestCase):
+    def test_identifier_tensor_likes(self):
+        actual = torch.tensor([1, 2, 3, 4])
+        expected = torch.tensor([1, 2, 5, 6])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Tensor-likes")):
+                fn()
+
+    def test_identifier_scalars(self):
+        actual = 3
+        expected = 5
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Scalars")):
+                fn()
+
+    def test_not_equal(self):
+        actual = torch.tensor([1, 2, 3, 4], dtype=torch.float32)
+        expected = torch.tensor([1, 2, 5, 6], dtype=torch.float32)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("not equal")):
+                fn(rtol=0.0, atol=0.0)
+
+    def test_not_close(self):
+        actual = torch.tensor([1, 2, 3, 4], dtype=torch.float32)
+        expected = torch.tensor([1, 2, 5, 6], dtype=torch.float32)
+
+        for fn, (rtol, atol) in itertools.product(
+            assert_close_with_inputs(actual, expected), ((1.3e-6, 0.0), (0.0, 1e-5), (1.3e-6, 1e-5))
+        ):
+            with self.assertRaisesRegex(AssertionError, re.escape("not close")):
+                fn(rtol=rtol, atol=atol)
+
+    def test_mismatched_elements(self):
+        actual = torch.tensor([1, 2, 3, 4])
+        expected = torch.tensor([1, 2, 5, 6])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Mismatched elements: 2 / 4 (50.0%)")):
+                fn()
+
+    def test_abs_diff(self):
+        actual = torch.tensor([[1, 2], [3, 4]])
+        expected = torch.tensor([[1, 2], [5, 4]])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at index (1, 0)")):
+                fn()
+
+    def test_abs_diff_scalar(self):
+        actual = 3
+        expected = 5
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Absolute difference: 2")):
+                fn()
+
+    def test_rel_diff(self):
+        actual = torch.tensor([[1, 2], [3, 4]])
+        expected = torch.tensor([[1, 4], [3, 4]])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Greatest relative difference: 0.5 at index (0, 1)")):
+                fn()
+
+    def test_rel_diff_scalar(self):
+        actual = 2
+        expected = 4
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Relative difference: 0.5")):
+                fn()
+
+    def test_zero_div_zero(self):
+        actual = torch.tensor([1.0, 0.0])
+        expected = torch.tensor([2.0, 0.0])
+
+        for fn in assert_close_with_inputs(actual, expected):
+            # Although it looks complicated, this regex just makes sure that the word 'nan' is not part of the error
+            # message. That would happen if the 0 / 0 is used for the mismatch computation although it matches.
+            with self.assertRaisesRegex(AssertionError, "((?!nan).)*"):
+                fn()
+
+    def test_rtol(self):
+        rtol = 1e-3
+
+        actual = torch.tensor((1, 2))
+        expected = torch.tensor((2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape(f"(up to {rtol} allowed)")):
+                fn(rtol=rtol, atol=0.0)
+
+    def test_atol(self):
+        atol = 1e-3
+
+        actual = torch.tensor((1, 2))
+        expected = torch.tensor((2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape(f"(up to {atol} allowed)")):
+                fn(rtol=0.0, atol=atol)
+
+    def test_msg(self):
+        msg = "Custom error message!"
+
+        actual = torch.tensor(1)
+        expected = torch.tensor(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, msg):
+                fn(msg=msg)
+
+
+class TestAssertCloseContainer(TestCase):
+    def test_sequence_mismatching_len(self):
+        actual = (torch.empty(()),)
+        expected = ()
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(actual, expected)
+
+    def test_sequence_mismatching_values_msg(self):
+        t1 = torch.tensor(1)
+        t2 = torch.tensor(2)
+
+        actual = (t1, t1)
+        expected = (t1, t2)
+
+        with self.assertRaisesRegex(AssertionError, re.escape("item [1]")):
+            torch.testing.assert_close(actual, expected)
+
+    def test_mapping_mismatching_keys(self):
+        actual = {"a": torch.empty(())}
+        expected = {}
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_close(actual, expected)
+
+    def test_mapping_mismatching_values_msg(self):
+        t1 = torch.tensor(1)
+        t2 = torch.tensor(2)
+
+        actual = {"a": t1, "b": t1}
+        expected = {"a": t1, "b": t2}
+
+        with self.assertRaisesRegex(AssertionError, re.escape("item ['b']")):
+            torch.testing.assert_close(actual, expected)
+
+
+class TestAssertCloseSparseCOO(TestCase):
+    def test_matching_coalesced(self):
+        indices = (
+            (0, 1),
+            (1, 0),
+        )
+        values = (1, 2)
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2)).coalesce()
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_matching_uncoalesced(self):
+        indices = (
+            (0, 1),
+            (1, 0),
+        )
+        values = (1, 2)
+        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_sparse_dims(self):
+        t = torch.randn(2, 3, 4)
+        actual = t.to_sparse()
+        expected = t.to_sparse(2)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of sparse dimensions in sparse COO tensors")):
+                fn()
+
+    def test_mismatching_nnz(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
+
+        expected_indices = (
+            (0, 1, 1,),
+            (1, 0, 0,),
+        )
+        expected_values = (1, 1, 1)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of specified values in sparse COO tensors")):
+                fn()
+
+    def test_mismatching_indices_msg(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
+
+        expected_indices = (
+            (0, 1),
+            (1, 1),
+        )
+        expected_values = (1, 2)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse COO indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        actual_values = (1, 2)
+        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2))
+
+        expected_indices = (
+            (0, 1),
+            (1, 0),
+        )
+        expected_values = (1, 3)
+        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse COO values")):
+                fn()
+
+
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSR testing")
+class TestAssertCloseSparseCSR(TestCase):
+    def test_matching(self):
+        crow_indices = (0, 1, 2)
+        col_indices = (1, 0)
+        values = (1, 2)
+        actual = torch.sparse_csr_tensor(crow_indices, col_indices, values, size=(2, 2))
+        # TODO: replace this by actual.clone() after https://github.com/pytorch/pytorch/issues/59285 is fixed
+        expected = torch.sparse_csr_tensor(
+            actual.crow_indices(), actual.col_indices(), actual.values(), size=actual.size(), device=actual.device
         )
 
-        self.assertEqual(
-            '''\
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
 
-- class Baz:
--     # was   15.23s ±   2.30s
--
--     def test_baz1: ...
--         # was   0.004s           (skipped)
--
--     def test_baz2: ...
--         # was  15.231s ±  2.300s
+    def test_mismatching_crow_indices_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = (0, 2, 2)
+        expected_col_indices = actual_col_indices
+        expected_values = actual_values
+        expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR crow_indices")):
+                fn()
+
+    def test_mismatching_col_indices_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = actual_crow_indices
+        expected_col_indices = (1, 1)
+        expected_values = actual_values
+        expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR col_indices")):
+                fn()
+
+    def test_mismatching_values_msg(self):
+        actual_crow_indices = (0, 1, 2)
+        actual_col_indices = (1, 0)
+        actual_values = (1, 2)
+        actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
+
+        expected_crow_indices = actual_crow_indices
+        expected_col_indices = actual_col_indices
+        expected_values = (1, 3)
+        expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR values")):
+                fn()
 
 
-  class Grault:
-      # was   48.86s ±   1.19s
-      # now    6.25s
+class TestAssertCloseQuantized(TestCase):
+    def test_mismatching_is_quantized(self):
+        actual = torch.tensor(1.0)
+        expected = torch.quantize_per_tensor(actual, scale=1.0, zero_point=0, dtype=torch.qint32)
 
-    - def test_grault1: ...
-    -     # was  13.146s ±  1.179s (failed)
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "is_quantized"):
+                fn()
 
-    - def test_grault3: ...
-    -     # was  30.460s
-
-
-  class Qux:
-      # was   41.66s ±   1.06s
-      # now   42.63s
-
-    - def test_qux2: ...
-    -     # was   6.020s ±  0.402s
-
-    ! def test_qux3: ...
-    !     # was   4.978s           (errored)
-    !     # now  23.496s
-
-    ! def test_qux4: ...
-    !     # was   7.074s ±  0.979s (errored)
-    !     # now   7.158s           (failed)
-
-    ! def test_qux6: ...
-    !     # was  23.589s           (failed)
-    !     # now   0.002s           (skipped)
-
-    + def test_qux1: ...
-    +     # now   0.001s           (skipped)
-
-    + def test_qux5: ...
-    +     # now  11.968s
-
-
-+ class Bar:
-+     # now   54.19s
-+
-+     def test_bar1: ...
-+         # now  50.447s
-+
-+     def test_bar2: ...
-+         # now   3.742s           (failed)
-
-''',
-            print_test_stats.anomalies(analysis),
+    def test_mismatching_qscheme(self):
+        t = torch.tensor((1.0,))
+        actual = torch.quantize_per_tensor(t, scale=1.0, zero_point=0, dtype=torch.qint32)
+        expected = torch.quantize_per_channel(
+            t,
+            scales=torch.tensor((1.0,)),
+            zero_points=torch.tensor((0,)),
+            axis=0,
+            dtype=torch.qint32,
         )
 
-    def test_graph(self):
-        # HEAD is on master
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(AssertionError, "qscheme"):
+                fn()
 
-    : (master)
-    |
-    * aaaaaaaaaa (HEAD)              total time   502.99s
-    * bbbbbbbbbb (base)   1 report,  total time    47.84s
-    * cccccccccc          1 report,  total time   332.50s
-    * dddddddddd          0 reports
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=502.99,
-                base_seconds={
-                    fakehash('b'): [47.84],
-                    fakehash('c'): [332.50],
-                    fakehash('d'): [],
-                },
-                on_master=True,
-            )
+    def test_matching_per_tensor(self):
+        actual = torch.quantize_per_tensor(torch.tensor(1.0), scale=1.0, zero_point=0, dtype=torch.qint32)
+        expected = actual.clone()
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_matching_per_channel(self):
+        actual = torch.quantize_per_channel(
+            torch.tensor((1.0,)),
+            scales=torch.tensor((1.0,)),
+            zero_points=torch.tensor((0,)),
+            axis=0,
+            dtype=torch.qint32,
         )
+        expected = actual.clone()
 
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time  9988.77s
-    |/
-    * bbbbbbbbbb (base) 121 reports, total time  7654.32s ±   55.55s
-    * cccccccccc         20 reports, total time  5555.55s ±  253.19s
-    * dddddddddd          1 report,  total time  1234.56s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=9988.77,
-                base_seconds={
-                    fakehash('b'): [7598.77] * 60 + [7654.32] + [7709.87] * 60,
-                    fakehash('c'): [5308.77] * 10 + [5802.33] * 10,
-                    fakehash('d'): [1234.56],
-                },
-                on_master=False,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time    25.52s
-    | |
-    | : (5 commits)
-    |/
-    * bbbbbbbbbb          0 reports
-    * cccccccccc          0 reports
-    * dddddddddd (base)  15 reports, total time    58.92s ±   25.82s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=25.52,
-                base_seconds={
-                    fakehash('b'): [],
-                    fakehash('c'): [],
-                    fakehash('d'): [52.25] * 14 + [152.26],
-                },
-                on_master=False,
-                ancestry_path=5,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     0.08s
-    |/|
-    | : (1 commit)
-    |
-    * bbbbbbbbbb          0 reports
-    * cccccccccc (base)   1 report,  total time     0.09s
-    * dddddddddd          3 reports, total time     0.10s ±    0.05s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=0.08,
-                base_seconds={
-                    fakehash('b'): [],
-                    fakehash('c'): [0.09],
-                    fakehash('d'): [0.05, 0.10, 0.15],
-                },
-                on_master=False,
-                other_ancestors=1,
-            )
-        )
-
-        self.assertEqual(
-            '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
-
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     5.98s
-    | |
-    | : (1 commit)
-    |/|
-    | : (7 commits)
-    |
-    * bbbbbbbbbb (base)   2 reports, total time     6.02s ±    1.71s
-    * cccccccccc          0 reports
-    * dddddddddd         10 reports, total time     5.84s ±    0.92s
-    |
-    :
-''',
-            print_test_stats.graph(
-                head_sha=fakehash('a'),
-                head_seconds=5.98,
-                base_seconds={
-                    fakehash('b'): [4.81, 7.23],
-                    fakehash('c'): [],
-                    fakehash('d'): [4.97] * 5 + [6.71] * 5,
-                },
-                on_master=False,
-                ancestry_path=1,
-                other_ancestors=7,
-            )
-        )
-
-    def test_regression_info(self):
-        self.assertEqual(
-            '''\
------ Historic stats comparison result ------
-
-    job: foo_job
-    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
 
 
-  class Foo:
-      # was   42.50s ±   2.12s
-      # now    3.02s
-
-    - def test_bar: ...
-    -     # was   1.000s
-
-    ! def test_foo: ...
-    !     # was  41.500s ±  2.121s
-    !     # now   0.020s           (skipped)
-
-    + def test_baz: ...
-    +     # now   3.000s
+def _get_test_names_for_test_class(test_cls):
+    """ Convenience function to get all test names for a given test class. """
+    test_names = ['{}.{}'.format(test_cls.__name__, key) for key in test_cls.__dict__
+                  if key.startswith('test_')]
+    return sorted(test_names)
 
 
-Commit graph (base is most recent master ancestor with at least one S3 report):
+class TestTestParametrization(TestCase):
+    def test_default_names(self):
 
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     3.02s
-    |/
-    * bbbbbbbbbb (base)   1 report,  total time    41.00s
-    * cccccccccc          1 report,  total time    43.00s
-    |
-    :
+        class TestParametrized(TestCase):
+            @parametrize("x", range(5))
+            def test_default_names(self, x):
+                pass
 
-Removed  (across    1 suite)      1 test,  totaling -   1.00s
-Modified (across    1 suite)      1 test,  totaling -  41.48s ±   2.12s
-Added    (across    1 suite)      1 test,  totaling +   3.00s
-''',
-            print_test_stats.regression_info(
-                head_sha=fakehash('a'),
-                head_report=make_report_v1({
-                    'Foo': [
-                        makecase('test_foo', 0.02, skipped=True),
-                        makecase('test_baz', 3),
-                    ]}),
-                base_reports={
-                    fakehash('b'): [
-                        make_report_v1({
-                            'Foo': [
-                                makecase('test_foo', 40),
-                                makecase('test_bar', 1),
-                            ],
-                        }),
-                    ],
-                    fakehash('c'): [
-                        make_report_v1({
-                            'Foo': [
-                                makecase('test_foo', 43),
-                            ],
-                        }),
-                    ],
-                },
-                job_name='foo_job',
-                on_master=False,
-                ancestry_path=0,
-                other_ancestors=0,
-            )
-        )
+            @parametrize("x,y", [(1, 2), (2, 3), (3, 4)])
+            def test_two_things_default_names(self, x, y):
+                pass
 
-    def test_regression_info_new_job(self):
-        self.assertEqual(
-            '''\
------ Historic stats comparison result ------
+        instantiate_parametrized_tests(TestParametrized)
 
-    job: foo_job
-    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        expected_test_names = [
+            'TestParametrized.test_default_names_x_0',
+            'TestParametrized.test_default_names_x_1',
+            'TestParametrized.test_default_names_x_2',
+            'TestParametrized.test_default_names_x_3',
+            'TestParametrized.test_default_names_x_4',
+            'TestParametrized.test_two_things_default_names_x_1_y_2',
+            'TestParametrized.test_two_things_default_names_x_2_y_3',
+            'TestParametrized.test_two_things_default_names_x_3_y_4',
+        ]
+        test_names = _get_test_names_for_test_class(TestParametrized)
+        self.assertEqual(expected_test_names, test_names)
+
+    def test_name_fn(self):
+
+        class TestParametrized(TestCase):
+            @parametrize("bias", [False, True], name_fn=lambda b: 'bias' if b else 'no_bias')
+            def test_custom_names(self, bias):
+                pass
+
+            @parametrize("x", [1, 2], name_fn=str)
+            @parametrize("y", [3, 4], name_fn=str)
+            @parametrize("z", [5, 6], name_fn=str)
+            def test_three_things_composition_custom_names(self, x, y, z):
+                pass
+
+            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: '{}__{}'.format(x, y))
+            def test_two_things_custom_names_alternate(self, x, y):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
+        expected_test_names = [
+            'TestParametrized.test_custom_names_bias',
+            'TestParametrized.test_custom_names_no_bias',
+            'TestParametrized.test_three_things_composition_custom_names_1_3_5',
+            'TestParametrized.test_three_things_composition_custom_names_1_3_6',
+            'TestParametrized.test_three_things_composition_custom_names_1_4_5',
+            'TestParametrized.test_three_things_composition_custom_names_1_4_6',
+            'TestParametrized.test_three_things_composition_custom_names_2_3_5',
+            'TestParametrized.test_three_things_composition_custom_names_2_3_6',
+            'TestParametrized.test_three_things_composition_custom_names_2_4_5',
+            'TestParametrized.test_three_things_composition_custom_names_2_4_6',
+            'TestParametrized.test_two_things_custom_names_alternate_1__2',
+            'TestParametrized.test_two_things_custom_names_alternate_1__3',
+            'TestParametrized.test_two_things_custom_names_alternate_1__4',
+        ]
+        test_names = _get_test_names_for_test_class(TestParametrized)
+        self.assertEqual(expected_test_names, test_names)
+
+    def test_subtest_names(self):
+
+        class TestParametrized(TestCase):
+            @parametrize("bias", [subtest(True, name='bias'),
+                                  subtest(False, name='no_bias')])
+            def test_custom_names(self, bias):
+                pass
+
+            @parametrize("x,y", [subtest((1, 2), name='double'),
+                                 subtest((1, 3), name='triple'),
+                                 subtest((1, 4), name='quadruple')])
+            def test_two_things_custom_names(self, x, y):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
+        expected_test_names = [
+            'TestParametrized.test_custom_names_bias',
+            'TestParametrized.test_custom_names_no_bias',
+            'TestParametrized.test_two_things_custom_names_double',
+            'TestParametrized.test_two_things_custom_names_quadruple',
+            'TestParametrized.test_two_things_custom_names_triple',
+        ]
+        test_names = _get_test_names_for_test_class(TestParametrized)
+        self.assertEqual(expected_test_names, test_names)
+
+    def test_modules_decorator_misuse_error(self):
+        # Test that @modules errors out when used with instantiate_parametrized_tests().
+
+        class TestParametrized(TestCase):
+            @modules(module_db)
+            def test_modules(self, module_info):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'intended to be used in a device-specific context'):
+            instantiate_parametrized_tests(TestParametrized)
+
+    def test_ops_decorator_misuse_error(self):
+        # Test that @modules errors out when used with instantiate_parametrized_tests().
+
+        class TestParametrized(TestCase):
+            @ops(op_db)
+            def test_ops(self, module_info):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'intended to be used in a device-specific context'):
+            instantiate_parametrized_tests(TestParametrized)
+
+    def test_multiple_handling_of_same_param_error(self):
+        # Test that multiple decorators handling the same param errors out.
+
+        class TestParametrized(TestCase):
+            @parametrize("x", range(3))
+            @parametrize("x", range(5))
+            def test_param(self, x):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'multiple parametrization decorators'):
+            instantiate_parametrized_tests(TestParametrized)
+
+    @parametrize("x", [1, subtest(2, decorators=[unittest.expectedFailure]), 3])
+    def test_subtest_expected_failure(self, x):
+        if x == 2:
+            raise RuntimeError('Boom')
+
+    @parametrize("x", [subtest(1, decorators=[unittest.expectedFailure]), 2, 3])
+    @parametrize("y", [4, 5, subtest(6, decorators=[unittest.expectedFailure])])
+    def test_two_things_subtest_expected_failure(self, x, y):
+        if x == 1 or y == 6:
+            raise RuntimeError('Boom')
 
 
-+ class Foo:
-+     # now    3.02s
-+
-+     def test_baz: ...
-+         # now   3.000s
-+
-+     def test_foo: ...
-+         # now   0.020s           (skipped)
+class TestTestParametrizationDeviceType(TestCase):
+    def test_unparametrized_names(self, device):
+        # This test exists to protect against regressions in device / dtype test naming
+        # due to parametrization logic.
+
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            def test_device_specific(self, device):
+                pass
+
+            @dtypes(torch.float32, torch.float64)
+            def test_device_dtype_specific(self, device, dtype):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_device_dtype_specific_{}_float32',
+            '{}.test_device_dtype_specific_{}_float64',
+            '{}.test_device_specific_{}')
+        ]
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
+
+    def test_default_names(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("x", range(5))
+            def test_default_names(self, device, x):
+                pass
+
+            @parametrize("x,y", [(1, 2), (2, 3), (3, 4)])
+            def test_two_things_default_names(self, device, x, y):
+                pass
 
 
-Commit graph (base is most recent master ancestor with at least one S3 report):
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-    : (master)
-    |
-    | * aaaaaaaaaa (HEAD)            total time     3.02s
-    | |
-    | : (3 commits)
-    |/|
-    | : (2 commits)
-    |
-    * bbbbbbbbbb          0 reports
-    * cccccccccc          0 reports
-    |
-    :
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_default_names_x_0_{}',
+            '{}.test_default_names_x_1_{}',
+            '{}.test_default_names_x_2_{}',
+            '{}.test_default_names_x_3_{}',
+            '{}.test_default_names_x_4_{}',
+            '{}.test_two_things_default_names_x_1_y_2_{}',
+            '{}.test_two_things_default_names_x_2_y_3_{}',
+            '{}.test_two_things_default_names_x_3_y_4_{}')
+        ]
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
 
-Removed  (across    0 suites)     0 tests, totaling     0.00s
-Modified (across    0 suites)     0 tests, totaling     0.00s
-Added    (across    1 suite)      2 tests, totaling +   3.02s
-''',
-            print_test_stats.regression_info(
-                head_sha=fakehash('a'),
-                head_report=make_report_v1({
-                    'Foo': [
-                        makecase('test_foo', 0.02, skipped=True),
-                        makecase('test_baz', 3),
-                    ]}),
-                base_reports={
-                    fakehash('b'): [],
-                    fakehash('c'): [],
-                },
-                job_name='foo_job',
-                on_master=False,
-                ancestry_path=3,
-                other_ancestors=2,
-            )
-        )
+    def test_name_fn(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("bias", [False, True], name_fn=lambda b: 'bias' if b else 'no_bias')
+            def test_custom_names(self, device, bias):
+                pass
+
+            @parametrize("x", [1, 2], name_fn=str)
+            @parametrize("y", [3, 4], name_fn=str)
+            @parametrize("z", [5, 6], name_fn=str)
+            def test_three_things_composition_custom_names(self, device, x, y, z):
+                pass
+
+            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: '{}__{}'.format(x, y))
+            def test_two_things_custom_names_alternate(self, device, x, y):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_custom_names_bias_{}',
+            '{}.test_custom_names_no_bias_{}',
+            '{}.test_three_things_composition_custom_names_1_3_5_{}',
+            '{}.test_three_things_composition_custom_names_1_3_6_{}',
+            '{}.test_three_things_composition_custom_names_1_4_5_{}',
+            '{}.test_three_things_composition_custom_names_1_4_6_{}',
+            '{}.test_three_things_composition_custom_names_2_3_5_{}',
+            '{}.test_three_things_composition_custom_names_2_3_6_{}',
+            '{}.test_three_things_composition_custom_names_2_4_5_{}',
+            '{}.test_three_things_composition_custom_names_2_4_6_{}',
+            '{}.test_two_things_custom_names_alternate_1__2_{}',
+            '{}.test_two_things_custom_names_alternate_1__3_{}',
+            '{}.test_two_things_custom_names_alternate_1__4_{}')
+        ]
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
+
+    def test_subtest_names(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @parametrize("bias", [subtest(True, name='bias'),
+                                  subtest(False, name='no_bias')])
+            def test_custom_names(self, device, bias):
+                pass
+
+            @parametrize("x,y", [subtest((1, 2), name='double'),
+                                 subtest((1, 3), name='triple'),
+                                 subtest((1, 4), name='quadruple')])
+            def test_two_things_custom_names(self, device, x, y):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_custom_names_bias_{}',
+            '{}.test_custom_names_no_bias_{}',
+            '{}.test_two_things_custom_names_double_{}',
+            '{}.test_two_things_custom_names_quadruple_{}',
+            '{}.test_two_things_custom_names_triple_{}')
+        ]
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(expected_test_names, test_names)
+
+    def test_ops_composition_names(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @ops(op_db)
+            @parametrize("flag", [False, True], lambda f: 'flag_enabled' if f else 'flag_disabled')
+            def test_op_parametrized(self, device, dtype, op, flag):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = []
+        for op in op_db:
+            for dtype in op.default_test_dtypes(device):
+                for flag_part in ('flag_disabled', 'flag_enabled'):
+                    expected_name = '{}.test_op_parametrized_{}_{}_{}_{}'.format(
+                        device_cls.__name__, op.formatted_name, flag_part, device, dtype_name(dtype))
+                    expected_test_names.append(expected_name)
+
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(sorted(expected_test_names), sorted(test_names))
+
+    def test_dtypes_composition_valid(self, device):
+        # Test checks that @parametrize and @dtypes compose as expected when @parametrize
+        # doesn't set dtype.
+
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @dtypes(torch.float32, torch.float64)
+            @parametrize("x", range(3))
+            def test_parametrized(self, x, dtype):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = [name.format(device_cls.__name__, device) for name in (
+            '{}.test_parametrized_x_0_{}_float32',
+            '{}.test_parametrized_x_0_{}_float64',
+            '{}.test_parametrized_x_1_{}_float32',
+            '{}.test_parametrized_x_1_{}_float64',
+            '{}.test_parametrized_x_2_{}_float32',
+            '{}.test_parametrized_x_2_{}_float64')
+        ]
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(sorted(expected_test_names), sorted(test_names))
+
+    def test_dtypes_composition_invalid(self, device):
+        # Test checks that @dtypes cannot be composed with parametrization decorators when they
+        # also try to set dtype.
+
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @dtypes(torch.float32, torch.float64)
+            @parametrize("dtype", [torch.int32, torch.int64])
+            def test_parametrized(self, dtype):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        # Verify proper error behavior with @ops + @dtypes, as both try to set dtype.
+
+        class TestParametrized(TestCase):
+            @dtypes(torch.float32, torch.float64)
+            @ops(op_db)
+            def test_parametrized(self, op, dtype):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+    def test_multiple_handling_of_same_param_error(self, device):
+        # Test that multiple decorators handling the same param errors out.
+        # Both @modules and @ops handle the dtype param.
+
+        class TestParametrized(TestCase):
+            @ops(op_db)
+            @modules(module_db)
+            def test_param(self, device, dtype, op, module_info):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+    @parametrize("x", [1, subtest(2, decorators=[unittest.expectedFailure]), 3])
+    def test_subtest_expected_failure(self, device, x):
+        if x == 2:
+            raise RuntimeError('Boom')
+
+    @parametrize("x", [subtest(1, decorators=[unittest.expectedFailure]), 2, 3])
+    @parametrize("y", [4, 5, subtest(6, decorators=[unittest.expectedFailure])])
+    def test_two_things_subtest_expected_failure(self, device, x, y):
+        if x == 1 or y == 6:
+            raise RuntimeError('Boom')
+
+
+instantiate_parametrized_tests(TestTestParametrization)
+instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
 
 
 if __name__ == '__main__':

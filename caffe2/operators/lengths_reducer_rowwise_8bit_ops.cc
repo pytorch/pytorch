@@ -65,7 +65,9 @@ OPERATOR_SCHEMA(SparseLengthsWeightedSum8BitsRowwise)
     .NumInputs(5)
     .NumOutputs(1)
     .ValueLengthInputFillers(
+        // NOLINTNEXTLINE(modernize-use-bool-literals)
         SparseLengths8BitsRowwiseOp<CPUContext, 1>::DATA,
+        // NOLINTNEXTLINE(modernize-use-bool-literals)
         SparseLengths8BitsRowwiseOp<CPUContext, 1>::LENGTHS)
     .SetDoc(R"DOC(
 Variation of SparseLengthsWeightedSum operator, where
@@ -104,7 +106,9 @@ OPERATOR_SCHEMA(SparseLengthsMean8BitsRowwise)
     .NumInputs(4)
     .NumOutputs(1)
     .ValueLengthInputFillers(
+        // NOLINTNEXTLINE(modernize-use-bool-literals)
         SparseLengths8BitsRowwiseOp<CPUContext, 0, 1>::DATA,
+        // NOLINTNEXTLINE(modernize-use-bool-literals)
         SparseLengths8BitsRowwiseOp<CPUContext, 0, 1>::LENGTHS)
     .SetDoc(R"DOC(
 Variation of SparseLengthsMean operator, where DATA is
@@ -139,7 +143,9 @@ OPERATOR_SCHEMA(SparseLengthsWeightedMean8BitsRowwise)
     .NumInputs(5)
     .NumOutputs(1)
     .ValueLengthInputFillers(
+        // NOLINTNEXTLINE(modernize-use-bool-literals)
         SparseLengths8BitsRowwiseOp<CPUContext, 1, 1>::DATA,
+        // NOLINTNEXTLINE(modernize-use-bool-literals)
         SparseLengths8BitsRowwiseOp<CPUContext, 1, 1>::LENGTHS)
     .SetDoc(R"DOC(
 Variation of SparseLengthsWeightedMean operator, where

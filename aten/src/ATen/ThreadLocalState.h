@@ -1,23 +1,32 @@
 #pragma once
 
+#include <stack>
+
+#include <c10/core/InferenceMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <ATen/record_function.h>
+#include <ATen/FuncTorchTLS.h>
+#include <ATen/core/PythonModeTLS.h>
+#include <ATen/PythonTorchFunctionTLS.h>
 
 namespace at {
 
 // Thread local state contains values that are preserved across
-// thread boundaries (e.g. at::launch/JIT fork, autograd, at::parallel_for)
+// thread boundaries (e.g. at::launch/JIT fork, autograd).
+// Note at::parallel_for doesn't preserve TLS across thread boundaries.
 class TORCH_API ThreadLocalState {
  public:
   // Saves the thread local variables' values and
   // returns them as a ThreadLocalState
-  // keep_grad_mode - whether grad mode has to be preserved
-  //  (e.g. not preserved when passing from forward pass into
-  //   the autograd engine, autograd engine takes care of grad mode)
-  ThreadLocalState(bool keep_grad_mode = true);
+  ThreadLocalState();
+
+  // set_grad_mode - force the value of the grad mode TLS in
+  //  the current state object. This is used for example in the
+  //  autograd engine.
+  void set_grad_mode(bool enabled);
 
   // Sets thread local variables in the current thread,
   // according to the thread boundary specified
@@ -33,10 +42,26 @@ class TORCH_API ThreadLocalState {
   // RecordFunction TLS
   RecordFunctionTLS rf_tls_;
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-  bool keep_grad_mode_ = true;
-  bool grad_mode_enabled_;
-#endif
+  // TLS for out-of-tree functorch
+  // See NOTE [functorch TLS in pytorch/pytorch] for why this needs to be a
+  // pointer (spoiler alert: it's due to the indirection)
+  // This needs to be a shared_ptr instead of a unique_ptr because
+  // ThreadLocalState is copy-able and does indeed get copied. Maybe we can
+  // consider adding an explicit copy constructor for ThreadLocalState in the
+  // future but I didn't want to add one just for this.
+  std::shared_ptr<const functorch::FuncTorchTLSBase> functorch_tls_;
+
+  // TLS for AutogradModes
+  AutogradState autograd_tls_;
+
+  // TLS for enable_python_mode (__torch_dispatch__)
+  std::shared_ptr<SafePyObject> python_mode_state_;
+
+  // TLS for __torch_function__ (mode and disable_torch_function)
+  at::impl::PythonTorchFunctionTLS python_torch_function_state_;
+
+  // TLS for saved tensors default hooks
+  std::stack<std::pair<PyObject*, PyObject*>> saved_tensors_default_hooks_;
 
   // Whether pre-sampling RecordFunction optimization was enabled
   bool bumped_record_all_functions_ = false;
@@ -82,12 +107,12 @@ class TORCH_API ThreadLocalStateGuard {
 };
 
 template <typename T>
-std::function<T(void)> wrapPropagateTLSState(
-    std::function<T(void)> callback) {
-  return [tls_state = ThreadLocalState(), callback = std::move(callback)]() {
+auto wrapPropagateTLSState(T callback) {
+  return [tls_state = ThreadLocalState(),
+          callback = std::move(callback)](auto&&... args) {
     ThreadLocalStateGuard g(tls_state);
     // Propagate value returned by callback().
-    return callback();
+    return callback(std::forward<decltype(args)>(args)...);
   };
 }
 

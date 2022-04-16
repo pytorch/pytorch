@@ -8,17 +8,17 @@ r"""Microbenchmarks for the quantized activations."""
 qactivation_long_configs = op_bench.cross_product_configs(
     dims=(
         # VGG-16 relu's with original shape: (-1, 3, 224, 224)
-        ( 64, 224, 224),  # ReLU-1   # noqa
-        (128, 112, 112),  # ReLU-6   # noqa
-        (256,  56,  56),  # ReLU-11  # noqa
-        (512,  28,  28),  # ReLU-18  # noqa
-        (512,  14,  14),  # ReLU-25  # noqa
+        ( 64, 224, 224),  # ReLU-1   # noqa: E201
+        (128, 112, 112),  # ReLU-6
+        (256,  56,  56),  # ReLU-11  # noqa: E241
+        (512,  28,  28),  # ReLU-18  # noqa: E241
+        (512,  14,  14),  # ReLU-25  # noqa: E241
         # Batch = 16
-        (16,  64, 224, 224),  # ReLU-1   # noqa
-        (16, 128, 112, 112),  # ReLU-6   # noqa
-        (16, 256,  56,  56),  # ReLU-11  # noqa
-        (16, 512,  28,  28),  # ReLU-18  # noqa
-        (16, 512,  14,  14),  # ReLU-25  # noqa
+        (16,  64, 224, 224),  # ReLU-1   # noqa: E241
+        (16, 128, 112, 112),  # ReLU-6
+        (16, 256,  56,  56),  # ReLU-11  # noqa: E241
+        (16, 512,  28,  28),  # ReLU-18  # noqa: E241
+        (16, 512,  14,  14),  # ReLU-25  # noqa: E241
     ),
     contig=(False, True),
     inplace=(False, True),

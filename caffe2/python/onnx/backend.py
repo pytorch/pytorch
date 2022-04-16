@@ -25,7 +25,6 @@ import onnx
 from onnx import TensorProto
 import onnx.numpy_helper
 import onnx.defs
-import onnx.optimizer
 import onnx.shape_inference
 import onnx.utils
 from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
@@ -652,7 +651,13 @@ class Caffe2Backend(Backend):
             passes.append('split_init')
         if predict:
             passes.append('split_predict')
-        out = onnx.optimizer.optimize(input, passes)
+        try:
+            out = onnx.optimizer.optimize(input, passes)
+        except AttributeError:
+            warnings.warn("OptimizerWarning: optimizer module not found in ONNX version {}".format(onnx.__version__))
+            # ONNX does no ship onnx.optimizer since version 1.9+
+            import onnxoptimizer
+            out = onnxoptimizer.optimize(input, passes)
         return out
 
     @classmethod
@@ -875,8 +880,18 @@ class Caffe2Backend(Backend):
             onnx_model = onnx.utils.polish_model(onnx_model)
         except RuntimeError:
             warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
-        init_model = cls.optimize_onnx(onnx_model, init=True)
-        pred_model = cls.optimize_onnx(onnx_model, predict=True)
+        except AttributeError:
+            warnings.warn("ShapeInferenceWarning: utils module not found in ONNX version {}".format(onnx.__version__))
+
+        # Optimizer module has been removed in ONNX-1.9 or later, warn caller if that is the case
+        try:
+            init_model = cls.optimize_onnx(onnx_model, init=True)
+            pred_model = cls.optimize_onnx(onnx_model, predict=True)
+        except ModuleNotFoundError:
+            warnings.warn("OptimizerWarning: onnxoptimizer module not installed. "
+                          "init_model and pred_model models will not be splitted, which can cause a runtime error")
+            init_model = onnx_model
+            pred_model = onnx_model
 
         init_net = caffe2_pb2.NetDef()
         pred_net = caffe2_pb2.NetDef()

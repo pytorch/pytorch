@@ -2,6 +2,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -9,7 +10,16 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
+#include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace torch {
 namespace jit {
@@ -17,15 +27,6 @@ namespace jit {
 namespace {
 
 using Tensor = at::Tensor;
-
-bool nonConstantParameters(Node* n) {
-  for (size_t i = 1; i < n->inputs().size(); i++) {
-    if (n->inputs().at(i)->node()->kind() != prim::Constant) {
-      return true;
-    }
-  }
-  return false;
-}
 
 bool supportedConvNode(Node* n) {
   switch (n->kind()) {
@@ -58,6 +59,15 @@ void FoldFrozenConvBatchnorm(Block* b) {
         continue;
       }
       if (conv->output()->uses().size() > 1) {
+        continue;
+      }
+
+      auto bn_rm_ivalue = bn->namedInput("running_mean");
+      auto bn_rv_ivalue = bn->namedInput("running_var");
+      // check running_mean and running_var has value, if they are
+      // None(track_running_stats=False), skiping the folding path.
+      if (bn_rm_ivalue->type() == NoneType::get() &&
+          bn_rv_ivalue->type() == NoneType::get()) {
         continue;
       }
 
@@ -163,7 +173,6 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
     return false;
   }
 
-  auto conv_w = constant_as<Tensor>(conv->namedInput("weight")).value();
   Tensor weight_tensor =
       constant_as<Tensor>(conv->namedInput("weight")).value();
 
@@ -178,12 +187,11 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
     if (!opDoesNotBroadCastWithConv(op_tensor, weight_tensor)) {
       return false;
     }
-    if (!op_tensor.is_floating_point()) {
-      return false;
-    }
-    if (c10::promoteTypes(
+
+    if (!op_tensor.is_floating_point() &&
+        c10::promoteTypes(
             op_tensor.scalar_type(), weight_tensor.scalar_type()) !=
-        weight_tensor.scalar_type()) {
+            weight_tensor.scalar_type()) {
       return false;
     }
   }
@@ -225,9 +233,9 @@ void FoldFrozenConvAddOrSub(Block* b) {
 
     if (supportedAddOrSub(n) && supportedConvNode(n->inputs().at(0)->node())) {
       auto conv = n->inputs().at(0)->node();
-      auto add_or_div = n;
+      auto add_or_sub = n;
 
-      if (!checkConvAndBroadcastingOpPreConditions(conv, add_or_div)) {
+      if (!checkConvAndBroadcastingOpPreConditions(conv, add_or_sub)) {
         continue;
       }
 
@@ -235,35 +243,35 @@ void FoldFrozenConvAddOrSub(Block* b) {
           constant_as<Tensor>(conv->namedInput("weight")).value();
 
       Tensor add_or_sub_tensor = resizeConstantScalarOrTensorToShape(
-          add_or_div->inputs().at(1),
+          add_or_sub->inputs().at(1),
           {weight_tensor.size(0)},
           weight_tensor.options());
       Tensor bias;
       if (conv->namedInput("bias")->type() == NoneType::get()) {
-        bias = at::zeros_like(add_or_sub_tensor);
+        bias = at::zeros_like(add_or_sub_tensor, weight_tensor.dtype());
       } else {
         bias = constant_as<Tensor>(conv->namedInput("bias")).value();
       }
 
       WithInsertPoint guard(conv);
 
-      add_or_div->replaceInputWith(
+      add_or_sub->replaceInputWith(
           conv->output(), b->owningGraph()->insertConstant(bias));
-      add_or_div->replaceInput(
+      add_or_sub->replaceInput(
           1, b->owningGraph()->insertConstant(add_or_sub_tensor));
 
-      auto stack_out = runNodeIfInputsAreConstant(add_or_div);
+      auto stack_out = runNodeIfInputsAreConstant(add_or_sub);
       TORCH_INTERNAL_ASSERT(stack_out && stack_out->size() == 1);
-      Tensor fuse_bias = (*stack_out)[0].toTensor();
+      Tensor fuse_bias = (*stack_out)[0].toTensor().to(bias.dtype());
 
       auto fused_conv_b = b->owningGraph()->insertConstant(fuse_bias);
       auto conv_b_value = conv->namedInput("bias");
 
       fused_conv_b->setDebugName(
           conv_b_value->debugName() + "_fused_" +
-          add_or_div->kind().toUnqualString());
+          add_or_sub->kind().toUnqualString());
       conv->replaceInputWith(conv_b_value, fused_conv_b);
-      add_or_div->output()->replaceAllUsesWith(conv->output());
+      add_or_sub->output()->replaceAllUsesWith(conv->output());
       // DCE run after cleans up nodes
     }
   }
@@ -302,7 +310,8 @@ void FoldFrozenConvMulOrDiv(Block* b) {
       // channels-out resize it to the shape that will broadcast to
       // weight_tensor when the op is run so we dont change weight size
       std::vector<int64_t> weight_compatible_size = {out_channels};
-      for (int64_t i = 1; i < weight_tensor.ndimension(); ++i) {
+      for (const auto i : c10::irange(1, weight_tensor.ndimension())) {
+        (void)i; // Suppress unused variable warning
         weight_compatible_size.push_back(1);
       }
 
@@ -320,7 +329,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
 
       auto stack_out = runNodeIfInputsAreConstant(mul_or_div);
       TORCH_INTERNAL_ASSERT(stack_out && stack_out->size() == 1);
-      Tensor fuse_weight = (*stack_out)[0].toTensor();
+      Tensor fuse_weight = (*stack_out)[0].toTensor().to(weight_tensor.dtype());
 
       auto fused_conv_weight = b->owningGraph()->insertConstant(fuse_weight);
       auto conv_weight_value = conv->namedInput("weight");
@@ -344,7 +353,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
 
         auto stack_out = runNodeIfInputsAreConstant(mul_or_div);
         TORCH_INTERNAL_ASSERT(stack_out && stack_out->size() == 1);
-        Tensor fuse_bias = (*stack_out)[0].toTensor();
+        Tensor fuse_bias = (*stack_out)[0].toTensor().to(bias.dtype());
 
         auto fused_conv_bias = b->owningGraph()->insertConstant(fuse_bias);
         auto conv_b_value = conv->namedInput("bias");

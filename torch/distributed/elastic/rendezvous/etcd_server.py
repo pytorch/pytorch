@@ -14,9 +14,12 @@ import socket
 import subprocess
 import tempfile
 import time
-from typing import Optional
+from typing import Optional, TextIO, Union
 
-import etcd  # type: ignore[import]
+try:
+    import etcd  # type: ignore[import]
+except ModuleNotFoundError:
+    pass
 
 
 log = logging.getLogger(__name__)
@@ -150,7 +153,12 @@ class EtcdServer:
         """
         return f"{self._host}:{self._port}"
 
-    def start(self, timeout: int = 60, num_retries: int = 3) -> None:
+    def start(
+        self,
+        timeout: int = 60,
+        num_retries: int = 3,
+        stderr: Union[int, TextIO, None] = None,
+    ) -> None:
         """
         Starts the server, and waits for it to be ready. When this function
         returns the sever is ready to take requests.
@@ -160,6 +168,10 @@ class EtcdServer:
                 before giving up.
             num_retries: number of retries to start the server. Each retry
                 will wait for max ``timeout`` before considering it as failed.
+            stderr: the standard error file handle. Valid values are
+                `subprocess.PIPE`, `subprocess.DEVNULL`, an existing file
+                descriptor (a positive integer), an existing file object, and
+                `None`.
 
         Raises:
             TimeoutError: if the server is not ready within the specified timeout
@@ -169,7 +181,7 @@ class EtcdServer:
             try:
                 data_dir = os.path.join(self._base_data_dir, str(curr_retries))
                 os.makedirs(data_dir, exist_ok=True)
-                return self._start(data_dir, timeout)
+                return self._start(data_dir, timeout, stderr)
             except Exception as e:
                 curr_retries += 1
                 stop_etcd(self._etcd_proc)
@@ -181,7 +193,9 @@ class EtcdServer:
                     raise
         atexit.register(stop_etcd, self._etcd_proc, self._base_data_dir)
 
-    def _start(self, data_dir: str, timeout: int = 60) -> None:
+    def _start(
+        self, data_dir: str, timeout: int = 60, stderr: Union[int, TextIO, None] = None
+    ) -> None:
         sock = find_free_port()
         sock_peer = find_free_port()
         self._port = sock.getsockname()[1]
@@ -208,10 +222,10 @@ class EtcdServer:
 
         sock.close()
         sock_peer.close()
-        self._etcd_proc = subprocess.Popen(etcd_cmd, close_fds=True)
+        self._etcd_proc = subprocess.Popen(etcd_cmd, close_fds=True, stderr=stderr)
         self._wait_for_ready(timeout)
 
-    def get_client(self) -> etcd.Client:
+    def get_client(self):
         """
         Returns:
            An etcd client object that can be used to make requests to

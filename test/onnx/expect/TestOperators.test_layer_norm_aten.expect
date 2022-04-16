@@ -1,4 +1,4 @@
-ir_version: 6
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -7,6 +7,7 @@ graph {
     input: "weight"
     input: "bias"
     output: "3"
+    name: "ATen_0"
     op_type: "ATen"
     attribute {
       name: "cudnn_enable"
@@ -29,8 +30,14 @@ graph {
       s: "layer_norm"
       type: STRING
     }
+    attribute {
+      name: "overload_name"
+      s: ""
+      type: STRING
+    }
+    domain: "org.pytorch.aten"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 10
     dims: 10
@@ -123,5 +130,9 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
+}
+opset_import {
+  domain: "org.pytorch.aten"
+  version: 1
 }

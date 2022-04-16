@@ -349,7 +349,10 @@ class GradScaler(object):
         to reduce it. If ``growth_interval`` unskipped iterations occurred consecutively,
         the scale is multiplied by ``growth_factor`` to increase it.
 
-        Passing ``new_scale`` sets the scale directly.
+        Passing ``new_scale`` sets the new scale value manually. (``new_scale`` is not
+        used directly, it's used to fill GradScaler's internal scale tensor. So if
+        ``new_scale`` was a tensor, later in-place changes to that tensor will not further
+        affect the scale GradScaler uses internally.)
 
         Args:
             new_scale (float or :class:`torch.cuda.FloatTensor`, optional, default=None):  New scale factor.
@@ -366,13 +369,13 @@ class GradScaler(object):
         if new_scale is not None:
             # Accept a new user-defined scale.
             if isinstance(new_scale, float):
-                self._scale = torch.full((1,), new_scale, dtype=torch.float32, device=_scale.device)
+                self._scale.fill_(new_scale)  # type: ignore[union-attr]
             else:
                 reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor with requires_grad=False."
                 assert isinstance(new_scale, torch.cuda.FloatTensor), reason  # type: ignore[attr-defined]
                 assert new_scale.numel() == 1, reason
                 assert new_scale.requires_grad is False, reason
-                self._scale = new_scale
+                self._scale.copy_(new_scale)  # type: ignore[union-attr]
         else:
             # Consume shared inf/nan data collected from optimizers to update the scale.
             # If all found_inf tensors are on the same device as self._scale, this operation is asynchronous.
@@ -387,12 +390,12 @@ class GradScaler(object):
                 for i in range(1, len(found_infs)):
                     found_inf_combined += found_infs[i]
 
-            self._scale = torch._amp_update_scale(_growth_tracker,
-                                                  _scale,
-                                                  found_inf_combined,
-                                                  self._growth_factor,
-                                                  self._backoff_factor,
-                                                  self._growth_interval)
+            torch._amp_update_scale_(_scale,
+                                     _growth_tracker,
+                                     found_inf_combined,
+                                     self._growth_factor,
+                                     self._backoff_factor,
+                                     self._growth_interval)
 
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
         self._per_optimizer_states = defaultdict(_refresh_per_optimizer_state)

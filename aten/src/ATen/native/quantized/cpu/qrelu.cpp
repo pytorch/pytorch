@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
@@ -15,7 +16,6 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qrelu_stub);
-DEFINE_DISPATCH(qrelu6_stub);
 DEFINE_DISPATCH(qrelu_leaky_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -23,6 +23,11 @@ Tensor qnnpack_relu(Tensor input) {
   Tensor qy;
   TORCH_CHECK(
       input.ndimension() > 0, "qnnpack_relu(): Got empty input tensor");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+               "qnnpack_relu(): Expected input data type ",
+               toString(c10::kQUInt8),
+               " but got ",
+               toString(input.scalar_type()));
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
 
@@ -31,7 +36,7 @@ Tensor qnnpack_relu(Tensor input) {
   initQNNPACK();
 
   size_t num_elems = 1;
-  for (int i = 1; i < input_contig.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, input_contig.ndimension())) {
     num_elems *= input_contig.size(i);
   }
 
@@ -94,7 +99,7 @@ Tensor relu_quantized_cpu(const Tensor& qx) {
 Tensor& relu_quantized_cpu_(Tensor& qx) {
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
-    using Vec = Vec256<scalar_t>;
+    using Vec = Vectorized<scalar_t>;
     auto iter = TensorIterator::unary_op(qx, qx);
     auto zero_point_vec = Vec(scalar_t(zero_point));
     cpu_kernel_vec(
@@ -107,13 +112,13 @@ Tensor& relu_quantized_cpu_(Tensor& qx) {
   return qx;
 }
 
-Tensor& leaky_relu_out_quantized_cpu(Tensor& result, const Tensor& self,
-                                 Scalar negval) {
+Tensor& leaky_relu_out_quantized_cpu(const Tensor& self,
+                                 const Scalar& negval, Tensor& result) {
   qrelu_leaky_stub(self.device().type(), result, self, negval);
   return result;
 }
 
-Tensor leaky_relu_quantized_cpu(const Tensor& self, Scalar negval) {
+Tensor leaky_relu_quantized_cpu(const Tensor& self, const Scalar& negval) {
   const auto qx = self.contiguous(self.suggest_memory_format());
   auto qy = at::_empty_affine_quantized(qx.sizes(),
       at::device(kCPU).dtype(self.scalar_type()),
@@ -124,7 +129,7 @@ Tensor leaky_relu_quantized_cpu(const Tensor& self, Scalar negval) {
   return qy;
 }
 
-Tensor& leaky_relu_quantized_cpu_(Tensor& self, Scalar negval) {
+Tensor& leaky_relu_quantized_cpu_(Tensor& self, const Scalar& negval) {
   qrelu_leaky_stub(self.device().type(), self, self, negval);
   return self;
 }
@@ -132,30 +137,12 @@ Tensor& leaky_relu_quantized_cpu_(Tensor& self, Scalar negval) {
 namespace {
 Tensor quantized_relu6(const Tensor& qx) {
   Tensor qy;
-  qrelu6_stub(qx.device().type(), qx, qy);
+  qy = hardtanh_quantized_cpu(qx, 0.0f, 6.0f);
   return qy;
 }
 
 Tensor quantized_relu6_(Tensor& qx) {
-  const auto zero_point = qx.q_zero_point();
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu6_", [&]() {
-    using Vec = Vec256<scalar_t>;
-    auto iter = TensorIterator::unary_op(qx, qx);
-    auto zero_point_vec = Vec(scalar_t(zero_point));
-    scalar_t six = at::native::quantize_val<scalar_t>(
-        qx.q_scale(),
-        qx.q_zero_point(),
-        /*value=*/6.0);
-    auto six_vec = Vec(six);
-    cpu_kernel_vec(
-        iter,
-        [&](scalar_t value) -> scalar_t {
-          underlying_t relu_val = std::max<underlying_t>(value.val_,
-                                                         zero_point);
-          return scalar_t(std::min<underlying_t>(relu_val, six.val_));
-        },
-        [&](Vec value) -> Vec { return value.relu6(zero_point_vec, six_vec); });
-  });
+  hardtanh_quantized_cpu_(qx, 0.0f, 6.0f);
   return qx;
 }
 
@@ -172,7 +159,7 @@ class QRelu6 final {
 
 class QLeakyRelu final {
  public:
-  static Tensor run(Tensor self, Scalar negative_slope, bool inplace, double output_scale, int64_t output_zero_point) {
+  static Tensor run(Tensor self, const Scalar& negative_slope, bool inplace, double output_scale, int64_t output_zero_point) {
     // inplace argument is ignored now, TODO:support inplace
     if (inplace) {
       TORCH_WARN("inplace=True is not supported for quantized::leaky_relu yet");

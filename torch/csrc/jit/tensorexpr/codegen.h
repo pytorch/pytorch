@@ -17,31 +17,33 @@ class TORCH_API CodeGen {
   class CallArg;
 
   template <typename... Ts>
-  CodeGen(Stmt* stmt, Ts... ts)
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  CodeGen(StmtPtr stmt, Ts... ts)
       : stmt_(stmt), buffer_args_({BufferArg(ts)...}) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CodeGen(
-      Stmt* stmt,
-      const std::vector<BufferArg>& buffer_args,
+      StmtPtr stmt,
+      std::vector<BufferArg> buffer_args,
       at::Device device = at::kCPU,
-      const std::string& kernel_func_name = "func")
-      : stmt_(stmt),
-        buffer_args_(buffer_args),
-        device_(device),
-        kernel_func_name_(kernel_func_name) {}
+      std::string kernel_func_name = "func");
 
-  virtual ~CodeGen() {}
+  virtual ~CodeGen() = default;
 
-  Stmt* stmt() const {
+  StmtPtr stmt() const {
     return stmt_;
   }
 
-  void set_stmt(Stmt* s) {
+  void set_stmt(StmtPtr s) {
     stmt_ = s;
   }
 
   void apply_mutator(IRMutator* mutator) {
     stmt_ = stmt_->accept_mutator(mutator);
+  }
+
+  void apply_visitor(IRVisitor* visitor) {
+    stmt_->accept(visitor);
   }
 
   std::vector<BufferArg>& buffer_args() {
@@ -57,14 +59,26 @@ class TORCH_API CodeGen {
   }
 
   // This function returns the generated code as
-  // a string. Currently only implemented for Block.
-  // TODO. Rename this, as we can return other than string
-  // and implement for other backends.
-  virtual std::string getCodeText() {
+  // a string.
+  virtual std::string getCodeText(const std::string& attr = "") {
     return ("");
   }
 
+  // TODO: Figure out how to unify these call interfaces.
+
+  /// Call a function with a vector of CallArgs, which are tagged
+  /// unions that properly type the arguments.
   virtual void call(const std::vector<CallArg>& args) = 0;
+
+  /// Call a function faster than a regular `call` by assuming that
+  /// the generated kernel already knows the type of the arguments, so
+  /// they can be type-punned with `void*`s.
+  virtual void call_raw(const std::vector<void*>& args) = 0;
+
+  /// Call a function even faster than a regular call, by assuming
+  /// that the number of thread blocks can be derived from `numel` via
+  /// a simple division, rather than evaluating an expression.
+  virtual void call_with_numel(void** args, int64_t numel);
 
   virtual at::Tensor empty_strided(
       c10::IntArrayRef size,
@@ -81,39 +95,59 @@ class TORCH_API CodeGen {
     return kernel_func_name_;
   }
 
+  void allocIntermediateBufs();
+
+ protected:
+  static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);
+
  private:
-  Stmt* stmt_;
+  StmtPtr stmt_;
   std::vector<BufferArg> buffer_args_;
   at::Device device_ = at::kCPU;
   std::string kernel_func_name_ = "func";
 };
 
+class TORCH_API ExtCallMemoryReuse : public IRMutator {
+  static std::unordered_map<std::string, std::string> makeExtCallFuncNameMap();
+  static const std::unordered_map<std::string, std::string> extCallFuncNameMap_;
+
+ public:
+  explicit ExtCallMemoryReuse(
+      const std::vector<CodeGen::BufferArg>& bufferArgs);
+  ~ExtCallMemoryReuse() override = default;
+  StmtPtr mutate(ExternalCallPtr v) override;
+
+ private:
+  std::unordered_set<BufPtr> bufferArgs_;
+};
+
 class CodeGen::BufferArg {
  public:
-  BufferArg(const Placeholder& buffer)
-      : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
-  BufferArg(Tensor* tensor)
-      : var_(tensor->buf()->base_handle()), dtype_(tensor->buf()->dtype()) {}
-  BufferArg(const VarHandle& var)
-      : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
-  BufferArg(const BufHandle& buf)
-      : var_(buf.node()->base_handle()), dtype_(buf.node()->dtype()) {}
+  BufferArg(Tensor tensor) : buf_(tensor.buf()) {}
+  BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
+  BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
+  BufferArg(const BufPtr& buf) : buf_(buf) {}
 
-  const Var* var() const {
-    return var_;
+  VarPtr var() const {
+    return isVar_ ? var_ : buf_->base_handle();
   }
-  Dtype dtype() const {
-    return dtype_;
+
+  BufPtr buf() const {
+    return buf_;
   }
 
   bool isVar() const {
     return isVar_;
   }
 
+  Dtype dtype() const {
+    return isVar_ ? var_->dtype() : buf_->dtype();
+  }
+
  private:
-  const Var* var_;
-  Dtype dtype_;
-  bool isVar_{false};
+  VarPtr var_ = nullptr;
+  BufPtr buf_ = nullptr;
+  bool isVar_ = false;
 };
 
 class CodeGen::CallArg {
@@ -122,43 +156,39 @@ class CodeGen::CallArg {
   CallArg(const PaddedBuffer<T>& buffer);
 
   template <typename T>
-  CallArg(const std::vector<T>& buffer) : ptr_(const_cast<T*>(buffer.data())) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-pro-type-const-cast)
+  CallArg(const std::vector<T>& buffer)
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      : data_(const_cast<T*>(buffer.data())) {}
 
-  CallArg(void* ptr) : ptr_(ptr) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  CallArg(void* ptr) : data_(ptr) {}
 
-#define ARG_TYPE_CTOR(Type, Name) \
-  CallArg(Type v) : Name##val_(v) {}
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_TYPE_CTOR);
+#define ARG_TYPE_CTOR(Type, Name)     \
+  CallArg(Type v) {                   \
+    memcpy(&data_, &v, sizeof(Type)); \
+  }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_TYPE_CTOR);
 #undef ARG_TYPE_CTOR
 
   void* data() const {
-    return ptr_;
+    return data_;
   }
 
-#define ARG_DATA_DEFINE(Type, Name) \
-  Type Name##Data() const {         \
-    return Name##val_;              \
+#define ARG_PTR_DEFINE(Type, Name) \
+  Type* Name##Ptr() const {        \
+    return (Type*)&data_;          \
   }
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_DATA_DEFINE);
-#undef ARG_DATA_DEFINE
-
-#define ARG_PTR_DEFINE(Type, Name)         \
-  Type* Name##Ptr() const {                \
-    return const_cast<Type*>(&Name##val_); \
-  }
-  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_PTR_DEFINE);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_PTR_DEFINE);
 #undef ARG_PTR_DEFINE
 
  private:
-  union {
-    void* ptr_;
-
-#define ARG_BACKING(Type, Name) Type Name##val_;
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_BACKING);
-#undef ARG_BACKING
-  };
+  void* data_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class RegisterCodeGenList {
  public:
   TORCH_API static RegisterCodeGenList& GetInstance() {
@@ -167,22 +197,23 @@ class RegisterCodeGenList {
   }
 
   using StmtFactoryMethod = std::function<std::unique_ptr<CodeGen>(
-      Stmt* stmt,
+      StmtPtr stmt,
       const std::vector<CodeGen::BufferArg>&,
       at::Device device,
       const std::string& kernel_func_name)>;
 
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
+  RegisterCodeGenList(const RegisterCodeGenList&) = delete;
+  RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
 
  private:
   template <class CodeGenType>
   friend class RegisterCodeGen;
-  RegisterCodeGenList() {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  RegisterCodeGenList() = default;
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
       const StmtFactoryMethod& stmt_factory_method);
-  RegisterCodeGenList(const RegisterCodeGenList&) = delete;
-  RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
 
   std::unordered_map<std::string, StmtFactoryMethod> stmt_factory_methods_;
 };
@@ -194,10 +225,11 @@ class RegisterCodeGen {
     RegisterCodeGenList& codegen_list = RegisterCodeGenList::GetInstance();
     codegen_list.AddStmtFactoryMethod(
         name,
-        [](Stmt* stmt,
+        [](StmtPtr stmt,
            const std::vector<CodeGen::BufferArg>& params,
            at::Device device,
            const std::string& kernel_func_name) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::unique_ptr<CodeGen> method(
               new CodeGenType(stmt, params, device, kernel_func_name));
           return method;
@@ -207,14 +239,14 @@ class RegisterCodeGen {
 
 TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
-    Stmt* stmt,
+    StmtPtr stmt,
     const std::vector<CodeGen::BufferArg>& params,
     at::Device device = at::kCPU,
     const std::string& kernel_func_name = "func");
 
 class TORCH_API GenericIntrinsicsExpander : public IRMutator {
  protected:
-  const Expr* mutate(const Intrinsics* v) override;
+  ExprPtr mutate(IntrinsicsPtr v) override;
 };
 
 } // namespace tensorexpr

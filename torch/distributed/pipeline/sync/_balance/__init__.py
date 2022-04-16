@@ -18,7 +18,7 @@ Usage::
     pipe = Pipe(model, balance, chunks=8)
 
 """
-from typing import List, Union, Sequence
+from typing import Any, List, Union, Sequence
 
 import torch
 from torch import Tensor
@@ -44,7 +44,7 @@ def balance_cost(cost: List[int], partitions: int) -> List[int]:
 def balance_by_time(
     partitions: int,
     module: nn.Sequential,
-    sample: TensorOrTensors,
+    sample: Union[List[Any], Tensor],
     *,
     timeout: float = 1.0,
     device: Device = torch.device("cuda"),
@@ -87,7 +87,7 @@ def balance_by_time(
 def balance_by_size(
     partitions: int,
     module: nn.Sequential,
-    input: TensorOrTensors,
+    input: Union[List[Any], Tensor],
     *,
     chunks: int = 1,
     param_scale: float = 2.0,

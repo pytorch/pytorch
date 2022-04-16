@@ -27,6 +27,7 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
     const auto* lengthsPtr = lengths.template data<T>();
     const auto* maskPtr = mask.template data<bool>();
     auto totalLength =
+        // NOLINTNEXTLINE(bugprone-fold-init-type)
         std::accumulate(lengthsPtr, lengthsPtr + lengths.numel(), 0);
     CAFFE_ENFORCE(mask.numel() == totalLength);
     auto* lengthsOut = Output(0, lengths.sizes(), at::dtype<T>());
@@ -90,6 +91,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
     if (lastStart != -1 && ((i >= outerSize) || !maskPtr[i])) {
       const auto* src = inPtr + lastStart * innerSizeBytes;
       auto* dst = outPtr + outStart * innerSizeBytes;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       int numItems = i - lastStart;
       context_.CopyItemsSameDevice(
           data.dtype(), numItems * innerSize, src, dst);
@@ -284,6 +286,7 @@ NO_GRADIENT(BooleanMaskLengths);
 
 } // namespace
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-const-variable)
 const float minf = -1.0f * std::numeric_limits<float>::infinity();
 
 // Template this on a functor object so we can generate different
@@ -356,6 +359,7 @@ class SequenceFunctor {
   explicit SequenceFunctor(const int* sl, const size_t len)
       : sl_(sl), len_(len) {}
   bool operator()(int i, int j, float /* val*/) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     CAFFE_ENFORCE(i < len_, "Out of bound.");
     return j >= sl_[i];
   }
@@ -450,6 +454,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
 
   // product of dims from 1 to batch
   const int batch_dim =
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (canonical_batch >= 0
            ? input->size_to_dim(canonical_batch) * input->size(canonical_batch)
            : -1);
@@ -489,6 +494,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         right,
         batch_dim,
         input->data<T>(),
+        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
         WindowFunctor(window_centers->data<int>(), radius_),
         fill_val,
         output->template mutable_data<T>());
@@ -541,6 +547,12 @@ REGISTER_CPU_OPERATOR(SequenceMask, SequenceMaskOp<CPUContext>);
 OPERATOR_SCHEMA(SequenceMask)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1, in[0]);
+      out[0].set_data_type(in[0].data_type());
+      return out;
+    })
     .SetDoc(R"DOC(
 Mask op designed for use in attention mechanisms for sequence modeling tasks.
 Supports batching: given batch_dim, collapses dims 0 through batch_dim into a

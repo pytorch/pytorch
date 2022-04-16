@@ -2,12 +2,66 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
 
 using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
 class OperatorHandle;
+
+/*
+ * [Note: Argument forwarding in the dispatcher]
+ *
+ * The dispatcher uses a somewhat unusual way to forward arguments through several layers of
+ * wrapper functions. This can be confusing because an experienced C++ programmer would look at this
+ * and think "oh this is supposed to be forwarding a universal reference but the && is missing. This is a bug.".
+ * It is not a bug. The common way in C++ to forward arguments is to use universal references:
+ *
+ * > template<class T> void func(T&& arg) { func2(std::forward<T>(arg)); }
+ *
+ * but that relies on inferring the correct reference type (i.e. value vs & vs &&) from the argument.
+ * In our case, we cannot rely on the argument as supplied by the caller, because that could infer a
+ * different reference type than was used in the kernel function. The correct reference type
+ * is dictated by the kernel signature and must be identical since we cast function pointers
+ * through void* pointers and mismatches would be UB. So we need a forwarding pattern that determines
+ * the reference type to use by looking at the explicitly supplied operator signature, not by looking at
+ * the argument we're calling it with.
+ *
+ * What does std::forward do, exactly?
+ * ------------------------------------
+ * std::forward<T>(t) is a way to cast t to the reference type supplied in T.
+ * Let's assume decay_t<T> == U and T is either U or some reference of U.
+ *  - std::forward<T&>(t) will return U&, no matter what kind of reference t is.
+ *  - std::forward<T&&>(t) will return U&&, no matter what kind of reference t is.
+ *  - std::forward<T>(t) will return U&& (not U!), no matter what kind of reference t is.
+ *
+ * For universal references, that means that in the following function
+ * > template<class T> void func(T&& arg) { func2(std::forward<T>(arg)); }
+ *
+ *  - when called with arg being a rvalue reference or non-reference value, T gets inferred to be
+ *    a non-reference U, and std::forward<T>(t) will return U&&, correctly moving the argument.
+ *  - when called with arg behind a lvalue reference, T gets inferred to be U& because that's the only
+ *    way to match the signature (in C++, a type that is (T&)&& will collapse to T&).
+ *    That means std::forward<T>(t) will return U& and the value will not be moved but passed on as
+ *    a lvalue reference.
+ *
+ * How do we use that?
+ * ------------------------------------
+ * But std::forward can also be used outside of the common "universal forwarding" pattern to change
+ * reference types. So instead of following the common C++ pattern, we notice what
+ * std::forward<T>() actually does, and that is it takes a value and changes its reference to the
+ * type of reference passed in as T. If we don't infer T but explicitly specify it, we can use this
+ * to forward based on an explicitly specified reference type instead of the inferred argument type.
+ *
+ * This is why many of the dispatcher functions look like
+ * > template<class T> func(T t) { func2<T>(std::forward<T>(t)); }
+ * instead of the common
+ * > template<class T> func(T&& t) { func2(std::forward<T>(t)); }
+ *
+ * and are expected to be called by explicitly specifying the template parameters in a way that matches
+ * the expected operator signature at each call site.
+ */
 
 /**
  * Inherit from OperatorKernel to implement a c10 kernel.
@@ -26,7 +80,7 @@ class OperatorHandle;
  *
  * See below for how to register this kernel with PyTorch.
  */
-struct TORCH_API OperatorKernel {
+struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
   virtual ~OperatorKernel() = default;
 };
 
@@ -38,7 +92,7 @@ namespace impl {
     int64_t,
     double,
     bool,
-    std::string,
+    c10::string_view,
     at::Tensor,
     at::Scalar,
     c10::QScheme,
@@ -126,6 +180,13 @@ namespace impl {
       "You tried to register a kernel with an unsupported input type: ArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<c10::OptionalArrayRef<T>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value,
+      "You tried to register a kernel with an unsupported input type: OptionalArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
+  };
+
   template<class T, size_t N, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<std::array<T, N>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
@@ -146,7 +207,7 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported input type: const char*. Please use std::string instead.");
+      "You tried to register a kernel with an unsupported input type: const char*. Please use c10::string_view instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
@@ -177,6 +238,10 @@ namespace impl {
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<c10::optional<T>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<c10::OptionalArrayRef<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
 
   template<class Key, class Value, bool AllowDeprecatedTypes>
@@ -234,7 +299,7 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
     static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel with an unsupported output type: const char*. Please use std::string instead.");
+      "You tried to register a kernel with an unsupported output type: const char*. Please use c10::string_view instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
@@ -307,8 +372,19 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
     // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that
-    // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but impliticly convertible
+    // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but implicitly convertible
     // to optional<ArrayRef<T>>.
+    static OptionalArray<T> call(IValue& v) {
+      return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
+    }
+  };
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<OptionalArrayRef<T>, AllowDeprecatedTypes> final {
+    // If an argument is OptionalArrayRef<T>, convert the IValue to an
+    // optional<std::vector<T>> and pass that to the operator. OptionalArray<T>
+    // is basically a optional<std::vector<T>> but implicitly convertible to
+    // OptionalArrayRef<T>
     static OptionalArray<T> call(IValue& v) {
       return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
     }
@@ -324,6 +400,10 @@ namespace impl {
       assert_is_valid_output_type<T, AllowDeprecatedTypes>();
       return c10::ivalue::from(std::move(v));
     }
+    static IValue copy(const T& v) {
+      assert_is_valid_output_type<T, AllowDeprecatedTypes>();
+      return IValue(v);
+    }
   };
 
   // Special case to allow kernels to return `Tensor&`.
@@ -332,6 +412,9 @@ namespace impl {
   struct return_to_ivalue<at::Tensor&, AllowDeprecatedTypes, void> final {
     static IValue call(at::Tensor& v) {
       return c10::ivalue::from(v);
+    }
+    static IValue copy(at::Tensor& v) {
+      return IValue(v);
     }
   };
 
@@ -349,6 +432,7 @@ namespace impl {
     static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
       "Parameter types mismatch");
 
+    // See [Note: Argument forwarding in the dispatcher] for why ParameterTypes doesn't use &&
     static ReturnType call(OperatorKernel* functor, DispatchKeySet, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       // Note [Plumbing Keys Through The Dispatcher 2]
@@ -371,6 +455,7 @@ namespace impl {
     static_assert(std::is_same<guts::typelist::typelist<DispatchKeySet, ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
       "Parameter types mismatch");
 
+    // See [Note: Argument forwarding in the dispatcher] for why ParameterTypes doesn't use &&
     static ReturnType call(OperatorKernel* functor, DispatchKeySet dispatchKeySet, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       // We're explicitly taking in a dispatchKeySet and forwarding it to the registered kernel.
@@ -415,8 +500,15 @@ namespace impl {
 
   template<class OutputType, bool AllowDeprecatedTypes>
   struct push_outputs final {
+    // Contrary to [Note: Argument forwarding in the dispatcher], we use OutputType&& here
+    // to avoid one extra call to the move constructor in this case. This is still not a
+    // universal reference though because OutputType is an explicitly specified class
+    // template parameter.
     static void call(OutputType&& output, Stack* stack) {
       torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::call(std::forward<OutputType>(output)));
+    }
+    static void copy(const OutputType& output, Stack* stack) {
+      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::copy(output));
     }
   };
   template<class... OutputTypes, bool AllowDeprecatedTypes>
@@ -424,16 +516,25 @@ namespace impl {
     static void call(std::tuple<OutputTypes...>&& output, Stack* stack) {
       call_(std::move(output), stack, std::make_index_sequence<sizeof...(OutputTypes)>());
     }
+    static void copy(const std::tuple<OutputTypes...>& output, Stack* stack) {
+      copy_(output, stack, std::make_index_sequence<sizeof...(OutputTypes)>());
+    }
 
   private:
     template<size_t... indices>
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, std::index_sequence<indices...>) {
       torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::call(std::forward<OutputTypes>(std::get<indices>(output)))...);
     }
+    template<size_t... indices>
+    static void copy_(const std::tuple<OutputTypes...>& output, Stack* stack, std::index_sequence<indices...>) {
+      torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::copy(std::get<indices>(output))...);
+    }
   };
   template<bool AllowDeprecatedTypes>
   struct push_outputs<void, AllowDeprecatedTypes> final {
     static void call(int /*dummy*/, Stack* /*stack*/) {
+    }
+    static void copy(int /*dummy*/, Stack* /*stack*/) {
     }
   };
 

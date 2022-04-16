@@ -52,11 +52,11 @@ def run_benchmark(name: str, function: object, dtype: torch.dtype, seed: int, de
 
 Benchmark = namedtuple('Benchmark', ['name', 'function', 'dtype'])
 BENCHMARKS = [
-    Benchmark('fft_real', torch.fft.fftn, torch.float32),  # type: ignore
-    Benchmark('fft_complex', torch.fft.fftn, torch.complex64),  # type: ignore
-    Benchmark('ifft', torch.fft.ifftn, torch.complex64),  # type: ignore
-    Benchmark('rfft', torch.fft.rfftn, torch.float32),  # type: ignore
-    Benchmark('irfft', torch.fft.irfftn, torch.complex64),  # type: ignore
+    Benchmark('fft_real', torch.fft.fftn, torch.float32),
+    Benchmark('fft_complex', torch.fft.fftn, torch.complex64),
+    Benchmark('ifft', torch.fft.ifftn, torch.complex64),
+    Benchmark('rfft', torch.fft.rfftn, torch.float32),
+    Benchmark('irfft', torch.fft.irfftn, torch.complex64),
 ]
 BENCHMARK_MAP = {b.name: b for b in BENCHMARKS}
 BENCHMARK_NAMES = [b.name for b in BENCHMARKS]

@@ -83,8 +83,8 @@ class Dropout2d(_DropoutNd):
             in-place
 
     Shape:
-        - Input: :math:`(N, C, H, W)`
-        - Output: :math:`(N, C, H, W)` (same shape as input)
+        - Input: :math:`(N, C, H, W)` or :math:`(C, H, W)`.
+        - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input).
 
     Examples::
 
@@ -125,8 +125,8 @@ class Dropout3d(_DropoutNd):
             in-place
 
     Shape:
-        - Input: :math:`(N, C, D, H, W)`
-        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`.
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input).
 
     Examples::
 
@@ -215,8 +215,8 @@ class FeatureAlphaDropout(_DropoutNd):
             in-place
 
     Shape:
-        - Input: :math:`(N, C, D, H, W)`
-        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`.
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input).
 
     Examples::
 

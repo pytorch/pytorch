@@ -9,8 +9,8 @@ namespace c10 {
 
 TEST(TypeCustomPrinter, Basic) {
   TypePrinter printer =
-      [](const ConstTypePtr& t) -> c10::optional<std::string> {
-    if (auto tensorType = t->cast<TensorType>()) {
+      [](const Type& t) -> c10::optional<std::string> {
+    if (auto tensorType = t.cast<TensorType>()) {
       return "CustomTensor";
     }
     return c10::nullopt;
@@ -23,14 +23,14 @@ TEST(TypeCustomPrinter, Basic) {
   EXPECT_EQ(type->annotation_str(printer), "CustomTensor");
 
   // Unrelated types shoudl not be affected
-  const auto intType = IntType::create();
+  const auto intType = IntType::get();
   EXPECT_EQ(intType->annotation_str(printer), intType->annotation_str());
 }
 
 TEST(TypeCustomPrinter, ContainedTypes) {
   TypePrinter printer =
-      [](const ConstTypePtr& t) -> c10::optional<std::string> {
-    if (auto tensorType = t->cast<TensorType>()) {
+      [](const Type& t) -> c10::optional<std::string> {
+    if (auto tensorType = t.cast<TensorType>()) {
       return "CustomTensor";
     }
     return c10::nullopt;
@@ -53,9 +53,9 @@ TEST(TypeCustomPrinter, ContainedTypes) {
 
 TEST(TypeCustomPrinter, NamedTuples) {
   TypePrinter printer =
-      [](const ConstTypePtr& t) -> c10::optional<std::string> {
-    if (auto tupleType = t->cast<TupleType>()) {
-      // Rewrite only namedtuples
+      [](const Type& t) -> c10::optional<std::string> {
+    if (auto tupleType = t.cast<TupleType>()) {
+      // Rewrite only NamedTuples
       if (tupleType->name()) {
         return "Rewritten";
       }
@@ -65,8 +65,9 @@ TEST(TypeCustomPrinter, NamedTuples) {
   torch::Tensor iv = torch::rand({2, 3});
   const auto type = TensorType::create(iv);
 
+  std::vector<std::string> field_names = {"foo", "bar"};
   const auto namedTupleType = TupleType::createNamed(
-      "my.named.tuple", {"foo", "bar"}, {type, IntType::get()});
+      "my.named.tuple", field_names, {type, IntType::get()});
   EXPECT_EQ(namedTupleType->annotation_str(printer), "Rewritten");
 
   // Put it inside another tuple, should still work
@@ -183,25 +184,27 @@ TEST(TypeEquality, TupleEquality) {
 
 TEST(TypeEquality, NamedTupleEquality) {
   // Named tuples should compare equal if they share a name and field names
+  std::vector<std::string> fields = {"a", "b", "c", "d"};
+  std::vector<std::string> otherFields = {"wow", "so", "very", "different"};
   auto type = TupleType::createNamed(
       "MyNamedTuple",
-      {"a", "b", "c", "d"},
+      fields,
       {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   auto type2 = TupleType::createNamed(
       "MyNamedTuple",
-      {"a", "b", "c", "d"},
+      fields,
       {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_EQ(*type, *type2);
 
   auto differentName = TupleType::createNamed(
       "WowSoDifferent",
-      {"a", "b", "c", "d"},
+      fields,
       {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_NE(*type, *differentName);
 
   auto differentField = TupleType::createNamed(
       "MyNamedTuple",
-      {"wow", "so", "very", "different"},
+      otherFields,
       {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_NE(*type, *differentField);
 }

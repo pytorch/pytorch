@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 
@@ -7,7 +8,7 @@
 namespace at { namespace native {
 
 Tensor mkldnn_convolution(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
   TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
@@ -30,9 +31,11 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
   TORCH_CHECK(false, "mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
 }
 
+REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
+
 }}
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -85,12 +88,15 @@ ideep::tensor _mkldnn_convolution(
 
 Tensor mkldnn_convolution(
     const Tensor& input,
-    const Tensor& weight,
-    const Tensor& bias,
+    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
@@ -193,9 +199,9 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
       mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_weight),
                                               optTypeMetaToScalarType(grad_output.options().dtype_opt()),
                                               grad_output.options().device_opt())),
-      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias),
+      bias_defined ? mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias),
                                               optTypeMetaToScalarType(grad_output.options().dtype_opt()),
-                                              grad_output.options().device_opt())));
+                                              grad_output.options().device_opt())) : Tensor());
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
@@ -206,16 +212,18 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::mkldnn_convolution_backward_input(
+    grad_input = mkldnn_convolution_backward_input(
       input.sizes(), grad_output, weight, padding, stride, dilation, groups, output_mask[2]);
   }
   if (output_mask[1] || output_mask[2]) {
-    std::tie(grad_weight, grad_bias) = at::mkldnn_convolution_backward_weights(
+    std::tie(grad_weight, grad_bias) = mkldnn_convolution_backward_weights(
       weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2]);
   }
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
+
+REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward);
 
 }}  // namespace at::native
 

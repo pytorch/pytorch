@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 
 namespace torch {
 namespace jit {
@@ -27,8 +28,10 @@ void CastAllConstantToFloating(Block* block) {
     if (node->kind() == onnx::Constant) {
       auto val = node->t(attr::value);
       at::ScalarType dtype = val.scalar_type();
+      auto val_type = TensorType::create(val);
       if (dtype != at::ScalarType::Double && dtype != at::ScalarType::Float &&
           dtype != at::ScalarType::Half) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int to_type;
         switch (val.scalar_type()) {
           case at::ScalarType::Byte:
@@ -36,12 +39,12 @@ void CastAllConstantToFloating(Block* block) {
           case at::ScalarType::Int:
           case at::ScalarType::Short:
           case at::ScalarType::Bool:
-            to_type = 6; // ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
+            to_type = ATenTypeToOnnxType(val.scalar_type());
             val = val.to(at::ScalarType::Float);
             break;
 
           case at::ScalarType::Long:
-            to_type = 7; // ::ONNX_NAMESPACE::TensorProto_DataType_INT64;
+            to_type = ATenTypeToOnnxType(val.scalar_type());
             val = val.to(at::ScalarType::Double);
             break;
 
@@ -53,11 +56,13 @@ void CastAllConstantToFloating(Block* block) {
         node->t_(attr::value, val);
         Node* cast_node = graph->create(onnx::Cast, 1);
         cast_node->i_(attr::to, to_type);
+        cast_node->output()->setType(val_type);
         cast_node->insertAfter(node);
         // get input from cast node
         node->outputs().at(0)->replaceAllUsesWith(cast_node->outputs().at(0));
         // add input from constant to cast node
         cast_node->addInput(node->outputs().at(0));
+        cast_node->copyMetadata(node);
       }
     }
   }

@@ -1,12 +1,15 @@
 #pragma once
 
+#include <ostream>
+#include <string>
+
 #include <c10/core/Scalar.h>
 #include <ATen/core/Tensor.h>
-#include <iostream>
-
 
 namespace c10 {
 TORCH_API std::ostream& operator<<(std::ostream& out, Backend b);
+TORCH_API std::ostream& operator<<(std::ostream & out, Scalar s);
+TORCH_API std::string toString(Scalar s);
 }
 namespace at {
 
@@ -18,12 +21,5 @@ TORCH_API std::ostream& print(
 static inline std::ostream& operator<<(std::ostream & out, const Tensor & t) {
   return print(out,t,80);
 }
-static inline void print(const Tensor & t, int64_t linesize=80) {
-  print(std::cout,t,linesize);
-}
-
-static inline std::ostream& operator<<(std::ostream & out, Scalar s) {
-  return out << (s.isFloatingPoint() ? s.toDouble() : s.toLong());
-}
-
+TORCH_API void print(const Tensor & t, int64_t linesize=80);
 }

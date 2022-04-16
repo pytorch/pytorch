@@ -8,4 +8,6 @@ constexpr DeviceType CUDAGuardImpl::static_type;
 
 C10_REGISTER_GUARD_IMPL(CUDA, CUDAGuardImpl);
 
-}}} // namespace c10::cuda::detail
+} // namespace impl
+} // namespace cuda
+} // namespace c10

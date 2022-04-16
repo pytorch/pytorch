@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """This script runs cuda-memcheck on the specified unit test. Each test case
 is run in its isolated process with a timeout so that:
@@ -108,7 +108,7 @@ else:
 
     # create a fake progress bar that does not display anything
     class ProgressbarStub:
-        def update(*args):
+        def update(self, *args):
             return
     progressbar = ProgressbarStub()
 

@@ -8,4 +8,3 @@ This is a full reference of functions and Tensor methods accessible in TorchScri
 .. contents:: :local:
 
 .. automodule:: torch.jit.supported_ops
-

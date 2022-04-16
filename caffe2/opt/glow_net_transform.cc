@@ -23,6 +23,12 @@ C10_DEFINE_bool(
     false,
     "Merge all the fp32 input tensors into one, convert it to fp16 and split it back");
 
+C10_DEFINE_bool(
+    verify_only_single_subnet,
+    false,
+    "Check that only one subnet is created during Onnxifi."
+)
+
 C10_DEFINE_int32(
     onnxifi_min_ops,
     1,
@@ -56,10 +62,16 @@ C10_DEFINE_string(
     "A list of net positions whose corresponding op's inputs and outputs will be"
     " observed. ");
 
+C10_DEFINE_bool(
+    use_onnxifi_batch_size,
+    true,
+    "If true then instead of nominal batch blob for determining current batch "
+    "size we would use batch size provided as part of Glow request data.");
+
 namespace caffe2 {
 namespace glow {
 
-// The list in in the form of "0-3,5,6-7" which means, we will black list ops
+// The list in the form of "0-3,5,6-7" which means, we will black list ops
 // with net positions in [0,1,2,3,5,6,7]
 std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   std::unordered_set<int> net_position_list;
@@ -116,7 +128,9 @@ void onnxifi(
     bool predictor_net_ssa_rewritten,
     const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs,
     const c10::optional<std::string> &blacklist_ops,
-    const c10::optional<size_t> &min_ops) {
+    const c10::optional<size_t> &min_ops,
+    const std::unordered_set<std::string> &blocklist_blobs,
+    const c10::optional<bool> &verify_only_single_subnet) {
   // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
   splitSparseLengthsSumSparse(net, *ws);
 
@@ -144,9 +158,11 @@ void onnxifi(
   opts.load_model_by_blob = load_model_by_blob;
   opts.enforce_fp32_inputs_into_fp16 = FLAGS_enforce_fp32_inputs_into_fp16;
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
+  opts.verify_only_single_subnet = verify_only_single_subnet.value_or(FLAGS_verify_only_single_subnet);
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
   opts.timeout = FLAGS_onnxifi_timeout_ms;
   opts.shape_hints_per_bs = shape_hints_per_bs;
+  opts.use_onnxifi_batch_size = FLAGS_use_onnxifi_batch_size;
 
   ShapeInfoMap more_shape_hints = shape_hints_max_bs;
   if (!FLAGS_onnxifi_shape_hints.empty()) {
@@ -170,6 +186,13 @@ void onnxifi(
         ArgumentHelper helper(op);
         more_blocklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
       }
+    }
+  }
+  // exclude blocklisted blobs, which is supposed to be loaded to NVM selectively.
+  for (const auto& op : net->op()) {
+    if (blocklist_blobs.count(op.input(0))) {
+      ArgumentHelper helper(op);
+      more_blocklist.emplace(helper.GetSingleArgument(op, kNetPos, -1));
     }
   }
 

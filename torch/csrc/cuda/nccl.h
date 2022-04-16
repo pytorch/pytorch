@@ -2,12 +2,21 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THC.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <vector>
+
+// NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for HIP 3.1+
+#if defined(__CUDA_BF16_TYPES_EXIST__)
+#define HAS_NCCL_BF16_DATATYPE \
+  ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301)
+#define HAS_NCCL_BF16_DATATYPE 1
+#else
+#define HAS_NCCL_BF16_DATATYPE 0
+#endif
 
 namespace torch {
 namespace cuda {
@@ -21,6 +30,7 @@ typedef void* ncclComm_t;
 
 /** redefine nccl unique ID in torch scope. this should be identical to native nccl impp. */
 #define NCCL_UNIQUE_ID_BYTES 128
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; } ncclUniqueId;
 
 /* Error type */
@@ -52,7 +62,9 @@ enum class ncclDataType {
     Float16    = 6, Half       = 6,
     Float32    = 7, Float      = 7,
     Float64    = 8, Double     = 8,
-    numTypes   = 9 };
+    Bfloat16   = 9,
+    NumTypes   = 10
+};
 
 
 
@@ -132,11 +144,25 @@ TORCH_CUDA_CPP_API void reduce_scatter(
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
+TORCH_CUDA_CPP_API void scatter(
+    const std::vector<at::Tensor>& inputs,
+    at::Tensor& outputs,
+    ncclComm_t comm,
+    at::cuda::CUDAStream& stream,
+    int32_t root = 0);
+
 TORCH_CUDA_CPP_API void all_gather(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
+
+TORCH_CUDA_CPP_API void gather(
+    const at::Tensor& inputs,
+    std::vector<at::Tensor>& outputs,
+    ncclComm_t comm,
+    at::cuda::CUDAStream& stream,
+    int32_t root = 0);
 
 TORCH_CUDA_CPP_API void all2all_single_equal_split(
     at::Tensor& input,

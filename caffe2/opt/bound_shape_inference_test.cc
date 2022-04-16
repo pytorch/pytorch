@@ -45,7 +45,7 @@ void verifyShapeInfo(
   EXPECT_EQ(shape_info.getDimType(), t);
   const auto& shape = shape_info.shape;
   ASSERT_EQ(shape.dims_size(), dims.size());
-  for (int i = 0; i < dims.size(); ++i) {
+  for (unsigned i = 0; i < dims.size(); ++i) {
     EXPECT_EQ(dims[i], shape.dims(i));
   }
   EXPECT_EQ(shape.data_type(), dtype);
@@ -669,7 +669,7 @@ TEST(BoundShapeInference, Bucketize) {
   shape_map.emplace(
       "In",
       makeTensorInfo(
-          {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+          {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX, TensorBoundShape_DimType_CONSTANT},
           {spec.max_batch_size, 60}));
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -677,7 +677,7 @@ TEST(BoundShapeInference, Bucketize) {
   verifyShapeInfo(
       out_shape,
       "Out",
-      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 60},
       TensorProto_DataType_INT32);
 }
@@ -1033,4 +1033,123 @@ TEST(BoundShapeInference, LpNorm) {
       "output",
       {TensorBoundShape_DimType_CONSTANT},
       {1});
+}
+
+TEST(BoundShapeInference, Transpose) {
+  NetDef net;
+  std::vector<int> axes{1, 0};
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Transpose",
+      "",
+      {"input"},
+      {"output"},
+      {MakeArgument<std::vector<int>>("axes", axes)}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "input",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1, 16}));
+  BoundShapeSpec spec(32, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "output",
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
+      {16, 1});
+}
+
+TEST(BoundShapeInference, Clip) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Clip",
+      "",
+      {"input"},
+      {"output"},
+      {MakeArgument<int>("min", 10.0), MakeArgument<int>("max", 20.0)}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "input",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {8, 16}));
+  BoundShapeSpec spec(32, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "output",
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
+      {8, 16});
+}
+
+TEST(BoundShapeInference, Mean) {
+  NetDef net;
+    net.add_op()->CopyFrom(CreateOperatorDef(
+      "Mean",
+      "",
+      {"input0", "input1", "input2"},
+      {"output"}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "input0",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {8, 16}));
+  shape_map.emplace(
+      "input1",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {8, 16}));
+  shape_map.emplace(
+      "input2",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {8, 16}));
+  BoundShapeSpec spec(32, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "output",
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
+      {8, 16});
+}
+
+TEST(BoundShapeInference, Div) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Div",
+      "",
+      {"input0", "input1"},
+      {"output"}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "input0",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT},
+          {16}));
+  shape_map.emplace(
+      "input1",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT},
+          {16}));
+  BoundShapeSpec spec(32, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "output",
+      {TensorBoundShape_DimType_CONSTANT},
+      {16});
 }

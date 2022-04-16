@@ -1,5 +1,6 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/resize_3d_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -74,9 +75,9 @@ __global__ void NearestNeighbor3DGradientKernel(
         (((n * num_channels + c) * output_frames + out_f) * output_height +
           out_y) * output_width + out_x;
 #if __CUDA_ARCH__ >= 350
-    atomicAdd(dX + out_index, __ldg(dY + index));
+    gpu_atomic_add(dX + out_index, __ldg(dY + index));
 #else
-    atomicAdd(dX + out_index, *(dY + index));
+    gpu_atomic_add(dX + out_index, *(dY + index));
 #endif
   }
 }

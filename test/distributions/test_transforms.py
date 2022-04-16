@@ -1,3 +1,5 @@
+# Owner(s): ["module: distributions"]
+
 from numbers import Number
 
 import pytest
@@ -6,11 +8,12 @@ import torch
 from torch.autograd.functional import jacobian
 from torch.distributions import Dirichlet, Independent, Normal, TransformedDistribution, constraints
 from torch.distributions.transforms import (AbsTransform, AffineTransform, ComposeTransform,
-                                            CorrCholeskyTransform, ExpTransform, IndependentTransform,
-                                            LowerCholeskyTransform, PowerTransform, ReshapeTransform,
-                                            SigmoidTransform, TanhTransform, SoftmaxTransform,
-                                            StickBreakingTransform, identity_transform, Transform,
-                                            _InverseTransform)
+                                            CorrCholeskyTransform, CumulativeDistributionTransform,
+                                            ExpTransform, IndependentTransform,
+                                            LowerCholeskyTransform, PowerTransform,
+                                            ReshapeTransform, SigmoidTransform, TanhTransform,
+                                            SoftmaxTransform, SoftplusTransform, StickBreakingTransform,
+                                            identity_transform, Transform, _InverseTransform)
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
 
 
@@ -35,6 +38,7 @@ def get_transforms(cache_size):
                         torch.randn(4, 5),
                         cache_size=cache_size),
         SoftmaxTransform(cache_size=cache_size),
+        SoftplusTransform(cache_size=cache_size),
         StickBreakingTransform(cache_size=cache_size),
         LowerCholeskyTransform(cache_size=cache_size),
         CorrCholeskyTransform(cache_size=cache_size),
@@ -65,6 +69,7 @@ def get_transforms(cache_size):
                             torch.randn(5),
                             cache_size=cache_size),
             1),
+        CumulativeDistributionTransform(Normal(0, 1)),
     ]
     transforms += [t.inv for t in transforms]
     return transforms

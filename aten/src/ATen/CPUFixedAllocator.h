@@ -1,6 +1,6 @@
 #pragma once
 
-#include <TH/TH.h>
+#include <c10/core/Allocator.h>
 #include <c10/util/Exception.h>
 
 // This file creates a fake allocator that just throws exceptions if

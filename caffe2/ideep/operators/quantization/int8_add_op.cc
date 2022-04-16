@@ -25,6 +25,7 @@ class IDEEPInt8SumReluOp final : public IDEEPOperator {
 
     Y_scales_ = ConvertScales({scale_});
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default,modernize-use-override)
   virtual ~IDEEPInt8SumReluOp() {}
 
   bool RunOnDevice() override {

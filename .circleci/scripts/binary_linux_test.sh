@@ -1,18 +1,28 @@
 #!/bin/bash
 
-source /home/circleci/project/env
-cat >/home/circleci/project/ci_test_script.sh <<EOL
+OUTPUT_SCRIPT=${OUTPUT_SCRIPT:-/home/circleci/project/ci_test_script.sh}
+
+# only source if file exists
+if [[ -f /home/circleci/project/env ]]; then
+  source /home/circleci/project/env
+fi
+cat >"${OUTPUT_SCRIPT}" <<EOL
 # =================== The following code will be executed inside Docker container ===================
 set -eux -o pipefail
+
+retry () {
+    "\$@"  || (sleep 1 && "\$@") || (sleep 2 && "\$@")
+}
+
+# Source binary env file here if exists
+if [[ -e "${BINARY_ENV_FILE:-/nofile}" ]]; then
+  source "${BINARY_ENV_FILE:-/nofile}"
+fi
 
 python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
 
 # Set up Python
 if [[ "$PACKAGE_TYPE" == conda ]]; then
-  # There was a bug that was introduced in conda-package-handling >= 1.6.1 that makes archives
-  # above a certain size fail out when attempting to extract
-  # see: https://github.com/conda/conda-package-handling/issues/71
-  conda install -y conda-package-handling=1.6.0
   retry conda create -qyn testenv python="$DESIRED_PYTHON"
   source activate testenv >/dev/null
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
@@ -27,16 +37,29 @@ fi
 
 EXTRA_CONDA_FLAGS=""
 NUMPY_PIN=""
-if [[ "\$python_nodot" = *39* ]]; then
+PROTOBUF_PACKAGE="defaults::protobuf"
+if [[ "\$python_nodot" = *310* ]]; then
+  EXTRA_CONDA_FLAGS="-c=conda-forge"
+  # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
+  # we set a lower boundary here just to be safe
+  NUMPY_PIN=">=1.21.2"
+  PROTOBUF_PACKAGE="protobuf>=3.19.0"
+fi
+
+if [[ "\$python_nodot" = *39*  ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.20"
 fi
 
-if [[ "$DESIRED_CUDA" == "cu112" ]]; then
+if [[ "$DESIRED_CUDA" == "cu115" || "$DESIRED_CUDA" == "cu116" ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
 fi
+
+# Move debug wheels out of the the package dir so they don't get installed
+mkdir -p /tmp/debug_final_pkgs
+mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to move"
 
 # Install the package
 # These network calls should not have 'retry's because they are installing
@@ -44,7 +67,8 @@ fi
 # TODO there is duplicated and inconsistent test-python-env setup across this
 #   file, builder/smoke_test.sh, and builder/run_tests.sh, and also in the
 #   conda build scripts themselves. These should really be consolidated
-pkg="/final_pkgs/\$(ls /final_pkgs)"
+# Pick only one package of multiple available (which happens as result of workflow re-runs)
+pkg="/final_pkgs/\$(ls -1 /final_pkgs|sort|tail -1)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   (
     # For some reason conda likes to re-activate the conda environment when attempting this install
@@ -59,7 +83,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       ninja \
       dataclasses \
       typing-extensions \
-      defaults::protobuf \
+      ${PROTOBUF_PACKAGE} \
       six
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
@@ -92,4 +116,4 @@ EOL
 echo
 echo
 echo "The script that will run in the next step is:"
-cat /home/circleci/project/ci_test_script.sh
+cat "${OUTPUT_SCRIPT}"

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/arg.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/data/datasets/stateful.h>
@@ -136,6 +137,7 @@ class BatchDataBuffer {
 
     // If we still have data remaining after filling the last pushed batch, add
     // them to the queue too.
+    // NOLINTNEXTLINE(bugprone-infinite-loop)
     while (remaining_size > 0) {
       UnwrappedBatchType current_batch;
 
@@ -209,6 +211,7 @@ class BatchDataBuffer {
   struct UnwrappedBatchData {
     explicit UnwrappedBatchData(UnwrappedBatchType data) : batch_data(std::move(data)) {}
 
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     explicit UnwrappedBatchData(std::exception_ptr e) : exception(e) {}
 
     /// batch data to return
@@ -323,18 +326,20 @@ class ChunkDataset final
       ChunkSampler chunk_sampler,
       ExampleSampler example_sampler,
       ChunkDatasetOptions options,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::function<void(UnwrappedBatchType&)> preprocessing_policy =
           std::function<void(UnwrappedBatchType&)>())
       : chunk_reader_(std::move(chunk_reader)),
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
+        // NOLINTNEXTLINE(performance-move-const-arg)
         options_(std::move(options)),
         preprocessing_policy_(preprocessing_policy),
         quit_worker_(false),
         running_preloaders_(0),
         load_checkpoint_(false) {}
 
-  virtual ~ChunkDataset() {
+   ~ChunkDataset() override {
     // stop batch buffer first.
     if (batch_buffer_) {
       batch_buffer_->stop();
@@ -394,7 +399,7 @@ class ChunkDataset final
 
     AT_ASSERT(running_preloaders_ == 0);
     running_preloaders_ = options_.preloader_count();
-    for (size_t i = 0; i < options_.preloader_count(); ++i) {
+    for (const auto i : c10::irange(options_.preloader_count())) {
       preload_threads_.emplace_back([this, i]() { this->preloader(i); });
     }
   }
@@ -436,7 +441,7 @@ class ChunkDataset final
           }
         }
         UnwrappedBatchType data = chunk_reader_.read_chunk(chunk_idx[0]);
-        for (size_t i = 1; i < chunk_idx.size(); ++i) {
+        for (const auto i : c10::irange(1, chunk_idx.size())) {
           auto chunk_data = chunk_reader_.read_chunk(chunk_idx[i]);
           std::move(
               chunk_data.begin(), chunk_data.end(), std::back_inserter(data));

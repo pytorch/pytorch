@@ -62,10 +62,16 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         # Check if we have a Python version <3.8
         self.using_deprecated_ast: bool = sys.version_info < (3, 8)
 
-        source_lines = textwrap.dedent(inspect.getsource(nn_module.__class__.__init__))
+        source_lines = inspect.getsource(nn_module.__class__.__init__)
+
+        # Ignore comments no matter the indentation
+        def is_useless_comment(line):
+            line = line.strip()
+            return line.startswith("#") and not line.startswith("# type:")
+        source_lines = "\n".join([l for l in source_lines.split("\n") if not is_useless_comment(l)])
 
         # This AST only contains the `__init__` method of the nn.Module
-        init_ast = ast.parse(source_lines)
+        init_ast = ast.parse(textwrap.dedent(source_lines))
 
         # Get items annotated in the class body
         self.class_level_annotations = list(nn_module.__annotations__.keys())
@@ -100,7 +106,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             if (self.using_deprecated_ast
                     and not isinstance(node, ast.NameConstant)):
                 return False
-            if node.value:  # type: ignore
+            if node.value:  # type: ignore[attr-defined]
                 return False
 
         return True
@@ -220,7 +226,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         containers = {"List", "Dict", "Optional"}
 
         try:
-            ann_type = node.args[0].value.id    # type: ignore
+            ann_type = node.args[0].value.id    # type: ignore[attr-defined]
         except AttributeError:
             return
 

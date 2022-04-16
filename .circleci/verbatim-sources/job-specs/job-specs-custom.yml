@@ -1,11 +1,11 @@
   pytorch_doc_push:
     resource_class: medium
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     parameters:
       branch:
         type: string
-        default: "master"
+        default: "main"
     steps:
     - attach_workspace:
         at: /tmp/workspace
@@ -27,10 +27,10 @@
   pytorch_python_doc_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.7-gcc5.4"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -41,10 +41,11 @@
         no_output_timeout: "1h"
         command: |
           set -ex
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          tag=${CIRCLE_TAG:1:5}
-          target=${tag:-master}
+          # turn v1.12.0rc3 into 1.12
+          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9]*\.[0-9]*\).*/\1/')
+          target=${tag:-main}
           echo "building for ${target}"
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -54,7 +55,7 @@
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           mkdir -p ~/workspace/build_artifacts
-          docker cp $id:/var/lib/jenkins/workspace/pytorch.github.io/docs/master ~/workspace/build_artifacts
+          docker cp $id:/var/lib/jenkins/workspace/pytorch.github.io/docs/main ~/workspace/build_artifacts
           docker cp $id:/var/lib/jenkins/workspace/pytorch.github.io /tmp/workspace
 
           # Save the docs build so we can debug any problems
@@ -66,16 +67,16 @@
         paths:
           - .
     - store_artifacts:
-        path: ~/workspace/build_artifacts/master
+        path: ~/workspace/build_artifacts/main
         destination: docs
 
   pytorch_cpp_doc_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-cpp-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.7-gcc5.4"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -86,15 +87,16 @@
         no_output_timeout: "1h"
         command: |
           set -ex
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          tag=${CIRCLE_TAG:1:5}
-          target=${tag:-master}
+          # turn v1.12.0rc3 into 1.12
+          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9]*\.[0-9]*\).*/\1/')
+          target=${tag:-main}
           echo "building for ${target}"
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && '"export CIRCLE_SHA1='$CIRCLE_SHA1'"' && . ./.circleci/scripts/cpp_doc_push_script.sh docs/"$target" master") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && '"export CIRCLE_SHA1='$CIRCLE_SHA1'"' && . ./.circleci/scripts/cpp_doc_push_script.sh docs/"$target" main") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -125,7 +127,8 @@
           command: |
             set -e
             export IN_CI=1
-            export CROSS_COMPILE_ARM=1
+            export CROSS_COMPILE_ARM64=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
@@ -162,6 +165,7 @@
           command: |
             set -e
             export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
@@ -198,9 +202,26 @@
           command: |
             set -e
             export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
+      - run:
+          name: Report results
+          no_output_timeout: "5m"
+          command: |
+            set -ex
+            source /Users/distiller/workspace/miniconda3/bin/activate
+            python3 -m pip install boto3==1.19.12
+
+            export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
+
+            # Using the same IAM user to write stats to our OSS bucket
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          when: always
       - store_test_results:
           path: test/test-reports
 
@@ -221,6 +242,7 @@
             set -e
             export IN_CI=1
             export BUILD_LITE_INTERPRETER=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
             chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
             unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
       - store_test_results:
@@ -230,10 +252,10 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
-      PYTHON_VERSION: "3.6"
+      PYTHON_VERSION: "3.7"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -244,7 +266,7 @@
         no_output_timeout: "1h"
         command: |
           set -eux
-          docker_image_commit=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          docker_image_commit=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
 
           docker_image_libtorch_android_x86_32=${docker_image_commit}-android-x86_32
           docker_image_libtorch_android_x86_64=${docker_image_commit}-android-x86_64
@@ -319,10 +341,10 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
-      PYTHON_VERSION: "3.6"
+      PYTHON_VERSION: "3.7"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -333,7 +355,7 @@
         no_output_timeout: "1h"
         command: |
           set -eux
-          docker_image_commit=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          docker_image_commit=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
 
           docker_image_libtorch_android_x86_32_gradle=${docker_image_commit}-android-x86_32-gradle
 
@@ -355,10 +377,10 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
-      PYTHON_VERSION: "3.6"
+      PYTHON_VERSION: "3.7"
     resource_class: large
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -370,7 +392,7 @@
         no_output_timeout: "1h"
         command: |
           set -e
-          docker_image_libtorch_android_x86_32=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}-android-x86_32
+          docker_image_libtorch_android_x86_32=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}-android-x86_32
           echo "docker_image_libtorch_android_x86_32: "${docker_image_libtorch_android_x86_32}
 
           # x86
@@ -393,50 +415,10 @@
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
 
-  pytorch_android_gradle_custom_build_single:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
-      PYTHON_VERSION: "3.6"
-    resource_class: large
-    machine:
-      image: ubuntu-1604:202007-01
-    steps:
-    - checkout
-    - calculate_docker_image_tag
-    - setup_linux_system_environment
-    - checkout
-    - calculate_docker_image_tag
-    - setup_ci_environment
-    - run:
-        name: pytorch android gradle custom build single architecture (for PR)
-        no_output_timeout: "1h"
-        command: |
-          set -e
-          # Unlike other gradle jobs, it's not worth building libtorch in a separate CI job and share via docker, because:
-          # 1) Not shareable: it's custom selective build, which is different from default libtorch mobile build;
-          # 2) Not parallelizable by architecture: it only builds libtorch for one architecture;
-
-          echo "DOCKER_IMAGE: ${DOCKER_IMAGE}:${DOCKER_TAG}"
-          time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
-
-          git submodule sync && git submodule update -q --init --recursive --depth 1
-          VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
-          export id=$(docker run --env-file "${BASH_ENV}" ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
-
-          export COMMAND='((echo "export GRADLE_OFFLINE=1" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
-          # Skip docker push as this job is purely for size analysis purpose.
-          # Result binaries are already in `/home/circleci/project/` as it's mounted instead of copied.
-
-    - upload_binary_size_for_android_build:
-        build_type: custom-build-single
-
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "12.0"
+      xcode: "12.5.1"
     steps:
       - checkout
       - run_brew_for_ios_build
@@ -450,16 +432,17 @@
             # install fastlane
             sudo gem install bundler && bundle install
             # install certificates
-            echo ${IOS_CERT_KEY} >> cert.txt
+            echo ${IOS_CERT_KEY_2022} >> cert.txt
             base64 --decode cert.txt -o Certificates.p12
             rm cert.txt
-            bundle exec fastlane install_cert
+            bundle exec fastlane install_root_cert
+            bundle exec fastlane install_dev_cert
             # install the provisioning profile
-            PROFILE=PyTorch_CI_2021.mobileprovision
+            PROFILE=PyTorch_CI_2022.mobileprovision
             PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
             mkdir -pv "${PROVISIONING_PROFILES}"
             cd "${PROVISIONING_PROFILES}"
-            echo ${IOS_SIGN_KEY} >> cert.txt
+            echo ${IOS_SIGN_KEY_2022} >> cert.txt
             base64 --decode cert.txt -o ${PROFILE}
             rm cert.txt
       - run:
@@ -489,7 +472,7 @@
             # sync submodules
             cd ${PROJ_ROOT}
             git submodule sync
-            git submodule update --init --recursive --depth 1
+            git submodule update --init --recursive --depth 1 --jobs 0
 
             # export
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
@@ -500,6 +483,7 @@
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
             echo "USE_PYTORCH_METAL": "${USE_METAL}"
             echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
+            echo "USE_COREML_DELEGATE": "${USE_COREML_DELEGATE}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -508,6 +492,7 @@
             fi
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
+            export USE_COREML_DELEGATE=${USE_COREML_DELEGATE}
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               export USE_PYTORCH_METAL=${USE_METAL}
             fi
@@ -517,12 +502,8 @@
           no_output_timeout: "30m"
           command: |
             set -e
-            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              echo "Run Build Test is not for BUILD_LITE_INTERPRETER, skipping."
-              exit 0
-            fi
             PROJ_ROOT=/Users/distiller/project
-            PROFILE=PyTorch_CI_2021
+            PROFILE=PyTorch_CI_2022
             # run the ruby build script
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
@@ -546,25 +527,44 @@
             if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
-            elif [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              echo "Run Simulator Tests is not for BUILD_LITE_INTERPRETER, skipping."
-              exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install torch torchvision --progress-bar off
-            #run unit test
+            # use the pytorch nightly build to generate models
+            pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+            # generate models for differnet backends
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
-            python trace_model.py
-            ruby setup.rb
+            mkdir -p ../models
+            if [ ${USE_COREML_DELEGATE} == 1 ]; then
+              pip install coremltools==5.0b5
+              pip install six
+              python coreml_backend.py
+            else
+              python trace_model.py
+            fi
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              echo "Setting up the TestApp for LiteInterpreter"
+              ruby setup.rb --lite 1
+            else
+              echo "Setting up the TestApp for Full JIT"
+              ruby setup.rb
+            fi
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
-            fastlane scan
+            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
+              if [ ${USE_COREML_DELEGATE} == 1 ]; then
+                fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+              else
+                fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+              fi
+            else
+              fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
+            fi
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -580,9 +580,9 @@
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
-          echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
+          echo "Do NOT merge main branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
 
-          git submodule sync && git submodule update -q --init --recursive --depth 1
+          git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
@@ -593,7 +593,7 @@
           # Push intermediate Docker image for next phase to use
           if [ -z "${BUILD_ONLY}" ]; then
             # Augment our output image name with bazel to avoid collisions
-            output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-bazel-${CIRCLE_SHA1}
+            output_image=${DOCKER_IMAGE}:build-${DOCKER_TAG}-bazel-${CIRCLE_SHA1}
             export COMMIT_DOCKER_IMAGE=$output_image
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
             time docker push ${COMMIT_DOCKER_IMAGE}
@@ -602,7 +602,7 @@
   pytorch_linux_bazel_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -613,7 +613,7 @@
         no_output_timeout: "90m"
         command: |
           set -e
-          output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-bazel-${CIRCLE_SHA1}
+          output_image=${DOCKER_IMAGE}:build-${DOCKER_TAG}-bazel-${CIRCLE_SHA1}
           export COMMIT_DOCKER_IMAGE=$output_image
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
 
@@ -643,13 +643,26 @@
     - store_test_results:
         path: bazel-testlogs
 
+  pytorch_windows_test_multigpu:
+    machine:
+      image: ubuntu-2004:202104-01
+    steps:
+      - checkout
+      - run:
+          name: Test
+          no_output_timeout: "90m"
+          command: |
+            set -e
+            python3 -m pip install requests
+            python3 ./.circleci/scripts/trigger_azure_pipeline.py
+
   pytorch_doc_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-doc-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.7-gcc5.4"
     resource_class: medium
     machine:
-      image: ubuntu-1604:202007-01
+      image: ubuntu-2004:202104-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -660,7 +673,7 @@
         no_output_timeout: "30m"
         command: |
           set -ex
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})

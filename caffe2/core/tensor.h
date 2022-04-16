@@ -8,6 +8,11 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 namespace at {
@@ -499,7 +504,9 @@ class TORCH_API Tensor final {
         i, static_cast<int>(impl_->dim()), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
 #endif
-    auto s = impl_->size(i);
+    // Avoid TensorImpl::size() because it is a virtual call that
+    // supports out-of-range indexing like Python.
+    auto s = impl_->sizes()[i];
     CAFFE_ENFORCE_LT_WITH_CALLER(s, std::numeric_limits<int>::max());
     return static_cast<int>(s);
   }
@@ -637,4 +644,7 @@ void TensorPrinter::Print(const Tensor& tensor) {
 }
 
 } // namespace caffe2
+
+C10_CLANG_DIAGNOSTIC_POP()
+
 #endif // CAFFE2_CORE_TENSOR_H_

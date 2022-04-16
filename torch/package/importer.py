@@ -1,9 +1,9 @@
 import importlib
 from abc import ABC, abstractmethod
-from pickle import _getattribute, _Pickler  # type: ignore
-from pickle import whichmodule as _pickle_whichmodule  # type: ignore
+from pickle import _getattribute, _Pickler  # type: ignore[attr-defined]
+from pickle import whichmodule as _pickle_whichmodule  # type: ignore[attr-defined]
 from types import ModuleType
-from typing import Any, Optional, Tuple, List
+from typing import Any, List, Optional, Tuple, Dict
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
 
@@ -40,6 +40,8 @@ class Importer(ABC):
         obj2 = getattr(module, obj_name)
         assert obj1 is obj2
     """
+
+    modules: Dict[str, ModuleType]
 
     @abstractmethod
     def import_module(self, module_name: str) -> ModuleType:
@@ -141,8 +143,23 @@ class Importer(ABC):
         module_name = getattr(obj, "__module__", None)
         if module_name is not None:
             return module_name
-        else:
-            return "__main__"
+
+        # Protect the iteration by using a list copy of self.modules against dynamic
+        # modules that trigger imports of other modules upon calls to getattr.
+        for module_name, module in self.modules.copy().items():
+            if (
+                module_name == "__main__"
+                or module_name == "__mp_main__"  # bpo-42406
+                or module is None
+            ):
+                continue
+            try:
+                if _getattribute(module, name)[0] is obj:
+                    return module_name
+            except AttributeError:
+                pass
+
+        return "__main__"
 
 
 class _SysImporter(Importer):
@@ -167,6 +184,24 @@ class OrderedImporter(Importer):
     def __init__(self, *args):
         self._importers: List[Importer] = list(args)
 
+    def _is_torchpackage_dummy(self, module):
+        """Returns true iff this module is an empty PackageNode in a torch.package.
+
+        If you intern `a.b` but never use `a` in your code, then `a` will be an
+        empty module with no source. This can break cases where we are trying to
+        re-package an object after adding a real dependency on `a`, since
+        OrderedImportere will resolve `a` to the dummy package and stop there.
+
+        See: https://github.com/pytorch/pytorch/pull/71520#issuecomment-1029603769
+        """
+        if not getattr(module, "__torch_package__", False):
+            return False
+        if not hasattr(module, "__path__"):
+            return False
+        if not hasattr(module, "__file__"):
+            return True
+        return module.__file__ is None
+
     def import_module(self, module_name: str) -> ModuleType:
         last_err = None
         for importer in self._importers:
@@ -176,7 +211,10 @@ class OrderedImporter(Importer):
                     "All importers in OrderedImporter must inherit from Importer."
                 )
             try:
-                return importer.import_module(module_name)
+                module = importer.import_module(module_name)
+                if self._is_torchpackage_dummy(module):
+                    continue
+                return module
             except ModuleNotFoundError as err:
                 last_err = err
 
@@ -185,13 +223,10 @@ class OrderedImporter(Importer):
         else:
             raise ModuleNotFoundError(module_name)
 
-    def get_name(self, obj: Any, name: Optional[str] = None) -> Tuple[str, str]:
-        last_err = None
+    def whichmodule(self, obj: Any, name: str) -> str:
         for importer in self._importers:
-            try:
-                return importer.get_name(obj, name)
-            except ObjNotFoundError as err:
-                last_err = err
+            module_name = importer.whichmodule(obj, name)
+            if module_name != "__main__":
+                return module_name
 
-        assert last_err is not None
-        raise last_err
+        return "__main__"

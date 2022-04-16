@@ -170,5 +170,13 @@ struct AutoDefaultDtypeMode {
   c10::ScalarType prev_default_dtype;
 };
 
+
+inline void assert_tensor_creation_meta(torch::Tensor& x, torch::autograd::CreationMeta creation_meta) {
+  auto autograd_meta = x.unsafeGetTensorImpl()->autograd_meta();
+  TORCH_CHECK(autograd_meta);
+  auto view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(autograd_meta);
+  TORCH_CHECK(view_meta->has_bw_view());
+  ASSERT_EQ(view_meta->get_creation_meta(), creation_meta);
+}
 } // namespace test
 } // namespace torch

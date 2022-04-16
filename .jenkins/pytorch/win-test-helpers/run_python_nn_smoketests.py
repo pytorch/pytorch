@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import subprocess
 import os
@@ -7,10 +7,6 @@ COMMON_TESTS = [
     (
         "Checking that torch is available",
         "import torch",
-    ),
-    (
-        "Checking that caffe2.python is available",
-        "from caffe2.python import core",
     ),
     (
         "Checking that MKL is available",

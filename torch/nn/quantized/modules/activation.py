@@ -15,7 +15,7 @@ class ReLU6(torch.nn.ReLU):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
-    .. image:: scripts/activation_images/ReLU6.png
+    .. image:: ../scripts/activation_images/ReLU6.png
 
     Examples::
 
@@ -62,6 +62,10 @@ class Hardswish(torch.nn.Hardswish):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return Hardswish(float(scale), int(zero_point))
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(float(scale), int(zero_point))
+
 class ELU(torch.nn.ELU):
     r"""This is the quantized equivalent of :class:`~torch.nn.ELU`.
 
@@ -87,6 +91,10 @@ class ELU(torch.nn.ELU):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return ELU(float(scale), int(zero_point), mod.alpha)
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(float(scale), int(zero_point), mod.alpha)
+
 class LeakyReLU(torch.nn.LeakyReLU):
     r"""This is the quantized equivalent of :class:`~torch.nn.LeakyReLU`.
 
@@ -95,10 +103,12 @@ class LeakyReLU(torch.nn.LeakyReLU):
         zero_point: quantization zero point of the output tensor
         negative_slope: Controls the angle of the negative slope. Default: 1e-2
     """
-    def __init__(self, scale: float, zero_point: int, negative_slope: float = 1e-2, inplace: bool = False):
+    def __init__(self, scale: float, zero_point: int, negative_slope: float = 1e-2,
+                 inplace: bool = False, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(negative_slope, inplace)
-        self.register_buffer('scale', torch.tensor(scale))
-        self.register_buffer('zero_point', torch.tensor(zero_point))
+        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
+        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
         return torch.ops.quantized.leaky_relu(
@@ -110,6 +120,10 @@ class LeakyReLU(torch.nn.LeakyReLU):
     @classmethod
     def from_float(cls, mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
+        return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
         return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
 
 class Sigmoid(torch.nn.Sigmoid):

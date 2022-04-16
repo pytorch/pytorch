@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import io
 import os
 import sys
@@ -6,13 +8,18 @@ import unittest
 
 import torch
 from typing import Optional
-from pathlib import Path
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS, IS_FBCODE
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    find_library_location,
+)
 from torch.testing import FileCheck
 
 if __name__ == "__main__":
@@ -26,13 +33,8 @@ class TestTorchbind(JitTestCase):
     def setUp(self):
         if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        if TEST_WITH_ROCM:
-            torch_root = Path(torch.__file__).resolve().parent
-            p = torch_root / 'lib' / 'libtorchbind_test.so'
-        else:
-            torch_root = Path(__file__).resolve().parent.parent.parent
-            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
-        torch.ops.load_library(str(p))
+        lib_file_path = find_library_location('libtorchbind_test.so')
+        torch.ops.load_library(str(lib_file_path))
 
     def test_torchbind(self):
         def test_equality(f, cmp_key):
@@ -171,7 +173,9 @@ class TestTorchbind(JitTestCase):
             # getY method intentionally adds 4 to x
             return fooGetterSetter.y
 
-        with self.assertRaisesRegex(RuntimeError, 'Tried to set read-only attribute: y'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 'Tried to set read-only attribute: y',
+                                                 'fooGetterSetter.y = old + 4'):
             scripted = torch.jit.script(foo_not_setter)
 
     def test_torchbind_def_property_readwrite(self):
@@ -188,7 +192,9 @@ class TestTorchbind(JitTestCase):
             fooReadWrite.y = 5
             return fooReadWrite
 
-        with self.assertRaisesRegex(RuntimeError, 'Tried to set read-only attribute: y'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 'Tried to set read-only attribute: y',
+                                                 'fooReadWrite.y = 5'):
             scripted = torch.jit.script(foo_readwrite_error)
 
     def test_torchbind_take_instance_as_method_arg(self):
@@ -328,7 +334,7 @@ class TestTorchbind(JitTestCase):
         self.assertEqual(torch.zeros(4, 4), traced())
 
     def test_torchbind_pass_wrong_type(self):
-        with self.assertRaisesRegex(RuntimeError, 'missing attribute capsule'):
+        with self.assertRaisesRegex(RuntimeError, 'but instead found type \'Tensor\''):
             torch.ops._TorchScriptTesting.take_an_instance(torch.rand(3, 4))
 
     def test_torchbind_tracing_nested(self):

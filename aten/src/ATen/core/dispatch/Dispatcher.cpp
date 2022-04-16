@@ -32,7 +32,7 @@ private:
 };
 }
 
-OpRegistrationListener::~OpRegistrationListener() {}
+OpRegistrationListener::~OpRegistrationListener()= default;
 
 Dispatcher::Dispatcher()
 : operators_()
@@ -41,7 +41,7 @@ Dispatcher::Dispatcher()
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
-Dispatcher::~Dispatcher() {}
+Dispatcher::~Dispatcher() = default;
 
 C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   static Dispatcher _singleton;
@@ -87,6 +87,16 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
   return it.value();
 }
 
+const std::vector<OperatorName> Dispatcher::getAllOpNames() {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
+    std::vector<OperatorName> allOpNames;
+    for (const auto& op : operatorLookupTable) {
+        allOpNames.push_back(op.first);
+    }
+    return allOpNames;
+  });
+}
+
 // Postcondition: caller is responsible for disposing of registration when they
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
@@ -104,6 +114,13 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   return handle;
 }
 
+
+// Adding explicit destructor definition in the cpp to over linker error in Windows builds.
+// Windows build doesn't produce the destructor symbol in PyTorch libs
+// causing a linker failure in downstream projects.
+// x-ref https://github.com/pytorch/pytorch/issues/70032
+OperatorHandle::~OperatorHandle() = default;
+
 RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto found = libraries_.find(ns);
@@ -112,7 +129,10 @@ RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string d
     "Only a single TORCH_LIBRARY can be used to register the namespace ", ns,
     "; please put all of your definitions in a single TORCH_LIBRARY block.  "
     "If you were trying to specify implementations, consider using TORCH_LIBRARY_IMPL "
-    "(which can be duplicated).  Previous registration of TORCH_LIBRARY was ",
+    "(which can be duplicated).  If you really intended to define operators for a "
+    "single namespace in a distributed way, you can use TORCH_LIBRARY_FRAGMENT to "
+    "explicitly indicate this.  "
+    "Previous registration of TORCH_LIBRARY was ",
     found->second, "; latest registration was ", debug
   );
   libraries_.emplace(ns, std::move(debug));
@@ -188,6 +208,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
     *this,
     dispatch_key,
     std::move(kernel),
+    // NOLINTNEXTLINE(performance-move-const-arg)
     std::move(cpp_signature),
     std::move(inferred_function_schema),
     std::move(debug)
@@ -200,7 +221,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   });
 }
 
-void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::AnnotatedKernel>::iterator handle) {
+void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   op.operatorDef_->op.deregisterKernel_(*this, dispatch_key, handle);
@@ -246,14 +267,16 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
 
+  auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
+  TORCH_CHECK(idx >= 0 && static_cast<uint64_t>(idx) < backendFallbackKernels_.size(), "idx=", idx);
   TORCH_CHECK(
-    !backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)].kernel.isValid(),
+    !backendFallbackKernels_[idx].kernel.isValid(),
     "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, "; previous registration ",
-    backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)].debug, ", new registration ", debug
+    backendFallbackKernels_[idx].debug, ", new registration ", debug
   );
   // NB: inferred function schema is always nullptr for fallbacks, as fallbacks
   // cannot be unobxed
-  backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
+  backendFallbackKernels_[idx] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
 
   for (auto& op : operators_) {
     op.op.updateFallback(*this, dispatchKey);
@@ -267,7 +290,8 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)] = {};
+  auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
+  backendFallbackKernels_[idx] = {};
 
   for (auto& op : operators_) {
     op.op.updateFallback(*this, dispatchKey);
@@ -306,6 +330,19 @@ std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
       }
     }
     return opsWithDanglingImpls;
+  });
+}
+
+std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
+    std::vector<OperatorName> op_names;
+    for (const auto& op : operatorLookupTable) {
+      // If no DispatchKey is specified, print all of the operators.
+      if (!k || op.second.hasKernelForDispatchKey(*k)) {
+          op_names.push_back(op.first);
+      }
+    }
+    return op_names;
   });
 }
 

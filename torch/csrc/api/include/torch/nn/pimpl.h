@@ -28,6 +28,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   /// The module pointer this class wraps.
   /// NOTE: Must be placed at the top of the class so that we can use it with
   /// trailing return types below.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Contained> impl_;
 
  public:

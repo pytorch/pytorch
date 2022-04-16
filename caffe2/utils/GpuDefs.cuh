@@ -7,7 +7,7 @@ namespace caffe2 {
 
 // Static definition of GPU warp size for unrolling and code generation
 
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
 constexpr int kWarpSize = warpSize;   // = 64 (Defined in hip_runtime.h)
 #else
 constexpr int kWarpSize = 32;
@@ -25,7 +25,7 @@ template <>
 struct Bitfield<unsigned int> {
   static __device__ __forceinline__
   unsigned int getBitfield(unsigned int val, int pos, int len) {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
     pos &= 0xff;
     len &= 0xff;
 
@@ -35,12 +35,12 @@ struct Bitfield<unsigned int> {
     unsigned int ret;
     asm("bfe.u32 %0, %1, %2, %3;" : "=r"(ret) : "r"(val), "r"(pos), "r"(len));
     return ret;
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
   }
 
   static __device__ __forceinline__
   unsigned int setBitfield(unsigned int val, unsigned int toInsert, int pos, int len) {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
     pos &= 0xff;
     len &= 0xff;
 
@@ -55,7 +55,7 @@ struct Bitfield<unsigned int> {
     asm("bfi.b32 %0, %1, %2, %3, %4;" :
         "=r"(ret) : "r"(toInsert), "r"(val), "r"(pos), "r"(len));
     return ret;
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
   }
 };
 
@@ -63,7 +63,7 @@ template <>
 struct Bitfield<unsigned long long int> {
   static __device__ __forceinline__
   unsigned long long int getBitfield(unsigned long long int val, int pos, int len) {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
     pos &= 0xff;
     len &= 0xff;
 
@@ -73,12 +73,12 @@ struct Bitfield<unsigned long long int> {
     unsigned long long int ret;
     asm("bfe.u64 %0, %1, %2, %3;" : "=l"(ret) : "l"(val), "r"(pos), "r"(len));
     return ret;
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
   }
 
   static __device__ __forceinline__
   unsigned long long int setBitfield(unsigned long long int val, unsigned long long int toInsert, int pos, int len) {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
     pos &= 0xff;
     len &= 0xff;
 
@@ -93,21 +93,21 @@ struct Bitfield<unsigned long long int> {
     asm("bfi.b64 %0, %1, %2, %3, %4;" :
         "=l"(ret) : "l"(toInsert), "l"(val), "r"(pos), "r"(len));
     return ret;
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
   }
 };
 
 __device__ __forceinline__ int getLaneId() {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
   return __lane_id();
 #else
   int laneId;
   asm("mov.s32 %0, %%laneid;" : "=r"(laneId) );
   return laneId;
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 }
 
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
 __device__ __forceinline__ unsigned long long int getLaneMaskLt() {
   unsigned long long int m = (1ull << getLaneId()) - 1ull;
   return m;
@@ -151,7 +151,7 @@ __device__ __forceinline__ unsigned getLaneMaskGe() {
   asm("mov.u32 %0, %%lanemask_ge;" : "=r"(mask));
   return mask;
 }
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
 
 }  // namespace caffe2
 

@@ -63,7 +63,7 @@ class TestOneHotOps(serial.SerializedTestCase):
             elements=st.integers(min_value=-5, max_value=5)),
         seed=st.integers(min_value=0, max_value=1000),
         **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_batch_bucketized_one_hot(self, x, seed, gc, dc):
         np.random.seed(seed)
         d = x.shape[1]

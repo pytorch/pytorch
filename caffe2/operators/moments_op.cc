@@ -15,8 +15,10 @@ bool MomentsGradientOp<T, Context>::Compute(
     const T* mean_data,
     T* dX_data) {
   const int dY_size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
   const int dX_size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
   const int ndim = dX_dims.size();
   std::vector<int> index(ndim, 0);

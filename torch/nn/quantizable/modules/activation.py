@@ -38,6 +38,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                        value sequences at dim=1.
         kdim: total number of features in key. Default: None.
         vdim: total number of features in value. Default: None.
+        batch_first: If ``True``, then the input and output tensors are provided
+            as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
 
     Note that if :attr:`kdim` and :attr:`vdim` are None, they will be set
     to :attr:`embed_dim` such that query, key, and value have the same
@@ -52,31 +54,33 @@ class MultiheadAttention(nn.MultiheadAttention):
     Note::
         Please, follow the quantization flow to convert the quantizable MHA.
     """
+    __constants__ = ['batch_first']
+
     def __init__(self, embed_dim: int, num_heads: int,
                  dropout: float = 0., bias: bool = True,
                  add_bias_kv: bool = False, add_zero_attn: bool = False,
-                 kdim: int = None, vdim: int = None):
+                 kdim: int = None, vdim: int = None, batch_first: bool = False,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(MultiheadAttention, self).__init__(embed_dim, num_heads, dropout,
                                                  bias, add_bias_kv,
-                                                 add_zero_attn, kdim, vdim)
-        self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)
-        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias)
-        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias)
-
-        # TODO: The use of the `_LinearWithBias` increases the quantization noise
-        # The `out_proj` in the parent is ``_LinearWithBias`, so need to ignore
-        # the type for mypy not to complain.
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias)  # type: ignore
+                                                 add_zero_attn, kdim, vdim, batch_first,
+                                                 **factory_kwargs)
+        self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)
+        self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias, **factory_kwargs)
+        self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias, **factory_kwargs)
+        # for the type: ignore, see https://github.com/pytorch/pytorch/issues/58969
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore[assignment]
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
 
         # Quant/Dequant
-        self.quant_attn_output = torch.quantization.QuantStub()
-        self.quant_attn_output_weights = torch.quantization.QuantStub()
-        self.dequant_q = torch.quantization.DeQuantStub()
-        self.dequant_k = torch.quantization.DeQuantStub()
-        self.dequant_v = torch.quantization.DeQuantStub()
+        self.quant_attn_output = torch.ao.quantization.QuantStub()
+        self.quant_attn_output_weights = torch.ao.quantization.QuantStub()
+        self.dequant_q = torch.ao.quantization.DeQuantStub()
+        self.dequant_k = torch.ao.quantization.DeQuantStub()
+        self.dequant_v = torch.ao.quantization.DeQuantStub()
 
     def _get_name(self):
         return 'QuantizableMultiheadAttention'
@@ -95,8 +99,9 @@ class MultiheadAttention(nn.MultiheadAttention):
         observed.qconfig = other.qconfig
 
         # Set the linear weights
-        observed.out_proj.weight = other.out_proj.weight  # type: ignore
-        observed.out_proj.bias = other.out_proj.bias  # type: ignore
+        # for the type: ignores, see https://github.com/pytorch/pytorch/issues/58969
+        observed.out_proj.weight = other.out_proj.weight  # type: ignore[has-type]
+        observed.out_proj.bias = other.out_proj.bias  # type: ignore[has-type]
         if other._qkv_same_embed_dim:
             # Use separate params
             bias = other.in_proj_bias
@@ -132,16 +137,16 @@ class MultiheadAttention(nn.MultiheadAttention):
             observed.linear_K.weight = nn.Parameter(other.k_proj_weight)
             observed.linear_V.weight = nn.Parameter(other.v_proj_weight)
             if other.in_proj_bias is None:
-                observed.linear_Q.bias = None  # type: ignore
-                observed.linear_K.bias = None  # type: ignore
-                observed.linear_V.bias = None  # type: ignore
+                observed.linear_Q.bias = None  # type: ignore[assignment]
+                observed.linear_K.bias = None  # type: ignore[assignment]
+                observed.linear_V.bias = None  # type: ignore[assignment]
             else:
                 observed.linear_Q.bias = nn.Parameter(other.in_proj_bias[0:other.embed_dim])
                 observed.linear_K.bias = nn.Parameter(other.in_proj_bias[other.embed_dim:(other.embed_dim * 2)])
                 observed.linear_V.bias = nn.Parameter(other.in_proj_bias[(other.embed_dim * 2):])
         observed.eval()
         # Explicit prepare
-        observed = torch.quantization.prepare(observed, inplace=True)
+        observed = torch.ao.quantization.prepare(observed, inplace=True)
         return observed
 
     @torch.jit.unused
@@ -155,7 +160,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         fp = self._FLOAT_MODULE(self.embed_dim, self.num_heads, self.dropout,
                                 (self.in_proj_bias is not None),
                                 (self.bias_k is not None),
-                                self.add_zero_attn, self.kdim, self.vdim)
+                                self.add_zero_attn, self.kdim, self.vdim, self.batch_first)
         assert fp._qkv_same_embed_dim == self._qkv_same_embed_dim
         if self.bias_k is not None:
             fp.bias_k = nn.Parameter(self.bias_k.dequantize())
@@ -165,16 +170,17 @@ class MultiheadAttention(nn.MultiheadAttention):
         # Set the linear weights
         # Note: Because the linear layers are quantized, mypy does not nkow how
         # to deal with them -- might need to ignore the typing checks.
-        w, b = self.out_proj._weight_bias()  # type: ignore
+        # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
+        w, b = self.out_proj._weight_bias()  # type: ignore[operator, has-type]
         fp.out_proj.weight = nn.Parameter(w.dequantize())
         if b is not None:
             fp.out_proj.bias = nn.Parameter(b)
 
-        wQ, bQ = self.linear_Q._weight_bias()  # type: ignore
+        wQ, bQ = self.linear_Q._weight_bias()  # type: ignore[operator]
         wQ = wQ.dequantize()
-        wK, bK = self.linear_K._weight_bias()  # type: ignore
+        wK, bK = self.linear_K._weight_bias()  # type: ignore[operator]
         wK = wK.dequantize()
-        wV, bV = self.linear_V._weight_bias()  # type: ignore
+        wV, bV = self.linear_V._weight_bias()  # type: ignore[operator]
         wV = wV.dequantize()
         if fp._qkv_same_embed_dim:
             # Use separate params
@@ -202,9 +208,9 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.k_proj_weight = nn.Parameter(wK)
             fp.v_proj_weight = nn.Parameter(wV)
             if fp.in_proj_bias is None:
-                self.linear_Q.bias = None  # type: ignore
-                self.linear_K.bias = None  # type: ignore
-                self.linear_V.bias = None  # type: ignore
+                self.linear_Q.bias = None
+                self.linear_K.bias = None
+                self.linear_V.bias = None
             else:
                 fp.in_proj_bias[0:fp.embed_dim] = bQ
                 fp.in_proj_bias[fp.embed_dim:(fp.embed_dim * 2)] = bK
@@ -215,10 +221,10 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     @classmethod
     def from_observed(cls, other):
-        converted = torch.quantization.convert(other, mapping=None,
-                                               inplace=False,
-                                               remove_qconfig=True,
-                                               convert_custom_config_dict=None)
+        converted = torch.ao.quantization.convert(other, mapping=None,
+                                                  inplace=False,
+                                                  remove_qconfig=True,
+                                                  convert_custom_config_dict=None)
         # Remove the parameters for the bias_k and bias_v to quantize them
         # TODO: This is a potential source of accuracy drop.
         #       quantized cat takes the scale and zp of the first
@@ -246,7 +252,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                 value: Tensor,
                 key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = True,
-                attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+                attn_mask: Optional[Tensor] = None,
+                average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Note::
         Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
@@ -267,11 +274,11 @@ class MultiheadAttention(nn.MultiheadAttention):
     Shape:
         - Inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
-          the embedding dimension.
+          the embedding dimension. :math:`(N, L, E)` if ``batch_first`` is ``True``.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
-          the embedding dimension.
+          the embedding dimension. :math:`(N, S, E)` if ``batch_first`` is ``True``.
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
-          the embedding dimension.
+          the embedding dimension. :math:`(N, S, E)` if ``batch_first`` is ``True``.
         - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
           If a ByteTensor is provided, the non-zero positions will be ignored while the position
           with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
@@ -283,15 +290,20 @@ class MultiheadAttention(nn.MultiheadAttention):
           while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
           is not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
+        - average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
+          heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
+          effect when ``need_weights=True.``. Default: True (i.e. average weights across heads)
 
         - Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
-          E is the embedding dimension.
-        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
-          L is the target sequence length, S is the source sequence length.
+          E is the embedding dimension. :math:`(N, L, E)` if ``batch_first`` is ``True``.
+        - attn_output_weights: If ``average_attn_weights=True``, returns attention weights averaged
+          across heads of shape :math:`(N, L, S)`, where N is the batch size, L is the target sequence length,
+          S is the source sequence length. If ``average_weights=False``, returns attention weights per
+          head of shape :math:`(N, num_heads, L, S)`.
         """
         return self._forward_impl(query, key, value, key_padding_mask,
-                                  need_weights, attn_mask)
+                                  need_weights, attn_mask, average_attn_weights)
 
     def _forward_impl(self,
                       query: Tensor,
@@ -299,7 +311,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                       value: Tensor,
                       key_padding_mask: Optional[Tensor] = None,
                       need_weights: bool = True,
-                      attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+                      attn_mask: Optional[Tensor] = None,
+                      average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
         #
@@ -307,6 +320,9 @@ class MultiheadAttention(nn.MultiheadAttention):
         # `torch.nn.functional.multi_head_attention`. Will need to refactor.
         static_k = None
         static_v = None
+
+        if self.batch_first:
+            query, key, value = [x.transpose(0, 1) for x in (query, key, value)]
 
         tgt_len, bsz, embed_dim_to_check = query.size()
         assert self.embed_dim == embed_dim_to_check
@@ -348,8 +364,16 @@ class MultiheadAttention(nn.MultiheadAttention):
             key_padding_mask = key_padding_mask.to(torch.bool)
         if self.bias_k is not None and self.bias_v is not None:
             if static_k is None and static_v is None:
-                k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
-                v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
+
+                # Explicitly assert that bias_k and bias_v are not None
+                # in a way that TorchScript can understand.
+                bias_k = self.bias_k
+                assert bias_k is not None
+                bias_v = self.bias_v
+                assert bias_v is not None
+
+                k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+                v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
                 if attn_mask is not None:
                     attn_mask = nnF.pad(attn_mask, (0, 1))
                 if key_padding_mask is not None:
@@ -426,16 +450,22 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         attn_output = torch.bmm(attn_output_weights, v)
         assert list(attn_output.size()) == [bsz * self.num_heads, tgt_len, head_dim]
-        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, self.embed_dim)
+        if self.batch_first:
+            attn_output = attn_output.view(bsz, tgt_len, self.embed_dim)
+        else:
+            attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, self.embed_dim)
 
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
-        attn_output = self.out_proj(attn_output)  # type: ignore
+        # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
+        attn_output = self.out_proj(attn_output)  # type: ignore[has-type]
         attn_output_weights = self.quant_attn_output_weights(attn_output_weights)
 
         if need_weights:
             # average attention weights over heads
             attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            return attn_output, attn_output_weights.mean(dim=1)
+            if average_attn_weights:
+                attn_output_weights = attn_output_weights.mean(dim=1)
+            return attn_output, attn_output_weights
         else:
             return attn_output, None

@@ -136,18 +136,20 @@ DataLoader
 ..........
 
 DataLoader will reseed workers following :ref:`data-loading-randomness` algorithm.
-Use :meth:`worker_init_fn` to preserve reproducibility::
+Use :meth:`worker_init_fn` and `generator` to preserve reproducibility::
 
     def seed_worker(worker_id):
         worker_seed = torch.initial_seed() % 2**32
         numpy.random.seed(worker_seed)
         random.seed(worker_seed)
 
+    g = torch.Generator()
+    g.manual_seed(0)
+
     DataLoader(
         train_dataset,
         batch_size=batch_size,
         num_workers=num_workers,
-        worker_init_fn=seed_worker
+        worker_init_fn=seed_worker,
+        generator=g,
     )
-
-

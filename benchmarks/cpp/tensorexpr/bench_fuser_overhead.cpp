@@ -1,4 +1,6 @@
 #include <benchmark/benchmark.h>
+#include <c10/core/InferenceMode.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/torch.h>
 
@@ -10,8 +12,7 @@ def two_adds(self, x: Tensor, y: Tensor, z: Tensor) -> Tensor:
 )JIT";
 
 static void FusedOverhead(benchmark::State& state) {
-  torch::NoGradGuard ng;
-  torch::AutoNonVariableTypeMode nv;
+  c10::InferenceMode mode;
   overrideCanFuseOnCPU(true);
 
   Module m("m");
@@ -22,7 +23,8 @@ static void FusedOverhead(benchmark::State& state) {
   auto z = torch::ones({1});
 
   // Warmup.
-  for (int i = 0; i < 8; i++) {
+  for (const auto i : c10::irange(8)) {
+    (void)i; // Suppress unused variable warning
     m.run_method("two_adds", x, y, z);
   }
 
@@ -32,8 +34,7 @@ static void FusedOverhead(benchmark::State& state) {
 }
 
 static void UnfusedOverhead(benchmark::State& state) {
-  torch::NoGradGuard ng;
-  torch::AutoNonVariableTypeMode nv;
+  c10::InferenceMode guard;
   overrideCanFuseOnCPU(false);
 
   Module m("m");
@@ -44,7 +45,8 @@ static void UnfusedOverhead(benchmark::State& state) {
   auto z = torch::ones({1});
 
   // Warmup.
-  for (int i = 0; i < 8; i++) {
+  for (const auto i : c10::irange(8)) {
+    (void)i; // Suppress unused variable warning
     m.run_method("two_adds", x, y, z);
   }
 

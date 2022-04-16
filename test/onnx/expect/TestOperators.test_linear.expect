@@ -1,37 +1,46 @@
-ir_version: 6
+ir_version: 7
 producer_name: "pytorch"
-producer_version: "1.9"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "input"
-    input: "6"
-    output: "4"
-    name: "MatMul_0"
-    op_type: "MatMul"
-  }
-  node {
-    input: "4"
+    input: "onnx::Gemm_0"
+    input: "weight"
     input: "bias"
-    output: "5"
-    name: "Add_1"
-    op_type: "Add"
+    output: "3"
+    name: "Gemm_0"
+    op_type: "Gemm"
+    attribute {
+      name: "alpha"
+      f: 1
+      type: FLOAT
+    }
+    attribute {
+      name: "beta"
+      f: 1
+      type: FLOAT
+    }
+    attribute {
+      name: "transB"
+      i: 1
+      type: INT
+    }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
+  initializer {
+    dims: 5
+    dims: 4
+    data_type: 1
+    name: "weight"
+    raw_data: "\212\332\356>@\265u>p\303E\275 \320\306\274\354\201\221>\004\354\261\276\2746*>8\247)\276\340\035\224>\024\2446\276\200\211\312<\224\344,>D\356\257>\320\202\226\275\364\213\351>z\226\330\276\310\250\266\275\352F\377\276\000\250)=\244K\021>"
+  }
   initializer {
     dims: 5
     data_type: 1
     name: "bias"
     raw_data: "\324BO\276@\245T>\350\377\245\275\374u\336\276&\212\304>"
   }
-  initializer {
-    dims: 4
-    dims: 5
-    data_type: 1
-    name: "6"
-    raw_data: "\212\332\356>\354\201\221>\340\035\224>D\356\257>\310\250\266\275@\265u>\004\354\261\276\024\2446\276\320\202\226\275\352F\377\276p\303E\275\2746*>\200\211\312<\364\213\351>\000\250)= \320\306\2748\247)\276\224\344,>z\226\330\276\244K\021>"
-  }
   input {
-    name: "input"
+    name: "onnx::Gemm_0"
     type {
       tensor_type {
         elem_type: 1
@@ -47,6 +56,22 @@ graph {
     }
   }
   input {
+    name: "weight"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 5
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  input {
     name: "bias"
     type {
       tensor_type {
@@ -59,24 +84,8 @@ graph {
       }
     }
   }
-  input {
-    name: "6"
-    type {
-      tensor_type {
-        elem_type: 1
-        shape {
-          dim {
-            dim_value: 4
-          }
-          dim {
-            dim_value: 5
-          }
-        }
-      }
-    }
-  }
   output {
-    name: "5"
+    name: "3"
     type {
       tensor_type {
         elem_type: 1
@@ -93,5 +102,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

@@ -1,11 +1,12 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
 #include <torch/enum.h>
 
 #include <torch/nn/modules/container/any.h>
+#include <torch/nn/options/transformerlayer.h>
 
 namespace torch {
 namespace nn {
@@ -19,8 +20,6 @@ namespace nn {
 /// auto options = TransformerOptions().d_model(4).nhead(2).dropout(0.0);
 /// ```
 struct TORCH_API TransformerOptions {
-
-  using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU>;
 
   // The following constructors are commonly used
   // Please don't add more unless it is proved as a common usage

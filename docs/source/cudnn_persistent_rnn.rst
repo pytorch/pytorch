@@ -1,6 +1,3 @@
-:orphan:
-
-
 .. note::
 
     If the following conditions are satisfied:
