@@ -23,6 +23,7 @@ DeviceType SparseCsrTensorSetToDeviceType(DispatchKeySet key_set) {
 
 SparseCsrTensorImpl::SparseCsrTensorImpl(
     at::DispatchKeySet key_set,
+    at::Layout layout,
     const caffe2::TypeMeta data_type)
     : SparseCsrTensorImpl(
           key_set,
@@ -44,6 +45,8 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
               at::initialTensorOptions()
                   .device(SparseCsrTensorSetToDeviceType(key_set))
                   .dtype(data_type)) // values
+          ,
+          layout
       ) {}
 
 SparseCsrTensorImpl::SparseCsrTensorImpl(
@@ -51,11 +54,13 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
     const caffe2::TypeMeta data_type,
     at::Tensor crow_indices,
     at::Tensor col_indices,
-    at::Tensor values)
+    at::Tensor values,
+    at::Layout layout)
     : TensorImpl(key_set, data_type, values.device()),
       crow_indices_(std::move(crow_indices)),
       col_indices_(std::move(col_indices)),
-      values_(std::move(values)) {
+      values_(std::move(values)),
+      layout_(layout) {
   // https://pytorch.org/blog/pytorch-feature-classification-changes/#beta
   TORCH_WARN_ONCE("Sparse CSR tensor support is in beta state.");
   set_storage_access_should_throw();
@@ -88,6 +93,7 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
 }
 
 void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
+  set_layout(src.layout());
   crow_indices_ = at::empty_like(
       src.crow_indices(),
       src.crow_indices().options(),
