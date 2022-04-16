@@ -3837,6 +3837,7 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x[:-1] >>= x[1:]
 
+    # FIXME: convert to ErrorInputs (but have to extend ErrorInputs to handle inplace-only errors)
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_bernoulli_mem_overlap(self, device):

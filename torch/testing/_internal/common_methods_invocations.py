@@ -2871,7 +2871,7 @@ def sample_inputs_bernoulli(self, device, dtype, requires_grad, **kwargs):
 
 def error_inputs_bernoulli(op_info, device, **kwargs):
     x = torch.rand((1,), device=device).expand((6,))
-    err_msg = 'unsupported operation'
+    err_msg = 'more than one element of the written-to tensor refers to a single memory location'
     yield ErrorInput(SampleInput(torch.rand_like(x), kwargs={'out': x}),
                      error_regex=err_msg)
 
