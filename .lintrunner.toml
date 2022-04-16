@@ -274,6 +274,8 @@ exclude_patterns=[
     '**/*.ipynb',
     '**/*.ptl',
     'tools/clang_format_hash/**',
+    'test/cpp/jit/upgrader_models/*.ptl',
+    'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
 command = [
     'python3',
@@ -289,6 +291,8 @@ exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
     'third_party/**',
+    'test/cpp/jit/upgrader_models/*.ptl',
+    'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
 command = [
     'python3',
@@ -314,6 +318,8 @@ exclude_patterns = [
     'third_party/**',
     '**/.gitattributes',
     '**/.gitmodules',
+    'test/cpp/jit/upgrader_models/*.ptl',
+    'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
 command = [
     'python3',
