@@ -5,7 +5,6 @@ def define_targets(rules):
         visibility = ["//:__pkg__"],
         deps = [
             rules.requirement("PyYAML"),
-            rules.requirement("setuptools"),
             "//tools/autograd",
             "//tools/codegen",
         ],
