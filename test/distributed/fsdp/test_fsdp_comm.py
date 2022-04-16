@@ -36,13 +36,6 @@ class PassType(Enum):
     FWD = auto()
     BWD = auto()
 
-    def __repr__(self) -> str:
-        if self == PassType.FWD:
-            return "FWD"
-        elif self == PassType.BWD:
-            return "BWD"
-        raise ValueError()
-
 
 class TestCommunication(FSDPTest):
     """Tests ``FullyShardedDataParallel``'s collective communication usage."""

@@ -97,13 +97,6 @@ class ShardingStrategy(Enum):
     # NO_SHARD = auto()
     # HYBRID_SHARD = auto()
 
-    def __repr__(self) -> str:
-        if self == ShardingStrategy.FULL_SHARD:
-            return "FULL_SHARD"
-        elif self == ShardingStrategy.SHARD_GRAD_OP:
-            return "SHARD_GRAD_OP"
-        raise ValueError()
-
 
 @dataclass
 class MixedPrecision:
@@ -1860,6 +1853,10 @@ class FullyShardedDataParallel(nn.Module):
                 # pre-backward hook.
                 torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
+            # Start of a backward pass for the first time in an backward pass.
+            self._assert_state([TrainingState_.IDLE])
+            self.training_state = TrainingState_.BACKWARD_PRE
+
             # All-gather full parameters, moving them to compute device if
             # necessary.
             self._rebuild_full_params()
@@ -1874,9 +1871,6 @@ class FullyShardedDataParallel(nn.Module):
             self._pre_backward_hook_has_run = True
             # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
             self._prep_grads_for_backward()
-            # Start of a backward pass for the first time in an backward pass.
-            self._assert_state([TrainingState_.IDLE])
-            self.training_state = TrainingState_.BACKWARD_PRE
 
         def _register_hook(t: torch.Tensor) -> torch.Tensor:
             if t.requires_grad:
@@ -2376,7 +2370,7 @@ class FullyShardedDataParallel(nn.Module):
         sequence's prefix (for ``SHARD_GRAD_OP``).
         """
         # Only check all-gathers when rebuilding the full parameters in the
-        # forward pass and in the beginning of the backward pass
+        # forward pass or in the beginning of the backward pass
         if self.training_state not in (
             TrainingState_.FORWARD, TrainingState_.BACKWARD_PRE,
         ):
