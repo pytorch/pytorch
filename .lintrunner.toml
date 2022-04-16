@@ -20,7 +20,6 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/flake8_linter.py',
-    '--binary=flake8',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -110,7 +109,6 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
-    '--binary=mypy',
     '--config=mypy.ini',
     '--',
     '@{{PATHSFILE}}'
@@ -141,7 +139,6 @@ include_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/mypy_linter.py',
-    '--binary=mypy',
     '--config=mypy-strict.ini',
     '--',
     '@{{PATHSFILE}}'
