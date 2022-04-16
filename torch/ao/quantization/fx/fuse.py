@@ -25,7 +25,7 @@ from .fusion_patterns import *  # noqa: F401,F403
 
 from typing import Callable, Tuple, Dict, Any, Optional, List
 
-from .quantization_types import Pattern, NodePattern
+from torch.ao.quantization.quantization_types import Pattern, NodePattern
 
 def fuse(
     model: GraphModule,
