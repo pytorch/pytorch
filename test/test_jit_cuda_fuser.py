@@ -4516,8 +4516,13 @@ class TestPassManagerCudaFuser(JitTestCase):
             torch._C._jit_set_nvfuser_enabled(True)
             torch._C._jit_set_nvfuser_enabled(False)
 
-class TestCudaFuserOpInfo(JitCommonTestCase):
+# See TestNNCOpInfoParent
+class TestCudaFuserOpInfoParent(JitCommonTestCase):
+    pass
+
+class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
     def setUp(self):
+        super(TestCudaFuserOpInfoParent, self).setUp()
         if RUN_NVFUSER:
             self.cuda_fuser_options = CudaFuserTestOptions()
         self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
@@ -4525,13 +4530,10 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
     def tearDown(self):
         if RUN_NVFUSER:
             self.cuda_fuser_options.restore()
+
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
 
-        # https://github.com/pytorch/pytorch/issues/35600
-        # each torch.jit.trace adds state to the _python_cu compilation unit
-        # since this test traces a lot of functions, out-of-memory can occur
-        # if the CU is not cleared.
-        torch.jit._state._python_cu.drop_all_functions()
+        super(TestCudaFuserOpInfoParent, self).tearDown()
 
     @slowTest
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -4548,6 +4550,13 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
             val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
             self.assertEqual(ref, val)
+
+        # Note: Clearing CU after NVFuser tests
+        # https://github.com/pytorch/pytorch/issues/35600
+        # each torch.jit.trace adds state to the _python_cu compilation unit
+        # since this test traces a lot of functions, out-of-memory can occur
+        # if the CU is not cleared.
+        torch.jit._state._python_cu.drop_all_functions()
 
     @slowTest
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -4598,6 +4607,9 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
             val = trace(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
 
             self.assertEqual(val, ref, equal_nan=True, exact_device=True)
+
+        # See [Note: Clearing CU after NVFuser tests]
+        torch.jit._state._python_cu.drop_all_functions()
 
 instantiate_device_type_tests(TestCudaFuserOpInfo, globals(), only_for=("cuda"))
 
