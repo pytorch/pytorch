@@ -236,7 +236,55 @@ PyObject * THPVariable_Wrap(at::TensorBase var)
       (PyTypeObject*)THPVariableClass, std::move(var), status);
 }
 
+// returns true if successfully rezzed; if so, cancel the
+// rest of deallocation
+static bool THPVariable_tryResurrect(THPVariable* self) {
+  const auto& tensor = THPVariable_Unpack(self);
+
+  // Check if there are other C++ owners
+  if (tensor.use_count() <= 1) {
+    return false;
+  }
+
+  // At this point, we are definitely going to resurrect the tensor. So, the
+  // tensor better be defined :)
+  TORCH_INTERNAL_ASSERT(tensor.defined());
+
+  // There are other C++ owners of the tensor.  Flip ownership
+  // so that C++ owns this Python object, and cancel deallocation.
+  TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->owns_pyobj());
+
+  tensor.unsafeGetTensorImpl()->set_owns_pyobj(true);
+
+// Resurrect the Python object.  This is something CPython does
+// internally occasionally, see
+// https://github.com/python/cpython/blob/b98eba5bc2ffbe7a0ed49d540ebc4f756ae61985/Objects/object.c#L248-L259
+// so we just copy the pattern here.  Note that we don't have to worry
+// about saving and restoring the refcount (as the quoted code does)
+// because we actually DO need to reset the refcount to one here, we
+// can't assume that some other code has taken care of it.
+// NB: this will overreport _Py_RefTotal but based on inspection of object.c
+// there is no way to avoid this
+#ifdef Py_TRACE_REFS
+  _Py_AddToAllObjects(reinterpret_cast<PyObject *>(self), 1);
+#endif
+  Py_INCREF(self);
+
+  // Flip THPVariable to be non-owning
+  // (near use-after-free miss here: fresh MaybeOwned is created breaking
+  // reference on Tensor in struct BEFORE we overwrite the old one)
+  self->cdata = MaybeOwned<Variable>::borrowed(tensor);
+
+  // NB: At this point, tensor *could* be dead (e.g., some other C++ thread
+  // decrefed it.)  At this point, it is probably waiting on the GIL to
+  // deallocate the Python object and will kill self, BUT NOT YET.
+
+  return true;
+}
+
 static int THPVariable_clear(THPVariable* self) {
+  if (THPVariable_tryResurrect((THPVariable*)self))
+    return 0;
   Py_CLEAR(self->backward_hooks);
   const auto& tensor = THPVariable_Unpack(self);
   if (tensor.defined()) {
@@ -289,54 +337,13 @@ static int THPVariable_clear(THPVariable* self) {
       }
     }
   }
+  // If we're removing the python reference to the C++ tensor, that C++ tensor
+  // better not have any uses.
+  TORCH_INTERNAL_ASSERT(self->cdata.unsafeIsBorrowed() || tensor.use_count() <= 1);
   self->cdata = MaybeOwned<Variable>();
   return 0;
 }
 
-// returns true if successfully rezzed; if so, cancel the
-// rest of deallocation
-static bool THPVariable_tryResurrect(THPVariable* self) {
-  const auto& tensor = THPVariable_Unpack(self);
-
-  // Is this true or not???  Triggered by TestAutograd.test_variable_traverse
-  // TORCH_INTERNAL_ASSERT(tensor.defined());
-
-  // Check if there are other C++ owners
-  if (tensor.use_count() <= 1) {
-    return false;
-  }
-
-  // There are other C++ owners of the tensor.  Flip ownership
-  // so that C++ owns this Python object, and cancel deallocation.
-  TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->owns_pyobj());
-
-  tensor.unsafeGetTensorImpl()->set_owns_pyobj(true);
-
-// Resurrect the Python object.  This is something CPython does
-// internally occasionally, see
-// https://github.com/python/cpython/blob/b98eba5bc2ffbe7a0ed49d540ebc4f756ae61985/Objects/object.c#L248-L259
-// so we just copy the pattern here.  Note that we don't have to worry
-// about saving and restoring the refcount (as the quoted code does)
-// because we actually DO need to reset the refcount to one here, we
-// can't assume that some other code has taken care of it.
-// NB: this will overreport _Py_RefTotal but based on inspection of object.c
-// there is no way to avoid this
-#ifdef Py_TRACE_REFS
-  _Py_AddToAllObjects(reinterpret_cast<PyObject *>(self), 1);
-#endif
-  Py_INCREF(self);
-
-  // Flip THPVariable to be non-owning
-  // (near use-after-free miss here: fresh MaybeOwned is created breaking
-  // reference on Tensor in struct BEFORE we overwrite the old one)
-  self->cdata = MaybeOwned<Variable>::borrowed(tensor);
-
-  // NB: At this point, tensor *could* be dead (e.g., some other C++ thread
-  // decrefed it.)  At this point, it is probably waiting on the GIL to
-  // deallocate the Python object and will kill self, BUT NOT YET.
-
-  return true;
-}
 
 PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs);
 
