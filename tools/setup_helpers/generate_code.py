@@ -34,8 +34,7 @@ def generate_code(gen_dir: pathlib.Path,
         python_install_dir = install_dir
     autograd_gen_dir = os.path.join(install_dir, 'autograd', 'generated')
     for d in (autograd_gen_dir, python_install_dir):
-        if not os.path.exists(d):
-            os.makedirs(d)
+        os.makedirs(d, exist_ok=True)
     autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
@@ -183,8 +182,7 @@ def main() -> None:
         ts_node_base = "torch/csrc/lazy/ts_backend/ts_node.h"
         install_dir = options.install_dir or os.fspath(options.gen_dir / "torch/csrc")
         lazy_install_dir = os.path.join(install_dir, "lazy/generated")
-        if not os.path.exists(lazy_install_dir):
-            os.makedirs(lazy_install_dir)
+        os.makedirs(lazy_install_dir, exist_ok=True)
 
         assert os.path.isfile(ts_backend_yaml), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
         assert os.path.isfile(ts_native_functions), f"Unable to access {ts_native_functions}"
