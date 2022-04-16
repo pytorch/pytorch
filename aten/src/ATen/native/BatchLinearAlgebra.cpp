@@ -1199,7 +1199,7 @@ Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& inf
   return result;
 }
 
-// Computes the inverse matrix of 'input', it is is saved to 'result' in-place
+// Computes the inverse matrix of 'input', it is saved to 'result' in-place
 // LAPACK/MAGMA/cuSOLVER error codes are saved in 'infos' tensors, they are not checked here
 static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
   squareCheckInputs(input, "linalg.inv");
@@ -1288,7 +1288,7 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
   return result;
 }
 
-// Computes the inverse matrix of 'input', it is is saved to 'result' in-place
+// Computes the inverse matrix of 'input', it is saved to 'result' in-place
 Tensor& linalg_inv_out(const Tensor &input, Tensor &result) {
   auto info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
   auto infos_lu = at::zeros({info_shape}, input.options().dtype(kInt));
