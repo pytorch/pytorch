@@ -539,6 +539,7 @@ class TORCH_API IRSimplifier {
 ExprPtr buf_flat_size(BufPtr v);
 // Returns true if expressions A and B can be simplified to an equal expression.
 TORCH_API bool exprEquals(ExprPtr A, ExprPtr B);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
