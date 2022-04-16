@@ -305,14 +305,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
     if (dims_.size() != 3) {
       return false;
     }
-    return is_leading_dim(1) && is_cont_with(2, 1) && is_cont_with(0, 2);
+    return is_stride_one(1) && is_cont_with(2, 1) && is_cont_with(0, 2);
   }
 
   bool is_channels_last_2d_contiguous() {
     if (dims_.size() != 4) {
       return false;
     }
-    return is_leading_dim(1) && is_cont_with(3, 1) && is_cont_with(2, 3) &&
+    return is_stride_one(1) && is_cont_with(3, 1) && is_cont_with(2, 3) &&
         is_cont_with(0, 2);
   }
 
@@ -320,13 +320,13 @@ class TORCH_API Buf : public ExprNode<Buf> {
     if (dims_.size() != 5) {
       return false;
     }
-    return is_leading_dim(1) && is_cont_with(4, 1) && is_cont_with(3, 4) &&
+    return is_stride_one(1) && is_cont_with(4, 1) && is_cont_with(3, 4) &&
         is_cont_with(2, 3) && is_cont_with(0, 2);
   }
 
  private:
   bool is_cont_with(int cur_dim, int adjacent_dim);
-  bool is_leading_dim(int cur_dim);
+  bool is_stride_one(int cur_dim);
 
  private:
   VarPtr base_handle_;

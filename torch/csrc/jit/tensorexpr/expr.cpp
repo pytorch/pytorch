@@ -488,18 +488,8 @@ bool Buf::is_cont_with(int cur_dim, int adjacent_dim) {
       dims_[adjacent_dim], strides_[adjacent_dim], strides_[cur_dim]);
 }
 
-bool Buf::is_leading_dim(int cur_dim) {
-  auto is_leading_dim_fn = [](ExprPtr stride) {
-    if (!stride->isConstant()) {
-      return false;
-    }
-    if (immediateAs<long>(stride) != 1) {
-      return false;
-    }
-
-    return true;
-  };
-  return is_leading_dim_fn(strides_[cur_dim]);
+bool Buf::is_stride_one(int cur_dim) {
+  return exprEquals(strides_[cur_dim], alloc<LongImm>(1));
 }
 
 ExprHandle expr_to_vec(ExprHandle v, int lanes) {

@@ -70,17 +70,17 @@ TEST(Expr, IsChannelsLastContiguous) {
     }
 
     std::vector<std::vector<ExprHandle>> strides_expr_vec;
-    for (int i = 0; i < strides_expr_vec.size(); i++) {
+    for (size_t i = 0; i < strides_expr_vec.size(); i++) {
       strides_expr_vec[i].resize(ndims);
     }
 
     auto stride_order_vec = shape_gen_info.at(ndims);
 
-    for (int i = 0; i < strides_expr_vec.size(); i++) {
+    for (size_t i = 0; i < strides_expr_vec.size(); i++) {
       auto stride_order = stride_order_vec[i];
 
       strides_expr_vec[i][stride_order[0]] = 1;
-      for (int j = 1; j < stride_order.size(); j++) {
+      for (size_t j = 1; j < stride_order.size(); j++) {
         auto cur_dim_idx = stride_order[j];
         auto adjacent_dim_idx = stride_order[j - 1];
         strides_expr_vec[i][cur_dim_idx] = dims_expr_vec[adjacent_dim_idx] *
@@ -91,27 +91,27 @@ TEST(Expr, IsChannelsLastContiguous) {
     return {dims_expr_vec, strides_expr_vec};
   };
 
-  auto check_fn = [](int ndims, BufHandle buf) -> bool {
+  auto check_fn = [](int ndims, BufHandle buf_handle) -> bool {
     if (ndims == 3) {
-      return buf.node()->is_channels_last_1d_contiguous();
+      return buf_handle.node()->is_channels_last_1d_contiguous();
     } else if (ndims == 4) {
-      return buf.node()->is_channels_last_2d_contiguous();
+      return buf_handle.node()->is_channels_last_2d_contiguous();
     } else {
-      return buf.node()->is_channels_last_3d_contiguous();
+      return buf_handle.node()->is_channels_last_3d_contiguous();
     }
   };
 
-  for (int i = 0; i < dims.size(); i++) {
+  for (size_t i = 0; i < dims.size(); i++) {
     auto shape_info = shape_gen_fn(dims[i], cont_shape_gen_order);
-    for (int j = 0; j < shape_info.second.size(); j++) {
+    for (size_t j = 0; j < shape_info.second.size(); j++) {
       BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
       ASSERT_EQ(check_fn(dims[i], buf_handle), true);
     }
   }
 
-  for (int i = 0; i < dims.size(); i++) {
+  for (size_t i = 0; i < dims.size(); i++) {
     auto shape_info = shape_gen_fn(dims[i], non_cont_shape_gen_order);
-    for (int j = 0; j < shape_info.second.size(); j++) {
+    for (size_t j = 0; j < shape_info.second.size(); j++) {
       BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
       ASSERT_EQ(check_fn(dims[i], buf_handle), false);
     }
