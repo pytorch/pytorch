@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     TemporaryFileName, TemporaryDirectoryName)
 from torch.autograd import (_record_function_with_args_enter, _record_function_with_args_exit)
 from torch.autograd.profiler import profile as _profile
+from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
     DeviceType, ProfilerAction, ProfilerActivity
@@ -881,6 +882,20 @@ class TestProfiler(TestCase):
                 self.assertTrue(all([ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]]))
                 self.assertTrue(ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits")
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
+
+    def test_profiler_type(self):
+        profiler_type = torch._C._autograd._profiler_type
+        ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+        self.assertEqual(profiler_type(), ActiveProfilerType.NONE)
+
+        # Autograd profiler
+        with _profile_legacy():
+            self.assertEqual(profiler_type(), ActiveProfilerType.LEGACY)
+
+        # Kineto profiler
+        with profile():
+            self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
+
 
 if __name__ == '__main__':
     run_tests()
