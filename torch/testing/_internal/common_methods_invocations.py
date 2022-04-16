@@ -2774,6 +2774,20 @@ def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
 
     return tuple(samples)
 
+# TODO: add reduction kwargs
+def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
+
+    inputs = (
+        ([], make_target([], low=0, high=1)),
+        ([S], make_target([S], low=0, high=S)),
+        ([M, S], make_target([M, S], low=0, high=S)),
+    )
+
+    for shape, target in inputs:
+        yield SampleInput(_make_tensor(shape), args=(target,))
+
 def get_independent_tensor(tensor):
     return tensor.clone().requires_grad_(tensor.requires_grad)
 
@@ -7959,6 +7973,22 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
     for input, target, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target, ), kwargs=kwargs)
 
+def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, with_distance=False, **kwargs):
+    make = partial(make_tensor, (S, M), device=device, dtype=dtype, requires_grad=requires_grad)
+
+    kwargss = (
+        *[dict(margin=margin) for margin in (1e-6, 1.0, 10.0)],
+        dict(swap=True),
+        *[dict(reduction=reduction) for reduction in ("mean", "sum", "none")],
+    )
+
+    for kwargs in kwargss:
+        input = make()
+        args = (make(), make())
+        if with_distance:
+            kwargs["distance_function"] = torch.nn.PairwiseDistance()
+        yield SampleInput(input, args=args, kwargs=kwargs)
+
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7996,6 +8026,30 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
         for downscale_factor in (1, 3)
     ]
 
+def sample_inputs_binary_cross_entropy(op_info, device, dtype, requires_grad, logits=False, **kwargs):
+    make = partial(make_tensor, device=device, dtype=dtype)
+    make_prob = partial(make, low=0, high=1)
+
+    reductions = ("mean", "sum", "none")
+
+    shapes_and_kwargs = [
+        *[(shape, None) for shape in ((), (1,), (S,), (S, S), (S, S, S))],
+        *[((S, S), dict(reduction=reduction)) for reduction in reductions],
+        *[((S, S), dict(reduction=reduction, weight=make((S, S)))) for reduction in reductions],
+    ]
+
+    if logits:
+        shapes_and_kwargs.extend(
+            [((S, S), dict(reduction=reduction, pos_weight=make((S,), low=0))) for reduction in reductions]
+        )
+
+    for shape, kwargs in shapes_and_kwargs:
+        yield SampleInput(
+            (make if logits else make_prob)(shape, requires_grad=requires_grad),
+            args=(make_prob(shape, requires_grad=requires_grad),),
+            kwargs=kwargs,
+        )
+
 def sample_inputs_allclose(op_info, device, dtype, requires_grad, **kwargs):
     samples = []
     sample_shapes = [(), (S), (S, S, S)]
@@ -8017,6 +8071,24 @@ def sample_inputs_allclose(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
+def sample_inputs_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs)
+
+    # In addition to the regular test cases, we add two for mixed floating point and complex inputs
+    if dtype.is_complex:
+        make = partial(make_tensor, (), device=device, requires_grad=requires_grad)
+        yield SampleInput(make(dtype=dtype), args=(make(dtype=torch.double),))
+        yield SampleInput(make(dtype=torch.double), args=(make(dtype=dtype),))
+
+def sample_inputs_smooth_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs)
+
+    make = partial(make_tensor, (S, S), device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # This test case always triggers the smooth condition, since absolute difference of input and target
+    # is smaller than beta
+    yield SampleInput(make(low=0, high=2), args=(make(low=-2, high=0),), kwargs=dict(beta=5))
+    yield SampleInput(make(), args=(make(),), kwargs=dict(beta=0))
 
 def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -11882,6 +11954,19 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False),
+    OpInfo(
+        "nn.functional.soft_margin_loss",
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        supports_forward_ad=True,
+        # doesn't support grad on target
+        sample_inputs_func=partial(sample_inputs_loss, rhs_requires_grad=False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_floating_inputs_are_differentiable'),
+        )
+    ),
     OpInfo('nn.functional.upsample_nearest',
            supports_autograd=True,
            supports_forward_ad=True,
@@ -11918,6 +12003,15 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multi_margin_loss,
+    ),
+    OpInfo(
+        "nn.functional.multilabel_margin_loss",
+        ref=_NOTHING,
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        supports_gradgrad=False,
+        sample_inputs_func=sample_inputs_multilabel_margin_loss
     ),
     OpInfo('nn.functional.leaky_relu',
            aliases=None,
@@ -12505,6 +12599,40 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_threshold,
     ),
+    OpInfo(
+        "nn.functional.triplet_margin_loss",
+        sample_inputs_func=sample_inputs_triplet_margin_loss,
+        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+    ),
+    OpInfo(
+        "nn.functional.triplet_margin_with_distance_loss",
+        sample_inputs_func=partial(sample_inputs_triplet_margin_loss, with_distance=True),
+        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            # This test cannot handle a callable passed to `distance_function`. If we would use
+            # `distance_function=None`, the test would pass fine.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_variant_consistency_jit",
+            ),
+            # This tests raises a plain AssertionError at
+            # https://github.com/pytorch/pytorch/blob/840fe8e4e6efee5d8197bd6987757f29d72dd162/test/test_fx_experimental.py#L1559
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestNormalizeOperators",
+                "test_normalize_operator_exhaustive",
+            ),
+        ),
+    ),
     BinaryUfuncInfo('nextafter',
                     dtypes=floating_types_and(torch.bfloat16),
                     supports_autograd=False,
@@ -12546,6 +12674,55 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("We don't want to differentiate wrt running mean / std"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
            sample_inputs_func=sample_inputs_batch_norm),
+    OpInfo(
+        "nn.functional.binary_cross_entropy",
+        sample_inputs_func=sample_inputs_binary_cross_entropy,
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        gradcheck_fast_mode=False,
+        decorators=(
+            # RuntimeError: expected int at position 0, but got: Tensor
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness",
+            ),
+            # RuntimeError: expected int at position 0, but got: Tensor
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestNNCOpInfo",
+                "test_nnc_correctness",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
+                "TestJit",
+                "test_variant_consistency_jit",
+            ),
+        ),
+        skips=(
+            # RuntimeError: expected int at position 0, but got: Tensor
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_variant_consistency_jit",
+            ),
+            # NotImplementedError: the derivative for 'binary_cross_entropy_backward wrt `target`' is not implemented.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
+            ),
+            # AssertionError: Found a sampled tensor of floating-point dtype torch.float32 sampled with
+            # requires_grad=False.
+            # `weight` input does not support gradient.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_floating_inputs_are_differentiable",
+            ),
+        ),
+    ),
     # We have to add 2 OpInfo entry for `igamma` and `igammac`.First is the
     # standard entry, second is to run gradcheck tests on the second argument.
     BinaryUfuncInfo('igamma',
@@ -15367,6 +15544,38 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
                    )),
+    OpInfo("nn.functional.smooth_l1_loss",
+           ref=reference_smooth_l1_loss,
+           sample_inputs_func=sample_inputs_smooth_l1_loss,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16),
+           supports_out=False,
+           supports_forward_ad=True,
+           skips=(
+               # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
+               # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
+               DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),)),
+    OpInfo(
+        "nn.functional.l1_loss",
+        ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
+        sample_inputs_func=sample_inputs_l1_loss,
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypes=all_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_forward_ad=True,
+        skips=(
+            # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
+            # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
     UnaryUfuncInfo('lgamma',
                    ref=reference_lgamma if TEST_SCIPY else _NOTHING,
                    aliases=('special.gammaln', ),
