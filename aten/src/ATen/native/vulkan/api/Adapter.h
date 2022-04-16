@@ -5,6 +5,8 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
+
+#include <mutex>
 #include <ostream>
 #include <iostream>
 
