@@ -35,7 +35,7 @@ void fill_kernel_cuda(TensorIterator& iter, const Scalar& value) {
           scalar_t value;
       };
   ); // fill_string
-  AT_DISPATCH_COMPLEX_TYPES(dtype, "fill_cuda", [&]() {
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "fill_cuda", [&]() {
       jitted_gpu_kernel<
         /*name=*/ fill_name,
         /*return_dtype=*/ scalar_t,
@@ -43,12 +43,12 @@ void fill_kernel_cuda(TensorIterator& iter, const Scalar& value) {
         /*arity=*/ 1>(iter, fill_string);
   });
 #else
-  AT_DISPATCH_COMPLEX_TYPES(dtype, "fill_cuda", [&]() {
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "fill_cuda", [&]() {
       gpu_kernel(iter, FillFunctor<scalar_t>(value.to<scalar_t>()));
   });
 #endif
   } else {
-  AT_DISPATCH_ALL_TYPES_AND4(kComplexHalf, kBool, kHalf, kBFloat16, dtype, "fill_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, dtype, "fill_cuda", [&]() {
     gpu_kernel(iter, FillFunctor<scalar_t>(value.to<scalar_t>()));
   });
   }
