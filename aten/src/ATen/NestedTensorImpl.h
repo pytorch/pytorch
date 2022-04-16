@@ -10,7 +10,7 @@
 namespace at {
 namespace native {
 
-struct NestedTensorImpl : public c10::TensorImpl {
+struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY

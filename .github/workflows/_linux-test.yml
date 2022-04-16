@@ -15,6 +15,11 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      needs-viable-strict:
+        required: false
+        type: boolean
+        default: false
+        description: checks out viable/strict
 
 env:
   IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
@@ -33,6 +38,9 @@ jobs:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          needs-viable-strict: ${{ inputs.needs-viable-strict }}
+          needs-history-and-master: true
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -144,11 +152,18 @@ jobs:
           )
           docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${TEST_COMMAND}"
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@master
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
-          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Store Core dumps on S3
         uses: seemethere/upload-artifact-s3@v4
@@ -157,8 +172,7 @@ jobs:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
           retention-days: 14
           if-no-files-found: ignore
-          path:
-            ./**/core.[1-9]*
+          path: ./**/core.[1-9]*
 
       - name: Upload test statistics
         if: always()
@@ -173,13 +187,12 @@ jobs:
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         shell: bash
         run: |
           set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
-          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
-          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
