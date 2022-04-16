@@ -50,17 +50,36 @@ TEST(Expr, IsChannelsLastContiguous) {
       VarHandle("var4", kLong),
       VarHandle("var5", kLong)};
 
+  // {
+  //   key: ndims,
+  //   value: [
+  //     ...
+  //     [dim_2, dim_1, ..., dim_n]
+  //   ]
+  // }
   using shapGenInfo = std::unordered_map<int, std::vector<std::vector<int>>>;
+
+  // {
+  //   size: [ExprHandle_1, ExprHandle_2, ..., ExprHandle_n],
+  //   strides: [
+  //     ...
+  //     [ExprHandle_x, ExprHandle_y, ..., ExprHandle_z]
+  //   ]
+  // }
   using shapeInfo =
       std::pair<std::vector<ExprHandle>, std::vector<std::vector<ExprHandle>>>;
 
   std::vector<int> dims = {3, 4, 5};
-  shapGenInfo cont_shape_gen_order = {
+
+  shapGenInfo channels_last_cont_shape_conf = {
       {3, {{1, 2, 0}}}, {4, {{1, 3, 2, 0}}}, {5, {{1, 4, 3, 2, 0}}}};
-  shapGenInfo non_cont_shape_gen_order = {
+  shapGenInfo channels_last_non_cont_shape_conf = {
       {3, {{2, 1, 0}, {1, 0, 2}}},
       {4, {{3, 1, 2, 0}, {1, 2, 3, 0}, {1, 0, 2, 3}}},
       {5, {{4, 3, 2, 1, 0}, {1, 3, 2, 4, 0}, {1, 4, 3, 2, 0}}}};
+
+  shapGenInfo cont_shape_conf = {
+      {3, {{0, 1, 2}}}, {4, {{0, 1, 2, 3}}}, {5, {{0, 1, 2, 3, 4}}}};
 
   auto shape_gen_fn = [vars](
                           int ndims, shapGenInfo shape_gen_info) -> shapeInfo {
@@ -91,29 +110,49 @@ TEST(Expr, IsChannelsLastContiguous) {
     return {dims_expr_vec, strides_expr_vec};
   };
 
-  auto check_fn = [](int ndims, BufHandle buf_handle) -> bool {
+  auto check_channels_last_fn = [](int ndims, BufHandle buf_handle) -> bool {
     if (ndims == 3) {
       return buf_handle.node()->is_channels_last_1d_contiguous();
     } else if (ndims == 4) {
-      return buf_handle.node()->is_channels_last_2d_contiguous();
+      return buf_handle.node()->is_contigous(at::MemoryFormat::ChannelsLast);
     } else {
-      return buf_handle.node()->is_channels_last_3d_contiguous();
+      return buf_handle.node()->is_contigous(at::MemoryFormat::ChannelsLast3d);
     }
   };
 
+  // channels-last contigous
   for (size_t i = 0; i < dims.size(); i++) {
-    auto shape_info = shape_gen_fn(dims[i], cont_shape_gen_order);
+    auto shape_info = shape_gen_fn(dims[i], channels_last_cont_shape_conf);
     for (size_t j = 0; j < shape_info.second.size(); j++) {
       BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
-      ASSERT_EQ(check_fn(dims[i], buf_handle), true);
+      ASSERT_EQ(check_channels_last_fn(dims[i], buf_handle), true);
     }
   }
 
+  // channels-last non-contigous
   for (size_t i = 0; i < dims.size(); i++) {
-    auto shape_info = shape_gen_fn(dims[i], non_cont_shape_gen_order);
+    auto shape_info = shape_gen_fn(dims[i], channels_last_non_cont_shape_conf);
     for (size_t j = 0; j < shape_info.second.size(); j++) {
       BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
-      ASSERT_EQ(check_fn(dims[i], buf_handle), false);
+      ASSERT_EQ(check_channels_last_fn(dims[i], buf_handle), false);
+    }
+  }
+
+  // contiguous
+  for (size_t i = 0; i < dims.size(); i++) {
+    auto shape_info = shape_gen_fn(dims[i], cont_shape_conf);
+    for (size_t j = 0; j < shape_info.second.size(); j++) {
+      BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
+      ASSERT_EQ(buf_handle.node()->is_contigous(), true);
+    }
+  }
+
+  // non-contiguous
+  for (size_t i = 0; i < dims.size(); i++) {
+    auto shape_info = shape_gen_fn(dims[i], channels_last_cont_shape_conf);
+    for (size_t j = 0; j < shape_info.second.size(); j++) {
+      BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
+      ASSERT_EQ(buf_handle.node()->is_contigous(), false);
     }
   }
 }

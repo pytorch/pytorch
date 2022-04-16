@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <c10/core/MemoryFormat.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
@@ -301,27 +302,44 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return true;
   }
 
+  bool is_contigous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
+    auto ndims = dims_.size();
+    std::vector<int64_t> dim_order(ndims);
+    if (memory_format == at::MemoryFormat::ChannelsLast) {
+      if (dims_.size() != 4)
+        return false;
+      dim_order = {1, 3, 2, 0};
+    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+      if (dims_.size() != 5)
+        return false;
+      dim_order = {1, 4, 3, 2, 0};
+    } else {
+      for (size_t i = 0; i < ndims; i++) {
+        dim_order[i] = ndims - i - 1; // Reverse
+      }
+    }
+
+    bool res = is_stride_one(dim_order[0]);
+    if (!res)
+      return false;
+
+    for (size_t i = 1; i < ndims; i++) {
+      auto cur_dim = dim_order[i];
+      auto pre_dim = dim_order[i - 1];
+      res &= is_cont_with(cur_dim, pre_dim);
+      if (!res)
+        return false;
+    }
+
+    return true;
+  }
+
   bool is_channels_last_1d_contiguous() {
     if (dims_.size() != 3) {
       return false;
     }
     return is_stride_one(1) && is_cont_with(2, 1) && is_cont_with(0, 2);
-  }
-
-  bool is_channels_last_2d_contiguous() {
-    if (dims_.size() != 4) {
-      return false;
-    }
-    return is_stride_one(1) && is_cont_with(3, 1) && is_cont_with(2, 3) &&
-        is_cont_with(0, 2);
-  }
-
-  bool is_channels_last_3d_contiguous() {
-    if (dims_.size() != 5) {
-      return false;
-    }
-    return is_stride_one(1) && is_cont_with(4, 1) && is_cont_with(3, 4) &&
-        is_cont_with(2, 3) && is_cont_with(0, 2);
   }
 
  private:
