@@ -1279,7 +1279,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
   if (obj.ptr() == py::module::import("math").attr("inf").ptr()) {
-    return toSimple(g.insertConstant(std::numeric_limits<double>::infinity(), loc));
+    return toSimple(
+        g.insertConstant(std::numeric_limits<double>::infinity(), loc));
   }
 
   py::bool_ isMethod = py::module::import("inspect").attr("ismethod")(obj);
