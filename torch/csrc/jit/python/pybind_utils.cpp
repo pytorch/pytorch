@@ -42,6 +42,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
       return static_cast<c10::complex<double>>(c_obj);
     }
+    case TypeKind::SymIntType:
+      return py::cast<int64_t>(obj);
     case TypeKind::IntType:
     // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
     case TypeKind::LayoutType:

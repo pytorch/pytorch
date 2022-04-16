@@ -45,11 +45,5 @@ struct TORCH_API ScopePusher {
 
 TORCH_API MetaData GetMetaDataIfDebugging();
 
-// If python bindings for lazy tensor core are initialized, they should
-// register a function to get python frame info.  Otherwise, frame info
-// will not be available.
-TORCH_API void RegisterGetFrameInfo(
-    const std::function<std::vector<SourceLocation>()>& getFrameInfo);
-
 } // namespace lazy
 } // namespace torch

@@ -80,7 +80,7 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
       crow_indices.dim() == values.dim(),
       "Number of dimensions of indices and values must be the same.");
   TORCH_CHECK(
-      crow_indices.dim() == size.size() - 1,
+      static_cast<size_t>(crow_indices.dim()) == size.size() - 1,
       "Number of dimensions of indices must be one less than the number of dimensions of the provided size.");
 
   // All batch sizes must be the same
@@ -172,7 +172,8 @@ SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor
   // constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  TORCH_INTERNAL_ASSERT(options.layout() == kSparseCsr);
+  Layout layout = options.layout();
+  TORCH_INTERNAL_ASSERT(layout == kSparseCsr);
   DispatchKey dispatch_key;
 
   TORCH_CHECK_NOT_IMPLEMENTED(
@@ -186,7 +187,7 @@ SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
   }
 
   return detail::make_tensor<SparseCsrTensorImpl>(
-      DispatchKeySet(dispatch_key), options.dtype());
+      DispatchKeySet(dispatch_key), layout, options.dtype());
 }
 
 Tensor _sparse_csr_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_indices,

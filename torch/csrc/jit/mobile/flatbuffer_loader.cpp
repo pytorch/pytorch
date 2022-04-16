@@ -24,6 +24,11 @@
 
 #include <flatbuffers/flatbuffers.h>
 
+#ifndef DISABLE_UPGRADER
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
+#endif
+
 #if defined(HAVE_MMAP)
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -210,6 +215,15 @@ mobile::Module FlatbufferLoader::parseModule(
   module_parsed_ = true;
   return mobile::Module(module_ivalue.toObject(), mcu_);
 }
+namespace {
+void appendUpgraderFunctions(mobile::Function* function) {
+#ifndef DISABLE_UPGRADER
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    function->append_function(byteCodeFunctionWithOperator.function);
+  }
+#endif
+}
+} // namespace
 
 std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     const mobile::serialization::Function* method) {
@@ -227,7 +241,13 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
   }
 
   std::unordered_set<std::string> unsupported_op_names;
-  const int64_t model_version = 0x6L;
+
+  appendUpgraderFunctions(function.get());
+  // 2. Decides if upgrader is needed
+  const uint32_t operator_version = module_->operator_version();
+  bool use_upgrader =
+      (operator_version < caffe2::serialize::kProducedFileFormatVersion);
+
   for (const auto* op : *method->operators()) {
     c10::optional<int> num_args = c10::nullopt;
     if (op->num_args_serialized() > -1) {
@@ -235,7 +255,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     }
 
     auto op_found = function->append_operator(
-        op->name()->str(), op->overload_name()->str(), num_args, model_version);
+        op->name()->str(), op->overload_name()->str(), num_args);
 
     if (!op_found) {
       unsupported_op_names.emplace(
@@ -250,6 +270,15 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
 
   for (const auto i : *method->type_annotations()) {
     function->append_type(getOrCreateTypeAnnotations(i));
+  }
+
+  // 3. If upgrader is needed, change change the OP instrunction to CALL
+  // instruction (In next PR, use_upgrader will be parsed to parseInstruction
+  // function and do the actual change)
+  if (use_upgrader) {
+#ifndef DISABLE_UPGRADER
+    applyUpgrader(function.get(), operator_version);
+#endif
   }
 
   function->set_register_size(method->register_size());
@@ -661,6 +690,28 @@ mobile::Module load_mobile_module_from_file(
   size_t size = 0;
   std::tie(data, size) = get_file_content(filename.c_str());
   return parse_and_initialize_mobile_module(std::move(data), size, device);
+}
+
+uint64_t get_bytecode_version(std::istream& in) {
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_stream_content(in);
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+      "Format error");
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
+  return flatbuffer_module->bytecode_version();
+}
+
+uint64_t get_bytecode_version(const std::string& filename) {
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_file_content(filename.c_str());
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+      "Format error");
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
+  return flatbuffer_module->bytecode_version();
 }
 
 } // namespace jit
