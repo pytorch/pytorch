@@ -215,6 +215,8 @@ class _Gather(Function):
         tensor_list = [
             torch.zeros_like(tensor) for i in range(dist.get_world_size(group=group))
         ]
+
+        tensor = tensor.contiguous()
         if dist.get_rank(group=group) == dst:
             dist.gather(tensor, tensor_list, dst, group=group)
         else:
@@ -262,14 +264,13 @@ class _Reduce_Scatter(Function):
     @staticmethod
     def forward(ctx, op, group, tensor, *input_tensor_list):
         ctx.group = group
+        input_tensor_list = tuple(t.contiguous() for t in input_tensor_list)
         dist.reduce_scatter(tensor, list(input_tensor_list), op=op, group=group)
         return tensor
 
     @staticmethod
     def backward(ctx, grad_output):
-        return (None, None, None) + _AllGather.apply(
-            ctx.group, grad_output.contiguous()
-        )
+        return (None, None, None) + _AllGather.apply(ctx.group, grad_output)
 
 
 class _AllGather(Function):
@@ -277,16 +278,24 @@ class _AllGather(Function):
     def forward(ctx, group, tensor):
         ctx.group = group
         out_tensor_list = [
-            torch.empty_like(tensor) for i in range(dist.get_world_size(group=group))
+            torch.empty_like(tensor) for _ in range(dist.get_world_size(group=group))
         ]
-        dist.all_gather(out_tensor_list, tensor, group=group)
+
+        dist.all_gather(out_tensor_list, tensor.contiguous(), group=group)
         return tuple(out_tensor_list)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        tensor_list = [torch.empty_like(tensor) for tensor in grad_outputs]
-        gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
-        gx = torch.sum(torch.stack(gxs), dim=0)
+        if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
+            rank = dist.get_rank()
+            gx = torch.empty_like(grad_outputs[rank])
+            _Reduce_Scatter.apply(dist.ReduceOp.SUM, ctx.group, gx, *grad_outputs)
+        else:
+            # As many backends doesn't support ReduceScatter, we use AlltoAll with .sum()
+            # to emulate the ReduceScatter behavior
+            tensor_list = [torch.empty_like(tensor) for tensor in grad_outputs]
+            gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
+            gx = torch.sum(torch.stack(gxs), dim=0)
         return (None, gx)
 
 
@@ -298,6 +307,7 @@ class _AlltoAll(Function):
             tensors[i].size() for i in range(dist.get_world_size(group=group))
         ]
         my_rank = dist.get_rank(group=group)
+        tensors = tuple(t.contiguous() for t in tensors)
         # Implement it on means of scatter/gather, send/recv async operations have issues
         if dist.get_backend(group=group) is dist.Backend.GLOO:
             for i in range(dist.get_world_size(group=group)):
@@ -319,7 +329,6 @@ class _AlltoAll(Function):
             torch.empty(size, device=grad_outputs[0].device)
             for size in ctx.input_tensor_size_list
         ]
-        grad_outputs = tuple(tensor.contiguous() for tensor in grad_outputs)
         return (None, None) + _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
 
 
