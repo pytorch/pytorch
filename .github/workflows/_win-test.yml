@@ -36,6 +36,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           no-sudo: true
+          needs-history-and-master: true
 
       - name: Setup Windows
         uses: ./.github/actions/setup-win
