@@ -317,11 +317,12 @@ class TestPublicBindings(TestCase):
                 if not (isinstance(obj, Callable) or inspect.isclass(obj)):
                     return
                 elem_module = getattr(obj, '__module__', None)
-                elem_modname_starts_with_mod = elem_module is not None and elem_module.startswith(modname)
+                elem_modname_starts_with_mod = elem_module is not None and \
+                    elem_module.startswith(modname) and '._' not in elem_module
                 # elem's name must NOT begin with an `_` and it's module name
                 # SHOULD start with it's current module since it's a public API
                 looks_public = not elem.startswith('_') and elem_modname_starts_with_mod
-                if is_public == looks_public:
+                if is_public != looks_public:
                     add_to_failure_list_if_not_in_allow_dict(modname, elem, elem_module)
 
             if hasattr(modname, '__all__'):
