@@ -242,7 +242,7 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   const auto& tensor = THPVariable_Unpack(self);
 
   // Check if there are other C++ owners
-  if (tensor.use_count() <= 1) {
+  if (tensor.use_count() <= 1 || tensor.unsafeGetTensorImpl()->owns_pyobj()) {
     return false;
   }
 
