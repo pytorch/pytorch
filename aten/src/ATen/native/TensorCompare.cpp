@@ -18,12 +18,12 @@
 #else
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
-#include <ATen/ops/_cat.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/allclose_native.h>
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/argsort_native.h>
+#include <ATen/ops/cat.h>
 #include <ATen/ops/clamp.h>
 #include <ATen/ops/clamp_max.h>
 #include <ATen/ops/clamp_max_native.h>
@@ -355,7 +355,7 @@ static void isin_sorting(
   // 2. Stable sort all elements, maintaining order indices to reverse the
   //    operation. Stable sort is necessary to keep elements before test
   //    elements within the sorted list.
-  Tensor all_elements = at::_cat({elements_flat, test_elements_flat});
+  Tensor all_elements = at::cat({elements_flat, test_elements_flat});
   Tensor sorted_elements, sorted_order;
   std::tie (sorted_elements, sorted_order) = all_elements.sort(
       /*stable=*/ true, /*dim=*/ 0, /*descending=*/ false);

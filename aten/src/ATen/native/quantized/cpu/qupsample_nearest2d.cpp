@@ -1,7 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/cpu/utils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -52,25 +54,32 @@ static void upsample_nearest2d_out_frame(
     return;
   }
 
-  for (const auto h2 : c10::irange(output_height)) {
-    const int64_t h1 =
-        nn_compute_source_index_fn(height_scale, h2, input_height);
+  std::unique_ptr<int64_t []> input_offset_arr(new int64_t[output_width]);
+  int64_t* input_offset = input_offset_arr.get();
 
-    for (const auto w2 : c10::irange(output_width)) {
-      const int64_t w1 =
-          nn_compute_source_index_fn(width_scale, w2, input_width);
-
-      const auto* pos1 = &i_p[h1 * input_width + w1];
-      auto* pos2 = &o_p[h2 * output_width + w2];
-
-      for (const auto c : c10::irange(channels)) {
-        (void)c; //Suppress unused variable warning
-        pos2[0] = pos1[0];
-        pos1 += input_height * input_width;
-        pos2 += output_height * output_width;
-      }
-    }
+  for (const auto w2 : c10::irange(output_width)) {
+    const int64_t w1 = nn_compute_source_index_fn(width_scale, w2, input_width);
+    input_offset[w2] = w1;
   }
+
+  int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, output_width);
+  at::parallel_for(0, channels * output_height, grain_size, [&](int64_t begin, int64_t end) {
+    int64_t nc{0}, h2{0};
+    data_index_init(begin, nc, channels, h2, output_height);
+
+    for (const auto i : c10::irange(begin, end)) {
+      const int64_t h1 = nn_compute_source_index_fn(height_scale, h2, input_height);
+      const auto* pos1 = &i_p[nc * input_height * input_width + h1 * input_width];
+      auto* pos2 = &o_p[i * output_width];
+
+      for (const auto w2 : c10::irange(output_width)) {
+        const int64_t w1 = input_offset[w2];
+        pos2[w2] = pos1[w1];
+      }
+
+      data_index_step(nc, channels, h2, output_height);
+    }
+  });
 }
 
 template <typename scalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
@@ -88,29 +97,24 @@ static void upsample_nearest2d_out_frame_nhwc(
   float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
 
-  for (const auto b : c10::irange(nbatch)) {
-    auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * input_height * input_width * channels);
-    auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * output_height * output_width * channels);
-    // special case: just copy
-    if (input_height == output_height && input_width == output_width) {
-      std::memcpy(o_p, i_p, channels * input_height * input_width * sizeof(typename scalar_t::underlying));
-      return;
+  at::parallel_for(0, nbatch * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
+    int64_t b{0}, h2{0}, w2{0};
+    data_index_init(begin, b, nbatch, h2, output_height, w2, output_width);
+
+    for (const auto i : c10::irange(begin, end)) {
+      auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * input_height * input_width * channels);
+      auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + i * channels);
+
+      const int64_t h1 = nn_compute_source_index_fn(height_scale, h2, input_height);
+      const int64_t w1 = nn_compute_source_index_fn(width_scale, w2, input_width);
+
+      const auto* pos1 = &i_p[(h1 * input_width + w1)*channels];
+      auto* pos2 = &o_p[0];
+      std::memcpy(pos2, pos1, channels * sizeof(typename scalar_t::underlying));
+
+      data_index_step(b, nbatch, h2, output_height, w2, output_width);
     }
-
-    for (const auto h2 : c10::irange(output_height)) {
-      const int64_t h1 =
-          nn_compute_source_index_fn(height_scale, h2, input_height);
-
-      for (const auto w2 : c10::irange(output_width)) {
-        const int64_t w1 =
-            nn_compute_source_index_fn(width_scale, w2, input_width);
-
-        const auto* pos1 = &i_p[(h1 * input_width + w1)*channels];
-        auto* pos2 = &o_p[(h2 * output_width + w2)*channels];
-        std::memcpy(pos2, pos1, channels * sizeof(typename scalar_t::underlying));
-      }
-    }
-  }
+  });
 }
 
 template <nn_compute_source_index_fn_t nn_compute_source_index_fn>
@@ -144,6 +148,12 @@ Tensor _upsample_nearest2d_quantized_cpu(
         input.q_scale(),
         input.q_zero_point(),
         c10::nullopt);
+
+    // special case: just copy
+    if (input_height == output_height && input_width == output_width) {
+      output.copy_(input);
+      return output;
+    }
 
     AT_DISPATCH_QINT_TYPES(input.scalar_type(), "upsample_nearest2d", [&] {
       auto* idata = static_cast<scalar_t*>(input.data_ptr());

@@ -16,6 +16,7 @@
 #include <ATen/ops/_to_cpu_native.h>
 #include <ATen/ops/_to_dense_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/to_dense_backward_native.h>
@@ -26,7 +27,6 @@
 #include <ATen/ops/view_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like_ops.h>
-
 #endif
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
@@ -102,9 +102,13 @@ Tensor _to_copy(
     }
   }
   // See Note [Explicit nullopt MemoryFormat argument]
-  auto r = at::empty(self.sizes(),
-                     options.memory_format(memory_format).pinned_memory(pin_out),
-                     c10::nullopt);
+  // TODO: empty_quantized does not work here. It raises an exception in CheckMemoryFormat.h prior to
+  // empty_affine_quantizd/_empty_per_channel_affine_quantized calls
+  // at::empty also does not work here because there is no proper at::empty support for quantized tensors
+  // as it would return a quantized tensor with an UnknownQuantizer
+  auto r = self.is_quantized() ? at::empty_like(self, memory_format)
+                               : at::empty(self.sizes(),
+                                 options.memory_format(memory_format).pinned_memory(pin_out), c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
 }
