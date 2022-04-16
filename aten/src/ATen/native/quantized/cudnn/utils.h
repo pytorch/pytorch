@@ -19,7 +19,7 @@ This file contains some of the auxiliary functions used by both Conv.cpp & Linea
 #include <c10/util/ArrayRef.h>
 #include <cudnn_frontend.h>
 
-struct TORCH_API PackedLinearWeightCudnn : public LinearPackedParamsBase {
+struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
   PackedLinearWeightCudnn(
       at::Tensor orig_weight,
       c10::optional<at::Tensor> bias,
@@ -77,7 +77,7 @@ struct TORCH_API PackedLinearWeightCudnn : public LinearPackedParamsBase {
 };
 
 template <int kSpatialDim = 2>
-struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
+struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightCudnn(
       at::Tensor orig_weight,
       c10::optional<at::Tensor> bias,
