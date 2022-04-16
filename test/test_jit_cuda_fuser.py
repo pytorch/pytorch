@@ -4469,6 +4469,24 @@ class TestCudaFuser(JitTestCase):
             jit_t = torch.jit.script(t)
             self._run_helper(jit_t, t, x)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_high_rank_fusion(self):
+        # currently we want to limit fusion to node with input where rank <= 8
+        rank_limit = 8
+        shapes = [4 for i in range(rank_limit + 1)]
+        x = torch.randn(shapes, device="cuda")
+
+        with nvfuser_singleton_fusion(True):
+            def t(x):
+                return x.relu()
+
+            jit_t = torch.jit.script(t)
+            for i in range(5):
+                jit_t(x)
+                self.assertGraphContainsExactly(jit_t.graph_for(x), FUSION_GUARD, 0)
+
 
 class TestPassManagerCudaFuser(JitTestCase):
     def setUp(self):
