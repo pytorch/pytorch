@@ -96,8 +96,8 @@ jobs:
           python3 -m pip install boto3==1.19.12
           .github/scripts/lint_test_ownership.py
 
-  shellcheck:
-    name: shellcheck
+  workflow-checks:
+    name: workflow-checks
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -134,32 +134,10 @@ jobs:
             echo 'onto a more recent commit from the PyTorch master branch.'
             false
           fi
-      - name: Install ShellCheck
-        id: install_shellcheck
-        if: always()
-        # https://github.com/koalaman/shellcheck/tree/v0.7.2#installing-a-pre-compiled-binary
-        run: |
-          set -x
-          scversion="v0.7.2"
-          wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
-          mkdir -p ~/.local/bin
-          cp "shellcheck-${scversion}/shellcheck" ~/.local/bin/
-          rm -r "shellcheck-${scversion}"
-          ~/.local/bin/shellcheck --version
       - name: Check that jobs will be cancelled
         if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
           .github/scripts/ensure_actions_will_cancel.py
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Run actionlint
-        with:
-          timeout_minutes: 1
-          max_attempts: 3
-          command: |
-            set -eux
-            bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-            ./actionlint --color
-            rm actionlint
 
   toc:
     name: toc
