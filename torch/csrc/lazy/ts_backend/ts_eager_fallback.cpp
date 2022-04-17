@@ -6,6 +6,7 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/library.h>
 #include <sstream>
 #include <unordered_map>
@@ -107,8 +108,8 @@ static std::unordered_map<std::string, ::torch::lazy::Counter*>
     _eager_fallback_counters;
 
 bool force_eager_fallback(c10::Symbol op) {
-  static char* force_str = std::getenv("LTC_FORCE_FALLBACK");
-  if (force_str != nullptr) {
+  auto force_str = getLTCForceFallback();
+  if (!force_str.empty()) {
     static auto force_sym = c10::Symbol::fromQualString(std::string(force_str));
     if (op == force_sym) {
       return true;
@@ -149,7 +150,13 @@ void ltc_eager_fallback(
       op, stack, torch::lazy::getBackend()->EagerFallbackDeviceType());
 }
 
-TORCH_LIBRARY_IMPL(_, Lazy, m) {
+void register_ts_ltc_eager_fallback() {
+  static auto m = MAKE_TORCH_LIBRARY_IMPL(_, Lazy);
+  // Most backends use TORCH_LIBRARY_* macros which perform their dispatcher
+  // registrations at static library init time, but the lazy Torchscript backend
+  // does not since it is built in the main torch lib but not always used.
+  // In particular, if another external backend wants to register itself to the
+  // same key (Lazy), Torchscript backend must not be initialized.
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&ltc_eager_fallback>());
 }
 

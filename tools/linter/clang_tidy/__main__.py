@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import re
 import sys
+from sysconfig import get_paths as gp
 from typing import List
 
 
@@ -13,6 +14,9 @@ from tools.linter.clang_tidy.generate_build_files import generate_build_files
 from tools.linter.install.clang_tidy import INSTALLATION_PATH
 from tools.linter.install.download_bin import PYTORCH_ROOT
 
+# Returns '/usr/local/include/python<version number>'
+def get_python_include_dir() -> str:
+    return gp()['include']
 
 def clang_search_dirs() -> List[str]:
     # Compilers are ordered based on fallback preference
@@ -93,7 +97,11 @@ DEFAULTS = {
         "-torch/csrc/deploy/test_deploy_python_ext.cpp",
     ],
     "paths": ["torch/csrc/"],
-    "include-dir": ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
+    "include-dir": [
+        "/usr/lib/llvm-11/include/openmp",
+        get_python_include_dir(),
+        os.path.join(PYTORCH_ROOT, "third_party/pybind11/include")
+    ] + clang_search_dirs(),
     "clang-tidy-exe": INSTALLATION_PATH,
     "compile-commands-dir": "build",
     "config-file": ".clang-tidy",

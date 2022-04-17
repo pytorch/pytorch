@@ -1,8 +1,12 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 
 namespace at {
 namespace native {
+static bool cat_should_skip_tensor(const Tensor& t) {
+  return t.numel() == 0 && t.dim() == 1;
+}
 
  // Check to see if the shape of tensors is compatible
  // for being concatenated along a given dimension.

@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: jit"]
 
 from typing import Sequence
-import unittest
 import torch
 import functools
 
@@ -9,7 +8,6 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_WINDOWS
 import torch._lazy
 import torch._lazy.metrics
 import torch._lazy.ts_backend
@@ -91,9 +89,6 @@ class TestLazyOpInfo(TestCase):
 
     @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST], allowed_dtypes=(torch.float,))
     def test_dispatched_to_lazy(self, device, dtype, op):
-        if IS_WINDOWS:
-            raise unittest.SkipTest("TODO debug windows failure (gh #74519)")
-
         def get_name(op):
             l = [op.name]
             if op.variant_test_name != '':
