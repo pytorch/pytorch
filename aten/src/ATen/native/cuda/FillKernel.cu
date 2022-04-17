@@ -28,7 +28,7 @@ void fill_kernel_cuda(TensorIterator& iter, const Scalar& value) {
       template<typename scalar_t>
       struct FillFunctor {
         FillFunctor(scalar_t v): value(v) {}
-        __device__ __foceinline__ scalar_t operator() () const {
+        __device__ __forceinline__ scalar_t operator() () const {
           return value;
         }
         private:
