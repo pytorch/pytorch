@@ -738,7 +738,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
-      ${TORCH_SRC_DIR}/csrc/utils/crash_handler.cpp
     )
   endif()
 
