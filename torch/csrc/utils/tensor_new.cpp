@@ -868,8 +868,37 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
   at::native::_validate_sparse_coo_tensor_args(indices, values, r.intlist(2));
 }
 
-template <c10::Layout layout>
 void _validate_sparse_compressed_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  auto options = dispatchKeyToTensorOptions(dispatch_key);
+  enum {
+    ARG_CROW_INDICES = 0,
+    ARG_COL_INDICES,
+    ARG_VALUES,
+    ARG_SIZE,
+    ARG_LAYOUT,
+    ARGS_COUNT
+  };
+
+  const std::string signature = "_validate_sparse_compressed_tensor(PyObject* compressed_indices, PyObject* plain_indices, PyObject* values, IntArrayRef size, Layout layout)";
+  static PythonArgParser parser({signature});
+
+  ParsedArgs<ARGS_COUNT> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  Tensor values = internal_new_from_data(
+      options, scalar_type, c10::nullopt, r.pyobject(ARG_VALUES),
+      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
+  // See Note [Ensuring sparse values and indices match devices]
+  Tensor crow_indices = internal_new_from_data(
+      values.options(), kInt, c10::nullopt, r.pyobject(ARG_CROW_INDICES),
+      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
+  Tensor col_indices = internal_new_from_data(
+      values.options(), kInt, c10::nullopt, r.pyobject(ARG_COL_INDICES),
+      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
+  at::native::_validate_sparse_compressed_tensor_args(crow_indices, col_indices, values, r.intlist(ARG_SIZE), r.layout(ARG_LAYOUT));
+}
+
+template <c10::Layout layout>
+void _validate_sparse_compressed_tensor_args_template(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
   enum {
     ARG_CROW_INDICES = 0,
@@ -901,19 +930,19 @@ void _validate_sparse_compressed_tensor_args(c10::DispatchKey dispatch_key, at::
 }
 
 void _validate_sparse_csr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  _validate_sparse_compressed_tensor_args<c10::kSparseCsr>(dispatch_key, scalar_type, args, kwargs);
+  _validate_sparse_compressed_tensor_args_template<c10::kSparseCsr>(dispatch_key, scalar_type, args, kwargs);
 }
 
 void _validate_sparse_csc_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  _validate_sparse_compressed_tensor_args<c10::kSparseCsc>(dispatch_key, scalar_type, args, kwargs);
+  _validate_sparse_compressed_tensor_args_template<c10::kSparseCsc>(dispatch_key, scalar_type, args, kwargs);
 }
 
 void _validate_sparse_bsr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  _validate_sparse_compressed_tensor_args<c10::kSparseBsr>(dispatch_key, scalar_type, args, kwargs);
+  _validate_sparse_compressed_tensor_args_template<c10::kSparseBsr>(dispatch_key, scalar_type, args, kwargs);
 }
 
 void _validate_sparse_bsc_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  _validate_sparse_compressed_tensor_args<c10::kSparseBsc>(dispatch_key, scalar_type, args, kwargs);
+  _validate_sparse_compressed_tensor_args_template<c10::kSparseBsc>(dispatch_key, scalar_type, args, kwargs);
 }
 
 Tensor tensor_ctor(
