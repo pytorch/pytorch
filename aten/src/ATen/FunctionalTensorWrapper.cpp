@@ -186,8 +186,10 @@ void FunctionalTensorWrapper::sync_() {
   if (is_up_to_date()) {
     return;
   }
-  apply_updates();
-  regenerate_from_base();
+  auto any_updates = apply_updates();
+  if (any_updates) {
+    regenerate_from_base();
+  }
 }
 
 void FunctionalTensorWrapper::regenerate_from_base() {
@@ -204,10 +206,10 @@ void FunctionalTensorWrapper::regenerate_from_base() {
   generation_ = storage_impl->generation();
 }
 
-void FunctionalTensorWrapper::apply_updates() {
+bool FunctionalTensorWrapper::apply_updates() {
   // Apply all updates on alias_
   auto storage_impl = functional_storage_impl();
-  storage_impl->apply_updates();
+  return storage_impl->apply_updates();
 }
 
 const char* FunctionalTensorWrapper::tensorimpl_type_name() const {

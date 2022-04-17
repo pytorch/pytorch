@@ -63,7 +63,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // It can't just call sync_(), because the FunctionalTensorWrapper will look like it has no aliases and sync_ will be a noop.
   // We use the reference count on storage_ to determine if the wrapper is aliased, and by the time functorch
   // is ready to propagate updates to inputs, any intermediate views of the input created by the program will have been deallocated.
-  void apply_updates();
+  // This function also returns whether or not the base actually had any updates to apply.
+  bool apply_updates();
   // Takes the current state of value_ and snapshots it, sending it as a pending update to the alias.
   void commit_update();
   // When any tensor is mutated, the tensor increments its alias's "generation".
