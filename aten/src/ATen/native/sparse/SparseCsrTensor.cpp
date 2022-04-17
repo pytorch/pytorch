@@ -42,7 +42,7 @@ namespace {
 
 } // end anonymous namespace
 
-void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, Layout layout) {
+void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, const IntArrayRef size, const Layout& layout) {
 
   // Layout must be Sparse Compressed
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args", [&]{});
@@ -105,7 +105,8 @@ void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, c
 
   int block_ndim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args", [&]{ return 0; }, [&]{ return 2; });
   IntArrayRef block_size = values.sizes().slice(values.dim() - block_ndim, block_ndim);
-  long numel_per_block = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args", [&]{ return 1l; }, [&]{ return block_size[0] * block_size[1]; });
+  int64_t numel_per_block = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args",
+                                [&]() -> int64_t { return 1; }, [&]() -> int64_t { return block_size[0] * block_size[1]; });
   int compressed_dim = compressedDimension(layout, size);
   int plain_dim = plainDimension(layout, size);
 
@@ -206,8 +207,12 @@ void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, c
 
 }
 
+void _validate_sparse_compressed_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size, Layout layout) {
+  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, layout);
+}
+
 void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
-  _validate_sparse_compressed_tensor_args(crow_indices, col_indices, values, size, kSparseCsr);
+  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseCsr);
 }
 
 // Construction of CSR tensors.
