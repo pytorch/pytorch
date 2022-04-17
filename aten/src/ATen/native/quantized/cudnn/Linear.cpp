@@ -108,8 +108,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     // the number of trailling dimensions is quantized_output.dim() - 2. We also prepend a leading dimension for clarity
     std::vector<int64_t> new_size(quantized_output.dim(), 1);
     new_size.back() = bias_.value().size(0);
-    broadcasted_bias = bias_.value().reshape(new_size);
-    broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
+    broadcasted_bias = bias_.value().clone().reshape(new_size);
+    broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes()).to(c10::MemoryFormat::Contiguous);
     bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
     auto bias_multiplier = 1.0 / (act_scale * weight_scale);
     bias_multiplier_tensor.value().fill_(bias_multiplier);
