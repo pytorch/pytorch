@@ -1,9 +1,11 @@
 from collections import OrderedDict
+import enum
 import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 import warnings
-import weakref
+import copyreg
+from copy import deepcopy
 
 import torch
 import torch._C as _C
@@ -12,31 +14,63 @@ from torch._namedtensor_internals import (
     unzip_namedshape, single_ellipsis_index, is_ellipsis)
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
-    handle_torch_function)
+    handle_torch_function, get_default_nowrap_functions)
 import torch.utils.hooks as hooks
 
 
-def _wrap_type_error_to_not_implemented(f):
+def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
     # functools.wraps doesn't work well with methods in python 2
     method_assignments = ('__name__', '__doc__')
     assigned = functools.WRAPPER_ASSIGNMENTS
 
     @functools.wraps(f, assigned=assigned)
     def wrapped(*args, **kwargs):
-        if has_torch_function(args):
-            return handle_torch_function(wrapped, args, *args, **kwargs)
         try:
+            # See https://github.com/pytorch/pytorch/issues/75462
+            if has_torch_function(args):
+                return handle_torch_function(wrapped, args, *args, **kwargs)
             return f(*args, **kwargs)
         except TypeError:
             return NotImplemented
     return wrapped
 
+# Should not be used, this is kept only for BC of loading old serialized Tensor subclasses
 def _rebuild_from_type(func, type, args, dict):
     if type is Tensor:
         return func(*args)
 
     ret = func(*args).as_subclass(type)
     ret.__dict__ = dict
+    return ret
+
+def _rebuild_from_type_v2(func, new_type, args, state):
+    if new_type is Tensor:
+        return func(*args)
+
+    ret = func(*args)
+    if type(ret) is not new_type:
+        ret = ret.as_subclass(new_type)
+    # Tensor does define __setstate__ even though it doesn't define
+    # __getstate__. So only use __setstate__ if it is NOT the one defined
+    # on Tensor
+    if getattr(ret.__class__, "__setstate__", Tensor.__setstate__) is not Tensor.__setstate__:
+        ret.__setstate__(state)
+    else:
+        if isinstance(state, tuple):
+            if not len(state) == 2:
+                raise RuntimeError(f"Invalid serialized state: {state}")
+            dict_state = state[0]
+            slots_state = state[1]
+        else:
+            dict_state = state
+            slots_state = None
+
+        for k, v in dict_state.items():
+            setattr(ret, k, v)
+
+        if slots_state:
+            for k, v in slots_state.items():
+                setattr(ret, k, v)
     return ret
 
 
@@ -57,8 +91,20 @@ class Tensor(torch._C._TensorBase):
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
-            if self.is_sparse or self.device.type == 'xla' or self.device.type == 'mlc':
+            # TODO: skipping storage copy is wrong for meta, as meta
+            # does accurate alias tracking; however, the code below
+            # doesn't work because of
+            # https://github.com/pytorch/pytorch/issues/47442
+            if self.is_sparse or self.device.type in ['lazy', 'xla', 'mlc', 'ort', 'meta', 'hpu'] or \
+                    (type(self) is not Tensor and self.data_ptr() == 0):
                 new_tensor = self.clone()
+                if type(new_tensor) is not type(self):
+                    raise RuntimeError("The default implementation of __deepcopy__() for wrapper subclasses "
+                                       "only works for subclass types that implement clone() and for which "
+                                       "cloning returns another instance of the same subclass. You should either "
+                                       "properly implement clone() for your subclass or override __deepcopy__() "
+                                       "if it is intended behavior for clone() to return an instance of a "
+                                       "different type.")
             else:
                 new_storage = self.storage().__deepcopy__(memo)
                 if self.is_quantized:
@@ -73,62 +119,122 @@ class Tensor(torch._C._TensorBase):
                             self.q_per_channel_axis()
                     else:
                         raise RuntimeError(f"Unsupported qscheme {self.qscheme()} in deepcopy")
+                    # TODO: Once we decide to break serialization FC, no longer
+                    # need to wrap with _TypedStorage
                     new_tensor = torch._utils._rebuild_qtensor(
-                        new_storage,
+                        torch.storage._TypedStorage(
+                            wrap_storage=new_storage._untyped(),
+                            dtype=self.dtype),
                         self.storage_offset(),
                         self.size(),
                         self.stride(),
                         quantizer_params,
                         self.requires_grad,
                         self._backward_hooks)
+                    if type(new_tensor) is not type(self):
+                        raise RuntimeError("The default implementation of __deepcopy__() for quantized tensors "
+                                           "expects the tensor returned by torch._utils._rebuild_qtensor() to "
+                                           "match the type of the instance being copied. If you encounter this, "
+                                           "please open an issue on PyTorch's GitHub.")
                 else:
-                    new_tensor = self.new()
+                    new_tensor = self.new_empty([])
+                    if type(new_tensor) is not type(self):
+                        raise RuntimeError("The default implementation of __deepcopy__() for non-wrapper subclasses "
+                                           "only works for subclass types that implement new_empty() and for which "
+                                           "that function returns another instance of the same subclass. You should "
+                                           "either properly implement new_empty() for your subclass or override "
+                                           "__deepcopy__() if it is intended behavior for new_empty() to return "
+                                           "an instance of a different type.")
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                    if self.is_conj():
+                        new_tensor = new_tensor.conj_physical()
+                    if self.is_neg():
+                        new_tensor = new_tensor.neg()
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
+
+            if not type(self) is Tensor:
+                if type(new_tensor) is not type(self):
+                    raise RuntimeError("Type of deepcopy result does not match the type of the source tensor. "
+                                       "If you encounter this, please open an issue on PyTorch's GitHub.")
+
+                # Plain Tensors don't have slots
+                slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+                for slot in slots_to_save:
+                    if hasattr(self, slot):
+                        setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
+
+            new_tensor.__dict__ = deepcopy(self.__dict__, memo)
+
             memo[id(self)] = new_tensor
             return new_tensor
 
     def __reduce_ex__(self, proto):
         if type(self) is Tensor:
             return self._reduce_ex_internal(proto)
-        relevant_args = (self,)
-        from torch.overrides import has_torch_function, handle_torch_function
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__reduce_ex__, relevant_args, self, proto)
-        func, args = self._reduce_ex_internal(proto)
-        return (_rebuild_from_type, (func, type(self), args, self.__dict__))
-
-    def _reduce_ex_internal(self, proto):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
+        func, args = self._reduce_ex_internal(proto)
+        # Get the state of the python subclass
+        # This loosely mimicks the function on the object class but since Tensor do not inherit
+        # from it, we cannot call that function directly
+        # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
+        getstate_fn = getattr(self, "__getstate__", None)
+        if getstate_fn:
+            state = getstate_fn()
+        else:
+            slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+            if slots_to_save:
+                state = (self.__dict__, {name: getattr(self, name) for name in slots_to_save if hasattr(self, name)})
+            else:
+                state = self.__dict__
+        return (_rebuild_from_type_v2, (func, type(self), args, state))
+
+    def storage(self):
+        r"""
+        storage() -> torch.Storage
+
+        Returns the underlying storage.
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.storage, (self,), self)
+
+        if self.dtype not in torch.storage._dtype_to_storage_type_map():
+            raise RuntimeError(f'unsupported Storage type: {self.dtype}')
+
+        return torch._TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
+
+    def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
-        # Note: Numpy array is chosen to be the rebuild component for XLA Tensor.
+        # Note: Numpy array is chosen to be the rebuild component for XLA, ORT, MLC Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
         #    Otherwise in torch.load CPU storage is reconstructed with randomly
-        #    initialized data, moved onto XLA device, and then storage is updated
-        #    to the serialized content. This works perfectly for CPU/CUDA but not XLA.
-        #    XLA tensor is disconnected with storage so it doesn't get the update.
+        #    initialized data, moved onto backend device, and then storage is updated
+        #    to the serialized content. This works perfectly for CPU/CUDA but not these backends;
+        #    their tensors are disconnected with storage so they don't get the update.
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type == 'xla':
-            arg_xla = (self.cpu().numpy(),
-                       self.dtype,
-                       str(self.device),
-                       self.requires_grad)
-            return (torch._utils._rebuild_xla_tensor, arg_xla)
-        if self.device.type == 'mlc':
-            arg_mlc = (self.cpu().numpy(),
-                       self.dtype,
-                       str(self.device),
-                       self.requires_grad)
-            return (torch._utils._rebuild_mlc_tensor, arg_mlc)
+        if self.device.type in ['xla', 'ort', 'mlc', 'hpu']:
+            return (torch._utils._rebuild_device_tensor_from_numpy, (self.cpu().numpy(),
+                                                                     self.dtype,
+                                                                     str(self.device),
+                                                                     self.requires_grad))
+        if self.device.type == 'meta':
+            # NB: This implementation BREAKS storage sharing.  Current
+            # hypothesis is that no one cares for meta tensors.
+            arg_meta = (
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.requires_grad,
+            )
+            return (torch._utils._rebuild_meta_tensor_no_storage, arg_meta)
         if self.is_quantized:
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]]
@@ -146,13 +252,18 @@ class Tensor(torch._C._TensorBase):
                                     self.q_per_channel_axis())
             else:
                 raise RuntimeError(f"Serialization is not supported for tensors of type {self.qscheme()}")
-            args_qtensor = (self.storage(),
-                            self.storage_offset(),
-                            tuple(self.size()),
-                            self.stride(),
-                            quantizer_params,
-                            self.requires_grad,
-                            backward_hooks)
+            # TODO: Once we decide to break serialization FC, no longer
+            # need to wrap with _TypedStorage
+            args_qtensor = (
+                torch.storage._TypedStorage(
+                    wrap_storage=self.storage()._untyped(),
+                    dtype=self.dtype),
+                self.storage_offset(),
+                tuple(self.size()),
+                self.stride(),
+                quantizer_params,
+                self.requires_grad,
+                backward_hooks)
             return (torch._utils._rebuild_qtensor, args_qtensor)
         elif self.is_sparse:
             if self.layout == torch.sparse_coo:
@@ -164,13 +275,41 @@ class Tensor(torch._C._TensorBase):
                 raise NotImplementedError(
                     'sparse tensor __reduce_ex__ for layout `%s`' % (self.layout))
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
+        elif self.is_sparse_csr:
+            if self.layout == torch.sparse_csr:
+                args_sparse_csr = (self.layout,
+                                   (self.crow_indices(),
+                                    self.col_indices(),
+                                    self.values(),
+                                    self.size()))
+            else:
+                raise NotImplementedError(
+                    'sparse csr tensor __reduce_ex__ for layout `%s`' % (self.layout))
+            return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
+        elif self.data_ptr() == 0 and type(self) is not torch.Tensor:
+            arg_wrapper_subclass = (
+                type(self),
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.storage_offset(),
+                self.layout,
+                self.device,
+                self.requires_grad
+            )
+            return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
-            args = (self.storage(),
-                    self.storage_offset(),
-                    tuple(self.size()),
-                    self.stride(),
-                    self.requires_grad,
-                    backward_hooks)  # previously was self._backward_hooks
+            # TODO: Once we decide to break serialization FC, no longer
+            # need to wrap with _TypedStorage
+            args = (
+                torch.storage._TypedStorage(
+                    wrap_storage=self.storage()._untyped(),
+                    dtype=self.dtype),
+                self.storage_offset(),
+                tuple(self.size()),
+                self.stride(),
+                self.requires_grad,
+                backward_hooks)  # previously was self._backward_hooks
             return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
@@ -218,6 +357,13 @@ class Tensor(torch._C._TensorBase):
             in a user-specified CUDA stream context, see
             :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
+        .. note::
+
+            When ``inputs`` are provided and a given input is not a leaf,
+            the current implementation will call its grad_fn (though it is not strictly needed to get this gradients).
+            It is an implementation detail on which the user should not rely.
+            See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
+
         Args:
             gradient (Tensor or None): Gradient w.r.t. the
                 tensor. If it is a tensor, it will be automatically converted
@@ -236,8 +382,7 @@ class Tensor(torch._C._TensorBase):
             inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
                 accumulated into ``.grad``. All other Tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the attr::tensors. All the provided inputs must be leaf
-                Tensors.
+                used to compute the attr::tensors.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -324,6 +469,9 @@ class Tensor(torch._C._TensorBase):
 
     The result will never require gradient.
 
+    This method also affects forward mode AD gradients and the result will never
+    have forward mode AD gradients.
+
     .. note::
 
       Returned Tensor shares the same storage with the original one.
@@ -342,34 +490,10 @@ class Tensor(torch._C._TensorBase):
     detach_ = _C._add_docstr(_C._TensorBase.detach_, r"""
     Detaches the Tensor from the graph that created it, making it a leaf.
     Views cannot be detached in-place.
+
+    This method also affects forward mode AD gradients and the result will never
+    have forward mode AD gradients.
     """)
-
-    def retain_grad(self):
-        r"""Enables .grad attribute for non-leaf Tensors."""
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.retain_grad, (self,), self)
-        if not self.requires_grad:
-            raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
-        if self.is_leaf:  # no-op for leaves
-            return
-        if hasattr(self, 'retains_grad'):
-            return
-        weak_self = weakref.ref(self)
-
-        def retain_grad_hook(grad):
-            var = weak_self()
-            if var is None:
-                return
-            if var._grad is None:
-                if grad.is_sparse:
-                    var._grad = grad.clone()
-                else:
-                    var._grad = grad.clone(memory_format=torch.contiguous_format)
-            else:
-                var._grad = var._grad + grad
-
-        self.register_hook(retain_grad_hook)
-        self.retains_grad = True
 
     def is_shared(self):
         r"""Checks if tensor is in shared memory.
@@ -411,28 +535,6 @@ class Tensor(torch._C._TensorBase):
         # If get_infos is True, then we don't need to check for errors and vice versa
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.lu, (self,), self, pivot=pivot, get_infos=get_infos)
-
-        if not torch._jit_internal.is_scripting():
-            if self.requires_grad:
-                if not (self.size(-2) == self.size(-1) and self.dtype.is_floating_point):
-                    raise ValueError(
-                        'lu.backward works only with batches of squared full-rank matrices'
-                        ' of floating types.'
-                    )
-
-                from torch._autograd_functions import _LU
-                LU, pivots, infos = _LU.apply(self, pivot, get_infos)
-                if get_infos:
-                    return LU, pivots, infos
-                else:
-                    return LU, pivots
-        else:
-            if self.requires_grad:
-                raise RuntimeError(
-                    'Script and require gradients is not supported at the moment.'
-                    'If you just want to do the forward, use .detach()'
-                    'on the input before calling the function.'
-                )
 
         LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
         if get_infos:
@@ -528,46 +630,70 @@ class Tensor(torch._C._TensorBase):
             )
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rsub__(self, other):
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__rsub__, (self, other), self, other)
         return _C._VariableFunctions.rsub(self, other)
 
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rdiv__(self, other):
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__rdiv__, (self, other), self, other)
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
 
-    __pow__ = _C._TensorBase.pow
+    __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(_C._TensorBase.pow)
+
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __rmod__(self, other):
+        return torch.remainder(other, self)
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
-        if self.dim() == 0:
+        if self.dim() == 0 and not self.is_meta:
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __ipow__(self, other):  # type: ignore[misc]
-        if has_torch_function_variadic(self, other):
-            return handle_torch_function(Tensor.__ipow__, (self, other), self, other)
         return NotImplemented
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
         dtype = torch.result_type(other, self)
         return torch.tensor(other, dtype=dtype, device=self.device) ** self
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
-        return torch.floor_divide(self, other)
+        warnings.warn("__floordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
+                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+                      "This results in incorrect rounding for negative values. "
+                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
+        return torch.div(self, other, rounding_mode='trunc')
 
-    @_wrap_type_error_to_not_implemented
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
-        return torch.floor_divide(other, self)
+        warnings.warn("__rfloordiv__ is deprecated, and its behavior will change in a future version of pytorch. "
+                      "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+                      "This results in incorrect rounding for negative values. "
+                      "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+                      "or for actual floor division, use torch.div(a, b, rounding_mode='floor').", stacklevel=3)
+        return torch.div(other, self, rounding_mode='trunc')
 
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __rlshift__(self, other):
+        return torch.bitwise_left_shift(other, self)
+
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __rrshift__(self, other):
+        return torch.bitwise_right_shift(other, self)
+
+    @_handle_torch_function_and_wrap_type_error_to_not_implemented
+    def __rmatmul__(self, other):
+        return torch.matmul(other, self)
+
+    __pos__ = _C._TensorBase.positive
     __neg__ = _C._TensorBase.neg
     __abs__ = _C._TensorBase.abs
 
@@ -576,6 +702,11 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.__len__, (self,), self)
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")
+        if torch._C._get_tracing_state():
+            warnings.warn('Using len to get tensor shape might cause the trace to be incorrect. '
+                          'Recommended usage would be tensor.shape[0]. '
+                          'Passing a tensor of different shape might lead to errors or silently give '
+                          'incorrect results.', category=torch.jit.TracerWarning, stacklevel=2)
         return self.shape[0]
 
     def __iter__(self):
@@ -585,8 +716,8 @@ class Tensor(torch._C._TensorBase):
         # (e.g., if you zip(*hiddens), the eager map will force all the
         # indexes of hiddens[0] before hiddens[1], while the generator
         # map will interleave them.)
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__iter__, (self,), self)
+        # NB: We have intentionally skipped __torch_function__ dispatch here.
+        # See gh-54457
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
         if torch._C._get_tracing_state():
@@ -604,8 +735,6 @@ class Tensor(torch._C._TensorBase):
     def __dir__(self):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dir__, (self,), self)
-        if self.is_quantized:
-            warnings.warn('Only a small subset of methods are supported for quantized tensors.')
         tensor_methods = dir(self.__class__)
         tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
@@ -718,6 +847,17 @@ class Tensor(torch._C._TensorBase):
         data = (data_ptr, False)  # read-only is false
 
         return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=2)
+
+    def storage_type(self):
+        r"""storage_type() -> type
+
+        Returns the type of the underlying storage.
+
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.storage_type, (self,), self)
+
+        return self.storage()._get_legacy_storage_class()
 
     def refine_names(self, *names):
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
@@ -904,6 +1044,19 @@ class Tensor(torch._C._TensorBase):
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
+    def to_sparse_coo(self):
+        """ Convert a tensor to :ref:`coordinate format <sparse-coo-docs>`.
+
+       Examples::
+
+            >>> dense = torch.randn(5, 5)
+            >>> sparse = dense.to_sparse_coo()
+            >>> sparse._nnz()
+            25
+
+       """
+        return self.to_sparse()
+
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor._update_names, (self,), self, names, inplace)
@@ -926,12 +1079,6 @@ class Tensor(torch._C._TensorBase):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
             return handle_torch_function(Tensor.grad.__get__, (self,), self)  # type: ignore[attr-defined]
 
-        if self.requires_grad and not hasattr(self, "retains_grad") and not self.is_leaf and self._grad is None:
-            warnings.warn("The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
-                          "attribute won't be populated during autograd.backward(). If you indeed want the gradient "
-                          "for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the "
-                          "non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See "
-                          "github.com/pytorch/pytorch/pull/30531 for more informations.", stacklevel=2)
         return self._grad
 
     @grad.setter
@@ -971,16 +1118,81 @@ class Tensor(torch._C._TensorBase):
 
         with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
-            return _convert(ret, cls)
+            if func in get_default_nowrap_functions():
+                return ret
+            else:
+                return _convert(ret, cls)
+
+    __torch_dispatch__ = _C._disabled_torch_dispatch_impl
+
+    def __dlpack__(self, stream=None):
+        """
+        Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
+        of the current tensor to be exported to other libraries.
+
+        This function will be called from the `from_dlpack` method
+        of the library that will consume the capsule. `from_dlpack` passes the current
+        stream to this method as part of the specification.
+
+        Args:
+            stream (integer or None): An optional Python integer representing a
+            pointer to a CUDA stream. The current stream is synchronized with
+            this stream before the capsule is created, and since the capsule
+            shares its storage with the tensor this make it safe to access from
+            both streams.  If None or -1 is passed then no synchronization is performed.
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
+
+        # DLPack capsules can't capture all of PyTorch's semantics,
+        # so we prohibit exporting tensors that would lose their properties like
+        # requires_grad and having the conjugate bit set.
+        if self.requires_grad:
+            raise RuntimeError('Can\'t export tensors that require gradient, use tensor.detach()')
+        if self.is_conj():
+            raise RuntimeError('Can\'t export tensors with the conjugate bit set')
+        if self.layout != torch.strided:
+            raise RuntimeError('Can\'t export tensors with layout other than torch.strided')
+
+        if stream is not None and type(stream) is not int:
+            # Stream pointers in CUDA/ROCm are uniquely numbered and can
+            # be retrieved from their integer value.
+            raise TypeError('stream must be ``int`` or ``none``')
+        elif stream is not None and stream != -1:
+            if self.device.type == 'cuda':
+                stream = torch.cuda.ExternalStream(stream)
+                # Only synchronize on different streams
+                if stream != torch.cuda.current_stream:
+                    event = torch.cuda.Event()
+                    event.record(torch.cuda.current_stream())
+                    stream.wait_event(event)
+        return torch.to_dlpack(self)
+
+    def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
+        # Avoid circular import
+        from torch.utils.dlpack import DLDeviceType
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
+        idx = self.device.index if self.device.index is not None else 0
+        if self.device.type == 'cuda' and torch.version.hip is not None:
+            device_type = DLDeviceType.kDLROCM
+        elif self.device.type == 'cpu' and self.is_pinned():
+            device_type = DLDeviceType.kDLCPUPinned
+        elif self.device.type == 'cuda':
+            device_type = DLDeviceType.kDLGPU
+        elif self.device.type == 'cpu':
+            device_type = DLDeviceType.kDLCPU
+        else:
+            raise ValueError('Unknown device type {} for Dlpack'.format(self.device.type))
+        return (device_type, idx)
 
     __module__ = 'torch'
-
 
 def _convert(ret, cls):
     if cls is Tensor:
         return ret
 
-    if isinstance(ret, Tensor):
+    if isinstance(ret, Tensor) and not isinstance(ret, cls):
         ret = ret.as_subclass(cls)
 
     if isinstance(ret, (tuple, list)):

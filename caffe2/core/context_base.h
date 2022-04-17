@@ -42,7 +42,7 @@ class TORCH_API BaseContext {
   /* Sorry for the naming, will get rid of this in future diff */
   virtual DeviceType device_type() const = 0;
 
-  virtual void SwitchToDevice(int /*stream_id*/) = 0;
+  virtual void SwitchToDevice(int64_t /*stream_id*/) = 0;
 
   inline void SwitchToDevice() {
     SwitchToDevice(0);

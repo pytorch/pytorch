@@ -16,6 +16,10 @@ class Identity(Module):
         args: any argument (unused)
         kwargs: any keyword argument (unused)
 
+    Shape:
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
     Examples::
 
         >>> m = nn.Identity(54, unused_argument1=0.1, unused_argument2=False)
@@ -44,9 +48,9 @@ class Linear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, H_{in})` where :math:`*` means any number of
-          additional dimensions and :math:`H_{in} = \text{in\_features}`
-        - Output: :math:`(N, *, H_{out})` where all but the last dimension
+        - Input: :math:`(*, H_{in})` where :math:`*` means any number of
+          dimensions including none and :math:`H_{in} = \text{in\_features}`.
+        - Output: :math:`(*, H_{out})` where all but the last dimension
           are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
 
     Attributes:
@@ -72,22 +76,27 @@ class Linear(Module):
     out_features: int
     weight: Tensor
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
+    def __init__(self, in_features: int, out_features: int, bias: bool = True,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = Parameter(torch.Tensor(out_features, in_features))
+        self.weight = Parameter(torch.empty((out_features, in_features), **factory_kwargs))
         if bias:
-            self.bias = Parameter(torch.Tensor(out_features))
+            self.bias = Parameter(torch.empty(out_features, **factory_kwargs))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
+        # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
+        # uniform(-1/sqrt(in_features), 1/sqrt(in_features)). For details, see
+        # https://github.com/pytorch/pytorch/issues/57109
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
+            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input: Tensor) -> Tensor:
@@ -99,13 +108,16 @@ class Linear(Module):
         )
 
 
-# This class exists solely for Transformer; it has an annotation stating
-# that bias is never None, which appeases TorchScript
-class _LinearWithBias(Linear):
-    bias: Tensor  # type: ignore
-
-    def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features, out_features, bias=True)  # type: ignore
+# This class exists solely to avoid triggering an obscure error when scripting
+# an improperly quantized attention layer. See this issue for details:
+# https://github.com/pytorch/pytorch/issues/58969
+# TODO: fail fast on quantization API usage error, then remove this class
+# and replace uses of it with plain Linear
+class NonDynamicallyQuantizableLinear(Linear):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True,
+                 device=None, dtype=None) -> None:
+        super().__init__(in_features, out_features, bias=bias,
+                         device=device, dtype=dtype)
 
 
 class Bilinear(Module):
@@ -120,11 +132,11 @@ class Bilinear(Module):
             Default: ``True``
 
     Shape:
-        - Input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}` and
-          :math:`*` means any number of additional dimensions. All but the last dimension
+        - Input1: :math:`(*, H_{in1})` where :math:`H_{in1}=\text{in1\_features}` and
+          :math:`*` means any number of additional dimensions including none. All but the last dimension
           of the inputs should be the same.
-        - Input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`.
-        - Output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
+        - Input2: :math:`(*, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`.
+        - Output: :math:`(*, H_{out})` where :math:`H_{out}=\text{out\_features}`
           and all but the last dimension are the same shape as the input.
 
     Attributes:
@@ -152,15 +164,17 @@ class Bilinear(Module):
     out_features: int
     weight: Tensor
 
-    def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True) -> None:
+    def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(Bilinear, self).__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features
         self.out_features = out_features
-        self.weight = Parameter(torch.Tensor(out_features, in1_features, in2_features))
+        self.weight = Parameter(torch.empty((out_features, in1_features, in2_features), **factory_kwargs))
 
         if bias:
-            self.bias = Parameter(torch.Tensor(out_features))
+            self.bias = Parameter(torch.empty(out_features, **factory_kwargs))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -211,26 +225,29 @@ class LazyLinear(LazyModuleMixin, Linear):
 
     cls_to_become = Linear  # type: ignore[assignment]
     weight: UninitializedParameter
+    bias: UninitializedParameter  # type: ignore[assignment]
 
-    def __init__(self, out_features: int, bias: bool = True) -> None:
+    def __init__(self, out_features: int, bias: bool = True,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         # bias is hardcoded to False to avoid creating tensor
         # that will soon be overwritten.
         super().__init__(0, 0, False)
-        self.weight = UninitializedParameter()
+        self.weight = UninitializedParameter(**factory_kwargs)
         self.out_features = out_features
         if bias:
-            self.bias = UninitializedParameter()
+            self.bias = UninitializedParameter(**factory_kwargs)
 
     def reset_parameters(self) -> None:
         if not self.has_uninitialized_params() and self.in_features != 0:
             super().reset_parameters()
 
-    def initialize_parameters(self, input) -> None:  # type: ignore
+    def initialize_parameters(self, input) -> None:  # type: ignore[override]
         if self.has_uninitialized_params():
             with torch.no_grad():
                 self.in_features = input.shape[-1]
-                self.weight.materialize((self.out_features, self.in_features))  # type: ignore
+                self.weight.materialize((self.out_features, self.in_features))
                 if self.bias is not None:
-                    self.bias.materialize((self.out_features,))  # type: ignore
+                    self.bias.materialize((self.out_features,))
                 self.reset_parameters()
 # TODO: PartialLinear - maybe in sparse?

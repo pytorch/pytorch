@@ -25,6 +25,18 @@ class PackageMangler:
         assert len(name) != 0
         return self._mangle_parent + "." + name
 
+    def demangle(self, mangled: str) -> str:
+        """
+        Note: This only demangles names that were mangled by this specific
+        PackageMangler. It will pass through names created by a different
+        PackageMangler instance.
+        """
+        if mangled.startswith(self._mangle_parent + "."):
+            return mangled.partition(".")[2]
+
+        # wasn't a mangled name
+        return mangled
+
     def parent_name(self):
         return self._mangle_parent
 

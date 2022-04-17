@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -46,9 +46,21 @@ TORCH_API void mergeNodeIntoSubgraphAndUpdateAliasing(
     Node* subgraphNode,
     AliasDb& db);
 
+TORCH_API std::vector<Node*> unmergeAliasedOutputs(
+    Node* subgraphNode,
+    AliasDb& db);
+
 // Move nodes from a subgraph node to the outer graph.
 // `subgraphNode` is destroyed.
 TORCH_API void unmergeSubgraph(Node* subgraphNode);
+
+// Move `node_to_unmerge` and its descendants after `subgraphNode`
+// promotes any dependencies of `node_to_unmerge` to subgraphNode outputs
+TORCH_API void unmergeNode(Node* node_to_unmerge, Node* subgraphNode);
+
+TORCH_API bool unmergeOutputsAlisingInputs(Node* subgraphNode);
+
+TORCH_API bool unmergeAliasedOutputs(Node* subgraphNode);
 
 // Convenience function
 std::shared_ptr<Graph> getSubgraph(Node* n);

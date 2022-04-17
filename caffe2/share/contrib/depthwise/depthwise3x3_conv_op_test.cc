@@ -140,8 +140,7 @@ void compare(
 
           // For small values / small difference, the relative error
           // can be huge but the absolute error will be small
-          EXPECT_TRUE(
-              relErr <= maxRelErr || absErr <= absErrForRelErrFailure)
+          EXPECT_TRUE(relErr <= maxRelErr || absErr <= absErrForRelErrFailure)
               << v1 << " " << v2 << " (rel err " << relErr << ") "
               << "(" << n << " " << c << " " << h << " " << w << ") "
               << "running N " << N << " inputC " << inputC << " H " << H
@@ -200,7 +199,7 @@ void runConv(
 
 } // unnamed namespace
 
-constexpr size_t kIters = 20;
+constexpr int kIters = 20;
 
 TEST(DEPTHWISE3x3, Conv) {
   for (int i = 0; i < kIters; ++i) {

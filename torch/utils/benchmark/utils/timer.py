@@ -2,9 +2,8 @@
 import enum
 import timeit
 import textwrap
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Type, Union
+from typing import overload, Any, Callable, Dict, List, NoReturn, Optional, Tuple, Type, Union
 
-import numpy as np
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import TimerClass, TimeitModuleType
@@ -251,6 +250,11 @@ class Timer(object):
             num_threads=num_threads,
         )
 
+    def _timeit(self, number: int) -> float:
+        # Even calling a timer in C++ takes ~50 ns, so no real operation should
+        # take less than 1 ns. (And this prevents divide by zero errors.)
+        return max(self._timer.timeit(number), 1e-9)
+
     def timeit(self, number: int = 1000000) -> common.Measurement:
         """Mirrors the semantics of timeit.Timer.timeit().
 
@@ -259,11 +263,11 @@ class Timer(object):
         """
         with common.set_torch_threads(self._task_spec.num_threads):
             # Warmup
-            self._timer.timeit(number=max(int(number // 100), 1))
+            self._timeit(number=max(int(number // 100), 2))
 
             return common.Measurement(
                 number_per_run=number,
-                raw_times=[self._timer.timeit(number=number)],
+                raw_times=[self._timeit(number=number)],
                 task_spec=self._task_spec
             )
 
@@ -301,14 +305,17 @@ class Timer(object):
         with common.set_torch_threads(self._task_spec.num_threads):
             # Estimate the block size needed for measurement to be negligible
             # compared to the inner loop. This also serves as a warmup.
-            overhead = np.median([self._timer.timeit(0) for _ in range(5)])
+            overhead = torch.tensor([self._timeit(0) for _ in range(5)]).median().item()
             number = 1
             while True:
-                time_taken = self._timer.timeit(number)
+                time_taken = self._timeit(number)
                 relative_overhead = overhead / time_taken
                 if relative_overhead <= 1e-4 and time_taken >= min_run_time / 1000:
                     break
                 if time_taken > min_run_time:
+                    break
+                # Avoid overflow in C++ pybind11 interface
+                if number * 10 > 2147483647:
                     break
                 number *= 10
         return number
@@ -324,7 +331,7 @@ class Timer(object):
         number = self._estimate_block_size(min_run_time=0.05)
 
         def time_hook() -> float:
-            return self._timer.timeit(number)
+            return self._timeit(number)
 
         def stop_hook(times: List[float]) -> bool:
             if len(times) > 3:
@@ -387,7 +394,7 @@ class Timer(object):
         number = self._estimate_block_size(min_run_time)
 
         def time_hook() -> float:
-            return self._timer.timeit(number)
+            return self._timeit(number)
 
         def stop_hook(times: List[float]) -> bool:
             return True
@@ -403,13 +410,36 @@ class Timer(object):
             task_spec=self._task_spec
         )
 
+    @overload
+    def collect_callgrind(
+        self,
+        number: int,
+        *,
+        repeats: None,
+        collect_baseline: bool,
+        retain_out_file: bool,
+    ) -> valgrind_timer_interface.CallgrindStats:
+        ...
+
+    @overload
+    def collect_callgrind(
+        self,
+        number: int,
+        *,
+        repeats: int,
+        collect_baseline: bool,
+        retain_out_file: bool,
+    ) -> Tuple[valgrind_timer_interface.CallgrindStats, ...]:
+        ...
+
     def collect_callgrind(
         self,
         number: int = 100,
         *,
+        repeats: Optional[int] = None,
         collect_baseline: bool = True,
         retain_out_file: bool = False,
-    ) -> valgrind_timer_interface.CallgrindStats:
+    ) -> Any:
         """Collect instruction counts using Callgrind.
 
         Unlike wall times, instruction counts are deterministic
@@ -417,7 +447,7 @@ class Timer(object):
         jitter from the Python interpreter.) This makes them ideal for detailed
         performance analysis. This method runs `stmt` in a separate process
         so that Valgrind can instrument the program. Performance is severely
-        degraded due to the instrumentation, howevever this is ameliorated by
+        degraded due to the instrumentation, however this is ameliorated by
         the fact that a small number of iterations is generally sufficient to
         obtain good measurements.
 
@@ -444,17 +474,23 @@ class Timer(object):
         if not isinstance(self._task_spec.stmt, str):
             raise ValueError("`collect_callgrind` currently only supports string `stmt`")
 
+        if repeats is not None and repeats < 1:
+            raise ValueError("If specified, `repeats` must be >= 1")
+
         # Check that the statement is valid. It doesn't guarantee success, but it's much
         # simpler and quicker to raise an exception for a faulty `stmt` or `setup` in
         # the parent process rather than the valgrind subprocess.
-        self._timer.timeit(1)
+        self._timeit(1)
         is_python = (self._language == Language.PYTHON)
         assert is_python or not self._globals
-        return valgrind_timer_interface.wrapper_singleton().collect_callgrind(
+        result = valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             task_spec=self._task_spec,
             globals=self._globals,
             number=number,
+            repeats=repeats or 1,
             collect_baseline=collect_baseline and is_python,
             is_python=is_python,
             retain_out_file=retain_out_file,
         )
+
+        return (result[0] if repeats is None else result)

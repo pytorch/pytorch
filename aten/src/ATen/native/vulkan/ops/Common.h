@@ -28,6 +28,14 @@ struct Layout final {
     static constexpr size_t width = 3u;
   };
 
+  // Transposed Convolution Filters
+  struct TransposedFilter final {
+    static constexpr size_t input = 0u;
+    static constexpr size_t output = 1u;
+    static constexpr size_t height = 2u;
+    static constexpr size_t width = 3u;
+  };
+
   // Parameters (Pooling Kernels, Dilation, Padding, Stride, etc.)
   struct Parameter final {
     static constexpr size_t height = 0u;
@@ -39,6 +47,8 @@ uint32_t batch_size(const Tensor& tensor);
 uint32_t channels_size(const Tensor& tensor);
 uint32_t height_size(const Tensor& tensor);
 uint32_t width_size(const Tensor& tensor);
+
+api::Shader::WorkGroup adaptive_work_group_size(const api::Shader::WorkGroup& global_work_group);
 
 } // namespace ops
 } // namespace vulkan

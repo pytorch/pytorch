@@ -1,5 +1,5 @@
 #include "caffe2/utils/signal_handler.h"
-#if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+#if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
 #include <gtest/gtest.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -102,7 +102,7 @@ bool forkAndPipe(
     }));                                                                     \
     int keyPhraseCount = 0;                                                  \
     std::string keyPhrase =                                                  \
-        std::string(name) + "(" + c10::to_string(signum) + "), Thread";      \
+        std::string(name) + "(" + c10::to_string(signum) + ")";              \
     size_t loc = 0;                                                          \
     while ((loc = stderrBuffer.find(keyPhrase, loc)) != std::string::npos) { \
       keyPhraseCount += 1;                                                   \
@@ -145,4 +145,4 @@ TEST(fatalSignalTest, SIGSEGV8) {
 TEST(fatalSignalTest, SIGABRT8_NOPRINT) {
   TEST_FATAL_SIGNAL_NO_PRINT(SIGABRT, "SIGABRT", 8);
 }
-#endif // defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+#endif // defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)

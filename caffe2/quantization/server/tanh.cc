@@ -25,19 +25,25 @@ static int GetPassRegionEnd_(
   int in_pos_qmax = (1 << (num_in_bits - 1)) - 1;
 
   float scale_multiplier = in_qparams.scale / out_qparams.scale;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int log2_scale_multiplier = nearbyint(log2(scale_multiplier));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int x_q;
   for (x_q = 0; x_q < in_pos_qmax; ++x_q) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int y_q;
     if (log2_scale_multiplier < 0) {
       y_q = x_q >> (-log2_scale_multiplier);
     } else {
       y_q = x_q << (log2_scale_multiplier);
     }
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     float y = y_q * out_qparams.scale;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     float x_min = std::max((x_q - 0.5f) * in_qparams.scale, 0.f);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     float x_max = (x_q + 0.5f) * in_qparams.scale;
     if (fabs(tanh(x_max) - y) > max_abs_err ||
         fabs(tanh(x_min) - y) > max_abs_err) {
@@ -47,6 +53,7 @@ static int GetPassRegionEnd_(
   return x_q - 1;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T>
 Tanh<T>::Tanh(double max_abs_err) : max_abs_err_(max_abs_err) {
   // Choose saturation region
@@ -70,6 +77,7 @@ Tanh<T>::Tanh(double max_abs_err) : max_abs_err_(max_abs_err) {
   int in_pos_qmax = (1 << (num_in_bits_ - 1)) - 1;
   processing_region_lut_.resize(in_pos_qmax - x_pq_index_ + 2);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int i;
   for (i = x_pq_index_; i < in_pos_qmax; ++i) {
     double y_begin = tanh((i - 0.5) * in_qparams_.scale);
@@ -105,11 +113,13 @@ template <typename T>
 T Tanh<T>::Compute(T x) const {
   int32_t x_adjusted = x - in_qparams_.zero_point;
   int32_t x_sgn = sgn(x_adjusted), x_mag = std::abs(x_adjusted);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int32_t y;
 
   if (x_mag < x_pq_index_) {
     // pass region
     float scale_multiplier = in_qparams_.scale / out_qparams_.scale;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     int log2_scale_multiplier = nearbyint(log2(scale_multiplier));
     if (log2_scale_multiplier < 0) {
       y = x_sgn * (x_mag >> (-log2_scale_multiplier));

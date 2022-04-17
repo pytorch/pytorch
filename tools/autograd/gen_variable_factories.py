@@ -5,13 +5,13 @@
 import re
 from typing import Optional, List
 
-from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api.types import CppSignatureGroup
+from tools.codegen.api import cpp
 import tools.codegen.api.python as python
-from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
-from tools.codegen.utils import mapMaybe
-from tools.codegen.model import *
+from tools.codegen.utils import mapMaybe, FileManager
+from tools.codegen.model import NativeFunction, TensorOptionsArguments, Variant
 
 OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
 TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
@@ -34,12 +34,23 @@ def fully_qualified_type(argument_type: str) -> str:
     return maybe_optional_type(qualified_type, is_opt)
 
 def gen_variable_factories(out: str, native_yaml_path: str, template_path: str) -> None:
-    native_functions = parse_native_yaml(native_yaml_path)
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    factory_functions = [fn for fn in native_functions if is_factory_function(fn)]
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_with_template('variable_factories.h', 'variable_factories.h', lambda: {
         'generated_comment': '@' + f'generated from {fm.template_dir}/variable_factories.h',
-        'function_definitions': list(mapMaybe(process_function, native_functions)),
+        'ops_headers': [f'#include <ATen/ops/{fn.root_name}.h>' for fn in factory_functions],
+        'function_definitions': list(mapMaybe(process_function, factory_functions)),
     })
+
+@with_native_function
+def is_factory_function(f: NativeFunction) -> bool:
+    if Variant.function not in f.variants:
+        return False
+
+    name = cpp.name(f.func)
+    has_tensor_options = python.has_tensor_options(f)
+    return has_tensor_options or name.endswith("_like")
 
 @with_native_function
 def process_function(f: NativeFunction) -> Optional[str]:
@@ -74,7 +85,7 @@ def process_function(f: NativeFunction) -> Optional[str]:
 
     return f"""\
 inline at::Tensor {name}({', '.join(formals)}) {{
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  at::AutoDispatchBelowADInplaceOrView guard;
   return autograd::make_variable(at::{name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
 }}
 """

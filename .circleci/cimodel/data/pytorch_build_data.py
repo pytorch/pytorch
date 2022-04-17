@@ -1,95 +1,7 @@
-from cimodel.lib.conf_tree import ConfigNode, X, XImportant
+from cimodel.lib.conf_tree import ConfigNode
 
 
 CONFIG_TREE_DATA = [
-    ("xenial", [
-        ("gcc", [
-            ("5.4", [  # All this subtree rebases to master and then build
-                ("3.6", [
-                    ("important", [X(True)]),
-                    ("parallel_tbb", [X(True)]),
-                    ("parallel_native", [X(True)]),
-                    ("pure_torch", [X(True)]),
-                ]),
-            ]),
-            # TODO: bring back libtorch test
-            ("7", [X("3.6")]),
-        ]),
-        ("clang", [
-            ("5", [
-                ("3.6", [
-                    ("asan", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
-                ]),
-            ]),
-            ("7", [
-                ("3.6", [
-                    ("onnx", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        ("cuda", [
-            ("10.1", [
-                ("3.6", [
-                    ('build_only', [X(True)]),
-                ]),
-            ]),
-            ("10.2", [
-                ("3.6", [
-                    ("shard_test", [XImportant(True)]),
-                    ("libtorch", [
-                        (True, [
-                            ('build_only', [X(True)]),
-                        ]),
-                    ]),
-                ]),
-            ]),
-            ("11.1", [
-                ("3.8", [
-                    ("shard_test", [X(True)]),
-                    ("libtorch", [
-                        (True, [
-                            ('build_only', [XImportant(True)]),
-                        ]),
-                    ]),
-                ]),
-            ]),
-        ]),
-    ]),
-    ("bionic", [
-        ("clang", [
-            ("9", [
-                XImportant("3.6"),
-            ]),
-            ("9", [
-                ("3.6", [
-                    ("xla", [XImportant(True)]),
-                    ("vulkan", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        ("gcc", [
-            ("9", [
-                ("3.8", [
-                    ("coverage", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
-                ]),
-            ]),
-        ]),
-        ("rocm", [
-            ("3.9", [
-                ("3.6", [
-                    ('build_only', [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-    ]),
 ]
 
 
@@ -141,6 +53,8 @@ class PyVerConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["pyver"] = node_name
         self.props["abbreviated_pyver"] = get_major_pyver(node_name)
+        if node_name == "3.9":
+            self.props["abbreviated_pyver"] = "py3.9"
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
@@ -160,6 +74,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "mlc": MLCConfigNode,
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
+            "noarch": NoarchConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -167,11 +82,18 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "build_only": BuildOnlyConfigNode,
             "shard_test": ShardTestConfigNode,
             "cuda_gcc_override": CudaGccOverrideConfigNode,
-            "coverage": CoverageConfigNode,
             "pure_torch": PureTorchConfigNode,
+            "slow_gradcheck": SlowGradcheckConfigNode,
         }
         return next_nodes[experimental_feature]
 
+
+class SlowGradcheckConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_slow_gradcheck"] = True
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
 
 class PureTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):
@@ -249,6 +171,14 @@ class ParallelTBBConfigNode(TreeConfigNode):
         return ImportantConfigNode
 
 
+class NoarchConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_noarch"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
 class ParallelNativeConfigNode(TreeConfigNode):
     def modify_label(self, label):
         return "PARALLELNATIVE=" + str(label)
@@ -293,14 +223,6 @@ class ShardTestConfigNode(TreeConfigNode):
 
     def child_constructor(self):
         return ImportantConfigNode
-
-
-class CoverageConfigNode(TreeConfigNode):
-    def init2(self, node_name):
-        self.props["is_coverage"] = node_name
-
-    def child_constructor(self):
-        return ExperimentalFeatureConfigNode
 
 
 class ImportantConfigNode(TreeConfigNode):

@@ -1,71 +1,35 @@
 #pragma once
 
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/detail/UnpackRaw.cuh>
+#include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+
+// c10/cuda/CUDAGraphsC10Utils.h has utils used by both c10 and aten.
+// This file adds utils used by aten only.
 
 namespace at {
 namespace cuda {
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-// Protects against enum cudaStreamCaptureStatus implementation changes.
-// Some compilers seem not to like static_assert without the messages.
-static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) == 0,
-              "unexpected int(cudaStreamCaptureStatusNone) value");
-static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) == 1,
-              "unexpected int(cudaStreamCaptureStatusActive) value");
-static_assert(int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated) == 2,
-              "unexpected int(cudaStreamCaptureStatusInvalidated) value");
-#endif
+using CaptureId_t = c10::cuda::CaptureId_t;
+using CaptureStatus = c10::cuda::CaptureStatus;
 
-enum class CaptureStatus: int {
-  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  None = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusNone),
-  Active = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusActive),
-  Invalidated = int(cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated)
-  #else
-  None = 0
-  #endif
-};
-
-inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
-  switch(status) {
-    case CaptureStatus::None:
-      os << "cudaStreamCaptureStatusNone";
-      break;
-    #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-    case CaptureStatus::Active:
-      os << "cudaStreamCaptureStatusActive";
-      break;
-    case CaptureStatus::Invalidated:
-      os << "cudaStreamCaptureStatusInvalidated";
-      break;
-    #endif
-    default:
-      TORCH_INTERNAL_ASSERT(false,
-                            "Unknown CUDA graph CaptureStatus",
-                            int(status));
-  }
-  return os;
-}
-
+// Use this version where you don't want to create a CUDA context if none exists.
 inline CaptureStatus currentStreamCaptureStatus() {
-  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // don't create a context if we don't have to
-  if (at::detail::getCUDAHooks().hasPrimaryContext(c10::cuda::current_device())) {
-    cudaStreamCaptureStatus is_capturing;
-    AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
-                                        &is_capturing));
-    return CaptureStatus(is_capturing);
+  if (at::cuda::detail::hasPrimaryContext(c10::cuda::current_device())) {
+    return c10::cuda::currentStreamCaptureStatusMayInitCtx();
   } else {
     return CaptureStatus::None;
   }
-  #else
+#else
   return CaptureStatus::None;
-  #endif
+#endif
 }
 
 inline void assertNotCapturing(std::string attempt) {
@@ -76,6 +40,19 @@ inline void assertNotCapturing(std::string attempt) {
               "please file an issue. "
               "Current cudaStreamCaptureStatus: ",
               status);
+}
+
+inline void errorIfCapturingCudnnBenchmark(std::string version_specific) {
+  auto status = currentStreamCaptureStatus();
+  TORCH_CHECK(status == CaptureStatus::None,
+              "Current cudaStreamCaptureStatus: ",
+              status,
+              "\nCapturing ",
+              version_specific,
+              "is prohibited. Possible causes of this error:\n"
+              "1. No warmup iterations occurred before capture.\n"
+              "2. The convolutions you're trying to capture use dynamic shapes, "
+              "in which case capturing them is generally prohibited.");
 }
 
 } // namespace cuda

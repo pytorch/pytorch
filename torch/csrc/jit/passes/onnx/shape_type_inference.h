@@ -7,8 +7,11 @@
 namespace torch {
 namespace jit {
 
-TORCH_API TypePtr
-MergeInferredType(TypePtr existing_type, TypePtr inferred_type);
+void MergeInferredTypeAndSetMap(
+    Value* dest_v,
+    TypePtr existing_type,
+    TypePtr inferred_type,
+    bool set_constant_value_map = true);
 
 // Update graph input types with dynamic axes info.
 // Axes that are marked as dynamic will be assigned as dynamic ShapeSymbol.
@@ -32,7 +35,7 @@ TORCH_API void ONNXAssignOutputShape(
     bool onnx_shape_inference);
 
 // Utilize ONNX Shape Inference for node.
-// The node must have ONNX namespace, and is valid ONNX node accroding to spec.
+// The node must have ONNX namespace, and is valid ONNX node according to spec.
 // On successful ONNX shape inference runs, the function updates output types of
 // n with inferred shape and type. Otherwise n is unchanged.
 TORCH_API void ONNXShapeTypeInference(
@@ -48,6 +51,11 @@ TORCH_API void ONNXShapeTypeInference(
     std::shared_ptr<Graph>& g,
     const ParamMap& params_dict,
     int opset_version);
+
+std::pair<bool, bool> AreInputsReliableOrStatic(Node* n);
+void UpdateReliable(
+    torch::jit::Value* output,
+    const std::pair<bool, bool>& input_reliable);
 
 } // namespace jit
 } // namespace torch

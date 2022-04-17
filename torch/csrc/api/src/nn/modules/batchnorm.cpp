@@ -22,7 +22,15 @@ void BatchNormImplBase<D, Derived>::pretty_print(std::ostream& stream) const {
          << "torch::nn::BatchNorm" << D << "d("
          << this->options.num_features() << ", "
          << "eps=" << this->options.eps() << ", "
-         << "momentum=" << this->options.momentum().value() << ", "
+         << "momentum=";
+
+  if (this->options.momentum().has_value()) {
+      stream << this->options.momentum().value();
+  } else {
+      stream << "None";
+  }
+
+   stream << ", "
          << "affine=" << this->options.affine() << ", "
          << "track_running_stats=" << this->options.track_running_stats() << ")";
 }

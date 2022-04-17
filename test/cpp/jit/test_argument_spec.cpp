@@ -1,16 +1,19 @@
 #include <gtest/gtest.h>
 
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/jit.h>
+
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/runtime/argument_spec.h"
 
 namespace torch {
 namespace jit {
 
 namespace {
 
-int device(const autograd::Variable& v) {
-  return v.device().is_cuda() ? v.get_device() : -1;
+at::Device device(const autograd::Variable& v) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+  return v.device();
 }
 
 bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {
@@ -135,11 +138,11 @@ TEST(ArgumentSpecTest, Basic_CUDA) {
   auto& GF = at::CUDA(at::kFloat);
   auto& GD = at::CUDA(at::kDouble);
 
-  auto graph = jit::compile(R"JIT(
+  auto graph = toGraphFunction(jit::compile(R"JIT(
    def fn(a, b, c, d, e):
       return a, b, c, d, e
    )JIT")
-                   ->get_function("fn")
+                                   ->get_function("fn"))
                    .graph();
 
   ArgumentSpecCreator arg_spec_creator(*graph);

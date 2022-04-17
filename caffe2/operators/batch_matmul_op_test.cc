@@ -47,9 +47,13 @@ class BatchMatMulOpTest : public testing::Test {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   DeviceOption option_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<CPUContext> cpu_context_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Workspace ws_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   OperatorDef def_;
 };
 

@@ -91,6 +91,7 @@ are sorted by the corresponding KEY.
       }
       CAFFE_ENFORCE_GT(lengths.size(), 0, "lengths should be non-empty.");
       std::vector<TensorShape> out(lengths.size());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < lengths.size(); ++i) {
         out[i].set_data_type(in[0].data_type());
         out[i].add_dims(in[1].dims(0));

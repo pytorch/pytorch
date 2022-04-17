@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -110,8 +111,8 @@ bool isSimpleMap(Node* node) {
     return false;
   }
   for (Value* input : node->inputs()) {
-    if (input->type()->isSubtypeOf(TensorType::get()) ||
-        input->type()->isSubtypeOf(FloatType::get())) {
+    if (input->type()->isSubtypeOf(*TensorType::get()) ||
+        input->type()->isSubtypeOf(*FloatType::get())) {
       continue;
     }
     if (input->node()->kind() != prim::Constant) {
@@ -165,7 +166,7 @@ struct GraphFuser {
 
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
-      return v->type()->isSubtypeOf(TensorType::get());
+      return v->type()->isSubtypeOf(*TensorType::get());
     });
   }
 
@@ -174,7 +175,7 @@ struct GraphFuser {
   }
 
   bool isFusableDevice(Value* v, bool strict_fuser_check) {
-    if (!v->type()->isSubtypeOf(TensorType::get())) {
+    if (!v->type()->isSubtypeOf(*TensorType::get())) {
       return true;
     }
     auto device = v->type()->expectRef<TensorType>().device();
@@ -182,13 +183,14 @@ struct GraphFuser {
       return !strict_fuser_check;
     }
     if ((*device).is_cpu()) {
-      return canFuseOnCPU();
+      return canFuseOnCPULegacy();
     } else if ((*device).is_cuda()) {
       return canFuseOnGPU();
     } else if ((*device).is_xpu()) {
       return false;
+    } else {
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "Unknown device for graph fuser");
     }
-    throw std::runtime_error("Unknown device");
   }
 
   // Default fusability check - used when the user doesn't pass in
@@ -265,7 +267,7 @@ struct GraphFuser {
     std::unordered_map<Value*, Value*> inner_to_outer;
     auto inner_inputs = producer_subgraph->inputs();
     auto outer_inputs = producer_group->inputs();
-    for (size_t i = 0; i < inner_inputs.size(); ++i) {
+    for (const auto i : c10::irange(inner_inputs.size())) {
       inner_to_outer[inner_inputs[i]] = outer_inputs[i];
     }
 
@@ -277,14 +279,14 @@ struct GraphFuser {
       temporary_nodes.emplace_back(outer);
       auto inner_outputs = inner->outputs();
       auto outer_outputs = outer->outputs();
-      for (size_t i = 0; i < inner_outputs.size(); ++i) {
+      for (const auto i : c10::irange(inner_outputs.size())) {
         inner_to_outer[inner_outputs[i]] = outer_outputs[i];
       }
     }
 
     // Replace uses of producer_group outputs and destroy the producer
     auto subgraph_outputs = producer_subgraph->outputs();
-    for (size_t i = 0; i < subgraph_outputs.size(); ++i) {
+    for (const auto i : c10::irange(subgraph_outputs.size())) {
       auto outer_output = inner_to_outer.at(subgraph_outputs[i]);
       producer_group->outputs()[i]->replaceAllUsesWith(outer_output);
       // new producer outputs have same aliasing properties as outer_output
@@ -302,7 +304,7 @@ struct GraphFuser {
       Node* merged = mergeNodeIntoGroup(consumer_group, node);
       // If any of the outputs are still used then we need to add them
       auto outputs = node->outputs();
-      for (size_t i = 0; i < outputs.size(); ++i) {
+      for (const auto i : c10::irange(outputs.size())) {
         auto output = outputs[i];
         if (output->uses().size() == 0)
           continue;
@@ -330,7 +332,7 @@ struct GraphFuser {
     AT_ASSERT(group->inputs().size() == subgraph.inputs().size());
     for (auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
-      if (input->type()->isSubtypeOf(TensorType::get()))
+      if (input->type()->isSubtypeOf(*TensorType::get()))
         tensor_insert_idx = i;
     }
     // add n's inputs to the fusion group's input list if we don't already have
@@ -340,17 +342,17 @@ struct GraphFuser {
     WithInsertPoint guard(*subgraph.nodes().begin());
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
-        if (input->type()->isSubtypeOf(TensorType::get())) {
+        if (input->type()->isSubtypeOf(*TensorType::get())) {
           auto in_group = subgraph.insertInput(tensor_insert_idx);
           in_group->setType(input->type());
           inputs_map[input] = in_group;
           group->insertInput(tensor_insert_idx, input);
           tensor_insert_idx++;
         } else if (
-            (input->type()->isSubtypeOf(FloatType::get()) &&
+            (input->type()->isSubtypeOf(*FloatType::get()) &&
              input->node()->kind() != prim::Constant) ||
             (n->kind() == aten::_grad_sum_to_size &&
-             input->type()->isSubtypeOf(ListType::ofInts()))) {
+             input->type()->isSubtypeOf(*ListType::ofInts()))) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;
@@ -599,7 +601,7 @@ struct GraphFuser {
     //   a_broadcasted, b_broadcasted = listUnpack(output_list)
     // `a_broadcasted` should receive the same aliasing info as `a`
     TORCH_INTERNAL_ASSERT(unpack_node->outputs().size() == inputs.size());
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for (const auto i : c10::irange(inputs.size())) {
       Value* original_input = inputs[i];
       Value* broadcasted_output = unpack_node->outputs()[i];
       aliasDb_->copyValue(original_input, broadcasted_output);
@@ -616,7 +618,7 @@ struct GraphFuser {
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();
     for (size_t i = 0; i < node->inputs().size(); ++i) {
-      if (node->inputs()[i]->type()->isSubtypeOf(TensorType::get())) {
+      if (node->inputs()[i]->type()->isSubtypeOf(*TensorType::get())) {
         AT_ASSERT(new_tensors_it != new_tensors.end());
         node->replaceInput(i, *(new_tensors_it++));
       }
@@ -630,7 +632,7 @@ struct GraphFuser {
     Node* bchunk =
         chunk->owningGraph()->create(prim::BroadcastingChunk, nchunks);
     bchunk->addInput(chunk->input());
-    for (size_t i = 0; i < nchunks; ++i) {
+    for (const auto i : c10::irange(nchunks)) {
       auto* old_output = chunk->outputs().at(i);
       auto* new_output = bchunk->outputs().at(i);
       new_output->copyMetadata(old_output);
@@ -731,7 +733,7 @@ struct GraphFuser {
     Value* producer_for_chunk = *it;
     size_t producer_index = it - chunk->inputs().begin();
 
-    // all uses of the chunk must be in in this consumer
+    // all uses of the chunk must be in this consumer
     for (auto s : chunk->outputs()) {
       for (auto u : s->uses()) {
         if (u.user != consumer)
@@ -752,7 +754,7 @@ struct GraphFuser {
     WithInsertPoint guard(bchunk->next());
 
     std::vector<Value*> producer_chunk_outputs;
-    for (size_t i = 0; i < nchunks; i++) {
+    for (const auto i : c10::irange(nchunks)) {
       producer_chunk_outputs.push_back(
           bchunk->output(nchunks * producer_index + i));
     }
@@ -766,7 +768,7 @@ struct GraphFuser {
       // XXX: we only work with pointwise ops in here, so we know it is valid to
       // push the concat only through tensor arguments (and all other args can
       // be safely ignored).
-      if (!input->type()->isSubtypeOf(TensorType::get()))
+      if (!input->type()->isSubtypeOf(*TensorType::get()))
         continue;
 
       // if 'input' is already an input to the bchunk, reuse it.
@@ -775,9 +777,9 @@ struct GraphFuser {
       if (it != bchunk_inputs.end()) {
         chunked_inputs.emplace_back();
         auto input_index = std::distance(bchunk_inputs.begin(), it);
-        for (size_t chunk = 0; chunk < nchunks; ++chunk) {
+        for (const auto chunki : c10::irange(nchunks)) {
           chunked_inputs.back().push_back(
-              bchunk->outputs().at(nchunks * input_index + chunk));
+              bchunk->outputs().at(nchunks * input_index + chunki));
         }
         continue;
       }
@@ -811,9 +813,10 @@ struct GraphFuser {
       chunked_op->output()->setType(chunk_sel->type());
       auto chunked_inputs_it = chunked_inputs.begin();
       for (Value* original_input : original_inputs) {
-        if (original_input->type()->isSubtypeOf(TensorType::get())) {
+        if (original_input->type()->isSubtypeOf(*TensorType::get())) {
           AT_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(
+              // NOLINTNEXTLINE(clang-analyzer-core.DivideZero)
               chunked_inputs_it->at(chunk_sel->offset() % nchunks));
           ++chunked_inputs_it;
         } else {
@@ -826,7 +829,8 @@ struct GraphFuser {
     }
 
     bchunk->removeInput(producer_index);
-    for (size_t i = 0; i < nchunks; i++) {
+    for (const auto i : c10::irange(nchunks)) {
+      (void)i; // Suppress unused variable warning
       bchunk->eraseOutput(nchunks * producer_index);
     }
 
@@ -841,7 +845,7 @@ struct GraphFuser {
     if (!size_calc_uses.empty()) {
       auto tensor_inputs = filter(
           producer_for_chunk_node->inputs(),
-          [](Value* v) { return v->type()->isSubtypeOf(TensorType::get()); });
+          [](Value* v) { return v->type()->isSubtypeOf(*TensorType::get()); });
       auto tensor_sizes = fmap(tensor_inputs, [&](Value* v) {
         Value* output = v->owningGraph()->insert(aten::size, {v});
         aliasDb_->createValue(output);
@@ -906,8 +910,7 @@ struct GraphFuser {
         Node* new_chunk =
             graph->insertNode(graph->create(prim::ConstantChunk, input, 0));
         new_chunk->copyAttributes(*bchunk);
-        for (size_t output_offset = 0; output_offset < nchunks;
-             output_offset++) {
+        for (const auto output_offset : c10::irange(nchunks)) {
           auto new_output = new_chunk->addOutput();
           auto old_output =
               bchunk->outputs().at(input_offset * nchunks + output_offset);
@@ -933,8 +936,8 @@ struct GraphFuser {
     auto inputs = fusion_group->inputs();
     auto sinputs = subgraph->inputs();
     AT_ASSERT(inputs.size() == sinputs.size());
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
+    for (const auto i : c10::irange(inputs.size())) {
+      if (inputs[i]->type()->isSubtypeOf(*TensorType::get())) {
         Value* soutput = graph->insert(aten::size, {inputs[i]});
         aliasDb_->createValue(soutput);
         shape_of[sinputs[i]] = soutput;
@@ -948,7 +951,7 @@ struct GraphFuser {
     auto outputs = fusion_group->outputs();
     auto soutputs = subgraph->outputs();
     AT_ASSERT(outputs.size() == soutputs.size());
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       if (usedOnlyInSize(outputs[i]))
         continue;
       Value* soutput = graph->insert(aten::size, {outputs[i]});
@@ -989,7 +992,7 @@ struct GraphFuser {
         continue;
       }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
-        return v->type()->isSubtypeOf(TensorType::get());
+        return v->type()->isSubtypeOf(*TensorType::get());
       });
       auto shapes =
           fmap(tensor_inputs, [&](Value* v) { return shape_of.at(v); });
@@ -1153,6 +1156,7 @@ struct GraphFuser {
     while (any_changed) {
       any_changed = false;
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         bool changed;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
@@ -1239,6 +1243,16 @@ void PeepholeOptimizeShapeExpressions(Block* block, AliasDb* db) {
 }
 
 } // anonymous namespace
+
+static bool cpu_fuser_enabled_legacy = false;
+
+bool canFuseOnCPULegacy() {
+  return cpu_fuser_enabled_legacy;
+}
+
+void overrideCanFuseOnCPULegacy(bool value) {
+  cpu_fuser_enabled_legacy = value;
+}
 
 void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
   AliasDb db(graph);

@@ -1,14 +1,26 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
-#include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/core/Tensor.h>
+#include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
-#include <ATen/NativeFunctions.h>
+#include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/SparseTensorUtils.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/accumulate.h>
-#include <THC/THCTensorSort.cuh>
-#include <THC/THCThrustAllocator.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_coalesce_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_mask_helper_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
@@ -33,18 +45,15 @@ using at::cuda::detail::getTensorInfo;
 namespace {
 
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
+C10_LAUNCH_BOUNDS_1(1024)
 __global__ void _sparse_mask_copy_kernel(
-  int64_t total_threads,
-  int64_t t_nnz,
-  const TensorInfo<int64_t, int64_t> t_indices_ti,
-  const TensorInfo<int64_t, int64_t> mask_indices_ti,
-  const TensorInfo<int64_t, int64_t> t_indices_pos_ti,
-  const TensorInfo<scalar_t, int64_t> t_values_ti,
-  TensorInfo<scalar_t, int64_t> r_values_ti
-) {
+    int64_t total_threads,
+    int64_t t_nnz,
+    const TensorInfo<int64_t, int64_t> t_indices_ti,
+    const TensorInfo<int64_t, int64_t> mask_indices_ti,
+    const TensorInfo<int64_t, int64_t> t_indices_pos_ti,
+    const TensorInfo<scalar_t, int64_t> t_values_ti,
+    TensorInfo<scalar_t, int64_t> r_values_ti) {
   const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= total_threads) return;
   const int64_t j = t_indices_pos_ti.data[i];
@@ -68,11 +77,9 @@ __global__ void _sparse_mask_copy_kernel(
 
 } // end namespace
 
-SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
+SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
-  if (self.is_coalesced()) {
-    return self;
-  }
+  TORCH_INTERNAL_ASSERT(!self.is_coalesced());
   // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (nnz < 2) {
@@ -82,7 +89,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
   // Replace instances with
 
@@ -115,7 +122,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 
   thrust::sort_by_key(policy,
     indicesIter, indicesIter + nnz,
-    origIndicesIter, ThrustLTOp<int64_t>()
+    origIndicesIter, LTOp<int64_t>()
   );
 
   // this forces device-host synchronization!
@@ -135,10 +142,11 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
     const int SZ = 4;
     values = values.contiguous();
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
-    dim3 grid(THCCeilDiv(newNnz, (int64_t) SZ), THCCeilDiv(stride, (int64_t) C10_WARP_SIZE*SZ));
-    dim3 block(C10_WARP_SIZE, SZ);
-    AT_DISPATCH_ALL_TYPES_AND2(
-      at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
+    int warp_size = at::cuda::warp_size();
+    dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) warp_size*SZ));
+    dim3 block(warp_size, SZ);
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
         apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
           uniqueOffsets.data_ptr<int64_t>(),
@@ -157,8 +165,8 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // to different sizes
   // int64_t blockX = min(stride, (int64_t) 512);
   // dim3 block(blockX, 512 / blockX);
-  // int64_t grid = min((int64_t) 1024, THCCeilDiv((int64_t) newNnz * stride, (int64_t) block.x * block.y));
-  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream>>>(
+  // int64_t grid = min((int64_t) 1024, ceil_div((int64_t) newNnz * stride, (int64_t) block.x * block.y));
+  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream> >>(
   //   THCIndexTensor_(data)(state, uniqueOffsets),
   //   THCIndexTensor_(data)(state, origIndices),
   //   THCTensor_(data)(state, values),
@@ -193,7 +201,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // duplicates.
   SparseTensor dst = ::at::native::_sparse_coo_tensor_unsafe(newIndices, newValues, self.sizes())._coalesced_(true);
 
-  THCudaCheck(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
   return dst;
 }
 
@@ -236,7 +244,7 @@ Tensor sparse_mask_helper_cuda(
   auto t_nnz = t._nnz();
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   // Step 1: flatten the sparse indices `t._indices()` tensor into a 1D indices
@@ -264,7 +272,7 @@ Tensor sparse_mask_helper_cuda(
   // Step 4: Copy the Filtered `t._values()` using the matches at `t_indices_pos`
   if (r_nnz > 0 && t_values.numel() > 0) {
     int64_t block_size = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
-    auto grid_size = cuda::ATenCeilDiv(r_nnz, block_size);
+    auto grid_size = ceil_div(r_nnz, block_size);
 
     auto t_indices_ti = getTensorInfo<int64_t, int64_t>(t_flatten_indices);
     auto mask_indices_ti =
@@ -272,7 +280,7 @@ Tensor sparse_mask_helper_cuda(
     auto t_indices_pos_ti =
         getTensorInfo<int64_t, int64_t>(t_indices_pos);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
         r_values.scalar_type(), "sparse_mask_helper_cuda", [&] {
           auto t_values_ti = getTensorInfo<scalar_t, int64_t>(t_values);
           auto r_values_ti =

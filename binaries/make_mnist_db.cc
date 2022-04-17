@@ -91,7 +91,6 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   int count = 0;
   const int kMaxKeyLength = 11;
   char key_cstr[kMaxKeyLength];
-  string value;
 
   TensorProtos protos;
   TensorProto* data = protos.add_protos();
@@ -119,11 +118,10 @@ void convert_dataset(const char* image_filename, const char* label_filename,
     }
     label->set_int32_data(0, static_cast<int>(label_value));
     snprintf(key_cstr, kMaxKeyLength, "%08d", item_id);
-    protos.SerializeToString(&value);
     string keystr(key_cstr);
 
     // Put in db
-    transaction->Put(keystr, value);
+    transaction->Put(keystr, protos.SerializeAsString());
     if (++count % 1000 == 0) {
       transaction->Commit();
     }

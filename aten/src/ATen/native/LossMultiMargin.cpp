@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/native/LossMulti.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -18,7 +19,7 @@ inline scalar_t multi_margin_inner_sum_cpu(
     const int64_t target_idx) {
   const scalar_t input_target = input_data[target_idx];
   scalar_t sum = 0;
-  for (int64_t d = 0; d < dim; d++) {
+  for (const auto d : c10::irange(dim)) {
     if (d == target_idx) {
       continue;
     }
@@ -63,7 +64,7 @@ static inline void multi_margin_loss_cpu_kernel(
   // cannot be handled by TensorAccessor)
   if (reduction == Reduction::None && output.dim() > 0) {
     auto output_acc = output.accessor<scalar_t, 1>();
-    for (int64_t t = 0; t < nframe; t++) {
+    for (const auto t : c10::irange(nframe)) {
       const auto idx = target_index_checked(target_data, t, dim);
       auto sum = multi_margin_inner_sum_cpu(
           input_data, weight_data, p, margin, dim, idx);
@@ -73,7 +74,7 @@ static inline void multi_margin_loss_cpu_kernel(
   } else {
     accscalar_t sum = 0;
     auto output_acc = output.data_ptr<scalar_t>();
-    for (int64_t t = 0; t < nframe; t++) {
+    for (const auto t : c10::irange(nframe)) {
       const auto idx = target_index_checked(target_data, t, dim);
       sum += multi_margin_inner_sum_cpu(
           input_data, weight_data, p, margin, dim, idx);
@@ -91,9 +92,10 @@ void multi_margin_loss_out_cpu_template(
     const Tensor& input,
     const Tensor& target,
     int p,
-    Scalar margin,
+    const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
   const auto ndims = input.dim();
   auto target_arg = TensorArg(target, "target", 2);
@@ -148,11 +150,11 @@ static void multi_margin_loss_backward_cpu_kernel(
     int64_t dim,
     int64_t reduction) {
   scalar_t* grad_input_row_data = grad_input_data;
-  for (int64_t t = 0; t < nframe; t++) {
+  for (const auto t : c10::irange(nframe)) {
     int64_t target_idx = target_index_checked(target_data, t, dim);
     scalar_t input_target = input_data[target_idx];
     scalar_t grad_input_target = 0;
-    for (int64_t d = 0; d < dim; d++) {
+    for (const auto d : c10::irange(dim)) {
       scalar_t z = margin - input_target + input_data[d];
       if (d == target_idx) {
         continue;
@@ -185,8 +187,8 @@ static void multi_margin_loss_backward_cpu_kernel(
     }
   } else {
     auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
-    for (int64_t t = 0; t < nframe; t++) {
-      for (int64_t d = 0; d < dim; d++) {
+    for (const auto t : c10::irange(nframe)) {
+      for (const auto d : c10::irange(dim)) {
         grad_input_data[t * dim + d] *= grad_output_acc[t];
       }
     }
@@ -199,9 +201,10 @@ void multi_margin_loss_backward_out_cpu_template(
     const Tensor& input,
     const Tensor& target,
     int p,
-    Scalar margin,
+    const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
   auto target_arg = TensorArg(target, "target", 2);
   const auto ndims = input.dim();
@@ -250,24 +253,29 @@ void multi_margin_loss_backward_out_cpu_template(
 Tensor multi_margin_loss_cpu(
     const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
-    const Tensor& weight,
+    const Scalar& p,
+    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
     int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
   auto output = at::empty({0}, input.options());
   multi_margin_loss_out_cpu_template(
       output, input, target, p.toInt(), margin, weight, reduction);
   return output;
 }
 
-Tensor& multi_margin_loss_cpu_out(
-    Tensor& output,
-    const Tensor& input,
+Tensor& multi_margin_loss_cpu_out(const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
-    const Tensor& weight,
-    int64_t reduction) {
+    const Scalar& p,
+    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    int64_t reduction,
+    Tensor& output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
   multi_margin_loss_out_cpu_template(
       output, input, target, p.toInt(), margin, weight, reduction);
   return output;
@@ -277,10 +285,13 @@ Tensor multi_margin_loss_cpu_backward(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
-    const Tensor& weight,
+    const Scalar& p,
+    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
     int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
   auto grad_input = at::empty({0}, input.options());
   multi_margin_loss_backward_out_cpu_template(
       grad_input,
@@ -294,15 +305,17 @@ Tensor multi_margin_loss_cpu_backward(
   return grad_input;
 }
 
-Tensor& multi_margin_loss_cpu_backward_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
+Tensor& multi_margin_loss_cpu_backward_out(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
-    const Tensor& weight,
-    int64_t reduction) {
+    const Scalar& p,
+    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    int64_t reduction,
+    Tensor& grad_input) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
   multi_margin_loss_backward_out_cpu_template(
       grad_input,
       grad_output,

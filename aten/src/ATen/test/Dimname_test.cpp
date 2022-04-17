@@ -40,7 +40,9 @@ TEST(DimnameTest, createNormalName) {
   auto dimname = Dimname::fromSymbol(foo);
   ASSERT_EQ(dimname.type(), NameType::BASIC);
   ASSERT_EQ(dimname.symbol(), foo);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("inva.lid")), c10::Error);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("1invalid")), c10::Error);
 }
 

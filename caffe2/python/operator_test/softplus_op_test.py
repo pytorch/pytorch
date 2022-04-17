@@ -14,7 +14,7 @@ class TestSoftplus(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_softplus(self, X, gc, dc):
         op = core.CreateOperator("Softplus", ["X"], ["Y"])
         self.assertDeviceChecks(dc, op, [X], [0])

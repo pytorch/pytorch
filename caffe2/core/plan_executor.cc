@@ -83,6 +83,7 @@ class ExceptionWrapperTerminate {
 class ScopeExitGuard {
  public:
   explicit ScopeExitGuard(std::function<void()>&& f) : f_(std::move(f)) {}
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~ScopeExitGuard() {
     f_();
   }
@@ -205,6 +206,7 @@ struct ExecutionStepWrapper {
   ExecutionStepWrapper(
       const ExecutionStep* step,
       Workspace* externalWorkspace,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       ShouldContinue externalShouldContinue,
       NetDefMap* netDefs,
       WorkspaceIdInjector* ws_id_injector)
@@ -237,6 +239,7 @@ struct ExecutionStepWrapper {
     }
 
    private:
+    // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init,clang-analyzer-optin.cplusplus.UninitializedObject)
     CompiledGuard() {}
     std::unique_ptr<CompiledExecutionStep> compiled_;
     CompiledExecutionStep* compiledRef_;
@@ -281,6 +284,7 @@ struct CompiledExecutionStep {
       WorkspaceIdInjector* ws_id_injector)
       : step(mainStep) {
     if (mainStep->create_workspace()) {
+      // NOLINTNEXTLINE(modernize-make-unique)
       localWorkspace_.reset(new Workspace(externalWorkspace));
       workspace = localWorkspace_.get();
       ws_id_injector->InjectWorkspaceId(workspace);
@@ -392,16 +396,26 @@ struct CompiledExecutionStep {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const ExecutionStep* step;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Workspace* workspace;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   vector<std::shared_ptr<ExecutionStepWrapper>> reportSubsteps;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   vector<std::shared_ptr<ExecutionStepWrapper>> recurringSubsteps;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   vector<NetBase*> networks;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   NetBase* reportNet;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Blob* shouldStop{nullptr};
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ShouldContinue netShouldContinue;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ShouldContinue shouldContinue;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::atomic<bool> gotFailure{false};
 
  private:
@@ -418,6 +432,7 @@ void ExecutionStepWrapper::Cancel() {
 }
 
 std::unique_ptr<CompiledExecutionStep> ExecutionStepWrapper::doCompile() {
+  // NOLINTNEXTLINE(modernize-make-unique)
   return std::unique_ptr<CompiledExecutionStep>(new CompiledExecutionStep(
       step_,
       externalWorkspace_,
@@ -552,6 +567,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           });
 
           auto num_substeps = compiledStep->recurringSubsteps.size();
+          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           int substep_id = next_substep++ % num_substeps;
           if (compiledStep->gotFailure) {
             return;
@@ -584,6 +600,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           threads.emplace_back(worker);
         }
 
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         auto workersDone = [&] { return done == numThreads; };
 
         // If we get an exception, try to wait for all threads to stop
@@ -598,6 +615,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         if (!workersDone() && first_exception) {
           LOG(ERROR) << "failed to stop concurrent workers after exception: "
                      << first_exception.what();
+          // NOLINTNEXTLINE(bugprone-throw-keyword-missing)
           ExceptionWrapperTerminate(std::move(first_exception));
         }
 
@@ -606,6 +624,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         }
         if (compiledStep->gotFailure) {
           LOG(ERROR) << "One of the workers failed.";
+          // NOLINTNEXTLINE(bugprone-use-after-move)
           if (first_exception) {
             first_exception.rethrowException();
           }

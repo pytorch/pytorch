@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -30,7 +32,7 @@ def test_1to3(balance, checkpoint, setup_rpc):
         def forward(self, input):
             yield stash("1to3", input)
             output = self.conv(input)
-            return output # noqa
+            return output  # noqa: B901
 
     class Layer2(nn.Module):
         def __init__(self):
@@ -73,7 +75,7 @@ def test_none_skip(setup_rpc):
     class Stash(nn.Module):
         def forward(self, input):
             yield stash("none", None)
-            return input # noqa
+            return input  # noqa: B901
 
     @skippable(pop=["none"])
     class Pop(nn.Module):

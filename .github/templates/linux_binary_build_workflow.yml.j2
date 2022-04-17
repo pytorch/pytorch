@@ -1,0 +1,197 @@
+{% import 'common.yml.j2' as common %}
+{% import 'upload.yml.j2' as upload %}
+
+{%- block name -%}
+# Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: !{{ build_environment }}
+{%- endblock %}
+
+on:
+  push:
+    {%- if branches == "nightly" %}
+    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
+    {%- endif %}
+    branches:
+      - !{{ branches }}
+    {%- if branches == "nightly" %}
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    {%- endif %}
+{%- for label in ciflow_config.labels | sort %}
+    {%- if loop.first and branches != "nightly" %}
+    tags:
+    {%- endif %}
+      - '!{{ label }}/*'
+{%- endfor %}
+  workflow_dispatch:
+
+env:
+  # Needed for conda builds
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  ANACONDA_USER: pytorch
+  AWS_DEFAULT_REGION: us-east-1
+  BINARY_ENV_FILE: /tmp/env
+  BUILD_ENVIRONMENT: !{{ build_environment }}
+  BUILDER_ROOT: /builder
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  IN_CI: 1
+  IS_GHA: 1
+  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+  PYTORCH_RETRY_TEST_CASES: 1
+  PYTORCH_ROOT: /pytorch
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  SKIP_ALL_TESTS: 1
+!{{ common.concurrency(build_environment) }}
+
+jobs:
+{%- for config in build_configs %}
+  !{{ config["build_name"] }}-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.4xlarge
+    timeout-minutes: !{{ common.timeout_minutes }}
+    !{{ upload.binary_env(config) }}
+    steps:
+      !{{ common.setup_ec2_linux() }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
+{%- if config["gpu_arch_type"] == 'cuda' and config["gpu_arch_version"].startswith('11') %}
+      - name: Set BUILD_SPLIT_CUDA
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+{%- endif %}
+      - name: Pull Docker image
+        run: |
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e IS_GHA \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/!{{ config["package_type"] }}/build.sh"
+      !{{ common.chown_dir("${RUNNER_TEMP}/artifacts") }}
+      - uses: !{{ common.upload_artifact_s3_action }}
+        with:
+          name: !{{ config["build_name"] }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            ${{ runner.temp }}/artifacts/*
+      !{{ common.teardown_ec2_linux("pytorch/") }}
+  !{{ config["build_name"] }}-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: !{{ config["build_name"] }}-build
+{%- if config["gpu_arch_type"] == "rocm" %}
+    runs-on: linux.rocm.gpu
+{%- elif config["gpu_arch_type"] == "cuda" %}
+    runs-on: linux.4xlarge.nvidia.gpu
+{%- else %}
+    runs-on: linux.4xlarge
+{%- endif %}
+    timeout-minutes: !{{ common.timeout_minutes }}
+    !{{ upload.binary_env(config) }}
+    steps:
+{%- if config["gpu_arch_type"] == "rocm" %}
+      !{{ common.setup_rocm_linux() }}
+{%- else %}
+      !{{ common.setup_ec2_linux() }}
+{%- endif %}
+      - uses: seemethere/download-artifact-s3@v3
+        name: Download Build Artifacts
+        with:
+          name: !{{ config["build_name"] }}
+          path: "${{ runner.temp }}/artifacts/"
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
+{%- if config["gpu_arch_type"] == "rocm" %}
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+{%- elif config["gpu_arch_type"] == "cuda" %}
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            pushd pytorch
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+            popd
+{%- endif %}
+      - name: Pull Docker image
+        run: |
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Test PyTorch binary
+        run: |
+          set -x
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e IS_GHA \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          # Generate test script
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+{%- if config["gpu_arch_type"] == "rocm" %}
+      !{{ common.teardown_rocm_linux() }}
+{%- else %}
+      !{{ common.teardown_ec2_linux("pytorch/") }}
+{%- endif %}
+  {%- if branches == "nightly" %}
+  !{{ upload.upload_binaries(config) }}
+  {%- endif %}
+{%- endfor %}

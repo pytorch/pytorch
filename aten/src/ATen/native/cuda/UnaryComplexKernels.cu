@@ -1,7 +1,7 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/DispatchStub.h>
@@ -23,7 +23,7 @@ __host__ __device__ static inline c10::complex<T> angle_wrapper(c10::complex<T> 
   return std::arg(v);
 }
 
-void angle_kernel_cuda(TensorIterator& iter) {
+void angle_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "angle_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return angle_wrapper(a);
@@ -42,7 +42,7 @@ __host__ __device__ static inline c10::complex<T> real_wrapper(c10::complex<T> v
   return v.real();
 }
 
-void real_kernel_cuda(TensorIterator& iter) {
+void real_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "real_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return real_wrapper(a);
@@ -61,7 +61,7 @@ __host__ __device__ static inline c10::complex<T> imag_wrapper(c10::complex<T> v
   return v.imag();
 }
 
-void imag_kernel_cuda(TensorIterator& iter) {
+void imag_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "imag_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return imag_wrapper(a);
@@ -80,7 +80,8 @@ __host__ __device__ static inline c10::complex<T> conj_wrapper(c10::complex<T> v
   return std::conj(v);
 }
 
-void conj_kernel_cuda(TensorIterator& iter) {
+// NB: Ignores the negative bit on tensors
+void conj_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cuda", [&]() {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -92,6 +93,6 @@ void conj_kernel_cuda(TensorIterator& iter) {
 REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda);
 REGISTER_DISPATCH(real_stub, &real_kernel_cuda);
 REGISTER_DISPATCH(imag_stub, &imag_kernel_cuda);
-REGISTER_DISPATCH(conj_stub, &conj_kernel_cuda);
+REGISTER_DISPATCH(conj_physical_stub, &conj_kernel_cuda);
 
 }} // namespace at::native

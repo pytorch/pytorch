@@ -12,6 +12,8 @@
 set -eou pipefail
 shopt -s globstar
 
+OUTPUT_DIR=${OUTPUT_DIR:-$(pwd)}
+
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf ${tmp_dir}' EXIT
 
@@ -27,7 +29,7 @@ for whl_file in "$@"; do
     version_with_suffix_escaped=${version_with_suffix/+/%2B}
     # Remove all suffixed +bleh versions
     version_no_suffix=${version_with_suffix/+*/}
-    new_whl_file=${whl_file/${version_with_suffix_escaped}/${version_no_suffix}}
+    new_whl_file=${OUTPUT_DIR}/$(basename "${whl_file/${version_with_suffix_escaped}/${version_no_suffix}}")
     dist_info_folder=$(find "${whl_dir}" -type d -name '*.dist-info' | head -1)
     basename_dist_info_folder=$(basename "${dist_info_folder}")
     dirname_dist_info_folder=$(dirname "${dist_info_folder}")

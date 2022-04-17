@@ -7,8 +7,8 @@ Like all ATen methods/functions, native functions are made available
 from both ATen's C++ and Python APIs.  In C++, they are made available
 either as methods on `Tensor` (`t.mymeth()`) and functions in the ATen
 namespace (`at::myfunc()`).  In PyTorch, they are made available as
-methods on `Variable` or as functions on `torch._C._FunctionBase`
-(it is the user's responsibility to re-exporting these functions in
+methods on `Variable` or as functions on `torch._C._FunctionBase`.
+(It is the user's responsibility to re-export these functions in
 a more user-facing module.)
 
 The rest of this document describes how to implement an ATen function.
@@ -61,8 +61,7 @@ signature.
 - `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
 - `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
-- `str`.  It is translated into a C++ argument of type `std::string`
-  (but we should fix this, see https://github.com/pytorch/pytorch/issues/53546)
+- `str`.  It is translated into a C++ argument of non-owning type `c10::string_view`
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
   floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
   numerical types. However, you probably don't want to use `Scalar`;
@@ -250,6 +249,13 @@ There is also another situation in which we use annotations, namely views.
   - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
     An alias to the memory represented by `self` may be also returned, however it is not mutated.
 
+When a Tensor views are contained in a Tensor list, we need to represent that the output list
+contains Tensors that alias the input.
+  - `func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]`
+We assume lists contain memory which aliases the heap, so in order to correctly set up the aliasing
+relationship between the output and input, we annotate that the input Tensor enters the wildcard set `(a -> *)`.
+For more details, see the JIT [README](https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/OVERVIEW.md#aliasing-and-mutation-annotations-in-functionschema).
+
 We have some asserts to check whether a developer uses these annotations correctly and throw asserts
 if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
  If this causes a lot of confusion please add @cpuhrsch to your PR.
@@ -264,37 +270,56 @@ dispatch:
 
 This specifies the actual name of the function you want to dispatch to, so you
 can dispatch to different functions depending on which backend the passed tensors
-belong to.  Technically, it is also possible to write `dispatch: func_name`
-to unconditionally dispatch to a native function whose name is different than
-the name in the public ATen API, but this is generally frowned upon (just name
-them the same thing!)
+belong to.  If the dispatch table is omitted, we assume a default dispatch
+table:
+
+```
+# overload is ignored
+func: func.overload(...) -> ...
+dispatch:
+    CompositeImplicitAutograd: func
+
+# overload is ignored, but out functions get suffixed with _out in their name
+# (NB: no out functions in PyTorch today actually support autograd, but if they
+# did, you could call them here and autograd would be inferred)
+func: func.out_overload(...) -> ...
+dispatch:
+    CompositeImplicitAutograd: func_out
+```
 
 If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
 Available backend options can be found by searching `dispatch_keys` in
 [codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
-Among the supported backends, there're a few alias keys that maps to a set of backends:
-  - `DefaultBackend`: an alias that maps to all backends. Functions registered to
-    `DefaultBackend` should work for any backend for inference.  (Note:
-    calling into a DispatchStub does NOT mean it works for any backend;
+There are also two special "generic" backends:
+
+  - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):
+    implementations of kernels that work for all backends, but require an
+    explicit definition of backward function in `derivatives.yaml` to support autograd.
+    The most typical use of this key are for delegating functions; i.e.,
+    functions that do a very small amount of work and then delegate to another
+    operator to do the actual heavy lifting.  Under the hood, registering a
+    kernel to `CompositeExplicitAutograd` is equivalent to registering that
+    kernel to every backend (e.g., `CPU, CUDA`). Note: kernels which call
+    DispatchStub should NOT be registered as CompositeExplicitAutograd, as
     DispatchStub only works for `CPU, CUDA`)
-  - `Math`: an alias that maps to all backend and autograd backend keys. Functions
-    registered to `Math` key should be plain mathematical composition of other
-    `at::` functions and support training and inference for any backend.
 
-`DefaultBackend` and `Math` keys act as defaults that can be overridden: for example, you can specify a custom
-kernel for a particular backend using a backend-specific dispatch key, and use
-`DefaultBackend` or `Math` to specify a generic kernel for the others.
+  - `CompositeImplicitAutograd` (previously known as `Math`): implementations of
+    kernels that work for all backends, and also can implicitly support autograd,
+    because all of the operations it calls support autograd.  Direct use of
+    this key should be rare: if you provide no dispatch table, we default to
+    registering your kernel as `CompositeImplicitAutograd`.  Explicitly adding
+    this key to an existing dispatch table may be useful if you have specialized
+    CPU and CUDA implementations, but you might want to provide a fallback
+    lowering for external backends that may not have a specialized
+    implementation.
 
-Note that like those registered to `Math`, kernels registered to `DefaultBackend` are
-very often implemented as mathematical expressions built up from calls to other `at::`
-functions.  This is because in both cases, the kernel needs to delegate backend-specific
-computation to the functions it calls.  The difference between `DefaultBackend` and `Math`
-is that a `Math` kernel also implicitly defines a derivative formula: to do this, it must
-call only functions that themselves support autograd.
+Functions registered to composite backends should work for any backend, if the
+nested functions they call work for those backends.
 
 For example, suppose `my_op` can be implemented in the following way:
+
 ```
 at::Tensor my_op(const Tensor& self, const Tensor& other) {
   return self + 2 * other;
@@ -302,30 +327,60 @@ at::Tensor my_op(const Tensor& self, const Tensor& other) {
 ```
 
 If we already know inference kernels and derivative formulas for operators `+` and `*` in our system,
-you can just register `my_op` to `Math` and both inference & autograd will just work.
+you can just register `my_op` to `CompositeImplicitAutograd` and both inference & autograd will just work.
 Although it seems we only write down the inference formula here, PyTorch autograd system would correctly
 set up the backward for `my_op` using the chain formula and derivatives of `+` & `*` operators.
 In other words `d_out/d_self = 1; d_out/d_other = 2` can be derived automatically from
 the `my_op` inference kernel. Of course if we don't have derivative formula defined for either `+` or `*`,
 backward of `my_op` can no longer be derived automatically.
 
-Whether to use `Math` or `DefaultBackend` for your kernel can be decided by the following steps:
-1. If you can, always start with a `Math` kernel that's composable from existing operators.
-2. If you don't want to use the derived gradient formula from `Math` kernel for autograd, either to
-   get better performance or better numerical stability, you should put the kernel in `DefaultBackend`
+Whether to use implicit or explicit autograd for your kernel can be decided by the following steps:
+1. If you can, always start with a `CompositeImplicitAutograd` kernel that's composable from existing operators.
+2. If you don't want to use the derived gradient formula from `CompositeImplicitAutograd` kernel for autograd, either to
+   get better performance or better numerical stability, you should register the kernel with `CompositeExplicitAutograd`
    so that it's only used in inference.
    Later for autograd, depending on whether your autograd kernel works for all backends or not,
    you can put them in alias `Autograd` or specific keys like `AutogradCPU`.
 3. If you prefer to write backend-specific kernels, use reserved dispatch keys for your backend instead,
    e.g. `CPU/AutogradCPU`.
 
-**Important**: because a `Math` kernel is implicitly registered for ops with no `dispatch:` section,
+**Important**: because a `CompositeImplicitAutograd` kernel is implicitly registered for ops with no `dispatch:` section,
 when you add a backend-specific kernel (and hence a `dispatch:` section) to one of these, you **must** also
-add a `Math:` entry that names the old kernel implementation (it's named after the op, with _<overload name>
+add a `CompositeImplicitAutograd:` entry that names the old kernel implementation (it's named after the op, with _<overload name>
 added if applicable), so that it's still available for other backends to use.
 
 If you implemented a native function in C++ and want to find out which dispatch keyword
 should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
+
+### CompositeImplicitAutograd Compliance
+
+Functions registered as CompositeImplicitAutograd MUST work for most, if not
+all, backends. This means that we impose a set of constraints that make it more
+difficult to write a CompositeImplicitAutograd function than writing regular
+PyTorch code.
+
+If you wish to do something that is banned (you may wish to do this for perf
+reasons), please write a backwards formula for your operator so it is no longer
+CompositeImplicitAutograd or hide parts of the operator in a new operator
+that is not CompositeImplicitAutograd.
+
+CompositeImplicitAutograd operators must not:
+- call `resize_` or moral equivalents. These are tricky to handle for
+many backends, like vmap and meta.
+- call `out=` operations. These are impossible to handle for vmap and can cause
+dispatch-to-python objects to lose their subclassing.
+- Change the metadata of a Tensor without performing dispatches. Examples of these
+operations are directly accessing the TensorImpl API to modify the
+sizes/strides/metadata of a Tensor.
+- In the same vein as the last point, `data_ptr` access or `item` access are not
+allowed. These operations do not go through the dispatcher.
+- `copy_` is a marginal case. If you're able to rewrite your operation without
+`copy_` you should definitely do so; this should be trivial if you're not copy-ing
+into a view. Otherwise, it is fine to leave the code as-is.
+
+We have CompositeImplicitAutograd compliance tests in `test/test_ops.py`. These
+tests aren't perfect (it's pretty difficult to check for all of the above) so if
+something looks wrong please shout.
 
 ### `device_guard`
 
@@ -346,45 +401,20 @@ you're a function that simply does not interact with any devices. In
 that case, code generation of the device guard can be disabled by adding
 `device_guard: False` to your function definition.
 
-### `matches_jit_signature`
+### `device_check`
 
 ```
-matches_jit_signature: False
+device_check: NoCheck
 ```
 
-This will indicate that the func syntax does not follow the JIT signature schema.
-If you are a triggering an assert related to JIT signature compliance
-try adding this field and setting it to False. In general, this serves as a means
-of tracking an ongoing schema unification with the goal of aligning func syntax
-with other components of PyTorch in order to reduce overall complexity.
-If you find yourself having to set this field to False add @gchanan to your PR's
-set of reviewers.
+By default, ATen code generation will generate device check,
+which will ensure all the tensor parameters passed to kernel are
+on the same device.
 
-### `use_c10_dispatcher`
-
-```
-use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
-```
-
-This will indicate that the operator implementation is still using a legacy operator signature.
-For any new ops, please don't set this.
-The new, non-legacy operator signature requires the operator function signature to be aligned with the
-function schema in native_functions.yaml, i.e.
-- out arguments have to be in the end of the argument list instead of in the beginning
-- TensorOptions are taken as separate arguments
-```
-  const c10::optional<ScalarType>& dtype,
-  const c10::optional<Layout>& layout,
-  const c10::optional<Device>& device,
-  const c10::optional<bool>& pin_memory
-```
-  instead of one `TensorOptions` argument
-- optional tensors are taken as `const c10::optional<Tensor>&` instead of `Tensor`
-Some of our kernels are still written in a legacy way, not doing those things,
-and need an adapter to work with the dispatcher calling convention. For those, we use
-`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate a corresponding
-adapter around them in the operator registration call. Over time, we will migrate all
-those kernels to the new calling convention and hacky_wrapper will die.
+However, in some cases, checking the device is unncessary, because,
+e.g., you call a function allows to work on multiple devices.
+In that case, code generation of the device check can be disabled by adding
+`device_check: NoCheck` to your function definition.
 
 ### `manual_kernel_registration`
 
@@ -399,6 +429,19 @@ You can find the manual registrations in torch/csrc/autograd/VariableTypeManual.
 Currently ops have this field set to True should match `MANUAL_CATCHALL` in tools/autograd/gen_variable_type.py
 (It can be a superset of `MANUAL_CATCHALL` but we don't have a use case for it).
 This field should only be used rarely.
+
+### `use_const_ref_for_mutable_tensors`
+
+```
+use_const_ref_for_mutable_tensors: True
+```
+
+With this flag set, we will generate arguments for Tensors whose underlying data may change as
+`const Tensor&` (or similar), just like we would for other Tensors. Previously, we generated these
+as `Tensor &`, which 1) allowed changing which `TensorImpl` the `Tensor` itself referred to and 2)
+was not necessary to allow the underlying data to change. (This was like using `T * const` when we
+wanted `const T*`.)
+
 
 ## Writing an implementation in C++
 
@@ -460,24 +503,20 @@ Here're steps to follow to decide the right dispatch keyword:
     - Yes: you're likely calling other `at::` ops in the implemetation. Go to step 2.
 
 2. Think about training: does your kernel support autograd? [check autograd support](#will-your-function-be-automatically-differentiable)
-    - Yes: in other words, you're providing a `Math` kernel which supports both inference and autograd.
-      To use autograd support for training, simply skip adding a dispatch section or write
-      ```
-      dispatch:
-        Math: kernel
-      ```
-
-      You're done. This will allow this op to be correctly registered for both inference and training.
+    - Yes: in other words, you're providing a `CompositeImplicitAutograd` kernel which supports both inference and autograd.
+      To use autograd support for training, simply skip adding a dispatch
+      section and you're done. This will allow this op to be correctly
+      registered for both inference and training.
 
     - Yes, but you still want to provide a numerically stable gradient formula instead of using autograd, write
       ```
       dispatch:
-        DefaultBackend: kernel
+        CompositeExplicitAutograd: kernel
       ```
 
       You're done. This op will be called in inference for all backends.
 
-      Note: to support training you're required to add a autograd formula,
+      Note: to support training you're required to add an autograd formula,
       or it'll error out in backward pass when calling with a Tensor has requires_grad=True.
 
     - No: ops in this category are mainly using `_out` boilerplate where its out version doesn't have a derivative
@@ -492,7 +531,7 @@ Here're steps to follow to decide the right dispatch keyword:
       For `sign` and `sign_`, write
       ```
       dispatch:
-        DefaultBackend: kernel
+        CompositeExplicitAutograd: kernel
       ```
 
       You're done. This op will be called in inference for all backends.
@@ -503,12 +542,12 @@ Here're steps to follow to decide the right dispatch keyword:
       Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
       the implementations and add dispatch section with device keywords instead.
 3. Validate the computed dispatch table matches what you want. You can use `PythonDispatcher` provided in
-[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispacher.py).
+[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispatcher.py).
 It shows for a certain operator, what the computed dispatch table looks like after your registrations.
 
     ```
     dispatcher = PythonDispatcher()
-    dispatcher.register(["CPU", "XLA", "AutogradCPU", "Math"])
+    dispatcher.register(["CPU", "XLA", "AutogradCPU", "CompositeImplicitAutograd"])
     print(dispatcher.dispatchTable()) # Tells you exactly which kernel is used for certain backend.
     ```
 
@@ -516,8 +555,8 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
   - direct registration to backend always has higher precendence than alias
-  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > Math`,
-    e.g. adding both `Math` and `DefaultBackend` kernels for one op will completely ignore `Math` kernel for
+  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `CompositeExplicitAutograd > CompositeImplicitAutograd`,
+    e.g. adding both `CompositeImplicitAutograd` and `CompositeExplicitAutograd` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
 
 
@@ -532,6 +571,7 @@ The generated bindings are either exposed as methods on python_variable or funct
 the torch._C._nn (marked with `python_module: nn`),
 torch._C._fft (marked with `python_module: fft`),
 torch._C._linalg (marked with `python_module: linalg`) objects,
+torch._C._sparse (marked with `python_module: sparse`) objects,
 or torch._C._special (marked with `python_module: special`) objects.
 
 ### Undefined tensor conventions

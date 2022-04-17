@@ -2,9 +2,8 @@
 
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/THP_export.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -20,6 +19,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/irange.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 #include <vector>
@@ -40,7 +40,7 @@ Py_ssize_t THPVariable_length(PyObject* self) {
     }
     return length;
   }
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  const auto& self_ = THPVariable_Unpack(self);
   if (self_.dim() == 0) {
     return 0;
   }
@@ -62,7 +62,7 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     if (!THPVariable_CheckExact(obj) && check_has_torch_function(obj)) return -1;
     if (THPVariable_Check(obj)) {
-      auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
+      const auto& var = THPVariable_Unpack(obj);
       const auto& var_scalar_type = var.scalar_type();
       if (var_scalar_type == kByte || var_scalar_type == kBool) {
         count += var.dim();
@@ -83,15 +83,15 @@ static inline void invalid_index(PyObject* obj) {
     "Variables are valid indices (got %s)", Py_TYPE(obj)->tp_name);
 }
 
-static inline Variable sequenceToVariable(c10::DispatchKey dispatch_key, PyObject* seq) {
-  return torch::utils::indexing_tensor_from_data(dispatch_key, kLong, c10::nullopt, seq);
+static inline Variable sequenceToVariable(c10::TensorOptions options, PyObject* seq) {
+  return torch::utils::indexing_tensor_from_data(options, kLong, c10::nullopt, seq);
 }
 
-static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
+inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
   if (THPVariable_Check(value)) {
-    return reinterpret_cast<THPVariable*>(value)->cdata;
+    return THPVariable_Unpack(value);
   }
-  at::AutoNonVariableTypeMode guard;  // TODO: remove
+  at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     return at::indexing::scalarToTensor(Scalar(THPUtils_unpackLong(value)), options, device);
@@ -147,7 +147,7 @@ static inline Variable applySlicing(
   }
 
   Variable result = self;
-  for (int64_t i = 0; i < size; i++) {
+  for(const auto i : c10::irange(size)) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     result = at::indexing::handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,
@@ -159,6 +159,7 @@ static inline Variable applySlicing(
           }
           return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
         } else if (PySlice_Check(obj)) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           Py_ssize_t start, stop, step;
           checkUnpackSlice(obj, &start, &stop, &step);
           if (is_tracing) {
@@ -181,9 +182,7 @@ static inline Variable applySlicing(
           }
           return at::indexing::TensorIndex(std::move(tensor));
         } else if (PySequence_Check(obj)) {
-          // TODO: Naughty naughty get out of jail free
-          // (Fixing this means I have to fix the call chain though :/)
-          return at::indexing::TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj));
+          return at::indexing::TensorIndex(sequenceToVariable(self.options(), obj));
         } else {
           auto idx = THPObjectPtr(PyNumber_Index(obj));
           if (!idx) {
@@ -212,6 +211,9 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
   if (PyTuple_Check(index)) {
     return true;
   }
+  if (THPVariable_Check(index)) {
+    return false;
+  }
   if (!PySequence_Check(index)) {
     return false;
   }
@@ -229,6 +231,7 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
     PyErr_Clear();
     return false;
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (n >= 32) {
     return false;
   }
@@ -272,7 +275,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   if (!THPVariable_CheckExact(self) && check_has_torch_function(self)) {
     return handle_torch_function_indexing(self, index);
   }
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  const auto& self_ = THPVariable_Unpack(self);
   OptionalDeviceGuard device_guard(device_of(self_));
 
   // handle simple types: none, ellipsis
@@ -294,6 +297,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     return THPVariable_Wrap(
       at::indexing::get_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}));
   } else if (PySlice_Check(index)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, step;
     checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {
@@ -336,6 +340,12 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   END_HANDLE_TH_ERRORS
 }
 
+void dispatch_set_item(const Tensor& self, ArrayRef<at::indexing::TensorIndex> indices,
+                       const Tensor& value, bool disable_slice_optimization=false) {
+  pybind11::gil_scoped_release no_gil;
+  at::indexing::set_item(self, indices, value, disable_slice_optimization);
+}
+
 // NOTE: Here is the dispatch structure for `THPVariable_setitem`:
 //
 // 1. Python 1-D setter calls C++ `at::indexing::set_item` after
@@ -357,7 +367,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     return 0;
   }
 
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  const auto& self_ = THPVariable_Unpack(self);
   if (self_.is_sparse())
   {
     throw TypeError("Cannot assign to a sparse tensor");
@@ -368,6 +378,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   // TODO: This qint special case looks very suspicious...
   if (isQIntType(self_.scalar_type())) {
     value = valueToTensor(device(kCPU).dtype(kFloat), py_value, at::Device(kCPU));
+  } else if (self_device.is_cuda()) {
+    value = valueToTensor(self_.options(), py_value, at::Device(kCPU));
   } else {
     value = valueToTensor(self_.options(), py_value, self_device);
   }
@@ -378,13 +390,13 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     // real 0-sized shapes.
     return 0;
   } else if (index == Py_Ellipsis) {
-    at::indexing::set_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, value);
+    dispatch_set_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, value);
     return 0;
   } else if (index == Py_None) {
-    at::indexing::set_item(self_, {at::indexing::TensorIndex(at::indexing::None)}, value);
+    dispatch_set_item(self_, {at::indexing::TensorIndex(at::indexing::None)}, value);
     return 0;
   } else if (index == Py_True) {
-    at::indexing::set_item(self_, {at::indexing::TensorIndex(true)}, value);
+    dispatch_set_item(self_, {at::indexing::TensorIndex(true)}, value);
     return 0;
   }
 
@@ -395,16 +407,17 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    at::indexing::set_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, value);
+    dispatch_set_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, value);
     return 0;
   } else if (PySlice_Check(index)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, step;
     checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {
       recordSliceTrace(index);
     }
     // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
-    at::indexing::set_item(
+    dispatch_set_item(
       self_, {at::indexing::TensorIndex(at::indexing::Slice(start, stop, step))}, value, /*disable_slice_optimization=*/is_tracing);
     return 0;
   }
@@ -423,23 +436,24 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   Variable sliced = applySlicing(
     self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing, self_device, self_.sizes(), specified_dims);
   if (variableIndices.empty()) {
+    pybind11::gil_scoped_release no_gil;
     at::indexing::copy_to(sliced, value);
     return 0;
   }
 
-  IntArrayRef valueSizes = value.sizes();
-  IntArrayRef slicedValueSizes = at::indexing::slicePrefix1sSize(valueSizes);
-  torch::autograd::Variable valuesSliced;
-  if (!valueSizes.equals(slicedValueSizes)) {
-    valuesSliced = value.view(slicedValueSizes);
-  } else {
-    valuesSliced = value;
-  }
   {
     pybind11::gil_scoped_release no_gil;
+    IntArrayRef valueSizes = value.sizes();
+    IntArrayRef slicedValueSizes = at::indexing::slicePrefix1sSize(valueSizes);
+    torch::autograd::Variable valuesSliced;
+    if (!valueSizes.equals(slicedValueSizes)) {
+      valuesSliced = value.view(slicedValueSizes);
+    } else {
+      valuesSliced = value;
+    }
     at::indexing::dispatch_index_put_(sliced, std::move(variableIndices), valuesSliced);
+    return 0;
   }
-  return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 

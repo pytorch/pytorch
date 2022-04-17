@@ -1,11 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/cuda/vol2col.cuh>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cuda/im2col.cuh>
-#include <ATen/native/cuda/vol2col.cuh>
 #include <ATen/native/DilatedConvolutionUtils.h>
 #include <c10/util/accumulate.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/slow_conv_dilated2d_native.h>
+#include <ATen/ops/slow_conv_dilated3d_native.h>
+#endif
 
 #include <tuple>
 
@@ -136,6 +149,7 @@ void col2hvol(
    check tensor data locations
 */
 void slow_conv_dilated_location_check(
+    CheckedFrom c,
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
@@ -143,13 +157,12 @@ void slow_conv_dilated_location_check(
   // checking data locations of user-provided tensor arguments
   TensorArg input_arg{input, "input", 2}, weight_arg{weight, "weight", 3},
       bias_arg{bias, "bias", 4}, grad_output_arg{grad_output, "grad_output", 5};
-  checkAllSameGPU("slow_conv_dilated_all_cuda_template", {input_arg, weight_arg});
+  checkAllSameGPU(c, {input_arg, weight_arg});
   if (bias.defined()) {
-    checkAllSameGPU("slow_conv_dilated_all_cuda_template", {input_arg, bias_arg});
+    checkAllSameGPU(c, {input_arg, bias_arg});
   }
   if (grad_output.defined()) {
-    checkAllSameGPU(
-        "slow_conv_dilated_all_cuda_template", {input_arg, grad_output_arg});
+    checkAllSameGPU(c, {input_arg, grad_output_arg});
   }
   // we are not checking the data locations of other tensor
   // arguments such as output, grad_input, etc because of these are
@@ -178,7 +191,7 @@ void slow_conv_dilated_all_cuda_template(
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
-  slow_conv_dilated_location_check(input, weight, bias, grad_output);
+  slow_conv_dilated_location_check(__func__, input, weight, bias, grad_output);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto options = input.options();
   // The rear part of input tensor sizes:
@@ -207,7 +220,7 @@ void slow_conv_dilated_all_cuda_template(
     output.zero_();
   }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
   /* When using ROCm, the sum evaluation is inaccurate for double
      tensors. The reason is currently unknown. Hence, we use gemv for
      computing `grad_output_n.sum(dims)` until the ROCm-sum issue is
@@ -225,13 +238,13 @@ void slow_conv_dilated_all_cuda_template(
       /*trans=*/'t',                                 \
       /*    m=*/output_vsize,                        \
       /*    n=*/nOutputPlane,                        \
-      /*alpha=*/ScalarConvert<int, scalar_t>::to(1), \
-      /*    A=*/grad_output_n.data_ptr<scalar_t>(),      \
+      /*alpha=*/static_cast<scalar_t>(1),            \
+      /*    A=*/grad_output_n.data_ptr<scalar_t>(),  \
       /*  lda=*/output_vsize,                        \
-      /*    x=*/ones.data_ptr<scalar_t>(),               \
+      /*    x=*/ones.data_ptr<scalar_t>(),           \
       /* incx=*/1,                                   \
-      /* beta=*/ScalarConvert<int, scalar_t>::to(1), \
-      /*    y=*/grad_bias.data_ptr<scalar_t>(),          \
+      /* beta=*/static_cast<scalar_t>(1),            \
+      /*    y=*/grad_bias.data_ptr<scalar_t>(),      \
       /* incy=*/1)
 #else
 #define CALCULATE_GRAD_BIAS grad_bias += grad_output_n.sum(dims)
@@ -281,12 +294,12 @@ void slow_conv_dilated_all_cuda_template(
                 /*     m=*/columns.size(1),
                 /*     n=*/nOutputPlane,
                 /*     k=*/columns.size(0),
-                /* alpha=*/ScalarConvert<int, scalar_t>::to(1),
+                /* alpha=*/static_cast<scalar_t>(1),
                 /*     A=*/columns.data_ptr<scalar_t>(),
                 /*   lda=*/columns.size(1),
                 /*     B=*/weight.data_ptr<scalar_t>(),
                 /*   ldb=*/columns.size(0),
-                /*  beta=*/ScalarConvert<int, scalar_t>::to(1),
+                /*  beta=*/static_cast<scalar_t>(1),
                 /*     C=*/output_n.data_ptr<scalar_t>(),
                 /*   ldc=*/columns.size(1));
 
@@ -306,12 +319,12 @@ void slow_conv_dilated_all_cuda_template(
                 /*     m=*/columns.size(1),
                 /*     n=*/columns.size(0),
                 /*     k=*/nOutputPlane,
-                /* alpha=*/ScalarConvert<int, scalar_t>::to(1),
+                /* alpha=*/static_cast<scalar_t>(1),
                 /*     A=*/grad_output_n.data_ptr<scalar_t>(),
                 /*   lda=*/columns.size(1),
                 /*     B=*/weight.data_ptr<scalar_t>(),
                 /*   ldb=*/columns.size(0),
-                /*  beta=*/ScalarConvert<int, scalar_t>::to(0),
+                /*  beta=*/static_cast<scalar_t>(0),
                 /*     C=*/columns.data_ptr<scalar_t>(),
                 /*   ldc=*/columns.size(1));
             // Unpack columns back into input:
@@ -344,7 +357,7 @@ void slow_conv_dilated_all_cuda_template(
                 pad_size,
                 dilation_size,
                 columns.data_ptr<scalar_t>());
-            scalar_t scale = ScalarConvert<int, scalar_t>::to(
+            scalar_t scale = static_cast<scalar_t>(
                 1); // TODO: expose as argument?
             /* For gemm argument derivation, see
                slow_conv_dilated_all_cuda_template in
@@ -360,7 +373,7 @@ void slow_conv_dilated_all_cuda_template(
                 /*   lda=*/columns.size(1),
                 /*     B=*/grad_output_n.data_ptr<scalar_t>(),
                 /*   ldb=*/columns.size(1),
-                /*  beta=*/ScalarConvert<int, scalar_t>::to(1),
+                /*  beta=*/static_cast<scalar_t>(1),
                 /*     C=*/grad_weight.data_ptr<scalar_t>(),
                 /*   ldc=*/columns.size(0));
           }
@@ -387,11 +400,14 @@ void slow_conv_dilated_all_cuda_template(
 Tensor slow_conv_dilated2d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<2>(
       input,
@@ -490,11 +506,14 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cuda(
 Tensor slow_conv_dilated3d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<3>(
       input,
@@ -589,6 +608,9 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cuda(
       dilation_size);
   return std::tie(grad_input, grad_weight, grad_bias);
 }
+
+REGISTER_CUDA_DISPATCH(slow_conv_dilated2d_backward_stub, &slow_conv_dilated2d_backward_cuda);
+REGISTER_CUDA_DISPATCH(slow_conv_dilated3d_backward_stub, &slow_conv_dilated3d_backward_cuda);
 
 } // namespace native
 } // namespace at

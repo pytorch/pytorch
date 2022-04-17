@@ -72,11 +72,13 @@ class AveragePoolDnnLowPOp final
 
   AveragePoolDnnLowPOp(const OperatorDef& operator_def, Workspace* ws)
       : BaseType(operator_def, ws) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < this->kernel_.size(); ++i) {
       CAFFE_ENFORCE(
           dilation_[i] == 1, "Pooling op does not support dilation right now.");
     }
     if (!global_pooling_) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < this->kernel_.size(); ++i) {
         CAFFE_ENFORCE(
             pads_[i] < kernel_[i] &&
@@ -432,11 +434,13 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 
   MaxPoolDnnLowPOp(const OperatorDef& operator_def, Workspace* ws)
       : BaseType(operator_def, ws) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < this->kernel_.size(); ++i) {
       CAFFE_ENFORCE(
           dilation_[i] == 1, "Pooling op does not support dilation right now.");
     }
     if (!global_pooling_) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < this->kernel_.size(); ++i) {
         CAFFE_ENFORCE(
             pads_[i] < kernel_[i] &&

@@ -20,6 +20,7 @@ class CreateMutexOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<std::mutex>>(0) =
+        // NOLINTNEXTLINE(modernize-make-unique)
         std::unique_ptr<std::mutex>(new std::mutex);
     return true;
   }
@@ -57,6 +58,7 @@ class CreateAtomicBoolOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<std::atomic<bool>>>(0) =
+        // NOLINTNEXTLINE(modernize-make-unique)
         std::unique_ptr<std::atomic<bool>>(new std::atomic<bool>(false));
     return true;
   }

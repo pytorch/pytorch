@@ -49,6 +49,7 @@ inline Tensor kl_div(
     const Tensor& target,
     KLDivFuncOptions::reduction_t reduction,
     bool log_target = false) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   torch::Reduction::Reduction reduction_enum;
 
   if (c10::get_if<enumtype::kMean>(&reduction)) {
@@ -471,7 +472,9 @@ inline Tensor multilabel_soft_margin_loss(
     loss = loss * weight;
   }
 
-  loss = loss.sum(1) / input.size(1); // only return N loss values
+  auto class_dim = input.dim() - 1;
+  auto C = input.size(class_dim);
+  loss = loss.sum(class_dim) / C; // only return N loss values
 
   Tensor ret;
 
@@ -737,8 +740,8 @@ inline Tensor margin_ranking_loss(const Tensor& input1,
                                   double margin,
                                   MarginRankingLossFuncOptions::reduction_t reduction) {
   TORCH_CHECK(
-    input1.dim() != 0 && input2.dim() != 0 && target.dim() != 0,
-    "margin_ranking_loss does not support scalars, got sizes: "
+    input1.dim() == input2.dim() && input1.dim() == target.dim(),
+    "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
     "input1: ", input1.sizes(), ", input2: ", input2.sizes(),
     ", target: ", target.sizes());
   return torch::margin_ranking_loss(input1, input2, target, margin,
@@ -781,54 +784,12 @@ inline Tensor nll_loss(
     TORCH_CHECK(false, "Expected input batch_size (", input.sizes()[0], ") to match target batch_size (", target.sizes()[0], ").");
   }
 
-  torch::Tensor ret;
-  torch::Tensor input_ = input;
-  torch::Tensor target_ = target;
-  if (input_.dim() == 2) {
-    ret = torch::nll_loss(
-          input_,
-          target_,
-          weight,
-          enumtype::reduction_get_enum(reduction),
-          ignore_index);
-  } else if (input_.dim() == 4) {
-    ret = torch::nll_loss2d(
-          input_,
-          target_,
-          weight,
-          enumtype::reduction_get_enum(reduction),
-          ignore_index);
-  } else {
-    // dim == 3 or dim > 4
-    auto n = input_.sizes()[0];
-    auto c = input_.sizes()[1];
-    auto out_size = input_.sizes().slice(2).vec();
-    out_size.insert(out_size.begin(), n);
-    if (target_.sizes().slice(1) != input_.sizes().slice(2)) {
-      TORCH_CHECK(false, "Expected target size ", at::IntArrayRef(out_size), ", got ", target_.sizes());
-    }
-    input_ = input_.contiguous();
-    target_ = target_.contiguous();
-    // support empty batches, see #15870
-    if (input_.numel() > 0) {
-      input_ = input_.view({n, c, 1, -1});
-    } else {
-      input_ = input_.view({n, c, 0, 0});
-    }
-    if (target_.numel() > 0) {
-      target_ = target_.view({n, 1, -1});
-    } else {
-      target_ = target_.view({n, 0, 0});
-    }
-    auto reduction_enum = enumtype::reduction_get_enum(reduction);
-    if (!c10::get_if<enumtype::kNone>(&reduction)) {
-      ret = torch::nll_loss2d(input_, target_, weight, reduction_enum, ignore_index);
-    } else {
-      auto out = torch::nll_loss2d(input_, target_, weight, reduction_enum, ignore_index);
-      ret = out.view(out_size);
-    }
-  }
-  return ret;
+  return torch::nll_loss_nd(
+      input,
+      target,
+      weight,
+      enumtype::reduction_get_enum(reduction),
+      ignore_index);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -865,26 +826,15 @@ inline Tensor cross_entropy(
     const Tensor& target,
     const Tensor& weight,
     int64_t ignore_index,
-    CrossEntropyFuncOptions::reduction_t reduction) {
-  NLLLossFuncOptions::reduction_t reduction_;
-  if (c10::get_if<enumtype::kNone>(&reduction)) {
-    reduction_ = torch::kNone;
-  } else if (c10::get_if<enumtype::kMean>(&reduction)) {
-    reduction_ = torch::kMean;
-  } else if (c10::get_if<enumtype::kSum>(&reduction)) {
-    reduction_ = torch::kSum;
-  } else {
-    TORCH_INTERNAL_ASSERT(
-      false,
-      enumtype::get_enum_name(reduction),
-      " is not valid");
-  }
-  return torch::nn::functional::detail::nll_loss(
-    torch::nn::functional::detail::log_softmax(input, 1, c10::nullopt),
-    target,
-    weight,
-    ignore_index,
-    reduction_);
+    CrossEntropyFuncOptions::reduction_t reduction,
+    double label_smoothing) {
+  return torch::cross_entropy_loss(
+      input,
+      target,
+      weight,
+      enumtype::reduction_get_enum(reduction),
+      ignore_index,
+      label_smoothing);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -909,7 +859,8 @@ inline Tensor cross_entropy(
       target,
       options.weight(),
       options.ignore_index(),
-      options.reduction());
+      options.reduction(),
+      options.label_smoothing());
 }
 
 // ============================================================================

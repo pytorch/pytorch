@@ -9,6 +9,8 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serializer_base.h"
 #include "caffe2/core/tensor.h"
+
+#include <c10/util/irange.h>
 #include <c10/util/typeid.h>
 #include "caffe2/core/types.h"
 #include "caffe2/utils/simple_queue.h"
@@ -43,8 +45,18 @@ constexpr auto kChunkIdSeparator = "#%";
 TORCH_API void SerializeBlob(
     const Blob& blob,
     const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor);
+
+TORCH_API void SerializeBlob(
+    const Blob& blob,
+    const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
-    int chunk_size = kDefaultChunkSize);
+    const BlobSerializationOptions& options);
+
+TORCH_API size_t EstimateSerializedBlobSize(
+    const Blob& blob,
+    c10::string_view name,
+    const BlobSerializationOptions& options);
 
 /**
  * @brief Convenience function to serialize a blob to a string.
@@ -107,19 +119,36 @@ class TORCH_API TensorSerializer : public BlobSerializerBase {
       TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override;
-  void SerializeWithChunkSize(
+  void SerializeWithOptions(
       const void* pointer,
       TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor,
-      int chunk_size) override;
+      const BlobSerializationOptions& options) override;
+
+  void Serialize(
+      const Tensor& tensor,
+      const string& name,
+      TensorProto* proto,
+      const BlobSerializationOptions& options,
+      size_t chunkBegin,
+      int32_t chunkSize);
 
   void Serialize(
       const Tensor& tensor,
       const string& name,
       TensorProto* proto,
       size_t chunkBegin,
-      int32_t chunkSize);
+      int32_t chunkSize) {
+    BlobSerializationOptions options;
+    Serialize(tensor, name, proto, options, chunkBegin, chunkSize);
+  }
+
+  size_t EstimateSerializedBlobSize(
+      const void* pointer,
+      TypeMeta typeMeta,
+      c10::string_view name,
+      const BlobSerializationOptions& options) override;
 
  private:
   // A utility function to store the device context detauls.
@@ -162,6 +191,24 @@ class TORCH_API TensorDeserializer : public BlobDeserializerBase {
 ////////////////////////////////////////////////////////////////////////////////
 
 namespace detail {
+// Make space for new elements to be copied to the end of the repeated field.
+// The new space is not guaranteed to be initialized.
+template <typename T>
+void ExtendRepeatedField(
+    google::protobuf::RepeatedField<T>* field,
+    size_t size) {
+  field->Reserve(field->size() + size);
+#if GOOGLE_PROTOBUF_VERSION >= 3000000
+  field->AddNAlreadyReserved(size);
+#else
+  // We unfortunately do still need to support old protobuf versions in some
+  // build configurations.
+  for (const auto i : c10::irange(size)) {
+    field->Add(0);
+  }
+#endif
+}
+
 template <typename SrcType, typename DstType>
 inline void CopyToProtoAsIs(
     const size_t size,
@@ -172,10 +219,7 @@ inline void CopyToProtoAsIs(
       sizeof(SrcType) == sizeof(DstType),
       "The source type and dest type cannot be copied as-is. Did "
       "you mean CopyToProtoWithCast?");
-  field->Reserve(size);
-  for (size_t i = 0; i < size; ++i) {
-    field->Add(0);
-  }
+  ExtendRepeatedField(field, size);
   context->template CopyToCPU<SrcType>(
       size, src, reinterpret_cast<SrcType*>(field->mutable_data()));
   // Make sure that we finish the copy into the protobuf.
@@ -194,7 +238,7 @@ inline void CopyToProtoWithCast(
   context->template CopyToCPU<SrcType>(size, src, buffer.get());
   context->FinishDeviceComputation();
   field->Reserve(size);
-  for (size_t i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
     field->Add(static_cast<DstType>(buffer[i]));
   }
 }
@@ -225,7 +269,7 @@ inline void CopyFromProtoWithCast(
   // CPUContext. Remove it if it is performance critical.
   unique_ptr<DstType[]> buffer(new DstType[size]);
   const SrcType* src = field.data();
-  for (size_t i = 0; i < size; ++i) {
+  for (const auto i : c10::irange(size)) {
     buffer[i] = static_cast<DstType>(src[i]);
   }
   context->template CopyFromCPU<DstType>(size, buffer.get(), dst);

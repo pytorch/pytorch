@@ -322,7 +322,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans(),
            **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_layer_norm_op_jit(self, X, eps, elementwise_affine, gc, dc):
         @torch.jit.script
         def jit_layer_norm(
@@ -344,7 +344,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
             expected_norm, expected_mean, expected_std = \
                 _layer_norm_with_affine_ref(axis, eps, X, gamma, beta)
             actual_norm, actual_mean, actual_std = jit_layer_norm(
-                torch.Tensor(X), torch.tensor(gamma), torch.tensor(beta),
+                torch.tensor(X), torch.tensor(gamma), torch.tensor(beta),
                 axis, eps, elementwise_affine)
         else:
             expected_norm, expected_mean, expected_std = _layer_norm_ref(

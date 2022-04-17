@@ -1,13 +1,29 @@
-#include <ATen/ATen.h>
-#include <ATen/Parallel.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/div_rtn.h>
-#include <tuple>
+#include <ATen/TensorUtils.h>
+#include <ATen/native/DispatchStub.h>
+#include <c10/util/irange.h>
 
 #pragma once
 
 namespace at {
 namespace native {
+
+using max_pool2d_fn = void(*)(const Tensor& output, const Tensor& indices, const Tensor& input,
+    int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH);
+using max_pool2d_backward_fn = void(*)(const Tensor& grad_input, const Tensor& grad_output, const Tensor& indices);
+
+DECLARE_DISPATCH(max_pool2d_fn, max_pool2d_kernel);
+DECLARE_DISPATCH(max_pool2d_backward_fn, max_pool2d_backward_kernel);
+
+// averge pooling has same signature for forward and backward
+using avg_pool2d_fn = void(*)(const Tensor& output, const Tensor& input, int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH, int64_t padW, int64_t padH, bool count_include_pad, c10::optional<int64_t> divisor_override);
+using avg_pool2d_backward_fn = void(*)(const Tensor& output, const Tensor& input, int kW, int kH,
+    int dW, int dH, int padW, int padH, bool count_include_pad, c10::optional<int64_t> divisor_override);
+
+DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel);
+DECLARE_DISPATCH(avg_pool2d_backward_fn, avg_pool2d_backward_kernel);
 
 namespace {
 
@@ -44,6 +60,24 @@ static inline T pooling_output_shape(
     TORCH_CHECK(stride != 0, "stride should not be zero");
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
+}
+
+inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
+    int64_t inputSize, int64_t kernelSize, int64_t stride, int64_t dilation) {
+  // NOTE: with strides, the output shape is ceil(inputSize/stride)
+  auto total_padding = dilation * (kernelSize - 1);
+
+  // Prefer symmetric padding if possible
+  if (stride > 2 && (total_padding % 2 == 1)) {
+    // The floor in the output size calculation gives us a little wiggle room
+    auto wiggle_room = inputSize % stride - 1;
+    if (wiggle_room > 0) {
+      --total_padding;
+    }
+  }
+
+  auto left = total_padding / 2;
+  return {left, total_padding - left};
 }
 
 
@@ -100,12 +134,10 @@ max_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
   const Tensor& indices,
-  int64_t nbatch,
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format,
-  bool cuda=false)
+  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)
 {
   pool2d_shape_check(
     input,
@@ -129,7 +161,7 @@ static inline void
 avg_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
-  int64_t nbatch,
+  int64_t /*nbatch*/,
   int kH, int kW, int dH, int dW, int padH, int padW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
@@ -161,6 +193,7 @@ pool3d_shape_check(
   int dilationT, int dilationH, int dilationW,
   int64_t itime, int64_t iheight, int64_t iwidth,
   int64_t otime, int64_t oheight, int64_t owidth,
+  const char *fn_name,
   bool check_input_size=false)
 {
   const int64_t ndim = input.ndimension();
@@ -175,8 +208,14 @@ pool3d_shape_check(
               "dilation should be greater than zero, but got ",
               "dilationT: ", dilationT, " dilationH: ", dilationH, " dilationW: ", dilationW);
 
-  TORCH_CHECK(input.numel() > 0 && (ndim == 4 || ndim == 5),
-              "non-empty 4D or 5D (batch mode) tensor expected for input, but got ndim: ", ndim);
+  TORCH_CHECK(ndim == 4 || ndim == 5,
+              fn_name, ": Expected 4D or 5D tensor for input, but got: ", input.sizes());
+
+  for (const auto i : c10::irange(1, ndim)) {
+    TORCH_CHECK(input.size(i) > 0,
+                fn_name, "Expected input to have non-zero size for non-batch dimensions, but got",
+                input.sizes(), " with dimension ", i, " being empty.");
+  }
 
   if (check_input_size) { // AveragePool3d
     TORCH_CHECK(itime >= kT && iheight >= kH && iwidth >= kW,
@@ -207,7 +246,8 @@ max_pool3d_backward_shape_check(
   int pT, int pH, int pW,
   int dilationT, int dilationH, int dilationW,
   int64_t itime, int64_t iheight, int64_t iwidth,
-  int64_t otime, int64_t oheight, int64_t owidth)
+  int64_t otime, int64_t oheight, int64_t owidth,
+  const char* fn_name)
 {
   const int64_t ndim = input.ndimension();
 
@@ -219,7 +259,7 @@ max_pool3d_backward_shape_check(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth, fn_name);
 
   check_dim_size(gradOutput, ndim, ndim-4, nslices);
   check_dim_size(gradOutput, ndim, ndim-3, otime);
@@ -241,7 +281,8 @@ avg_pool3d_backward_shape_check(
   int dT, int dH, int dW,
   int pT, int pH, int pW,
   int64_t itime, int64_t iheight, int64_t iwidth,
-  int64_t otime, int64_t oheight, int64_t owidth)
+  int64_t otime, int64_t oheight, int64_t owidth,
+  const char *fn_name)
 {
   const int64_t ndim = input.ndimension();
 
@@ -254,7 +295,7 @@ avg_pool3d_backward_shape_check(
     1, 1, 1,
     itime, iheight, iwidth,
     otime, oheight, owidth,
-    true);
+    fn_name, true);
 
   check_dim_size(gradOutput, ndim, ndim-4, nslices);
   check_dim_size(gradOutput, ndim, ndim-3, otime);

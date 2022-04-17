@@ -28,12 +28,14 @@ void Workspace::PrintBlobSizes() {
     Blob* b = this->GetBlob(s);
     TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
     if (shape_fun) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t capacity;
       DeviceOption _device;
       auto shape = shape_fun(b->GetRaw(), &capacity, &_device);
       // NB: currently it overcounts capacity of shared storages
       // TODO: fix it after the storage sharing is merged
       cumtotal += capacity;
+      // NOLINTNEXTLINE(modernize-use-emplace)
       blob_sizes.push_back(make_pair(capacity, s));
     }
   }
@@ -52,6 +54,7 @@ void Workspace::PrintBlobSizes() {
     Blob* b = this->GetBlob(sb.second);
     TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
     CHECK(shape_fun != nullptr);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t capacity;
     DeviceOption _device;
 
@@ -106,6 +109,7 @@ Blob* Workspace::CreateBlob(const string& name) {
             << "(blob " << forwarded_blobs_[name].second << "). Skipping.";
   } else {
     VLOG(1) << "Creating blob " << name;
+    // NOLINTNEXTLINE(modernize-make-unique)
     blob_map_[name] = unique_ptr<Blob>(new Blob());
   }
   return GetBlob(name);
@@ -222,6 +226,7 @@ void Workspace::AddBlobMapping(
 }
 
 Blob* Workspace::GetBlob(const string& name) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return const_cast<Blob*>(static_cast<const Workspace*>(this)->GetBlob(name));
 }
 

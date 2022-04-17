@@ -16,6 +16,7 @@
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -89,6 +90,7 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
   torch::ModelDef model_def;
 
   at::DataPtr data_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t data_size;
   std::tie(data_ptr, data_size) = reader_->getRecord("model.json");
   // NB: cannot use JsonStringToMessage, since fbcode's protobuf is too old
@@ -128,7 +130,9 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
         LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
   } else if (proto_version >= 3) {
     LEGACY_pickled_ivalues_ =
-        LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
+        std::move(*LEGACY_loadPickleArchive("attributes.pkl").toTuple())
+            .elements()
+            .vec();
   }
   LEGACY_moduleStack_.emplace_back("__torch__");
   const auto& module_def = model_def.main_module();
@@ -143,6 +147,7 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
 IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
     const std::string& name) {
   at::DataPtr attributes_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
   auto ivalue = unpickle(
@@ -152,7 +157,7 @@ IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
         auto cls = source_importer_.loadType(qn)->expect<ClassType>();
         return c10::StrongTypePtr(compilation_unit_, std::move(cls));
       },
-      &tensor_table_);
+      tensor_table_);
   return ivalue;
 }
 
@@ -187,6 +192,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
   auto storage_it = storageMap.find(record_key);
   if (storage_it == storageMap.end()) {
     at::DataPtr storage_ptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint64_t record_size;
     std::tie(storage_ptr, record_size) = reader_->getRecord(record_key);
     auto cpu_storage = at::Storage(
@@ -288,12 +294,12 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
   auto module =
       Module(c10::QualifiedName(LEGACY_moduleStack_), compilation_unit_);
-  for (int i = 0; i < module_def.submodules_size(); ++i) {
+  for (const auto i : c10::irange(module_def.submodules_size())) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
     auto submodule = LEGACY_convertModule(sub_def);
     module.register_module(sub_def.name(), submodule);
   }
-  for (int i = 0; i < module_def.parameters_size(); ++i) {
+  for (const auto i : c10::irange(module_def.parameters_size())) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
     at::Tensor tensor = constant_table_.at(param_def.tensor_id()).toTensor();
     if (param_def.is_buffer()) {
@@ -304,7 +310,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
   ScriptTypeParser typeParser(
       std::make_shared<ClassResolver>(source_importer_));
-  for (int i = 0; i < module_def.attributes_size(); ++i) {
+  for (const auto i : c10::irange(module_def.attributes_size())) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
     if (module.hasattr(attr_def.name())) {
       // this attribute was already registered as a buffer above.
@@ -327,6 +333,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr;
   if (module_def.has_torchscript_debug_arena()) {
     at::DataPtr data;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t size;
     std::tie(data, size) =
         reader_->getRecord(module_def.torchscript_debug_arena().key());
@@ -337,6 +344,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
 
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t size;
     std::tie(data, size) =
         reader_->getRecord(module_def.torchscript_arena().key());
@@ -373,7 +381,8 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
     }
   }
 
-  for (size_t i = 0; i < numPushed; i++) {
+  for (const auto i : c10::irange(numPushed)) {
+    (void)i; // Suppress unused variable warning
     LEGACY_moduleStack_.pop_back();
   }
   return module;

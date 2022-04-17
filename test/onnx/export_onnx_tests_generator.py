@@ -135,6 +135,6 @@ def convert_tests(testcases, sets=1):
     print("PyTorch converted cases are stored in {}.".format(test_onnx_common.pytorch_converted_dir))
     print_stats(FunctionalModule_nums, nn_module)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     testcases = module_tests + new_module_tests
     convert_tests(testcases)

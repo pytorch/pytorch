@@ -41,6 +41,7 @@ class TestBenchNetwork:
         if modeldef.backward is not None:
             benchmark(cuda_sync, modeldef.backward, *backward_input, retain_graph=True)
 
-            for param in modeldef.params:
-                assert param.grad is not None
-                param.grad.data.zero_()
+            with torch.no_grad():
+                for param in modeldef.params:
+                    assert param.grad is not None
+                    param.grad.zero_()

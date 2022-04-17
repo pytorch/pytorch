@@ -1,14 +1,16 @@
+import argparse
 import collections
 from pprint import pformat
 
-import argparse
-
-from tools.codegen.model import *
-from tools.codegen.api.python import *
-from tools.codegen.gen import FileManager
+from tools.codegen.model import Variant
+from tools.codegen.api.python import (PythonSignatureGroup,
+                                      PythonSignatureNativeFunctionPair,
+                                      returns_named_tuple_pyi)
+from tools.codegen.gen import parse_native_yaml
+from tools.codegen.utils import FileManager
 from typing import Sequence, List, Dict
 
-from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
+from tools.autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
 
 """
 This module implements generation of type stubs for PyTorch,
@@ -70,8 +72,6 @@ blocklist = [
     '__new__',
     '__subclasshook__',
     'cdist',
-    'clamp',
-    'clamp_',
     'device',
     'grad',
     'requires_grad',
@@ -96,7 +96,6 @@ blocklist = [
     'norm',
     'chain_matmul',
     'stft',
-    'istft',
     'tensordot',
     'split',
     'unique_consecutive',
@@ -123,11 +122,14 @@ blocklist = [
 binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
               'matmul', 'floordiv',
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
-              'and', 'or', 'xor',                   # logic
+              'and', 'or', 'xor', 'rand', 'ror', 'rxor',  # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
               'ior', 'irshift', 'isub', 'ixor', 'ifloordiv', 'imod',  # inplace ops
               )
-comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
+symmetric_comparison_ops = ('eq', 'ne')
+asymmetric_comparison_ops = ('ge', 'gt', 'lt', 'le')
+comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
+
 unary_ops = ('neg', 'abs', 'invert')
 to_py_type_ops = ('bool', 'float', 'complex', 'long', 'index', 'int', 'nonzero')
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
@@ -146,8 +148,11 @@ def sig_for_ops(opname: str) -> List[str]:
     if name in binary_ops:
         return ['def {}(self, other: Any) -> Tensor: ...'.format(opname)]
     elif name in comparison_ops:
-        # unsafe override https://github.com/python/mypy/issues/5704
-        return ['def {}(self, other: Any) -> Tensor: ...  # type: ignore'.format(opname)]
+        sig = 'def {}(self, other: Any) -> Tensor: ...'.format(opname)
+        if name in symmetric_comparison_ops:
+            # unsafe override https://github.com/python/mypy/issues/5704
+            sig += '  # type: ignore[override]'
+        return [sig]
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
@@ -210,6 +215,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         'pixel_shuffle',
         'pixel_unshuffle',
         'channel_shuffle',
+        'native_channel_shuffle',
         'pdist',
         'cosine_similarity',
     ]
@@ -277,10 +283,14 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     unsorted_function_hints.update({
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
+        'asarray': ['def asarray(obj: Any, *, dtype: Optional[_dtype]=None, '
+                    'device: Union[_device, str, None]=None, copy: Optional[_bool]=None, '
+                    'requires_grad: _bool=False) -> Tensor: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
+        'frombuffer': ['def frombuffer(buffer: Any, *, dtype: _dtype, count: int=-1, '
+                       'offset: int=0, device: Union[_device, str, None]=None, '
+                       'requires_grad: _bool=False) -> Tensor: ...'],
         'numel': ['def numel(self: Tensor) -> _int: ...'],
-        'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
-                  " *, out: Optional[Tensor]=None) -> Tensor: ..."],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> _int: ...'],
         'set_num_threads': ['def set_num_threads(num: _int) -> None: ...'],
@@ -294,7 +304,17 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
                               ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
+        'sparse_csr_tensor' : ['def sparse_csr_tensor(crow_indices: Union[Tensor, List],'
+                               'col_indices: Union[Tensor, List],'
+                               ' values: Union[Tensor, List], size: Optional[_size]=None,'
+                               ' *, dtype: Optional[_dtype]=None,'
+                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
         '_sparse_coo_tensor_unsafe': ['def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],'
+                                      ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
+                                      ' requires_grad: bool = False) -> Tensor: ...'],
+        '_sparse_csr_tensor_unsafe': ['def _sparse_csr_tensor_unsafe(crow_indices: Union[Tensor, List],'
+                                      'col_indices: Union[Tensor, List],'
+                                      ' values: Union[Tensor, List], size: List[int],'
                                       ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
                                       ' requires_grad: bool = False) -> Tensor: ...'],
         'range': ['def range(start: Number, end: Number,'
@@ -307,6 +327,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                    .format(FACTORY_PARAMS),
                    'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                    .format(FACTORY_PARAMS)],
+        'linspace': ['def linspace(start: Number, end: Number, steps: Optional[_int]=None, *,'
+                     ' out: Optional[Tensor]=None, {}) -> Tensor: ...'.format(FACTORY_PARAMS)],
+        'logspace': ['def logspace(start: Number, end: Number, steps: Optional[_int]=None, base: _float=10.0, *,'
+                     ' out: Optional[Tensor]=None, {}) -> Tensor: ...'.format(FACTORY_PARAMS)],
         'randint': ['def randint(low: _int, high: _int, size: _size, *,'
                     ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS),
@@ -322,6 +346,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                  ' layout: _layout=strided, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
+        'is_inference_mode_enabled': ['def is_inference_mode_enabled() -> _bool: ...'],
         'nonzero': ['def nonzero(input: Tensor, *, as_tuple: Literal[False]=False, out: Optional[Tensor]=None) -> Tensor: ...',
                     'def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...'],
         'binary_cross_entropy_with_logits': ['def binary_cross_entropy_with_logits(input: Tensor, target: Tensor, '
@@ -364,13 +389,16 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
             ' other: Union[Tensor, Number],'
             ' *, alpha: Optional[Number]=1, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
 
-    function_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=False, pyi=True)
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = list(filter(should_generate_py_binding, native_functions))
+
+    function_signatures = load_signatures(native_functions, deprecated_yaml_path, method=False, pyi=True)
     sig_groups = get_py_torch_functions(function_signatures)
     for group in sorted(sig_groups, key=lambda g: g.signature.name):
         name = group.signature.name
         unsorted_function_hints[name] += generate_type_hints(group)
 
-        named_tuple = group.signature.returns.named_tuple_pyi()
+        named_tuple = returns_named_tuple_pyi(group.signature)
         if named_tuple is not None and not group.signature.deprecated:
             # deprecated namedtuples are currently not included for torch functions
             tuple_name, tuple_def = named_tuple
@@ -391,7 +419,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     unsorted_tensor_method_hints: Dict[str, List[str]] = collections.defaultdict(list)
     unsorted_tensor_method_hints.update({
         'size': ['def size(self) -> Size: ...',
-                 'def size(self, _int) -> _int: ...'],
+                 'def size(self, dim: _int) -> _int: ...'],
         'stride': ['def stride(self) -> Tuple[_int]: ...',
                    'def stride(self, _int) -> _int: ...'],
         'new_ones': ['def new_ones(self, size: _size, {}) -> Tensor: ...'.
@@ -411,11 +439,6 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                      ],
         'as_subclass': ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
         '_make_subclass': ["def _make_subclass(cls, data: Tensor, require_grad: _bool = False) -> Tensor: ..."],
-        # clamp has no default values in the Declarations
-        'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
-                  " *, out: Optional[Tensor]=None) -> Tensor: ..."],
-        'clamp_': ["def clamp_(self, min: _float=-inf, max: _float=inf) -> Tensor: ..."],
-        '__get__': ["def __get__(self, instance, owner=None) -> Tensor: ..."],
         '__getitem__': ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
         '__setitem__': ["def __setitem__(self, {}, val: Union[Tensor, Number])"
                         " -> None: ...".format(INDICES)],
@@ -434,7 +457,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ...'],
         'map2_': ['def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ...'],
-        'storage': ['def storage(self) -> Storage: ...'],
+        'storage': ['def _storage(self) -> Storage: ...'],
         'storage_type': ['def storage_type(self) -> Storage: ...'],
         'type': ['def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...',
                  'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
@@ -446,11 +469,15 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         '_is_view': ['def _is_view(self) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
+        'is_nested': ['is_nested: _bool'],
         'is_sparse': ['is_sparse: _bool'],
+        'is_sparse_csr' : ['is_sparse_csr: _bool'],
         'is_quantized': ['is_quantized: _bool'],
         'is_meta': ['is_meta: _bool'],
+        'is_ort': ['is_ort: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],
         'is_vulkan': ['is_vulkan: _bool'],
+        'is_ipu': ['is_ipu: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '
@@ -459,12 +486,11 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                ],
         'item': ["def item(self) -> Number: ..."],
         'copy_': ["def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."],
-        'set_': ['def set_(self, storage: Storage, offset: _int, size: _size, stride: _size) -> Tensor: ...',
-                 'def set_(self, storage: Storage) -> Tensor: ...'],
+        'set_': ['def set_(self, storage: Union[Storage, _TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...',
+                 'def set_(self, storage: Union[Storage, _TypedStorage]) -> Tensor: ...'],
         'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
                   'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
-        'div': ['def div(self, other: Union[Tensor, Number], *, '
-                'rounding_mode: Optional[str] = None, out: Optional[Tensor]=None) -> Tensor: ...'],
+        'div': ['def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
         'div_': ['def div_(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
     })
     for binop in ['mul', 'true_divide', 'floor_divide']:
@@ -494,14 +520,14 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
 
     # pyi tensor methods don't currently include deprecated signatures for some reason
     # TODO: we should probably add them in
-    tensor_method_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=True, skip_deprecated=True, pyi=True)
+    tensor_method_signatures = load_signatures(native_functions, deprecated_yaml_path, method=True, skip_deprecated=True, pyi=True)
     tensor_method_sig_groups = get_py_torch_functions(tensor_method_signatures, method=True)
 
     for group in sorted(tensor_method_sig_groups, key=lambda g: g.signature.name):
         name = group.signature.name
         unsorted_tensor_method_hints[name] += generate_type_hints(group)
 
-        named_tuple = group.signature.returns.named_tuple_pyi()
+        named_tuple = returns_named_tuple_pyi(group.signature)
         if named_tuple is not None and not group.signature.deprecated:
             # deprecated namedtuples are currently not included for torch functions
             tuple_name, tuple_def = named_tuple
@@ -535,7 +561,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     dt = ('Double', 'Float', 'Long', 'Int',
           'Short', 'Char', 'Byte', 'Bool',
           'Half', 'BFloat16', 'ComplexDouble',
-          'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2')
+          'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2', 'QUInt2x4')
     for c in dt:
         legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
     for c in dt:
@@ -556,7 +582,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                          ['float32', 'float', 'float64', 'double', 'float16', 'bfloat16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
                           'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
-                          'quint8', 'qint8', 'qint32', 'bool', 'quint4x2']]
+                          'quint8', 'qint8', 'qint32', 'bool', 'quint4x2', 'quint2x4']]
 
     # Generate __all__ directive
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -590,6 +616,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     })
     fm.write_with_template('torch/_VF.pyi', 'torch/_C/_VariableFunctions.pyi.in', lambda: {
         'generated_comment': '@' + 'generated from torch/_C/_VariableFunctions.pyi.in',
+        **env,
+    })
+    fm.write_with_template('torch/return_types.pyi', 'torch/_C/return_types.pyi.in', lambda: {
+        'generated_comment': '@' + 'generated from torch/_C/return_types.pyi',
         **env,
     })
     gen_nn_functional(fm)

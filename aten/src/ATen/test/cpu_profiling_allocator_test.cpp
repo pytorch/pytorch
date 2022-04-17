@@ -50,6 +50,7 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
           a, conv_weight, linear_weight, true, pointers);
     }
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(valid_allocation_plan());
 
   auto validate_allocation_plan =
@@ -62,6 +63,7 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
     }
     bool success{true};
     for (uint64_t i = 0; i < 10; ++i) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       bool validation_success;
       {
         c10::WithValidateAllocationPlanGuard
@@ -97,6 +99,7 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
           a, conv_weight, linear_weight, false, pointers);
     }
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(valid_allocation_plan());
 
   auto validate_allocation_plan =
@@ -146,20 +149,26 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   };
   // When control flow conditions are same between profiling and evaluation
   // profiling allocator should not throw.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(true, true, false));
   ASSERT_TRUE(ref_output.equal(output));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(false, false, false));
   ASSERT_TRUE(ref_output.equal(output));
   // Furthermore profiling allocator should return the same pointers
   // back for the intermediate tensors
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(true, true, true));
   ASSERT_TRUE(ref_output.equal(output));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(validate_allocation_plan(false, false, true));
   ASSERT_TRUE(ref_output.equal(output));
 
   // When control flow conditions are different between profiling and evaluation
   // profiling allocator should throw.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(validate_allocation_plan(true, false, false), c10::Error);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(validate_allocation_plan(false, true, false), c10::Error);
 }
 

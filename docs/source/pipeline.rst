@@ -51,7 +51,7 @@ Skip connections
 ^^^^^^^^^^^^^^^^
 
 Certain models like ResNeXt are not completely sequential and have skip
-connections between layers. Naively implementing as part of pipeling
+connections between layers. Naively implementing as part of pipeline
 parallelism would imply that we need to copy outputs for certain layers through
 multiple GPUs till we eventually reach the GPU where the layer for the skip
 connection resides. To avoid this copy overhead, we provide APIs below to stash
@@ -62,10 +62,20 @@ and pop Tensors in different layers of the model.
 .. autoclass:: torch.distributed.pipeline.sync.skip.skippable.pop
 .. autofunction:: torch.distributed.pipeline.sync.skip.skippable.verify_skippables
 
+Tutorials
+---------
+
+The following tutorials give a good overview of how to use the
+:class:`~torch.distributed.pipeline.sync.Pipe` API to train your models with the
+rest of the components that PyTorch provides:
+
+- `Training Transformer models using Pipeline Parallelism <https://pytorch.org/tutorials/intermediate/pipeline_tutorial.html>`__
+- `Training Transformer models using Distributed Data Parallel and Pipeline Parallelism <https://pytorch.org/tutorials/advanced/ddp_pipeline.html>`__
+
 Acknowledgements
 ----------------
 
-The implementation for pipeline parallelism is based on `fairscale's pipe implementation <https://github.com/facebookresearch/fairscale/tree/master/fairscale/nn/pipe>`__ and
+The implementation for pipeline parallelism is based on `fairscale's pipe implementation <https://github.com/facebookresearch/fairscale/tree/main/fairscale/nn/pipe>`__ and
 `torchgpipe <https://github.com/kakaobrain/torchgpipe>`__. We would like to
 thank both teams for their contributions and guidance towards bringing pipeline
 parallelism into PyTorch.

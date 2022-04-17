@@ -52,8 +52,8 @@ bool broadcast_first_input(const vTensor& input1, const vTensor& input2) {
 
 Tensor arithmetic_scalar(
     const Tensor& self_arg,
-    const Scalar other,
-    const c10::optional<Scalar> alpha_arg,
+    const Scalar& other,
+    const c10::optional<Scalar>& alpha_arg,
     const api::Shader::Descriptor& shader_descriptor) {
   api::Context* const context = api::context();
 
@@ -90,7 +90,7 @@ Tensor arithmetic_scalar(
           },
           shader_descriptor,
           v_output.extents(),
-          context->gpu().adapter->local_work_group_size(),
+          adaptive_work_group_size(v_output.extents()),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -112,8 +112,8 @@ Tensor arithmetic_scalar(
 
 Tensor& arithmetic_scalar_(
     Tensor& self,
-    const Scalar other,
-    const c10::optional<Scalar> alpha_arg,
+    const Scalar& other,
+    const c10::optional<Scalar>& alpha_arg,
     const api::Shader::Descriptor& shader_descriptor) {
   api::Context* const context = api::context();
 
@@ -146,7 +146,7 @@ Tensor& arithmetic_scalar_(
           },
           shader_descriptor,
           v_self.extents(),
-          context->gpu().adapter->local_work_group_size(),
+          adaptive_work_group_size(v_self.extents()),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(
@@ -168,7 +168,7 @@ Tensor& arithmetic_scalar_(
 Tensor arithmetic_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
-    const c10::optional<Scalar> alpha_arg,
+    const c10::optional<Scalar>& alpha_arg,
     const api::Shader::Descriptor& shader_descriptor) {
   check_inputs(self_arg, other_arg);
   api::Context* const context = api::context();
@@ -216,7 +216,7 @@ Tensor arithmetic_tensor(
           },
           shader_descriptor,
           v_output.extents(),
-          context->gpu().adapter->local_work_group_size(),
+          adaptive_work_group_size(v_output.extents()),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -242,7 +242,7 @@ Tensor arithmetic_tensor(
 Tensor& arithmetic_tensor_(
     Tensor& self,
     const Tensor& other_arg,
-    const c10::optional<Scalar> alpha_arg,
+    const c10::optional<Scalar>& alpha_arg,
     const api::Shader::Descriptor& shader_descriptor) {
   check_inputs(self, other_arg);
   api::Context* const context = api::context();
@@ -283,7 +283,7 @@ Tensor& arithmetic_tensor_(
           },
           shader_descriptor,
           v_self.extents(),
-          context->gpu().adapter->local_work_group_size(),
+          adaptive_work_group_size(v_self.extents()),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(
@@ -307,13 +307,13 @@ Tensor& arithmetic_tensor_(
 
 Tensor add_scalar(
     const Tensor& self_arg,
-    const Scalar other,
-    const Scalar alpha) {
+    const Scalar& other,
+    const Scalar& alpha) {
   return arithmetic_scalar(
       self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar));
 }
 
-Tensor& add_scalar_(Tensor& self, const Scalar other, const Scalar alpha) {
+Tensor& add_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return arithmetic_scalar_(
       self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_));
 }
@@ -321,20 +321,27 @@ Tensor& add_scalar_(Tensor& self, const Scalar other, const Scalar alpha) {
 Tensor add_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
-    const Scalar alpha) {
+    const Scalar& alpha) {
+  if (other_arg.sizes().size() == 0) {
+    return arithmetic_scalar(
+        self_arg,
+        other_arg.item<float>(),
+        c10::optional<Scalar>(alpha.to<float>()),
+        VK_KERNEL(add_scalar));
+  }
   return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
 }
 
-Tensor& add_tensor_(Tensor& self, const Tensor& other_arg, const Scalar alpha) {
+Tensor& add_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
   return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
 }
 
 Tensor sub_scalar(
     const Tensor& self_arg,
-    const Scalar other,
-    const Scalar alpha) {
+    const Scalar& other,
+    const Scalar& alpha) {
   return arithmetic_scalar(
       self_arg,
       other,
@@ -342,7 +349,7 @@ Tensor sub_scalar(
       VK_KERNEL(add_scalar));
 }
 
-Tensor& sub_scalar_(Tensor& self, const Scalar other, const Scalar alpha) {
+Tensor& sub_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return arithmetic_scalar_(
       self,
       other,
@@ -353,27 +360,41 @@ Tensor& sub_scalar_(Tensor& self, const Scalar other, const Scalar alpha) {
 Tensor sub_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
-    const Scalar alpha) {
+    const Scalar& alpha) {
+  if (other_arg.sizes().size() == 0) {
+    return arithmetic_scalar(
+        self_arg,
+        other_arg.item<float>(),
+        c10::optional<Scalar>(-1 * alpha.to<float>()),
+        VK_KERNEL(add_scalar));
+  }
   return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
 }
 
-Tensor& sub_tensor_(Tensor& self, const Tensor& other_arg, const Scalar alpha) {
+Tensor& sub_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
   return arithmetic_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
 }
 
-Tensor mul_scalar(const Tensor& self_arg, const Scalar other) {
+Tensor mul_scalar(const Tensor& self_arg, const Scalar& other) {
   return arithmetic_scalar(
       self_arg, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar));
 }
 
-Tensor& mul_scalar_(Tensor& self, const Scalar other) {
+Tensor& mul_scalar_(Tensor& self, const Scalar& other) {
   return arithmetic_scalar_(
       self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_));
 }
 
 Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
+  if (other_arg.sizes().size() == 0) {
+    return arithmetic_scalar(
+        self_arg,
+        other_arg.item<float>(),
+        c10::optional<Scalar>(),
+        VK_KERNEL(mul_scalar));
+  }
   return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul));
 }
@@ -383,7 +404,7 @@ Tensor& mul_tensor_(Tensor& self, const Tensor& other_arg) {
       self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_));
 }
 
-Tensor div_scalar(const Tensor& self_arg, const Scalar other) {
+Tensor div_scalar(const Tensor& self_arg, const Scalar& other) {
   return arithmetic_scalar(
       self_arg,
       1.0 / other.to<float>(),
@@ -391,7 +412,7 @@ Tensor div_scalar(const Tensor& self_arg, const Scalar other) {
       VK_KERNEL(mul_scalar));
 }
 
-Tensor& div_scalar_(Tensor& self, const Scalar other) {
+Tensor& div_scalar_(Tensor& self, const Scalar& other) {
   return arithmetic_scalar_(
       self,
       1.0 / other.to<float>(),
@@ -400,6 +421,13 @@ Tensor& div_scalar_(Tensor& self, const Scalar other) {
 }
 
 Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
+  if (other_arg.sizes().size() == 0) {
+    return arithmetic_scalar(
+        self_arg,
+        1.0 / other_arg.item<float>(),
+        c10::optional<Scalar>(),
+        VK_KERNEL(mul_scalar));
+  }
   return arithmetic_tensor(
       self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(div));
 }
@@ -412,22 +440,22 @@ Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("add.Scalar", TORCH_FN(add_scalar));
-  m.impl("add_.Scalar", TORCH_FN(add_scalar_));
-  m.impl("add.Tensor", TORCH_FN(add_tensor));
-  m.impl("add_.Tensor", TORCH_FN(add_tensor_));
-  m.impl("sub.Scalar", TORCH_FN(sub_scalar));
-  m.impl("sub_.Scalar", TORCH_FN(sub_scalar_));
-  m.impl("sub.Tensor", TORCH_FN(sub_tensor));
-  m.impl("sub_.Tensor", TORCH_FN(sub_tensor_));
-  m.impl("mul.Scalar", TORCH_FN(mul_scalar));
-  m.impl("mul_.Scalar", TORCH_FN(mul_scalar_));
-  m.impl("mul.Tensor", TORCH_FN(mul_tensor));
-  m.impl("mul_.Tensor", TORCH_FN(mul_tensor_));
-  m.impl("div.Scalar", TORCH_FN(div_scalar));
-  m.impl("div_.Scalar", TORCH_FN(div_scalar_));
-  m.impl("div.Tensor", TORCH_FN(div_tensor));
-  m.impl("div_.Tensor", TORCH_FN(div_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add.Scalar"), TORCH_FN(add_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add_.Scalar"), TORCH_FN(add_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add.Tensor"), TORCH_FN(add_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add_.Tensor"), TORCH_FN(add_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub.Scalar"), TORCH_FN(sub_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub_.Scalar"), TORCH_FN(sub_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub.Tensor"), TORCH_FN(sub_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub_.Tensor"), TORCH_FN(sub_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul.Scalar"), TORCH_FN(mul_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul_.Scalar"), TORCH_FN(mul_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul.Tensor"), TORCH_FN(mul_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul_.Tensor"), TORCH_FN(mul_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div.Scalar"), TORCH_FN(div_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div_.Scalar"), TORCH_FN(div_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div.Tensor"), TORCH_FN(div_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div_.Tensor"), TORCH_FN(div_tensor_));
 }
 
 #endif /* USE_VULKAN_API */

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -13,8 +13,11 @@ from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 
+if os.getenv("CIRCLECI"):
+    print("T85992919 temporarily disabling in circle ci", file=sys.stderr)
+    sys.exit(0)
 
-@unittest.skipIf(os.getenv("CIRCLECI"), "T85992919 temporarily disabling in circle ci")
+
 class EtcdRendezvousTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

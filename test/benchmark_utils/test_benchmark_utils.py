@@ -1,3 +1,6 @@
+# Owner(s): ["module: unknown"]
+
+import collections
 import json
 import os
 import re
@@ -9,7 +12,7 @@ import unittest
 import torch
 import torch.utils.benchmark as benchmark_utils
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest
-from torch.testing._internal import expecttest
+import expecttest
 import numpy as np
 
 
@@ -167,6 +170,19 @@ class TestBenchmarkUtils(TestCase):
 
     @slowTest
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    @unittest.skipIf(True, "Failing on clang, see 74398")
+    def test_timer_tiny_fast_snippet(self):
+        timer = benchmark_utils.Timer(
+            'auto x = 1;(void)x;',
+            timer=timeit.default_timer,
+            language=benchmark_utils.Language.CPP,
+        )
+        median = timer.blocked_autorange().median
+        self.assertIsInstance(median, float)
+
+    @slowTest
+    @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
+    @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_cpp_timer(self):
         timer = benchmark_utils.Timer(
             """
@@ -259,7 +275,7 @@ class TestBenchmarkUtils(TestCase):
         )
 
         # Check against strings so we can reuse expect infra.
-        self.regularizeAndAssertExpectedInline(m.mean, """8.001365835795602e-09""")
+        self.regularizeAndAssertExpectedInline(m.mean, """8.0013658357956e-09""")
         self.regularizeAndAssertExpectedInline(m.median, """7.983151323215967e-09""")
         self.regularizeAndAssertExpectedInline(len(m.times), """125""")
         self.regularizeAndAssertExpectedInline(m.number_per_run, """10000000""")
@@ -504,12 +520,25 @@ class TestBenchmarkUtils(TestCase):
             }
         )
 
-        # Don't collect baseline to speed up unit test by ~30 seconds.
-        stats = timer.collect_callgrind(number=1000, collect_baseline=False)
+        stats = timer.collect_callgrind(number=1000)
         counts = stats.counts(denoise=False)
 
         self.assertIsInstance(counts, int)
         self.assertGreater(counts, 0)
+
+        # There is some jitter with the allocator, so we use a simpler task to
+        # test reproducibility.
+        timer = benchmark_utils.Timer(
+            "x += 1",
+            setup="x = torch.ones((1,))",
+        )
+
+        stats = timer.collect_callgrind(number=1000, repeats=20)
+        assert isinstance(stats, tuple)
+
+        # Check that the repeats are at least somewhat repeatable. (within 10 instructions per iter)
+        counts = collections.Counter([s.counts(denoise=True) // 10_000 * 10_000 for s in stats])
+        self.assertGreater(max(counts.values()), 1, f"Every instruction count total was unique: {counts}")
 
         from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import wrapper_singleton
         self.assertIsNone(
@@ -520,6 +549,7 @@ class TestBenchmarkUtils(TestCase):
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
+    @unittest.skipIf(True, "Failing on clang, see 74398")
     def test_collect_cpp_callgrind(self):
         timer = benchmark_utils.Timer(
             "x += 1;",
@@ -542,6 +572,14 @@ class TestBenchmarkUtils(TestCase):
             self.assertEqual(
                 s.counts(denoise=True), s.counts(denoise=False),
                 "De-noising should not apply to C++.")
+
+        stats = timer.collect_callgrind(number=1000, repeats=20)
+        assert isinstance(stats, tuple)
+
+        # NB: Unlike the example above, there is no expectation that all
+        #     repeats will be identical.
+        counts = collections.Counter([s.counts(denoise=True) // 10_000 * 10_000 for s in stats])
+        self.assertGreater(max(counts.values()), 1, repr(counts))
 
     def test_manipulate_callgrind_stats(self):
         stats_no_data, stats_with_data = load_callgrind_artifacts()
@@ -664,7 +702,7 @@ class TestBenchmarkUtils(TestCase):
                 2000  /usr/include/c++/8/bits/atomic_base.h:at::Tensor at::detail::make_tensor ... t_null_type<c10::StorageImpl> >&&, c10::DispatchKey&&, caffe2::TypeMeta&)
                 2000  /usr/include/c++/8/array:at::Tensor& c10::Dispatcher::callWithDispatchKe ... , c10::Scalar)> const&, c10::DispatchKey, at::Tensor&, c10::Scalar) const
 
-            Total: 8869966"""  # noqa
+            Total: 8869966"""  # noqa: B950
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -902,7 +940,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |  \x1b[2m\x1b[91m   3    \x1b[0m\x1b[0m  |     4.0     |      11      |  \x1b[92m\x1b[1m    2100    \x1b[0m\x1b[0m  |      2100
                   special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[92m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[92m\x1b[1m    1700    \x1b[0m\x1b[0m
 
-            Times are in microseconds (us)."""  # noqa
+            Times are in microseconds (us)."""  # noqa: B950
         )
 
         compare.colorize(rowwise=True)
@@ -916,7 +954,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |  \x1b[92m\x1b[1m   3    \x1b[0m\x1b[0m  |     4.0     |  \x1b[2m\x1b[91m    11    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    2100    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    2100    \x1b[0m\x1b[0m
                   special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[31m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[31m\x1b[1m    1700    \x1b[0m\x1b[0m
 
-            Times are in microseconds (us)."""  # noqa
+            Times are in microseconds (us)."""  # noqa: B950
         )
 
         def print_new_expected(s: str) -> None:
@@ -957,7 +995,7 @@ class TestBenchmarkUtils(TestCase):
         for i, (tensors, _, _) in enumerate(fuzzer.take(2)):
             x = tensors["x"]
             self.assertEqual(
-                x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
+                x, torch.tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
 
 
 if __name__ == '__main__':

@@ -88,10 +88,11 @@ class PredictorExportMeta(collections.namedtuple(
             "Intersection: {}".format(set(parameters).intersection(outputs)))
         shapes = shapes or {}
 
-        if isinstance(predict_net, (core.Net, core.Plan)):
-            predict_net = predict_net.Proto()
+        if predict_net is not None:
+            if isinstance(predict_net, (core.Net, core.Plan)):
+                predict_net = predict_net.Proto()
 
-        assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
+            assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
         return super(PredictorExportMeta, cls).__new__(
             cls, predict_net, parameters, inputs, outputs, shapes, name,
             extra_init_net, global_init_net, net_type, num_workers, trainer_prefix)

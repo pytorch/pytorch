@@ -1,4 +1,5 @@
 #include <ATen/native/quantized/affine_quantizer_base.h>
+#include <c10/util/irange.h>
 #include <cfenv>
 #include <climits>
 
@@ -44,7 +45,9 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   // cases away from zero, and can be consistent with SIMD implementations for
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int32_t qvalue;
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   qvalue = fbgemm::Quantize<typename T::underlying, false /*LEGACY*/>(
       value,
       static_cast<int32_t>(zero_point),
@@ -70,6 +73,7 @@ void quantize_vec(
 
 template <typename T>
 inline float dequantize_val(double scale, int64_t zero_point, T value) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   fbgemm::TensorQuantizationParams qparams;
   qparams.scale = static_cast<float>(scale);
   qparams.zero_point = static_cast<int32_t>(zero_point);
@@ -115,10 +119,20 @@ uint8_t quantize_val_arm(
     const float scale,
     const int32_t zero_point,
     const float value) {
-  const int32_t qmin = std::numeric_limits<uint8_t>::min();
-  const int32_t qmax = std::numeric_limits<uint8_t>::max();
+  constexpr int32_t qmin = std::numeric_limits<uint8_t>::min();
+  constexpr int32_t qmax = std::numeric_limits<uint8_t>::max();
   float inv_scale = 1.0f / scale;
+#ifndef _MSC_VER
+  auto r = static_cast<int32_t>(Round(value * inv_scale));
+  // builtin_add_overflow() returns true in case of overflow
+  if (__builtin_add_overflow(zero_point, r, &r)) {
+    // zero_point must be a non-negative value between qmin and qmax,
+    // i.e. only overflow can happen.
+    r = qmax;
+  }
+#else
   auto r = zero_point + static_cast<int32_t>(Round(value * inv_scale));
+#endif
   r = std::max(r, qmin);
   r = std::min(r, qmax);
   return static_cast<uint8_t>(r);
@@ -132,16 +146,14 @@ void quantize_vec(
     T* dst,
     size_t count) {
   checkZeroPoint<typename T::underlying>("quantize_vec", zero_point);
-  for (int64_t i = 0; i < count; ++i) {
+  for (const auto i : c10::irange(count)) {
     dst[i] = quantize_val<T>(scale, zero_point, src[i]);
   }
 }
 
 template <typename T>
 TORCH_API float dequantize_val(double scale, int64_t zero_point, T value) {
-  // We need to convert the qint8 value to float to ensure the subtraction
-  // subexpression returns a float
-  return (static_cast<float>(value.val_) - zero_point) * scale;
+  return static_cast<float>(scale) * (value.val_ - static_cast<int32_t>(zero_point));
 }
 #endif // USE_FBGEMM
 
@@ -154,9 +166,11 @@ TORCH_API float dequantize_val(double scale, int64_t zero_point, T value) {
 * to (-Xmin/scale), where Xmin is the min value in input tensor row.
 */
 int quantize_val_float_qparams(float scale, float zero_point, float value, int qmin, int qmax) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int qvalue;
 
   float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   qvalue = lrintf(value * inv_scale + zero_point);
   qvalue = std::max(qmin, std::min(qvalue, qmax));
   return qvalue;
@@ -177,6 +191,7 @@ template <typename DST_T>
 DST_T requantize_from_int(double multiplier, int64_t zero_point, int64_t src) {
   int64_t quantize_down =
       zero_point + lrintf(src * static_cast<float>(multiplier));
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   int32_t min = std::numeric_limits<typename DST_T::underlying>::min();
   int32_t max = std::numeric_limits<typename DST_T::underlying>::max();
   return static_cast<DST_T>(

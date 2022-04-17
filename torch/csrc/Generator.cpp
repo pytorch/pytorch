@@ -4,7 +4,6 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
 
-#include <TH/TH.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
@@ -15,7 +14,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 
 #ifdef USE_CUDA
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #endif
 
 using namespace at;
@@ -97,7 +96,7 @@ static PyObject * THPGenerator_setState(PyObject *_self, PyObject *_new_state)
   }
   auto self = (THPGenerator*)_self;
   auto& gen = self->cdata;
-  auto& new_state_tensor = ((THPVariable*)_new_state)->cdata;
+  const auto& new_state_tensor = THPVariable_Unpack(_new_state);
 
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen.mutex());
@@ -117,6 +116,7 @@ static PyObject * THPGenerator_manualSeed(PyObject *_self, PyObject *seed)
           "but got %s", THPUtils_typename(seed));
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(generator.mutex());
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint64_t seed_unpacked;
   try {
     // First try to interpret as unsigned long
@@ -164,11 +164,13 @@ static PyObject * THPGenerator_get_device(THPGenerator *self, void *unused) {
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPGenerator_properties[] = {
   {"device", (getter)THPGenerator_get_device, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPGenerator_methods[] = {
   {"get_state",       THPGenerator_getState,       METH_NOARGS,  nullptr},
   {"set_state",       THPGenerator_setState,       METH_O,       nullptr},
@@ -178,6 +180,7 @@ static PyMethodDef THPGenerator_methods[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPGenerator_members[] = {
   {(char*)"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, nullptr},
   {nullptr}

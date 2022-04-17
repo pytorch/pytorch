@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
@@ -35,7 +34,9 @@ struct TORCH_API RMSpropOptions : public OptimizerCloneableOptions<RMSpropOption
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const RMSpropOptions& lhs, const RMSpropOptions& rhs);
-  ~RMSpropOptions() = default;
+  ~RMSpropOptions() override = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
 };
 
 struct TORCH_API RMSpropParamState : public OptimizerCloneableParamState<RMSpropParamState> {
@@ -48,7 +49,7 @@ struct TORCH_API RMSpropParamState : public OptimizerCloneableParamState<RMSprop
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs);
-  ~RMSpropParamState() = default;
+  ~RMSpropParamState() override = default;
 };
 
 class TORCH_API RMSprop : public Optimizer {
@@ -63,6 +64,7 @@ class TORCH_API RMSprop : public Optimizer {
   }
 
   explicit RMSprop(std::vector<Tensor> params,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       RMSpropOptions defaults = {}) : RMSprop({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;

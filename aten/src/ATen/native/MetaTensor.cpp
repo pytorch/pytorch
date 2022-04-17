@@ -1,77 +1,39 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/EmptyTensor.h>
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_strided_native.h>
+#endif
 
 namespace at {
 namespace native {
 
 Tensor empty_meta(
   IntArrayRef size,
-  c10::optional<ScalarType> dtype,
-  c10::optional<Layout> layout,
-  c10::optional<Device> device,
-  c10::optional<bool> pin_memory,
-  c10::optional<c10::MemoryFormat> memory_format
+  c10::optional<ScalarType> dtype_opt,
+  c10::optional<Layout> layout_opt,
+  c10::optional<Device> device_opt,
+  c10::optional<bool> pin_memory_opt,
+  c10::optional<c10::MemoryFormat> memory_format_opt
 ) {
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device).type() == DeviceType::Meta);
-  // NB: because there is no SparseMeta (yet), non-strided layout is
-  // exerciseable
-  TORCH_CHECK_NOT_IMPLEMENTED(
-    layout_or_default(layout) == Layout::Strided,
-    "strided meta tensors not supported yet"
-  );
-
-  check_size_nonnegative(size);
-
-  auto tensor = detail::make_tensor<TensorImpl>(
-    DispatchKeySet{DispatchKey::Meta},
-    scalarTypeToTypeMeta(dtype_or_default(dtype)),
-    device
-  );
-
-  tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-
-  auto memory_format_ = memory_format.value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format_);
-
-  return tensor;
+  return at::detail::empty_meta(
+      size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
 Tensor empty_strided_meta(
   IntArrayRef size,
   IntArrayRef stride,
-  c10::optional<ScalarType> dtype,
-  c10::optional<Layout> layout,
-  c10::optional<Device> device,
-  c10::optional<bool> pin_memory
+  c10::optional<ScalarType> dtype_opt,
+  c10::optional<Layout> layout_opt,
+  c10::optional<Device> device_opt,
+  c10::optional<bool> pin_memory_opt
 ) {
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_or_default(device).type() == DeviceType::Meta);
-  // NB: because there is no SparseMeta (yet), non-strided layout is
-  // exerciseable
-  TORCH_CHECK_NOT_IMPLEMENTED(
-    layout_or_default(layout) == Layout::Strided,
-    "strided meta tensors not supported yet"
-  );
-
-  // NB: pin_memory intentionally ignored; it is a property of storage and
-  // therefore meta does not track it  (this is not a forced choice, but it's
-  // the choice we made)
-
-  check_size_nonnegative(size);
-  // TODO: check if strides are negative,
-  // https://github.com/pytorch/pytorch/issues/53391
-  // (bugged here to be consistent with CPU implementation)
-
-  auto tensor = detail::make_tensor<TensorImpl>(
-    DispatchKeySet{DispatchKey::Meta},
-    scalarTypeToTypeMeta(dtype_or_default(dtype)),
-    device
-  );
-
-  tensor.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride);
-
-  return tensor;
+  return at::detail::empty_strided_meta(
+      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 } // namespace native

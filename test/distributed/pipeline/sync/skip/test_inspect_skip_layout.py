@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -19,7 +21,7 @@ class Pass(nn.Module):
 class StashFoo(nn.Module):
     def forward(self, input):
         yield stash("foo", input)
-        return input # noqa
+        return input  # noqa: B901
 
 
 @skippable(pop=["foo"])
@@ -33,7 +35,7 @@ class PopFoo(nn.Module):
 class StashBar(nn.Module):
     def forward(self, input):
         yield stash("bar", input)
-        return input # noqa
+        return input  # noqa: B901
 
 
 @skippable(pop=["bar"])

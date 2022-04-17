@@ -2,6 +2,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandBase.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/util/Half.h>
@@ -111,7 +112,7 @@ template<typename scalar_t,
          typename RNG,
          typename dist_t,
          typename transform_t>
-void distribution_nullary_kernel(at::TensorIterator& iter,
+void distribution_nullary_kernel(at::TensorIteratorBase& iter,
                                  RNG gen,
                                  const dist_t& dist_func,
                                  const transform_t transform_func) {
@@ -188,11 +189,11 @@ __global__ void distribution_binary_elementwise_kernel(
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
 
-  input_t_1 inputs_1[thread_work_size];
-  input_t_2 inputs_2[thread_work_size];
+  input_t_1 inputs_1[thread_work_size()];
+  input_t_2 inputs_2[thread_work_size()];
 
-  int base_index = BLOCK_WORK_SIZE * blockIdx.x;
-  int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
+  int base_index = block_work_size() * blockIdx.x;
+  int remaining = std::min<int>(numel - base_index, block_work_size());
 
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
@@ -203,7 +204,7 @@ __global__ void distribution_binary_elementwise_kernel(
   // load data into registers
   int thread_idx = threadIdx.x;
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (thread_idx >= remaining) {
       break;
     }
@@ -212,25 +213,25 @@ __global__ void distribution_binary_elementwise_kernel(
     inputs_1[i] = input_data_1[offsets[0]];
     inputs_2[i] = input_data_2[offsets[1]];
 
-    thread_idx += num_threads;
+    thread_idx += num_threads();
   }
 
   // compute and store
   thread_idx = threadIdx.x;
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size(); i++) {
     if (thread_idx >= remaining) {
       break;
     }
     int input_idx = thread_idx + base_index;
     auto offsets = out_calc.get(input_idx);
     output_data[offsets[0]] = f(state, inputs_1[i], inputs_2[i]);
-    thread_idx += num_threads;
+    thread_idx += num_threads();
   }
 }
 
 template <typename func_t>
-void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_args, const func_t &f) {
+void distribution_binary_kernel(TensorIteratorBase &iter, PhiloxCudaState philox_args, const func_t &f) {
   static_assert(std::is_same<typename function_traits<func_t>::template arg<0>::type, curandStatePhilox4_32_10_t&>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
@@ -254,16 +255,16 @@ void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_arg
   const input_t_1 *input_data_1 = static_cast<const input_t_1 *>(iter.data_ptr(1));
   const input_t_2 *input_data_2 = static_cast<const input_t_2 *>(iter.data_ptr(2));
 
-  int64_t grid = (numel + block_work_size - 1) / block_work_size;
+  int64_t grid = (numel + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
 
   if (iter.is_contiguous()) {
-    distribution_binary_elementwise_kernel<<<grid,num_threads, 0, stream>>>(
+    distribution_binary_elementwise_kernel<<<grid,num_threads(), 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<1>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    distribution_binary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
+    distribution_binary_elementwise_kernel<<<grid, num_threads(), 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         make_input_offset_calculator<2>(iter), make_output_offset_calculator(iter));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -282,7 +283,7 @@ namespace cuda {
 // ==================================================== Random ========================================================
 
 template<typename RNG>
-void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG gen) {
+void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cuda", [&] {
     if ((
       std::is_same<scalar_t, int64_t>::value ||
@@ -322,7 +323,7 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
 // from(inclusive) = std::numeric_limits<int64_t>::lowest()
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
-void random_full_64_bits_range_kernel(TensorIterator& iter, RNG gen) {
+void random_full_64_bits_range_kernel(TensorIteratorBase& iter, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cuda", [&] {
     if (std::is_same<scalar_t, int64_t>::value ||
         std::is_same<scalar_t, double>::value ||
@@ -349,16 +350,16 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG gen) {
 
 template<typename RNG>
 struct RandomFromToKernel {
-  void operator()(TensorIterator& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
     random_from_to_kernel(iter, range, base, check_generator<RNG>(gen));
   }
-  void operator()(TensorIterator& iter, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, c10::optional<Generator> gen) {
     random_full_64_bits_range_kernel(iter, check_generator<RNG>(gen));
   }
 };
 
 template<typename RNG>
-void random_kernel(TensorIterator& iter, RNG gen) {
+void random_kernel(TensorIteratorBase& iter, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "random_kernel_cuda", [&] {
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
       auto random_func = [] __device__ (uint64_t rand) {
@@ -389,7 +390,7 @@ void random_kernel(TensorIterator& iter, RNG gen) {
 
 template<typename RNG>
 struct RandomKernel {
-  void operator()(TensorIterator& iter, RNG gen) {
+  void operator()(TensorIteratorBase& iter, RNG gen) {
     random_kernel(iter, gen);
   }
 };
@@ -397,7 +398,7 @@ struct RandomKernel {
 // ====================================================================================================================
 
 template<typename scalar_t, typename accscalar_t, size_t curand4_engine_calls, typename RNG, typename transform_t>
-void uniform_and_transform(TensorIterator& iter, RNG gen, transform_t transform) {
+void uniform_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transform) {
   if (std::is_same<scalar_t, double>::value) {
     distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
       gen,
@@ -412,7 +413,7 @@ void uniform_and_transform(TensorIterator& iter, RNG gen, transform_t transform)
 }
 
 template<typename scalar_t, typename accscalar_t, size_t curand4_engine_calls, typename RNG, typename transform_t>
-void normal_and_transform(TensorIterator& iter, RNG gen, transform_t transform) {
+void normal_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transform) {
   if (std::is_same<scalar_t, double>::value) {
     distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
       gen,
@@ -429,8 +430,8 @@ void normal_and_transform(TensorIterator& iter, RNG gen, transform_t transform) 
 // ==================================================== Normal ========================================================
 
 template<typename RNG>
-void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
-  auto iter = TensorIterator::nullary_op(self);
+void normal_kernel(const TensorBase &self, double mean_, double std_, RNG gen) {
+  auto iter = TensorIterator::borrowing_nullary_op(self);
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "normal_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto mean = static_cast<accscalar_t>(mean_);
@@ -445,7 +446,7 @@ void normal_kernel(Tensor& self, double mean_, double std_, RNG gen) {
 
 template<typename RNG>
 struct NormalKernel {
-  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, double mean, double std, c10::optional<Generator> gen) {
     normal_kernel(self, mean, std, check_generator<RNG>(gen));
   }
 };
@@ -453,7 +454,7 @@ struct NormalKernel {
 // ==================================================== Uniform ========================================================
 
 template<typename RNG>
-void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
+void uniform_kernel(TensorIteratorBase& iter, double from_, double to_, RNG gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_kernel_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
@@ -475,7 +476,7 @@ void uniform_kernel(TensorIterator& iter, double from_, double to_, RNG gen) {
 
 template<typename RNG>
 struct UniformKernel {
-  void operator()(TensorIterator& iter, double from, double to, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double from, double to, c10::optional<Generator> gen) {
     uniform_kernel(iter, from, to, check_generator<RNG>(gen));
   }
 };
@@ -483,7 +484,7 @@ struct UniformKernel {
 // ================================================== LogNormal =======================================================
 
 template<typename RNG>
-void log_normal_kernel(TensorIterator& iter, double mean_, double std_, RNG gen) {
+void log_normal_kernel(TensorIteratorBase& iter, double mean_, double std_, RNG gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "log_normal_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto mean = static_cast<accscalar_t>(mean_);
@@ -498,7 +499,7 @@ void log_normal_kernel(TensorIterator& iter, double mean_, double std_, RNG gen)
 
 template<typename RNG>
 struct LogNormalKernel {
-  void operator()(TensorIterator& iter, double mean, double std, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double mean, double std, c10::optional<Generator> gen) {
     log_normal_kernel(iter, mean, std, check_generator<RNG>(gen));
   }
 };
@@ -506,7 +507,7 @@ struct LogNormalKernel {
 // =================================================== Geometric ======================================================
 
 template<typename RNG>
-void geometric_kernel(TensorIterator& iter, double p, RNG gen) {
+void geometric_kernel(TensorIteratorBase& iter, double p, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "geometric_cuda", [&] {
     using accscalar_t = at::DiscreteDistributionType<scalar_t>::type;
     // define lambda for geometric transformation
@@ -519,7 +520,7 @@ void geometric_kernel(TensorIterator& iter, double p, RNG gen) {
 
 template<typename RNG>
 struct GeometricKernel {
-  void operator()(TensorIterator& iter, double p, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double p, c10::optional<Generator> gen) {
     geometric_kernel(iter, p, check_generator<RNG>(gen));
   }
 };
@@ -527,18 +528,12 @@ struct GeometricKernel {
 // ================================================== Exponential =====================================================
 
 template<typename RNG>
-void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
+void exponential_kernel(TensorIteratorBase& iter, double lambda_, RNG gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "exponential_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto lambda = static_cast<accscalar_t>(lambda_);
     // define lambda for exponential transformation
     auto exponential_func = [lambda] __device__ (accscalar_t rand) {
-      // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
-      // Hence, squash the 1 to just below 1.
-      // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
-      if(rand == static_cast<accscalar_t>(1.0)) {
-        rand = ::nextafter(static_cast<accscalar_t>(1.0), static_cast<accscalar_t>(0.0));
-      }
       return static_cast<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
     };
     uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, exponential_func);
@@ -547,7 +542,7 @@ void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
 
 template<typename RNG>
 struct ExponentialKernel {
-  void operator()(TensorIterator& iter, double lambda, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
     exponential_kernel(iter, lambda, check_generator<RNG>(gen));
   }
 };
@@ -555,7 +550,7 @@ struct ExponentialKernel {
 // ==================================================== Cauchy ========================================================
 
 template<typename RNG>
-void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, RNG gen) {
+void cauchy_kernel(TensorIteratorBase& iter, double median_, double sigma_, RNG gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "cauchy_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto median = static_cast<accscalar_t>(median_);
@@ -570,7 +565,7 @@ void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, RNG gen)
 
 template<typename RNG>
 struct CauchyKernel {
-  void operator()(TensorIterator& iter, double median, double sigma, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double median, double sigma, c10::optional<Generator> gen) {
     cauchy_kernel(iter, median, sigma, check_generator<RNG>(gen));
   }
 };
@@ -579,7 +574,7 @@ struct CauchyKernel {
 
 template<typename scalar_t, typename prob_t>
 void bernoulli_tensor_cuda_kernel(
-    at::Tensor& ret, const at::Tensor& p,
+    const TensorBase &ret, const at::TensorBase &p,
     PhiloxCudaState philox_args) {
   auto functor = [philox_args] __device__(
           int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
@@ -623,26 +618,30 @@ void bernoulli_tensor_cuda_kernel(
 }
 
 template<typename RNG>
-void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
+void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG gen) {
   PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(10);
   }
-  auto p = std::get<0>(expand_inplace(self, p_.to(kCUDA)));
+  TORCH_CHECK(at::isFloatingType(p_.scalar_type()), "expected probabilities tensor to have floating type, got ", p_.scalar_type());
+  // cast probabilities tensor to double for double `self` tensor, and to `float` for everything else
+  const auto p_type = self.dtype() == at::kDouble ? at::kDouble : at::kFloat;
+  auto p_cuda = p_.to(TensorOptions().device(self.device()).dtype(p_type));
+  auto p = expand_inplace(self, p_cuda);
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
-      using self_t = scalar_t;
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, p.scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
-        using p_t = scalar_t;
-        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, rng_engine_inputs);
-      });
+      if (std::is_same<scalar_t, double>::value) {
+        return bernoulli_tensor_cuda_kernel<double, double>(self, *p, rng_engine_inputs);
+      } else {
+        return bernoulli_tensor_cuda_kernel<scalar_t, float>(self, *p, rng_engine_inputs);
+      }
    });
 }
 
 template<typename RNG>
-void bernoulli_kernel(TensorIterator& iter, double p, RNG gen) {
+void bernoulli_kernel(TensorIteratorBase& iter, double p, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "bernoulli_scalar_cuda_", [&] {
       using accscalar_t = at::DiscreteDistributionType<scalar_t>::type;
@@ -656,10 +655,10 @@ void bernoulli_kernel(TensorIterator& iter, double p, RNG gen) {
 
 template<typename RNG>
 struct BernoulliKernel {
-  void operator()(TensorIterator& iter, double p, c10::optional<Generator> gen) {
+  void operator()(TensorIteratorBase& iter, double p, c10::optional<Generator> gen) {
     bernoulli_kernel(iter, p, check_generator<RNG>(gen));
   }
-  void operator()(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, const TensorBase &p_, c10::optional<Generator> gen) {
     bernoulli_kernel(self, p_, check_generator<RNG>(gen));
   }
 };

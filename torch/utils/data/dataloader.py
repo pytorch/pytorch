@@ -10,7 +10,7 @@ import threading
 import itertools
 import warnings
 import queue
-from typing import Any, Callable, TypeVar, Generic, Sequence, List, Optional
+from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
 import torch
@@ -18,8 +18,10 @@ import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
 
-from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
+from . import IterDataPipe, IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
 from . import _utils
+
+import torch.utils.data.graph_settings
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -31,14 +33,16 @@ _worker_init_fn_t = Callable[[int], None]
 _collate_fn_t = Callable[[List[T]], Any]
 
 
-# This function used to be defined in this file. However, it was moved to
+# These functions used to be defined in this file. However, it was moved to
 # _utils/collate.py. Although it is rather hard to access this from user land
 # (one has to explicitly directly `import torch.utils.data.dataloader`), there
 # probably is user code out there using it. This aliasing maintains BC in this
 # aspect.
 default_collate: _collate_fn_t = _utils.collate.default_collate
+default_convert = _utils.collate.default_convert
 
 get_worker_info = _utils.worker.get_worker_info
+
 
 class _DatasetKind(object):
     Map = 0
@@ -111,9 +115,12 @@ class DataLoader(Generic[T_co]):
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
-        prefetch_factor (int, optional, keyword-only arg): Number of samples loaded
+        generator (torch.Generator, optional): If not ``None``, this RNG will be used
+            by RandomSampler to generate random indexes and multiprocessing to generate
+            `base_seed` for workers. (default: ``None``)
+        prefetch_factor (int, optional, keyword-only arg): Number of batches loaded
             in advance by each worker. ``2`` means there will be a total of
-            2 * num_workers samples prefetched across all workers. (default: ``2``)
+            2 * num_workers batches prefetched across all workers. (default: ``2``)
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
@@ -151,21 +158,21 @@ class DataLoader(Generic[T_co]):
     pin_memory: bool
     drop_last: bool
     timeout: float
-    sampler: Sampler
+    sampler: Union[Sampler, Iterable]
     prefetch_factor: int
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
-                 shuffle: bool = False, sampler: Optional[Sampler[int]] = None,
-                 batch_sampler: Optional[Sampler[Sequence[int]]] = None,
+                 shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
+                 batch_sampler: Union[Sampler[Sequence], Iterable[Sequence], None] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
                  multiprocessing_context=None, generator=None,
                  *, prefetch_factor: int = 2,
                  persistent_workers: bool = False):
-        torch._C._log_api_usage_once("python.data_loader")  # type: ignore
+        torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
             raise ValueError('num_workers option should be non-negative; '
@@ -221,11 +228,16 @@ class DataLoader(Generic[T_co]):
             # option. If this turns out to be useful in future, we can re-enable
             # this, and support custom samplers that specify the assignments to
             # specific workers.
-            if shuffle is not False:
+            if isinstance(dataset, IterDataPipe):
+                if shuffle is not None:
+                    dataset = torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
+            # We cannot check `shuffle is not None` here, since previously `shuffle=False` was the default.
+            elif shuffle not in {False, None}:
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
                     "shuffle option, but got shuffle={}".format(shuffle))
-            elif sampler is not None:
+
+            if sampler is not None:
                 # See NOTE [ Custom Samplers and IterableDataset ]
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
@@ -236,7 +248,10 @@ class DataLoader(Generic[T_co]):
                     "DataLoader with IterableDataset: expected unspecified "
                     "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
         else:
+            shuffle = bool(shuffle)
             self._dataset_kind = _DatasetKind.Map
+
+
 
         if sampler is not None and shuffle:
             raise ValueError('sampler option is mutually exclusive with '
@@ -262,11 +277,9 @@ class DataLoader(Generic[T_co]):
                 sampler = _InfiniteConstantSampler()
             else:  # map-style
                 if shuffle:
-                    # Cannot statically verify that dataset is Sized
-                    # Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
-                    sampler = RandomSampler(dataset, generator=generator)  # type: ignore
+                    sampler = RandomSampler(dataset, generator=generator)  # type: ignore[arg-type]
                 else:
-                    sampler = SequentialSampler(dataset)
+                    sampler = SequentialSampler(dataset)  # type: ignore[arg-type]
 
         if batch_size is not None and batch_sampler is None:
             # auto_collation without custom batch_sampler
@@ -294,6 +307,8 @@ class DataLoader(Generic[T_co]):
 
         self.check_worker_number_rationality()
 
+        torch.set_vital('Dataloader', 'enabled', 'True')  # type: ignore[attr-defined]
+
     def _get_iterator(self) -> '_BaseDataLoaderIter':
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
@@ -317,7 +332,7 @@ class DataLoader(Generic[T_co]):
                              'should specify a valid start method in {!r}, but got '
                              'multiprocessing_context={!r}').format(valid_start_methods, multiprocessing_context))
                     # error: Argument 1 to "get_context" has incompatible type "Union[str, bytes]"; expected "str"  [arg-type]
-                    multiprocessing_context = multiprocessing.get_context(multiprocessing_context)  # type: ignore
+                    multiprocessing_context = multiprocessing.get_context(multiprocessing_context)  # type: ignore[arg-type]
 
                 if not isinstance(multiprocessing_context, python_multiprocessing.context.BaseContext):
                     raise TypeError(('multiprocessing_context option should be a valid context '
@@ -389,7 +404,7 @@ class DataLoader(Generic[T_co]):
             # if the iterator ends up yielding more than this number of samples.
 
             # Cannot statically verify that dataset is Sized
-            length = self._IterableDataset_len_called = len(self.dataset)  # type: ignore
+            length = self._IterableDataset_len_called = len(self.dataset)  # type: ignore[assignment, arg-type]
             if self.batch_size is not None:  # IterableDataset doesn't allow custom sampler or batch_sampler
                 from math import ceil
                 if self.drop_last:
@@ -883,9 +898,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             multiprocessing_context = loader.multiprocessing_context
 
         self._worker_init_fn = loader.worker_init_fn
-        self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
         # No certainty which module multiprocessing_context is
-        self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore
+        self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
         self._worker_pids_set = False
         self._shutdown = False
         self._workers_done_event = multiprocessing_context.Event()
@@ -894,7 +908,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._workers = []
         for i in range(self._num_workers):
             # No certainty which module multiprocessing_context is
-            index_queue = multiprocessing_context.Queue()  # type: ignore
+            index_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
             # Need to `cancel_join_thread` here!
             # See sections (2) and (3b) above.
             index_queue.cancel_join_thread()
@@ -903,7 +917,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 args=(self._dataset_kind, self._dataset, index_queue,
                       self._worker_result_queue, self._workers_done_event,
                       self._auto_collation, self._collate_fn, self._drop_last,
-                      self._base_seed + i, self._worker_init_fn, i, self._num_workers,
+                      self._base_seed, self._worker_init_fn, i, self._num_workers,
                       self._persistent_workers))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
@@ -920,7 +934,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             self._pin_memory_thread_done_event = threading.Event()
 
             # Queue is not type-annotated
-            self._data_queue = queue.Queue()  # type: ignore
+            self._data_queue = queue.Queue()  # type: ignore[var-annotated]
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(self._worker_result_queue, self._data_queue,
@@ -934,8 +948,20 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         else:
             self._data_queue = self._worker_result_queue
 
+        # In some rare cases, persistent workers (daemonic processes)
+        # would be terminated before `__del__` of iterator is invoked
+        # when main process exits
+        # It would cause failure when pin_memory_thread tries to read
+        # corrupted data from worker_result_queue
+        # atexit is used to shutdown thread and child processes in the
+        # right sequence before main process exits
+        if self._persistent_workers and self._pin_memory:
+            import atexit
+            for w in self._workers:
+                atexit.register(_MultiProcessingDataLoaderIter._clean_up_worker, w)
+
         # .pid can be None only before process is spawned (not the case, so ignore)
-        _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))  # type: ignore
+        _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))  # type: ignore[misc]
         _utils.signal_handling._set_SIGCHLD_handler()
         self._worker_pids_set = True
         self._reset(loader, first_iter=True)
@@ -957,6 +983,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # It does not mean that a worker is dead. In case of `_persistent_workers`,
         # the worker will be reset to available in the next epoch.
         self._workers_status = [True for i in range(self._num_workers)]
+        # Reset the worker queue cycle so it resumes next epoch at worker 0
+        self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
         # We resume the prefetching in case it was enabled
         if not first_iter:
             for idx in range(self._num_workers):
@@ -1320,6 +1348,15 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
                         # we kill the worker.
                         w.terminate()
+
+    # staticmethod is used to remove reference to `_MultiProcessingDataLoaderIter`
+    @staticmethod
+    def _clean_up_worker(w):
+        try:
+            w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+        finally:
+            if w.is_alive():
+                w.terminate()
 
     def __del__(self):
         self._shutdown_workers()

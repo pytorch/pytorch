@@ -1,22 +1,23 @@
 import argparse
 import os
+import pathlib
 import sys
 import yaml
+from typing import Any, List, Optional, cast
 
 try:
     # use faster C loader if available
-    from yaml import CLoader as YamlLoader
+    from yaml import CSafeLoader as YamlLoader
 except ImportError:
-    from yaml import Loader as YamlLoader
+    from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
 
 source_files = {'.py', '.cpp', '.h'}
 
-DECLARATIONS_PATH = 'torch/share/ATen/Declarations.yaml'
 NATIVE_FUNCTIONS_PATH = 'aten/src/ATen/native/native_functions.yaml'
 
 # TODO: This is a little inaccurate, because it will also pick
 # up setup_helper scripts which don't affect code generation
-def all_generator_source():
+def all_generator_source() -> List[str]:
     r = []
     for directory, _, filenames in os.walk('tools'):
         for f in filenames:
@@ -26,15 +27,13 @@ def all_generator_source():
     return sorted(r)
 
 
-def generate_code(ninja_global=None,
-                  declarations_path=None,
-                  nn_path=None,
-                  native_functions_path=None,
-                  install_dir=None,
-                  subset=None,
-                  disable_autograd=False,
-                  force_schema_registration=False,
-                  operator_selector=None):
+def generate_code(ninja_global: Optional[str] = None,
+                  native_functions_path: Optional[str] = None,
+                  install_dir: Optional[str] = None,
+                  subset: Optional[str] = None,
+                  disable_autograd: bool = False,
+                  force_schema_registration: bool = False,
+                  operator_selector: Any = None) -> None:
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -51,14 +50,10 @@ def generate_code(ninja_global=None,
     for d in (autograd_gen_dir, jit_gen_dir, python_install_dir):
         if not os.path.exists(d):
             os.makedirs(d)
-    runfiles_dir = os.environ.get("RUNFILES_DIR", None)
-    data_dir = os.path.join(runfiles_dir, 'pytorch') if runfiles_dir else ''
-    autograd_dir = os.path.join(data_dir, 'tools', 'autograd')
-    tools_jit_templates = os.path.join(data_dir, 'tools', 'jit', 'templates')
+    autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
-            declarations_path or DECLARATIONS_PATH,
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             autograd_gen_dir,
             autograd_dir)
@@ -69,7 +64,6 @@ def generate_code(ninja_global=None,
     if subset == "libtorch" or not subset:
 
         gen_autograd(
-            declarations_path or DECLARATIONS_PATH,
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             autograd_gen_dir,
             autograd_dir,
@@ -86,7 +80,7 @@ def generate_code(ninja_global=None,
 
 def get_selector_from_legacy_operator_selection_list(
         selected_op_list_path: str,
-):
+) -> Any:
     with open(selected_op_list_path, 'r') as f:
         # strip out the overload part
         # It's only for legacy config - do NOT copy this code!
@@ -113,7 +107,10 @@ def get_selector_from_legacy_operator_selection_list(
     return selector
 
 
-def get_selector(selected_op_list_path, operators_yaml_path):
+def get_selector(
+    selected_op_list_path: Optional[str],
+    operators_yaml_path: Optional[str],
+) -> Any:
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
@@ -129,14 +126,12 @@ def get_selector(selected_op_list_path, operators_yaml_path):
     elif selected_op_list_path is not None:
         return get_selector_from_legacy_operator_selection_list(selected_op_list_path)
     else:
-        return SelectiveBuilder.from_yaml_path(operators_yaml_path)
+        return SelectiveBuilder.from_yaml_path(cast(str, operators_yaml_path))
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description='Autogenerate code')
-    parser.add_argument('--declarations-path')
     parser.add_argument('--native-functions-path')
-    parser.add_argument('--nn-path')
     parser.add_argument('--ninja-global')
     parser.add_argument('--install_dir')
     parser.add_argument(
@@ -163,12 +158,20 @@ def main():
         help='force it to generate schema-only registrations for ops that are not'
         'listed on --selected-op-list'
     )
+    parser.add_argument(
+        '--gen_lazy_ts_backend',
+        action='store_true',
+        help='Enable generation of the torch::lazy TorchScript backend'
+    )
+    parser.add_argument(
+        '--per_operator_headers',
+        action='store_true',
+        help='Build lazy tensor ts backend with per-operator ATen headers, must match how ATen was built'
+    )
     options = parser.parse_args()
 
     generate_code(
         options.ninja_global,
-        options.declarations_path,
-        options.nn_path,
         options.native_functions_path,
         options.install_dir,
         options.subset,
@@ -177,6 +180,34 @@ def main():
         # options.selected_op_list
         operator_selector=get_selector(options.selected_op_list_path, options.operators_yaml_path),
     )
+
+    if options.gen_lazy_ts_backend:
+        aten_path = os.path.dirname(os.path.dirname(options.native_functions_path))
+        ts_backend_yaml = os.path.join(aten_path, 'native/ts_native_functions.yaml')
+        ts_native_functions = "torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
+        ts_node_base = "torch/csrc/lazy/ts_backend/ts_node.h"
+        if options.install_dir is None:
+            options.install_dir = "torch/csrc"
+        lazy_install_dir = os.path.join(options.install_dir, "lazy/generated")
+        if not os.path.exists(lazy_install_dir):
+            os.makedirs(lazy_install_dir)
+
+        assert os.path.isfile(ts_backend_yaml), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
+        assert os.path.isfile(ts_native_functions), f"Unable to access {ts_native_functions}"
+        from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
+        from tools.codegen.dest.lazy_ir import TSLazyIR
+        run_gen_lazy_tensor(aten_path=aten_path,
+                            source_yaml=ts_backend_yaml,
+                            backend_name="TorchScript",
+                            output_dir=lazy_install_dir,
+                            dry_run=False,
+                            impl_path=ts_native_functions,
+                            node_base="TsNode",
+                            node_base_hdr=ts_node_base,
+                            build_in_tree=True,
+                            lazy_ir_cls=TSLazyIR,
+                            per_operator_headers=options.per_operator_headers,
+                            gen_forced_fallback_code=True)
 
 
 if __name__ == "__main__":

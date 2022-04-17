@@ -34,6 +34,7 @@ struct PyTensorType {
   THPDtype* dtype;
   THPLayout* layout;
   bool is_cuda;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char name[64];
   int backend;
   int scalar_type;
@@ -53,8 +54,7 @@ struct PyTensorType {
 
 static_assert(std::is_standard_layout<PyTensorType>::value, "PyTensorType must be standard layout");
 
-// This is always an instance of VariableType
-static PyTensorType* default_tensor_type;
+static Backend default_backend = Backend::CPU;
 
 static void py_bind_tensor_types(const std::vector<PyTensorType*>& tensor_types);
 
@@ -80,7 +80,7 @@ static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
   HANDLE_TH_ERRORS
   auto self = (PyTensorType*)_self;
   if (THPVariable_Check(arg)) {
-    auto& var = ((THPVariable*)arg)->cdata;
+    const auto& var = THPVariable_Unpack(arg);
     // NB: This is a little unfortunate, in that if I do an isinstance check
     // against torch.cuda.FloatTensor, this will immediately initialize CUDA.
     // I originally thought that it would not be possible for aten_type_ to
@@ -123,6 +123,15 @@ PyObject *Tensor_is_sparse(PyTensorType *self, void *unused) {
   }
 }
 
+PyObject *Tensor_is_sparse_csr(PyTensorType *self, void *unused) {
+  if (self->layout->layout == at::Layout::SparseCsr) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef metaclass_methods[] = {
   {"__instancecheck__", Tensor_instancecheck, METH_O, nullptr},
   {nullptr}
@@ -130,11 +139,13 @@ static struct PyMethodDef metaclass_methods[] = {
 
 typedef PyObject *(*getter)(PyObject *, void *);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef metaclass_properties[] = {
   {"dtype",        (getter)Tensor_dtype, nullptr, nullptr, nullptr},
   {"layout",       (getter)Tensor_layout, nullptr, nullptr, nullptr},
   {"is_cuda",      (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse",    (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
+  {"is_sparse_csr",(getter)Tensor_is_sparse_csr, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
@@ -195,12 +206,12 @@ static std::string get_name(Backend backend, ScalarType scalarType) {
   return ss.str();
 }
 
-static THPObjectPtr get_storage_obj(PyTensorType* type) {
-  auto module_name = get_module(type->get_backend());
+static THPObjectPtr get_storage_obj(Backend backend, ScalarType dtype) {
+  auto module_name = get_module(backend);
   auto module_obj = THPObjectPtr(PyImport_ImportModule(module_name));
   if (!module_obj) throw python_error();
 
-  auto storage_name = std::string(toString(type->get_scalar_type())) + "Storage";
+  auto storage_name = std::string(toString(dtype)) + "Storage";
   THPObjectPtr storage(PyObject_GetAttrString(module_obj.get(), storage_name.c_str()));
   if (!storage.get()) {
     throw TypeError("couldn't find storage object %s", storage_name.c_str());
@@ -264,29 +275,37 @@ static THPObjectPtr get_tensor_dict() {
 // importing torch.
 static std::vector<PyTensorType*> tensor_types;
 
-void set_default_tensor_type(PyTensorType* type) {
-  if (!at::isFloatingType(type->get_scalar_type())) {
-    throw TypeError("only floating-point types are supported as the default type");
-  }
-  if (type->get_backend() == Backend::Undefined) {
-    throw TypeError("default type cannot be undefined");
-  }
-  if (isSparse(type->get_backend())) {
-    throw TypeError("only dense types are supported as the default type");
-  }
-
-  // get the storage first, so if it doesn't exist we don't change the default tensor type
-  THPObjectPtr storage = get_storage_obj(type);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  default_tensor_type = type;
-  at::set_default_dtype(scalarTypeToTypeMeta(type->get_scalar_type()));
+void set_default_storage_type(Backend backend, ScalarType dtype) {
+  THPObjectPtr storage = get_storage_obj(backend, dtype);
 
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!torch_module) throw python_error();
 
   if (PyObject_SetAttrString(torch_module.get(), "Storage", storage) != 0) {
-    // technically, we should undo the change of default tensor type.
     throw python_error();
+  }
+}
+
+void set_default_tensor_type(c10::optional<Backend> backend, c10::optional<ScalarType> dtype) {
+  if (backend.has_value()) {
+    TORCH_CHECK_TYPE(*backend != Backend::Undefined, "default type cannot be undefined");
+    TORCH_CHECK_TYPE(!isSparse(*backend), "only dense types are supported as the default type");
+  }
+  if (dtype.has_value()) {
+    TORCH_CHECK_TYPE(at::isFloatingType(*dtype),
+                     "only floating-point types are supported as the default type");
+  }
+
+  // Try setting default storage in python first as it's the only operation that can fail
+  set_default_storage_type(
+      backend.value_or(default_backend),
+      dtype.value_or(at::get_default_dtype_as_scalartype()));
+
+  if (dtype.has_value()) {
+    at::set_default_dtype(scalarTypeToTypeMeta(*dtype));
+  }
+  if (backend.has_value()) {
+    default_backend = *backend;
   }
 }
 
@@ -302,12 +321,9 @@ static void initialize_aten_types(std::vector<PyTensorType*>& tensor_types) {
     ScalarType scalar_type = declared_types[i].second;
     set_type(tensor_type, backend, scalar_type);
     set_name(tensor_type, get_name(backend, scalar_type));
-
-    // Use torch.float32 as the default tensor type
-    if (backend == Backend::CPU && scalar_type == at::kFloat) {
-      set_default_tensor_type(&tensor_type);
-    }
   }
+
+  set_default_tensor_type(Backend::CPU, ScalarType::Float);
 }
 
 void initialize_python_bindings() {
@@ -372,39 +388,27 @@ static bool PyTensorType_Check(PyObject* obj) {
 }
 
 void py_set_default_tensor_type(PyObject* obj) {
-  PyTensorType *type;
-  if (PyTensorType_Check(obj)) {
-    type = (PyTensorType*)obj;
-  } else {
-    throw TypeError("invalid type object");
-  }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  TORCH_CHECK_TYPE(PyTensorType_Check(obj), "invalid type object");
+  PyTensorType *type = (PyTensorType*)obj;
   if (type->is_cuda && !torch::utils::cuda_enabled()) {
     throw unavailable_type(*type);
   }
-  set_default_tensor_type(type);
+  set_default_tensor_type(type->get_backend(), type->get_scalar_type());
 }
 
 void py_set_default_dtype(PyObject* obj) {
-  if (THPDtype_Check(obj)) {
-    auto scalar_type = ((THPDtype*)obj)->scalar_type;
-    auto backend = default_tensor_type->get_backend();
-    auto it = std::find_if(tensor_types.begin(), tensor_types.end(),
-      [backend, scalar_type](PyTensorType *x) {
-        return x->get_backend() == backend && x->get_scalar_type() == scalar_type;
-      });
-    set_default_tensor_type(*it);
-  } else {
-    throw TypeError("invalid dtype object");
-  }
+  TORCH_CHECK_TYPE(THPDtype_Check(obj), "invalid dtype object");
+  auto scalar_type = ((THPDtype*)obj)->scalar_type;
+  set_default_tensor_type(/*backend=*/c10::nullopt, scalar_type);
 }
 
 c10::DispatchKey get_default_dispatch_key() {
-  AT_ASSERT(default_tensor_type);
-  return default_tensor_type->get_dispatch_key();
+  return backendToDispatchKey(default_backend);
 }
 
 ScalarType get_default_scalar_type() {
-  return typeMetaToScalarType(get_default_dtype());
+  return get_default_dtype_as_scalartype();
 }
 
 }} // namespace torch::tensors

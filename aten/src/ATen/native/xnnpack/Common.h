@@ -41,9 +41,6 @@ struct ContextConv2D final {
   std::array<int64_t, 2> output_padding_;
   std::array<int64_t, 2> stride_;
   std::array<int64_t, 2> dilation_;
-  const float* cached_input_ptr{nullptr};
-  const float* cached_output_ptr{nullptr};
-  size_t input_height{0}, input_width{0}, batch_size{0}, input_channels{0};
   bool transposed_;
   int64_t groups_;
 
@@ -69,6 +66,9 @@ struct ContextConv2D final {
   static constexpr float kMin = -std::numeric_limits<float>::infinity();
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
+
+
+bool available();
 
 namespace internal {
 
@@ -124,9 +124,6 @@ struct Layout final {
     static constexpr size_t width = 1u;
   };
 };
-
-bool available();
-
 } // namespace internal
 } // namespace xnnpack
 } // namespace native
