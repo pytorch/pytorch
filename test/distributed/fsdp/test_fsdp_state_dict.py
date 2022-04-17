@@ -368,7 +368,7 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("double_nest", [True])
-    def test_state_dict_skip_module(self, double_nest, state_dict_rank0_and_offload):
+    def test_state_dict_skip_module(self, double_nest):
         torch.cuda.set_device(self.rank)
 
         def _create_module(wrap_fsdp=True):
@@ -411,6 +411,7 @@ class TestFSDPStateDict(FSDPTest):
         _zero_model(new_fsdp)
         for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
             self.assertNotEqual(p1, p2)
+        new_fsdp.load_state_dict(deepcopy(state_dict))
         for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
             self.assertEqual(p1, p2)
 

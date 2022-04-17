@@ -1171,6 +1171,9 @@ class FullyShardedDataParallel(nn.Module):
         """
         prev_state_dict_type = None
         prev_state_dict_config = None
+        # Use default config a state_dict config is not set.
+        if state_dict_config is None:
+            state_dict_config = _state_dict_type_to_config[state_dict_type]()
         for module in FullyShardedDataParallel.fsdp_modules(module):
             if prev_state_dict_type is None:
                 prev_state_dict_type = module._state_dict_type
@@ -1350,7 +1353,10 @@ class FullyShardedDataParallel(nn.Module):
         self._lazy_init()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             # Get config args
-            full_state_dict_config = self._state_dict_config
+            full_state_dict_config = (
+                self._state_dict_config if self._state_dict_config is not None
+                else FullStateDictConfig()
+            )
             rank0_only = full_state_dict_config.rank0_only
             offload_to_cpu = full_state_dict_config.offload_to_cpu
             summon_ctx = (
