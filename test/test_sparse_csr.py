@@ -428,7 +428,7 @@ class TestSparseCSR(TestCase):
                                     torch.tensor([1, 2, 3, 4]),
                                     device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r"\"csr_construct_check\" not implemented for 'Short'"):
+        with self.assertRaisesRegex(RuntimeError, r"\"validate_sparse_compressed_tensor_args\" not implemented for 'Short'"):
             torch.sparse_csr_tensor(torch.tensor([0, 2, 4], dtype=torch.int16),
                                     torch.tensor([0, 1, 0, 1], dtype=torch.int16),
                                     torch.tensor([1, 2, 3, 4]),
@@ -492,22 +492,22 @@ class TestSparseCSR(TestCase):
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"Number of dimensions of crow_indices and col_indices must be the same"):
+                                    r"number of dimensions of crow_indices and col_indices must be the same"):
             torch.sparse_csr_tensor(crow_indices, col_indices.repeat(2, 1), values, size,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"Number of dimensions of indices and values must be the same"):
+                                    r"number of dimensions of indices and values must be the same"):
             torch.sparse_csr_tensor(crow_indices, col_indices, values.repeat(2, 1), size,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"Number of dimensions of indices must be one less"):
+                                    r"number of dimensions of indices must be one less"):
             torch.sparse_csr_tensor(crow_indices.repeat(2, 1), col_indices.repeat(2, 1), values.repeat(2, 1), size,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"All batch dimensions of the provided size \(\[2\]\), indices \(\[2\], \[3\]\),"
+                                    r"all batch dimensions of the provided size \(\[2\]\), indices \(\[2\], \[3\]\),"
                                     r" and values \(\[4\]\) must be the same"):
             torch.sparse_csr_tensor(crow_indices.repeat(2, 1), col_indices.repeat(3, 1), values.repeat(4, 1), (2, 2, 10),
                                     device=device)

@@ -41,9 +41,12 @@ using namespace at::sparse_csr;
 namespace {
 } // end anonymous namespace
 
-void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, c10::Layout layout) {
+void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, Layout layout) {
 
-  const std::string layout_name = at::sparse_csr::layoutToString(layout, /*upper=*/ true);
+  // Layout must be Sparse Compressed
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args", [&]{});
+
+  const std::string layout_name = layoutToString(layout, /*upper=*/ true);
   const std::string compressed_indices_name = compressedIndicesName(layout);
   const std::string plain_indices_name = plainIndicesName(layout);
 
@@ -61,106 +64,114 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
       "expected values to be a strided and contiguous tensor");
 
   // Shape and Strides invariants
-  switch (layout) {
-  case kSparseCsr:
-  case kSparseCsc:
-    TORCH_CHECK(
-                size.size() >= 2,
-                "size of a batched ", layout_name, " tensor must have length >= 2, but got: ",
-                size.size());
-    TORCH_CHECK(
-                compressed_indices.dim() >= 1,
-                compressed_indices_name, " must have dim >= 1 but got ", compressed_indices_name, ".dim() = ",
-                compressed_indices.dim());
-    TORCH_CHECK(
-                plain_indices.dim() >= 1,
-                plain_indices_name, " must have dim >= 1 but got ", plain_indices_name, ".dim() = ",
-                plain_indices.dim());
-    TORCH_CHECK(
-                values.dim() >= 1,
-                "values must have dim >= 1 but got values.dim() = ",
-                values.dim());
-    break;
-  case kSparseBsr:
-  case kSparseBsc:
-    TORCH_CHECK(false, "_validate_sparse_csr_tensor_args: layout ", layout, " is not yet supported");  // TODO
-    break;
-  default:
-    TORCH_CHECK(false, "_validate_sparse_csr_tensor_args: layout ", layout, " is not supported");
-  }
+  TORCH_CHECK(
+              size.size() >= 2,
+              "size of a batched ", layout_name, " tensor must have length >= 2, but got: ",
+              size.size());
+  TORCH_CHECK(
+              compressed_indices.dim() >= 1,
+              compressed_indices_name, " must have dim >= 1 but got ", compressed_indices_name, ".dim() = ",
+              compressed_indices.dim());
+  TORCH_CHECK(
+              plain_indices.dim() >= 1,
+              plain_indices_name, " must have dim >= 1 but got ", plain_indices_name, ".dim() = ",
+              plain_indices.dim());
+  TORCH_CHECK(
+              values.dim() >= 1,
+              "values must have dim >= 1 but got values.dim() = ",
+              values.dim());
 
   TORCH_CHECK(
       compressed_indices.dim() == plain_indices.dim(),
-      "Number of dimensions of ", compressed_indices_name, " and ", plain_indices_name, " must be the same.");
-  TORCH_CHECK(
-      compressed_indices.dim() == values.dim(),
-      "Number of dimensions of indices and values must be the same.");
+      "number of dimensions of ", compressed_indices_name, " and ", plain_indices_name, " must be the same.");
+
+  AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
+      layout, "validate_sparse_compressed_tensor_args",
+      [&] {
+        TORCH_CHECK(
+                    compressed_indices.dim() == values.dim(),
+                    "number of dimensions of indices and values must be the same.");
+      },
+      [&] {
+        TORCH_CHECK(
+                    compressed_indices.dim() + 2 == values.dim(),
+                    "number of dimensions of indices must be two less than the number of dimensions of the values.");
+      });
+
   TORCH_CHECK(
       static_cast<size_t>(compressed_indices.dim()) == size.size() - 1,
-      "Number of dimensions of indices must be one less than the number of dimensions of the provided size.");
+      "number of dimensions of indices must be one less than the number of dimensions of the provided size.");
+
+  int block_ndim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args", [&]{ return 0; }, [&]{ return 2; });
+  IntArrayRef block_size = values.sizes().slice(values.dim() - block_ndim, block_ndim);
+  long numel_per_block = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args", [&]{ return 1l; }, [&]{ return block_size[0] * block_size[1]; });
+  int compressed_dim = compressedDimension(layout, size);
+  int plain_dim = plainDimension(layout, size);
 
   // All batch sizes must be the same
   auto batch_size = size.slice(0, size.size() - 2);
   auto compressed_indices_batch_size = compressed_indices.sizes().slice(0, compressed_indices.dim() - 1);
   auto plain_indices_batch_size = plain_indices.sizes().slice(0, plain_indices.dim() - 1);
-  auto values_batch_size = values.sizes().slice(0, values.dim() - 1);
+  auto values_batch_size = values.sizes().slice(0, values.dim() - 1 - block_ndim);
   TORCH_CHECK(
       batch_size == compressed_indices_batch_size &&
       batch_size == plain_indices_batch_size &&
       batch_size == values_batch_size,
-      "All batch dimensions of the provided size (", batch_size, "), indices (",
+      "all batch dimensions of the provided size (", batch_size, "), indices (",
       compressed_indices_batch_size,", ", plain_indices_batch_size, "), and values (",
       values_batch_size,") must be the same.");
+
   // Note, this check also enforces `compressed_indices.size(-1) >= 1`
   TORCH_CHECK(
-              compressed_indices.size(-1) == (size[size.size() - 2] + 1),  // TODO: BSR/BSC
-              compressed_indices_name, ".size(-1) must be equal to size[-2] + 1 (that is ", size[size.size() - 2] + 1, "), but got: ",
-              compressed_indices.size(-1));
-  TORCH_CHECK(
-      plain_indices.numel() == values.numel(),
-      plain_indices_name, " and values must have the same number of elements, but got ", plain_indices_name, ".numel(): ",
-      plain_indices.numel(),
-      ", values.numel(): ",
-      values.numel());
+              compressed_indices.size(-1) == (size[compressed_dim] + 1),
+              compressed_indices_name, ".size(-1) must be equal to size[-", (size.size() - compressed_dim), "] + 1 (that is ",
+              size[compressed_dim] + 1, "), but got: ", compressed_indices.size(-1));
+
+  AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args",
+      [&] {
+        TORCH_CHECK(
+                    plain_indices.numel() == values.numel(),
+                    plain_indices_name, " and values must have the same number of elements, but got ", plain_indices_name, ".numel(): ",
+                    plain_indices.numel(), ", values.numel(): ", values.numel());
+      },
+      [&] {
+        TORCH_CHECK(
+                    plain_indices.numel() * numel_per_block == values.numel(),
+                    "number of ", plain_indices_name, " elements must be the same as the number of blocks in values, but got ",
+                    plain_indices_name, ".numel() * numel_per_block: ", plain_indices.numel() * numel_per_block,
+                    ", values.numel(): ", values.numel(),", numel_per_block: ", numel_per_block);
+      });
 
   // Indices invariants
-  AT_DISPATCH_INDEX_TYPES(compressed_indices.scalar_type(), "csr_construct_check", [&] {
-    Tensor compressed_indices_cpu = compressed_indices.to(kCPU);
-    auto compressed_indices_data_ptr = compressed_indices_cpu.data_ptr<index_t>();
-    auto batch_stride = compressed_indices_cpu.dim() >= 2 ? compressed_indices_cpu.stride(-2) : 0;
-    switch (layout) {
-    case kSparseCsr:
-    case kSparseCsc:
-      for (const auto batch_id : c10::irange(batchCount(compressed_indices_cpu))) {
-        TORCH_CHECK(
-                    compressed_indices_data_ptr[batch_id*batch_stride] == 0,
-                    "(Batch element ", batch_id, ") ",
-                    ": 0th value of ", compressed_indices_name, " must be 0, but it is ", compressed_indices_data_ptr[batch_id*batch_stride]);
-        TORCH_CHECK(
-                    compressed_indices_data_ptr[batch_id*batch_stride + compressed_indices.size(-1) - 1] == plain_indices.size(-1),
-                    "(Batch element ", batch_id, ") ",
-                    "last value of ", compressed_indices_name, " should be equal to the length of ", plain_indices_name, ".");
-        for (int i =  1; i <= size[size.size() - 2]; i++) {
-          TORCH_CHECK(
-                      compressed_indices_data_ptr[batch_id*batch_stride + i - 1] <= compressed_indices_data_ptr[batch_id*batch_stride + i],
-                      "(Batch element ", batch_id, ") ",
-                      "at position i = ", i, ", the condition ", compressed_indices_name, "[i - 1] <= ", compressed_indices_name, "[i] fails");
-        }
-      }
-      if (plain_indices.numel() > 0) {
-        TORCH_CHECK(0 <= plain_indices.min().item<index_t>(), plain_indices_name, ".min() should be greater or equal to zero");
-        TORCH_CHECK(size[size.size() - 1] > plain_indices.max().item<index_t>(), "size[-1] should be greater than ", plain_indices_name, ".max()");
-      }
-      break;
-    case kSparseBsr:
-    case kSparseBsc:
-      TORCH_CHECK(false, "_validate_sparse_csr_tensor_args: layout ", layout, " is not yet supported");  // TODO
-    default:
-      TORCH_CHECK(false, "_validate_sparse_csr_tensor_args: layout ", layout, " is not supported");
-    }
-  });
+  AT_DISPATCH_INDEX_TYPES(compressed_indices.scalar_type(), "validate_sparse_compressed_tensor_args",
+      [&] {
+        Tensor compressed_indices_cpu = compressed_indices.to(kCPU);
+        auto compressed_indices_data_ptr = compressed_indices_cpu.data_ptr<index_t>();
+        auto batch_stride = compressed_indices_cpu.dim() >= 2 ? compressed_indices_cpu.stride(-2) : 0;
 
-  // CSR Type Invariants
+        for (const auto batch_id : c10::irange(batchCount(compressed_indices_cpu))) {
+          TORCH_CHECK(
+                      compressed_indices_data_ptr[batch_id*batch_stride] == 0,
+                      "(Batch element ", batch_id, ") ",
+                      ": 0th value of ", compressed_indices_name, " must be 0, but it is ", compressed_indices_data_ptr[batch_id*batch_stride]);
+          TORCH_CHECK(
+                      compressed_indices_data_ptr[batch_id*batch_stride + compressed_indices.size(-1) - 1] == plain_indices.size(-1),
+                      "(Batch element ", batch_id, ") ",
+                      "last value of ", compressed_indices_name, " should be equal to the length of ", plain_indices_name, ".");
+          for (int i =  1; i <= size[size.size() - 2]; i++) {
+            TORCH_CHECK(
+                        compressed_indices_data_ptr[batch_id*batch_stride + i - 1] <= compressed_indices_data_ptr[batch_id*batch_stride + i],
+                        "(Batch element ", batch_id, ") ",
+                        "at position i = ", i, ", the condition ", compressed_indices_name, "[i - 1] <= ", compressed_indices_name, "[i] fails");
+          }
+        }
+        if (plain_indices.numel() > 0) {
+          TORCH_CHECK(0 <= plain_indices.min().item<index_t>(), plain_indices_name, ".min() should be greater or equal to zero");
+          TORCH_CHECK(size[plain_dim] > plain_indices.max().item<index_t>(), "size[-", (size.size() - plain_dim),"] should be greater than ", plain_indices_name, ".max()");
+        }
+      });
+
+  // Type Invariants
   auto compressed_indices_type = compressed_indices.scalar_type();
   auto plain_indices_type = plain_indices.scalar_type();
   TORCH_CHECK(
@@ -171,7 +182,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
       compressed_indices_name, " and ", plain_indices_name, " must be an int32 or int64 type, but got: ",
       compressed_indices_type);
 
-  // CSR Device Invariants
+  // Device Invariants
   TORCH_CHECK(
       plain_indices.get_device() == compressed_indices.get_device(),
       compressed_indices_name, " and ", plain_indices_name, " devices (",
@@ -191,23 +202,20 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
       "device type of values (",
       values.device().type(),
       ") must be CPU or CUDA");
-}
 
-void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, c10::optional<Layout> layout_) {
-   _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout_.value_or(kDummyLayout));
 }
 
 void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
-  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseCsr);
+  _validate_sparse_compressed_tensor_args(crow_indices, col_indices, values, size, kSparseCsr);
 }
 void _validate_sparse_csc_tensor_args(const Tensor& ccol_indices, const Tensor& row_indices, const Tensor& values, IntArrayRef size) {
-  _validate_sparse_compressed_tensor_args_worker(ccol_indices, row_indices, values, size, kSparseCsc);
+  _validate_sparse_compressed_tensor_args(ccol_indices, row_indices, values, size, kSparseCsc);
 }
 void _validate_sparse_bsr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
-  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseBsr);
+  _validate_sparse_compressed_tensor_args(crow_indices, col_indices, values, size, kSparseBsr);
 }
 void _validate_sparse_bsc_tensor_args(const Tensor& ccol_indices, const Tensor& row_indices, const Tensor& values, IntArrayRef size) {
-  _validate_sparse_compressed_tensor_args_worker(ccol_indices, row_indices, values, size, kSparseBsc);
+  _validate_sparse_compressed_tensor_args(ccol_indices, row_indices, values, size, kSparseBsc);
 }
 
 // Construction of CSR, CSC, BSR, and BSC tensors.

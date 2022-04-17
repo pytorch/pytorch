@@ -41,9 +41,14 @@ void _validate_sparse_csr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
 void _validate_sparse_csc_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 void _validate_sparse_bsr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 void _validate_sparse_bsc_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-
-at::Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r);
-at::Tensor as_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r);
+at::Tensor tensor_ctor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r);
+at::Tensor as_tensor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r);
 at::Tensor new_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor new_ones(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor tensor_frombuffer(PyObject* buffer, at::ScalarType dtype, int64_t count, int64_t offset, bool requires_grad);

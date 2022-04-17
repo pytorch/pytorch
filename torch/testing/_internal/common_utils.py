@@ -1023,7 +1023,6 @@ def skipIfNoLapack(fn):
             fn(*args, **kwargs)
     return wrapper
 
-
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
 
@@ -1045,6 +1044,17 @@ def skipIfNotRegistered(op_name, message):
         skipper = unittest.skip("Cannot import `caffe2.python.core`")
     return skipper
 
+def _decide_skip_caffe2(expect_caffe2, reason):
+    def skip_dec(func):
+        def wrapper(self):
+            if torch.onnx._CAFFE2_ATEN_FALLBACK != expect_caffe2:
+                raise unittest.SkipTest(reason)
+            return func(self)
+        return wrapper
+    return skip_dec
+
+skipIfCaffe2 = _decide_skip_caffe2(False, "Not compatible with Caffe2")
+skipIfNoCaffe2 = _decide_skip_caffe2(True, "Caffe2 is not available")
 
 def skipIfNoSciPy(fn):
     @wraps(fn)
