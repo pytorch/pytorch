@@ -2,15 +2,12 @@ import torch
 from torch import Tensor
 import torchvision_models as models
 
-try:
-    import functorch  # noqa: F401
-    has_functorch = True
-except ImportError:
-    has_functorch = False
-
-from utils import extract_weights, load_weights, GetterReturnType
+from utils import check_for_functorch, extract_weights, load_weights, GetterReturnType
 
 from typing import cast
+
+has_functorch = check_for_functorch()
+
 
 def get_resnet18(device: torch.device) -> GetterReturnType:
     N = 32
@@ -46,6 +43,8 @@ def get_fcn_resnet(device: torch.device) -> GetterReturnType:
         from functorch.experimental import replace_all_batch_norm_modules_
 
         replace_all_batch_norm_modules_(model)
+        # disable dropout for consistency checking
+        model.eval()
 
     model.to(device)
     params, names = extract_weights(model)

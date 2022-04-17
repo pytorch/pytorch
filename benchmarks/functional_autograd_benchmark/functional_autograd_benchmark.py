@@ -47,8 +47,8 @@ def get_task_functorch(task: str) -> Callable:
 
     def vjp(model, inp, v=None, strict=None):
         assert v is not None
-        _, vjpfunc = ft.vjp(model, *inp)
-        return vjpfunc(v)
+        out, vjpfunc = ft.vjp(model, *inp)
+        return out, vjpfunc(v)
 
     def jvp(model, inp, v=None, strict=None):
         assert v is not None
@@ -57,13 +57,14 @@ def get_task_functorch(task: str) -> Callable:
     def vhp(model, inp, v=None, strict=None):
         assert v is not None
         argnums = tuple(range(len(inp)))
-        _, vjpfunc = ft.vjp(ft.grad(model, argnums), *inp)
-        return vjpfunc(v)
+        _, vjpfunc, aux = ft.vjp(ft.grad_and_value(model, argnums), *inp, has_aux=True)
+        return aux, vjpfunc(v)
 
     def hvp(model, inp, v=None, strict=None):
         assert v is not None
         argnums = tuple(range(len(inp)))
-        return ft.jvp(ft.grad(model, argnums), inp, v)
+        _, hvp_out, aux = ft.jvp(ft.grad_and_value(model, argnums), inp, v, has_aux=True)
+        return aux, hvp_out
 
     def jacfwd(model, inp, v=None, strict=None):
         argnums = tuple(range(len(inp)))
@@ -74,32 +75,21 @@ def get_task_functorch(task: str) -> Callable:
         return ft.jacrev(model, argnums)(*inp)
 
     def hessian(model, inp, v=None, strict=None):
-        return ft.hessian(model)(*inp)
+        argnums = tuple(range(len(inp)))
+        return ft.hessian(model, argnums=argnums)(*inp)
 
     def hessian_fwdrev(model, inp, v=None, strict=None):
-        return ft.jacfwd(ft.jacfwd(model))(*inp)
+        argnums = tuple(range(len(inp)))
+        return ft.jacfwd(ft.jacrev(model, argnums=argnums), argnums=argnums)(*inp)
 
     def hessian_revrev(model, inp, v=None, strict=None):
-        return ft.jacrev(ft.jacrev(model))(*inp)
+        argnums = tuple(range(len(inp)))
+        return ft.jacrev(ft.jacrev(model, argnums=argnums), argnums=argnums)(*inp)
 
-    if task == "jacfwd":
-        return jacfwd
-    elif task in ["jacrev", "jacobian"]:
-        return jacrev
-    elif task == "vjp":
-        return vjp
-    elif task == "jvp":
-        return jvp
-    elif task == "hessian":
-        return hessian
-    elif task == "hessian_fwdrev":
-        return hessian_fwdrev
-    elif task == "hessian_revrev":
-        return hessian_revrev
-    elif task == "vhp":
-        return vhp
-    elif task == "hvp":
-        return hvp
+    if task in locals():
+        return locals()[task]
+    elif task == "jacobian":
+        raise RuntimeError("functorch has no equivalent of autograd.functional.jacobian with vectorize=False yet")
     else:
         raise RuntimeError(f"Unsupported task: {task}")
 
@@ -166,7 +156,7 @@ def get_v_for(model: Callable, inp: InputsType, task: str) -> VType:
 
     return v
 
-def run_once(model: Callable, inp: InputsType, task: str, v: VType) -> None:
+def run_once(model: Callable, inp: InputsType, task: str, v: VType, **kwargs) -> None:
     func = get_task_func(task)
 
     if v is not None:
@@ -174,7 +164,7 @@ def run_once(model: Callable, inp: InputsType, task: str, v: VType) -> None:
     else:
         res = func(model, inp, strict=True)
 
-def run_once_functorch(model: Callable, inp: InputsType, task: str, v: VType) -> None:
+def run_once_functorch(model: Callable, inp: InputsType, task: str, v: VType, check_consistency=False) -> None:
     func = get_task_functorch(task)
 
     if v is not None:
@@ -182,7 +172,16 @@ def run_once_functorch(model: Callable, inp: InputsType, task: str, v: VType) ->
     else:
         res = func(model, inp, strict=True)
 
-def run_model(model_getter: GetterType, args: Any, task: str) -> List[float]:
+    if check_consistency:
+        af_func = get_task_func(task)
+        if v is not None:
+            expected = af_func(model, inp, v=v, strict=True)
+        else:
+            expected = af_func(model, inp, strict=True)
+        atol = 1e-2 if task == "vhp" else 5e-3
+        torch.testing.assert_close(res, expected, rtol=1e-5, atol=atol, msg=f"Consistency fail for task '{task}'")
+
+def run_model(model_getter: GetterType, args: Any, task: str, run_once_fn: Callable = run_once) -> List[float]:
     if args.gpu == -1:
         device = torch.device("cpu")
 
@@ -196,43 +195,18 @@ def run_model(model_getter: GetterType, args: Any, task: str) -> List[float]:
     model, inp = model_getter(device)
 
     v = get_v_for(model, inp, task)
-    # Warmup
-    run_once(model, inp, task, v)
 
-    elapsed = []
-    for it in range(args.num_iters):
-        do_sync()
-        start = time.time()
-        run_once(model, inp, task, v)
-        do_sync()
-        elapsed.append(time.time() - start)
+    with torch.set_grad_enabled(run_once_fn == run_once):
+        # Warmup
+        run_once_fn(model, inp, task, v, check_consistency=run_once_fn == run_once_functorch)
 
-    return elapsed
-
-def run_model_functorch(model_name: str, model_getter: GetterType, args: Any, task: str) -> List[float]:
-    if args.gpu == -1:
-        device = torch.device("cpu")
-
-        def noop():
-            pass
-        do_sync = noop
-    else:
-        device = torch.device("cuda:{}".format(args.gpu))
-        do_sync = torch.cuda.synchronize
-
-    model, inp = model_getter(device)
-
-    v = get_v_for(model, inp, task)
-    # Warmup
-    run_once_functorch(model, inp, task, v)
-
-    elapsed = []
-    for it in range(args.num_iters):
-        do_sync()
-        start = time.time()
-        run_once_functorch(model, inp, task, v)
-        do_sync()
-        elapsed.append(time.time() - start)
+        elapsed = []
+        for it in range(args.num_iters):
+            do_sync()
+            start = time.time()
+            run_once_fn(model, inp, task, v)
+            do_sync()
+            elapsed.append(time.time() - start)
 
     return elapsed
 
@@ -277,7 +251,7 @@ def main():
 
             if has_functorch:
                 try:
-                    runtimes = run_model_functorch(name, model_getter, args, task)
+                    runtimes = run_model(model_getter, args, task, run_once_fn=run_once_functorch)
                 except RuntimeError as e:
                     print(f"Failed model using Functorch: {name}, task: {task}, Error message: \n\t", e)
                     continue

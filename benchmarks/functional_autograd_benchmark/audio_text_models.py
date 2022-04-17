@@ -1,15 +1,13 @@
 import torch
 from torch import nn, Tensor
 
-try:
-    import functorch  # noqa: F401
-    has_functorch = True
-except ImportError:
-    has_functorch = False
-
 import torchaudio_models as models
 
-from utils import extract_weights, load_weights, GetterReturnType
+from utils import check_for_functorch, extract_weights, load_weights, GetterReturnType
+
+
+has_functorch = check_for_functorch()
+
 
 def get_wav2letter(device: torch.device) -> GetterReturnType:
     N = 10
@@ -83,6 +81,11 @@ def get_transformer(device: torch.device) -> GetterReturnType:
     ntoken = 50
     model = models.TransformerModel(ntoken=ntoken, ninp=720, nhead=12, nhid=2048, nlayers=2)
     model.to(device)
+
+    if has_functorch:
+        # disable dropout for consistency checking
+        model.eval()
+
     criterion = nn.NLLLoss()
     params, names = extract_weights(model)
 
