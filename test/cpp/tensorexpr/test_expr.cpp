@@ -71,6 +71,12 @@ TEST(Expr, IsChannelsLastContiguous) {
 
   std::vector<int> dims = {3, 4, 5};
 
+  std::unordered_map<int, std::vector<ExprHandle>> dims_expr_vec_conf = {
+    {3, std::vector<ExprHandle>(vars.begin(), vars.begin() + 2)},
+    {4, std::vector<ExprHandle>(vars.begin(), vars.begin() + 3)},
+    {5, std::vector<ExprHandle>(vars.begin(), vars.begin() + 4)},
+  };
+
   shapGenInfo channels_last_cont_shape_conf = {
       {3, {{1, 2, 0}}}, {4, {{1, 3, 2, 0}}}, {5, {{1, 4, 3, 2, 0}}}};
   shapGenInfo channels_last_non_cont_shape_conf = {
@@ -81,10 +87,9 @@ TEST(Expr, IsChannelsLastContiguous) {
   shapGenInfo cont_shape_conf = {
       {3, {{0, 1, 2}}}, {4, {{0, 1, 2, 3}}}, {5, {{0, 1, 2, 3, 4}}}};
 
-  auto shape_gen_fn = [vars](
+  auto shape_gen_fn = [dims_expr_vec_conf](
                           int ndims, shapGenInfo shape_gen_info) -> shapeInfo {
-    std::vector<ExprHandle> dims_expr_vec(
-        vars.begin(), vars.begin() + ndims - 1);
+    auto dims_expr_vec = dims_expr_vec_conf.at(ndims);
     std::vector<std::vector<ExprHandle>> strides_expr_vec;
     for (size_t i = 0; i < strides_expr_vec.size(); i++) {
       strides_expr_vec[i].resize(ndims);
