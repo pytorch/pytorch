@@ -104,7 +104,7 @@ void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
 #if AT_USE_JITERATOR()
   static const auto reciprocal_string = jiterator_stringify(
       template <typename T>
-      T reciprocal_kernel(T v) {
+      T reciprocal_kernel(c10::complex<T> v) {
         // Handle extreme cases for numpy compatibility
         auto both_inf = [](T real, T imag) {
           return ::isinf(real) && ::isinf(imag);
