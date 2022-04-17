@@ -4,7 +4,7 @@ namespace torch {
 namespace lazy {
 
 DimensionNode::DimensionNode(OpKind op, OpList operands, hash_t hash_seed):
-  TsNode(op, operands, /*num_outputs=*/1,
+  Node(op, operands, /*num_outputs=*/1,
   /* node_hash */ HashCombine(op.hash(), hash_seed)){}
 
 std::string DimensionNode::ToString() const {
