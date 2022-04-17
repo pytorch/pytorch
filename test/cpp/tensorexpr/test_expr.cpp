@@ -83,11 +83,8 @@ TEST(Expr, IsChannelsLastContiguous) {
 
   auto shape_gen_fn = [vars](
                           int ndims, shapGenInfo shape_gen_info) -> shapeInfo {
-    std::vector<ExprHandle> dims_expr_vec;
-    for (int i = 0; i < ndims; i++) {
-      dims_expr_vec.push_back(vars[i]);
-    }
-
+    std::vector<ExprHandle> dims_expr_vec(
+        vars.begin(), vars.begin() + ndims - 1);
     std::vector<std::vector<ExprHandle>> strides_expr_vec;
     for (size_t i = 0; i < strides_expr_vec.size(); i++) {
       strides_expr_vec[i].resize(ndims);
@@ -112,11 +109,11 @@ TEST(Expr, IsChannelsLastContiguous) {
 
   auto check_channels_last_fn = [](int ndims, BufHandle buf_handle) -> bool {
     if (ndims == 3) {
-      return buf_handle.node()->is_channels_last_1d_contiguous();
+      return buf_handle.is_channels_last_1d_contiguous();
     } else if (ndims == 4) {
-      return buf_handle.node()->is_contigous(at::MemoryFormat::ChannelsLast);
+      return buf_handle.is_contiguous(at::MemoryFormat::ChannelsLast);
     } else {
-      return buf_handle.node()->is_contigous(at::MemoryFormat::ChannelsLast3d);
+      return buf_handle.is_contiguous(at::MemoryFormat::ChannelsLast3d);
     }
   };
 
@@ -143,7 +140,7 @@ TEST(Expr, IsChannelsLastContiguous) {
     auto shape_info = shape_gen_fn(dims[i], cont_shape_conf);
     for (size_t j = 0; j < shape_info.second.size(); j++) {
       BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
-      ASSERT_EQ(buf_handle.node()->is_contigous(), true);
+      ASSERT_EQ(buf_handle.is_contiguous(), true);
     }
   }
 
@@ -152,7 +149,7 @@ TEST(Expr, IsChannelsLastContiguous) {
     auto shape_info = shape_gen_fn(dims[i], channels_last_cont_shape_conf);
     for (size_t j = 0; j < shape_info.second.size(); j++) {
       BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
-      ASSERT_EQ(buf_handle.node()->is_contigous(), false);
+      ASSERT_EQ(buf_handle.is_contiguous(), false);
     }
   }
 }

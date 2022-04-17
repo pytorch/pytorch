@@ -465,11 +465,43 @@ BufHandle Buf::make(
       qzero ? qzero->node() : nullptr));
 }
 
+bool Buf::is_contiguous(at::MemoryFormat memory_format) const {
+  auto ndims = dims_.size();
+  std::vector<int64_t> dim_order(ndims);
+  if (memory_format == at::MemoryFormat::ChannelsLast) {
+    if (dims_.size() != 4)
+      return false;
+    dim_order = {1, 3, 2, 0};
+  } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+    if (dims_.size() != 5)
+      return false;
+    dim_order = {1, 4, 3, 2, 0};
+  } else {
+    for (size_t i = 0; i < ndims; i++) {
+      dim_order[i] = ndims - i - 1; // Reverse
+    }
+  }
+
+  bool res = is_stride_one(dim_order[0]);
+  if (!res)
+    return false;
+
+  for (size_t i = 1; i < ndims; i++) {
+    auto cur_dim = dim_order[i];
+    auto pre_dim = dim_order[i - 1];
+    res &= is_cont_with(cur_dim, pre_dim);
+    if (!res)
+      return false;
+  }
+
+  return true;
+}
+
 std::vector<ExprHandle> BufHandle::dims() const {
   return ExprVectorToExprHandleVector(node()->dims());
 }
 
-bool Buf::is_cont_with(int cur_dim, int adjacent_dim) {
+bool Buf::is_cont_with(int cur_dim, int adjacent_dim) const {
   auto is_cont_fn = [](ExprPtr adjacent_dim,
                        ExprPtr adjacent_stride,
                        ExprPtr cur_stride) {
@@ -488,7 +520,7 @@ bool Buf::is_cont_with(int cur_dim, int adjacent_dim) {
       dims_[adjacent_dim], strides_[adjacent_dim], strides_[cur_dim]);
 }
 
-bool Buf::is_stride_one(int cur_dim) {
+bool Buf::is_stride_one(int cur_dim) const {
   return exprEquals(strides_[cur_dim], alloc<LongImm>(1));
 }
 

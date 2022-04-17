@@ -302,40 +302,17 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return true;
   }
 
-  bool is_contigous(
-      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
-    auto ndims = dims_.size();
-    std::vector<int64_t> dim_order(ndims);
-    if (memory_format == at::MemoryFormat::ChannelsLast) {
-      if (dims_.size() != 4)
-        return false;
-      dim_order = {1, 3, 2, 0};
-    } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-      if (dims_.size() != 5)
-        return false;
-      dim_order = {1, 4, 3, 2, 0};
-    } else {
-      for (size_t i = 0; i < ndims; i++) {
-        dim_order[i] = ndims - i - 1; // Reverse
-      }
-    }
+  bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const;
 
-    bool res = is_stride_one(dim_order[0]);
-    if (!res)
-      return false;
-
-    for (size_t i = 1; i < ndims; i++) {
-      auto cur_dim = dim_order[i];
-      auto pre_dim = dim_order[i - 1];
-      res &= is_cont_with(cur_dim, pre_dim);
-      if (!res)
-        return false;
-    }
-
-    return true;
-  }
-
-  bool is_channels_last_1d_contiguous() {
+  // The channels-last 1d can benefit the performance of some operators like
+  // conv1d. But the MemoryFormat enum has not covered this layout yet. Hence,
+  // we abstract a dedicated function to check channels-last 1d contiguous.
+  //
+  // Channels-last 1d:
+  //   dims:              n   c    l
+  //   strides(nlc):    c*l   1    c
+  bool is_channels_last_1d_contiguous() const {
     if (dims_.size() != 3) {
       return false;
     }
@@ -343,8 +320,8 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
 
  private:
-  bool is_cont_with(int cur_dim, int adjacent_dim);
-  bool is_stride_one(int cur_dim);
+  bool is_cont_with(int cur_dim, int adjacent_dim) const;
+  bool is_stride_one(int cur_dim) const;
 
  private:
   VarPtr base_handle_;
@@ -418,6 +395,15 @@ class TORCH_API BufHandle : public ExprHandle {
 
   ExprHandle dim(size_t index) const {
     return ExprHandle(node()->dim(index));
+  }
+
+  bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    return node()->is_contiguous(memory_format);
+  }
+
+  bool is_channels_last_1d_contiguous() const {
+    return node()->is_channels_last_1d_contiguous();
   }
 };
 
