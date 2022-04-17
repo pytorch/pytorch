@@ -485,6 +485,14 @@ operator&&(const complex<_Tp>& __x, const complex<_Tp>& __y)
     return (__x.real() || __x.imag()) && (__y.real() || __y.imag());
 }
 
+template<class _Tp>
+inline constexpr
+bool
+operator||(const complex<_Tp>& __x, const complex<_Tp>& __y)
+{
+    return (__x.real() || __x.imag()) || (__y.real() || __y.imag());
+}
+
 // 26.3.7 values:
 
 template <class _Tp, bool = is_integral<_Tp>::value,

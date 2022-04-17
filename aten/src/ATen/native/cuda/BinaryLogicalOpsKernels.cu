@@ -88,7 +88,7 @@ void logical_xor_kernel_cuda(TensorIterator& iter) {
 #if AT_USE_JITERATOR()
     static const auto logical_xor_string = jiterator_stringify(
         template <typename T>
-        T logical_and_kernel(T a, T b) {
+        T logical_xor_kernel(T a, T b) {
           return bool(a) != bool(b);
         }
     );
