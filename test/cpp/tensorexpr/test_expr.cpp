@@ -72,9 +72,9 @@ TEST(Expr, IsChannelsLastContiguous) {
   std::vector<int> dims = {3, 4, 5};
 
   std::unordered_map<int, std::vector<ExprHandle>> dims_expr_vec_conf = {
-    {3, std::vector<ExprHandle>(vars.begin(), vars.begin() + 2)},
-    {4, std::vector<ExprHandle>(vars.begin(), vars.begin() + 3)},
-    {5, std::vector<ExprHandle>(vars.begin(), vars.begin() + 4)},
+      {3, std::vector<ExprHandle>(vars.begin(), vars.begin() + 2)},
+      {4, std::vector<ExprHandle>(vars.begin(), vars.begin() + 3)},
+      {5, std::vector<ExprHandle>(vars.begin(), vars.begin() + 4)},
   };
 
   shapGenInfo channels_last_cont_shape_conf = {
