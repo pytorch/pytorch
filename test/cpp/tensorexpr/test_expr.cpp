@@ -95,8 +95,15 @@ TEST(Expr, IsChannelsLastContiguous) {
       strides_expr_vec[i].resize(ndims);
     }
 
-    auto stride_order_vec = shape_gen_info.at(ndims);
+    auto stride_gen_fn = [](int indicator, ExprHandle a, ExprHandle b) {
+      if (indicator % 2 == 0) {
+        return a * b;
+      } else {
+        return b * a;
+      }
+    };
 
+    auto stride_order_vec = shape_gen_info.at(ndims);
     for (size_t i = 0; i < strides_expr_vec.size(); i++) {
       auto stride_order = stride_order_vec[i];
 
@@ -104,8 +111,11 @@ TEST(Expr, IsChannelsLastContiguous) {
       for (size_t j = 1; j < stride_order.size(); j++) {
         auto cur_dim_idx = stride_order[j];
         auto adjacent_dim_idx = stride_order[j - 1];
-        strides_expr_vec[i][cur_dim_idx] = dims_expr_vec[adjacent_dim_idx] *
-            strides_expr_vec[i][adjacent_dim_idx];
+
+        strides_expr_vec[i][cur_dim_idx] = stride_gen_fn(
+            i,
+            dims_expr_vec[adjacent_dim_idx],
+            strides_expr_vec[i][adjacent_dim_idx]);
       }
     }
 

@@ -509,11 +509,24 @@ bool Buf::is_cont_with(int cur_dim, int adjacent_dim) const {
     if (!mul_node) {
       return false;
     }
-    auto dim_ = mul_node->lhs();
-    auto stride_ = mul_node->rhs();
-    auto same_dim = exprEquals(dim_, adjacent_dim) || (adjacent_dim == dim_);
-    auto same_stride =
-        exprEquals(stride_, adjacent_stride) || (adjacent_stride == stride_);
+
+    // lhs and rhs could be other dim or stride
+    auto lhs_ = mul_node->lhs();
+    auto rhs_ = mul_node->rhs();
+
+    bool same_stride = false;
+    auto same_dim = exprEquals(lhs_, adjacent_dim) || (adjacent_dim == lhs_);
+    if (same_dim) {
+      // lhs_ is dim while rhs_ is stride
+      same_stride =
+          exprEquals(rhs_, adjacent_stride) || (adjacent_stride == rhs_);
+    } else {
+      // lhs_ is stride while rhs_ is dim
+      same_dim = exprEquals(rhs_, adjacent_dim) || (adjacent_dim == rhs_);
+      same_stride =
+          exprEquals(lhs_, adjacent_stride) || (adjacent_stride == lhs_);
+    }
+
     return same_dim && same_stride;
   };
   return is_cont_fn(
