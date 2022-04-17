@@ -606,6 +606,7 @@ class DistributedDataParallel(Module, Joinable):
         else:
             self.parameters_to_ignore = []
 
+        self._use_replicated_tensor_module = _ddp_with_replicated_tensor_enabled()
         self._build_replicated_tensor_module()
 
         if check_reduction:
@@ -653,11 +654,12 @@ class DistributedDataParallel(Module, Joinable):
             self._set_static_graph()
 
     def _build_replicated_tensor_module(self):
-        # Create a module with ReplicatedTensor without copying tensors. Avoid
-        # registering '_replicated_tensor_module' as a submodule by directly
-        # adding to self.__dict__.
-        from ._replicated_tensor_ddp_interop import _replicate_module
-        self.__dict__['_replicated_tensor_module'] = _replicate_module(self.module, self.process_group)
+        if self._use_replicated_tensor_module:
+            # Create a module with ReplicatedTensor without copying tensors. Avoid
+            # registering '_replicated_tensor_module' as a submodule by directly
+            # adding to self.__dict__.
+            from ._replicated_tensor_ddp_interop import _replicate_module
+            self.__dict__['_replicated_tensor_module'] = _replicate_module(self.module, self.process_group)
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
@@ -959,7 +961,7 @@ class DistributedDataParallel(Module, Joinable):
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def _run_ddp_forward(self, *inputs, **kwargs):
-        module_to_run = self._replicated_tensor_module if _ddp_with_replicated_tensor_enabled() else self.module
+        module_to_run = self._replicated_tensor_module if self._use_replicated_tensor_module else self.module
 
         if self.device_ids:
             inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
@@ -1138,7 +1140,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def train(self, mode=True):
         super(DistributedDataParallel, self).train(mode)
-        self._replicated_tensor_module.train(mode)
+        if self._use_replicated_tensor_module:
+            self._replicated_tensor_module.train(mode)
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks

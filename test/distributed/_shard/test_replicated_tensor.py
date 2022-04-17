@@ -282,5 +282,6 @@ class TestReplicatedTensor(ShardedTensorTestBase):
         with _ddp_replicated_tensor(False):
             for _ in range(5):
                 with _ddp_replicated_tensor(True):
+                    ddp = DDP(model)
                     out = ddp(replica_tensor)
                 self.assertIsInstance(out, ReplicatedTensor)

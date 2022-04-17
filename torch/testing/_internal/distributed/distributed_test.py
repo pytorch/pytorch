@@ -8694,10 +8694,15 @@ class DistributedTest:
 
             device = self.rank
             module = MockModule().to(device)
-            module = torch.nn.parallel.DistributedDataParallel(
-                module,
-                device_ids=[device]
-            )
+            # Disable DDP + ReplicatedTensor since stateless looks for 'module'
+            # whereas with ReplicatedTensor, we run '_replicated_tensor_module'
+            # in the forward pass.
+            from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
+            with _ddp_replicated_tensor(False):
+                module = torch.nn.parallel.DistributedDataParallel(
+                    module,
+                    device_ids=[device]
+                )
             x = torch.rand((1, 1)).to(device)
             weight = torch.tensor([[1.0]], device=device, requires_grad=True)
             bias = torch.tensor([0.0], device=device, requires_grad=True)
@@ -8708,12 +8713,7 @@ class DistributedTest:
             prev_weight = module.module.l1.weight.clone()
             prev_buffer = module.module.buffer.clone()
 
-            # Disable DDP + ReplicatedTensor since stateless looks for 'module'
-            # whereas with ReplicatedTensor, we run '_replicated_tensor_module'
-            # in the forward pass.
-            from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
-            with _ddp_replicated_tensor(False):
-                res = _stateless.functional_call(module, parameters, x)
+            res = _stateless.functional_call(module, parameters, x)
             self.assertEqual(x, res)
             # check that the weight remain unmodified
             cur_weight = module.module.l1.weight
