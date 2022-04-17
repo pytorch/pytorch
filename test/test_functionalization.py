@@ -247,6 +247,22 @@ $1 = torch._ops.aten.transpose_copy.int($0, 1, 0)
 $2 = torch._ops.aten.select_copy.int($1, 0, 0)
 $3 = torch._ops.aten.add.Tensor($2, tensor([1., 1., 1., 1.]))""")
 
+    def test_optional_tensor_list(self):
+        def f(x):
+            # test: an operator that takes in a List[Optional[Tensor]] argument
+            # (index_put)
+            y = x.view(8)
+            indices = torch.arange(4)
+            values = torch.arange(4, dtype=y.dtype)
+            y.index_put_((indices,), values, accumulate=False)
+            return y
+        self.assert_functionalization(f, torch.ones(4, 2))
+        logs = self.get_logs(f, torch.ones(4, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.view_copy.default($0, [8])
+$2 = torch._ops.aten.index_put.default($1, [tensor([0, 1, 2, 3])], tensor([0., 1., 2., 3.]))""")
+
     def test_scalars(self):
         def f(x):
             # test: the pass can handle scalar inputs properly

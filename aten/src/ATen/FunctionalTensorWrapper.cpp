@@ -225,8 +225,22 @@ Tensor to_functional_tensor(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isFunctionalTensor(tensor));
   return at::detail::make_tensor<FunctionalTensorWrapper>(tensor);
 }
+c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) {
+  if (tensor.has_value()) {
+    return c10::make_optional<Tensor>(to_functional_tensor(*tensor));
+  }
+  return c10::nullopt;
+}
 c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list) {
   c10::List<Tensor> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto i : c10::irange(t_list.size())) {
+    outputs.push_back(to_functional_tensor(t_list[i]));
+  }
+  return outputs;
+}
+c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
+  c10::List<c10::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(to_functional_tensor(t_list[i]));
