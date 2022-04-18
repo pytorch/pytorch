@@ -376,7 +376,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
           q_kv_weight_s.size());
       auto q = gemm_nt(query, q_kv_weight_s[0]);
       auto kv = gemm_nt(key, q_kv_weight_s[1]);
-      qkv = at::native::cat({q, kv}, 2);
+      qkv = at::cat({q, kv}, 2);
     }
   } else {
     auto q_k_v_weight_s = at::native::chunk(qkv_weight, 3, 0);
@@ -388,7 +388,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
     auto q = gemm_nt(query, q_k_v_weight_s[0]);
     auto k = gemm_nt(key, q_k_v_weight_s[1]);
     auto v = gemm_nt(value, q_k_v_weight_s[2]);
-    qkv = at::native::cat({q, k, v}, 2);
+    qkv = at::cat({q, k, v}, 2);
   }
 
   if (!qkv.is_nested() && qkv.numel() == 0) {
