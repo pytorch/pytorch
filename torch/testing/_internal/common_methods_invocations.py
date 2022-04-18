@@ -9146,7 +9146,7 @@ op_db: List[OpInfo] = [
                    supports_sparse_csr=True,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    device_type='cpu', dtypes=[torch.cfloat]),
+                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -12525,13 +12525,13 @@ op_db: List[OpInfo] = [
             # in each case, pytorch will produce a nan while numpy will not
             DecorateInfo(unittest.expectedFailure,
                          'TestUnaryUfuncs', "test_reference_numerics_normal",
-                         dtypes=(torch.complex64,), active_if=(IS_MACOS)),
+                         dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
             DecorateInfo(unittest.expectedFailure,
                          'TestUnaryUfuncs', "test_reference_numerics_hard",
-                         dtypes=(torch.complex64,), active_if=(IS_MACOS)),
+                         dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
             DecorateInfo(unittest.expectedFailure,
                          'TestUnaryUfuncs', "test_reference_numerics_extremal",
-                         dtypes=(torch.complex64,), device_type='cpu',
+                         dtypes=(torch.complex64, torch.complex128), device_type='cpu',
                          active_if=(IS_MACOS or IS_WINDOWS)),)
     ),
     OpInfo(
@@ -16238,7 +16238,7 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_small_input',
                          dtypes=(torch.bool,)),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked',
+            DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
                          dtypes=(torch.bool, torch.int8, torch.int16, torch.int32)),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
@@ -16277,6 +16277,8 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Failing on some jobs", 'TestReductions', 'test_reference_masked',
+                         dtypes=(torch.bool, torch.int8, torch.int16, torch.int32)),)
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-02)}),
@@ -16334,7 +16336,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+            DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
@@ -16352,7 +16354,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+            DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
