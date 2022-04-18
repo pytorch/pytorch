@@ -1014,8 +1014,7 @@ void runOptimization(
 
   EliminateCommonSubexpression(graph);
   GRAPH_DEBUG(
-      "After EliminateCommonSubexpression, before CheckInplace\n",
-      *graph);
+      "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
   CheckInplace(graph);
   GRAPH_DEBUG("After CheckInplace (end of runOptimization)\n", *graph);
 }
