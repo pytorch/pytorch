@@ -29,6 +29,7 @@ import torch.distributed as dist
 from torch.distributed.utils import (
     _verify_param_shape_across_processes,
     _sync_params_and_buffers,
+    _to_kwargs,
 )
 import torch.nn as nn
 import torch.nn.functional as F
@@ -373,6 +374,11 @@ class FullyShardedDataParallel(nn.Module):
             avoid sharding specific parameters when using an
             ``auto_wrap_policy`` or if parameters' sharding is not managed by
             FSDP. (Default: ``None``)
+        device_id (Optional[int]): An `int` describing the CUDA device FSDP
+            module should be moved to before initialization such as sharding
+            takes place. If not specified, module will not be moved to a
+            different device during initialization. If specified, resulting FSDP
+            instances will reside on this device.
     """
 
     def __init__(
@@ -385,6 +391,7 @@ class FullyShardedDataParallel(nn.Module):
         backward_prefetch: Optional[BackwardPrefetch] = None,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
+        device_id: Optional[int] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -431,6 +438,13 @@ class FullyShardedDataParallel(nn.Module):
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
+
+        self.device_id = device_id
+        if self.device_id is not None:
+            # Move module to device specified. Note that this is done prior to
+            # setting compute_device to ensure that they align.
+            module = module.to(self.device_id)
+
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
@@ -1570,6 +1584,12 @@ class FullyShardedDataParallel(nn.Module):
 
         # Start of a forward pass.
         self.training_state = TrainingState_.FORWARD
+
+        if self._is_root:
+            if self.device_id:
+                # TODO: Disabling side stream for tensor copies for now,
+                # investigate the perf with it on / off
+                args, kwargs = _to_kwargs(args, kwargs, self.device_id, False)
 
         # Cast inputs to their mixed precision type.
         if self._is_root and self.mixed_precision is not None:

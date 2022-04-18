@@ -160,8 +160,8 @@ class TestFSDPStateDict(FSDPTest):
         match as expected.
         """
         for model_call in [
-            partial(self._get_simple_nested_model, cpu_offload=cpu_offload),
-            partial(self._get_simple_model, cpu_offload=cpu_offload),
+            partial(self._get_simple_nested_model, cpu_offload=cpu_offload, device_id=torch.cuda.current_device()),
+            partial(self._get_simple_model, cpu_offload=cpu_offload, device_id=torch.cuda.current_device(),),
         ]:
             model = model_call()
             full_state_dict_mgr = self._get_full_state_dict_mgr(
