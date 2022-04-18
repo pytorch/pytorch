@@ -135,6 +135,14 @@ class TORCH_API Module {
     mem_to_delete_ = delete_mem;
   }
 
+  void set_min_operator_version(int64_t version) {
+    min_operator_version_ = version;
+  }
+
+  int64_t min_operator_version() const {
+    return min_operator_version_;
+  }
+
   void set_bytecode_version(int64_t version) {
     bytecode_version_ = version;
   }
@@ -149,7 +157,8 @@ class TORCH_API Module {
   std::shared_ptr<CompilationUnit> cu_;
   MobileDebugTable debug_table_;
   bool has_debug_handles_ = false;
-  int64_t bytecode_version_;
+  int64_t min_operator_version_ = 4;
+  int64_t bytecode_version_ = 4;
 
   // Extra handle for the module to delete when itself is deleted
   std::shared_ptr<char> mem_to_delete_;

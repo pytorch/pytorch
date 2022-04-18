@@ -1778,6 +1778,49 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
 
+    def test_qconfig_dict_with_fused_modules(self):
+        class LinearReLUModel(torch.nn.Module):
+            def __init__(self, relu):
+                super(LinearReLUModel, self).__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.relu = relu
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.relu(x)
+                return x
+
+        class ConvReLUModel(torch.nn.Module):
+            def __init__(self, relu):
+                super(ConvReLUModel, self).__init__()
+                self.conv = torch.nn.Conv1d(3, 3, 3)
+                self.relu = relu
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.relu(x)
+                return x
+
+        class ConvBnReLUModel(torch.nn.Module):
+            def __init__(self, relu):
+                super(ConvBnReLUModel, self).__init__()
+                self.conv = torch.nn.Conv1d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm1d(3)
+                self.relu = relu
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        for model in [LinearReLUModel, ConvReLUModel, ConvBnReLUModel]:
+            for relu in [torch.nn.ReLU(), torch.nn.functional.relu, torch.relu]:
+                m = model(relu).eval()
+                qconfig_dict = torch.ao.quantization.get_default_qconfig_dict("fbgemm")
+                # should not crash as in https://github.com/pytorch/pytorch/issues/75825
+                prepare_fx(m, qconfig_dict)
+
     def test_qconfig_dict_validity(self):
         r"""
         Verifies that if a user passes an invalid key or makes a typo when
@@ -5427,6 +5470,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         self.checkGraphModuleNodes(m_quant, expected_node_list=node_list)
 
+    @unittest.skip("TODO: reenable with backend_config_dict api")
     def test_gelu_normal(self):
         module = torch.nn.GELU
         functional = torch.nn.functional.gelu
@@ -5439,6 +5483,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_default_node_quant_handler_ops(
             module, functional, qconfig, is_reference, node_list)
 
+    @unittest.skip("TODO: reenable with backend_config_dict api")
     def test_softmax_normal(self):
         module = torch.nn.Softmax
         functional = torch.nn.functional.softmax
@@ -6927,15 +6972,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             model = EmbeddingLinear().train()
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict)
             test_only_train_fn(prepared_fx_model, train_indices)
-            convert_custom_config_dict = {
-                "additional_object_mapping": {
-                    "static": {
-                        torch.nn.qat.Embedding: nn.quantized.Embedding,
-                    }
-                }
-            }
             quant_model = convert_fx(prepared_fx_model,
-                                     convert_custom_config_dict=convert_custom_config_dict,
                                      qconfig_dict=qconfig_dict)
 
             def checkQuantized(model):

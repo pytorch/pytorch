@@ -125,7 +125,7 @@ def sharded_linear(types, args, kwargs, pg):
 
 def _validate_linear_op_param(args, kwargs):
     """
-    Validate input params of sharded embedding op.
+    Validate input params of sharded linear op.
 
     Args:
         input: input of the linear layer.
@@ -141,7 +141,7 @@ def _validate_linear_op_param(args, kwargs):
     # Validate types
     if not isinstance(input, torch.Tensor) and not isinstance(input, ShardedTensor):
         raise TypeError("input needs to be either torch.Tensor or ShardedTensor")
-    if not isinstance(bias, torch.Tensor):
+    if isinstance(bias, ShardedTensor):
         raise TypeError("bias needs to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")

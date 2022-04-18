@@ -129,42 +129,25 @@ class ShardedTensor(ShardedTensorInterface):
         # _process_group, _local_shards, etc.
         self._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
-        tensor_properties = TensorProperties(dtype, layout, requires_grad, memory_format, pin_memory)
-
-        if tensor_properties is None:
-            raise ValueError('tensor_properties must not be None.')
-
-        if tensor_properties.dtype is None:
-            tensor_properties.dtype = torch.get_default_dtype()
-
-        if tensor_properties.layout != torch.strided:
+        if layout != torch.strided:
             raise ValueError('Only torch.strided layout is currently supported')
 
-        if tensor_properties.memory_format != torch.contiguous_format:
+        if memory_format != torch.contiguous_format:
             raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
-        dims = _flatten_tensor_size(size)
-
-        if not isinstance(sharding_spec, shard_spec.ShardingSpec):
-            raise ValueError(f'Expecting ShardingSpec but got: {type(sharding_spec)}')
-
-        self._sharding_spec = sharding_spec
-
-        sharded_tensor_metadata = sharding_spec.build_metadata(
-            dims, tensor_properties=tensor_properties)
+        self._metadata.tensor_properties.memory_format = memory_format
 
         current_rank = dist.get_rank(self._process_group)
 
-        for shard_metadata in sharded_tensor_metadata.shards_metadata:
+        for shard_metadata in self._metadata.shards_metadata:
             rank, device = _parse_and_validate_remote_device(self._process_group, shard_metadata.placement)
             if rank == current_rank:
                 local_tensor = _create_tensor_from_params(
                     shard_metadata.shard_sizes,
                     local_device=device,
-                    tensor_properties=sharded_tensor_metadata.tensor_properties
+                    tensor_properties=self._metadata.tensor_properties
                 )
                 self._local_shards.append(Shard(local_tensor, shard_metadata))
-        self._metadata = sharded_tensor_metadata
 
         # do post initialization (i.e. register sharded_tensor_id, initialize_rpc)
         self._post_init()
@@ -420,8 +403,7 @@ class ShardedTensor(ShardedTensorInterface):
                                      requires_grad=tensor_properties.requires_grad)
         sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
-        # add to metadata and local_shards
-        sharded_tensor._metadata = global_sharded_tensor_metadata
+        # attach local_shards and sharding spec to ShardedTensor created
         sharded_tensor._local_shards = local_shards
         sharded_tensor._sharding_spec = spec
 
@@ -573,8 +555,6 @@ class ShardedTensor(ShardedTensorInterface):
                                      requires_grad=tensor_properties.requires_grad)
         sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
-        sharded_tensor._metadata = sharded_tensor_metadata
-
         local_shard_metadatas = []
 
         def _raise_if_mismatch(expected, actual, prop_name, rank, is_property=False):
@@ -627,7 +607,6 @@ class ShardedTensor(ShardedTensorInterface):
 
         # done validation, add local_shards
         sharded_tensor._local_shards = local_shards
-        sharded_tensor._sharding_spec = spec
 
         # run post initialization, i.e. map registration, rpc initialization
         sharded_tensor._post_init()

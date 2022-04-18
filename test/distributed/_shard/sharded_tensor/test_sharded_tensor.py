@@ -1030,6 +1030,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         self.assertEqual(st.size(-1), 20)
 
+        # Test with dim/ndim
+        self.assertEqual(st.dim(), 2)
+        self.assertEqual(st.ndim, 2)
+
         # Test with invalid input
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         with self.assertRaisesRegex(IndexError, 'Dimension out of range'):

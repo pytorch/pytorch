@@ -6,6 +6,7 @@ import torch
 
 import torch.distributed._shard.sharding_spec as shard_spec
 
+from .metadata import TensorProperties
 from .shard import Shard
 from .utils import _flatten_tensor_size
 
@@ -16,8 +17,9 @@ class ShardedTensorInterface(torch.Tensor):
     which represents Tensors that are sharded across multiple devices and
     multiple processes.
 
-    :class:`ShardedTensor` is a concrete implementation of this interface
-    and attached local shards with real data/memory.
+    This interface is a torch.Tensor subclass where it's only a wrapper
+    tensor with no real data in memory, subclasses of this interface should
+    attach the real data/memory as needed.
     """
 
     @staticmethod
@@ -28,11 +30,24 @@ class ShardedTensorInterface(torch.Tensor):
         # Use __new__ to construct a wrapper tensor, for recording tensor
         # properties and logging purposes.
         torch._C._log_api_usage_once("torch.distributed._shard.sharded_tensor")
+
+        # check sharding spec and build sharded tensor metadata
+        if not isinstance(sharding_spec, shard_spec.ShardingSpec):
+            raise ValueError(f'Expecting ShardingSpec but got: {type(sharding_spec)}')
+
         sizes = _flatten_tensor_size(size)
         dtype = kwargs['dtype']
         layout = kwargs['layout']
         pin_memory = kwargs['pin_memory']
         requires_grad = kwargs['requires_grad']
+
+        if dtype is None:
+            dtype = torch.get_default_dtype()
+
+        tensor_properties = TensorProperties(dtype, layout, requires_grad, pin_memory=pin_memory)
+        sharded_tensor_metadata = sharding_spec.build_metadata(
+            sizes, tensor_properties=tensor_properties)
+
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             sizes,
@@ -41,6 +56,10 @@ class ShardedTensorInterface(torch.Tensor):
             pin_memory=pin_memory,
             requires_grad=requires_grad
         )
+        # set sharding spec
+        r._sharding_spec = sharding_spec
+        # set metadata
+        r._metadata = sharded_tensor_metadata
         return r
 
     # We define this function for two reasons:
@@ -84,11 +103,4 @@ class ShardedTensorInterface(torch.Tensor):
         raise NotImplementedError()
 
     def __hash__(self):
-        """
-        By default implementation to define behavior when `hash()` is called on an instance
-        of class.
-
-        Subclass of :class:`ShardedTensorInterface` could override this method if it choose
-        to return a different result.
-        """
         return id(self)
