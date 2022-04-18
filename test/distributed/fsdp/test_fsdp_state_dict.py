@@ -482,6 +482,35 @@ class TestFSDPStateDict(FSDPTest):
                 pass
 
     @skip_if_lt_x_gpu(2)
+    def test_transformer_full_state_dict_checkpoint(self):
+        default = torch.distributed.distributed_c10d._get_default_group()
+        model = self._get_wrapped_model(group=default)
+        optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+        # Run a single forward pass
+        inputs = model.get_input(torch.cuda.current_device())
+        out = model(*inputs)
+        loss = model.get_loss(inputs, out)
+        model.run_backward(loss)
+        optimizer.step()
+        # Take checkpoint, which includes buffers
+        sd_mgr = self._get_full_state_dict_mgr(model, False)
+        with sd_mgr:
+            state_dict = model.state_dict()
+
+        new_model = self._get_wrapped_model(group=default)
+
+        model_param = model.params[0]
+        new_model_param = new_model.params[0]
+        self.assertNotEqual(model_param, new_model_param)
+
+        new_model.load_state_dict({k: v.clone() for k, v in state_dict.items()})
+
+        with model.summon_full_params(model):
+            with new_model.summon_full_params(new_model):
+                for (p1, p2) in zip(model.parameters(), new_model.parameters()):
+                    self.assertEqual(p1, p2)
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_rank0_and_offload", [True, False])
     def test_state_dict_with_ignored_modules(self, state_dict_rank0_and_offload):
         # Initialize an FSDP-wrapped model with an ignored module
