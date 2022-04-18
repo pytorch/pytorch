@@ -206,8 +206,8 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
 
 }
 
-void _validate_sparse_compressed_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size, Layout layout) {
-  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, layout);
+void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, Layout layout) {
+  _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout);
 }
 
 void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
@@ -234,8 +234,7 @@ SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor
   // constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  Layout layout = options.layout();
-  TORCH_INTERNAL_ASSERT(layout == kSparseCsr);
+  Layout layout = AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(options.layout(), "new_compressed_tensor", [&] { return the_layout; });
   DispatchKey dispatch_key;
   TORCH_CHECK_NOT_IMPLEMENTED(
     options.device().type() == kCPU || options.device().type() == kCUDA,
@@ -251,7 +250,7 @@ SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
       DispatchKeySet(dispatch_key), layout, options.dtype());
 }
 
-template <Layout expected_layout>
+template <c10::Layout required_layout>
 Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
                                                  const Tensor& plain_indices,
                                                  const Tensor& values,
@@ -260,19 +259,20 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
                                                  c10::optional<Layout> layout,
                                                  c10::optional<Device> device,
                                                  c10::optional<bool> pin_memory) {
-  Layout layout_ = layout.value_or(expected_layout);
-  if (expected_layout == kDummyLayout) {
-    TORCH_CHECK(layout_ != kDummyLayout, "expected layout SparseCsr, SparseCsc, SparseBsr, or SparseBsc but got none");
+  Layout layout_ = layout.value_or(required_layout);
+  if (required_layout == Layout::Unspecified) {
+    // checks that sparse compressed layout is specified
+    AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
   } else {
-    TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
+    TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
   }
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
   get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
   return self;
 }
 
-#define SPARSE_COMPRESSED_TENSOR_UNSAFE(KIND, EXPECTED_LAYOUT)          \
+#define SPARSE_COMPRESSED_TENSOR_UNSAFE(KIND, REQUIRED_LAYOUT)          \
   Tensor _sparse_##KIND##_tensor_unsafe(const Tensor& compressed_indices, \
                                         const Tensor& plain_indices,    \
                                         const Tensor& values,           \
@@ -281,15 +281,14 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
                                         c10::optional<Layout> layout,   \
                                         c10::optional<Device> device,   \
                                         c10::optional<bool> pin_memory) { \
-    return _sparse_compressed_tensor_unsafe_template<EXPECTED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
+    return _sparse_compressed_tensor_unsafe_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
   }
 
-SPARSE_COMPRESSED_TENSOR_UNSAFE(compressed, kDummyLayout)
-SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(compressed, Layout::Unspecified);
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
 SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc)
 SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr)
 SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc)
-
 
 inline DimVector _estimate_sparse_compressed_tensor_size(
     const Tensor& compressed_indices,
