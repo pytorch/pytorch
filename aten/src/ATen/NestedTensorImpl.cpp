@@ -18,6 +18,9 @@ NestedTensorImpl::NestedTensorImpl(
           buffer.device()),
       buffer_(std::move(buffer)),
       nested_size_tensor_(std::move(nested_size_tensor)) {
+  TORCH_WARN_ONCE(
+      "The PyTorch API of nested tensors is in prototype stage and will change "
+      "in the near future.");
   TORCH_INTERNAL_ASSERT(buffer_.is_cuda() || buffer_.is_cpu(), "NestedTensorImpl buffer must be either CUDA or CPU but got ", buffer_);
   TORCH_INTERNAL_ASSERT(nested_size_tensor_.is_contiguous());
   int64_t size_dim = nested_size_tensor_.dim();

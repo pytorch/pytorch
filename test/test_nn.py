@@ -5896,6 +5896,13 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(AssertionError, msg):
             mha(query, key, value, attn_mask=torch.randn(4, 3, 3).bernoulli_().to(torch.bool))
 
+    def test_multihead_attn_nested_tensor_outside_fast_path(self):
+        mha = torch.nn.MultiheadAttention(3, 3, batch_first=True).eval()
+        nt = torch.nested_tensor([torch.randn(3, 3)])
+        msg = "MultiheadAttention does not support NestedTensor outside of its fast path"
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(nt, nt, nt)
+
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
@@ -9355,13 +9362,15 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_PReLU_backward_requires_grad_false(self):
-        m = nn.PReLU().to('cuda')
-        x = torch.randn(2, 3, 4, 5, requires_grad=False, device='cuda')
-        y = m(x)
-        y.mean().backward()
-        self.assertEqual(x.grad, None)
+        devices = ['cpu']
+        devices += ['cuda'] if TEST_CUDA else []
+        for d in devices:
+            m = nn.PReLU().to(d)
+            x = torch.randn(2, 3, 4, 5, device=d, requires_grad=False)
+            y = m(x)
+            y.mean().backward()
+            self.assertEqual(x.grad, None)
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)

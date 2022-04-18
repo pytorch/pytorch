@@ -40,8 +40,8 @@ class TestMHADeviceType(TestCase):
             qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
 
             with torch.no_grad():
-                (q, k, v) = torch.ops.nativetransformers._transform_bias_rescale_qkv_op(
-                    x, qkv.bias, num_head=num_heads
+                (q, k, v) = torch._transform_bias_rescale_qkv(
+                    x, qkv.bias, num_heads=num_heads
                 )
 
                 def simple_transform_bias_rescale_qkv(qkv, bias):
@@ -90,7 +90,7 @@ class TestMHADeviceType(TestCase):
             )
 
     def _test_multihead_attention_impl(
-        self, device, dtype, mode, use_nt, need_weights, average_attn_weights, use_padding=False
+        self, device, dtype, mode, use_nt, need_weights, average_attn_weights, use_padding=False, pad_all=False
     ):
         embed_dim = 64
         num_heads = 4
@@ -99,9 +99,16 @@ class TestMHADeviceType(TestCase):
 
         q = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype) * 10
         if use_padding:
-            q[0][-1] = torch.zeros_like(q[0][-1], device=device, dtype=dtype)
-            mask = torch.zeros(q.shape[:-1], device=device, dtype=torch.bool)
-            mask[0][-1] = True
+            if pad_all:
+                for q_i in q:
+                    q_i[-1] = torch.zeros_like(q[0][-1], device=device, dtype=dtype)
+                mask = torch.zeros(q.shape[:-1], device=device, dtype=torch.bool)
+                for mask_i in mask:
+                    mask_i[-1] = True
+            else:
+                q[0][-1] = torch.zeros_like(q[0][-1], device=device, dtype=dtype)
+                mask = torch.zeros(q.shape[:-1], device=device, dtype=torch.bool)
+                mask[0][-1] = True
         if mode == "self":
             k = q
             v = q
@@ -125,7 +132,6 @@ class TestMHADeviceType(TestCase):
         pt.out_proj.weight = proj.weight
         pt.out_proj.bias = proj.bias
 
-        # XXX: loop, test 3 relevant configurations of need_weights/average_attn_weights!
         class NativeMHA(torch.nn.Module):
             def __init__(self, embed_dim, num_heads, qkv, proj):
                 super().__init__()
@@ -135,7 +141,7 @@ class TestMHADeviceType(TestCase):
                 self.num_heads = num_heads
 
             def forward(self, q, k, v, key_padding_mask):
-                return torch.ops.nativetransformers._native_multi_head_attention(
+                return torch._native_multi_head_attention(
                     q,
                     k,
                     v,
@@ -169,7 +175,10 @@ class TestMHADeviceType(TestCase):
         if use_nt:
             qs = list(torch.unbind(q))
             if use_padding:
-                qs[0] = qs[0][:-1]
+                if pad_all:
+                    qs = [x[:-1] for x in qs]
+                else:
+                    qs[0] = qs[0][:-1]
             q = torch.nested_tensor(qs, device=device, dtype=dtype)
             if mode == "self":
                 k = v = q
@@ -185,17 +194,30 @@ class TestMHADeviceType(TestCase):
         )
         if use_nt:
             ynpt = ynpt.to_padded_tensor(0)
+            if pad_all:
+                ynpt_final = torch.zeros_like(ypt)
+                ynpt_final[:, :ynpt.shape[1], :] = ynpt
+                ynpt = ynpt_final
+
+        def do_pad_all(tensors):
+            for t in tensors:
+                for t_i in t:
+                    t_i[-1] = torch.zeros_like(t_i[-1], device=device, dtype=dtype)
 
         # PyTorch implementation returns non-zero junk in the padding
         # locations; overwrite it so that the comparison works out.
         if use_padding:
             ypt[0][-1] = torch.zeros_like(ypt[0][-1], device=device, dtype=dtype)
             ynpt[0][-1] = torch.zeros_like(ynpt[0][-1], device=device, dtype=dtype)
+            if pad_all:
+                do_pad_all((ypt, ynpt))
             # Zero the last row of each TxT weight matrix
             if need_weights:
                 if average_attn_weights:
                     weight_pt[0][-1] = torch.zeros_like(weight_pt[0][-1], device=device, dtype=dtype)
                     weight_npt[0][-1] = torch.zeros_like(weight_npt[0][-1], device=device, dtype=dtype)
+                    if pad_all:
+                        do_pad_all((weight_pt, weight_npt))
                 else:
                     for nh in range(num_heads):
                         weight_pt[0][nh][-1] = torch.zeros_like(weight_pt[0][nh][-1], device=device, dtype=dtype)
@@ -216,9 +238,12 @@ class TestMHADeviceType(TestCase):
     @skipMeta
     @torch.inference_mode()
     def test_native_multihead_self_attention(self, device, dtype):
-        for use_padding in (False, True):
+        for (use_padding, pad_all) in ((False, False), (True, False), (True, True)):
             for use_nt in (False, True):
-                for need_weights in (False, True):
+                # Figuring out exactly which elements of the weights are garbage in this
+                # case eludes me, and it's not particularly enlightening to test anyway
+                # because padding doesn't especially affect the intermediate weights.
+                for need_weights in (False, not pad_all):
                     for average_attn_weights in (False, True):
                         self._test_multihead_attention_impl(
                             device,
@@ -226,6 +251,7 @@ class TestMHADeviceType(TestCase):
                             "self",
                             use_nt=use_nt,
                             use_padding=use_padding,
+                            pad_all=pad_all,
                             need_weights=need_weights,
                             average_attn_weights=average_attn_weights,
                         )

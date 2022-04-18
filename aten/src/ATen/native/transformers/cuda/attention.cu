@@ -20,7 +20,6 @@
 #include <ATen/native/nested/NestedTensorMath.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/transformers/attention.h>
-#include <ATen/native/transformers/library.h>
 namespace at {
 
 namespace native {

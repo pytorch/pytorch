@@ -11,7 +11,6 @@
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/transformers/attention.h>
-#include <ATen/native/transformers/library.h>
 
 namespace at {
 
@@ -290,7 +289,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_op_cpu(
       std::get<2>(result).clone());
 }
 
-std::tuple<Tensor, Tensor> multi_head_attention(
+std::tuple<Tensor, Tensor> native_multi_head_attention(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -407,10 +406,12 @@ std::tuple<Tensor, Tensor> multi_head_attention(
   }
 
 #ifndef NDEBUG
-  if (query.is_nested()) {
-    T = qkv.size(1);
+  if (!query.is_nested() || !qkv.is_nested()) {
+    if (query.is_nested()) {
+      T = qkv.size(1);
+    }
+    debug_assert_shape(__LINE__, qkv, {B, T, 3 * D});
   }
-  debug_assert_shape(__LINE__, qkv, {B, T, 3 * D});
 #endif
 
 #ifdef DEBUG_PRINT_EACH_STEP

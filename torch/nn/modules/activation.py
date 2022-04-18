@@ -1079,7 +1079,7 @@ class MultiheadAttention(Module):
                 # We have to use a list comprehension here because
                 # Torchscript doesn't support generator expressions.
                 all([x.is_cuda or 'cpu' in str(x.device) for x in tensor_args])):
-                return torch.ops.nativetransformers._native_multi_head_attention(
+                return torch._native_multi_head_attention(
                     query,
                     key,
                     value,
@@ -1092,6 +1092,9 @@ class MultiheadAttention(Module):
                     key_padding_mask if key_padding_mask is not None else attn_mask,
                     need_weights,
                     average_attn_weights)
+        any_nested = query.is_nested or key.is_nested or value.is_nested
+        assert not any_nested, "MultiheadAttention does not support NestedTensor outside of its fast path (see the MultiheadAttention docstring for fast path requirements)"
+
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property
             if key is value:

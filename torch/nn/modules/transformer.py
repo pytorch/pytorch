@@ -382,7 +382,7 @@ class TransformerEncoderLayer(Module):
                 self.linear2.bias,
             )
             if not torch.overrides.has_torch_function(tensor_args) and all([x.is_cuda or 'cpu' in str(x.device) for x in tensor_args]):
-                return torch.ops.nativetransformers._transformer_encoder_layer_forward(
+                return torch._transformer_encoder_layer_fwd(
                     src,
                     self.self_attn.embed_dim,
                     self.self_attn.num_heads,

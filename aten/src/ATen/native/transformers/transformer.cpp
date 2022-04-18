@@ -6,7 +6,6 @@
 #include <torch/library.h>
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-#include <ATen/native/transformers/library.h>
 #include <ATen/native/transformers/transformer.h>
 
 namespace at {
@@ -33,7 +32,7 @@ Tensor linear_for_ffn(
   }
   return result.view({mat1.sizes()[0], mat1.sizes()[1], -1});
 }
-} // namespace
+
 Tensor ffn_cpu(
     const Tensor& input,
     const Tensor& w1,
@@ -50,6 +49,7 @@ Tensor ffn_cpu(
   res = linear_for_ffn(b2, res, w2, c10::nullopt);
   return res;
 }
+} // namespace
 
 Tensor transformer_encoder_layer_forward(
     const Tensor& src,
@@ -79,7 +79,7 @@ Tensor transformer_encoder_layer_forward(
   }
   TORCH_CHECK(!norm_first, "norm_first is not supported yet");
   const bool use_nested_tensor = src.is_nested();
-  auto x = std::get<0>(multi_head_attention(
+  auto x = std::get<0>(native_multi_head_attention(
       src,
       src,
       src,
