@@ -1,7 +1,5 @@
 # Torch
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
-from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
-    unpack_variables
 import torch.nn.functional as F
 import torch
 import torch.cuda
@@ -609,3 +607,65 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
 
 def get_all_nn_module_tests():
     return module_tests + new_module_tests + additional_module_tests
+
+def unpack_variables(args):
+    if isinstance(args, tuple):
+        return tuple(unpack_variables(elem) for elem in args)
+    else:
+        return args
+
+class dont_convert(tuple):
+    pass
+
+non_differentiable = collections.namedtuple('non_differentiable', ['tensor'])
+
+def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
+    if not isinstance(call_args, tuple):
+        call_args = (call_args,)
+
+    def map_arg(arg):
+        def maybe_non_contig(tensor):
+            if not non_contiguous or tensor.numel() < 2:
+                return tensor.clone()
+
+            return noncontiguous_like(tensor)
+
+        def conjugate(tensor):
+            return tensor.conj()
+
+        if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
+            return arg
+        elif isinstance(arg, tuple) and len(arg) == 0:
+            var = conjugate(torch.randn((), dtype=dtype, device=device))
+            var.requires_grad = requires_grad
+            return var
+        elif isinstance(arg, tuple) and not isinstance(arg[0], torch.Tensor):
+            return conjugate(maybe_non_contig(torch.randn(*arg, dtype=dtype, device=device))).requires_grad_(requires_grad)
+        # double check casting
+        elif isinstance(arg, non_differentiable):
+            if isinstance(arg.tensor, torch.Tensor):
+                if arg.tensor.dtype == torch.float:
+                    return maybe_non_contig(arg.tensor.to(dtype=torch.double, device=device))
+                if arg.tensor.dtype == torch.cfloat:
+                    return conjugate(maybe_non_contig(arg.tensor.to(dtype=torch.cdouble, device=device)))
+                return conjugate(maybe_non_contig(arg.tensor.to(device=device)))
+            return conjugate(maybe_non_contig(arg.tensor.to(device=device)))
+        elif isinstance(arg, torch.Tensor):
+            if arg.dtype == torch.float:
+                arg = arg.double()
+            if arg.dtype == torch.cfloat:
+                arg = arg.to(torch.cdouble)
+            if arg.is_complex() != dtype.is_complex:
+                raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
+                                   "which is not supported for now")
+            # NOTE: We do clone() after detach() here because we need to be able to change size/storage of v afterwards
+            v = conjugate(maybe_non_contig(arg)).detach().to(device=device).clone()
+            v.requires_grad = requires_grad and (v.is_floating_point() or v.is_complex())
+            return v
+        elif callable(arg):
+            return map_arg(arg(dtype=dtype, device=device))
+        else:
+            return arg
+    args_out = tuple(map_arg(arg) for arg in call_args)
+    kwargs_out = {k: map_arg(v) for k, v in call_kwargs.items()} if call_kwargs else {}
+    return args_out, kwargs_out
