@@ -155,7 +155,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
         nodes {
           commit {
             oid
-            checkSuites(first: 100, after: $cursor) {
+            checkSuites(first: 10, after: $cursor) {
               nodes {
                 app {
                   name
@@ -166,7 +166,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
                     name
                   }
                 }
-                checkRuns(first: 10) {
+                checkRuns(first: 50) {
                   nodes {
                     name
                     conclusion
