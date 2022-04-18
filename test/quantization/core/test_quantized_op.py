@@ -832,7 +832,7 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the cudnn add and add_relu op
     (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    @unittest.skip("Local only - currently the test_qadd_relu_cudnn op is bulid "
                    "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
                    "after it is built by default")
     def test_qadd_relu_cudnn(self):
@@ -845,6 +845,41 @@ class TestQuantizedOps(TestCase):
         # implementation
         A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
         B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+        scale_A = 2.5
+        scale_B = 6.3
+        scale_C = 12.9
+        zero_point = 0
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
+                                       dtype=dtype)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
+                                       dtype=dtype)
+        # Add ground truth
+        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
+        qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
+        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized addition failed.")
+
+        # Add + ReLU ground truth
+        Crelu = C.copy()
+        Crelu[C < 0] = 0
+        qCrelu = _quantize(Crelu, scale_C, zero_point, dtype=np_dtype[dtype])
+        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                "Quantized addition with ReLU failed.")
+
+    """Tests the correctness of the cudnn add and add_relu op for nhwc format"""
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skip("Local only - currently the test_qadd_relu_cudnn_nhwc op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
+    def test_qadd_relu_cudnn_nhwc(self):
+        dtype = torch.qint8
+        add_relu = torch.ops.quantized.add_relu
+        add = torch.ops.quantized.add
+
+        A = torch.rand(16, 8, 4, 12).to(device="cuda")
+        B = torch.rand(16, 8, 4, 12).to(device="cuda")
         scale_A = 2.5
         scale_B = 6.3
         scale_C = 12.9
@@ -3546,25 +3581,19 @@ class TestQuantizedLinear(TestCase):
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
            output_channels=st.integers(4, 8),
-           use_bias=st.sampled_from([False]),
-           use_relu=st.sampled_from([False]),
+           use_bias=st.booleans(),
+           use_relu=st.booleans(),
            use_multi_dim_input=st.booleans(),
            use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    @unittest.skip("Local only - currently the qlinear_cudnn op is bulid "
                    "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
                    "after it is built by default")
     # TODO: check with yang regarding CUDNN flags
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
                            use_relu, use_multi_dim_input, use_channelwise):
         qlinear_prepack = torch.ops.quantized.linear_prepack
-        batch_size = 1
-        input_channels = 10
-        output_channels = 20
-        use_bias = False
-        use_relu = False
-        use_channelwise = False
         if use_relu:
             qlinear_op = torch.ops.quantized.linear_relu
         else:

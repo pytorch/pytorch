@@ -43,16 +43,9 @@ namespace lazy {
  * burned into the Graph.
  */
 
-class TORCH_API DimensionNode : public lazy::TsNode {
+class TORCH_API DimensionNode : public lazy::Node {
  public:
   DimensionNode(OpKind op, OpList operands, hash_t hash_seed = kHashSeed);
-
-  // N.B. Node doesn't have sizes() so we don't need to override it to
-  // throw an error
-
-  // TODO: Fix this when John lands input shape API. Change
-  // DimensionNode's `isDynamic` to a virtual method and implement the
-  // actual `isDynamic` in all DimensionNode subclasses
   bool isDynamic() {
       return false;
   }
