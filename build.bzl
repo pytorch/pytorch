@@ -7,10 +7,6 @@ def define_targets(rules):
             "caffe2/serialize/istream_adapter.cc",
             "caffe2/serialize/read_adapter_interface.cc",
         ],
-        # Flags that end with '()' are converted to a list of strings
-        # by calling the function when translating in to buck/bazel.
-        # TODO: find a better way to do this.
-        copts = ["get_c2_fbandroid_xplat_compiler_flags()", "-frtti"],
         tags = [
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",
