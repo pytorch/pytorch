@@ -10629,7 +10629,7 @@ class _TestONNXRuntime:
         model.set_weight_bias(q_weight, bias)
         input = torch.randn(3, 16, 32, 32)
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
-        self.run_test(torch.jit.trace(model, q_input), (q_input,))
+        self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_adaptive_avg_pool2d(self):
