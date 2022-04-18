@@ -52,6 +52,25 @@ namespace cuda {
 
 namespace {
 
+// Mark string attribute in alias-copy nodes to enable its implementation
+// in the fallback path.
+void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
+  static std::unordered_set<Symbol> alias_copy_op(
+      {prim::view_copy,
+       prim::reshape_copy,
+       prim::squeeze_copy,
+       prim::unsqueeze_copy});
+
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      enableAliasCopyNodes(graph, b);
+    }
+    if (alias_copy_op.find(n->kind()) != alias_copy_op.end()) {
+      n->s_(attr::name, "CudaFusionGroup");
+    }
+  }
+}
+
 // CudaFusionManager is not thread safe!
 // TODO: we should make the tradeoff here to use thread_local instead of global
 // singleton;
@@ -110,6 +129,29 @@ class CudaFusionManager {
     return graph_cache_[kernel_id]->runGraphWithInputs(inputs);
   }
 
+  Code* getFallbackCode(
+      int32_t kernel_id,
+      const Node* fusion_node) {
+    {
+      std::cerr << " CREATING A NEW GRAPH " << std::endl;
+      std::lock_guard<std::mutex> guard(mutex_);
+      auto it = fallback_cache_.find(kernel_id);
+      if (it != fallback_cache_.end()) {
+        return it->second.get();
+      }
+    }
+    std::cerr << " CREATING A NEW GRAPH " << std::endl;
+
+    auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
+    EraseShapeInformation(copied_graph);
+    enableAliasCopyNodes(copied_graph, copied_graph->block());
+    auto code = std::make_unique<Code>(copied_graph, "fallback_cuda_fuser");
+
+    std::lock_guard<std::mutex> guard(mutex_);
+    auto it = fallback_cache_.insert({kernel_id, std::move(code)}).first;
+    return it->second.get();
+  }
+
  private:
   // TODO: Dimension collapsing should be abstracted out and integrated into
   // graph caching.
@@ -138,28 +180,10 @@ class CudaFusionManager {
 
   std::unordered_map<std::string, int32_t> graph_cache_ids_;
   std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
+  std::unordered_map<int64_t, std::unique_ptr<Code>>  fallback_cache_;
 
   int32_t next_unique_id_ = 0;
 };
-
-// Mark string attribute in alias-copy nodes to enable its implementation
-// in the fallback path.
-void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_set<Symbol> alias_copy_op(
-      {prim::view_copy,
-       prim::reshape_copy,
-       prim::squeeze_copy,
-       prim::unsqueeze_copy});
-
-  for (Node* n : block->nodes()) {
-    for (Block* b : n->blocks()) {
-      enableAliasCopyNodes(graph, b);
-    }
-    if (alias_copy_op.find(n->kind()) != alias_copy_op.end()) {
-      n->s_(attr::name, "CudaFusionGroup");
-    }
-  }
-}
 
 } // namespace
 
@@ -210,11 +234,10 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
 
   // Fallback to use if anything goes wrong
   auto take_fallback = [&](Stack& stack) {
-    // copying graph here since we are eliminating shape information;
-    auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
-    EraseShapeInformation(copied_graph);
-    enableAliasCopyNodes(copied_graph, copied_graph->block());
-    InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
+    int32_t kernel_id = fusion_node->i(attr::cache_id);
+    auto fallback_code = CudaFusionManager::getManager().getFallbackCode(
+        kernel_id, fusion_node);
+    InterpreterState{*fallback_code}.run(stack);
   };
 
   c10::optional<Stack> stack_copy;
