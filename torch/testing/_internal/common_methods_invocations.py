@@ -11429,7 +11429,7 @@ op_db: List[OpInfo] = [
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
            ),
            supports_expanded_weight=True,
-           supports_out=False,),
+           supports_out=True,),
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
            aten_name='conv2d',
