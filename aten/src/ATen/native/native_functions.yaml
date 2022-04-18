@@ -10563,6 +10563,102 @@
   dispatch:
     CompositeExplicitAutograd: special_zeta_out
 
+- func: special_bessel_j0(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_bessel_j0.out
+
+- func: special_bessel_j0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_bessel_j0_out
+
+- func: special_bessel_j1(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_bessel_j1.out
+
+- func: special_bessel_j1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_bessel_j1_out
+
+- func: special_bessel_y0(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_bessel_y0.out
+
+- func: special_bessel_y0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_bessel_y0_out
+
+- func: special_bessel_k0(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_bessel_k0.out
+
+- func: special_bessel_k0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_bessel_k0_out
+
+- func: special_bessel_k0e(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_bessel_k0e.out
+
+- func: special_bessel_k0e.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_bessel_k0e_out
+
+- func: special_bessel_k1(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_bessel_k1.out
+
+- func: special_bessel_k1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_bessel_k1_out
+
+- func: special_bessel_k1e(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_bessel_k1e.out
+
+- func: special_bessel_k1e.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_bessel_k1e_out
+
+- func: special_bessel_y1(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_bessel_y1.out
+
+- func: special_bessel_y1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_bessel_y1_out
+
 - func: special_i0(Tensor self) -> Tensor
   python_module: special
   variants: function

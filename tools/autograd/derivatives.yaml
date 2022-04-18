@@ -722,6 +722,30 @@
   self: grad * at::special_i1(self)
   result: auto_element_wise
 
+- name: special_bessel_j0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_j1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_k0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_k0e(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_k1(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_k1e(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_y0(Tensor self) -> Tensor
+  self: non_differentiable
+
+- name: special_bessel_y1(Tensor self) -> Tensor
+  self: non_differentiable
+
 - name: special_i0e(Tensor self) -> Tensor
   self: grad * (at::special_i1e(self) - self.sgn() * result)
   result: auto_element_wise

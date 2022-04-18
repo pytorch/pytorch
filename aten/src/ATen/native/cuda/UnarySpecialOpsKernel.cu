@@ -120,6 +120,126 @@ void i1e_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
+const char bessel_j0_name[] = "bessel_j0";
+void bessel_j0_kernel_cuda(TensorIteratorBase& iterator) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j0_cuda", [&]() {
+      jitted_gpu_kernel<bessel_j0_name, scalar_t, scalar_t, 1>(iterator, bessel_j0_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j0_cuda", [&]() {
+      gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return bessel_j0(a);
+      });
+    });
+  #endif
+}
+
+const char bessel_j1_name[] = "bessel_j1";
+void bessel_j1_kernel_cuda(TensorIteratorBase& iterator) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j1_cuda", [&]() {
+      jitted_gpu_kernel<bessel_j1_name, scalar_t, scalar_t, 1>(iterator, bessel_j1_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j1_cuda", [&]() {
+      gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return bessel_j1(a);
+      });
+    });
+  #endif
+}
+
+const char bessel_k0_name[] = "bessel_k0";
+void bessel_k0_kernel_cuda(TensorIteratorBase& iterator) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_k0_cuda", [&]() {
+      jitted_gpu_kernel<bessel_k0_name, scalar_t, scalar_t, 1>(iterator, bessel_k0_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_k0_cuda", [&]() {
+      gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return bessel_k0(a);
+      });
+    });
+  #endif
+}
+
+const char bessel_k0e_name[] = "bessel_k0e";
+void bessel_k0e_kernel_cuda(TensorIteratorBase& iterator) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_k0e_cuda", [&]() {
+      jitted_gpu_kernel<bessel_k0e_name, scalar_t, scalar_t, 1>(iterator, bessel_k0e_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_k0e_cuda", [&]() {
+      gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return bessel_k0e(a);
+      });
+    });
+  #endif
+}
+
+const char bessel_k1_name[] = "bessel_k1";
+void bessel_k1_kernel_cuda(TensorIteratorBase& iterator) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_k1_cuda", [&]() {
+      jitted_gpu_kernel<bessel_k1_name, scalar_t, scalar_t, 1>(iterator, bessel_k1_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_k1_cuda", [&]() {
+      gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return bessel_k1(a);
+      });
+    });
+  #endif
+}
+
+const char bessel_k1e_name[] = "bessel_k1e";
+void bessel_k1e_kernel_cuda(TensorIteratorBase& iterator) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_k1e_cuda", [&]() {
+      jitted_gpu_kernel<bessel_k1e_name, scalar_t, scalar_t, 1>(iterator, bessel_k1e_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_k1e_cuda", [&]() {
+      gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return bessel_k1e(a);
+      });
+    });
+  #endif
+}
+
+const char bessel_y0_name[] = "bessel_y0";
+void bessel_y0_kernel_cuda(TensorIteratorBase& iterator) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y0_cuda", [&]() {
+      jitted_gpu_kernel<bessel_y0_name, scalar_t, scalar_t, 1>(iterator, bessel_y0_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y0_cuda", [&]() {
+      gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return bessel_y0(a);
+      });
+    });
+  #endif
+}
+
+const char bessel_y1_name[] = "bessel_y1";
+void bessel_y1_kernel_cuda(TensorIteratorBase& iterator) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y1_cuda", [&]() {
+      jitted_gpu_kernel<bessel_y1_name, scalar_t, scalar_t, 1>(iterator, bessel_y1_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y1_cuda", [&]() {
+      gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return bessel_y1(a);
+      });
+    });
+  #endif
+}
+
 const char sigmoid_name[] = "sigmoid";
 void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
@@ -372,22 +492,30 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
-REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
-REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
-REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_cuda);
-REGISTER_DISPATCH(special_i1_stub, &i1_kernel_cuda);
-REGISTER_DISPATCH(special_i1e_stub, &i1e_kernel_cuda);
-REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel_cuda);
-REGISTER_DISPATCH(sinc_stub, &sinc_kernel_cuda);
-REGISTER_DISPATCH(logit_stub, &logit_kernel_cuda);
 REGISTER_DISPATCH(erf_stub, &erf_kernel_cuda);
 REGISTER_DISPATCH(erfc_stub, &erfc_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
+REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
+REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
+REGISTER_DISPATCH(logit_stub, &logit_kernel_cuda);
+REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel_cuda);
+REGISTER_DISPATCH(sinc_stub, &sinc_kernel_cuda);
+REGISTER_DISPATCH(special_bessel_j0_stub, &bessel_j0_kernel_cuda);
+REGISTER_DISPATCH(special_bessel_j1_stub, &bessel_j1_kernel_cuda);
+REGISTER_DISPATCH(special_bessel_k0_stub, &bessel_k0_kernel_cuda);
+REGISTER_DISPATCH(special_bessel_k0e_stub, &bessel_k0e_kernel_cuda);
+REGISTER_DISPATCH(special_bessel_k1_stub, &bessel_k1_kernel_cuda);
+REGISTER_DISPATCH(special_bessel_k1e_stub, &bessel_k1e_kernel_cuda);
+REGISTER_DISPATCH(special_bessel_y0_stub, &bessel_y0_kernel_cuda);
+REGISTER_DISPATCH(special_bessel_y1_stub, &bessel_y1_kernel_cuda);
 REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
-REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
-REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_cuda);
 REGISTER_DISPATCH(special_erfcx_stub, &erfcx_kernel_cuda);
+REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_cuda);
+REGISTER_DISPATCH(special_i1_stub, &i1_kernel_cuda);
+REGISTER_DISPATCH(special_i1e_stub, &i1e_kernel_cuda);
+REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_cuda);
+REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
 
 } // namespace native
 } // namespace at

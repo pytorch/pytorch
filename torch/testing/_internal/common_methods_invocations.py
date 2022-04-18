@@ -10145,6 +10145,74 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
+    UnaryUfuncInfo(
+        'special.bessel_j0',
+        aten_name='special_j0',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bool: tol(atol=1e-4, rtol=0),
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.j0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_j1',
+        aten_name='special_bessel_j1',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bool: tol(atol=1e-4, rtol=0),
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.j1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_y0',
+        aten_name='special_y0',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bool: tol(atol=1e-4, rtol=0),
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.y0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_y1',
+        aten_name='special_bessel_y1',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bool: tol(atol=1e-4, rtol=0),
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.y1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
     UnaryUfuncInfo('i0',
                    ref=np_unary_ufunc_integer_promotion_wrapper(
                        scipy.special.i0) if TEST_SCIPY else _NOTHING,
@@ -10199,6 +10267,74 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_i0_i1,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True),
+    UnaryUfuncInfo(
+        'special.bessel_k0',
+        aten_name='special_bessel_k0',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bool: tol(atol=1e-4, rtol=0),
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k0 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_k0e',
+        aten_name='special_bessel_k0e',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bool: tol(atol=1e-4, rtol=0),
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k0e if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_k1',
+        aten_name='special_bessel_k1',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bool: tol(atol=1e-4, rtol=0),
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k1 if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.bessel_k1e',
+        aten_name='special_bessel_k1e',
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bool: tol(atol=1e-4, rtol=0),
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k1e if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
     UnaryUfuncInfo('special.ndtr',
                    aten_name='special_ndtr',
                    decorators=(precisionOverride({torch.bfloat16: 5e-3,
