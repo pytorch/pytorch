@@ -31,7 +31,7 @@ import math
 
 from torch.autograd.gradcheck import gradcheck
 
-from typing import List
+from typing import List, Union, Tuple
 
 RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM and not IS_WINDOWS
 CUDA_MAJOR, CUDA_MINOR = 0, 0
@@ -4595,21 +4595,27 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
 
         # just take the first sample input, or else the tests take too long
         gen = op.sample_inputs(device, dtype, requires_grad=False)
-        sample = next(iter(gen))
+        #sample = next(iter(gen))
+        for sample in gen:
 
-        trace = create_traced_fn(self, op)
-        trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
-        trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+            trace = create_traced_fn(self, op)
+            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-        for extremal_sample in _get_extremal_samples(sample, dtype):
-            ref = op(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+            for extremal_sample in _get_extremal_samples(sample, dtype):
+                print('^^^^', *clone_inputs((extremal_sample.input, *extremal_sample.args)))
+                ref = op(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+                print('^^^^ref', ref)
 
-            val = trace(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+                val = trace(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+                print('^^^^val', val)
 
-            self.assertEqual(val, ref, equal_nan=True, exact_device=True)
+                print('~~~~')
 
-        # See [Note: Clearing CU after NVFuser tests]
-        torch.jit._state._python_cu.drop_all_functions()
+                self.assertEqual(val, ref, equal_nan=True, exact_device=True)
+
+            # See [Note: Clearing CU after NVFuser tests]
+            torch.jit._state._python_cu.drop_all_functions()
 
 instantiate_device_type_tests(TestCudaFuserOpInfo, globals(), only_for=("cuda"))
 
