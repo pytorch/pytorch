@@ -156,15 +156,17 @@ class TORCH_API TensorBase {
   }
 
   int64_t size(int64_t dim) const {
+    const auto sizes = this->sizes();
+    const auto ndim = static_cast<int64_t>(sizes.size());
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
-    return sizes()[dim];
+    return sizes[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
   }
 
   int64_t stride(int64_t dim) const {
+    const auto strides = this->strides();
+    const auto ndim = static_cast<int64_t>(strides.size());
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-    dim = c10::maybe_wrap_dim(dim, this->dim(), false);
-    return strides()[dim];
+    return strides[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
   }
 
   TensorImpl * unsafeGetTensorImpl() const {
@@ -244,7 +246,7 @@ class TORCH_API TensorBase {
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
     // check 0,1 - sized dimension strides.
-    if (!is_mkldnn() && !is_sparse()) {
+    if (layout() == at::kStrided) {
       if (impl_->is_strides_like_channels_last()) {
         if (!channels_last_strides_exact_match ||
             get_channels_last_strides_2d(sizes()) == strides()) {
