@@ -332,7 +332,7 @@ Tensor binary_cross_entropy_with_logits(
   auto max_val = (-input).clamp_min_(0);
   auto hasSubclassTensors = at::areAnyTensorSubclassLike({target, input});
   if (pos_weight.defined()) {
-    // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+    // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
     auto log_weight = (pos_weight - 1).mul(target).add_(1);
     loss = hasSubclassTensors
         ? (1 - target)
@@ -360,7 +360,7 @@ Tensor binary_cross_entropy_with_logits(
   }
   if (weight.defined()) {
     if (at::areAnyTensorSubclassLike({loss, weight})) {
-      loss.mul(weight);
+      loss = loss.mul(weight);
     } else {
       loss.mul_(weight);
     }
@@ -388,7 +388,7 @@ Tensor binary_cross_entropy_with_logits_backward(
 
   // If there are subclassed tensors use the out of place version
   if (pos_weight.defined()) {
-    // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+    // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
     auto t = pos_weight.mul(target);
     grad_input = hasSubclassTensors
         ? t.add(1).sub(target).mul(input.sigmoid()).sub(t).mul(grad)
@@ -399,7 +399,7 @@ Tensor binary_cross_entropy_with_logits_backward(
   }
   if (weight.defined()) {
     if (at::areAnyTensorSubclassLike({grad_input, weight})) {
-      grad_input.mul(weight);
+      grad_input = grad_input.mul(weight);
     } else {
       grad_input.mul_(weight);
     }
