@@ -11050,10 +11050,6 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_out=False),
-    # TODO (tugsbayasgalan) We don't test for out variants
-    # as out variant tests assume they should work for all
-    # tensors. But, underlying implementation of softmax.int_out
-    # doesn't support non-contiguous tensors.
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
            variant_test_name="with_dtype",
@@ -11062,7 +11058,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_forward_ad=True,
-           supports_out=False),
+           supports_out=True),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     # https://github.com/pytorch/pytorch/issues/68752
@@ -15091,7 +15087,7 @@ op_db: List[OpInfo] = [
         'log_softmax',
         variant_test_name='dtype',
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
-        supports_out=False,
+        supports_out=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
         supports_forward_ad=True,
