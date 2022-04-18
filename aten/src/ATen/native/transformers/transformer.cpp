@@ -6,7 +6,6 @@
 #include <torch/library.h>
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-#include <ATen/native/transformers/transformer.h>
 
 namespace at {
 
