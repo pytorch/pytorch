@@ -137,11 +137,6 @@ Tensor& leaky_relu_quantized_cpu_(Tensor& self, const Scalar& negval) {
 
 Tensor prelu_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
                                 double output_scale, int64_t output_zero_point) {
-  // General idea:
-  // For input ndim in [1, 3], create fake dimensions and use NHWC fast path
-  // For input ndim in [4, 5], use NHWC fast path
-  // In other cases, use reference path
-
   auto ndim = self.dim();
   // for ndim < 1 or > 5, go to reference path
   if (ndim > 5 || ndim < 1) {
@@ -150,42 +145,15 @@ Tensor prelu_quantized_cpu_impl(const Tensor& self, const Tensor& weight,
     return at::quantize_per_tensor(y, output_scale, output_zero_point, c10::kQUInt8);
   }
 
-  // Create fake dimensions if input ndim in [1, 3]
-  Tensor qx = self;
-  auto format = MemoryFormat::ChannelsLast;
-  if (ndim == 1) {
-    qx = qx.unsqueeze(0).unsqueeze(-1).unsqueeze(-1);
-  } else if (ndim == 2) {
-    qx = qx.unsqueeze(-1).unsqueeze(-1);
-  } else if (ndim == 3) {
-    qx = qx.unsqueeze(-1);
-  } else if (ndim == 5) {
-    format = MemoryFormat::ChannelsLast3d;
-  }
-  qx = qx.contiguous(format);
-
-  auto qy = at::_empty_affine_quantized(qx.sizes(),
+  auto qy = at::_empty_affine_quantized(self.sizes(),
       at::device(kCPU)
-        .dtype(self.scalar_type())
-        .memory_format(format),
+        .dtype(self.scalar_type()),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      self.suggest_memory_format());
 
-  qprelu_stub(self.device().type(), qy, qx, weight);
+  qprelu_stub(self.device().type(), qy, self, weight);
 
-  // Remove fake dimensions, and go back to contiguous format
-  if (ndim < 4) {
-    auto result = qy.contiguous(MemoryFormat::Contiguous);
-    if (ndim == 1) {
-      result = result.squeeze(0).squeeze(-1).squeeze(-1);
-    } else if (ndim == 2) {
-      result = result.squeeze(-1).squeeze(-1);
-    } else { // ndim == 3
-      result = result.squeeze(-1);
-    }
-    return result;
-  }
   return qy;
 }
 
