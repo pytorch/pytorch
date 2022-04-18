@@ -378,7 +378,7 @@ class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T
 
 #if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
   // See [Note: MSVC Iterator Debug]
-  IListRefIterator(const ITensorListRefIterator& iterator)
+  IListRefIterator(const IListRefIterator& iterator)
       : tag_(iterator.tag_) {
     switch (tag_) {
       case ITensorListRefTag::Boxed:
