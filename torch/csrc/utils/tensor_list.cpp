@@ -19,6 +19,7 @@ static PyObject* recursive_to_list(
   }
   auto n = sizes[dim];
   auto list = THPObjectPtr(PyList_New(n));
+  TORCH_CHECK(data, "tolist() shouldn't be called on a tensor with unallocated storage");
   if (!list) throw python_error();
   for(const auto i : c10::irange(n)) {
     PyObject* obj = recursive_to_list(data, sizes, strides, dim + 1, scalarType, elementSize);
