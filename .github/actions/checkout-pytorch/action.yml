@@ -13,11 +13,9 @@ inputs:
   needs-history-and-master:
     description: If history of this commit and master should be checked out.  Usually used because the job calls git merge-base
     required: false
-    default: "false"
   needs-viable-strict:
     description: If viable/strict should be checked out.  Usually used because the job queries for test stats
     required: false
-    default: "false"
 
 runs:
   using: composite
@@ -45,7 +43,7 @@ runs:
 
     - name: Checkout the rest of history and master
       shell: bash
-      if: ${{ inputs.needs-history-and-master == 'true'}}
+      if: ${{ inputs.needs-history-and-master == 'true' }}
       env:
         HASH: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.sha }}
       run: git fetch --no-tags --prune --no-recurse-submodules origin --unshallow "${HASH}" master
