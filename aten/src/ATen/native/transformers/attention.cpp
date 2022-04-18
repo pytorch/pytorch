@@ -3,14 +3,12 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/cpu/vec/vec256/vec256.h>
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-#include <ATen/native/transformers/attention.h>
 
 namespace at {
 

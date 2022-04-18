@@ -1063,8 +1063,8 @@ class MultiheadAttention(Module):
             self.bias_v is None and self.dropout == 0 and
             not self.add_zero_attn and self._qkv_same_embed_dim and
             ((key_padding_mask is None and attn_mask is None)
-             if query.is_nested
-             else (key_padding_mask is None or attn_mask is None)) and
+                 if query.is_nested
+                 else (key_padding_mask is None or attn_mask is None)) and
             query is key and key is value):
             tensor_args = (
                 query,
@@ -1076,9 +1076,9 @@ class MultiheadAttention(Module):
                 self.out_proj.bias,
             )
             if (not torch.overrides.has_torch_function(tensor_args) and
-                # We have to use a list comprehension here because
-                # Torchscript doesn't support generator expressions.
-                all([x.is_cuda or 'cpu' in str(x.device) for x in tensor_args])):
+                    # We have to use a list comprehension here because
+                    # Torchscript doesn't support generator expressions.
+                    all([x.is_cuda or 'cpu' in str(x.device) for x in tensor_args])):
                 return torch._native_multi_head_attention(
                     query,
                     key,

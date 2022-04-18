@@ -404,7 +404,7 @@ class TransformerEncoderLayer(Module):
                     self.linear2.weight,
                     self.linear2.bias,
                     src_mask if src_mask is not None else src_key_padding_mask,
-            )
+                )
         x = src
         if self.norm_first:
             x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)
@@ -557,7 +557,7 @@ def _get_clones(module, N):
     return ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-def _get_activation_fn(activation):
+def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
     if activation == "relu":
         return F.relu
     elif activation == "gelu":

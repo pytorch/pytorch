@@ -3,7 +3,6 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorAccessor.h>
 
@@ -19,7 +18,6 @@
 
 #include <ATen/native/nested/NestedTensorMath.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-#include <ATen/native/transformers/attention.h>
 namespace at {
 
 namespace native {
