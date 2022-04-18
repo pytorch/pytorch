@@ -594,20 +594,6 @@ def convert_fx(
         * `convert_custom_config_dict`: dictionary for custom configurations for convert function::
 
             convert_custom_config_dict = {
-
-              # additional object (module/operator) mappings that will overwrite the default
-              # module mappinng
-              "additional_object_mapping": {
-                 "static": {
-                    FloatModule: QuantizedModule,
-                    float_op: quantized_op
-                 },
-                 "dynamic": {
-                    FloatModule: DynamicallyQuantizedModule,
-                    float_op: dynamically_quantized_op
-                 },
-              },
-
               # user will manually define the corresponding quantized
               # module class which has a from_observed class method that converts
               # observed custom module to quantized custom module
