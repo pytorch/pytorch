@@ -9,7 +9,7 @@ import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import cast, Dict, Optional, Union, Mapping
+from typing import cast, Dict, Optional, Union
 
 import torch._six as six
 from torch.distributed import FileStore, PrefixStore, Store, TCPStore
@@ -101,11 +101,11 @@ def _create_store_from_options(backend_options, rank):
         # If the world_size env variable is also not present then it is a dynamic group
         world_size = int(os.environ.get("WORLD_SIZE", world_size))
 
-    query_dict: Mapping[str, Union[str, int]] = _query_to_dict(result.query)
+    query_dict = _query_to_dict(result.query)
     # if rank is -1 then intentionally exclude rank for the query, error will be thrown later
     if rank != -1:
-        query_dict["rank"] = rank
-    query_dict["world_size"] = world_size
+        query_dict["rank"] = str(rank)
+    query_dict["world_size"] = str(world_size)
 
     result = result._replace(
         query="{}".format(
