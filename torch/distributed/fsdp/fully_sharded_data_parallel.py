@@ -2357,7 +2357,7 @@ class FullyShardedDataParallel(nn.Module):
         Checks the validity of an all-gather to rebuild the full parameter
         ``param``. If on the first iteration, this uses an all-gather to check
         that all ranks plan to all-gather the same parameter, erroring if not,
-        and on subsequent iterations, this warns the user if the forward pass
+        and on subsequent iterations, this warns the user if the all-gather
         execution order differs from that of the first iteration, meaning that
         we can no longer guarantee correct execution.
 
