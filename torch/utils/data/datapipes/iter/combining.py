@@ -189,6 +189,8 @@ class _ChildDataPipe(IterDataPipe):
         main_datapipe: Main DataPipe with a method 'get_next_element_by_instance(instance_id)'
         instance_id: integer identifier of this instance
     """
+    _is_child_datapipe: bool = True
+
     def __init__(self, main_datapipe, instance_id: int):
         required_attrs = ["get_next_element_by_instance", "is_instance_started", "is_every_instance_exhausted", "reset"]
         required_ops = [getattr(main_datapipe, attr) for attr in required_attrs]

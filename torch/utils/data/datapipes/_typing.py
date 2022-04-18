@@ -6,7 +6,7 @@ import functools
 import inspect
 import numbers
 import sys
-from typing import (Any, Dict, Iterator, Generic, List, Set, Tuple, TypeVar, Union,
+from typing import (Any, Dict, Iterator, Generic, List, Optional, Set, Tuple, TypeVar, Union,
                     get_type_hints)
 from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
 from typing import ForwardRef
@@ -337,35 +337,77 @@ class _DataPipeMeta(GenericMeta):
         return hash((self.__name__, self.type))
 
 
-def _check_iterator_valid(datapipe, id) -> None:
-    # if isinstance(datapipe, IterDataPipe)  # TODO: Do we need this?
-    print("Checking if the iterator is still valid")
-    if datapipe._valid_iterator_id == id:
-        pass
+def _simplify_obj_name(obj) -> str:
+    """
+    Simplify the display strings of objects for the purpose of rendering within DataPipe error messages.
+    """
+    if inspect.isfunction(obj):
+        return obj.__name__
+    try:
+        return str(obj.__class__.__qualname__)
+    except Exception as _:
+        return str(obj)
+
+
+def _generate_input_args_string(obj):
+    """
+    Generate a string for the input arguments of an object.
+    """
+    signature = inspect.signature(obj.__class__)
+    input_param_names = set()
+    for param_name, _ in signature.parameters.items():
+        input_param_names.add(param_name)
+    result = []
+    for name, obj in inspect.getmembers(obj):
+        if name in input_param_names:
+            result.append((name, _simplify_obj_name(obj)))
+    return ', '.join([f'{name}={value}' for name, value in result])
+
+def _generate_iterdatapipe_msg(datapipe):
+    return f"{datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
+
+
+def _check_iterator_valid(datapipe, iterator_id) -> None:
+    r"""
+    Given an instance of a DataPipe and an iterator ID, check if they match, and if not, raises an exception.
+    """
+    if hasattr(datapipe, "_is_child_datapipe") and datapipe._is_child_datapipe is True:
+        pass  # TODO: Add logic for multiple ChildDataPipe
     else:
-        raise RuntimeError("This iterator has been invalidated, because another iterator has been created"
-                           f"from the same IterDataPipe {datapipe}")  # TODO: Make this message better, show args?
+        if datapipe._valid_iterator_id == iterator_id:
+            pass
+        else:
+            raise RuntimeError("This iterator has been invalidated, because another iterator has been created"
+                               f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}")
 
 
 def _set_datapipe_valid_iterator_id(datapipe):
+    r"""
+    Given a DataPipe, set or update its valid iterator ID.
+    """
     if datapipe._valid_iterator_id is None:
         datapipe._valid_iterator_id = 0
-        print(f"Valid iterator id has been set to {datapipe._valid_iterator_id}.")
+        # print(f"Valid iterator id has been set to {datapipe._valid_iterator_id}.")  # TODO: Remove after debugging
     else:
         datapipe._valid_iterator_id += 1
-        print(f"Valid iterator id has been updated to {datapipe._valid_iterator_id}.")
+        # print(f"Valid iterator id has been updated to {datapipe._valid_iterator_id}.")  # TODO: Remove after debugging
     return datapipe._valid_iterator_id
 
 
 def hook_iterator(namespace, profile_name):
-
+    r"""
+    Hook that is applied to all `__iter__` of metaclass `_DataPipeMeta`. This is done for the purpose of
+    profiling and checking if an iterator is still valid.
+    """
     def context():
         return torch.autograd.profiler.record_function(profile_name)
 
     class IteratorDecorator:
-        '''Wrap the iterator return result by adding __next__'''
-        def __init__(self, iterator):
+        """Wrap the iterator return result by adding __next__"""
+        def __init__(self, iterator, source_dp, iterator_id):
             self.iterator = iterator
+            self.source_dp = source_dp
+            self.iterator_id = iterator_id
 
         def __iter__(self):
             return self
@@ -374,14 +416,15 @@ def hook_iterator(namespace, profile_name):
             # TODO: Add try-except to in-place reduce traceback from the Exception
             # See: https://github.com/pytorch/data/issues/284
             with context():
-                # TODO: Check if iterator is still valid here
+                if self.source_dp.singleton_mode:
+                    _check_iterator_valid(self.source_dp, self.iterator_id)
                 return next(self.iterator)
 
         def __getattr__(self, name):
             return getattr(self.iterator, name)
 
     func = namespace['__iter__']
-    iterator_id = None
+    iterator_id: Optional[int] = None
 
     # ``__iter__`` of IterDataPipe is a generator function
     if inspect.isgeneratorfunction(func):
@@ -395,9 +438,9 @@ def hook_iterator(namespace, profile_name):
                     response = gen.send(None)
                 while True:
                     request = yield response
-                    with context():
-                        # TODO: This is passed through when __next__ is called. Check if iterator is still valid.
-                        _check_iterator_valid(datapipe, iterator_id)
+                    with context():  # Pass through here every time `__next__` is called
+                        if datapipe.singleton_mode:
+                            _check_iterator_valid(datapipe, iterator_id)
                         response = gen.send(request)
             except StopIteration as e:
                 return e.value
@@ -410,17 +453,33 @@ def hook_iterator(namespace, profile_name):
 
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
+                datapipe = args[0]
                 with context():
-                    # TODO: Check if iterator is still valid here
+                    # TODO: This doesn't work when __iter__ simply return `self`
+                    # if datapipe.singleton_mode:  # TODO: Check if iterator is still valid here
+                    #     print(f"Checking with the ID as: {iterator_id}")
+                    #     _check_iterator_valid(datapipe, iterator_id)
                     return next_func(*args, **kwargs)
 
+            @functools.wraps(func)
+            def wrap_iter(*args, **kwargs):
+                # TODO: This doesn't work when __iter__ simply return `self`
+                # datapipe = args[0]
+                # nonlocal iterator_id
+                # iterator_id = _set_datapipe_valid_iterator_id(datapipe)
+                return func(*args, **kwargs)
+
+            namespace['__iter__'] = wrap_iter
             namespace['__next__'] = wrap_next
-        # ``__iter__`` of IterDataPipe returns an iterator other than self
+        # ``__iter__`` of IterDataPipe returns an iterator other than `self` (or simply doesn't have ``__next__``)
         else:
             @functools.wraps(func)
             def wrap_iter(*args, **kwargs):
                 iter_ret = func(*args, **kwargs)
-                return IteratorDecorator(iter_ret)
+                datapipe = args[0]
+                nonlocal iterator_id
+                iterator_id = _set_datapipe_valid_iterator_id(datapipe)
+                return IteratorDecorator(iter_ret, datapipe, iterator_id)
 
             namespace['__iter__'] = wrap_iter
 
