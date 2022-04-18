@@ -329,11 +329,31 @@ inline DimVector _estimate_sparse_compressed_tensor_size(
   return size;
 }
 
+inline DimVector _estimate_sparse_compressed_tensor_size(
+    const Tensor& compressed_indices,
+    const Tensor& plain_indices,
+    const Tensor& values,
+    Layout layout) {
+  DimVector size = DimVector(IntArrayRef(plain_indices.sizes().data(), plain_indices.dim() - 1));
+  int64_t compressed_dim = (plain_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
+  int64_t plain_dim = AT_DISPATCH_INDEX_TYPES(plain_indices.scalar_type(), "csr_construct_check", [&]() -> int64_t { return plain_indices.max().item<index_t>() + 1; });
+  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "estimate_sparse_compressed_tensor_size",
+      [&]{
+        size.push_back(compressed_dim);
+        size.push_back(plain_dim);
+      },
+      [&]{
+        size.push_back(plain_dim);
+        size.push_back(compressed_dim);
+      });
+  return size;
+}
+
 // TODO: This constructor should probably use an ATen abstract method in order
 // to make autograd dispatch available for the CSR constructor. See the relevant
 // note in native_functions.yaml.
 
-template <Layout expected_layout>
+template <Layout required_layout>
 Tensor sparse_compressed_tensor_template(
     const Tensor& compressed_indices,
     const Tensor& plain_indices,
@@ -343,12 +363,12 @@ Tensor sparse_compressed_tensor_template(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-
-  Layout layout_ = layout.value_or(expected_layout);
-  if (expected_layout == kDummyLayout) {
-    TORCH_CHECK(layout_ != kDummyLayout, "expected layout SparseCsr, SparseCsc, SparseBsr, or SparseBsc but got none");
+  Layout layout_ = layout.value_or(required_layout);
+  if (required_layout == Layout::Unspecified) {
+    // checks that sparse compressed layout is specified
+    AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
   } else {
-    TORCH_CHECK(layout_ == expected_layout, "expected layout ", expected_layout, " but got ", layout_);
+    TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
   }
   auto size_ = (size.has_value() ? size.value() : _estimate_sparse_compressed_tensor_size(compressed_indices, plain_indices, values, layout_));
 
@@ -368,7 +388,7 @@ Tensor sparse_compressed_tensor_template(
       options.pinned_memory_opt());
 }
 
-#define SPARSE_COMPRESSED_TENSOR(KIND, EXPECTED_LAYOUT) \
+#define SPARSE_COMPRESSED_TENSOR(KIND, REQUIRED_LAYOUT) \
   Tensor sparse_##KIND##_tensor(const Tensor& compressed_indices,       \
                                 const Tensor& plain_indices,            \
                                 const Tensor& values,                   \
@@ -376,8 +396,8 @@ Tensor sparse_compressed_tensor_template(
                                 c10::optional<Layout> layout,           \
                                 c10::optional<Device> device,           \
                                 c10::optional<bool> pin_memory) {       \
-  c10::optional<IntArrayRef> size;                                        \
-  return sparse_compressed_tensor_template<EXPECTED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
+    c10::optional<IntArrayRef> size;                                    \
+    return sparse_compressed_tensor_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
   }                                                                     \
   Tensor sparse_##KIND##_tensor(const Tensor& compressed_indices,       \
                                 const Tensor& plain_indices,            \
@@ -387,16 +407,15 @@ Tensor sparse_compressed_tensor_template(
                                 c10::optional<Layout> layout,           \
                                 c10::optional<Device> device,           \
                                 c10::optional<bool> pin_memory) {       \
-  c10::optional<IntArrayRef> size_(size);                                 \
-  return sparse_compressed_tensor_template<EXPECTED_LAYOUT>(compressed_indices, plain_indices, values, size_, dtype, layout, device, pin_memory); \
+    c10::optional<IntArrayRef> size_(size);                             \
+    return sparse_compressed_tensor_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size_, dtype, layout, device, pin_memory); \
   }
 
-SPARSE_COMPRESSED_TENSOR(compressed, kDummyLayout)
+SPARSE_COMPRESSED_TENSOR(compressed, Layout::Unspecified)
 SPARSE_COMPRESSED_TENSOR(csr, kSparseCsr)
 SPARSE_COMPRESSED_TENSOR(csc, kSparseCsc)
 SPARSE_COMPRESSED_TENSOR(bsr, kSparseBsr)
 SPARSE_COMPRESSED_TENSOR(bsc, kSparseBsc)
-
 
 Tensor empty_sparse_csr(
     IntArrayRef size,

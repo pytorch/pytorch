@@ -593,7 +593,7 @@ Tensor indexing_tensor_from_data(
   }
 }
 
-template <c10::Layout layout>
+template <c10::Layout required_layout>
 Tensor sparse_compressed_tensor_ctor_template(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
   TORCH_INTERNAL_ASSERT(!isSparseCsr(dispatchKeyToBackend(dispatch_key)));
   TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
@@ -618,7 +618,9 @@ Tensor sparse_compressed_tensor_ctor_template(c10::DispatchKey dispatch_key, at:
         ARG_REQUIRES_GRAD1,
         ARGS_COUNT1
   };
-  const std::string layout_name = (layout == c10::kDummyLayout ? "compressed" : at::sparse_csr::layoutToString(layout, /*upper=*/false, /*lower=*/true));
+  const std::string layout_name = (required_layout == c10::Layout::Unspecified
+                                   ? "compressed" :
+                                   at::sparse_csr::layoutToString(required_layout, /*upper=*/false, /*lower=*/true));
   auto safe_get_attr_string = [](PyObject *o, const char *attr_name) -> PyObject* {
     // Clear error indicator if attribute does not exists.
     // Otherwise subsequent Python C API calls might return bogus values.
@@ -657,7 +659,7 @@ Tensor sparse_compressed_tensor_ctor_template(c10::DispatchKey dispatch_key, at:
       plain_indices_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_PLAIN_INDICES),
       /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
-    c10::Layout layout_ = (layout == c10::kDummyLayout ? r.layoutOptional(ARG_LAYOUT).value_or(c10::kDummyLayout) : layout);
+    c10::Layout layout_ = (required_layout == c10::Layout::Unspecified ? r.layoutOptional(ARG_LAYOUT).value_or(required_layout) : required_layout);
     return at::sparse_compressed_tensor(compressed_indices, plain_indices, values, r.intlist(ARG_SIZE),
                                  values.options().layout(layout_)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
@@ -676,7 +678,7 @@ Tensor sparse_compressed_tensor_ctor_template(c10::DispatchKey dispatch_key, at:
     Tensor plain_indices = internal_new_from_data(values.options(), plain_indices_scalar_type, r.deviceOptional(ARG_DEVICE1),
       r.pyobject(ARG_PLAIN_INDICES), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
-    c10::Layout layout_ = (layout == c10::kDummyLayout ? r.layoutOptional(ARG_LAYOUT1).value_or(c10::kDummyLayout) : layout);
+    c10::Layout layout_ = (required_layout == c10::Layout::Unspecified ? r.layoutOptional(ARG_LAYOUT1).value_or(required_layout) : required_layout);
     return at::sparse_compressed_tensor(compressed_indices, plain_indices, values,
                                  values.options().layout(layout_)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
   }
@@ -684,7 +686,7 @@ Tensor sparse_compressed_tensor_ctor_template(c10::DispatchKey dispatch_key, at:
 }
 
 Tensor sparse_compressed_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
-  return sparse_compressed_tensor_ctor_template<c10::kDummyLayout>(dispatch_key, scalar_type, r);
+  return sparse_compressed_tensor_ctor_template<c10::Layout::Unspecified>(dispatch_key, scalar_type, r);
 }
 
 Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
