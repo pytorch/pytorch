@@ -59,7 +59,7 @@ def _fuse_fx(
     """
     _check_is_graph_module(graph_module)
     return fuse(
-        graph_module, is_qat, fuse_custom_config_dict, backend_config_dict)
+        graph_module, is_qat, fuse_custom_config_dict, backend_config_dict)  # type: ignore[operator]
 
 
 class Scope(object):
@@ -251,7 +251,7 @@ forward graph of the parent module,
         equalization_qconfig_dict=equalization_qconfig_dict,
         backend_config_dict=backend_config_dict,
         is_standalone_module=is_standalone_module,
-    )
+    )  # type: ignore[operator]
 
     for attr_name in preserved_attributes:
         setattr(prepared, attr_name, getattr(model, attr_name))

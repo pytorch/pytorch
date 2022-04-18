@@ -1,9 +1,12 @@
 import torch
-from torch.ao.quantization.quantization_types import Pattern, QuantizerCls
 from torch.ao.quantization.fx.pattern_utils import get_default_quant_patterns, sorted_patterns_dict
 from torch.ao.quantization.backend_config import get_native_backend_config_dict
 from torch.ao.quantization.backend_config.observation_type import ObservationType
-from torch.ao.quantization.quantization_types import Pattern, NodePattern
+from torch.ao.quantization.quantization_types import (
+    Pattern,
+    NodePattern,
+    QuantizerCls,
+)
 from torch.ao.quantization.utils import (
     activation_dtype,
     get_combined_dict,
@@ -103,7 +106,7 @@ def get_pattern_to_quantize_handlers(
 
 def get_fusion_pattern_to_fuse_handler_cls(
         backend_config_dict: Dict[str, Any]) -> Dict[Pattern, Callable]:
-    fusion_pattern_to_fuse_handlers = dict()
+    fusion_pattern_to_fuse_handlers: Dict[Pattern, Callable] = dict()
     for config in backend_config_dict.get("configs", []):
         if "fuser_method" in config:
             pattern = config["pattern"]
