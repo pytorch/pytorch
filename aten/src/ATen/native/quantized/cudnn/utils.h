@@ -193,9 +193,19 @@ uint8_t getAlignment(const at::Tensor &t) {
   return alignment;
 }
 
-cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint8_t alignment) {
+cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint8_t alignment, bool is_virtual = false) {
   auto shape = t.sizes();
   auto strides = t.strides();
+  if (is_virtual) {
+    return cudnn_frontend::TensorBuilder()
+      .setDim(shape.size(), shape.data())
+      .setStrides(strides.size(), strides.data())
+      .setId(id)
+      .setAlignment(alignment)
+      .setVirtual()
+      .setDataType(at::native::getCudnnDataType(t))
+      .build();
+  }
   return cudnn_frontend::TensorBuilder()
     .setDim(shape.size(), shape.data())
     .setStrides(strides.size(), strides.data())
@@ -205,7 +215,17 @@ cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint
     .build();
 }
 
-cudnn_frontend::Tensor getTensorDescriptor(const c10::IntArrayRef& shape, const c10::IntArrayRef& strides, cudnnDataType_t cudnn_dtype, int64_t id, uint8_t alignment) {
+cudnn_frontend::Tensor getTensorDescriptor(const c10::IntArrayRef& shape, const c10::IntArrayRef& strides, cudnnDataType_t cudnn_dtype, int64_t id, uint8_t alignment, bool is_virtual = false) {
+  if (is_virtual) {
+    return cudnn_frontend::TensorBuilder()
+      .setDim(shape.size(), shape.data())
+      .setStrides(strides.size(), strides.data())
+      .setId(id)
+      .setAlignment(alignment)
+      .setVirtual()
+      .setDataType(cudnn_dtype)
+      .build();
+  }
   return cudnn_frontend::TensorBuilder()
     .setDim(shape.size(), shape.data())
     .setStrides(strides.size(), strides.data())
