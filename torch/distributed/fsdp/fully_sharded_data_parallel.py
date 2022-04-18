@@ -417,10 +417,10 @@ class FullyShardedDataParallel(nn.Module):
         # Only handle params which are not already sharded. This enables
         # sharding individual layers of a Module, with an outer wrapper to
         # shard any leftover parameters.
-        params = []
-        for param in module.parameters():
-            if param not in ignored_params and not isinstance(param, FlatParameter):
-                params.append(param)
+        params = [
+            p for p in module.parameters()
+            if p not in ignored_params and not isinstance(p, FlatParameter)
+        ]
 
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
             module, param_list=params
@@ -1043,9 +1043,8 @@ class FullyShardedDataParallel(nn.Module):
         # For children instances, if they are checkpointed, state will not be reset to
         # IDLE after each inner forward/backward.
         self._assert_state(TrainingState_.IDLE)
-        for n, m in self.named_modules():
-            # `n != ""` excludes self.
-            if n != "" and isinstance(m, FullyShardedDataParallel):
+        for m in self.modules():
+            if m is not self and isinstance(m, FullyShardedDataParallel):
                 # We relax the assert for non-root instance, when the nested initialized module is wrapped
                 # again in FSDP later, for example after training to run inference.
                 assert (
@@ -1073,8 +1072,8 @@ class FullyShardedDataParallel(nn.Module):
         # We share streams with all children instances, which allows them to
         # overlap transfers across the forward pass without synchronizing with
         # the default stream.
-        for n, m in self.named_modules():
-            if n != "" and isinstance(m, FullyShardedDataParallel):
+        for m in self.modules():
+            if m is not self and isinstance(m, FullyShardedDataParallel):
                 m._streams = self._streams
                 m._fsdp_graph_order = self._fsdp_graph_order
 
@@ -1950,14 +1949,13 @@ class FullyShardedDataParallel(nn.Module):
                 "FSDP only works with gradients that don't require gradients"
             )
 
-        if self._require_backward_grad_sync or self.reshard_after_forward:
-            # Free full params. when in a ``no_sync`` context (as inversely indicated
-            # by ``self._require_backward_grad_sync``), the params will not get updated
-            # before the next forward. As a special case in a ``no_sync`` context, do
-            # not free full params, there is no need to call all_gather to sync params
-            # among ranks if users would like to use more GPU memory and save network
-            # overhead when users set sharding_strategy=SHARD_GRAD_OP
-            # (self.reshard_after_forward = False).
+        if self._require_backward_grad_sync or \
+                self.sharding_strategy == ShardingStrategy.FULL_SHARD:
+            # We free full parameters unless we are in `no_sync()` (i.e. when
+            # `_require_backward_grad_sync=False`) and not using the
+            # `FULL_SHARD` strategy. If we are not using the `FULL_SHARD`
+            # strategy (e.g. instead using `SHARD_GRAD_OP`), then we keep the
+            # full parameters in memory and save network overhead.
             self._free_full_params(cast(List[FlatParameter], [param]))
 
         if self.mixed_precision:
