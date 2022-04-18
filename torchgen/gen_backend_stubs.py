@@ -325,7 +325,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
 def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str] = None) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
-    pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
+    pytorch_root = pathlib.Path(__file__).parent.parent.absolute()
     template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")
 
     def make_file_manager(install_dir: str) -> FileManager:

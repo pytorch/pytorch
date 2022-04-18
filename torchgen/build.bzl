@@ -1,6 +1,6 @@
 def define_targets(rules):
     rules.py_library(
-        name = "codegen",
+        name = "torchgen",
         srcs = rules.glob(["**/*.py"]),
         deps = [
             rules.requirement("PyYAML"),
@@ -11,6 +11,6 @@ def define_targets(rules):
 
     rules.py_binary(
         name = "gen",
-        srcs = [":codegen"],
+        srcs = [":torchgen"],
         visibility = ["//visibility:public"],
     )
