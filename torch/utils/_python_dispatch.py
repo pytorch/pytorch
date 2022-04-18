@@ -1,8 +1,7 @@
-import torch
 import contextlib
 from typing import Iterator
 
-from torch.utils._mode_utils import _enable_mode, ModeInfo 
+from torch.utils._mode_utils import _enable_mode, ModeInfo
 
 # NB: Calling an operator inside __torch_dispatch__ does go through
 # __torch_dispatch__ again. Please use _DisableTorchDispatch inside
