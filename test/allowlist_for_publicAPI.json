@@ -686,7 +686,9 @@
     "get_debug_level",
     "set_debug_level",
     "set_debug_level_from_env",
-    "timedelta"
+    "timedelta",
+    "ProcessGroupMPI",
+    "ProcessGroupNCCL"
   ],
   "torch.distributed.algorithms.ddp_comm_hooks": [
     "DistributedDataParallel",
@@ -759,7 +761,9 @@
     "get_debug_level",
     "register_rendezvous_handler",
     "rendezvous",
-    "timedelta"
+    "timedelta",
+    "ProcessGroupMPI",
+    "ProcessGroupNCCL"
   ],
   "torch.distributed.elastic.agent.server.api": [
     "Any",
@@ -2067,7 +2071,8 @@
     "make_source_context",
     "namedtuple",
     "parse_def",
-    "should_drop"
+    "should_drop",
+    "monkeytype_trace"
   ],
   "torch.linalg": [
     "LinAlgError",
