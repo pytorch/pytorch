@@ -19,6 +19,11 @@ from torch.distributed.algorithms.join import (
     Joinable,
     JoinHook,
 )
+from torch.distributed.utils import (
+    _verify_param_shape_across_processes,
+    _sync_params_and_buffers
+)
+
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
@@ -636,9 +641,15 @@ class DistributedDataParallel(Module, Joinable):
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # Verify model equivalence.
-        dist._verify_params_across_processes(self.process_group, parameters)
+        _verify_param_shape_across_processes(self.process_group, parameters)
         # Sync params and buffers. Ensures all DDP models start off at the same value.
-        self._sync_params_and_buffers(authoritative_rank=0)
+        _sync_params_and_buffers(
+            module=self.module,
+            process_group=self.process_group,
+            broadcast_bucket_size=self.broadcast_bucket_size,
+            rank=0,
+            params_and_buffers_to_ignore=self.parameters_to_ignore,
+        )
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
         # Builds reducer.
@@ -649,21 +660,6 @@ class DistributedDataParallel(Module, Joinable):
 
         if static_graph:
             self._set_static_graph()
-
-    def _sync_params_and_buffers(self, authoritative_rank=0):
-        module_states = []
-        for name, param in self.module.named_parameters():
-            if name not in self.parameters_to_ignore:
-                module_states.append(param.detach())
-
-        for name, buffer in self.module.named_buffers():
-            if name not in self.parameters_to_ignore:
-                module_states.append(buffer.detach())
-
-        if len(module_states) > 0:
-            self._distributed_broadcast_coalesced(
-                module_states, self.broadcast_bucket_size, authoritative_rank
-            )
 
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
@@ -1153,7 +1149,13 @@ class DistributedDataParallel(Module, Joinable):
         self._authoritative_rank = self._find_common_rank(
             self._distributed_rank, is_last_joiner
         )
-        self._sync_params_and_buffers(authoritative_rank=self._authoritative_rank)
+        _sync_params_and_buffers(
+            module=self.module,
+            process_group=self.process_group,
+            broadcast_bucket_size=self.broadcast_bucket_size,
+            rank=self._authoritative_rank,
+            params_and_buffers_to_ignore=self.parameters_to_ignore
+        )
 
     # Schedule comm ops to match those scheduled in the reducer's backward
     # pass.
