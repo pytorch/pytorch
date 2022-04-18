@@ -26,6 +26,7 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
+from torch.fx.experimental.meta_tracer import MetaTracer
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -666,6 +667,28 @@ class TestFXExperimental(JitTestCase):
 
         # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
+
+    def test_meta_tracer(self):
+        mt = MetaTracer()
+
+        class MetaTracerTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(num_embeddings=42, embedding_dim=16)
+                self.layernorm = torch.nn.LayerNorm(16)
+
+            def forward(self, x):
+                emb = self.emb(x)
+                lol = self.layernorm(emb)
+                return torch.relu(lol) if lol.shape[0] < 30 else torch.sigmoid(lol)
+
+        mttm = MetaTracerTestModule()
+        for BS in [15, 35]:
+            x = torch.zeros(BS, dtype=torch.long).random_(42)
+            graph = mt.trace(mttm, meta_args={'x' : x.to(device='meta')})
+            gm = torch.fx.GraphModule(mttm, graph)
+            torch.testing.assert_close(gm(x), mttm(x))
+
 
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
