@@ -310,8 +310,6 @@ void loadFunctions() {
   auto shape_compute_functions =
       GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
 
-  std::cout << shape_compute_functions;
-
   auto src = std::make_shared<Source>(shape_compute_functions);
   std::stringstream ss;
   std::vector<at::IValue> constantTable;
