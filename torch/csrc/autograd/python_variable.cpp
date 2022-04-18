@@ -288,6 +288,27 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 }
 
 static int THPVariable_clear(THPVariable* self) {
+  // The main reason why resurrecting in tp_clear is suspicious is because
+  // CPython has already condemned an unreachable graph (containing a cycle),
+  // and will attempt to break the cycles by running tp_clear on all of the
+  // unreachable nodes. What if our Tensor (which we are about to resurrect)
+  // contains a reference to another object which is in the unreachable graph?
+  // Then we would be able to observe an object which is in a cleared state,
+  // which isn't going to look like anything good.
+
+  // BUT remember tp_traverse, which we coded to not traverse any fields when an
+  // object was resurrectable. This causes all of tensor's references to have
+  // unexplained refcounts, causing them to be considered reachable. So those
+  // objects will never be considered part of the unreachable graph, and we're
+  // saved!
+
+  // One more thing: is it OK for an object to still be live after running
+  // tp_clear? Yes. If Python is unlucky about the order it clears things,
+  // clearing one object may not actually induce deallocation of everything
+  // else. The source code explicitly handles this case:
+  // https://github.com/python/cpython/blob/4e661cd69164318c1f871faa476c68a04092ddc4/Modules/gcmodule.c#L1010-L1025
+
+  // See https://github.com/pytorch/pytorch/pull/75933 for more discussion.
   if (THPVariable_tryResurrect((THPVariable*)self))
     return 0;
   Py_CLEAR(self->backward_hooks);
