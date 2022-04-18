@@ -11,7 +11,6 @@ from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple, Callable, Any
-import unittest
 import numpy as np
 import torch
 import torch.cuda
@@ -89,6 +88,10 @@ if sys.platform == "win32":
 else:
     import fcntl
 
+if "TORCH_UCC_LIBRARY_PATH" in os.environ:
+    SKIP_NCCL_ON_CPU = False
+else:
+    SKIP_NCCL_ON_CPU = True
 
 class NetWithBuffers(nn.Module):
     def __init__(self):
@@ -380,23 +383,6 @@ def require_backend(backends):
     if BACKEND not in backends:
         return sandcastle_skip("Test requires backend to be one of %s" % backends)
     return lambda func: func
-
-
-def require_ucc_for_nccl():
-    def do_skip():
-        def is_ucc_available():
-            return dist.distributed_c10d._get_default_group().is_ucc_available
-
-        if BACKEND == dist.Backend.NCCL and not is_ucc_available():
-            raise unittest.SkipTest("Test requires UCC to be available for the NCCL backend")
-
-    def wrapper(func):
-        def wrapped_func(*args, **kwargs):
-            do_skip()
-            func(*args, **kwargs)
-        return wrapped_func
-
-    return wrapper
 
 
 def require_backends_available(backends):
@@ -1538,7 +1524,9 @@ class DistributedTest:
                             self.assertTrue(event.is_async)
                             self.assertTrue(event.input_shapes in expected_shapes)
 
-        @require_ucc_for_nccl()
+        @sandcastle_skip_if(
+            SKIP_NCCL_ON_CPU and BACKEND == "nccl", "Nccl send/recv not available on CPU"
+        )
         def test_send_recv(self):
             self._test_send_recv(profiler_ctx=None)
 
@@ -1699,7 +1687,9 @@ class DistributedTest:
                             self.assertEqual(event.name, event_name)
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
-        @require_ucc_for_nccl()
+        @sandcastle_skip_if(
+            SKIP_NCCL_ON_CPU and BACKEND == "nccl", "NCCL send/recv is not supported on CPU"
+        )
         def test_send_recv_with_tag(self):
             self._test_send_recv_with_tag(profiler_ctx=None)
 
@@ -1768,7 +1758,9 @@ class DistributedTest:
                         else:
                             self.assertEqual(event.input_shapes, expected_shapes[rank])
 
-        @require_ucc_for_nccl()
+        @sandcastle_skip_if(
+            SKIP_NCCL_ON_CPU and BACKEND == "nccl", "Nccl does not support isend on CPU"
+        )
         def test_isend(self):
             self._test_isend(profiler_ctx=None)
 
@@ -1788,7 +1780,9 @@ class DistributedTest:
             self._test_isend(profiler_ctx=torch_profiler_ctx)
 
         # IRECV
-        @require_ucc_for_nccl()
+        @sandcastle_skip_if(
+            SKIP_NCCL_ON_CPU and BACKEND == "nccl", "Nccl does not support irecv on CPU"
+        )
         def test_irecv(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
