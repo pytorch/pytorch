@@ -703,7 +703,7 @@ Tensor sparse_bsc_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   return sparse_compressed_tensor_ctor_template<c10::kSparseBsc>(dispatch_key, scalar_type, r);
 }
 
-template <c10::Layout layout>
+template <c10::Layout required_layout>
 Tensor _sparse_compressed_tensor_unsafe_ctor_template(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
   TORCH_INTERNAL_ASSERT(!isSparseCsr(dispatchKeyToBackend(dispatch_key)));
   TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
@@ -714,7 +714,7 @@ Tensor _sparse_compressed_tensor_unsafe_ctor_template(c10::DispatchKey dispatch_
         ARG_SIZE,
         ARG_TYPE,
         ARG_LAYOUT,
-        ARG_DEVICE = (layout == c10::kDummyLayout ? ARG_LAYOUT + 1: ARG_LAYOUT),
+        ARG_DEVICE = (required_layout == c10::Layout::Unspecified ? ARG_LAYOUT + 1: ARG_LAYOUT),
         ARG_REQUIRES_GRAD,
         ARGS_COUNT
   };
@@ -733,13 +733,13 @@ Tensor _sparse_compressed_tensor_unsafe_ctor_template(c10::DispatchKey dispatch_
   Tensor plain_indices = internal_new_from_data(values.options(), kInt, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_PLAIN_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
                                           /*type_inference=*/true);
-  c10::Layout layout_ = (layout == c10::kDummyLayout ? r.layoutOptional(ARG_LAYOUT).value_or(c10::kDummyLayout) : layout);
-  return at::_sparse_compressed_tensor_unsafe(compressed_indices, plain_indices, values, r.intlist(ARG_SIZE), values.options().layout(layout_)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
+  c10::Layout layout_ = (required_layout == c10::Layout::Unspecified ? r.layoutOptional(ARG_LAYOUT).value_or(required_layout) : required_layout);
+  return at::_sparse_compressed_tensor_unsafe(compressed_indices, plain_indices, values, r.intlist(ARG_SIZE),
+                                              values.options().layout(layout_)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
 }
 
-
 Tensor _sparse_compressed_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
-  return _sparse_compressed_tensor_unsafe_ctor_template<c10::kDummyLayout>(dispatch_key, scalar_type, r);
+  return _sparse_compressed_tensor_unsafe_ctor_template<c10::Layout::Unspecified>(dispatch_key, scalar_type, r);
 }
 
 Tensor _sparse_csr_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {

@@ -14,7 +14,8 @@ enum class Layout : int8_t {
   SparseCsc,
   SparseBsr,
   SparseBsc,
-  NumOptions
+  NumOptions,
+  Unspecified = NumOptions
 };
 
 constexpr auto kStrided = Layout::Strided;
@@ -62,6 +63,8 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "SparseBsc";
     case at::kMkldnn:
       return stream << "Mkldnn";
+    case at::Layout::Unspecified:
+      return stream << "Unspecified";
     case at::kDummyLayout:
       return stream << "DummyLayout";
     default:
