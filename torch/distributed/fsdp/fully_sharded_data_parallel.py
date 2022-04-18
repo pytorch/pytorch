@@ -1949,14 +1949,13 @@ class FullyShardedDataParallel(nn.Module):
                 "FSDP only works with gradients that don't require gradients"
             )
 
-        if self._require_backward_grad_sync or self.reshard_after_forward:
-            # Free full params. when in a ``no_sync`` context (as inversely indicated
-            # by ``self._require_backward_grad_sync``), the params will not get updated
-            # before the next forward. As a special case in a ``no_sync`` context, do
-            # not free full params, there is no need to call all_gather to sync params
-            # among ranks if users would like to use more GPU memory and save network
-            # overhead when users set sharding_strategy=SHARD_GRAD_OP
-            # (self.reshard_after_forward = False).
+        if self._require_backward_grad_sync or \
+                self.sharding_strategy == ShardingStrategy.FULL_SHARD:
+            # We free full parameters unless we are in `no_sync()` (i.e. when
+            # `_require_backward_grad_sync=False`) and not using the
+            # `FULL_SHARD` strategy. If we are not using the `FULL_SHARD`
+            # strategy (e.g. instead using `SHARD_GRAD_OP`), then we keep the
+            # full parameters in memory and save network overhead.
             self._free_full_params(cast(List[FlatParameter], [param]))
 
         if self.mixed_precision:
