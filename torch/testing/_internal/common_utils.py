@@ -71,6 +71,7 @@ from .composite_compliance import no_dispatch
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.nn import ModuleList, ModuleDict, Sequential, ParameterList, ParameterDict
 from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
+from torch.utils._pytree import tree_map
 
 torch.backends.disable_global_flags()
 
@@ -801,7 +802,69 @@ TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
+
+        def to_meta(t):
+            if isinstance(t, torch.Tensor):
+                # Now, you might think that to('meta') is enough, but it
+                # isn't, because this will destroy stride/view/base
+                # information.  For now, excluding as_strided but more stuff
+                # might need to get axed.
+                with torch.no_grad():
+                    return t.to('meta').requires_grad_(t.requires_grad)
+            else:
+                return t
+
+        T = torch.Tensor
+        do_meta = func not in {
+            # TODO: these should raise NotImplementedError, but raises a
+            # different error
+            T.numpy,
+            T.new,
+            # TODO: our conversion to meta is not accurate enough (doesn't
+            # preserve storage_offset, e.g.)
+            T.as_strided,
+            # TODO: segfaults
+            T.type,
+            # TODO: IDK what's up with these.  TestTorch.test_sobolengine_bounds
+            torch._sobol_engine_initialize_state_,
+            torch._sobol_engine_draw,
+        }
+
+        if do_meta:
+            try:
+                # TODO: technically, the meta conversions should work
+                # unconditionally, but currently they don't work on
+                # sparse tensors
+
+                # Don't convert factory functions to meta, if the size
+                # is a tensor we need a non-meta tensor to actually construct
+                # it
+                if func not in {torch.ones, torch.empty}:
+                    meta_args = tree_map(to_meta, args)
+                else:
+                    meta_args = args
+                meta_kwargs = tree_map(to_meta, kwargs)
+            except NotImplementedError:
+                pass
+            except Exception as e:
+                raise RuntimeError(
+                    f"failed to convert args to meta; "
+                    f"originally (*{args}, **{kwargs})") from e
+
         r = func(*args, **kwargs)
+
+        # TODO: also handle cases where func raise an exception
+
+        if do_meta:
+            try:
+                meta_r = func(*meta_args, **meta_kwargs)
+            except NotImplementedError:
+                pass
+            except Exception as e:
+                raise RuntimeError(
+                    f"failed to run {func}(*{meta_args}, **{meta_kwargs}); "
+                    f"originally (*{args}, **{kwargs})") from e
+
         return r
 
 # Determine whether to enable cuda memory leak check.
