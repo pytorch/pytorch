@@ -130,9 +130,9 @@ a :class:`torch.nn.Module`. If the passed-in model is not already a ``ScriptModu
   of different sizes. To use scripting:
 
   * Use :func:`torch.jit.script` to produce a ``ScriptModule``.
-  * Call ``torch.onnx.export()`` with the ``ScriptModule`` as the model, and set the
-    ``example_outputs`` arg. This is required so that the types and shapes of the outputs can be
-    captured without executing the model.
+  * Call ``torch.onnx.export()`` with the ``ScriptModule`` as the model. The ``args`` are still required,
+    but they will be used internally only to produce example outputs, so that the types and shapes of the
+    outputs can be captured. No tracing will be performed.
 
 See `Introduction to TorchScript <https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html>`_
 and `TorchScript <jit.html>`_ for more details, including how to compose tracing and scripting to suit the
