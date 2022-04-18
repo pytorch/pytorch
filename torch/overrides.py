@@ -247,6 +247,8 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._neg_view,
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
+        Tensor._nested_tensor_layer_norm,
+        Tensor.to_padded_tensor,
     }
 
 
@@ -557,6 +559,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.index_put: lambda input, indices, values, accumulate=False: -1,
         torch.index_select: lambda input, dim, index, out=None: -1,
         torch.index_fill: lambda input, dim, index, value: -1,
+        torch._index_mul: lambda input, dim, index, source, include_input=True: -1,
+        torch._index_mean: lambda input, dim, index, source, include_input=True: -1,
+        torch._index_max: lambda input, dim, index, source, include_input=True: -1,
+        torch._index_min: lambda input, dim, index, source, include_input=True: -1,
         torch.isfinite: lambda tensor: -1,
         torch.isin: lambda e, te, assume_unique=False, invert=False: -1,
         torch.isinf: lambda tensor: -1,
@@ -1439,7 +1445,8 @@ def handle_torch_function(
         # This call needs to become a classmethod call in the future.
         # See https://github.com/pytorch/pytorch/issues/63767
         torch_func_method = overloaded_arg.__torch_function__
-        if hasattr(torch_func_method, "__self__") and torch_func_method.__self__ is overloaded_arg:
+        if hasattr(torch_func_method, "__self__") and torch_func_method.__self__ is overloaded_arg and \
+                torch_func_method is not torch._C._disabled_torch_function_impl:
             warnings.warn("Defining your `__torch_function__ as a plain method is deprecated and "
                           "will be an error in future, please define it as a classmethod.",
                           DeprecationWarning)
