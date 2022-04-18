@@ -21,9 +21,10 @@ on:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
     {%- endif %}
 {%- for label in ciflow_config.labels | sort %}
-  {%- if label != "ciflow/default" %}
+    {%- if loop.first and branches != "nightly" %}
+    tags:
+    {%- endif %}
       - '!{{ label }}/*'
-  {%- endif %}
 {%- endfor %}
   workflow_dispatch:
 
@@ -109,7 +110,9 @@ jobs:
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
-{%- if config["gpu_arch_type"] == "cuda" %}
+{%- if config["gpu_arch_type"] == "rocm" %}
+    runs-on: linux.rocm.gpu
+{%- elif config["gpu_arch_type"] == "cuda" %}
     runs-on: linux.4xlarge.nvidia.gpu
 {%- else %}
     runs-on: linux.4xlarge
@@ -117,7 +120,11 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:
+{%- if config["gpu_arch_type"] == "rocm" %}
+      !{{ common.setup_rocm_linux() }}
+{%- else %}
       !{{ common.setup_ec2_linux() }}
+{%- endif %}
       - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
@@ -125,7 +132,11 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
-{%- if config["gpu_arch_type"] == "cuda" %}
+{%- if config["gpu_arch_type"] == "rocm" %}
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+{%- elif config["gpu_arch_type"] == "cuda" %}
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -175,7 +186,11 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+{%- if config["gpu_arch_type"] == "rocm" %}
+      !{{ common.teardown_rocm_linux() }}
+{%- else %}
       !{{ common.teardown_ec2_linux("pytorch/") }}
+{%- endif %}
   {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config) }}
   {%- endif %}
