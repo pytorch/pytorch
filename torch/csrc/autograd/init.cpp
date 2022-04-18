@@ -72,6 +72,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
 
+  using torch::profiler::impl::ActiveProfilerType;
+  py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
+      .value("NONE", ActiveProfilerType::NONE)
+      .value("LEGACY", ActiveProfilerType::LEGACY)
+      .value("KINETO", ActiveProfilerType::KINETO)
+      .value("NVTX", ActiveProfilerType::NVTX);
+
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
       .value("CUDA", ActivityType::CUDA);
@@ -290,6 +297,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       disableProfilerLegacy,
       py::arg("profiler_disable_options") = ProfilerDisableOptions());
   m.def("_profiler_enabled", profilerEnabled);
+  m.def("_profiler_type", torch::profiler::impl::profilerType);
   m.def("_enable_record_function", [](bool enable) {
     at::enableRecordFunction(enable);
   });
