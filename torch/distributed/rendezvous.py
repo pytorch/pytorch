@@ -9,7 +9,7 @@ import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import cast, Dict, Optional, Union
+from typing import Dict
 
 import torch._six as six
 from torch.distributed import FileStore, PrefixStore, Store, TCPStore
@@ -236,9 +236,10 @@ def _env_rendezvous_handler(
     result = urlparse(url)
     query_dict = _query_to_dict(result.query)
 
-    rank: Optional[Union[str, int]]
-    world_size: Optional[Union[str, int]]
-    master_port: Optional[Union[str, int]]
+    rank: int
+    world_size: int
+    master_port: int
+    master_addr: str
 
     if "rank" in query_dict:
         rank = int(query_dict["rank"])
