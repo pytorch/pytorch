@@ -213,6 +213,10 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     // we use inplace operation here where the output is assigned to the input
     sum_linear_bias_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(linear_op.getOutputTensor())
+      // TODO: An additional entry for broadcasted_bias in the uid-data_ptr pairing
+      // appears to be needed in the current version of cudnn (8.4.0). Without it, some
+      // test cases are failing. NVIDIA is currently investigating this issue.
+      // When this issue is fixed, we can change 'n' back to 'd' and remove the additional entry in uid and data_ptrs in variant pack above
       .setbDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'n', cudnn_utils::getAlignment(broadcasted_bias.value())))
       .setyDesc(cudnn_utils::getTensorDescriptor(linear_output, 'e', key.output_alignment))
       .setpwDesc(cudnn_utils::getPointWiseAddDescriptor(at::native::getCudnnDataType(broadcasted_bias.value())))
