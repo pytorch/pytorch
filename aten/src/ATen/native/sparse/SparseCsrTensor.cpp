@@ -253,7 +253,6 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
                                                  c10::optional<Layout> layout,
                                                  c10::optional<Device> device,
                                                  c10::optional<bool> pin_memory) {
-
   Layout layout_ = layout.value_or(required_layout);
   if (required_layout == Layout::Unspecified) {
     // checks that sparse compressed layout is specified
@@ -282,61 +281,90 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
 SPARSE_COMPRESSED_TENSOR_UNSAFE(compressed, Layout::Unspecified);
 SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
 
+inline DimVector _estimate_sparse_compressed_tensor_size(
+    const Tensor& compressed_indices,
+    const Tensor& plain_indices,
+    const Tensor& values,
+    Layout layout) {
+  DimVector size = DimVector(IntArrayRef(plain_indices.sizes().data(), plain_indices.dim() - 1));
+  int64_t compressed_dim = (plain_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
+  int64_t plain_dim = AT_DISPATCH_INDEX_TYPES(plain_indices.scalar_type(), "csr_construct_check", [&]() -> int64_t { return plain_indices.max().item<index_t>() + 1; });
+  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "estimate_sparse_compressed_tensor_size",
+      [&]{
+        size.push_back(compressed_dim);
+        size.push_back(plain_dim);
+      },
+      [&]{
+        size.push_back(plain_dim);
+        size.push_back(compressed_dim);
+      });
+  return size;
+}
+
 // TODO: This constructor should probably use an ATen abstract method in order
 // to make autograd dispatch available for the CSR constructor. See the relevant
 // note in native_functions.yaml.
-Tensor sparse_csr_tensor(
-    const Tensor& crow_indices,
-    const Tensor& col_indices,
+
+template <Layout required_layout>
+Tensor sparse_compressed_tensor_template(
+    const Tensor& compressed_indices,
+    const Tensor& plain_indices,
     const Tensor& values,
-    IntArrayRef size,
+    c10::optional<IntArrayRef> size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
+  Layout layout_ = layout.value_or(required_layout);
+  if (required_layout == Layout::Unspecified) {
+    // checks that sparse compressed layout is specified
+    AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
+  } else {
+    TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
+  }
+  auto size_ = (size.has_value() ? size.value() : _estimate_sparse_compressed_tensor_size(compressed_indices, plain_indices, values, layout_));
+
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
 
-  at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, size);
+  _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size_, layout_);
 
-  return at::native::_sparse_csr_tensor_unsafe(
-      crow_indices,
-      col_indices,
+  return at::native::_sparse_compressed_tensor_unsafe(
+      compressed_indices,
+      plain_indices,
       values,
-      size,
+      size_,
       optTypeMetaToScalarType(options.dtype_opt()),
       options.layout_opt(),
       options.device_opt(),
       options.pinned_memory_opt());
 }
 
-Tensor sparse_csr_tensor(
-    const Tensor& crow_indices,
-    const Tensor& col_indices,
-    const Tensor& values,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  // std::array<int64_t, 2> size = {0, 0};
-  auto size = DimVector(IntArrayRef(col_indices.sizes().data(), col_indices.dim() - 1));
-  size.push_back(crow_indices.size(-1) - 1);
-  size.push_back(col_indices.max().item<int64_t>() + 1);
+#define SPARSE_COMPRESSED_TENSOR(KIND, REQUIRED_LAYOUT) \
+  Tensor sparse_##KIND##_tensor(const Tensor& compressed_indices,       \
+                                const Tensor& plain_indices,            \
+                                const Tensor& values,                   \
+                                c10::optional<ScalarType> dtype,        \
+                                c10::optional<Layout> layout,           \
+                                c10::optional<Device> device,           \
+                                c10::optional<bool> pin_memory) {       \
+    c10::optional<IntArrayRef> size;                                    \
+    return sparse_compressed_tensor_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
+  }                                                                     \
+  Tensor sparse_##KIND##_tensor(const Tensor& compressed_indices,       \
+                                const Tensor& plain_indices,            \
+                                const Tensor& values,                   \
+                                IntArrayRef size,                       \
+                                c10::optional<ScalarType> dtype,        \
+                                c10::optional<Layout> layout,           \
+                                c10::optional<Device> device,           \
+                                c10::optional<bool> pin_memory) {       \
+    c10::optional<IntArrayRef> size_(size);                             \
+    return sparse_compressed_tensor_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size_, dtype, layout, device, pin_memory); \
+  }
 
-  at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, size);
-
-  return at::native::_sparse_csr_tensor_unsafe(
-      crow_indices,
-      col_indices,
-      values,
-      size,
-      optTypeMetaToScalarType(options.dtype_opt()),
-      options.layout_opt(),
-      options.device_opt(),
-      options.pinned_memory_opt());
-}
+SPARSE_COMPRESSED_TENSOR(compressed, Layout::Unspecified)
+SPARSE_COMPRESSED_TENSOR(csr, kSparseCsr)
 
 Tensor empty_sparse_csr(
     IntArrayRef size,
