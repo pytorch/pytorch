@@ -1,4 +1,3 @@
-import torch
 import functools
 from typing import Iterator, Union
 from torch._C import (
@@ -41,24 +40,19 @@ class ModeInfo:
         self.mode_class_name = mode_class_name
 
 def _enable_mode(mode, mode_info: ModeInfo, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
-    if mode_info.is_torch_function_mode:
-        allowed_types = (
-            isinstance(mode, mode_info.mode_class) or
-            (isinstance(mode, type) and not issubclass(mode, mode_info.mode_class)))
-    else:
-        allowed_types = isinstance(mode, type) and issubclass(mode, (torch.Tensor,))
-    if not (mode is None or allowed_types):
-        if mode_info.is_torch_function_mode:
-            allowed_options = "TorchFunctionMode, Tensor-like class, or None"
-        else:
-            allowed_options = "Tensor-like class or None"
-        raise ValueError(f'expected to get {allowed_options} as argument, got {type(mode)} instead')
+    if not (
+        mode is None or
+        isinstance(mode, mode_info.mode_class) or
+        (isinstance(mode, type) and not issubclass(mode, mode_info.mode_class))
+    ):
+        raise ValueError(f'The argument passed to enable_{mode_info.mode_type}_mode '
+                         'must be None or the type of a Tensor subclass')
     old = _get_torch_function_mode() if mode_info.is_torch_function_mode else _get_python_mode()
     if old is mode:
         yield
         return
     if old is not None and not ignore_preexisting and old is not replace:
-        if mode_info.is_torch_function_mode and isinstance(mode, mode_info.mode_class):
+        if isinstance(mode, mode_info.mode_class):
             help_text = (
                 f'Use push_{mode_info.mode_type}_mode instead.'
             )
@@ -83,5 +77,30 @@ def _enable_mode(mode, mode_info: ModeInfo, *, replace=None, ignore_preexisting=
     _set_torch_function_mode(mode) if mode_info.is_torch_function_mode else _set_python_mode(mode)
     try:
         yield
+    finally:
+        _set_torch_function_mode(old) if mode_info.is_torch_function_mode else _set_python_mode(old)
+
+def _push_mode(ctor, mode_info: ModeInfo) -> Iterator[type]:
+    # Helper function for pushing a mode onto the stack
+    if isinstance(ctor, mode_info.mode_class):
+        raise ValueError(
+            f'Expected a {mode_info.mode_class_name} constructor function, but got an '
+            f'instance of {mode_info.mode_class_name} {ctor}.  Consider using '
+            f'enable_{mode_info.mode_type}_mode instead.'
+        )
+    old = _get_torch_function_mode() if mode_info.is_torch_function_mode else _get_python_mode()
+    if old is None:
+        inner = mode_info.base_mode_class(inner=None)
+    else:
+        inner = old
+
+    mode = ctor(inner=inner)
+    if not isinstance(mode, mode_info.mode_class):
+        raise ValueError(
+            f'The callable passed to push_{mode_info.mode_type}_mode must return a {mode_info.mode_class_name}'
+        )
+    _set_torch_function_mode(mode) if mode_info.is_torch_function_mode else _set_python_mode(mode)
+    try:
+        yield mode
     finally:
         _set_torch_function_mode(old) if mode_info.is_torch_function_mode else _set_python_mode(old)
