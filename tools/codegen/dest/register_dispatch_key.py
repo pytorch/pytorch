@@ -368,7 +368,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
                 device_guard = "// DeviceGuard omitted"  # default
                 if f.device_guard and self.backend_index.device_guard:
-                    has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
+                    has_tensor_options = any(isinstance(a, TensorOptionsArguments) for a in f.func.arguments.non_out)
                     if has_tensor_options:
                         # kernel is creating a tensor
                         device_guard = """

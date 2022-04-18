@@ -283,7 +283,8 @@ auto handle_torch_function_no_python_arg_parser(
           PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
 
       // See https://github.com/pytorch/pytorch/issues/63767
-      if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(arg)) {
+      if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(arg) &&
+          torch_function.ptr() != torch::disabled_torch_function_impl()) {
         TORCH_WARN("Defining your `__torch_function__` as a plain method is deprecated and ",
                    "will be an error in future, please define it as a classmethod.");
       }
@@ -339,8 +340,13 @@ auto handle_torch_function_no_python_arg_parser(
   return ret.release().ptr();
 }
 
-auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject* {
-  py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
+auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name, const char* func_name_override) -> PyObject* {
+  py::object torch_api_function = PyObject_FastGetAttrString(
+    torch_api,
+    (char*)(
+      func_name_override ? func_name_override : r.get_func_name().c_str()
+    )
+  );
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::object ret;
   py::tuple args_ = combine_self_args(self, args);
@@ -354,9 +360,9 @@ auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObje
   return handle_torch_function_no_python_arg_parser(r.signature.overloaded_args, args_.ptr(), kwargs, r.get_func_name().c_str(), torch_api_function.ptr(), module_name);
 }
 
-auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name, const char* func_name_override) -> PyObject*
 {
-  return handle_torch_function(r, nullptr, args, kwargs, torch_api, module_name);
+  return handle_torch_function(r, nullptr, args, kwargs, torch_api, module_name, func_name_override);
 }
 
 auto handle_torch_function_indexing(PyObject* self, PyObject* index, PyObject* val) -> PyObject* {
@@ -541,11 +547,15 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
     }
     auto item = py::reinterpret_steal<py::object>(
         PySequence_GetItem(obj, 0));
+    if (THPUtils_checkIndex(item.ptr())) {
+      return true;
+    }
+    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+    // in an intlist argument. Even float or complex scalar tensors.
     return (
-      THPUtils_checkIndex(item.ptr()) ||
-      // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-      // in an intlist argument. Even float or complex scalar tensors.
-      (jit::tracer::isTracing() && THPVariable_Check(item.ptr())));
+        jit::tracer::isTracing() &&
+        THPVariable_Check(item.ptr()) &&
+        THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
   return broadcast_size > 0 && THPUtils_checkLong(obj);
