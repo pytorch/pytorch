@@ -61,8 +61,8 @@ static const OperatorMap<std::string>& conditionally_defined_ops() {
   // clang-format off
   static const OperatorMap<std::string> schema_to_function_graph{
 #ifdef USE_XNNPACK
-      // {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
-      // {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y", "prepacked_linear_clamp_run"},
+      {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
+      {"prepacked::linear_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.LinearOpContext W_prepack) -> Tensor Y", "prepacked_linear_clamp_run"},
 #endif
   };
   // clang-format on
@@ -308,8 +308,7 @@ void loadModule(const CompilationUnit& module) {
 
 void loadFunctions() {
   auto shape_compute_functions =
-      GetSerializedShapeFunctions();
-      // + _xnnpack_shape_compute_functions;
+      GetSerializedShapeFunctions() + _xnnpack_shape_compute_functions;
 
   std::cout << shape_compute_functions;
 
