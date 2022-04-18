@@ -483,6 +483,16 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   const Tensor& result
 );
 
+std::tuple<Tensor, Tensor> _index_reduction_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  int dim,
+  const Tensor& index,
+  const Tensor& source,
+  c10::string_view reduce,
+  bool include_self,
+  const Tensor& result
+);
 
 } // namespace details
 } // namespace generated

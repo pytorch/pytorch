@@ -5325,6 +5325,57 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
 
 }
 
+std::tuple<Tensor, Tensor> _index_reduction_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  int dim,
+  const Tensor& index,
+  const Tensor& source,
+  c10::string_view reduce,
+  bool include_self,
+  const Tensor& result) {
+  Tensor grad_self, grad_src;
+
+  // FIXME: index_add's backward formula has a special case for source.dim == 0
+  // but this case seems to throw the error "IndexError: dimension specified as 0 but tensor has no dimensions"
+  // look into whether this case is reachable and should be covered here
+
+  if (!grad.defined()) {
+    return std::make_tuple(grad_self, grad_src);
+  }
+
+  if (reduce == "mul") {
+    grad_self = (grad * result) / self;
+    grad_self.masked_fill_(self == 0, 0);
+    grad_src = (grad * result).index_select(dim, index) / source;
+    grad_src.masked_fill_(source == 0, 0);
+  } else if (reduce == "mean") {
+    Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
+    N = N.index_add(dim, index, ones_like(source));
+    N.masked_fill_(N == 0, 1);
+    grad_self = grad / N;
+    Tensor N_src = N.index_select(dim, index);
+    grad_src = grad.index_select(dim, index) / N_src;
+  } else if (reduce == "max" || reduce == "min") {
+    Tensor value = result.index_select(dim, index);
+    Tensor self_is_result = (self == result).to(self.scalar_type());
+    Tensor source_is_result = (source == value).to(self.scalar_type());
+    Tensor N_to_distribute = self_is_result.index_add(dim, index, source_is_result);
+    Tensor grad_distributed = grad / N_to_distribute;
+    grad_self = self_is_result * grad_distributed;
+    grad_src = source_is_result * grad_distributed.index_select(dim, index);
+  } else {
+    AT_ERROR("Expected 'reduce' to be one of 'mul', 'max', 'min' or 'mean' but got ", reduce, ".");
+  }
+
+  if (!include_self) {
+    grad_self = grad_self.index_fill(dim, index, 0);
+  }
+
+  return std::make_tuple(grad_self, grad_src);
+
+}
+
 
 } // namespace details
 } // namespace generated

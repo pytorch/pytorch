@@ -5607,6 +5607,58 @@ class TestTorch(TestCase):
                             dest2[idx[i]] += src[i] * 2
                         self.assertEqual(dest, dest2)
 
+    # FIXME: move to indexing test suite
+    def test_index_reductions(self):
+        device = 'cpu'
+        reduces = ['mul', 'min', 'max', 'mean']
+        other_sizess = ((), (4, 5))
+        index_dtypes = [torch.int, torch.long]
+        include_selfs = [True, False]
+        reduction_init = {'mul': 1, 'mean': 0, 'min': float('inf'), 'max': -float('inf')}
+
+        def index_reduce_(dest, dim, index, src, reduce, include_self=True):
+            if reduce == "mul":
+                return dest._index_mul_(dim, index, src, include_self=include_self)
+            elif reduce == "min":
+                return dest._index_min_(dim, index, src, include_self=include_self)
+            elif reduce == "max":
+                return dest._index_max_(dim, index, src, include_self=include_self)
+            else:
+                return dest._index_mean_(dim, index, src, include_self=include_self)
+
+        for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
+            for other_sizes, dtype, reduce, include_self in product(other_sizess, index_dtypes, reduces, include_selfs):
+                num_copy, num_dest = 3, 3
+                dest = torch.randn(num_dest, *other_sizes, device=device)
+                if not dest_contig:
+                    dest = make_tensor(dest.shape, device=device, dtype=dest.dtype, noncontiguous=True)
+                src = torch.randn(num_copy, *other_sizes, device=device)
+                if not src_contig:
+                    src = torch.testing.make_non_contiguous(src)
+                idx = torch.randperm(num_dest, dtype=dtype, device=device).narrow(0, 0, num_copy)
+                if not index_contig:
+                    idx = torch.testing.make_non_contiguous(idx)
+                dest2 = dest.clone()
+                index_reduce_(dest, 0, idx, src, reduce, include_self=include_self)
+                if (not include_self):
+                    dest2.index_fill_(0, idx.long(), reduction_init[reduce])
+                for i in range(idx.size(0)):
+                    if reduce == 'mul':
+                        dest2[idx[i]] *= src[i]
+                    elif reduce == 'min':
+                        torch.minimum(dest2[idx[i]], src[i], out=dest2[idx[i]])
+                    elif reduce == 'max':
+                        torch.maximum(dest2[idx[i]], src[i], out=dest2[idx[i]])
+                    else:
+                        dest2[idx[i]] += src[i]
+                if reduce == 'mean':
+                    counts = torch.ones_like(dest) if include_self else torch.zeros_like(dest)
+                    counts.index_add_(0, idx, torch.ones_like(src))
+                    counts.masked_fill_(counts == 0, 1)
+                    dest2 /= counts
+
+                self.assertEqual(dest, dest2)
+
     # FIXME: resolve comment below and move this to indexing test suite
     # add coverage for issue with atomic add that appeared only for
     # specific dtypes on cuda:

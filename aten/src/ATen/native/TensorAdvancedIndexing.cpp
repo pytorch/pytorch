@@ -62,11 +62,13 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/Parallel.h>
+#include <ATen/NumericUtils.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <numeric>
 #include <vector>
@@ -260,28 +262,33 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
   return TORCH_PRECOMPUTE_STRUCT(index_copy)().set_dim(dim);
 }
 
-TORCH_PRECOMPUTE_META_FUNC(index_add)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
-  dim = maybe_wrap_dim(dim, self.dim());
+template <typename Meta>
+void index_func_meta_impl(
+  Meta& meta,
+  const Tensor& self,
+  int64_t dim,
+  const Tensor& index,
+  const Tensor& source,
+  c10::string_view func) {
   auto numel = index.numel();
 
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector, but got dim: ",
+  TORCH_CHECK_INDEX(index.dim() <= 1, func, "_(): Index is supposed to be a vector, but got dim: ",
                     index.dim(), " with type: ", index.scalar_type(), " and size: ", index.sizes());
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
-              "index_add_(): Expected dtype int32/int64 for index but got: ", index.scalar_type());
+              func, "_(): Expected dtype int32/int64 for index but got: ", index.scalar_type());
   TORCH_CHECK(self.scalar_type() == source.scalar_type(),
-              "index_add_(): self (", self.scalar_type(), ") and source (", source.scalar_type(),
+              func, "_(): self (", self.scalar_type(), ") and source (", source.scalar_type(),
               ") must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < source.dim(),
-              "index_add_(): Indexing dim ", dim, " is out of bounds of the source tensor with dim ",
+              func, "_(): Indexing dim ", dim, " is out of bounds of the source tensor with dim ",
               source.dim());
   TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
-              "index_add_(): Number of indices (", numel, ") should be equal to source.size(dim): (",
+              func, "_(): Number of indices (", numel, ") should be equal to source.size(dim): (",
               source.size(dim), "), for dim: ", dim);
 
-  auto& result = maybe_get_output(0);
+  auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
-  set_output(self.sizes(), self.options());
+  meta.set_output(self.sizes(), self.options());
   if (is_defined) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, index);
@@ -296,8 +303,45 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
     auto sourceSlice = source.select(dim, 0);
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
   }
+}
 
+TORCH_PRECOMPUTE_META_FUNC(index_add)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  index_func_meta_impl(*this, self, dim, index, source, "index_add");
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
+}
+
+TORCH_PRECOMPUTE_META_FUNC(_index_mul)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self) {
+  (void)include_self;
+  dim = maybe_wrap_dim(dim, self.dim());
+  index_func_meta_impl(*this, self, dim, index, source, "_index_mul");
+  return TORCH_PRECOMPUTE_STRUCT(_index_mul)().set_dim(dim);
+}
+
+TORCH_PRECOMPUTE_META_FUNC(_index_min)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self) {
+  (void)include_self;
+  dim = maybe_wrap_dim(dim, self.dim());
+  index_func_meta_impl(*this, self, dim, index, source, "_index_min");
+  return TORCH_PRECOMPUTE_STRUCT(_index_min)().set_dim(dim);
+}
+
+TORCH_PRECOMPUTE_META_FUNC(_index_max)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self) {
+  (void)include_self;
+  dim = maybe_wrap_dim(dim, self.dim());
+  index_func_meta_impl(*this, self, dim, index, source, "_index_max");
+  return TORCH_PRECOMPUTE_STRUCT(_index_max)().set_dim(dim);
+}
+
+TORCH_PRECOMPUTE_META_FUNC(_index_mean)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self) {
+  (void)include_self;
+  dim = maybe_wrap_dim(dim, self.dim());
+  index_func_meta_impl(*this, self, dim, index, source, "_index_mean");
+  return TORCH_PRECOMPUTE_STRUCT(_index_mean)().set_dim(dim);
 }
 
 } // namespace meta
@@ -787,6 +831,7 @@ TORCH_IMPL_FUNC(index_copy_out)
       result_dim_stride);
 }
 
+// Not calling into index_reduce_func_impl because of a different dtype dispatch
 TORCH_IMPL_FUNC(index_add_cpu_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
   if (!result.is_same(self)) result.copy_(self);
@@ -851,6 +896,189 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       });
     });
   }
+}
+
+void index_reduce_func_impl(
+  const Tensor& self,
+  int64_t dim,
+  const Tensor& index,
+  const Tensor& source,
+  bool include_self,
+  const Tensor& result,
+  const INDEX_OP& op) {
+  if (!result.is_same(self)) result.copy_(self);
+  if (!include_self) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      self.scalar_type(), "index_reduce_func_exclude_input_init", [&] {
+      scalar_t init_val;
+      switch (op) {
+        case INDEX_OP::MULTIPLY:
+          init_val = (scalar_t)1;
+          break;
+        case INDEX_OP::MAXIMUM:
+          init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
+                     : std::numeric_limits<scalar_t>::lowest();
+          break;
+        case INDEX_OP::MINIMUM:
+          init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
+                     : std::numeric_limits<scalar_t>::max();
+          break;
+        case INDEX_OP::MEAN:
+          init_val = (scalar_t)0;
+          break;
+      }
+      // index_fill_ requires index to be a LongTensor
+      result.index_fill_(dim, index.to(at::ScalarType::Long), init_val);
+    });
+  }
+
+  auto numel = index.numel();
+
+  auto index_contig = index.contiguous();
+
+  if (result.dim() > 1) {
+    // Equivalent to:
+    //   for (const auto i : c10::irange(numel)) {
+    //     auto selfSlice = self.select(dim, index_data[i]);
+    //     auto sourceSlice = source.select(dim, i);
+    //     selfSlice.op_(sourceSlice);
+    //   }
+    // But much faster as this reuses the iterator from the binary op
+    if (numel == 0) {
+      return;
+    }
+    auto selfSlice = result.select(dim, 0);
+    auto sourceSlice = source.select(dim, 0);
+    auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
+    auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
+    auto self_dim_size = result.size(dim);
+    auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
+
+    AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_func_cpu_", [&] () {
+      auto index_data = index_contig.data_ptr<index_t>();
+      for (const auto i : c10::irange(numel)) {
+        auto self_i = index_data[i];
+        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+        auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
+        auto source_data = static_cast<char*>(sourceSlice.data_ptr()) + i * source_stride_bytes;
+        iter.unsafe_replace_operand(0, self_data);
+        iter.unsafe_replace_operand(1, self_data);
+        iter.unsafe_replace_operand(2, source_data);
+
+        switch (op) {
+          case INDEX_OP::MEAN :
+            add_stub(iter.device_type(), iter, 1);
+            break;
+          case INDEX_OP::MULTIPLY :
+            mul_stub(iter.device_type(), iter);
+            break;
+          case INDEX_OP::MINIMUM :
+            minimum_stub(iter.device_type(), iter);
+            break;
+          case INDEX_OP::MAXIMUM :
+            maximum_stub(iter.device_type(), iter);
+            break;
+        }
+      }
+    });
+
+    if (op == INDEX_OP::MEAN) {
+      auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
+      counts.index_add_(dim, index, at::ones_like(source));
+      counts.masked_fill_(counts == 0, 1);
+      result.div_(counts);
+    }
+  }
+  else {
+    TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
+    auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
+    // explicitly capture all required variables to work around windows build
+    // TODO: fix this when windows can correctly capture variables in nested lambda
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
+      result.scalar_type(), "index_func_", [&result, &source, &dim, &index_contig, &numel, &op, &counts] {
+      auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
+      auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
+      auto counts_stride = counts.dim() == 0 ? 1 : counts.stride(dim);
+      // TODO: Maybe TensorAccessor can be used here?
+      auto* result_ptr = result.data_ptr<scalar_t>();
+      auto* source_ptr = source.data_ptr<scalar_t>();
+      auto counts_ptr = counts.data_ptr<scalar_t>();
+      AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_func_cpu_",
+        [&index_contig, &numel, &result, &result_ptr, &result_stride, &source_ptr, &source_stride, &op, &counts_ptr, &counts_stride] {
+        auto index_data = index_contig.data_ptr<index_t>();
+        for (const auto i : c10::irange(numel)) {
+            auto self_i = index_data[i];
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
+            scalar_t *self_ip = result_ptr + self_i * result_stride;
+            scalar_t *count_ip;
+            scalar_t val;
+            switch (op) {
+              case INDEX_OP::MEAN :
+                *self_ip += *(source_ptr + i * source_stride);
+                count_ip = counts_ptr + self_i * counts_stride;
+                *count_ip += 1;
+                break;
+              case INDEX_OP::MULTIPLY :
+                *self_ip *= *(source_ptr + i * source_stride);
+                break;
+              case INDEX_OP::MINIMUM :
+                val = *(source_ptr + i * source_stride);
+                *self_ip = at::_isnan<scalar_t>(val) ? val : std::min(*self_ip, val);
+                break;
+              case INDEX_OP::MAXIMUM :
+                val = *(source_ptr + i * source_stride);
+                *self_ip = at::_isnan<scalar_t>(val) ? val : std::max(*self_ip, val);
+                break;
+            }
+        }
+      });
+    });
+    if (op == INDEX_OP::MEAN) {
+      counts.masked_fill_(counts == 0, 1);
+      result.div_(counts);
+    }
+  }
+}
+
+TORCH_IMPL_FUNC(_index_mul_cpu_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ bool include_input,
+ const Tensor& result) {
+  index_reduce_func_impl(self, dim, index, source, include_input, result, INDEX_OP::MULTIPLY);
+}
+
+TORCH_IMPL_FUNC(_index_min_cpu_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ bool include_input,
+ const Tensor& result) {
+  index_reduce_func_impl(self, dim, index, source, include_input, result, INDEX_OP::MINIMUM);
+}
+
+TORCH_IMPL_FUNC(_index_max_cpu_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ bool include_input,
+ const Tensor& result) {
+  index_reduce_func_impl(self, dim, index, source, include_input, result, INDEX_OP::MAXIMUM);
+}
+
+TORCH_IMPL_FUNC(_index_mean_cpu_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ bool include_input,
+ const Tensor& result) {
+  index_reduce_func_impl(self, dim, index, source, include_input, result, INDEX_OP::MEAN);
 }
 
 // Check that indices fall within dimension array size

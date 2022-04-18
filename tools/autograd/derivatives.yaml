@@ -754,6 +754,22 @@
   index: non_differentiable
   result: at::index_add(self_t, dim, index, maybe_multiply(source_t, alpha))
 
+- name: _index_mul(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor
+  self, source: _index_reduction_backward(grad, self, dim, index, source, "mul", include_self, result)
+  index: non_differentiable
+
+- name: _index_max(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor
+  self, source: _index_reduction_backward(grad, self, dim, index, source, "max", include_self, result)
+  index: non_differentiable
+
+- name: _index_min(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor
+  self, source: _index_reduction_backward(grad, self, dim, index, source, "min", include_self, result)
+  index: non_differentiable
+
+- name: _index_mean(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor
+  self, source: _index_reduction_backward(grad, self, dim, index, source, "mean", include_self, result)
+  index: non_differentiable
+
 - name: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
   self: grad.clone().index_fill_(dim, index, 0)
   # The case source.dim() == 0 is necessary to support scalar tensors of the form

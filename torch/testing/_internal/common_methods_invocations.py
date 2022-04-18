@@ -23,7 +23,7 @@ from torch.testing._internal.common_dtype import (
     all_types, double_types, empty_types
 )
 from torch.testing._internal.common_device_type import \
-    (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
+    (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride,
      toleranceOverride, tol, has_cusolver)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off
@@ -4832,6 +4832,9 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     copy = op_info.name == "index_copy"
     # target.index_fill(dim, idx, value)
     fill = op_info.name == "index_fill"
+    # target._index_<reduction>(dim, idx, value)
+    reduce_op = op_info.name in {"_index_mul", "_index_max", "_index_min", "_index_mean"}
+
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_permutation = partial(torch.randperm, device=device, dtype=torch.int64)
@@ -4842,8 +4845,9 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     shapes = [(), (1,), (S, S)]
     # extra parameter for add
     alphas = (-1, 0, 2) if add else (None,)
+    include_selfs = (True, False) if reduce_op else (None,)
 
-    for shape, alpha in product(shapes, alphas):
+    for shape, alpha, include_self in product(shapes, alphas, include_selfs):
         t = make_arg(shape)
         args = []
 
@@ -4857,7 +4861,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
         args.append(idx)
 
         # source
-        if copy or add:
+        if copy or add or reduce_op:
             args.append(make_arg(shape))
         elif fill:
             # A weird number to catch errors
@@ -4865,6 +4869,8 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
 
         args = tuple(args)
         kwargs = {} if alpha is None else {"alpha": alpha}
+        if include_self is not None:
+            kwargs['include_self'] = include_self
 
         yield SampleInput(t, args=args, kwargs=kwargs)
 
@@ -13729,6 +13735,26 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
+    OpInfo('_index_mul',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=True,
+           decorators=[onlyCPU],
+           sample_inputs_func=sample_inputs_index),
+    OpInfo('_index_max',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=True,
+           decorators=[onlyCPU],
+           sample_inputs_func=sample_inputs_index),
+    OpInfo('_index_min',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=True,
+           decorators=[onlyCPU],
+           sample_inputs_func=sample_inputs_index),
+    OpInfo('_index_mean',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=True,
+           decorators=[onlyCPU],
+           sample_inputs_func=sample_inputs_index),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,

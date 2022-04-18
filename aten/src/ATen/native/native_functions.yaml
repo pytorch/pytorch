@@ -6010,6 +6010,70 @@
 - func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
   variants: function, method
 
+- func: _index_mul.out(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  precomputed:
+  - dim -> int dim
+  dispatch:
+    CPU: _index_mul_cpu_out
+
+- func: _index_mul_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor(a!)
+  structured_delegate: _index_mul.out
+  variants: method
+
+- func: _index_mul(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor
+  structured_delegate: _index_mul.out
+  variants: function, method
+
+- func: _index_min.out(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  precomputed:
+  - dim -> int dim
+  dispatch:
+    CPU: _index_min_cpu_out
+
+- func: _index_min_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor(a!)
+  structured_delegate: _index_min.out
+  variants: method
+
+- func: _index_min(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor
+  structured_delegate: _index_min.out
+  variants: function, method
+
+- func: _index_max.out(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  precomputed:
+  - dim -> int dim
+  dispatch:
+    CPU: _index_max_cpu_out
+
+- func: _index_max_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor(a!)
+  structured_delegate: _index_max.out
+  variants: method
+
+- func: _index_max(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor
+  structured_delegate: _index_max.out
+  variants: function, method
+
+- func: _index_mean.out(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  precomputed:
+  - dim -> int dim
+  dispatch:
+    CPU: _index_mean_cpu_out
+
+- func: _index_mean_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor(a!)
+  structured_delegate: _index_mean.out
+  variants: method
+
+- func: _index_mean(Tensor self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor
+  structured_delegate: _index_mean.out
+  variants: function, method
+
 - func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
