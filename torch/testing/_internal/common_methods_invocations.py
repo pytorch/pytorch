@@ -16277,8 +16277,8 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.skip("Failing on some jobs", 'TestReductions', 'test_reference_masked',
-                         dtypes=(torch.bool, torch.int8, torch.int16, torch.int32)),)
+            DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
+                         dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),)
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-02)}),
