@@ -48,5 +48,5 @@ def enable_python_mode(mode, *, replace=None, ignore_preexisting=False) -> Itera
             and overwrite it with the passed mode.
     """
     # hacky because torch_function mode and python_mode don't yet have parity
-    mode_info = ModeInfo(mode_type="python", mode_class=None, base_mode_class=None, mode_class_name="")
+    mode_info = ModeInfo(mode_type="python", mode_class=type(None), base_mode_class=type(None), mode_class_name="")
     return _enable_mode(mode, mode_info=mode_info, replace=replace, ignore_preexisting=ignore_preexisting)
