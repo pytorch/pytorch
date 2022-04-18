@@ -9,8 +9,8 @@ on:
     branches:
       - master
     tags:
-      - "ciflow/all/*"
-      - "ciflow/trunk/*"
+      - 'ciflow/all/*'
+      - 'ciflow/trunk/*'
   workflow_dispatch:
 
 env:
@@ -140,7 +140,8 @@ jobs:
           name: libtorch-cpu-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -159,7 +160,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-shared-with-deps-cxx11-abi-test: # Testing
+  libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge

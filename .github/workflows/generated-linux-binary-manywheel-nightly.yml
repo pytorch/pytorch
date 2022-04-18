@@ -13,8 +13,8 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      - "ciflow/binaries/*"
-      - "ciflow/binaries_wheel/*"
+      - 'ciflow/binaries/*'
+      - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
 
 env:
@@ -143,7 +143,8 @@ jobs:
           name: manywheel-py3_7-cpu
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -162,7 +163,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cpu-test: # Testing
+  manywheel-py3_7-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cpu-build
     runs-on: linux.4xlarge
@@ -282,8 +283,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cpu-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_7-cpu-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cpu-test
     env:
@@ -478,7 +479,8 @@ jobs:
           name: manywheel-py3_7-cuda10_2
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -497,7 +499,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cuda10_2-test: # Testing
+  manywheel-py3_7-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda10_2-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -629,8 +631,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cuda10_2-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_7-cuda10_2-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda10_2-test
     env:
@@ -829,7 +831,8 @@ jobs:
           name: manywheel-py3_7-cuda11_3
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -848,7 +851,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cuda11_3-test: # Testing
+  manywheel-py3_7-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_3-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -980,8 +983,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cuda11_3-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_7-cuda11_3-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_3-test
     env:
@@ -1180,7 +1183,8 @@ jobs:
           name: manywheel-py3_7-cuda11_5
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1199,7 +1203,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cuda11_5-test: # Testing
+  manywheel-py3_7-cuda11_5-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_5-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -1331,8 +1335,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cuda11_5-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_7-cuda11_5-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_5-test
     env:
@@ -1531,7 +1535,8 @@ jobs:
           name: manywheel-py3_7-cuda11_6
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1550,7 +1555,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cuda11_6-test: # Testing
+  manywheel-py3_7-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_6-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -1682,8 +1687,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cuda11_6-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_7-cuda11_6-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_6-test
     env:
@@ -1879,7 +1884,8 @@ jobs:
           name: manywheel-py3_7-rocm4_5_2
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1898,7 +1904,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-rocm4_5_2-test: # Testing
+  manywheel-py3_7-rocm4_5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm4_5_2-build
     runs-on: linux.rocm.gpu
@@ -2028,8 +2034,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-rocm4_5_2-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_7-rocm4_5_2-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm4_5_2-test
     env:
@@ -2225,7 +2231,8 @@ jobs:
           name: manywheel-py3_7-rocm5_0
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2244,7 +2251,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-rocm5_0-test: # Testing
+  manywheel-py3_7-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm5_0-build
     runs-on: linux.rocm.gpu
@@ -2374,8 +2381,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-rocm5_0-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_7-rocm5_0-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm5_0-test
     env:
@@ -2570,7 +2577,8 @@ jobs:
           name: manywheel-py3_8-cpu
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2589,7 +2597,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-cpu-test: # Testing
+  manywheel-py3_8-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cpu-build
     runs-on: linux.4xlarge
@@ -2709,8 +2717,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-cpu-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_8-cpu-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cpu-test
     env:
@@ -2905,7 +2913,8 @@ jobs:
           name: manywheel-py3_8-cuda10_2
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2924,7 +2933,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-cuda10_2-test: # Testing
+  manywheel-py3_8-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda10_2-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -3056,8 +3065,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-cuda10_2-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_8-cuda10_2-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda10_2-test
     env:
@@ -3256,7 +3265,8 @@ jobs:
           name: manywheel-py3_8-cuda11_3
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3275,7 +3285,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-cuda11_3-test: # Testing
+  manywheel-py3_8-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_3-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -3407,8 +3417,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-cuda11_3-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_8-cuda11_3-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_3-test
     env:
@@ -3607,7 +3617,8 @@ jobs:
           name: manywheel-py3_8-cuda11_5
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3626,7 +3637,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-cuda11_5-test: # Testing
+  manywheel-py3_8-cuda11_5-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_5-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -3758,8 +3769,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-cuda11_5-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_8-cuda11_5-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_5-test
     env:
@@ -3958,7 +3969,8 @@ jobs:
           name: manywheel-py3_8-cuda11_6
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3977,7 +3989,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-cuda11_6-test: # Testing
+  manywheel-py3_8-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_6-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -4109,8 +4121,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-cuda11_6-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_8-cuda11_6-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_6-test
     env:
@@ -4306,7 +4318,8 @@ jobs:
           name: manywheel-py3_8-rocm4_5_2
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4325,7 +4338,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-rocm4_5_2-test: # Testing
+  manywheel-py3_8-rocm4_5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm4_5_2-build
     runs-on: linux.rocm.gpu
@@ -4455,8 +4468,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-rocm4_5_2-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_8-rocm4_5_2-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm4_5_2-test
     env:
@@ -4652,7 +4665,8 @@ jobs:
           name: manywheel-py3_8-rocm5_0
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4671,7 +4685,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-rocm5_0-test: # Testing
+  manywheel-py3_8-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm5_0-build
     runs-on: linux.rocm.gpu
@@ -4801,8 +4815,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_8-rocm5_0-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_8-rocm5_0-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm5_0-test
     env:
@@ -4997,7 +5011,8 @@ jobs:
           name: manywheel-py3_9-cpu
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -5016,7 +5031,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-cpu-test: # Testing
+  manywheel-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cpu-build
     runs-on: linux.4xlarge
@@ -5136,8 +5151,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-cpu-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_9-cpu-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cpu-test
     env:
@@ -5332,7 +5347,8 @@ jobs:
           name: manywheel-py3_9-cuda10_2
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -5351,7 +5367,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-cuda10_2-test: # Testing
+  manywheel-py3_9-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda10_2-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -5483,8 +5499,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-cuda10_2-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_9-cuda10_2-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda10_2-test
     env:
@@ -5683,7 +5699,8 @@ jobs:
           name: manywheel-py3_9-cuda11_3
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -5702,7 +5719,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-cuda11_3-test: # Testing
+  manywheel-py3_9-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_3-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -5834,8 +5851,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-cuda11_3-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_9-cuda11_3-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_3-test
     env:
@@ -6034,7 +6051,8 @@ jobs:
           name: manywheel-py3_9-cuda11_5
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -6053,7 +6071,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-cuda11_5-test: # Testing
+  manywheel-py3_9-cuda11_5-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_5-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -6185,8 +6203,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-cuda11_5-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_9-cuda11_5-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_5-test
     env:
@@ -6385,7 +6403,8 @@ jobs:
           name: manywheel-py3_9-cuda11_6
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -6404,7 +6423,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-cuda11_6-test: # Testing
+  manywheel-py3_9-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_6-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -6536,8 +6555,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-cuda11_6-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_9-cuda11_6-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_6-test
     env:
@@ -6733,7 +6752,8 @@ jobs:
           name: manywheel-py3_9-rocm4_5_2
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -6752,7 +6772,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-rocm4_5_2-test: # Testing
+  manywheel-py3_9-rocm4_5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm4_5_2-build
     runs-on: linux.rocm.gpu
@@ -6882,8 +6902,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-rocm4_5_2-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_9-rocm4_5_2-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm4_5_2-test
     env:
@@ -7079,7 +7099,8 @@ jobs:
           name: manywheel-py3_9-rocm5_0
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -7098,7 +7119,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-rocm5_0-test: # Testing
+  manywheel-py3_9-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm5_0-build
     runs-on: linux.rocm.gpu
@@ -7228,8 +7249,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_9-rocm5_0-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_9-rocm5_0-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm5_0-test
     env:
@@ -7424,7 +7445,8 @@ jobs:
           name: manywheel-py3_10-cpu
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -7443,7 +7465,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-cpu-test: # Testing
+  manywheel-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cpu-build
     runs-on: linux.4xlarge
@@ -7563,8 +7585,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-cpu-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_10-cpu-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cpu-test
     env:
@@ -7759,7 +7781,8 @@ jobs:
           name: manywheel-py3_10-cuda10_2
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -7778,7 +7801,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-cuda10_2-test: # Testing
+  manywheel-py3_10-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda10_2-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -7910,8 +7933,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-cuda10_2-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_10-cuda10_2-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda10_2-test
     env:
@@ -8110,7 +8133,8 @@ jobs:
           name: manywheel-py3_10-cuda11_3
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -8129,7 +8153,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-cuda11_3-test: # Testing
+  manywheel-py3_10-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda11_3-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -8261,8 +8285,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-cuda11_3-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_10-cuda11_3-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda11_3-test
     env:
@@ -8461,7 +8485,8 @@ jobs:
           name: manywheel-py3_10-cuda11_5
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -8480,7 +8505,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-cuda11_5-test: # Testing
+  manywheel-py3_10-cuda11_5-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda11_5-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -8612,8 +8637,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-cuda11_5-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_10-cuda11_5-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda11_5-test
     env:
@@ -8812,7 +8837,8 @@ jobs:
           name: manywheel-py3_10-cuda11_6
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -8831,7 +8857,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-cuda11_6-test: # Testing
+  manywheel-py3_10-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda11_6-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -8963,8 +8989,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-cuda11_6-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_10-cuda11_6-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda11_6-test
     env:
@@ -9160,7 +9186,8 @@ jobs:
           name: manywheel-py3_10-rocm4_5_2
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -9179,7 +9206,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-rocm4_5_2-test: # Testing
+  manywheel-py3_10-rocm4_5_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm4_5_2-build
     runs-on: linux.rocm.gpu
@@ -9309,8 +9336,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-rocm4_5_2-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_10-rocm4_5_2-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm4_5_2-test
     env:
@@ -9506,7 +9533,8 @@ jobs:
           name: manywheel-py3_10-rocm5_0
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -9525,7 +9553,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-rocm5_0-test: # Testing
+  manywheel-py3_10-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm5_0-build
     runs-on: linux.rocm.gpu
@@ -9655,8 +9683,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_10-rocm5_0-upload: # Uploading
-    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
+  manywheel-py3_10-rocm5_0-upload:  # Uploading
+    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm5_0-test
     env:

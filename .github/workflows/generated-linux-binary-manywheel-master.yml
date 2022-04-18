@@ -9,8 +9,8 @@ on:
     branches:
       - master
     tags:
-      - "ciflow/all/*"
-      - "ciflow/trunk/*"
+      - 'ciflow/all/*'
+      - 'ciflow/trunk/*'
   workflow_dispatch:
 
 env:
@@ -140,7 +140,8 @@ jobs:
           name: manywheel-py3_7-cuda10_2
           retention-days: 14
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path:
+            ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -159,7 +160,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cuda10_2-test: # Testing
+  manywheel-py3_7-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda10_2-build
     runs-on: linux.4xlarge.nvidia.gpu
