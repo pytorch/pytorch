@@ -528,6 +528,10 @@ class TestDistBackend(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
+        # Enable DDP + ReplicatedTensor
+        from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
+        _set_ddp_with_replicated_tensor(True)
+
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -6690,12 +6694,16 @@ class DistributedTest:
                 # Materialize new params. These are not registered in DDP and thus
                 # don't have autograd hooks installed on them.
                 ddp.module.fc2 = nn.Linear(1, 1, bias=False).to(device_id)
+                # Rebuild replicated_module to pick up the changes.
+                ddp._build_replicated_tensor_module()
+
                 # local model with the new materialized parameters.
                 local_model = copy.deepcopy(ddp.module).cuda(self.rank)
 
                 inp = torch.ones(1, dtype=torch.float).to(device_id) * (self.rank + 1)
                 for i in range(6):
                     ddp(inp).sum().backward()
+
                     local_model(inp).sum().backward()
                     # materialized param grad is not touched by DDP, so its grad should
                     # be the same as if running locally.
@@ -8362,10 +8370,10 @@ class DistributedTest:
                     super().__init__()
                     self.fc1 = nn.Linear(10, 10, bias=False)
                     self.fc2 = nn.Linear(10, 10, bias=False)
+                    self.device = self.fc1.weight.device
 
                 def __init_opt(self):
-                    param = next(self.parameters())
-                    opt = torch.randn(1, 10, device=param.device)
+                    opt = torch.randn(1, 10, device=self.device)
                     return opt
 
                 def forward(self, x, opt_1, opt_2, opt_nested):
@@ -8692,10 +8700,15 @@ class DistributedTest:
 
             device = self.rank
             module = MockModule().to(device)
-            module = torch.nn.parallel.DistributedDataParallel(
-                module,
-                device_ids=[device]
-            )
+            # Disable DDP + ReplicatedTensor since stateless looks for 'module'
+            # whereas with ReplicatedTensor, we run '_replicated_tensor_module'
+            # in the forward pass.
+            from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
+            with _ddp_replicated_tensor(False):
+                module = torch.nn.parallel.DistributedDataParallel(
+                    module,
+                    device_ids=[device]
+                )
             x = torch.rand((1, 1)).to(device)
             weight = torch.tensor([[1.0]], device=device, requires_grad=True)
             bias = torch.tensor([0.0], device=device, requires_grad=True)
@@ -8705,6 +8718,7 @@ class DistributedTest:
                           'module.buffer': buffer}
             prev_weight = module.module.l1.weight.clone()
             prev_buffer = module.module.buffer.clone()
+
             res = _stateless.functional_call(module, parameters, x)
             self.assertEqual(x, res)
             # check that the weight remain unmodified

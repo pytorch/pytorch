@@ -96,13 +96,6 @@ generate_aten(
     generator = "//tools/codegen:gen",
 )
 
-py_library(
-    name = "tools_jit",
-    srcs = glob(["tools/jit/*.py"]),
-    data = glob(["tools/jit/templates/*"]),
-    visibility = ["//tools/setup_helpers:__pkg__"],
-)
-
 libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/VariableType.h",
         "torch/csrc/autograd/generated/VariableType_0.cpp",
