@@ -201,7 +201,7 @@ Tensor nested_tensor(
   TensorOptions options = flat_tensors[0].options().merge_in(options_);
 
   return wrap_buffer(
-      at::native::cat(flat_tensors).to(options), at::native::stack(sizes));
+      at::cat(flat_tensors).to(options), at::native::stack(sizes));
 }
 
 int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
