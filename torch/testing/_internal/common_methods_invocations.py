@@ -11786,7 +11786,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            skips=(
                # NOTE: this failure may not reproduce consistently on different systems
-               # false INTERNAL ASSERT FAILED at "/var/lib/jenkins/workspace/torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
+               # false INTERNAL ASSERT FAILED at "...torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185
                DecorateInfo(unittest.skip("Internal assert failed!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('nn.functional.interpolate',
