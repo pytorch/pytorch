@@ -1,5 +1,5 @@
 import torch
-from torch.distributed import group
+from torch.distributed import group, ReduceOp
 from torch.autograd import Function
 
 
@@ -58,7 +58,7 @@ def scatter(tensors, src=0, group=group.WORLD):
     return _Scatter.apply(src, group, *tensors)
 
 
-def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=group.WORLD):
+def reduce(tensor, dst, op=ReduceOp.SUM, group=group.WORLD):
     """
     Reduces the tensor data across all machines.
 
@@ -79,7 +79,7 @@ def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=group.WORLD):
     return _Reduce.apply(dst, op, group, tensor)
 
 
-def reduce_scatter(output, input_list, op=dist.ReduceOp.SUM, group=group.WORLD):
+def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=group.WORLD):
     """
     Reduces, then scatters a list of tensors to all processes in a group.
 
@@ -161,7 +161,7 @@ def all_to_all_single(
     )
 
 
-def all_reduce(tensor, op=dist.ReduceOp.SUM, group=group.WORLD):
+def all_reduce(tensor, op=ReduceOp.SUM, group=group.WORLD):
     """
     Reduces the tensor data across all machines in such a way that all get
     the final result.
@@ -197,7 +197,7 @@ class _Broadcast(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        gx = _Reduce.apply(ctx.src, dist.ReduceOp.SUM, ctx.group, grad_output)
+        gx = _Reduce.apply(ctx.src, ReduceOp.SUM, ctx.group, grad_output)
         if ctx.src != ctx.rank:
             gx.zero_()
         return (None, None, gx)
@@ -289,7 +289,7 @@ class _AllGather(Function):
         if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
             rank = dist.get_rank()
             gx = torch.empty_like(grad_outputs[rank])
-            _Reduce_Scatter.apply(dist.ReduceOp.SUM, ctx.group, gx, *grad_outputs)
+            _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
         else:
             # As many backends doesn't support ReduceScatter, we use AlltoAll with .sum()
             # to emulate the ReduceScatter behavior
