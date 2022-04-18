@@ -52,9 +52,9 @@ def register_rendezvous_handler(scheme, handler):
 
 # Query will have format "rank=0&world_size=1" and is
 # converted into {"rank": 0, "world_size": 1}
-def _query_to_dict(query):
+def _query_to_dict(query: str):
     query_dict: Dict[str, str] = dict(
-        cast(Tuple[str, str], pair.split("=")) for pair in cast(Iterable[str], filter(None, query.split("&")))
+        pair.split("=") for pair in filter(None, query.split("&"))
     )
     return query_dict
 
