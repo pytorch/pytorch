@@ -241,8 +241,13 @@ PyObject * THPVariable_Wrap(at::TensorBase var)
 static bool THPVariable_tryResurrect(THPVariable* self) {
   const auto& tensor = THPVariable_Unpack(self);
 
-  // Check if there are other C++ owners
-  if (tensor.use_count() <= 1 || tensor.unsafeGetTensorImpl()->owns_pyobj()) {
+  // If C++ already owns this pyobject, we shouldn't be trying to resurrect it.
+  if (tensor.unsafeGetTensorImpl()->owns_pyobj()) {
+    return false;
+  }
+  // If there are no other usages of the C++ object (other than the pyobject),
+  // we shouldn't be trying to keep the pyobject alive.
+  if (tensor.use_count() <= 1 ) {
     return false;
   }
 
@@ -337,9 +342,23 @@ static int THPVariable_clear(THPVariable* self) {
       }
     }
   }
-  // If we're removing the python reference to the C++ tensor, that C++ tensor
-  // better not have any uses.
-  TORCH_INTERNAL_ASSERT(self->cdata.unsafeIsBorrowed() || tensor.use_count() <= 1);
+  // We want to divide the assert into two cases:
+
+  // 1. C++ owns PyObject (in this case, self->cdata.unsafeIsBorrowed() is
+  // true). You might think that in this case, it is impossible for tp_clear to
+  // be called: surely the C++ reference to the PyObject is keeping it live? And
+  // you'd be right! In fact, when C++ owns the PyObject, we have an invariant
+  // that the refcount on the PyObject should be precisely one (because if you
+  // take out another reference to the PyObject, we're supposed to flip the
+  // ownership pointer back). In reality, you can violate this invariant
+  // temporarily with weak references, so we don't test for it in asserts.
+
+  // 2. PyObject owns C++ (in this case, self->cdata.unsafeIsBorrowed() is
+  // false). In this case, tp_clear can get called if the PyObject is referenced
+  // from a dead cycle, and nowhere else. But if resurrection did not occur,
+  // then the reference to C++ from the PyObject must be the ONLY reference to
+  // the C++ object.
+  TORCH_INTERNAL_ASSERT(self->cdata.unsafeIsBorrowed() || (!self->cdata.unsafeIsBorrowed() && tensor.use_count() == 1));
   self->cdata = MaybeOwned<Variable>();
   return 0;
 }
