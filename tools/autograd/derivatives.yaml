@@ -402,7 +402,7 @@
   result: auto_linear
 
 - name: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
-  self: grad.to(self.options(), /*non_blocking*/false, /*copy*/false)
+  self: _to_copy_backward(grad, self.options())
   result: _to_copy(self_t, dtype, layout, device, pin_memory, non_blocking, memory_format)
   # The condition is: if dtype is not nullopt, then isDifferentiableType(*dtype)
   # (If dtype IS nullopt, we rely on the regular check that any input requires grad).
