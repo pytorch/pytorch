@@ -5398,6 +5398,16 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
 
 }
 
+Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_options) {
+  // Handle R->C copies without raising a warning
+  const auto self_type = self_options.dtype().toScalarType();
+  auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grad_);
+  if (!c10::isComplexType(self_type) && grad->is_complex()) {
+    grad = c10::MaybeOwned<at::Tensor>::owned(at::real(grad_));
+  }
+
+  return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
+}
 
 } // namespace details
 } // namespace generated
