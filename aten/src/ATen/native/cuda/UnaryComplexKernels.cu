@@ -82,8 +82,8 @@ __host__ __device__ static inline c10::complex<T> conj_wrapper(c10::complex<T> v
 
 // NB: Ignores the negative bit on tensors
 void conj_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kBool, kBFloat16, kHalf, kComplexHalf, iter.common_dtype(), "conj_cuda", [&]() {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
           return conj_wrapper(a);
         });

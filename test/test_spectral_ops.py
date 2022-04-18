@@ -208,6 +208,8 @@ class TestFFT(TestCase):
     @onlyNativeDeviceTypes
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.OneD])
     def test_reference_1d(self, device, dtype, op):
+        if dtype is torch.complex32 or dtype is torch.half:
+            raise unittest.SkipTest("No reference implementation for complex32 in NumPy")
         if op.ref is None:
             raise unittest.SkipTest("No reference implementation")
 
@@ -364,7 +366,12 @@ class TestFFT(TestCase):
     def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
         x = torch.randn(8, 8, device=device).to(dtype)
-        with self.assertRaisesRegex(RuntimeError, "Unsupported dtype "):
+        err_msg = "Unsupported dtype "
+        if dtype is torch.half and self.device_type == 'cpu':
+            err_msg = "MKL FFT doesn't support"
+        if dtype is torch.half and self.device_type == 'cpu' and op.name == 'fft.hfft':
+            err_msg = '"conj_cpu" not implemented for '
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             op(x)
 
     # nd-fft tests
@@ -373,6 +380,8 @@ class TestFFT(TestCase):
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND])
     def test_reference_nd(self, device, dtype, op):
+        if dtype is torch.complex32 or dtype is torch.half:
+            raise unittest.SkipTest("No reference implementation for complex32 in NumPy")
         if op.ref is None:
             raise unittest.SkipTest("No reference implementation")
 

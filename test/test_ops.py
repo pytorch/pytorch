@@ -69,7 +69,7 @@ class TestCommon(TestCase):
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
-        include_complex32 = ((torch.complex32,) if op.supports_dtype(torch.complex32, device) else ())
+        include_complex32 = ((torch.complex32,) if op.supports_dtype(torch.complex32, torch.device(device).type) else ())
 
         # dtypes to try to backward in
         allowed_backward_dtypes = floating_and_complex_types_and(
@@ -93,6 +93,7 @@ class TestCommon(TestCase):
             try:
                 samples = list(op.sample_inputs(device, dtype, requires_grad=requires_grad))
             except Exception as e:
+                print(e, "EXCEPTIOn")
                 unsupported(dtype)
                 continue
 
@@ -728,11 +729,16 @@ class TestCommon(TestCase):
         if not op.supports_dtype(torch.complex32, device):
             unittest.skip("Does not support complex32")
 
+        if isinstance(op, SpectralFuncInfo):
+            atol, rtol = 4e-2, 4e-2
+        else:
+            atol, rtol = None, None
+
         for sample in op.sample_inputs(device, dtype):
             actual = op(sample.input, *sample.args, **sample.kwargs)
             (inp, args, kwargs) = sample.transform(lambda x: x.to(torch.complex64))
             expected = op(inp, *args, **kwargs)
-            self.assertEqual(actual, expected, exact_dtype=False)
+            self.assertEqual(actual, expected, exact_dtype=False, atol=atol, rtol=rtol)
 
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most

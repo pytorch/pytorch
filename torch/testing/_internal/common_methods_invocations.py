@@ -5347,15 +5347,36 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     return wrapped_fn
 
 def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwargs):
-    nd_tensor = partial(make_tensor, (S, S + 1, S + 2), device=device,
-                        dtype=dtype, requires_grad=requires_grad)
-    oned_tensor = partial(make_tensor, (31,), device=device,
-                          dtype=dtype, requires_grad=requires_grad)
+    is_not_half_or_chalf = dtype != torch.complex32 and dtype != torch.half
+    if is_not_half_or_chalf:
+        nd_tensor = partial(make_tensor, (S, S + 1, S + 2), device=device,
+                            dtype=dtype, requires_grad=requires_grad)
+        oned_tensor = partial(make_tensor, (31,), device=device,
+                            dtype=dtype, requires_grad=requires_grad)
+    else:
+        if self.name in ['fft.hfft', 'fft.irfft']:
+            shapes = ((2, 9, 9), (33,))
+        elif self.name in ['fft.hfft2', 'fft.irfft2']:
+            shapes = ((2, 8, 9), (33,))
+        elif self.name in ['fft.hfftn', 'fft.irfftn']:
+            shapes = ((2, 2, 33), (33,))
+        else:
+            shapes = ((2, 8, 16), (32,))
+        nd_tensor = partial(make_tensor, shapes[0], device=device,
+                            dtype=dtype, requires_grad=requires_grad)
+        oned_tensor = partial(make_tensor, shapes[1], device=device,
+                            dtype=dtype, requires_grad=requires_grad)
+
+    def if_is_not_half_or_chalf(then_val, else_val):
+        if is_not_half_or_chalf:
+            return then_val
+        else:
+            return else_val
 
     if self.ndimensional == SpectralFuncType.ND:
         return [
             SampleInput(nd_tensor(),
-                        kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
+                        kwargs=dict(s=if_is_not_half_or_chalf((3, 10), (4, 8)), dim=(1, 2), norm='ortho')),
             SampleInput(nd_tensor(),
                         kwargs=dict(norm='ortho')),
             SampleInput(nd_tensor(),
@@ -5369,11 +5390,11 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
     elif self.ndimensional == SpectralFuncType.TwoD:
         return [
             SampleInput(nd_tensor(),
-                        kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
+                        kwargs=dict(s=if_is_not_half_or_chalf((3, 10), (4, 8)), dim=(1, 2), norm='ortho')),
             SampleInput(nd_tensor(),
                         kwargs=dict(norm='ortho')),
             SampleInput(nd_tensor(),
-                        kwargs=dict(s=(6, 8))),
+                        kwargs=dict(s=if_is_not_half_or_chalf((6, 8), (4, 8)))),
             SampleInput(nd_tensor(),
                         kwargs=dict(dim=0)),
             SampleInput(nd_tensor(),
@@ -5384,11 +5405,12 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
     else:
         return [
             SampleInput(nd_tensor(),
-                        kwargs=dict(n=10, dim=1, norm='ortho')),
+                        kwargs=dict(n=if_is_not_half_or_chalf(10, 8), dim=1, norm='ortho')),
             SampleInput(nd_tensor(),
                         kwargs=dict(norm='ortho')),
             SampleInput(nd_tensor(),
-                        kwargs=dict(n=7)),
+                        kwargs=dict(n=if_is_not_half_or_chalf(7, 8))
+                        ),
             SampleInput(oned_tensor()),
 
             *(SampleInput(nd_tensor(),
@@ -5417,6 +5439,7 @@ class SpectralFuncInfo(OpInfo):
                  *,
                  ref=None,  # Reference implementation (probably in np.fft namespace)
                  dtypes=floating_and_complex_types(),
+                 dtypesIfCUDA=floating_and_complex_types_and(torch.complex32),
                  ndimensional: SpectralFuncType,
                  sample_inputs_func=sample_inputs_spectral_ops,
                  decorators=None,
@@ -5428,6 +5451,7 @@ class SpectralFuncInfo(OpInfo):
 
         super().__init__(name=name,
                          dtypes=dtypes,
+                         dtypesIfCUDA=dtypesIfCUDA,
                          decorators=decorators,
                          sample_inputs_func=sample_inputs_func,
                          **kwargs)
@@ -9865,7 +9889,8 @@ op_db: List[OpInfo] = [
                      ref=np.fft.fft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.complex32, torch.half),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      ),
@@ -9874,7 +9899,8 @@ op_db: List[OpInfo] = [
                      ref=np.fft.fft2,
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.complex32, torch.half),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      decorators=[precisionOverride(
@@ -9885,7 +9911,8 @@ op_db: List[OpInfo] = [
                      ref=np.fft.fftn,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.complex32, torch.half),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      decorators=[precisionOverride(
@@ -9896,7 +9923,8 @@ op_db: List[OpInfo] = [
                      ref=np.fft.hfft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.complex32, torch.half),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_gradgrad=False),
@@ -9905,7 +9933,8 @@ op_db: List[OpInfo] = [
                      ref=scipy.fft.hfft2 if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.complex32, torch.half),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_gradgrad=False,
@@ -9919,7 +9948,8 @@ op_db: List[OpInfo] = [
                      ref=scipy.fft.hfftn if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.complex32, torch.half),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_gradgrad=False,
@@ -9933,7 +9963,8 @@ op_db: List[OpInfo] = [
                      ref=np.fft.rfft,
                      ndimensional=SpectralFuncType.OneD,
                      dtypes=all_types_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                     default_test_dtypes=floating_types_and(torch.half),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
@@ -9946,7 +9977,8 @@ op_db: List[OpInfo] = [
                      ref=np.fft.rfft2,
                      ndimensional=SpectralFuncType.TwoD,
                      dtypes=all_types_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                     default_test_dtypes=floating_types_and(torch.half),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
@@ -9960,7 +9992,8 @@ op_db: List[OpInfo] = [
                      ref=np.fft.rfftn,
                      ndimensional=SpectralFuncType.ND,
                      dtypes=all_types_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                     default_test_dtypes=floating_types_and(torch.half),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
@@ -9976,7 +10009,8 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types()),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.half, torch.complex32)),
     SpectralFuncInfo('fft.ifft2',
                      aten_name='fft_ifft2',
                      ref=np.fft.ifft2,
@@ -9984,7 +10018,8 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.half, torch.complex32),
                      decorators=[
                          DecorateInfo(
                              precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
@@ -9997,7 +10032,8 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.half, torch.complex32),
                      decorators=[
                          DecorateInfo(
                              precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
@@ -10010,7 +10046,8 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and(torch.bool),
-                     default_test_dtypes=floating_types(),
+                     dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                     default_test_dtypes=floating_types_and(torch.half),
                      skips=(
                          DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ),
@@ -10022,7 +10059,8 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and(torch.bool),
-                     default_test_dtypes=floating_types(),
+                     dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                     default_test_dtypes=floating_types_and(torch.half),
                      check_batched_grad=False,
                      check_batched_gradgrad=False,
                      decorators=(
@@ -10040,7 +10078,8 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and(torch.bool),
-                     default_test_dtypes=floating_types(),
+                     dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                     default_test_dtypes=floating_types_and(torch.half),
                      check_batched_grad=False,
                      check_batched_gradgrad=False,
                      decorators=[
@@ -10060,7 +10099,8 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.half, torch.complex32),
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.irfft2',
                      aten_name='fft_irfft2',
@@ -10069,7 +10109,8 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.half, torch.complex32),
                      check_batched_gradgrad=False,
                      decorators=[
                          DecorateInfo(
@@ -10083,7 +10124,8 @@ op_db: List[OpInfo] = [
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and_complex_and(torch.bool),
-                     default_test_dtypes=floating_and_complex_types(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+                     default_test_dtypes=floating_and_complex_types_and(torch.half, torch.complex32),
                      check_batched_gradgrad=False,
                      decorators=[
                          DecorateInfo(
