@@ -238,7 +238,7 @@ SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   DispatchKey dispatch_key;
   TORCH_CHECK_NOT_IMPLEMENTED(
     options.device().type() == kCPU || options.device().type() == kCUDA,
-    "Could not run 'sparse_compressed_tensor' from the '", options.device(), "' device.)");
+    "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
 
   if (options.device().is_cuda()) {
     dispatch_key = DispatchKey::SparseCsrCUDA;
@@ -289,45 +289,6 @@ SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
 SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc)
 SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr)
 SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc)
-
-inline DimVector _estimate_sparse_compressed_tensor_size(
-    const Tensor& compressed_indices,
-    const Tensor& plain_indices,
-    const Tensor& values,
-    Layout layout) {
-  DimVector size = DimVector(IntArrayRef(plain_indices.sizes().data(), plain_indices.dim() - 1));
-  switch (layout) {
-  case kSparseCsr:
-    if (plain_indices.size(-1) > 0) {
-      size.push_back(compressed_indices.size(-1) - 1);
-
-    } else {
-      size.push_back(0);
-    }
-    AT_DISPATCH_INDEX_TYPES(plain_indices.scalar_type(), "csr_construct_check", [&] {
-                                                                                size.push_back(plain_indices.max().item<index_t>() + 1);
-                                                                              });
-    break;
-  case kSparseCsc:
-    AT_DISPATCH_INDEX_TYPES(plain_indices.scalar_type(), "csr_construct_check", [&] {
-                                                                                size.push_back(plain_indices.max().item<index_t>() + 1);
-                                                                              });
-    if (plain_indices.size(-1) > 0) {
-      size.push_back(compressed_indices.size(-1) - 1);
-
-    } else {
-      size.push_back(0);
-    }
-    break;
-  case kSparseBsr:
-  case kSparseBsc:
-    TORCH_CHECK(false, "estimate_sparse_compressed_tensor_size: layout ", layout, " is not yet supported");  // TODO
-    break;
-  default:
-    TORCH_CHECK(false, "estimate_sparse_compressed_tensor_size: layout ", layout, " is not supported");
-  }
-  return size;
-}
 
 inline DimVector _estimate_sparse_compressed_tensor_size(
     const Tensor& compressed_indices,
