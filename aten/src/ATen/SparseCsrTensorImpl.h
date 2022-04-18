@@ -28,9 +28,10 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   Tensor crow_indices_;
   Tensor col_indices_;
   Tensor values_;
+  Layout layout_;
 
  public:
-  explicit SparseCsrTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta);
+  explicit SparseCsrTensorImpl(at::DispatchKeySet, Layout layout, const caffe2::TypeMeta);
 
   void resize_(int64_t nnz, IntArrayRef size);
   void resize_as_sparse_csr_tensor_(const Tensor& src);
@@ -45,6 +46,25 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   const Tensor& values() const { return values_; }
   int nnz() { return col_indices_.size(-1); }
 
+  IntArrayRef strides() const override;
+  int64_t stride(int64_t d) const override;
+  void set_size(int64_t dim, int64_t new_size) override;
+  void set_stride(int64_t dim, int64_t new_stride) override;
+  void set_storage_offset(int64_t storage_offset) override;
+  Layout layout_impl() const override { return layout_; }
+  void set_layout(Layout layout) {
+    switch (layout) {
+    case kSparseCsr:
+    case kSparseCsc:
+    case kSparseBsr:
+    case kSparseBsc:
+      layout_ = layout;
+      break;
+    default:
+      TORCH_CHECK(false, "unsupported layout ", layout);
+    }
+  }
+
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
@@ -54,7 +74,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
-    auto impl = c10::make_intrusive<SparseCsrTensorImpl>(key_set(), dtype());
+    auto impl = c10::make_intrusive<SparseCsrTensorImpl>(key_set(), layout_impl(), dtype());
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -73,7 +93,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const override {
-    auto impl = c10::make_intrusive<SparseCsrTensorImpl>(key_set(), dtype());
+    auto impl = c10::make_intrusive<SparseCsrTensorImpl>(key_set(), layout_impl(), dtype());
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -89,7 +109,10 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       const caffe2::TypeMeta data_type,
       at::Tensor crow_indices,
       at::Tensor col_indices,
-      at::Tensor values);
+      at::Tensor values,
+      at::Layout layout);
+
+  const char* tensorimpl_type_name() const override;
 
   /**
    * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
@@ -108,6 +131,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     dest_sparse_impl->crow_indices_ = src_sparse_impl->crow_indices();
     dest_sparse_impl->col_indices_ = src_sparse_impl->col_indices();
     dest_sparse_impl->values_ = src_sparse_impl->values();
+    dest_sparse_impl->layout_ = src_sparse_impl->layout_impl();
   }
 };
 } // namespace at

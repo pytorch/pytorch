@@ -138,6 +138,27 @@ class TestSparseCSR(TestCase):
         self.assertEqual(str(torch.sparse_csr), 'torch.sparse_csr')
         self.assertEqual(type(torch.sparse_csr), torch.layout)
 
+    def test_csr_stride(self):
+        a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
+
+        with self.assertRaisesRegex(RuntimeError, "Sparse CSR tensors do not have strides"):
+            a.stride()
+
+        with self.assertRaisesRegex(RuntimeError, "Sparse CSR tensors do not have strides"):
+            a.stride(-1)
+
+    def test_csr_storage(self):
+        a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot access storage of SparseCsrTensorImpl"):
+            a.storage()
+
+    def test_csr_is_contiguous(self):
+        a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
+
+        with self.assertRaisesRegex(RuntimeError, "Tensors of type SparseCsrTensorImpl do not have is_contiguous"):
+            a.is_contiguous()
+
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_constructor_shape_inference(self, device, dtype):
         crow_indices = [0, 2, 4]
@@ -359,7 +380,7 @@ class TestSparseCSR(TestCase):
                                     torch.tensor([1, 2, 3, 4]),
                                     device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r"\"csr_construct_check\" not implemented for 'Short'"):
+        with self.assertRaisesRegex(RuntimeError, r"\"validate_sparse_compressed_tensor_args\" not implemented for 'Short'"):
             torch.sparse_csr_tensor(torch.tensor([0, 2, 4], dtype=torch.int16),
                                     torch.tensor([0, 1, 0, 1], dtype=torch.int16),
                                     torch.tensor([1, 2, 3, 4]),
@@ -424,22 +445,23 @@ class TestSparseCSR(TestCase):
 
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"Number of dimensions of crow_indices and col_indices must be the same"):
+                                    r"number of dimensions of crow_indices and col_indices must be the same"):
             torch.sparse_csr_tensor(crow_indices, col_indices.repeat(2, 1), values, size,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"Number of dimensions of indices and values must be the same"):
+                                    r"number of dimensions of indices and values must be the same"):
             torch.sparse_csr_tensor(crow_indices, col_indices, values.repeat(2, 1), size,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"Number of dimensions of indices must be one less"):
+                                    r"number of dimensions of indices must be one less"):
             torch.sparse_csr_tensor(crow_indices.repeat(2, 1), col_indices.repeat(2, 1), values.repeat(2, 1), size,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"All batch dimensions of the provided size, indices, and values must be the same"):
+                                    r"all batch dimensions of the provided size \(\[2\]\), indices \(\[2\], \[3\]\),"
+                                    r" and values \(\[4\]\) must be the same"):
             torch.sparse_csr_tensor(crow_indices.repeat(2, 1), col_indices.repeat(3, 1), values.repeat(4, 1), (2, 2, 10),
                                     device=device)
 
@@ -580,6 +602,7 @@ class TestSparseCSR(TestCase):
         dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device).repeat(6, 1).reshape(csr.shape)
         self.assertEqual(csr.to_dense(), dense)
 
+    @skipMeta
     @skipCPUIfNoMklSparse
     @coalescedonoff
     @dtypes(torch.double)
