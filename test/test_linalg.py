@@ -2360,7 +2360,7 @@ class TestLinalg(TestCase):
                 expected = np.linalg.norm(xn, p, keepdims=keepdim)
                 msg = gen_error_message(x.size(), p, keepdim)
                 self.assertEqual(res.shape, expected.shape, msg=msg)
-                self.assertEqual(res, expected, msg=msg, rtol=1.3e-6, atol=3e-4)
+                self.assertEqual(res, expected, msg=msg, rtol=4e-6, atol=6e-4)
 
     # Ensure torch.norm with p='fro' and p=2 give the same results for mutually supported input combinations
     @dtypes(torch.float)
