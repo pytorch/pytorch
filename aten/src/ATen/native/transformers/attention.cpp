@@ -8,6 +8,12 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/cpu/vec/vec256/vec256.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat.h>
+#endif
+
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 
 namespace at {
@@ -319,7 +325,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
       "-D tensor");
   TORCH_CHECK(
       query.is_nested() || key.is_nested() || value.is_nested() ||
-          query.sizes() == key.sizes() && key.sizes() == value.sizes(),
+          (query.sizes() == key.sizes() && key.sizes() == value.sizes()),
       "expected `query`/`key`/`value` shapes to match");
   TORCH_CHECK(
       qkv_weight.dim() == 2,
