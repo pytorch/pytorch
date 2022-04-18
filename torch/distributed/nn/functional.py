@@ -1,9 +1,9 @@
 import torch
-import torch.distributed as dist
+from torch.distributed import group
 from torch.autograd import Function
 
 
-def broadcast(tensor, src, group=dist.group.WORLD):
+def broadcast(tensor, src, group=group.WORLD):
     """
     Broadcasts the tensor to the whole group.
 
@@ -23,7 +23,7 @@ def broadcast(tensor, src, group=dist.group.WORLD):
     return _Broadcast.apply(src, group, tensor)
 
 
-def gather(tensor, dst=0, group=dist.group.WORLD):
+def gather(tensor, dst=0, group=group.WORLD):
     """
     Gathers a list of tensors in a single process.
 
@@ -38,7 +38,7 @@ def gather(tensor, dst=0, group=dist.group.WORLD):
     return _Gather.apply(dst, group, tensor)
 
 
-def scatter(tensors, src=0, group=dist.group.WORLD):
+def scatter(tensors, src=0, group=group.WORLD):
     """
     Scatters a list of tensors to all processes in a group.
 
@@ -58,7 +58,7 @@ def scatter(tensors, src=0, group=dist.group.WORLD):
     return _Scatter.apply(src, group, *tensors)
 
 
-def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
+def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=group.WORLD):
     """
     Reduces the tensor data across all machines.
 
@@ -79,7 +79,7 @@ def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
     return _Reduce.apply(dst, op, group, tensor)
 
 
-def reduce_scatter(output, input_list, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
+def reduce_scatter(output, input_list, op=dist.ReduceOp.SUM, group=group.WORLD):
     """
     Reduces, then scatters a list of tensors to all processes in a group.
 
@@ -98,7 +98,7 @@ def reduce_scatter(output, input_list, op=dist.ReduceOp.SUM, group=dist.group.WO
     return _Reduce_Scatter.apply(op, group, output, *input_list)
 
 
-def all_gather(tensor, group=dist.group.WORLD):
+def all_gather(tensor, group=group.WORLD):
     """
     Gathers tensors from the whole group in a list.
 
@@ -113,7 +113,7 @@ def all_gather(tensor, group=dist.group.WORLD):
     return _AllGather.apply(group, tensor)
 
 
-def all_to_all(output_tensor_list, input_tensor_list, group=dist.group.WORLD):
+def all_to_all(output_tensor_list, input_tensor_list, group=group.WORLD):
     """
     Each process scatters list of input tensors to all processes in a group and
     return gathered list of tensors in output list.
@@ -135,7 +135,7 @@ def all_to_all_single(
     input,
     output_split_sizes=None,
     input_split_sizes=None,
-    group=dist.group.WORLD,
+    group=group.WORLD,
 ):
     """
     Each process splits input tensor and then scatters the split list
@@ -161,7 +161,7 @@ def all_to_all_single(
     )
 
 
-def all_reduce(tensor, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
+def all_reduce(tensor, op=dist.ReduceOp.SUM, group=group.WORLD):
     """
     Reduces the tensor data across all machines in such a way that all get
     the final result.
