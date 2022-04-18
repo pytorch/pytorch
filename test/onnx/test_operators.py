@@ -20,13 +20,15 @@ import os
 import shutil
 import tempfile
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import skipIfCaffe2, skipIfNoCaffe2
+from torch.testing._internal.common_utils import skipIfCaffe2
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
           --produce-onnx-test-data: generate onnx test data
           --accept: accept onnx updates and overwrite models
 '''
+
+# Full diff for expect files
 import unittest
 unittest.TestCase.maxDiff = None
 
@@ -593,7 +595,7 @@ class TestOperators(TestCase):
         self.assertONNX(nn.BatchNorm2d(128, affine=False, momentum=0.3), x,
                         keep_initializers_as_inputs=True)
 
-    @skipIfNoCaffe2
+    @skipIfCaffe2
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
@@ -793,7 +795,7 @@ class TestOperators(TestCase):
         input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.assertONNX(BitshiftModel(), (input, input2), opset_version=11)
 
-    @skipIfNoCaffe2
+    @skipIfCaffe2
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
