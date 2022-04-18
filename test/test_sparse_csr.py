@@ -400,7 +400,7 @@ class TestSparseCSR(TestCase):
                                     torch.tensor([1, 2, 3, 4]),
                                     device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r"\"validate_sparse_compressed_tensor_args\" not implemented for 'Short'"):
+        with self.assertRaisesRegex(RuntimeError, r"\"csr_construct_check\" not implemented for 'Short'"):
             torch.sparse_csr_tensor(torch.tensor([0, 2, 4], dtype=torch.int16),
                                     torch.tensor([0, 1, 0, 1], dtype=torch.int16),
                                     torch.tensor([1, 2, 3, 4]),
