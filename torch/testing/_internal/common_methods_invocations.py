@@ -12073,8 +12073,10 @@ op_db: List[OpInfo] = [
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cpu'),
                # RuntimeError: "max_pool1d_impl" not implemented for 'BFloat16'
-               DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.bfloat16,)),
+               DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
+                            'test_nnc_correctness', dtypes=(torch.bfloat16,)),
+               DecorateInfo(unittest.skip("Works on some conifgs"), 'TestCudaFuserOpInfo',
+                            'test_nvfuser_correctness', dtypes=(torch.bfloat16,)),
            ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
