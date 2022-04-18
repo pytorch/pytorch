@@ -9351,7 +9351,7 @@ op_db: List[OpInfo] = [
            skips=(
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float,)),),),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
            check_batched_grad=False,
@@ -10986,6 +10986,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,  # Supports only certain variants?
            supports_fwgrad_bwgrad=False,  # Need: std_mean
            skips=(
+               DecorateInfo(unittest.skip("ASAN: division by zero!"), active_if=TEST_WITH_ASAN),
                # std_mean does not support forward when complex inputs require grad
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                # https://github.com/pytorch/pytorch/issues/67539
@@ -11782,12 +11783,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_nn_unfold,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # RuntimeError: false
-               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
-               # please report a bug to PyTorch.
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
@@ -13305,8 +13300,6 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
                     skips=(
-                        # Jacobian computed with forward mode mismatch
-                        DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
                     ),
@@ -13971,8 +13964,6 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
-                       # lambda impl
-                       DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                        DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                    ),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
@@ -14186,8 +14177,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                # lambda impl
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),),
+               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),),
            sample_inputs_func=sample_inputs_column_stack,),
     OpInfo('pinverse',
            op=torch.pinverse,
@@ -15340,7 +15330,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # Allowed exception: sparse tensors don't have strides
                DecorateInfo(unittest.skip("Allowed exception"), 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Allowed exception"), 'TestCompositeCompliance', 'test_backward'),
