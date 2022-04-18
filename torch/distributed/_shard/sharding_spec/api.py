@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import List, Union
 from typing import TYPE_CHECKING
 
-import copy
 import torch
 
 from ._internals import (
