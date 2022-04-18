@@ -269,19 +269,19 @@ class TransformerEncoderLayer(Module):
 
     forward() will use a special optimized implementation if all of the following
     conditions are met:
-    - inference mode is enabled (using the torch.inference_mode() context manager)
-    - training is disabled (using .eval())
-    - batch_first is True and the input is batched (i.e., src.dim() == 3)
-    - norm_first is False (this restriction may be loosened in the future)
-    - activation is one of: "relu", "gelu", torch.functional.relu, or torch.functional.gelu
-    - at most one of src_mask and src_key_padding_mask is passed
-    - if src is a NestedTensor, neither src_mask nor src_key_padding_mask is passed
-    - the two LayerNorm instances have a consistent eps value (this will naturally be the
+    - inference mode is enabled (using the ``torch.inference_mode()`` context manager)
+    - training is disabled (using ``.eval()``)
+    - batch_first is ``True`` and the input is batched (i.e., ``src.dim() == 3``)
+    - norm_first is ``False`` (this restriction may be loosened in the future)
+    - activation is one of: ``"relu"``, ``"gelu"``, ``torch.functional.relu``, or ``torch.functional.gelu``
+    - at most one of ``src_mask`` and ``src_key_padding_mask`` is passed
+    - if src is a ``NestedTensor``, neither ``src_mask`` nor ``src_key_padding_mask`` is passed
+    - the two ``LayerNorm`` instances have a consistent ``eps`` value (this will naturally be the
       case unless the caller has manually modified one without modifying the other)
 
-    If the optimized implementation is in use, a NestedTensor can be
-    passed for src to represent padding more efficiently than using a padding
-    mask. In this case, a NestedTensor will be returned, and an
+    If the optimized implementation is in use, a ``NestedTensor`` can be
+    passed for ``src`` to represent padding more efficiently than using a padding
+    mask. In this case, a ``NestedTensor`` will be returned, and an
     additional speedup proportional to the fraction of the input that
     is padding can be expected.
 

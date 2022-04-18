@@ -896,23 +896,23 @@ class MultiheadAttention(Module):
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
-    forward() will use a special optimized implementation if all of the following
+    ``forward()`` will use a special optimized implementation if all of the following
     conditions are met:
-    - self attention is being computed (i.e., query, key, and value are the same tensor.
-      This restriction will be loosened in the future.)
-    - inference mode is enabled (using the torch.inference_mode() context manager)
-    - training is disabled (using .eval())
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same
+      tensor. This restriction will be loosened in the future.)
+    - inference mode is enabled (using the ``torch.inference_mode()`` context manager)
+    - training is disabled (using ``.eval()``)
     - dropout is 0
-    - add_bias_kv is False
-    - add_zero_attn is False
-    - batch_first is True and the input is batched
-    - kdim and vdim are equal to embed_dim
-    - at most one of key_padding_mask or attn_mask is passed
-    - if a NestedTensor is passed, neither key_padding_mask nor attn_mask is passed
+    - ``add_bias_kv`` is ``False``
+    - ``add_zero_attn`` is ``False``
+    - ``batch_first`` is ``True`` and the input is batched
+    - ``kdim`` and ``vdim`` are equal to ``embed_dim``
+    - at most one of ``key_padding_mask`` or ``attn_mask`` is passed
+    - if a ``NestedTensor`` is passed, neither ``key_padding_mask`` nor ``attn_mask`` is passed
 
-    If the optimized implementation is in use, a NestedTensor can be
-    passed for query/key/value to more represent padding more efficiently than using a
-    padding mask. In this case, a NestedTensor will be returned, and
+    If the optimized implementation is in use, a ``NestedTensor`` can be
+    passed for ``query``/``key``/``value`` to more represent padding more efficiently than using a
+    padding mask. In this case, a ``NestedTensor`` will be returned, and
     an additional speedup proportional to the fraction of the input
     that is padding can be expected.
 
