@@ -73,7 +73,7 @@ Tensor transformer_encoder_layer_forward(
   {
     const Tensor& check_for_empty = src.is_nested() ? get_nested_tensor_impl(src)->get_buffer() : src;
     if (check_for_empty.numel() == 0) {
-      return at::empty_like(src);
+      return src;
     }
   }
   TORCH_CHECK(!norm_first, "norm_first is not supported yet");

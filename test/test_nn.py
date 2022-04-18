@@ -13015,8 +13015,8 @@ class TestNNDeviceType(NNTestCase):
         if not inference:
             inp.requires_grad_(True)
         out = module(inp)
-        gO = torch.rand_like(out)
         if not inference:
+            gO = torch.rand_like(out)
             out.backward(gO)
         if check_size:
             self.assertEqual(out.size(), inp.size())
@@ -14593,9 +14593,14 @@ class TestNNDeviceType(NNTestCase):
                         self._test_module_empty_input(encoder_layer, input, check_size=False, inference=True)
                     if batch_first:
                         with torch.inference_mode():
+                            # A NestedTensor with no tensors inside it doesn't have dim 3 (or dim
+                            # 2, for that matter) so it can't hit the fast path, nor can we give a
+                            # result.
                             with self.assertRaisesRegex(
-                                    AssertionError, 'query should be unbatched 2D or batched 3D tensor but received 1-D query tensor'):
-                                self._test_module_empty_input(encoder_layer, torch.nested_tensor([]), check_size=False, inference=True)
+                                    AssertionError, 'MultiheadAttention does not support NestedTensor outside''):
+                                self._test_module_empty_input(encoder_layer, torch.nested_tensor([], device=device), check_size=False, inference=True)
+
+                            self._test_module_empty_input(encoder_layer, torch.nested_tensor([torch.rand(0, 512, device=device)], device=device), check_size=False, inference=True)
                 else:
                     self._test_module_empty_input(encoder_layer, input, check_size=False)
 
