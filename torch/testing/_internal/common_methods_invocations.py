@@ -16234,6 +16234,12 @@ op_db: List[OpInfo] = [
         promotes_int_to_int64=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_duplicate_values',
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_small_input',
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked',
+                         dtypes=(torch.bool, torch.int8, torch.int16, torch.int32)),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -16324,9 +16330,6 @@ op_db: List[OpInfo] = [
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            # FIXME (from torch.argmax): keepdim parameter is ignored when dim=None
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # initial is not a keyword for argmax
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
@@ -16345,9 +16348,6 @@ op_db: List[OpInfo] = [
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            # FIXME (from torch.argmin): keepdim parameter is ignored when dim=None
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # initial is not a keyword for argmin
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked'),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
@@ -16368,6 +16368,12 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
         skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_duplicate_values',
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_reference_masked',
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_small_input',
+                         dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
