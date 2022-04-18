@@ -172,10 +172,10 @@ Tensor quantized_max_pool2d_cudnn(
                       poolingDesc,
                       &one,
                       xDesc.desc(),
-                      reinterpret_cast<int8_t*>(input.data_ptr()),
+                      input.data_ptr<int8_t>(),
                       &zero,
                       yDesc.desc(),
-                      reinterpret_cast<int8_t*>(qy.data_ptr()));
+                      qy.data_ptr<int8_t>());
 
   // recall we casted our input and output to 4D if qx was 3D, so we recast it back to 3D prior to returning
   return (ndim == 3 ? qy.view(std::vector<int64_t>(output_shape.begin() + 1, output_shape.end())) : qy);
