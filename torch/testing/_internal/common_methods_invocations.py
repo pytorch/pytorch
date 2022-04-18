@@ -14187,9 +14187,7 @@ op_db: List[OpInfo] = [
            skips=(
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-               # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),),
            sample_inputs_func=sample_inputs_column_stack,),
     OpInfo('pinverse',
            op=torch.pinverse,
@@ -14808,11 +14806,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # Seems like a bug:
-               # The size of tensor a (0) must match the size of tensor b (4) at non-singleton dimension 1
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # NotImplementedError not raised
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                # Computed gradient is incorrect -- would be an exfail but gradgrad somehow passes
