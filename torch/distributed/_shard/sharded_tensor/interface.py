@@ -6,7 +6,7 @@ import torch
 
 import torch.distributed._shard.sharding_spec as shard_spec
 
-from .metadata import TensorProperties
+from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
 from .utils import _flatten_tensor_size
 
@@ -57,9 +57,9 @@ class ShardedTensorInterface(torch.Tensor):
             requires_grad=requires_grad
         )
         # set sharding spec
-        r._sharding_spec = sharding_spec
+        r._sharding_spec: shard_spec.ShardingSpec = sharding_spec
         # set metadata
-        r._metadata = sharded_tensor_metadata
+        r._metadata: ShardedTensorMetadata = sharded_tensor_metadata
         return r
 
     # We define this function for two reasons:
