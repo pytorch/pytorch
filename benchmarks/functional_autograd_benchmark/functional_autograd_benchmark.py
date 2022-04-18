@@ -45,43 +45,52 @@ def get_task_func(task: str) -> Callable:
 
 def get_task_functorch(task: str) -> Callable:
 
+    @torch.no_grad()
     def vjp(model, inp, v=None, strict=None):
         assert v is not None
         out, vjpfunc = ft.vjp(model, *inp)
         return out, vjpfunc(v)
 
+    @torch.no_grad()
     def jvp(model, inp, v=None, strict=None):
         assert v is not None
         return ft.jvp(model, inp, v)
 
+    @torch.no_grad()
     def vhp(model, inp, v=None, strict=None):
         assert v is not None
         argnums = tuple(range(len(inp)))
         _, vjpfunc, aux = ft.vjp(ft.grad_and_value(model, argnums), *inp, has_aux=True)
         return aux, vjpfunc(v)
 
+    @torch.no_grad()
     def hvp(model, inp, v=None, strict=None):
         assert v is not None
         argnums = tuple(range(len(inp)))
         _, hvp_out, aux = ft.jvp(ft.grad_and_value(model, argnums), inp, v, has_aux=True)
         return aux, hvp_out
 
+    @torch.no_grad()
     def jacfwd(model, inp, v=None, strict=None):
         argnums = tuple(range(len(inp)))
         return ft.jacfwd(model, argnums)(*inp)
 
+    @torch.no_grad()
     def jacrev(model, inp, v=None, strict=None):
         argnums = tuple(range(len(inp)))
         return ft.jacrev(model, argnums)(*inp)
 
+    @torch.no_grad()
     def hessian(model, inp, v=None, strict=None):
         argnums = tuple(range(len(inp)))
         return ft.hessian(model, argnums=argnums)(*inp)
 
+    @torch.no_grad()
     def hessian_fwdrev(model, inp, v=None, strict=None):
         argnums = tuple(range(len(inp)))
         return ft.jacfwd(ft.jacrev(model, argnums=argnums), argnums=argnums)(*inp)
 
+    @torch.no_grad()
     def hessian_revrev(model, inp, v=None, strict=None):
         argnums = tuple(range(len(inp)))
         return ft.jacrev(ft.jacrev(model, argnums=argnums), argnums=argnums)(*inp)
@@ -164,7 +173,7 @@ def run_once(model: Callable, inp: InputsType, task: str, v: VType, **kwargs) ->
     else:
         res = func(model, inp, strict=True)
 
-def run_once_functorch(model: Callable, inp: InputsType, task: str, v: VType, check_consistency=False) -> None:
+def run_once_functorch(model: Callable, inp: InputsType, task: str, v: VType, maybe_check_consistency=False) -> None:
     func = get_task_functorch(task)
 
     if v is not None:
@@ -172,7 +181,7 @@ def run_once_functorch(model: Callable, inp: InputsType, task: str, v: VType, ch
     else:
         res = func(model, inp, strict=True)
 
-    if check_consistency:
+    if maybe_check_consistency:
         af_func = get_task_func(task)
         if v is not None:
             expected = af_func(model, inp, v=v, strict=True)
@@ -196,17 +205,16 @@ def run_model(model_getter: GetterType, args: Any, task: str, run_once_fn: Calla
 
     v = get_v_for(model, inp, task)
 
-    with torch.set_grad_enabled(run_once_fn == run_once):
-        # Warmup
-        run_once_fn(model, inp, task, v, check_consistency=run_once_fn == run_once_functorch)
+    # Warmup
+    run_once_fn(model, inp, task, v, maybe_check_consistency=True)
 
-        elapsed = []
-        for it in range(args.num_iters):
-            do_sync()
-            start = time.time()
-            run_once_fn(model, inp, task, v)
-            do_sync()
-            elapsed.append(time.time() - start)
+    elapsed = []
+    for it in range(args.num_iters):
+        do_sync()
+        start = time.time()
+        run_once_fn(model, inp, task, v)
+        do_sync()
+        elapsed.append(time.time() - start)
 
     return elapsed
 
