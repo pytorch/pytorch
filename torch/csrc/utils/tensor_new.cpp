@@ -20,6 +20,7 @@
 #include <ATen/dlpack.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/Backend.h>
 #include <c10/core/DispatchKeySet.h>
@@ -592,13 +593,34 @@ Tensor indexing_tensor_from_data(
   }
 }
 
-Tensor sparse_csr_tensor_ctor(
-    c10::DispatchKey dispatch_key,
-    at::ScalarType scalar_type,
-    PythonArgs& r) {
+template <c10::Layout required_layout>
+Tensor sparse_compressed_tensor_ctor_template(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
   TORCH_INTERNAL_ASSERT(!isSparseCsr(dispatchKeyToBackend(dispatch_key)));
   TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
-  const int NUM_ARGS = 9, CROW_INDICES_ARG = 0, COL_INDICES_ARG = 1, VALUES_ARG = 2;
+  enum {
+        ARG_COMPRESSED_INDICES = 0,
+        ARG_PLAIN_INDICES,
+        ARG_VALUES,
+        ARG_SIZE,
+        ARG_TYPE,
+        ARG_LAYOUT,
+        ARG_DEVICE,
+        ARG_PIN_MEMORY,
+        ARG_REQUIRES_GRAD,
+        ARGS_COUNT
+  };
+  enum {
+        ARG_VALUES1 = ARG_VALUES,
+        ARG_TYPE1,
+        ARG_LAYOUT1,
+        ARG_DEVICE1,
+        ARG_PIN_MEMORY1,
+        ARG_REQUIRES_GRAD1,
+        ARGS_COUNT1
+  };
+  const std::string layout_name = (required_layout == c10::Layout::Unspecified
+                                   ? "compressed" :
+                                   at::sparse_csr::layoutToString(required_layout, /*upper=*/false, /*lower=*/true));
   auto safe_get_attr_string = [](PyObject *o, const char *attr_name) -> PyObject* {
     // Clear error indicator if attribute does not exists.
     // Otherwise subsequent Python C API calls might return bogus values.
@@ -613,55 +635,62 @@ Tensor sparse_csr_tensor_ctor(
     }
     return rc;
   };
-  THPObjectPtr crow_indices_dtype_attr(safe_get_attr_string(r.pyobject(CROW_INDICES_ARG), "dtype"));
-  THPObjectPtr col_indices_dtype_attr(safe_get_attr_string(r.pyobject(COL_INDICES_ARG), "dtype"));
-  at::ScalarType crow_indices_scalar_type = crow_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
-    crow_indices_dtype_attr.get())->scalar_type : kInt;
-  at::ScalarType col_indices_scalar_type = col_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
-    col_indices_dtype_attr.get())->scalar_type : kInt;
+  THPObjectPtr compressed_indices_dtype_attr(safe_get_attr_string(r.pyobject(ARG_COMPRESSED_INDICES), "dtype"));
+  THPObjectPtr plain_indices_dtype_attr(safe_get_attr_string(r.pyobject(ARG_PLAIN_INDICES), "dtype"));
+  at::ScalarType compressed_indices_scalar_type = compressed_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
+    compressed_indices_dtype_attr.get())->scalar_type : kInt;
+  at::ScalarType plain_indices_scalar_type = plain_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
+    plain_indices_dtype_attr.get())->scalar_type : kInt;
 
   if (r.idx == 0) {
-    const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, DEVICE_TYPE_ARG = 6, REQ_GRAD_ARG = 8;
-    bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
-    const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
-    const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
-    at::OptionalDeviceGuard device_guard(r.deviceOptional(DEVICE_TYPE_ARG));
+    bool type_inference = r.isNone(ARG_TYPE);
+    const auto inferred_options = typeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
 
-    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
-                                           r.pyobject(VALUES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
+    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(ARG_DEVICE),
+                                           r.pyobject(ARG_VALUES), /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
-    Tensor crow_indices =  internal_new_from_data(values.options(),
-      crow_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(CROW_INDICES_ARG),
+    Tensor compressed_indices =  internal_new_from_data(values.options(),
+      compressed_indices_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_COMPRESSED_INDICES),
       /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
-    Tensor col_indices = internal_new_from_data(values.options(),
-      col_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(COL_INDICES_ARG),
+    Tensor plain_indices = internal_new_from_data(values.options(),
+      plain_indices_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_PLAIN_INDICES),
       /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
-
-    return at::sparse_csr_tensor(crow_indices, col_indices, values, r.intlist(SIZE_ARRAY_ARG),
-                                 values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
+    c10::Layout layout_ = (required_layout == c10::Layout::Unspecified ? r.layoutOptional(ARG_LAYOUT).value_or(required_layout) : required_layout);
+    return at::sparse_compressed_tensor(compressed_indices, plain_indices, values, r.intlist(ARG_SIZE),
+                                 values.options().layout(layout_)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
-    const int TYPE_INFERENCE_ARG = 3, DEVICE_TYPE_ARG = 5, REQ_GRAD_ARG = 7;
-    bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
-    const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
-    const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
-    at::OptionalDeviceGuard device_guard(r.deviceOptional(DEVICE_TYPE_ARG));
+    bool type_inference = r.isNone(ARG_TYPE1);
+    const auto inferred_options = typeIdWithDefault(r, ARG_DEVICE1, dispatch_key);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE1, scalar_type);
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE1));
 
-    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
-                                           r.pyobject(VALUES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
+    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(ARG_DEVICE1),
+                                           r.pyobject(ARG_VALUES), /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
-    Tensor crow_indices = internal_new_from_data(values.options(),
-      crow_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
-      r.pyobject(CROW_INDICES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
+    Tensor compressed_indices = internal_new_from_data(values.options(),
+      compressed_indices_scalar_type, r.deviceOptional(ARG_DEVICE1),
+      r.pyobject(ARG_COMPRESSED_INDICES), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
-    Tensor col_indices = internal_new_from_data(values.options(), col_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
-      r.pyobject(COL_INDICES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
+    Tensor plain_indices = internal_new_from_data(values.options(), plain_indices_scalar_type, r.deviceOptional(ARG_DEVICE1),
+      r.pyobject(ARG_PLAIN_INDICES), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
-    return at::sparse_csr_tensor(crow_indices, col_indices, values,
-                                 values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
+    c10::Layout layout_ = (required_layout == c10::Layout::Unspecified ? r.layoutOptional(ARG_LAYOUT1).value_or(required_layout) : required_layout);
+    return at::sparse_compressed_tensor(compressed_indices, plain_indices, values,
+                                 values.options().layout(layout_)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
   }
-  throw std::runtime_error("sparse_csr_tensor(): invalid arguments");
+  throw std::runtime_error("sparse_" + layout_name + "_tensor(): invalid arguments");
+}
+
+Tensor sparse_compressed_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
+  return sparse_compressed_tensor_ctor_template<c10::Layout::Unspecified>(dispatch_key, scalar_type, r);
+}
+
+Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
+  return sparse_compressed_tensor_ctor_template<c10::kSparseCsr>(dispatch_key, scalar_type, r);
 }
 
 template <c10::Layout required_layout>
