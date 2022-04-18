@@ -680,7 +680,7 @@ class Graph:
         memo = memo if memo else {}
         g = Graph(tracer_cls=self._tracer_cls)
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
-        g._codegen = self._codegen
+        g._codegen = copy.deepcopy(self._codegen)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
         g.output(output_val, type_expr=getattr(old_output_val, 'type', None))
