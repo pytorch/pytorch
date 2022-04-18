@@ -908,13 +908,13 @@ class MultiheadAttention(Module):
     - ``batch_first`` is ``True`` and the input is batched
     - ``kdim`` and ``vdim`` are equal to ``embed_dim``
     - at most one of ``key_padding_mask`` or ``attn_mask`` is passed
-    - if a `NestedTensor<https://pytorch.org/docs/stable/nested.html>`_ is passed, neither
+    - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither
       ``key_padding_mask`` nor ``attn_mask`` is passed
 
     If the optimized implementation is in use, a
-    `NestedTensor<https://pytorch.org/docs/stable/nested.html>`_ can be passed for
+    `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
     ``query``/``key``/``value`` to more represent padding more efficiently than using a
-    padding mask. In this case, a `NestedTensor<https://pytorch.org/docs/stable/nested.html>`_
+    padding mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_
     will be returned, and an additional speedup proportional to the fraction of the input
     that is padding can be expected.
 
