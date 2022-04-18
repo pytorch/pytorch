@@ -5443,6 +5443,7 @@ class SpectralFuncInfo(OpInfo):
                  ndimensional: SpectralFuncType,
                  sample_inputs_func=sample_inputs_spectral_ops,
                  decorators=None,
+                 default_test_dtypes=floating_and_complex_types_and(torch.complex32, torch.half),
                  **kwargs):
         decorators = list(decorators) if decorators is not None else []
         decorators += [
@@ -5453,6 +5454,7 @@ class SpectralFuncInfo(OpInfo):
                          dtypes=dtypes,
                          dtypesIfCUDA=dtypesIfCUDA,
                          decorators=decorators,
+                         default_test_dtypes=default_test_dtypes,
                          sample_inputs_func=sample_inputs_func,
                          **kwargs)
         self.ref = ref
