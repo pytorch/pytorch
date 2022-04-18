@@ -13,8 +13,8 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      - 'ciflow/binaries/*'
-      - 'ciflow/binaries_libtorch/*'
+      - "ciflow/binaries/*"
+      - "ciflow/binaries_libtorch/*"
   workflow_dispatch:
 
 env:
@@ -56,7 +56,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -144,8 +144,7 @@ jobs:
           name: libtorch-cpu-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -164,7 +163,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cpu-shared-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge
@@ -181,7 +180,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -285,8 +284,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cpu-shared-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-test
     env:
@@ -301,7 +300,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -394,7 +393,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -482,8 +481,7 @@ jobs:
           name: libtorch-cpu-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -502,7 +500,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-shared-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cpu-shared-without-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge
@@ -519,7 +517,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -623,8 +621,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-shared-without-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cpu-shared-without-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-cxx11-abi-test
     env:
@@ -639,7 +637,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -732,7 +730,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -820,8 +818,7 @@ jobs:
           name: libtorch-cpu-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -840,7 +837,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cpu-static-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge
@@ -857,7 +854,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -961,8 +958,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-static-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cpu-static-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-cxx11-abi-test
     env:
@@ -977,7 +974,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1070,7 +1067,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1158,8 +1155,7 @@ jobs:
           name: libtorch-cpu-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1178,7 +1174,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-static-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cpu-static-without-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge
@@ -1195,7 +1191,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1299,8 +1295,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-static-without-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cpu-static-without-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-cxx11-abi-test
     env:
@@ -1315,7 +1311,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1409,7 +1405,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1497,8 +1493,7 @@ jobs:
           name: libtorch-cuda10_2-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1517,7 +1512,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda10_2-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda10_2-shared-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -1535,7 +1530,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1650,8 +1645,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda10_2-shared-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda10_2-shared-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-with-deps-cxx11-abi-test
     env:
@@ -1667,7 +1662,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1761,7 +1756,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1849,8 +1844,7 @@ jobs:
           name: libtorch-cuda10_2-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1869,7 +1863,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda10_2-shared-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda10_2-shared-without-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -1887,7 +1881,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2002,8 +1996,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda10_2-shared-without-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda10_2-shared-without-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-without-deps-cxx11-abi-test
     env:
@@ -2019,7 +2013,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2113,7 +2107,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2201,8 +2195,7 @@ jobs:
           name: libtorch-cuda10_2-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2221,7 +2214,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda10_2-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda10_2-static-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -2239,7 +2232,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2354,8 +2347,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda10_2-static-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda10_2-static-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-with-deps-cxx11-abi-test
     env:
@@ -2371,7 +2364,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2465,7 +2458,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2553,8 +2546,7 @@ jobs:
           name: libtorch-cuda10_2-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2573,7 +2565,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda10_2-static-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda10_2-static-without-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -2591,7 +2583,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2706,8 +2698,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda10_2-static-without-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda10_2-static-without-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-without-deps-cxx11-abi-test
     env:
@@ -2723,7 +2715,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2817,7 +2809,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2908,8 +2900,7 @@ jobs:
           name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2928,7 +2919,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_3-shared-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -2946,7 +2937,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3061,8 +3052,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-shared-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_3-shared-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-with-deps-cxx11-abi-test
     env:
@@ -3078,7 +3069,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3172,7 +3163,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3263,8 +3254,7 @@ jobs:
           name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3283,7 +3273,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-shared-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_3-shared-without-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -3301,7 +3291,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3416,8 +3406,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-shared-without-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_3-shared-without-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-without-deps-cxx11-abi-test
     env:
@@ -3433,7 +3423,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3527,7 +3517,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3618,8 +3608,7 @@ jobs:
           name: libtorch-cuda11_3-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3638,7 +3627,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_3-static-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -3656,7 +3645,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3771,8 +3760,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-static-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_3-static-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-with-deps-cxx11-abi-test
     env:
@@ -3788,7 +3777,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3882,7 +3871,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3973,8 +3962,7 @@ jobs:
           name: libtorch-cuda11_3-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3993,7 +3981,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-static-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_3-static-without-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -4011,7 +3999,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4126,8 +4114,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-static-without-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_3-static-without-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-without-deps-cxx11-abi-test
     env:
@@ -4143,7 +4131,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4237,7 +4225,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4328,8 +4316,7 @@ jobs:
           name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4348,7 +4335,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_5-shared-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -4366,7 +4353,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4481,8 +4468,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_5-shared-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-with-deps-cxx11-abi-test
     env:
@@ -4498,7 +4485,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4592,7 +4579,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4683,8 +4670,7 @@ jobs:
           name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4703,7 +4689,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_5-shared-without-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -4721,7 +4707,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4836,8 +4822,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-without-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_5-shared-without-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-without-deps-cxx11-abi-test
     env:
@@ -4853,7 +4839,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4947,7 +4933,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -5038,8 +5024,7 @@ jobs:
           name: libtorch-cuda11_5-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -5058,7 +5043,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_5-static-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -5076,7 +5061,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -5191,8 +5176,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_5-static-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-with-deps-cxx11-abi-test
     env:
@@ -5208,7 +5193,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -5302,7 +5287,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -5393,8 +5378,7 @@ jobs:
           name: libtorch-cuda11_5-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -5413,7 +5397,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_5-static-without-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -5431,7 +5415,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -5546,8 +5530,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-without-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_5-static-without-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-without-deps-cxx11-abi-test
     env:
@@ -5563,7 +5547,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -5657,7 +5641,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -5748,8 +5732,7 @@ jobs:
           name: libtorch-cuda11_6-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -5768,7 +5751,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_6-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_6-shared-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -5786,7 +5769,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -5901,8 +5884,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_6-shared-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_6-shared-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-with-deps-cxx11-abi-test
     env:
@@ -5918,7 +5901,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -6012,7 +5995,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -6103,8 +6086,7 @@ jobs:
           name: libtorch-cuda11_6-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -6123,7 +6105,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_6-shared-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_6-shared-without-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -6141,7 +6123,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -6256,8 +6238,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_6-shared-without-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_6-shared-without-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-without-deps-cxx11-abi-test
     env:
@@ -6273,7 +6255,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -6367,7 +6349,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -6458,8 +6440,7 @@ jobs:
           name: libtorch-cuda11_6-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -6478,7 +6459,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_6-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_6-static-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-with-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -6496,7 +6477,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -6611,8 +6592,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_6-static-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_6-static-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-with-deps-cxx11-abi-test
     env:
@@ -6628,7 +6609,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -6722,7 +6703,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -6813,8 +6794,7 @@ jobs:
           name: libtorch-cuda11_6-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -6833,7 +6813,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_6-static-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_6-static-without-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-without-deps-cxx11-abi-build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -6851,7 +6831,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -6966,8 +6946,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_6-static-without-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_6-static-without-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-without-deps-cxx11-abi-test
     env:
@@ -6983,7 +6963,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -7077,7 +7057,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -7165,8 +7145,7 @@ jobs:
           name: libtorch-rocm4_5_2-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -7185,7 +7164,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm4_5_2-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-rocm4_5_2-shared-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm4_5_2-shared-with-deps-cxx11-abi-build
     runs-on: linux.rocm.gpu
@@ -7316,8 +7295,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm4_5_2-shared-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-rocm4_5_2-shared-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm4_5_2-shared-with-deps-cxx11-abi-test
     env:
@@ -7333,7 +7312,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -7427,7 +7406,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -7515,8 +7494,7 @@ jobs:
           name: libtorch-rocm4_5_2-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -7535,7 +7513,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm4_5_2-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-rocm4_5_2-static-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm4_5_2-static-with-deps-cxx11-abi-build
     runs-on: linux.rocm.gpu
@@ -7666,8 +7644,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm4_5_2-static-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-rocm4_5_2-static-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm4_5_2-static-with-deps-cxx11-abi-test
     env:
@@ -7683,7 +7661,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -7777,7 +7755,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -7865,8 +7843,7 @@ jobs:
           name: libtorch-rocm5_0-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -7885,7 +7862,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm5_0-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-rocm5_0-shared-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-shared-with-deps-cxx11-abi-build
     runs-on: linux.rocm.gpu
@@ -8016,8 +7993,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm5_0-shared-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-rocm5_0-shared-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-shared-with-deps-cxx11-abi-test
     env:
@@ -8033,7 +8010,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -8127,7 +8104,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -8215,8 +8192,7 @@ jobs:
           name: libtorch-rocm5_0-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -8235,7 +8211,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm5_0-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-rocm5_0-static-with-deps-cxx11-abi-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-static-with-deps-cxx11-abi-build
     runs-on: linux.rocm.gpu
@@ -8366,8 +8342,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-rocm5_0-static-with-deps-cxx11-abi-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-rocm5_0-static-with-deps-cxx11-abi-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-static-with-deps-cxx11-abi-test
     env:
@@ -8383,7 +8359,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace

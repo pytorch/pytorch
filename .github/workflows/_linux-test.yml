@@ -37,7 +37,7 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
         with:
           needs-viable-strict: ${{ inputs.needs-viable-strict }}
           needs-history-and-master: true

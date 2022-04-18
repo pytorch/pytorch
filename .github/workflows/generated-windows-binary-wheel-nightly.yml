@@ -13,8 +13,8 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      - 'ciflow/binaries/*'
-      - 'ciflow/binaries_wheel/*'
+      - "ciflow/binaries/*"
+      - "ciflow/binaries_wheel/*"
   workflow_dispatch:
 
 env:
@@ -139,7 +139,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_7-cpu-test:  # Testing
+  wheel-py3_7-cpu-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_7-cpu-build
     runs-on: windows.4xlarge
@@ -241,8 +241,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_7-cpu-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_7-cpu-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_7-cpu-test
     env:
@@ -257,7 +257,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -438,7 +438,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_7-cuda11_3-test:  # Testing
+  wheel-py3_7-cuda11_3-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_7-cuda11_3-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -541,8 +541,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_7-cuda11_3-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_7-cuda11_3-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_7-cuda11_3-test
     env:
@@ -558,7 +558,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -739,7 +739,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_7-cuda11_5-test:  # Testing
+  wheel-py3_7-cuda11_5-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_7-cuda11_5-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -842,8 +842,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_7-cuda11_5-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_7-cuda11_5-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_7-cuda11_5-test
     env:
@@ -859,7 +859,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1040,7 +1040,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_7-cuda11_6-test:  # Testing
+  wheel-py3_7-cuda11_6-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_7-cuda11_6-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -1143,8 +1143,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_7-cuda11_6-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_7-cuda11_6-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_7-cuda11_6-test
     env:
@@ -1160,7 +1160,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1340,7 +1340,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_8-cpu-test:  # Testing
+  wheel-py3_8-cpu-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_8-cpu-build
     runs-on: windows.4xlarge
@@ -1442,8 +1442,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_8-cpu-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_8-cpu-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_8-cpu-test
     env:
@@ -1458,7 +1458,7 @@ jobs:
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1639,7 +1639,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_8-cuda11_3-test:  # Testing
+  wheel-py3_8-cuda11_3-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_8-cuda11_3-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -1742,8 +1742,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_8-cuda11_3-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_8-cuda11_3-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_8-cuda11_3-test
     env:
@@ -1759,7 +1759,7 @@ jobs:
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1940,7 +1940,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_8-cuda11_5-test:  # Testing
+  wheel-py3_8-cuda11_5-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_8-cuda11_5-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -2043,8 +2043,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_8-cuda11_5-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_8-cuda11_5-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_8-cuda11_5-test
     env:
@@ -2060,7 +2060,7 @@ jobs:
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2241,7 +2241,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_8-cuda11_6-test:  # Testing
+  wheel-py3_8-cuda11_6-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_8-cuda11_6-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -2344,8 +2344,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_8-cuda11_6-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_8-cuda11_6-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_8-cuda11_6-test
     env:
@@ -2361,7 +2361,7 @@ jobs:
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2541,7 +2541,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_9-cpu-test:  # Testing
+  wheel-py3_9-cpu-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_9-cpu-build
     runs-on: windows.4xlarge
@@ -2643,8 +2643,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_9-cpu-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_9-cpu-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_9-cpu-test
     env:
@@ -2659,7 +2659,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2840,7 +2840,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_9-cuda11_3-test:  # Testing
+  wheel-py3_9-cuda11_3-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_9-cuda11_3-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -2943,8 +2943,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_9-cuda11_3-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_9-cuda11_3-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_9-cuda11_3-test
     env:
@@ -2960,7 +2960,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3141,7 +3141,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_9-cuda11_5-test:  # Testing
+  wheel-py3_9-cuda11_5-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_9-cuda11_5-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -3244,8 +3244,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_9-cuda11_5-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_9-cuda11_5-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_9-cuda11_5-test
     env:
@@ -3261,7 +3261,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3442,7 +3442,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_9-cuda11_6-test:  # Testing
+  wheel-py3_9-cuda11_6-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_9-cuda11_6-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -3545,8 +3545,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_9-cuda11_6-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_9-cuda11_6-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_9-cuda11_6-test
     env:
@@ -3562,7 +3562,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3742,7 +3742,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cpu-test:  # Testing
+  wheel-py3_10-cpu-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cpu-build
     runs-on: windows.4xlarge
@@ -3844,8 +3844,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cpu-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_10-cpu-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cpu-test
     env:
@@ -3860,7 +3860,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4041,7 +4041,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cuda11_3-test:  # Testing
+  wheel-py3_10-cuda11_3-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cuda11_3-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -4144,8 +4144,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cuda11_3-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_10-cuda11_3-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cuda11_3-test
     env:
@@ -4161,7 +4161,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4342,7 +4342,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cuda11_5-test:  # Testing
+  wheel-py3_10-cuda11_5-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cuda11_5-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -4445,8 +4445,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cuda11_5-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_10-cuda11_5-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cuda11_5-test
     env:
@@ -4462,7 +4462,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4643,7 +4643,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cuda11_6-test:  # Testing
+  wheel-py3_10-cuda11_6-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cuda11_6-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -4746,8 +4746,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  wheel-py3_10-cuda11_6-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  wheel-py3_10-cuda11_6-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cuda11_6-test
     env:
@@ -4763,7 +4763,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace

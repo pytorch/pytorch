@@ -13,8 +13,8 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      - 'ciflow/binaries/*'
-      - 'ciflow/binaries_libtorch/*'
+      - "ciflow/binaries/*"
+      - "ciflow/binaries_libtorch/*"
   workflow_dispatch:
 
 env:
@@ -143,7 +143,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-with-deps-release-test:  # Testing
+  libtorch-cpu-shared-with-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-release-build
     runs-on: windows.4xlarge
@@ -249,8 +249,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-with-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cpu-shared-with-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-release-test
     env:
@@ -269,7 +269,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -453,7 +453,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-without-deps-release-test:  # Testing
+  libtorch-cpu-shared-without-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-release-build
     runs-on: windows.4xlarge
@@ -559,8 +559,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-without-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cpu-shared-without-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-release-test
     env:
@@ -579,7 +579,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -763,7 +763,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-with-deps-release-test:  # Testing
+  libtorch-cpu-static-with-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-release-build
     runs-on: windows.4xlarge
@@ -869,8 +869,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-with-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cpu-static-with-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-release-test
     env:
@@ -889,7 +889,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1073,7 +1073,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-without-deps-release-test:  # Testing
+  libtorch-cpu-static-without-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-release-build
     runs-on: windows.4xlarge
@@ -1179,8 +1179,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-without-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cpu-static-without-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-release-test
     env:
@@ -1199,7 +1199,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1384,7 +1384,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-with-deps-release-test:  # Testing
+  libtorch-cuda11_3-shared-with-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-with-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -1491,8 +1491,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-with-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_3-shared-with-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-with-deps-release-test
     env:
@@ -1512,7 +1512,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -1697,7 +1697,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-without-deps-release-test:  # Testing
+  libtorch-cuda11_3-shared-without-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-without-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -1804,8 +1804,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-without-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_3-shared-without-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-without-deps-release-test
     env:
@@ -1825,7 +1825,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2010,7 +2010,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-with-deps-release-test:  # Testing
+  libtorch-cuda11_3-static-with-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-with-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -2117,8 +2117,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-with-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_3-static-with-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-with-deps-release-test
     env:
@@ -2138,7 +2138,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2323,7 +2323,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-without-deps-release-test:  # Testing
+  libtorch-cuda11_3-static-without-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-without-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -2430,8 +2430,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-without-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_3-static-without-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-without-deps-release-test
     env:
@@ -2451,7 +2451,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2636,7 +2636,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-with-deps-release-test:  # Testing
+  libtorch-cuda11_5-shared-with-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-with-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -2743,8 +2743,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-with-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_5-shared-with-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-with-deps-release-test
     env:
@@ -2764,7 +2764,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -2949,7 +2949,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-without-deps-release-test:  # Testing
+  libtorch-cuda11_5-shared-without-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-without-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -3056,8 +3056,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-without-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_5-shared-without-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-shared-without-deps-release-test
     env:
@@ -3077,7 +3077,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3262,7 +3262,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-with-deps-release-test:  # Testing
+  libtorch-cuda11_5-static-with-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-with-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -3369,8 +3369,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-with-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_5-static-with-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-with-deps-release-test
     env:
@@ -3390,7 +3390,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3575,7 +3575,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-without-deps-release-test:  # Testing
+  libtorch-cuda11_5-static-without-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-without-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -3682,8 +3682,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-without-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_5-static-without-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_5-static-without-deps-release-test
     env:
@@ -3703,7 +3703,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -3888,7 +3888,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_6-shared-with-deps-release-test:  # Testing
+  libtorch-cuda11_6-shared-with-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-with-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -3995,8 +3995,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_6-shared-with-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_6-shared-with-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-with-deps-release-test
     env:
@@ -4016,7 +4016,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4201,7 +4201,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_6-shared-without-deps-release-test:  # Testing
+  libtorch-cuda11_6-shared-without-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-without-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -4308,8 +4308,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_6-shared-without-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_6-shared-without-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-without-deps-release-test
     env:
@@ -4329,7 +4329,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4514,7 +4514,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_6-static-with-deps-release-test:  # Testing
+  libtorch-cuda11_6-static-with-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-with-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -4621,8 +4621,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_6-static-with-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_6-static-with-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-with-deps-release-test
     env:
@@ -4642,7 +4642,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -4827,7 +4827,7 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_6-static-without-deps-release-test:  # Testing
+  libtorch-cuda11_6-static-without-deps-release-test: # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-without-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
@@ -4934,8 +4934,8 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_6-static-without-deps-release-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  libtorch-cuda11_6-static-without-deps-release-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-without-deps-release-test
     env:
@@ -4955,7 +4955,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace

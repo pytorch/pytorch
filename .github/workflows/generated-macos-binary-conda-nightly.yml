@@ -5,7 +5,7 @@
 name: macos-binary-conda
 
 on:
-# TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
+  # TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
@@ -14,8 +14,8 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-      - 'ciflow/binaries/*'
-      - 'ciflow/binaries_conda/*'
+      - "ciflow/binaries/*"
+      - "ciflow/binaries_conda/*"
   workflow_dispatch:
 
 env:
@@ -118,8 +118,8 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  conda-py3_7-cpu-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  conda-py3_7-cpu-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_7-cpu-build
     env:
@@ -133,7 +133,7 @@ jobs:
       DESIRED_PYTHON: "3.7"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -293,8 +293,8 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  conda-py3_8-cpu-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  conda-py3_8-cpu-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_8-cpu-build
     env:
@@ -308,7 +308,7 @@ jobs:
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -468,8 +468,8 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  conda-py3_9-cpu-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  conda-py3_9-cpu-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_9-cpu-build
     env:
@@ -483,7 +483,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
@@ -643,8 +643,8 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  conda-py3_10-cpu-upload:  # Uploading
-    runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
+  conda-py3_10-cpu-upload: # Uploading
+    runs-on: linux.2xlarge # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: conda-py3_10-cpu-build
     env:
@@ -658,7 +658,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace

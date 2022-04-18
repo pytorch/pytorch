@@ -138,7 +138,7 @@ on:
 
 {%- macro setup_ec2_linux() -%}
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/ignore-fix-fetch-depth-testing
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
