@@ -1,32 +1,7 @@
 import torch
-import functools
-from typing import Iterator, Union
+from typing import Iterator
 from torch._C import (
     _get_torch_function_mode, _set_torch_function_mode, _get_python_mode, _set_python_mode)
-
-def _wrap_init(f, metaclass, mode_type):
-    undef = object()
-
-    @functools.wraps(f)
-    def wrapped(self, *args, inner=undef, **kwargs):
-        if inner is undef:
-            assert metaclass.__name__[-4:] == "Meta"
-            non_meta_class = metaclass.__name__[:-4]
-            raise TypeError(
-                f"missing inner keyword argument; instead of constructing a {non_meta_class} directly, "
-                f"pass the constructor to push_{mode_type}_mode"
-            )
-        self.inner = inner
-        return f(self, *args, **kwargs)
-    return wrapped
-
-class ModeMeta(type):
-    def __new__(metacls, name, bases, dct, mode_type=None):
-        if mode_type not in ['torch_function', 'python']:
-            raise RuntimeError(f"only support torch_function or python modes, got mode_type of {mode_type}")
-        if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'], metacls, mode_type)
-        return super().__new__(metacls, name, bases, dct)
 
 # a class for the helper function to package all the info about the Mode class
 # so the helper function can access it without needing a circular import
