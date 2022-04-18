@@ -90,11 +90,6 @@ jobs:
         run: |
           set -eux
           python torch/testing/_check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
-      - name: Ensure all test files have header containing ownership information
-        if: always()
-        run: |
-          python3 -m pip install boto3==1.19.12
-          .github/scripts/lint_test_ownership.py
 
   workflow-checks:
     name: workflow-checks
