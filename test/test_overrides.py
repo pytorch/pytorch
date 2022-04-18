@@ -1113,7 +1113,7 @@ class TestTorchFunctionMode(TestCase):
         with torch.overrides.push_torch_function_mode(A):
             self.assertEqual(torch.randn(3), -1)
             self.assertEqual(torch.add(x, x), -1)
-            self.assertEqual(torch.split(None, [2]), -1)  # python side
+            self.assertEqual(torch.nn.functional.dropout(None, 0.5), -1)  # python side
             self.assertEqual(bar(x), -1)
 
     def test_factory_override(self):
@@ -1305,26 +1305,19 @@ class TestTorchFunctionMode(TestCase):
                 if kwargs is None:
                     kwargs = {}
                 called += 1
-                # The first time we call, the mode sees an active type that
-                # it doesn't know how to deal with.  The second time, we're
-                # instructed to treat it "as if it were a tensor", and so
-                # we keep going.  I'm not entirely clear if the subclasses
-                # disappearing from types is the correct way to do it.
-                if any(t is not torch.Tensor for t in types):
-                    return NotImplemented
-                else:
-                    return func(*args, **kwargs)
+                return NotImplemented
 
         class B(torch.Tensor):
             pass
 
         b = B()
 
+        # TODO: What is the goal of this test, are we breaking desired behavior?
         with torch.overrides.push_torch_function_mode(A):
             r = torch.neg(b)
 
         self.assertIs(type(r), B)
-        self.assertEqual(called, 2)
+        self.assertEqual(called, 1)
 
         called = 0
 
@@ -1332,7 +1325,7 @@ class TestTorchFunctionMode(TestCase):
             r = bar(b)
 
         self.assertIs(type(r), B)
-        self.assertEqual(called, 2)
+        self.assertEqual(called, 1)
 
 
 
