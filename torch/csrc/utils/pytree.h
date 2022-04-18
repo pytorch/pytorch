@@ -121,7 +121,12 @@ struct ContainerHandle {
   }
 
   const ContainerHandle& operator[](size_t idx) const {
-    assert(idx < handle->size);
+    TORCH_INTERNAL_ASSERT(
+        idx < handle->size,
+        "operator [] index=",
+        idx,
+        " >= size=",
+        handle->size);
     return handle->items[idx];
   }
   ContainerHandle& operator[](size_t idx) {
