@@ -309,7 +309,7 @@ class Pair(abc.ABC):
             Since this method uses instance attributes of :class:`Pair`, it should not be used before the
             ``super().__init__(...)`` call in the constructor.
         """
-        return ErrorMeta(type, (self.msg + '\n' + msg) if (self.msg and type is AssertionError) else (msg), id=self.id or id)
+        return ErrorMeta(type, self.msg if self.msg and type is AssertionError else msg, id=self.id or id)
 
     @abc.abstractmethod
     def compare(self) -> None:
