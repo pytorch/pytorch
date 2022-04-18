@@ -79,23 +79,14 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     qb = qb.contiguous(c10::MemoryFormat::ChannelsLast);
   }
 
-  at::Tensor add_output = qa.dim() == 4 ? at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast)
-                                        : at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
-  at::Tensor quantized_output = qa.dim() == 4 ? at::_empty_affine_quantized(qa.sizes(),
-                                                                            at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
-                                                                            output_scale,
-                                                                            output_zero_point,
-                                                                            at::MemoryFormat::ChannelsLast)
-                                              : at::_empty_affine_quantized(qa.sizes(),
-                                                                            at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
-                                                                            output_scale,
-                                                                            output_zero_point);
+  auto memory_format = qa.dim() == 4 ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
+  at::Tensor quantized_output = at::_empty_affine_quantized(qa.sizes(), at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
+                                                            output_scale, output_zero_point, memory_format)
   // TODO: When cudnn enables support for broadcasting, we can remove this tensor
-  at::Tensor requantize_multiplier_tensor = qa.dim() == 4 ? at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast)
-                                                          : at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
+  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
   requantize_multiplier_tensor.fill_(qa.q_scale() / output_scale);
-  at::Tensor rhs_multiplier_tensor = qa.dim() == 4 ? at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast)
-                                                   : at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
+  at::Tensor rhs_multiplier_tensor = qa.dim() == 4 ? at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
   rhs_multiplier_tensor.fill_(qb.q_scale() / qa.q_scale());
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
