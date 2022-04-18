@@ -4539,6 +4539,29 @@ class TestCudaFuser(JitTestCase):
                 t_jit = torch.jit.script(t)
                 self._run_helper(t_jit, t, x)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_device_constant(self):
+        x = torch.randn(4, 2, device="cuda")
+
+        def t(x):
+            return torch.rand_like(x, device=torch.device(type='cuda'))
+
+        # cpu tensor shouldn't be fused
+        def t_cpu(x):
+            return torch.rand_like(x, device=torch.device(type='cpu'))
+
+        with nvfuser_singleton_fusion(True):
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, x)
+
+            t_cpu_jit = torch.jit.script(t_cpu)
+            for i in range(5):
+                t_cpu_jit(x)
+
+            self.assertGraphContainsExactly(t_cpu_jit.graph_for(x), FUSION_GUARD, 0)
+
 
 class TestPassManagerCudaFuser(JitTestCase):
     def setUp(self):
