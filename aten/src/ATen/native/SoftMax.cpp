@@ -419,6 +419,7 @@ Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarTyp
 }
 
 Tensor& softmax_out(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype, Tensor& output_) {
+  TORCH_CHECK(output_.is_contiguous(), "Out tensor must be contiguous");
   if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float) {
     return at::_softmax_out(output_, input_, dim_, true);
   } else {
@@ -456,6 +457,7 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<Scala
 }
 
 Tensor& log_softmax_out(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype, Tensor& output_) {
+  TORCH_CHECK(output_.is_contiguous(), "Out tensor must be contiguous");
   if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float) {
     return at::_log_softmax_out(output_, input_, dim_, true);
   } else {
