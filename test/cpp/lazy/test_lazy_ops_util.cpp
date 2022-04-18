@@ -2,7 +2,7 @@
 
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
-#include <torch/csrc/lazy/core/ir_nodes.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
 
 #include <iostream>

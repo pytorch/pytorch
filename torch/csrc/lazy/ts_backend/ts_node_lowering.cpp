@@ -10,7 +10,7 @@
 #include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
-#include <torch/csrc/lazy/generated/LazyIrBuilder.h>
+#include <torch/csrc/lazy/ts_backend/ir_builder.h>
 #include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
