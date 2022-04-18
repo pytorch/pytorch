@@ -447,11 +447,8 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         self.assertEqual(called_funcs, [torch.ops.aten.index_put_.default])
 
     def test_enable_python_mode_error(self) -> None:
-        with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):
-            with enable_python_mode(torch.Tensor):
-                pass
         z = LoggingTensor(torch.empty([]))
-        with self.assertRaisesRegex(ValueError, "must be the type"):
+        with self.assertRaisesRegex(ValueError, "expected to get Tensor-like class or None"):
             with enable_python_mode(z):
                 pass
 
@@ -517,10 +514,81 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                 self.assertEqual(z.elem, expected)
 
     def test_nested_enable_python_mode(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "has already been set"):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise ErrorA
+
+        with self.assertRaisesRegex(ValueError, "there is already an active mode"):
+            with enable_python_mode(LoggingTensor):
+                with enable_python_mode(A):
+                    pass
+
+        # nested enable_python_modes are allowed if they're the same mode
+        # Will only write once to the log
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.tensor([3.]))
+            log_input("x", x)
             with enable_python_mode(LoggingTensor):
                 with enable_python_mode(LoggingTensor):
-                    pass
+                    x + x
+
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = torch._ops.aten.add.Tensor($0, $0)''')
+
+    def test_enable_python_mode_ignore_preexisting(self):
+        class Subclass_41(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return Subclass_41(torch.zeros(()))
+
+        class Subclass_40(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return Subclass_40(torch.zeros(()))
+
+        with enable_python_mode(Subclass_40):
+            with enable_python_mode(Subclass_41, ignore_preexisting=True):
+                self.assertTrue(isinstance(torch.zeros(()), Subclass_41))
+
+    def test_enable_python_mode_replace(self):
+        class Subclass_41(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return Subclass_41(torch.zeros(()))
+
+        class Subclass_40(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return Subclass_40(torch.zeros(()))
+
+        with enable_python_mode(Subclass_40):
+            with enable_python_mode(Subclass_41, replace=Subclass_40):
+                self.assertTrue(isinstance(torch.zeros(()), Subclass_41))
 
     def test_tolist_numpy_with_python_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
@@ -553,10 +621,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                 def wrap(e):
                     return NonWrapperSubclass(e) if isinstance(e, torch.Tensor) else e
 
-                # no_dispatch is only needed if you use enable_python_mode.
-                # It prevents infinite recursion.
-                with no_dispatch():
-                    rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+                rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
                 logging.getLogger("NonWrapperSubclass").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
                 return rs
 
@@ -590,10 +655,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                 def wrap(e):
                     return SubclassWithNone(e) if isinstance(e, torch.Tensor) else e
 
-                # no_dispatch is only needed if you use enable_python_mode.
-                # It prevents infinite recursion.
-                with no_dispatch():
-                    rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+                rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
                 if func.overloadpacket.__name__ == "add":
                     return None
                 else:

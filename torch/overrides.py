@@ -34,6 +34,8 @@ from torch._C import (
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 import contextlib
 
+from torch.utils._mode_utils import _enable_mode, ModeInfo
+
 __all__ = [
     "get_ignored_functions",
     "get_overridable_functions",
@@ -1751,49 +1753,9 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
         ignore_preexisting (bool): if True, ignore any preexisting mode
             and overwrite it with the passed mode.
     """
-    if not (
-        mode is None or
-        isinstance(mode, TorchFunctionMode) or
-        (isinstance(mode, type) and not issubclass(mode, TorchFunctionMode))
-    ):
-        raise TypeError(
-            "expected to get TorchFunctionMode, Tensor-like class or None as argument, got "
-            f"{type(mode)} instead"
-        )
-    old = _get_torch_function_mode()
-    # Short circuit.  It is valid to reset a mode to yourself, we won't error
-    # here
-    if old is mode:
-        yield
-        return
-    if old is not None and not ignore_preexisting and old is not replace:
-        if isinstance(mode, TorchFunctionMode):
-            help_text = (
-                'Use push_torch_function_mode instead.'
-            )
-        else:
-            help_text = (
-                'If you intended to completely override the preexisting mode, '
-                'pass ignore_preexisting=True.  This can result in unexpected '
-                'behavior; please consider rewriting your mode to be a subclass '
-                'of TorchFunctionMode to make it compositional!'
-            )
-        raise ValueError(
-            'Attempted to enable_torch_function_mode, but there is already an '
-            f'active mode {old}.  {help_text}'
-        )
-    # NB: we don't require TorchFunctionMode since this is intended to also
-    # let you directly pass a Tensor subclass type to "mode-ify" it.
-    if not hasattr(mode, '__torch_function__'):
-        raise ValueError(
-            'The argument passed to enable_torch_function_mode must implement '
-            '__torch_function__'
-        )
-    _set_torch_function_mode(mode)
-    try:
-        yield
-    finally:
-        _set_torch_function_mode(old)
+    mode_info = ModeInfo(mode_type="torch_function", mode_class=TorchFunctionMode,
+                         base_mode_class=BaseTorchFunctionMode, mode_class_name="BaseTorchFunctionMode")
+    return _enable_mode(mode, mode_info=mode_info, replace=replace, ignore_preexisting=ignore_preexisting)
 
 
 @contextlib.contextmanager

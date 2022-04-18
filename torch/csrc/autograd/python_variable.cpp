@@ -32,7 +32,6 @@
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/autograd/python_mode.h>
 
 
 #include <ATen/ATen.h>
