@@ -5,11 +5,11 @@ import tempfile
 import unittest
 import expecttest
 
-from tools.codegen.gen_backend_stubs import run
-from tools.codegen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
+from torchgen.gen_backend_stubs import run
+from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
 
 path = os.path.dirname(os.path.realpath(__file__))
-gen_backend_stubs_path = os.path.join(path, '../tools/codegen/gen_backend_stubs.py')
+gen_backend_stubs_path = os.path.join(path, '../../torchgen/gen_backend_stubs.py')
 
 # gen_backend_stubs.py is an integration point that is called directly by external backends.
 # The tests here are to confirm that badly formed inputs result in reasonable error messages.

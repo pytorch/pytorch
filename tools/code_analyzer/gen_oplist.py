@@ -7,7 +7,7 @@ from functools import reduce
 from typing import Set, List, Any
 
 import yaml
-from tools.codegen.selective_build.selector import combine_selective_builders, SelectiveBuilder
+from torchgen.selective_build.selector import combine_selective_builders, SelectiveBuilder
 from tools.lite_interpreter.gen_selected_mobile_ops_header import (
     write_selected_mobile_ops,
 )

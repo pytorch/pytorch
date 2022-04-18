@@ -4,12 +4,12 @@ import unittest
 
 from tools.autograd import gen_autograd_functions
 from tools.autograd import load_derivatives
-import tools.codegen.model
+import torchgen.model
 
 class TestCreateDerivative(unittest.TestCase):
 
     def test_named_grads(self) -> None:
-        schema = tools.codegen.model.FunctionSchema.parse(
+        schema = torchgen.model.FunctionSchema.parse(
             'func(Tensor a, Tensor b) -> (Tensor x, Tensor y)')
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
                                               func=schema)
@@ -23,7 +23,7 @@ class TestCreateDerivative(unittest.TestCase):
 
     def test_non_differentiable_output(self) -> None:
         specification = 'func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)'
-        schema = tools.codegen.model.FunctionSchema.parse(specification)
+        schema = torchgen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
                                               func=schema)
 
@@ -43,7 +43,7 @@ class TestCreateDerivative(unittest.TestCase):
                                  ['grad_x', 'grad_z'])
 
     def test_indexed_grads(self) -> None:
-        schema = tools.codegen.model.FunctionSchema.parse(
+        schema = torchgen.model.FunctionSchema.parse(
             'func(Tensor a, Tensor b) -> (Tensor x, Tensor y)')
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
                                               func=schema)
@@ -57,7 +57,7 @@ class TestCreateDerivative(unittest.TestCase):
 
     def test_named_grads_and_indexed_grads(self) -> None:
         specification = 'func(Tensor a, Tensor b) -> (Tensor x, Tensor y)'
-        schema = tools.codegen.model.FunctionSchema.parse(specification)
+        schema = torchgen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
                                               func=schema)
 
@@ -79,7 +79,7 @@ class TestCreateDerivative(unittest.TestCase):
 class TestGenAutogradFunctions(unittest.TestCase):
     def test_non_differentiable_output_invalid_type(self) -> None:
         specification = 'func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)'
-        schema = tools.codegen.model.FunctionSchema.parse(specification)
+        schema = torchgen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
                                               func=schema)
 
@@ -103,7 +103,7 @@ class TestGenAutogradFunctions(unittest.TestCase):
 
     def test_non_differentiable_output_output_differentiability(self) -> None:
         specification = 'func(Tensor a, Tensor b) -> (Tensor x, Tensor y, Tensor z)'
-        schema = tools.codegen.model.FunctionSchema.parse(specification)
+        schema = torchgen.model.FunctionSchema.parse(specification)
         native_function = dataclasses.replace(DEFAULT_NATIVE_FUNCTION,
                                               func=schema)
 
@@ -128,9 +128,9 @@ class TestGenAutogradFunctions(unittest.TestCase):
 
 # Represents the most basic NativeFunction. Use dataclasses.replace()
 # to edit for use.
-DEFAULT_NATIVE_FUNCTION, _ = tools.codegen.model.NativeFunction.from_yaml(
+DEFAULT_NATIVE_FUNCTION, _ = torchgen.model.NativeFunction.from_yaml(
     {'func': 'func() -> bool'},
-    loc=tools.codegen.model.Location(__file__, 1))
+    loc=torchgen.model.Location(__file__, 1))
 
 
 if __name__ == '__main__':

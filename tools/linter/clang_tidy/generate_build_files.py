@@ -36,7 +36,7 @@ def run_autogen() -> None:
         [
             sys.executable,
             "-m",
-            "tools.codegen.gen",
+            "torchgen.gen",
             "-s",
             "aten/src/ATen",
             "-d",

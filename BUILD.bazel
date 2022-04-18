@@ -93,7 +93,7 @@ generate_aten(
         aten_ufunc_generated_cuda_sources("aten/src/ATen/{}") +
         ["aten/src/ATen/Declarations.yaml"]
     ),
-    generator = "//tools/codegen:gen",
+    generator = "//torchgen:gen",
 )
 
 libtorch_cpp_generated_sources = [
@@ -1343,7 +1343,7 @@ cc_library(
 py_binary(
     name = "gen_op",
     srcs = ["caffe2/contrib/aten/gen_op.py"],
-    deps = ["//tools/codegen"],
+    deps = ["//torchgen"],
 )
 
 genrule(

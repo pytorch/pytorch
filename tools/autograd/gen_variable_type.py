@@ -37,19 +37,19 @@ from .gen_inplace_or_view_type import (
     AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION
 )
 
-from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
+from torchgen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
                                      tensorT, tensorListT, MutRefCType, OptionalCType,
                                      ListCType, SpecialArgName, scalarT, stringT,
                                      TupleCType, VectorCType)
-from tools.codegen.api.autograd import (
+from torchgen.api.autograd import (
     DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
     is_differentiable)
-from tools.codegen.api import cpp
-from tools.codegen.code_template import CodeTemplate
-from tools.codegen.context import native_function_manager, with_native_function
-from tools.codegen.utils import mapMaybe, FileManager
-from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
+from torchgen.api import cpp
+from torchgen.code_template import CodeTemplate
+from torchgen.context import native_function_manager, with_native_function
+from torchgen.utils import mapMaybe, FileManager
+from torchgen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
 from typing import Callable, List, Optional, Sequence, Tuple, Union, Dict

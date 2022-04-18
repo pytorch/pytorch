@@ -97,7 +97,7 @@ enum class BackendComponent : uint8_t {
 
 // See Note [DispatchKeySet Internal Representation] for more details.
 //
-// NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
+// NOTE: Keep the list in sync with `DispatchKey` in torchgen/model.py
 enum class DispatchKey : uint16_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
