@@ -53,7 +53,7 @@ def register_rendezvous_handler(scheme, handler):
 # Query will have format "rank=0&world_size=1" and is
 # converted into {"rank": 0, "world_size": 1}
 def _query_to_dict(query: str) -> Dict[str, str]:
-    return dict((pair.split("=")) for pair in filter(None, query.split("&")))
+    return dict((pair[0], pair[1]) for pair in (pair.split("=") for pair in filter(None, query.split("&"))))
 
 def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if not isinstance(url, six.string_classes):
