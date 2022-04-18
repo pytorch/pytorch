@@ -467,8 +467,10 @@ class TestBinaryUfuncs(TestCase):
             if op.supports_out:
                 # All these output types can be cast to any or complex type
                 out = torch.empty_like(lhs_c64, dtype=torch.complex64)
+
                 self.assertEqual(op(lhs_c64, rhs_c128, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_c64, rhs_c128), out, exact_dtype=False)
+                result = op(lhs_c64, rhs_c128)
+                self.assertEqual(result, out.to(result.dtype))
 
                 if not op.always_returns_bool:
                     # complex outs can't be cast to float types
