@@ -206,6 +206,8 @@ def run_model(model_getter: GetterType, args: Any, task: str, run_once_fn: Calla
     v = get_v_for(model, inp, task)
 
     # Warmup
+    # maybe_check_consistency=True checks for consistency between
+    # functorch vs autograd.functional and is done in run_once_functorch only
     run_once_fn(model, inp, task, v, maybe_check_consistency=True)
 
     elapsed = []
