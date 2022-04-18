@@ -5352,7 +5352,7 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         nd_tensor = partial(make_tensor, (S, S + 1, S + 2), device=device,
                             dtype=dtype, requires_grad=requires_grad)
         oned_tensor = partial(make_tensor, (31,), device=device,
-                            dtype=dtype, requires_grad=requires_grad)
+                              dtype=dtype, requires_grad=requires_grad)
     else:
         if self.name in ['fft.hfft', 'fft.irfft']:
             shapes = ((2, 9, 9), (33,))
@@ -5365,7 +5365,7 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         nd_tensor = partial(make_tensor, shapes[0], device=device,
                             dtype=dtype, requires_grad=requires_grad)
         oned_tensor = partial(make_tensor, shapes[1], device=device,
-                            dtype=dtype, requires_grad=requires_grad)
+                              dtype=dtype, requires_grad=requires_grad)
 
     def if_is_not_half_or_chalf(then_val, else_val):
         if is_not_half_or_chalf:
