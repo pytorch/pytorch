@@ -5,6 +5,7 @@
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
+#include <torch/csrc/lazy/ts_backend/ir_builder.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 namespace at {
@@ -97,6 +98,14 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       const at::Scalar& scalar,
       const torch::lazy::BackendDevice& device) const override {
     return std::make_shared<TSData>(scalar, device);
+  }
+
+  torch::lazy::BackendDataPtr GetComputationDataFromNode(Node* node) const {
+    auto* device_data_node = dynamic_cast<DeviceData*>(node);
+    if (!device_data_node) {
+      return nullptr;
+    }
+    return device_data_node->data();
   }
 
   std::string GetComputationBackendText(
