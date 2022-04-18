@@ -61,11 +61,17 @@ void sort_cuda_kernel(
     bool stable) {
   // this algorithm is always stable
 
+  // Macro for converting `TensorBase` -> `Tensor` without
+  // reference count bumps.
+#define TOTENSOR(BASE, VAR)           \
+  OptionalTensorRef opt_##BASE(BASE); \
+  const Tensor& VAR = *opt_##BASE;
+
   // Converting TensorBase into Tensor.
   // We will need Tensor's methods from this point onwards.
-  const Tensor& self = *OptionalTensorRef(self_base);
-  const Tensor& values = *OptionalTensorRef(values_base);
-  const Tensor& indices = *OptionalTensorRef(indices_base);
+  TOTENSOR(self_base, self);
+  TOTENSOR(values_base, values);
+  TOTENSOR(indices_base, indices);
 
   TORCH_CHECK(self.sizes()[dim] <= std::numeric_limits<int>::max(),
     "The dimension being sorted can not have more than INT_MAX elements.");
