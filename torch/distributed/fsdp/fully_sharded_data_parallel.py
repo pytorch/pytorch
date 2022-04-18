@@ -26,6 +26,10 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+from torch.distributed.utils import (
+    _verify_param_shape_across_processes,
+    _sync_params_and_buffers,
+)
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -461,6 +465,31 @@ class FullyShardedDataParallel(nn.Module):
             if param not in ignored_params and not isinstance(param, FlatParameter):
                 params.append(param)
 
+        # At this point we are wrapping an atomic FSDP unit. Check module shapes
+        # and broadcast module from rank 0 to ensure everything starts off with
+        # the same parameters.
+        # Hack: move to compute device and back if it is CPU
+        prev_device = next(module.parameters()).device
+        was_cpu = (prev_device == torch.device("cpu"))
+        if was_cpu:
+            warnings.warn(
+                f"Module is input on CPU, we are moving to to {self.compute_device} to perform parameter verification and will move it back after. In the future please specify device_ids which will explicitly tell FSDP to place the module on a particular device."
+            )
+            module = module.to(self.compute_device)
+        _verify_param_shape_across_processes(
+            process_group=self.process_group,
+            tensors=params,  # TODO: FSDP + DDP to verify buffers as well
+        )
+        _sync_params_and_buffers(
+            module=module,
+            process_group=self.process_group,
+            # Same bucket size as used in DDP.
+            broadcast_bucket_size=int(250 * 1024 * 1024),
+            rank=0,
+            params_and_buffers_to_ignore=ignored_params,
+        )
+        if was_cpu:
+            module = module.to(prev_device)
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
             module, param_list=params
         )
