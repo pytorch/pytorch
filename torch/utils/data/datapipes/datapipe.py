@@ -59,9 +59,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         [2, 4, 6, 8, 10]
     """
     functions: Dict[str, Callable] = {}
-    reduce_ex_hook : Optional[Callable] = None
+    reduce_ex_hook: Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
     _valid_iterator_id: Optional[int] = None
+    singleton_mode: bool = False  # If `True`, each IterDataPipe instance can only have one active iterator
 
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
@@ -132,6 +133,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         if IterDataPipe.reduce_ex_hook is not None and hook_fn is not None:
             raise Exception("Attempt to override existing reduce_ex_hook")
         IterDataPipe.reduce_ex_hook = hook_fn
+
+    @classmethod
+    def set_singleton_mode(cls, state: bool) -> None:
+        cls.singleton_mode = state
 
 
 class DFIterDataPipe(IterDataPipe):
