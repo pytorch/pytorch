@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 import contextlib
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, ModeInfo, ModeMeta
+from torch.utils._mode_utils import _enable_mode, _push_mode, ModeInfo, _wrap_init
 
 __all__ = [
     "get_ignored_functions",
@@ -1628,7 +1628,7 @@ def _wrap_torch_function(f):
 # more difficult to interact with TorchFunctionModeMeta.
 
 
-class TorchFunctionModeMeta(ModeMeta):
+class TorchFunctionModeMeta(type):
     """
     Metaclass for :class:`TorchFunctionMode`; it does two things:
 
@@ -1644,9 +1644,11 @@ class TorchFunctionModeMeta(ModeMeta):
     right thing (aka, this is why there is a metaclass).
     """
     def __new__(metacls, name, bases, dct):
+        if '__init__' in dct:
+            dct['__init__'] = _wrap_init(dct['__init__'], "TorchFunctionMode", "torch_function")
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
-        return super().__new__(metacls, name, bases, dct, mode_type="torch_function")
+        return super().__new__(metacls, name, bases, dct)
 
 
 class TorchFunctionMode(metaclass=TorchFunctionModeMeta):

@@ -1,13 +1,8 @@
-import torch
 import contextlib
-from typing import Iterator, Union
+from typing import Iterator
 import functools
 
-from torch._C import (
-    _get_python_mode, _set_python_mode,
-    _get_torch_function_mode, _set_torch_function_mode)
-
-from torch.utils._mode_utils import _enable_mode, _push_mode, ModeInfo, ModeMeta 
+from torch.utils._mode_utils import _enable_mode, _push_mode, ModeInfo, _wrap_init 
 
 # NB: Calling an operator inside __torch_dispatch__ does go through
 # __torch_dispatch__ again. Please use _DisableTorchDispatch inside
@@ -76,7 +71,7 @@ def _wrap_torch_dispatch(f):
 # notion of mode stack directly into C++ but in this design it's substantially
 # more difficult to interact with PythonModeMeta.
 
-class PythonModeMeta(ModeMeta):
+class PythonModeMeta(type):
     """
     Metaclass for :class:`PythonMode`; it does two things:
 
@@ -92,9 +87,11 @@ class PythonModeMeta(ModeMeta):
     right thing (aka, this is why there is a metaclass).
     """
     def __new__(metacls, name, bases, dct):
+        if '__init__' in dct:
+            dct['__init__'] = _wrap_init(dct['__init__'], "PythonMode", "python")
         if '__torch_dispatch__' in dct:
             dct['__torch_dispatch__'] = _wrap_torch_dispatch(dct['__torch_dispatch__'])
-        return super().__new__(metacls, name, bases, dct, mode_type="python")
+        return super().__new__(metacls, name, bases, dct)
 
 
 class PythonMode(metaclass=PythonModeMeta):

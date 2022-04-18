@@ -1,18 +1,17 @@
+import torch
 import functools
-from typing import Iterator, Union
+from typing import Iterator
 from torch._C import (
     _get_torch_function_mode, _set_torch_function_mode, _get_python_mode, _set_python_mode)
 
-def _wrap_init(f, metaclass, mode_type):
+def _wrap_init(f, class_name, mode_type):
     undef = object()
 
     @functools.wraps(f)
     def wrapped(self, *args, inner=undef, **kwargs):
         if inner is undef:
-            assert metaclass.__name__[-4:] == "Meta"
-            non_meta_class = metaclass.__name__[:-4]
             raise TypeError(
-                f"missing inner keyword argument; instead of constructing a {non_meta_class} directly, "
+                f"missing inner keyword argument; instead of constructing a {class_name} directly, "
                 f"pass the constructor to push_{mode_type}_mode"
             )
         self.inner = inner
