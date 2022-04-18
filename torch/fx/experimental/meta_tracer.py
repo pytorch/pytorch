@@ -5,10 +5,23 @@ import functools
 
 from typing import Dict
 
+def embedding_override(self, input):
+    return torch.empty(*input.shape, self.weight.shape[-1], device='meta')
+
+def nn_layernorm_override(self, input):
+    return input
+
+
+manual_meta_overrides = {
+    torch.nn.Embedding: embedding_override,
+    torch.nn.LayerNorm: nn_layernorm_override,
+}
+
 def gen_constructor_wrapper(target):
     @functools.wraps(target)
     def wrapper(*args, **kwargs):
         proxy = None
+
         def check_has_proxy(v):
             if isinstance(v, torch.fx.Proxy):
                 nonlocal proxy
@@ -35,7 +48,7 @@ class MetaProxy(torch.fx.Proxy):
         if hasattr(self, '_tensor_meta') and self._tensor_meta is not None:
             return self._tensor_meta.dim()
         return self.tracer.create_proxy('call_method', 'dim', (self,), {})
-        
+
     def __getattr__(self, k):
         if k == '_tensor_meta':
             return self.__getattribute__(k)
@@ -65,7 +78,7 @@ class MetaAttribute(MetaProxy):
 def proxys_to_metas(v):
     if isinstance(v, torch.fx.Proxy):
         assert isinstance(v, MetaProxy), f'Expected MetaProxy but got {type(v)}'
-        assert hasattr(v, '_tensor_meta'), f'MetaProxy does not have an associated meta'
+        assert hasattr(v, '_tensor_meta'), 'MetaProxy does not have an associated meta'
         return v._tensor_meta
     return v
 
@@ -100,7 +113,15 @@ class MetaTracer(torch.fx.Tracer):
                 meta_out = getattr(args_metas[0], target)(*args_metas[1:], **kwargs_metas)
             elif kind == 'call_module':
                 assert hasattr(self, 'orig_forward')
-                meta_out = self.orig_forward(*args_metas, **kwargs_metas)
+                self._disable_module_getattr = True
+                try:
+                    mod = self.root.get_submodule(target)
+                    mod_type = type(mod)
+                    if mod_type in manual_meta_overrides:
+                        return manual_meta_overrides[mod_type](mod, *args_metas, **kwargs_metas)
+                    meta_out = self.orig_forward(*args_metas, **kwargs_metas)
+                finally:
+                    self._disable_module_getattr = False
             else:
                 assert kind in ['placeholder'], f'Unsupported node kind {kind}'
                 return rv
@@ -108,10 +129,16 @@ class MetaTracer(torch.fx.Tracer):
             # TODO
             assert isinstance(rv, torch.fx.Proxy), 'Dont support composite output yet'
             rv.install_tensor_meta(meta_out)
-        except AssertionError as e:
+        except Exception as e:
             warnings.warn(f'Could not compute metadata for target {target}: {e}')
 
         return rv
+
+    def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
+        if getattr(self, '_disable_module_getattr', False):
+            return attr_val
+        else:
+            return super()._module_getattr(attr, attr_val, parameter_proxy_cache)
 
     def call_module(self, m, forward, args, kwargs):
         self.orig_forward = forward
@@ -162,4 +189,3 @@ class MetaTracer(torch.fx.Tracer):
         finally:
             for name, (_, orig) in self.patched_torch_methods.items():
                 setattr(torch, name, orig)
-
