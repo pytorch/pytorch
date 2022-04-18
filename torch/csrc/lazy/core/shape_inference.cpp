@@ -593,17 +593,17 @@ std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef
 
 std::vector<Shape> compute_shape_mul(const at::Tensor & self, const at::Tensor & other) {
   // TODO(bahuang): handle boardcast
-  return {Shape(self.scalar_type()), self.sizes().vec()};
+  return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_mul_(at::Tensor self, const at::Tensor & other) {
   // TODO(bahuang): handle boardcast
-  return {Shape(self.scalar_type()), self.sizes().vec()};
+  return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_mul_out(at::Tensor& out, const at::Tensor& self, const at::Tensor& other) {
   // TODO(bahuang): handle boardcast
-  return {Shape(self.scalar_type()), self.sizes().vec()};
+  return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 // Restore unused-parameters warnings

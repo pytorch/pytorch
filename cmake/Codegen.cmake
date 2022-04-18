@@ -143,7 +143,7 @@ if(INTERN_BUILD_ATEN_OPS)
 
   set(GEN_PER_OPERATOR_FLAG)
   if(USE_PER_OPERATOR_HEADERS)
-    list(APPEND GEN_PER_OPERATOR_FLAG "--per-operator-headers")
+    # list(APPEND GEN_PER_OPERATOR_FLAG "--per-operator-headers")
   endif()
 
   set(GEN_COMMAND
@@ -229,8 +229,8 @@ if(INTERN_BUILD_ATEN_OPS)
   add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
 
   if(USE_PER_OPERATOR_HEADERS)
-    target_compile_definitions(ATEN_CPU_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
-    target_compile_definitions(ATEN_CUDA_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
+    # target_compile_definitions(ATEN_CPU_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
+    # target_compile_definitions(ATEN_CUDA_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
   endif()
 
   # Handle source files that need to be compiled multiple times for

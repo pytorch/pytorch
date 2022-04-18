@@ -26,24 +26,12 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/core/Tensor.h>
 
-#include <ATen/TensorIterator.h>
-// #include <ATen/NamedTensorUtils.h>
-// #include <ATen/native/Resize.h>
-// #include <ATen/EmptyTensor.h>
-
 #include <tuple>
 #include <vector>
 
 ${NativeFunctions_includes}
 
 namespace at {
-
-namespace meta {
-struct TORCH_API structured_mul_Tensor : public TensorIteratorBase {
-    void meta(const at::Tensor & self, const at::Tensor & other);
-};
-}
-
 namespace native {
 
 ${NativeFunctions_declarations}

@@ -30,8 +30,10 @@ namespace at {
 
 } //namespace at
 
-#include <Aten/NativeFunctions.h>
-// #include <ATen/native/Resize.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/EmptyTensor.h>
+
 
 namespace at {
 namespace {

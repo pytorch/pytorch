@@ -2,7 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <ATen/Utils.h>
-#include <Aten/NativeFunctions.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 
 namespace at {
