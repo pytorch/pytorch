@@ -8777,6 +8777,14 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
                    skips=(
+                       # Failing with wrong imaginary sign on at least some Windows jobs
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    active_if=IS_WINDOWS),
+                       # Failing with wrong imaginary sign on at least some Windows jobs
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad',
@@ -8812,6 +8820,10 @@ op_db: List[OpInfo] = [
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    active_if=IS_WINDOWS),
+                       # Failing with wrong imaginary sign on at least some Windows jobs
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        # Reference: https://github.com/pytorch/pytorch/issues/50692
