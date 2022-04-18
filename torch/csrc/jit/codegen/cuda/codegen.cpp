@@ -938,8 +938,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     indent() << genMmaOp(mma, true) << "(reinterpret_cast<Array<"
              << mma->out()->getDataType().value() << ","
-             << getOutputRegisterSize(mma->options().macro) << ","
-             << getOutputRegisterSize(mma->options().macro) << ">*>"
+             << getOutputRegisterSize(options.macro) << ","
+             << getOutputRegisterSize(options.macro) << ">*>"
              << "(&" << gen(uop->out()) << "));\n";
   }
 
