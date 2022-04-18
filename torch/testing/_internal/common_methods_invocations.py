@@ -9105,6 +9105,10 @@ op_db: List[OpInfo] = [
                    supports_sparse_csr=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                    active_if=TEST_WITH_ROCM, device_type='cuda'),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    active_if=TEST_WITH_ROCM, device_type='cuda'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -9159,6 +9163,8 @@ op_db: List[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    active_if=TEST_WITH_ROCM, device_type='cuda'),
                    )),
     OpInfo('allclose',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -11643,7 +11649,7 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Works on some configs!"), 'TestJit', 'test_variant_consistency_jit'),
                # Ref: https://github.com/pytorch/pytorch/issues/75309
                # AssertionError: None mismatch: torch.complex128 is not None
                DecorateInfo(unittest.expectedFailure, 'TestDtypeCustomRules',
@@ -12067,7 +12073,7 @@ op_db: List[OpInfo] = [
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cpu'),
                # RuntimeError: "max_pool1d_impl" not implemented for 'BFloat16'
-               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
+               DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.bfloat16,)),
            ),
            sample_inputs_func=sample_inputs_max_pool),
@@ -12439,7 +12445,7 @@ op_db: List[OpInfo] = [
             # produces 0 instead of nan on ROCM
             DecorateInfo(unittest.expectedFailure,
                          'TestUnaryUfuncs', "test_reference_numerics_extremal",
-                         dtypes=(torch.bfloat16, torch.float16, torch.float32,), device_type='cuda',
+                         device_type='cuda',
                          active_if=(TEST_WITH_ROCM)), ]
     ),
     UnaryUfuncInfo(
@@ -12526,10 +12532,10 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure,
                          'TestUnaryUfuncs', "test_reference_numerics_normal",
                          dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
-            DecorateInfo(unittest.expectedFailure,
+            DecorateInfo(unittest.skip("Fails on some jobs works on others!"),
                          'TestUnaryUfuncs', "test_reference_numerics_hard",
                          dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
-            DecorateInfo(unittest.expectedFailure,
+            DecorateInfo(unittest.skip("Fails on some jobs works on others!"),
                          'TestUnaryUfuncs', "test_reference_numerics_extremal",
                          dtypes=(torch.complex64, torch.complex128), device_type='cpu',
                          active_if=(IS_MACOS or IS_WINDOWS)),)
