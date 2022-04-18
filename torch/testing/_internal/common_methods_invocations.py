@@ -11783,7 +11783,12 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_nn_unfold,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # NOTE: this failure may not reproduce consistently on different systems
+               # false INTERNAL ASSERT FAILED at "/var/lib/jenkins/workspace/torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
+               DecorateInfo(unittest.skip("Internal assert failed!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
            variant_test_name='nearest',
