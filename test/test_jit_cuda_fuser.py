@@ -2549,6 +2549,23 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_linear_symbolic_shapes(self):
+        def fn(x: int):
+            y = torch.zeros((x, x + 2)).cuda()
+            for i in range(2):
+                inp = torch.rand((x, x + i)).cuda()
+                weight = torch.rand((x + 2, x + i)).cuda()
+                bias = torch.rand((x, x + 2)).cuda()
+                y += torch.sin(torch.nn.functional.linear(inp, weight, bias))
+            return y
+
+        fn_s = torch.jit.script(fn)
+        fn_s(5)
+        fn_s(5)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_backward_type(self):
         # not super useful to check gradient of integer/bool, so skipping here
         type_pairs = [
