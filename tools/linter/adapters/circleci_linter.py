@@ -100,8 +100,8 @@ def run_check(
     return [
         LintMessage(
             path=config_file,
-            line=1,
-            char=1,
+            line=None,
+            char=None,
             code="CIRCLECI",
             severity=LintSeverity.ERROR,
             name="config inconsistency",

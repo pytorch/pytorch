@@ -836,6 +836,32 @@ $1 = torch._ops.aten.add.Tensor($0, $0)''')
         x.neg()
         self.assertEqual(called, [torch.ops.aten.neg.default])
 
+    def test_set_data(self):
+        called = 0
+
+        class SubTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                nonlocal called
+                called += 1
+                return super().__torch_dispatch__(func, types, args, kwargs)
+
+        x = SubTensor(torch.empty(2))
+        x.data
+        self.assertEqual(called, 1)
+        x.data = torch.empty(2)
+        self.assertEqual(called, 1)
+        x.data
+        self.assertEqual(called, 2)
+        self.assertIs(type(x), SubTensor)
+        x.set_(torch.empty(2))
+        self.assertEqual(called, 3)
+        x.data
+        self.assertEqual(called, 4)
+        self.assertIs(type(x), SubTensor)
+
     def test_construct_int_tensor(self):
         class SubTensor(torch.Tensor):
             pass
