@@ -42,8 +42,6 @@ struct CacheKey {
 void setAddParams(
     AddParams* params, const at::Tensor& input_a, const at::Tensor& input_b,
     bool deterministic, bool allow_tf32) {
-  // operator datatype needs to be int32 for int8 matmul, but we can
-  // set the datatype for output tensor to int32 or fp32
   memset(params, 0, sizeof(AddParams));
   params->device_id = at::cuda::current_device();
   params->input_dim = input_a.dim();
