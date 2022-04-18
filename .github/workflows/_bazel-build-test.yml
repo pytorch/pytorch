@@ -167,8 +167,6 @@ jobs:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           JOB_BASE_NAME: ${{ inputs.build-environment }}-test
-          TEST_CONFIG: ${{ matrix.config }}
-          SHARD_NUMBER: ${{ matrix.shard }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
