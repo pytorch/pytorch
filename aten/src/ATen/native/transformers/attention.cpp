@@ -278,17 +278,6 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
   return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
 }
 
-std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_op_cpu(
-    const Tensor& qkv,
-    const Tensor& qkv_bias,
-    const int64_t num_head) {
-  auto result = at::native::transform_bias_rescale_qkv_cpu(qkv, qkv_bias, num_head);
-  return std::make_tuple(
-      std::get<0>(result).clone(),
-      std::get<1>(result).clone(),
-      std::get<2>(result).clone());
-}
-
 std::tuple<Tensor, Tensor> native_multi_head_attention(
     const Tensor& query,
     const Tensor& key,

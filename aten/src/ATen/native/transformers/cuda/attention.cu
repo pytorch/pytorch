@@ -398,16 +398,5 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
   return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
 }
-
-std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_op_cuda(
-    const Tensor& qkv,
-    const Tensor& qkv_bias,
-    const int64_t num_head) {
-  auto result = transform_bias_rescale_qkv_cuda(qkv, qkv_bias, num_head);
-  return std::make_tuple(
-      std::get<0>(result).clone(),
-      std::get<1>(result).clone(),
-      std::get<2>(result).clone());
-}
 } // namespace native
 } // namespace at
