@@ -16929,6 +16929,7 @@ TEST_F(NVFuserTest, FusionWarpReduceUnrollOuterLoop_CUDA) {
 
 // Repro of issue #1579
 TEST_F(NVFuserTest, FusionWarpReducePredication_CUDA) {
+  GTEST_SKIP() << "Disabled temporarily.";
   Fusion fusion;
   FusionGuard fg(&fusion);
 
