@@ -373,6 +373,7 @@
     "activation_dtype",
     "get_combined_dict",
     "get_default_quant_patterns",
+    "get_native_backend_config_dict",
     "sorted_patterns_dict"
   ],
   "torch.ao.quantization.observer": [
