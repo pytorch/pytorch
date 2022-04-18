@@ -73,7 +73,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
   }
 
   auto ret_ptr = c10::make_intrusive<PackedConvWeightCudnn<kSpatialDim>>(
-          weight.contiguous(c10::MemoryFormat::ChannelsLast), // TODO: this assumes 2D I think. make it more general?
+          weight.to(c10::MemoryFormat::ChannelsLast), // TODO: this assumes 2D I think. make it more general?
           bias,
           stride,
           padding,

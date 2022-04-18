@@ -3149,3 +3149,33 @@ TEST(StaticRuntime, MoveCtor) {
   auto actual = new_runtime(args);
   compareResults(expected, actual);
 }
+
+TEST(StaticRuntime, SingleBlockIfReturnList) {
+  const auto src = R"JIT(
+    def forward(self, a, b, cond: bool):
+        lst = []
+        if cond:
+            lst.append(a + b)
+        return lst
+  )JIT";
+  std::vector<IValue> args1{at::randn({1}), at::randn({1}), true};
+  std::vector<IValue> args2{at::randn({42, 42}), at::randn({42, 42}), false};
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, NestedBlockIfReturnList) {
+  const auto src = R"JIT(
+    def forward(self, a, b, cond1: bool, cond2: bool):
+        if cond1:
+            lst = []
+            if cond2:
+                lst.append(a + b)
+            lst.append(a * b)
+            return lst
+        return []
+  )JIT";
+  std::vector<IValue> args1{at::randn({1}), at::randn({1}), true, true};
+  std::vector<IValue> args2{
+      at::randn({42, 42}), at::randn({42, 42}), true, false};
+  testStaticRuntime(src, args1, args2);
+}
