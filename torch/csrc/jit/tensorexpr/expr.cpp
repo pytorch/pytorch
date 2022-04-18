@@ -505,6 +505,14 @@ bool Buf::is_cont_with(int cur_dim, int adjacent_dim) const {
   auto is_cont_fn = [](ExprPtr adjacent_dim,
                        ExprPtr adjacent_stride,
                        ExprPtr cur_stride) {
+    // For static shape
+    bool res = exprEquals(
+        cur_stride,
+        (ExprHandle(adjacent_dim) * ExprHandle(adjacent_stride)).node());
+    if (res)
+      return res;
+
+    // For symbolic shape
     auto mul_node = to<Mul>(cur_stride);
     if (!mul_node) {
       return false;
