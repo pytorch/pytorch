@@ -204,7 +204,7 @@ class ChunkShardingSpec(ShardingSpec):
         chunks = len(self.placements)
         split_size = get_split_size(sharding_dim_size, chunks)
         scatter_shape = list(tensor.size())
-        scatter_shape[self.dim] = split_size
+        scatter_shape[self.dim] = split_size  # type: ignore[index]
 
         for shard_meta in tensor_meta.shards_metadata:
             rank, device = _parse_and_validate_remote_device(process_group, shard_meta.placement)
@@ -213,7 +213,7 @@ class ChunkShardingSpec(ShardingSpec):
                 # recording here for the narrow op and 'local_shard' should be a
                 # leaf variable in the autograd graph.
                 narrowed_tensor = narrow_tensor(tensor, shard_meta)
-                if shard_meta.shard_sizes[self.dim] < split_size:
+                if shard_meta.shard_sizes[self.dim] < split_size:  # type: ignore[index]
                     # for the last shard that might be smaller to other shards
                     # resize the narrowed tensor to the same size and use it for
                     # the scatter collective as dist.scatter requires same size
