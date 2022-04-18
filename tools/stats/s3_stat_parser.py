@@ -169,6 +169,7 @@ def _parse_master_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[R
             summary_dict[summary_job].append(json.loads(string))
     return summary_dict
 
+
 def _parse_pr_summaries(summaries: Any, job_prefix: str) -> Dict[str, List[Tuple[Report, str]]]:
     summary_dict = defaultdict(list)
     for summary in summaries:
@@ -195,6 +196,7 @@ def get_test_stats_summaries_for_job(*, sha: str, job_prefix: str) -> Dict[str, 
     bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
     summaries = bucket.objects.filter(Prefix=f"test_time/{sha}/{job_prefix}")
     return _parse_master_summaries(summaries, jobs=list())
+
 
 def get_test_stats_summaries_for_pr(*, pr: str, job_prefix: str) -> Dict[str, List[Tuple[Report, str]]]:
     bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
@@ -224,10 +226,15 @@ def get_previous_reports_for_branch(branch: str, ci_job_prefix: str = "") -> Lis
         logger.info(f'Grabbing reports from commit: {commit}')
         summaries = get_test_stats_summaries_for_job(sha=commit, job_prefix=ci_job_prefix)
         for job_name, summary in summaries.items():
-            if job_name[:len(job_name) - len('-test')] == _get_stripped_CI_job():
+            # due to naming, some slow tests might get included in the summaries by accident
+            # (specifically linux-bionic-py3.7-clang(-slow)-test), so check to make sure slow tests don't get
+            # included in the calculations for non-slow test times, as they are much slower than non-slow tests
+            # and heavily skew the calculation
+            if ("slow" in job_name and "slow" in os.environ.get("JOB_BASE_NAME", "")) or (
+                    "slow" not in job_name and "slow" not in os.environ.get("JOB_BASE_NAME", "")):
+                reports.append(summary[0])
                 if len(summary) > 1:
                     logger.warning(f'WARNING: Multiple summary objects found for {commit}/{job_name}')
-                reports.extend(summary)
         commit_index += 1
     return reports
 
