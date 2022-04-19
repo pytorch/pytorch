@@ -30,14 +30,6 @@ static bool has_level(const Tensor& self, int64_t level) {
   return batched->level() >= level;
 }
 
-static bool has_functional_level(const Tensor& self, int64_t level) {
-  if (!at::functionalization::impl::isFunctionalTensor(self)) {
-    return false;
-  }
-  const auto* functional = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
-  return functional->level() >= level;
-}
-
 Tensor _add_batch_dim(const Tensor& self, int64_t batch_dim, int64_t level) {
   return addBatchDim(self, batch_dim, level);
 }
@@ -61,8 +53,10 @@ void _propagate_functional_input_mutation(const Tensor& unwrapped, const Tensor&
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(unwrapped));
   auto wrapped_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(wrapped);
   // Ensure that the input is up to date by committing any pending updates to the alias.
-  wrapped_impl->apply_updates();
-  wrapped_impl->regenerate_from_base();
+  bool any_updates = wrapped_impl->apply_updates();
+  if (any_updates) {
+    wrapped_impl->regenerate_from_base();
+  }
   auto& wrapped_inner = wrapped_impl->value();
   // It would probably be more reasonable to check that the two tensors are aliased,
   // but we can't do that unless we give BatchedTensorImpl a notion of storage.
@@ -143,14 +137,21 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
   return result;
 }
 
-Tensor _unwrap_functional_tensor(const Tensor& self) {
-  auto* functional = dynamic_cast<FunctionalTensorWrapper*>(self.unsafeGetTensorImpl());
+Tensor _unwrap_functional_tensor(const Tensor& self, bool add_back_views) {
   // We only ever call that after popping out of a functionalize() call, in which case the current tensors
   // should always be wrapped in a FunctionalTensorWrapper.
-  TORCH_INTERNAL_ASSERT(functional != nullptr);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
+  auto functional = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
+
+  // when regenerating the (potentially mutated) input tensors, the functionalization pass
+  // regenerates them through a series of view_copy() op calls.
+  // Functorch wants to turn those back into view ops though.
   // Ensure that the input is up to date by committing any pending updates to the alias.
-  functional->apply_updates();
-  functional->regenerate_from_base();
+  at::functionalization::impl::FunctionalizationReapplyViewsGuard guard(add_back_views);
+  bool any_updates = functional->apply_updates();
+  if (any_updates) {
+    functional->regenerate_from_base();
+  }
   return functional->value();
 }
 
@@ -244,8 +245,8 @@ int64_t _vmap_decrement_nesting() {
   return layer.layerId();
 }
 
-int64_t _func_increment_nesting() {
-  return initAndPushDynamicLayer(DispatchKey::Functionalize);
+int64_t _func_increment_nesting(bool reapply_views) {
+  return initAndPushDynamicLayer(DispatchKey::Functionalize, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt, /*functionalize_add_back_views=*/reapply_views);
 }
 
 int64_t _func_decrement_nesting() {
