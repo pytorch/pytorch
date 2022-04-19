@@ -10122,6 +10122,8 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
            dtypes=floating_and_complex_types(),
+           # https://github.com/pytorch/functorch/issues/275
+           check_batched_forward_grad=False,
            # TODO: RuntimeError: While computing batched gradients,
            # got: vmap: Calling Tensor.as_strided is not supported
            # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
@@ -10137,6 +10139,8 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.cholesky_ex',
            aten_name='linalg_cholesky_ex',
            dtypes=floating_and_complex_types(),
+           # https://github.com/pytorch/functorch/issues/275
+           check_batched_forward_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
