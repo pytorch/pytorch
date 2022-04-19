@@ -15,13 +15,13 @@ class CodeTemplate:
     # Python 2.7.5 has a bug where the leading (^[^\n\S]*)? does not work,
     # workaround via appending another [^\n\S]? inside
 
-    substitution_str = r'(^[^\n\S]*[^\n\S]?)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})'
+    substitution_str = r"(^[^\n\S]*[^\n\S]?)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})"
 
     # older versions of Python have a bug where \w* does not work,
     # so we need to replace with the non-shortened version [a-zA-Z0-9_]*
     # https://bugs.python.org/issue18647
 
-    substitution_str = substitution_str.replace(r'\w', r'[a-zA-Z0-9_]')
+    substitution_str = substitution_str.replace(r"\w", r"[a-zA-Z0-9_]")
 
     substitution = re.compile(substitution_str, re.MULTILINE)
 
@@ -29,15 +29,17 @@ class CodeTemplate:
     filename: str
 
     @staticmethod
-    def from_file(filename: str) -> 'CodeTemplate':
-        with open(filename, 'r') as f:
+    def from_file(filename: str) -> "CodeTemplate":
+        with open(filename, "r") as f:
             return CodeTemplate(f.read(), filename)
 
     def __init__(self, pattern: str, filename: str = "") -> None:
         self.pattern = pattern
         self.filename = filename
 
-    def substitute(self, env: Optional[Mapping[str, object]] = None, **kwargs: object) -> str:
+    def substitute(
+        self, env: Optional[Mapping[str, object]] = None, **kwargs: object
+    ) -> str:
         if env is None:
             env = {}
 
@@ -46,20 +48,22 @@ class CodeTemplate:
             return kwargs[v] if v in kwargs else env[v]
 
         def indent_lines(indent: str, v: Sequence[object]) -> str:
-            return "".join([indent + l + "\n" for e in v for l in str(e).splitlines()]).rstrip()
+            return "".join(
+                [indent + l + "\n" for e in v for l in str(e).splitlines()]
+            ).rstrip()
 
         def replace(match: Match[str]) -> str:
             indent = match.group(1)
             key = match.group(2)
-            comma_before = ''
-            comma_after = ''
+            comma_before = ""
+            comma_after = ""
             if key[0] == "{":
                 key = key[1:-1]
                 if key[0] == ",":
-                    comma_before = ', '
+                    comma_before = ", "
                     key = key[1:]
-                if key[-1] == ',':
-                    comma_after = ', '
+                if key[-1] == ",":
+                    comma_after = ", "
                     key = key[:-1]
             v = lookup(key)
             if indent is not None:
@@ -67,17 +71,19 @@ class CodeTemplate:
                     v = [v]
                 return indent_lines(indent, v)
             elif isinstance(v, list):
-                middle = ', '.join([str(x) for x in v])
+                middle = ", ".join([str(x) for x in v])
                 if len(v) == 0:
                     return middle
                 return comma_before + middle + comma_after
             else:
                 return str(v)
+
         return self.substitution.sub(replace, self.pattern)
 
 
 if __name__ == "__main__":
-    c = CodeTemplate("""\
+    c = CodeTemplate(
+        """\
     int foo($args) {
 
         $bar
@@ -86,6 +92,15 @@ if __name__ == "__main__":
     }
     int commatest(int a${,stuff})
     int notest(int a${,empty,})
-    """)
-    print(c.substitute(args=["hi", 8], bar=["what", 7],
-                       a=3, b=4, stuff=["things...", "others"], empty=[]))
+    """
+    )
+    print(
+        c.substitute(
+            args=["hi", 8],
+            bar=["what", 7],
+            a=3,
+            b=4,
+            stuff=["things...", "others"],
+            empty=[],
+        )
+    )
