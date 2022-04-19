@@ -9057,7 +9057,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
                             dtypes=(torch.int32, torch.int64)),
                # 76047
-               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfoCPU', 'test_nnc_correctness',
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness',
                             dtypes=(torch.int8, torch.int16, torch.int32, torch.int64)),
            ),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
@@ -9867,7 +9867,7 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    skips=(
                        # 76047
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfoCPU', 'test_nnc_correctness',
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness',
                                     dtypes=(torch.float32, torch.float64)),
                    ),
                    # Reference for disabling extremals
@@ -14455,7 +14455,7 @@ op_db: List[OpInfo] = [
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # 76047
-               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfoCPU', 'test_nnc_correctness',
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness',
                             dtypes=(torch.int8,)),
            )),
     OpInfo('bool',
@@ -14470,7 +14470,7 @@ op_db: List[OpInfo] = [
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # 76047
-               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfoCPU', 'test_nnc_correctness',
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness',
                             dtypes=(torch.int8,)),
            )),
     OpInfo('byte',
