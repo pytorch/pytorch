@@ -6,6 +6,7 @@
          "docs/source/onnx.rst",
          "test/onnx/**",
          "test/jit/test_export_modes.py",
+         "aten/src/ATen/core/interned_strings.h",
          "tools/onnx/**",
          "torch/_C/__init__.pyi.in",
          "torch/csrc/jit/passes/onnx.*",
