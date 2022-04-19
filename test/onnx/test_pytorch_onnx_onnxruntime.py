@@ -7870,6 +7870,28 @@ class _TestONNXRuntime:
         y = torch.rand(1, 3)
         self.run_test(ModelWithNan(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_minimum_dtypes(self):
+        class MinimumModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.minimum(x, y)
+
+        x = torch.randn((5, 5), dtype=torch.float16)
+        y = torch.randn((5, 5), dtype=torch.float)
+        self.run_test(MinimumModel(), (x, y))
+
+        x = torch.randn((5, 5), dtype=torch.float16)
+        y = torch.randint(10, (5, 5), dtype=torch.int16)
+        self.run_test(MinimumModel(), (x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int16)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(MinimumModel(), (x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int)
+        y = torch.full_like(x, True)
+        self.run_test(MinimumModel(), (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_any(self):
         class M(torch.nn.Module):
