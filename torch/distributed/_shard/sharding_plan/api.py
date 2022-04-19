@@ -7,7 +7,9 @@ from torch.distributed._shard.sharding_spec import ShardingSpec
 class ShardingPlan(object):
     """
     Representation of a sharding plan, describes how to shard a module
-    across hosts.
+    across hosts. `plan` is used to shard module parameters according to the spec provided,
+    `output_plan` and `return_local_tensor` are optional, they are used to specify the output
+    layout of a module with a spec, and when to convert back to data parallel fashion.
 
     Args:
         plan (Dict[str, :class:`torch.distributed._shard.sharding_spec.ShardingSpec`]):
@@ -16,13 +18,27 @@ class ShardingPlan(object):
         output_plan (Dict[str, :class:`torch.distributed._shard.sharding_spec.ShardingSpec`), optional):
             a dict specifies the layout of a module's output which produces a ShardedTensor,
             keyed by the name of module to ShardingSpec("" in key means the root module).
-            If specified, outputs are resharded according to the provided sharding specs.
             Default: `None`
-        collect_local_shards (List[str], optional): a list of string, each element enables
-            a module's sharded output to be collected as a Tensor from its local shards to
-            ensure further processsing in a data parallel fashion.
+        return_local_tensor (List[str], optional): a list of string, each element enables
+            a module's sharded output to be returned as a Tensor from its local shards to
+            ensure further processsing in a data parallel fashion. ("" in list means the
+            root module).
             Default: None
-    Example::
+    Example:
+      Suppose we want to shard a module with two linear layers and then run it with DDP, we also
+      want to convert the output of the second linear layer back to DDP, we can do it as follows:
+
+        >>> class MyModule(nn.Module):
+        >>>     def __init__(self):
+        >>>        super().__init__()
+        >>>        self.fc1 = nn.Linear()
+        >>>        self.gelu = nn.GELU()
+        >>>        self.fc2 = nn.Linear()
+        >>>        self.relu = nn.Linear()
+        >>>
+        >>>     def forward(self, input):
+        >>>         return self.relu(self.fc2(self.gelu(self.fc1(input))))
+
 
         >>> sharding_plan = ShardingPlan(
         >>>    plan={
@@ -30,11 +46,11 @@ class ShardingPlan(object):
         >>>        "fc2.weight": spec2
         >>>    },
         >>>    output_plan={
-        >>>        "": reshard_spec
+        >>>        "fc2": output_spec
         >>>    },
-        >>>    collect_local_shards=[""]
+        >>>    return_local_tensor=["fc2"]
         >>> )
     """
     plan: Dict[str, ShardingSpec]
     output_plan: Optional[Dict[str, ShardingSpec]] = None
-    collect_local_shards: Optional[List[str]] = None
+    return_local_tensor: Optional[List[str]] = None

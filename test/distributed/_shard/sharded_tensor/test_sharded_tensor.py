@@ -14,12 +14,12 @@ from torch.distributed._shard import sharded_tensor
 from torch.distributed._shard.api import (
     shard_parameter,
     _shard_tensor,
+    load_with_process_group,
     _collect_local_shard,
     _reshard_output,
 )
 from torch.distributed._shard.sharded_tensor import (
     sharded_op_impl,
-    load_with_process_group,
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
