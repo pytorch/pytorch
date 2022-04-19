@@ -41,18 +41,25 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   return nameToId;
 }
 
-std::vector<std::string> splitString(
+std::vector<std::string> splitStringRemoveEmpties(
     const std::string& s,
     const std::string& delim) {
   std::vector<std::string> tokens;
   size_t start = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t end;
+  std::string token{};
   while ((end = s.find(delim, start)) != std::string::npos) {
-    tokens.emplace_back(s.substr(start, end - start));
+    token = s.substr(start, end - start);
+    if (!token.empty()) {
+      tokens.emplace_back(token);
+    }
     start = end + delim.length();
   }
-  tokens.emplace_back(s.substr(start));
+  token = s.substr(start);
+  if (!token.empty()) {
+    tokens.emplace_back(token);
+  }
   return tokens;
 }
 
@@ -93,14 +100,11 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
     std::vector<uint8_t> allWorkerInfosKeyVector = store.get(allWorkerInfosKey);
     allWorkerInfos = std::string(
         (char*)allWorkerInfosKeyVector.data(), allWorkerInfosKeyVector.size());
-    // workerInfos are comma separated, (e.g.
-    // "Name1-Rank1,Name2-Rank2,Name3-Rank2") parse list of workers
-    for (const std::string& workerInfo : splitString(allWorkerInfos, ",")) {
-      // Skip if the token is empty
-      if (workerInfo.empty()) {
-        continue;
-      }
-      auto workerInfoVec = splitString(workerInfo, "-");
+    // workerInfos are comma separated with a comma in the beginning, (e.g.
+    // ",Name1-Rank1,Name2-Rank2,Name3-Rank2") parse list of workers
+    for (const std::string& workerInfo :
+         splitStringRemoveEmpties(allWorkerInfos, ",")) {
+      auto workerInfoVec = splitStringRemoveEmpties(workerInfo, "-");
       std::string workerName = workerInfoVec.at(0);
       int workerId = std::stoi(workerInfoVec.at(1));
 

@@ -9,8 +9,6 @@ from torch.distributed.rpc.utils import group_membership_management, update_grou
 
 from . import api
 from . import constants as rpc_constants
-from . import utils
-
 
 BackendValue = collections.namedtuple(
     "BackendValue", ["construct_rpc_backend_options_handler", "init_backend_handler"]
@@ -255,13 +253,20 @@ def _create_reverse_mapping(my_name, all_names, all_device_maps):
             }
     return reverse_device_maps
 
+def _check_agent_is_tensorpipe(agent):
+    from . import TensorPipeAgent
+    if not isinstance(agent, TensorPipeAgent):
+        raise TypeError("_get_device_infos() must be called with TensorPipeAgent but is called with {}".format(agent))
+
 def _get_device_infos():
     agent = api._get_current_rpc_agent()
+    _check_agent_is_tensorpipe(agent)
     opts = agent._get_backend_options()
     device_count = torch.cuda.device_count()
     return device_count, opts.device_maps, opts.devices
 
 def _set_devices_and_reverse_device_map(agent):
+    _check_agent_is_tensorpipe(agent)
     # Group state is retrieved from local agent
     # On initialization, tensorpipe agent retrieves information from all existing workers, so group state is valid
     my_worker_info = agent.get_worker_info()
@@ -289,11 +294,12 @@ def _set_devices_and_reverse_device_map(agent):
     for worker_name in all_names:
         # Set device list for each worker
         all_devices[worker_name] = _create_device_list(all_devices[worker_name], all_device_maps[worker_name], reverse_device_maps)
-        api.rpc_sync(worker_name, update_group_membership, args=(my_worker_info, all_devices[worker_name], reverse_device_maps, True))
+        api.rpc_sync(worker_name, update_group_membership,
+                     args=(my_worker_info, all_devices[worker_name], reverse_device_maps, True))
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
-    from . import TensorPipeRpcBackendOptions
     from . import TensorPipeAgent
+    from . import TensorPipeRpcBackendOptions
 
     if not isinstance(store, dist.Store):
         raise TypeError("`store` must be a c10d::Store. {}".format(store))
