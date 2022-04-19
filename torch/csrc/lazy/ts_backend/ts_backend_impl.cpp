@@ -45,6 +45,11 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     default_device_type_ = TSBackendDeviceType(type);
   }
 
+  const IrBuilder* GetIrBuilder() const override {
+    static const IrBuilder* builder = new TorchScriptIrBuilder();
+    return builder;
+  }
+
   std::unique_ptr<torch::lazy::LoweringContext> CreateLoweringContext(
       const std::string& name,
       torch::lazy::BackendDevice device,
@@ -253,5 +258,13 @@ void InitTorchScriptBackend() {
   static std::unique_ptr<BackendRegistrar> s_registrar;
   s_registrar = std::make_unique<BackendRegistrar>(GetTSBackendImpl());
 }
+
+
+// Get IrBuilder from backend. Use TorchScriptIrBuilder by default
+const IrBuilder* getIrBuilder() {
+  static const IrBuilder* builder = hasBackend() ? getBackend()->GetIrBuilder() : new TorchScriptIrBuilder();
+  return builder;
+}
+
 } // namespace lazy
 } // namespace torch

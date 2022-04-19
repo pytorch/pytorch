@@ -10,7 +10,7 @@
 namespace torch {
 namespace lazy {
 
-class IrBuilder;
+struct IrBuilder;
 
 /**
  * Work in progress- don't treat this as a stable interface yet!
@@ -38,7 +38,7 @@ class TORCH_API BackendImplInterface {
    * IR Tracing
    * */
 
-  virtual IrBuilder* GetIrBuilder() const = 0;
+  virtual const IrBuilder* GetIrBuilder() const = 0;
 
   /**
    * Data Transfer
@@ -132,8 +132,10 @@ class TORCH_API BackendRegistrar {
   BackendRegistrar(const BackendImplInterface* backend_impl_interface);
 };
 
-bool hasBackend();
+TORCH_API bool hasBackend();
 TORCH_API const BackendImplInterface* getBackend();
+
+TORCH_API const IrBuilder* getIrBuilder();
 
 }  // lazy
 }  // torch
