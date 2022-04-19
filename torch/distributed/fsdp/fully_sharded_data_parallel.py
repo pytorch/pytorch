@@ -236,16 +236,18 @@ class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
     PARAM_ID = auto()
 
+
+class _ExecOrderWarnStatus(Enum):
+    NONE = auto()     # no deviation yet
+    WARNING = auto()  # deviated this iteration; currently issuing warnings
+    WARNED = auto()   # deviated in a previous iteration
+
+
 class _ExecOrderData():
     """
     This contains the data used for validating execution order across ranks.
 
     Attributes:
-        param_to_param_index (Dict[FlatParameter, int]): Mapping from FSDP
-            flattened parameter to a unique parameter index consistent across
-            ranks.
-        warned (bool): Whether a warning has been issued; this is used to only
-            warn once per rank as to not flood the console.
         is_first_iter (bool): Whether executing in the first iteration or not.
         param_order (List[int]): Order that parameters participate in the
             forward pass; constructed on the first iteration and validated
@@ -253,20 +255,52 @@ class _ExecOrderData():
         index (int): Index tracking the position in ``param_order``
             when validating the forward pass execution order in subsequent
             iterations.
+        warn_status (_ExecOrderWarnStatus): To avoid flooding the console, we
+            only issue warnings throughout the first deviating iteration and no
+            longer check thereafter; this tracks the warning status.
     """
-    param_to_param_index: Dict[FlatParameter, int] = {}
-    warned: bool = False
+    # Save in the constructor when `root_module.parameters()` is guaranteed to
+    # only consist of `FlatParameter`s to avoid `.parameters()` being dependent
+    # on the calling context
+    _all_flat_params: List[FlatParameter] = []
+    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = []
     # Modified in the first iteration:
     is_first_iter: bool = True
     param_order: List[int] = []
     # Modified in the subsequent iterations:
     index: int = 0
+    warn_status: _ExecOrderWarnStatus = _ExecOrderWarnStatus.NONE
+
+    def init(self, root_module: "FullyShardedDataParallel"):
+        assert root_module._is_root, "This data structure should only be " \
+            "initialized on an FSDP root module"
+        self._all_flat_params = list(root_module.parameters())
+        self.param_to_unflat_param_names = _get_param_to_unflat_param_names(root_module)
+
+    def get_param_index(self, param: FlatParameter):
+        """Returns a unique parameter index for ``param``. Critically, this
+        index assignment must be the same across ranks."""
+        assert isinstance(param, FlatParameter)
+        for i, p in enumerate(self._all_flat_params):
+            if p is param:
+                return i
+        raise AssertionError(f"Invalid parameter: {param}")
+
+    def get_param(self, param_index: int,):
+        """Returns the parameter corresponding to ``param_index``."""
+        for i, p in enumerate(self._all_flat_params):
+            if i == param_index:
+                return p
+        raise AssertionError(f"Invalid parameter index: {param_index}")
 
     def reset(self):
         """Called in :meth:`_wait_for_post_backward` to reset data for the next
         iteration."""
         self.is_first_iter = False
         self.index = 0
+        # Transition to `WARNED` when `reset()` is called in post-backward
+        if self.warn_status == _ExecOrderWarnStatus.WARNING:
+            self.warn_status = _ExecOrderWarnStatus.WARNED
 
 
 class FullyShardedDataParallel(nn.Module):
@@ -660,19 +694,6 @@ class FullyShardedDataParallel(nn.Module):
         while world_size % factor == 0 and world_size / factor > factor:
             factor *= 2
         return float(factor)
-
-    def _get_param_to_param_index(self) -> Dict[FlatParameter, int]:
-        """
-        Returns a mapping from FSDP flattened parameter to a unique index in
-        the FSDP module hierarchy rooted at this module. Critically, this
-        mapping must be consistent across ranks.
-        """
-        assert self._is_root, "Expects to be called only on root FSDP modules"
-        param_to_param_index = {
-            cast(FlatParameter, param): i
-            for i, param in enumerate(self.parameters())
-        }
-        return param_to_param_index
 
     def _offload_to_cpu(self, p):
         """
@@ -1085,7 +1106,7 @@ class FullyShardedDataParallel(nn.Module):
             return
         # No FSDP instance wraps this, else _is_root would be set to False.
         self._is_root = True
-        self._exec_order_data.param_to_param_index = self._get_param_to_param_index()
+        self._exec_order_data.init(self)
         # If final backward callback is never been queued, state should be IDLE.
         # If final backward callback is queued, the callback should be finished
         # and the state was reset to be IDLE.
@@ -2416,22 +2437,33 @@ class FullyShardedDataParallel(nn.Module):
         ):
             return
         eod = self._exec_order_data
-        param_index = eod.param_to_param_index[param]
+        param_index = eod.get_param_index(param)
         if not eod.is_first_iter:
-            # Warn possibly multiple times for the same iteration since the
-            # number of warnings may be informative in debugging
-            if param_index != eod.param_order[eod.index]:
-                if not eod.warned:
-                    warnings.warn(
-                        "Execution order differs from that of the first "
-                        f"iteration on rank {self.rank}; collectives are "
-                        "unchecked and may give incorrect results or hang\n"
-                        "Using indices following the root FSDP module's "
-                        "`.parameters()` order:\n"
-                        f"\nFirst iter: {eod.param_order}\nThis iter (so far): "
-                        f"{eod.param_order[:eod.index - 1] + [param_index]}",
-                    )
-                    eod.warned = True
+            # Only issue warnings on the first deviating iteration and stop
+            # checking thereafter to avoid flooding the console
+            if eod.warn_status == _ExecOrderWarnStatus.WARNED:
+                return
+            # However, we may issue multiple warnings on the first deviating
+            # iteration to help debugging
+            expected_param_index = eod.param_order[eod.index]
+            if param_index != expected_param_index:
+                expected_param = eod.get_param(expected_param_index)
+                expected_param_names = eod.param_to_unflat_param_names[expected_param]
+                param_names = eod.param_to_unflat_param_names[param]
+                warnings.warn(
+                    "All-gather order differs from that of the first iteration "
+                    f"on rank {self.rank} -- collectives are unchecked and may "
+                    "give incorrect results or hang\n"
+                    f"Expected the FSDP module wrapping {expected_param_names} "
+                    "to all-gather but got the FSDP module wrapping "
+                    f"{param_names}\n"
+                    f"First iteration's all-gather sequence: {eod.param_order}\n"
+                    "This iteration's all-gather sequence (so far): "
+                    f"{eod.param_order[:eod.index - 1] + [param_index]}\n"
+                    "where indices follow the root FSDP module's "
+                    "`.parameters()` order\n"
+                )
+                eod.warn_status = _ExecOrderWarnStatus.WARNING
             eod.index += 1
         else:
             device = param.device
@@ -2443,11 +2475,15 @@ class FullyShardedDataParallel(nn.Module):
                 ((rank, indices[rank]) for rank in range(self.world_size)), 2,
             ):
                 if not torch.equal(i1, i2):
+                    r1_param = eod.get_param(i1)
+                    r1_param_names = eod.param_to_unflat_param_names[r1_param]
+                    r2_param = eod.get_param(i2)
+                    r2_param_names = eod.param_to_unflat_param_names[r2_param]
                     raise RuntimeError(
-                        "Forward pass execution order differs across ranks: "
-                        f"rank {r1} is all-gathering parameter {i1} while rank "
-                        f"{r2} is all-gathering parameter {i2} (where indices "
-                        "follow the root FSDP module's `.parameters()` order"
+                        f"All-gather order differs across ranks: rank {r1} is "
+                        f"all-gathering the flattened parameter wrapping "
+                        f"{r1_param_names} while rank {r2} is all-gathering "
+                        f"the flattened parameter wrapping {r2_param_names}"
                     )
             eod.param_order.append(param_index)
 

@@ -96,16 +96,20 @@ class TestFSDPExecOrder(FSDPTest):
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
-    def test_invalid_first_iter_fwd_order(self, sharding_strategy: ShardingStrategy):
-        """Tests that FSDP errors if the forward order differs across ranks in
-        the first iteration."""
+    def test_invalid_first_iter_order(
+        self,
+        sharding_strategy: ShardingStrategy,
+    ):
+        """Tests that FSDP errors if the all-gather order differs across ranks
+        in the first iteration."""
         # Rank 0 runs the forward pass in one order and all other ranks run in
         # different order
         fsdp_model = Model.wrap(sharding_strategy, self.device)
         if self.rank != 0:
             fsdp_model.flip_path()
         inp = fsdp_model.module.get_input(self.device)
-        error_regex = "^(Forward pass execution order differs across ranks)"
+        # Match the error message with the following prefix
+        error_regex = "^(All-gather order differs across ranks)"
         with self.assertRaisesRegex(RuntimeError, error_regex):
             fsdp_model(*inp)
 
@@ -115,12 +119,12 @@ class TestFSDPExecOrder(FSDPTest):
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
     @parametrize("iters_before_path_change", [1, 3])
-    def test_invalid_later_iter_fwd_order(
+    def test_invalid_later_iter_order(
         self,
         sharding_strategy: ShardingStrategy,
         iters_before_path_change: int,
     ):
-        """Tests that FSDP warns the user if the forward order changes after
+        """Tests that FSDP warns the user if the all-gather order changes after
         the first iteration."""
         # On the first iteration, all ranks run the same order, and on the next
         # iteration, all but rank 0 run in a different order
@@ -130,8 +134,13 @@ class TestFSDPExecOrder(FSDPTest):
             output = fsdp_model(*inp)
             loss = fsdp_model.module.get_loss(inp, output).to(self.device)
             fsdp_model.module.run_backward(loss)
-        context = self.assertWarns(expected_warning=UserWarning) \
-            if self.rank != 0 else suppress()
+        # Match the warning message with the following prefix
+        regex = "^(All-gather order differs from that of the first iteration " \
+            f"on rank {self.rank}; collectives are unchecked and may give " \
+            "incorrect results or hang)"
+        context = self.assertWarnsRegex(
+            expected_warning=UserWarning, expected_regex=regex,
+        ) if self.rank != 0 else suppress()
         if self.rank != 0:
             fsdp_model.flip_path()
         inp = fsdp_model.module.get_input(self.device)
