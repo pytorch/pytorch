@@ -2027,7 +2027,7 @@ void ONNXShapeTypeInference(
   }
 
   SpecialPostProcess(n);
-  
+
   for (auto output: n->outputs()) {
     if (generated_shape.count(outputs_map[output->debugName()]) > 0) {
       auto shape_data = generated_shape.find(outputs_map[output->debugName()])->second;
