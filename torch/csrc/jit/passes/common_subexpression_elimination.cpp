@@ -72,10 +72,10 @@ struct CommonSubexpressionEliminator {
       auto node = *it;
 
       if (node->kind() == prim::Enter) {
-        prim_enter_stack.push_back(node);
+        prim_enter_stack_.push_back(node);
       }
       if (node->kind() == prim::Exit) {
-        prim_enter_stack.pop_back();
+        prim_enter_stack_.pop_back();
       }
 
       if (node->kind() == prim::profile) {
@@ -100,8 +100,8 @@ struct CommonSubexpressionEliminator {
           changed |= run(block, [&](Node* n) {
             NodeAndContextNode nacn(
                 n,
-                prim_enter_stack.size() == 0 ? nullptr
-                                             : prim_enter_stack.back());
+                prim_enter_stack_.size() == 0 ? nullptr
+                                             : prim_enter_stack_.back());
             auto existing = subexprs.find(nacn);
             if (existing != subexprs.end()) {
               return (*existing).node();
@@ -138,7 +138,7 @@ struct CommonSubexpressionEliminator {
 
       // Check whether the same subexpression already exists.
       Node* enter_node =
-          prim_enter_stack.size() == 0 ? nullptr : prim_enter_stack.back();
+          prim_enter_stack_.size() == 0 ? nullptr : prim_enter_stack_.back();
       auto subit = subexprs.insert(NodeAndContextNode(node, enter_node));
       if (!subit.second) {
         // Subexpression exists, replace the uses of node, and destroy it.
@@ -171,7 +171,7 @@ struct CommonSubexpressionEliminator {
   }
 
  private:
-  std::vector<Node*> prim_enter_stack;
+  std::vector<Node*> prim_enter_stack_;
   std::unique_ptr<AliasDb> alias_db_;
   std::shared_ptr<Graph> graph_;
 };
