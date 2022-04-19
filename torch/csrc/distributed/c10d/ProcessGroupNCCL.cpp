@@ -604,17 +604,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::call_once(initialize_ucc_lib_flag, [&]{
     uccLib_ = loadTorchUCC();
     if (uccLib_ != nullptr) {
-      LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
+      std::cout << "[Rank " << rank_  << "] torch_ucc.so loaded";
+    } else { // DEBUG
+      std::cout << "[Rank " << rank_  << "] loadTorchUCC failed.";
     }
   });
 
   if (uccLib_ != nullptr) {
-    LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
+    std::cout << "[Rank " << rank_  << "] torch_ucc.so loaded";
     typedef c10::intrusive_ptr<ProcessGroup> fn(const c10::intrusive_ptr<Store>& store, int rank, int size);
     auto createProcessGroupUCC = reinterpret_cast<fn*>(uccLib_->sym("createProcessGroupUCC"));
     if (createProcessGroupUCC != nullptr) {
       uccPG_ = createProcessGroupUCC(store, rank_, size_);
-      LOG(INFO) << "[Rank " << rank_  << "] ProcessGroupUCC created.";
+      std::cout << "[Rank " << rank_  << "] ProcessGroupUCC created.";
+    } else { // DEBUG
+      std::cout << "[Rank " << rank_  << "] createProcessGroupUCC not found.";
     }
   }
 #endif

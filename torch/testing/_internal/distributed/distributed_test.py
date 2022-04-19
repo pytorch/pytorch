@@ -90,6 +90,7 @@ else:
 
 if "TORCH_UCC_LIBRARY_PATH" in os.environ:
     SKIP_NCCL_ON_CPU = False
+    print("TORCH_UCC_LIBRARY_PATH =", os.environ["TORCH_UCC_LIBRARY_PATH"])
 else:
     SKIP_NCCL_ON_CPU = True
 
