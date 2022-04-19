@@ -377,7 +377,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
       ncclUniqueId* ncclID,
-      OpType opType,
+      bool isSingleP2POp,
       const std::string& devicesKey,
       int p2pRank);
 

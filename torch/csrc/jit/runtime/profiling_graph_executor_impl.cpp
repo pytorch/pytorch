@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
-#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -379,10 +378,7 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
 
     EliminateCommonSubexpression(graph);
     GRAPH_DEBUG(
-        "After EliminateCommonSubexpression, before HoistCommonExpression\n",
-        *graph);
-    HoistCommonExpression(graph);
-    GRAPH_DEBUG("After HoistCommonExpression, before CheckInplace\n", *graph);
+        "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
     CheckInplace(graph);
   }
   GRAPH_DEBUG(
@@ -440,15 +436,8 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
       auto min_size = getFusionGroupInlining() ? 2 : 1;
       bool dyn_shapes = getCurrentBehavior(remaining_bailout_depth) ==
           FusionBehavior::DYNAMIC;
-      FuseTensorExprs(graph, min_size, /*composed_op*/ false, dyn_shapes);
-      GRAPH_DEBUG(
-          "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
-
-      // Wipe tensor type info from the IR
-      RemoveTensorTypeSpecializations(graph);
-      GRAPH_DEBUG(
-          "After RemoveTensorTypeSpecializations, before customPostPasses\n",
-          *graph);
+      FuseTensorExprs(graph, min_size, /* composed op*/ false, dyn_shapes);
+      GRAPH_DEBUG("After Fusion, before customPostPasses\n", *graph);
     } else {
       // Rewrite subgraphs with many MMs into expressions that batch them.
       BatchMM(graph);
@@ -463,9 +452,13 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
+    GRAPH_DEBUG(
+        "After customPostPasses, before RemoveTensorTypeSpecializations \n",
+        *graph);
+    RemoveTensorTypeSpecializations(graph);
+    GRAPH_DEBUG("After RemoveTensorTypeSpecializations\n", *graph);
   }
-  GRAPH_DEBUG(
-      "After customPostPasses (end of runNoGradOptimizations)\n", *graph);
+  GRAPH_DEBUG("End of runNoGradOptimizations\n");
 }
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
@@ -564,11 +557,7 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
   DecomposeOps(graph);
   GRAPH_DEBUG("After DecomposeOps, before ConstantPropagation\n", *graph);
   ConstantPropagation(graph);
-  GRAPH_DEBUG(
-      "After ConstantPropagation, before HoistCommonExpression\n", *graph);
-  HoistCommonExpression(graph);
-  GRAPH_DEBUG(
-      "After EliminateCommonSubexpression, before ElimiateDeadCode\n", *graph);
+  GRAPH_DEBUG("After ConstantPropagation, before EliminateDeadCode\n", *graph);
   EliminateDeadCode(graph);
   GRAPH_DEBUG(
       "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
