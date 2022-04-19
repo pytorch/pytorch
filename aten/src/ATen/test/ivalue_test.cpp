@@ -843,11 +843,33 @@ TEST(TupleElementsTest, Basic) {
   validateTupleElements(large, sampleIValuesArray);
 }
 
+TEST(TupleElementsTest, ConstructFromIterator) {
+  std::array<IValue, 0> x;
+  TupleElements empty(x.begin(), x.end());
+  validateTupleElements(empty, {});
+
+  std::array<IValue, 1> arr1 = {1};
+  TupleElements size1(arr1.begin(), arr1.end());
+  validateTupleElements(size1, {1});
+
+  std::array<IValue, 2> arr2 = {1, 2};
+  TupleElements size2(arr2.begin(), arr2.end());
+  validateTupleElements(size2, {1, 2});
+
+  std::array<IValue, 3> arr3 = {1, 2, 3};
+  TupleElements size3(arr3.begin(), arr3.end());
+  validateTupleElements(size3, {1, 2, 3});
+
+  auto sampleIValuesArray = makeSampleIValues();
+  TupleElements large(sampleIValuesArray.begin(), sampleIValuesArray.end());
+  validateTupleElements(large, sampleIValuesArray);
+}
+
 namespace {
 
 std::array<TupleElements(*)(), 3> factories = {
   []() { return TupleElements();},
-  []() { return  TupleElements(1, 2, 3);},
+  []() { return TupleElements(1, 2, 3);},
   []() { return TupleElements(std::vector<IValue>({1, 2, 3, "hello"})); }
 };
 

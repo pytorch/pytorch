@@ -324,6 +324,19 @@ struct TORCH_API TupleElements {
     new (&elementsInline_[2]) IValue(std::move(e3));
   }
 
+  template <typename Iterator,
+            typename = std::enable_if_t<std::is_base_of<std::input_iterator_tag, typename std::iterator_traits<Iterator>::iterator_category>::value>>
+  explicit TupleElements(Iterator begin, Iterator end)
+  : inlineSize_((end - begin <= 3) ? (end - begin) : 0) {
+    if (inlineSize_) {
+      for (int ii = 0; begin != end; ++begin, ++ii) {
+        new (&elementsInline_[ii]) IValue(*begin);
+      }
+    } else {
+      new (&elementsVector_) std::vector<IValue>(begin, end);
+    }
+  }
+
   ~TupleElements() {
     if (inlineSize_) {
       destroyInline();
