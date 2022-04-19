@@ -146,7 +146,7 @@ def default_partition(
         if node.name not in forward_node_names:
             continue
         # Since we can't save tuple of tensor values, we need to flatten out what we're saving
-        if 'tensor_meta' not in node.meta:
+        if 'tensor_meta' not in node.meta and node.op == 'call_function':
             users = node.users
             assert all([user.target == operator.getitem for user in users])
             for user in users:
