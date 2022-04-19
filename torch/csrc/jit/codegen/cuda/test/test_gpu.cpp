@@ -148,6 +148,10 @@ class PredicatedChecker : public kir::IrVisitor {
       auto ti = expr->outputs()[0]->as<kir::TensorIndex>();
       if (ti->view() == tv_) {
         is_predicated_ = is_predicated_ | predicated_ite_;
+        if (expr->predicate() != nullptr &&
+            !expr->predicate()->value()->isConst()) {
+          is_predicated_ = true;
+        }
       }
     }
     kir::IrVisitor::handle(expr);
@@ -16929,7 +16933,6 @@ TEST_F(NVFuserTest, FusionWarpReduceUnrollOuterLoop_CUDA) {
 
 // Repro of issue #1579
 TEST_F(NVFuserTest, FusionWarpReducePredication_CUDA) {
-  GTEST_SKIP() << "Disabled temporarily.";
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17026,7 +17029,7 @@ TEST_F(NVFuserTest, FusionSegfaultReduction_CUDA) {
       &fusion, outputs, inputs, {at_output0, at_output1}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionPredicateElimination_CUDA) {
+TEST_F(NVFuserTest, FusionPredicateElimination1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17056,6 +17059,267 @@ TEST_F(NVFuserTest, FusionPredicateElimination_CUDA) {
     GpuLower gpulw(&fusion);
     TORCH_CHECK(PredicatedChecker::isPredicated(tv2, gpulw));
   }
+}
+
+// Repro of issue #1571
+TEST_F(NVFuserTest, FusionPredicateElimination2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> shape({10, 11});
+
+  auto tv0 = makeConcreteTensor(shape);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+
+  fusion.addOutput(tv3);
+
+  tv1->split(1, 4);
+  tv1->split(0, 4);
+  tv2->split(1, 4);
+  tv2->split(0, 4);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum({1}) + 1;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionPredicateElimination3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+  fusion.addOutput(tv2);
+
+  auto tv3 = tv0->cacheAfter();
+
+  tv1->split(0, 10);
+  tv1->split(0, 33);
+  TransformPropagator::from(tv1);
+
+  auto tv4 = tv1->rFactor({-1});
+  auto tv5 = tv1->rFactor({-1});
+
+  tv4->axis(0)->parallelize(ParallelType::BIDx);
+  tv4->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv4, ir_utils::allTvs(&fusion));
+
+  GpuLower gpulw(&fusion);
+
+  // The fusion has three reductions: one within each thread, one
+  // within each block, and another with the whole grid. All of them
+  // should not need to be predicated as they use the same init value
+  // and same reduction op.
+  TORCH_CHECK(!PredicatedChecker::isPredicated(tv4, gpulw));
+  TORCH_CHECK(!PredicatedChecker::isPredicated(tv5, gpulw));
+  TORCH_CHECK(!PredicatedChecker::isPredicated(tv1, gpulw));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  for (auto size : {1, 2, 999, 1001, 1234, 10000}) {
+    auto t0 = at::randn({size}, options);
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion, {t0});
+    auto cg_outputs = fe.runFusion({t0});
+
+    auto ref = sum(t0) + 1;
+    testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+  }
+}
+
+TEST_F(NVFuserTest, FusionPredicateElimination4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+
+  auto tv2 = sum(tv1, {0});
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+  fusion.addOutput(tv3);
+
+  auto tv4 = max(tv1, {0});
+  auto tv5 = add(tv4, IrBuilder::create<Double>(1));
+  fusion.addOutput(tv5);
+
+  tv1->split(1, 7);
+  tv1->split(0, 11);
+  tv1->reorder({{1, 2}, {2, 1}});
+  TransformPropagator::from(tv1);
+
+  tv1->axis(0)->parallelize(ParallelType::TIDy);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+
+  GpuLower gpulw(&fusion);
+
+  // tv2 uses the same op and init with tv1, so tv2 should be fine
+  // without a predicate. However, tv4, while it uses the tv1 as its
+  // input, the reduction op and init value is different from those of
+  // tv1, so tv4 needs to be predicated.
+  TORCH_CHECK(!PredicatedChecker::isPredicated(tv2, gpulw));
+  TORCH_CHECK(PredicatedChecker::isPredicated(tv4, gpulw));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  std::vector<int64_t> sizes = {1, 2, 33, 34, 64, 99};
+  for (auto s0 : sizes) {
+    for (auto s1 : sizes) {
+      auto t0 = at::randn({s0, s1}, options);
+
+      FusionExecutor fe;
+      fe.compileFusion(&fusion, {t0});
+      auto cg_outputs = fe.runFusion({t0});
+
+      auto t1 = t0.sum({1});
+      auto t3 = t1.sum({0}) + 1;
+      auto t5 = std::get<0>(t1.max(0)) + 1;
+
+      testValidate(&fusion, cg_outputs, {t0}, {t3, t5}, __LINE__, __FILE__);
+    }
+  }
+}
+
+TEST_F(NVFuserTest, FusionPredicateElimination5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tvs2 = Welford(tv1, {0});
+  auto tv3 = set(tvs2.avg);
+  fusion.addOutput(tv3);
+
+  tvs2.avg->split(0, 4);
+  TransformPropagator::from(tvs2.avg);
+  auto rtvs2 = tvs2.rFactor({1});
+
+  rtvs2.avg->axis(0)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(rtvs2.avg, ir_utils::allTvs(&fusion));
+
+  GpuLower gpulw(&fusion);
+
+  // The first per-thread welford needs to be predicated as the N
+  // input is different from its init value. The second welford op
+  // does not need a predicate.
+  TORCH_CHECK(PredicatedChecker::isPredicated(rtvs2.avg, gpulw));
+  TORCH_CHECK(!PredicatedChecker::isPredicated(tvs2.avg, gpulw));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  std::vector<int64_t> sizes = {1, 2, 33, 34, 64, 99};
+  for (auto s0 : sizes) {
+    auto t0 = at::randn({s0}, options);
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion, {t0});
+    auto cg_outputs = fe.runFusion({t0});
+
+    auto ref = t0.mean({0});
+
+    testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+  }
+}
+
+TEST_F(NVFuserTest, FusionPredicateElimination6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({2, 3});
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+  auto tv4 = add(tv3, IrBuilder::create<Double>(1));
+  fusion.addOutput(tv4);
+
+  tv4->split(1, 5);
+  TransformPropagator::from(tv4);
+
+  tv4->reorder({{0, 1}, {1, 0}});
+  tv3->computeAt(tv4, 1);
+
+  GpuLower gpulw(&fusion);
+
+  // The expression for tv2 is a local-to-local expression. It
+  // satisfies all the requirements of predicate elimination, except
+  // for the on on split root domains. As the second root axis of tv2
+  // is split, its index exceeds its extent (i.e., 3 in this case)
+  // without its predicate.
+  TORCH_CHECK(PredicatedChecker::isPredicated(tv2, gpulw));
+
+  // Unlike tv2, tv3 is computed at tv4, so the second root axis does
+  // have a zero domain. Its index should look like "i * 5 + j", where
+  // i comes from the first root domain and j comes from the split
+  // inner domain.
+  TORCH_CHECK(!PredicatedChecker::isPredicated(tv3, gpulw));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({2, 3}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 4;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionPredicateElimination7_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+  fusion.addOutput(tv3);
+
+  tv3->split(-1, 5);
+  tv3->split(-1, 4);
+  tv3->split(-1, 3);
+  TransformPropagator::from(tv3);
+
+  tv0->computeAt(tv3, 1);
+
+  // The last split of tv2 is a non-divisible split, and omitting it
+  // is invalid.
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(PredicatedChecker::isPredicated(tv2, gpulw));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({123}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 3;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
 TEST_F(NVFuserTest, FusionForceFp16Simple_CUDA) {

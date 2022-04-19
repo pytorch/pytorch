@@ -217,11 +217,8 @@ Bool* ParallelizedDomainPredicate::getPredicate(
     }
   }
 
-  if (pred) {
-    return pred->as<Bool>();
-  } else {
-    return nullptr;
-  }
+  TORCH_INTERNAL_ASSERT(pred != nullptr);
+  return pred->as<Bool>();
 }
 
 UnswitchPredicateKey::UnswitchPredicateKey()
@@ -341,8 +338,15 @@ Bool* PredicateCompute::getInlinePredicate(
   auto out_tv = ir_utils::getTvOutput(expr);
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Missing TensorView output");
 
+  // Predicates for non-exact parallel dimensions must be used even
+  // when PredicateElimination::canOmitPredicate is true.
+  auto parallel_dom_pred =
+      ParallelizedDomainPredicate::getPredicate(expr, loops);
+  TORCH_INTERNAL_ASSERT(parallel_dom_pred != nullptr);
+
   if (gpu_lower->predicateElimination().canOmitPredicate(expr)) {
-    return thread_pred;
+    return SimplifyingIrBuilder::andExpr(thread_pred, parallel_dom_pred)
+        ->as<Bool>();
   }
 
   auto pred_info_vec =
@@ -390,11 +394,7 @@ Bool* PredicateCompute::getInlinePredicate(
     return nullptr;
   }
 
-  auto parallel_dom_pred =
-      ParallelizedDomainPredicate::getPredicate(expr, loops);
-  if (parallel_dom_pred) {
-    preds.push_back(parallel_dom_pred);
-  }
+  preds.push_back(parallel_dom_pred);
 
   if (thread_pred != nullptr) {
     preds.push_back(thread_pred);
@@ -436,6 +436,7 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
 
   const auto gpu_lower = GpuLower::current();
   if (gpu_lower->predicateElimination().canOmitPredicate(tv_expr)) {
+    addParallelizedDomainPredicates(tv_expr);
     return;
   }
 
@@ -549,7 +550,10 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
     }
   }
 
-  // Adds new predicates for parallelized domains
+  addParallelizedDomainPredicates(tv_expr);
+}
+
+void UnswitchPredicate::addParallelizedDomainPredicates(Expr* tv_expr) {
   auto pred_map = ParallelizedDomainPredicate::getPredicateMap(
       tv_expr, for_loops_, unrolled_loop_);
   for (auto pt : kParallelTypeThreads) {

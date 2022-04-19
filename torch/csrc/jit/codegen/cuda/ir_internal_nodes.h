@@ -264,6 +264,8 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
     return is_fused_;
   }
 
+  std::vector<Val*> getInitVals() const;
+
  private:
   Val* const out_avg_;
   Val* const out_var_;

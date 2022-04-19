@@ -535,6 +535,11 @@ bool WelfordOp::sameAs(const Statement* other) const {
   return false;
 }
 
+std::vector<Val*> WelfordOp::getInitVals() const {
+  std::vector<Val*> init_vals({init_avg_, init_var_, init_N_});
+  return init_vals;
+}
+
 MmaOp::MmaOp(
     IrBuilderPasskey passkey,
     Val* out,

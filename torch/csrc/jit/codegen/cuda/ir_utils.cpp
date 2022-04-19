@@ -566,6 +566,31 @@ void replaceValue(
   ValReplacementMutator(fusion, replacement_map);
 }
 
+Val* getReductionInitValOf(TensorView* tv) {
+  auto def = tv->definition();
+  if (def == nullptr) {
+    return nullptr;
+  }
+
+  Val* init = nullptr;
+  if (auto rop = dynamic_cast<ReductionOp*>(def)) {
+    init = rop->init();
+  } else if (auto wop = dynamic_cast<WelfordOp*>(def)) {
+    if (tv == wop->outAvg()) {
+      init = wop->initAvg();
+    } else if (tv == wop->outVar()) {
+      init = wop->initVar();
+    } else {
+      TORCH_INTERNAL_ASSERT(tv == wop->outN());
+      init = wop->initN();
+    }
+  } else if (auto mma = dynamic_cast<MmaOp*>(def)) {
+    init = mma->init();
+  }
+
+  return init;
+}
+
 } // namespace ir_utils
 } // namespace cuda
 } // namespace fuser

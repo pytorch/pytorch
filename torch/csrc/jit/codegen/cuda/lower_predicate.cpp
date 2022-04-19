@@ -324,17 +324,18 @@ bool PredicateElimination::needsPredicate(Expr* expr) const {
     return false;
   });
 
-  // Predicates Welford ops
-  filters.emplace_back([](Expr* expr) { return expr->isA<WelfordOp>(); });
-
   // If this is a reduction, and if we omit the predicate for the
   // input, the input may have a garbabe value, which must not be used
-  // for this reduction. However, if the input is also an output of
-  // another reduction with the same binary op, which is a common
-  // pattern with rfactor, the input should be safe to use with no
-  // predication.
+  // for this reduction. However, it is still legal to omit its
+  // predicate when: 1) the predicate of the input is not omitted and
+  // 2) the input can be initialized to the init value of this
+  // reduction. When the input is the output of another reduciton, the
+  // input is initialized to the init value of the reduction, so the
+  // two reductions must use the same init value.
+  // See FusionPredicateElimination3 and FusionPredicateElimination4
+  // for concrete examples.
   filters.emplace_back([this](Expr* expr) {
-    if (expr->isA<ReductionOp>()) {
+    if (auto rop = dynamic_cast<ReductionOp*>(expr)) {
       auto input = expr->inputs()[0]->as<TensorView>();
       auto input_def = input->definition();
       // When input_def is null, input must be an input to the fusion,
@@ -344,11 +345,198 @@ bool PredicateElimination::needsPredicate(Expr* expr) const {
       TORCH_INTERNAL_ASSERT(
           input_def != nullptr, "Inconsistent input found: ", input);
 
-      if (non_predicated_exprs_.find(input_def) !=
-              non_predicated_exprs_.end() &&
-          !(input_def->isA<ReductionOp>() &&
-            (expr->as<ReductionOp>()->getReductionOpType() ==
-             input_def->as<ReductionOp>()->getReductionOpType()))) {
+      // The input needs to be initialized to the init value to omit
+      // the predicate, so if the input has its own init value, i.e.,
+      // produced by another reduction, they must use the same init
+      // value.
+      Val* input_init = ir_utils::getReductionInitValOf(input);
+      if (input_init != nullptr && !rop->init()->sameAs(input_init)) {
+        return true;
+      }
+
+      // If input is not predicated, out-of-bound value may be
+      // overwritten by a garbage value. However, it doesn't matter if
+      // the input is also produced by another reduction. If the preceding
+      // reduction omits the predicate, it means its input must be
+      // initialized to its init value, so no predicate should be
+      // needed in both of the two reduction ops if they use the same
+      // init value, which is guaranteed by the avove check, and the
+      // same reduction op.
+      if (auto input_def_rop = dynamic_cast<ReductionOp*>(input_def)) {
+        if (rop->getReductionOpType() != input_def_rop->getReductionOpType() &&
+            non_predicated_exprs_.find(input_def) !=
+                non_predicated_exprs_.end()) {
+          return true;
+        }
+      } else if (
+          non_predicated_exprs_.find(input_def) !=
+          non_predicated_exprs_.end()) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  // Welford. See FusionPredicateElimination5.
+  filters.emplace_back([this](Expr* expr) {
+    if (auto wop = dynamic_cast<WelfordOp*>(expr)) {
+      for (const auto i : c10::irange(3)) {
+        auto init = wop->getInitVals()[i];
+
+        // Welford input can be a scalar. Predicate is required unless
+        // the scalar value is equal to the init value.
+        auto input = wop->inputs().at(i);
+        if (input->isScalar()) {
+          if (!input->sameAs(init)) {
+            return true;
+          }
+          continue;
+        }
+
+        auto input_tv = dynamic_cast<TensorView*>(input);
+        TORCH_INTERNAL_ASSERT(input_tv != nullptr);
+
+        auto input_def = input->definition();
+
+        // When input_def is null, input must be an input to the fusion,
+        // so that must be allocated on global memory. Since we don't omit
+        // predication for expressions involving global memory, this
+        // should never occur.
+        TORCH_INTERNAL_ASSERT(
+            input_def != nullptr, "Inconsistent input found: ", input);
+
+        // The input needs to be initialized to the init value to omit
+        // the predicate, so if the input has its own init value, i.e.,
+        // produced by another reduction, they must use the same init
+        // value.
+        Val* input_init = ir_utils::getReductionInitValOf(input_tv);
+        if (input_init != nullptr && !init->sameAs(input_init)) {
+          return true;
+        }
+
+        // If input is not predicated, out-of-bound value may be
+        // overwritten by a garbage value. However, it doesn't matter if
+        // the input is also produced by another welford.
+        if (!input_def->isA<WelfordOp>() &&
+            non_predicated_exprs_.find(input_def) !=
+                non_predicated_exprs_.end()) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  });
+
+  // Similar to the above reduction constraint but for MMA
+  filters.emplace_back([this](Expr* expr) {
+    if (auto mma = dynamic_cast<MmaOp*>(expr)) {
+      for (auto input : ir_utils::filterByType<TensorView>(expr->inputs())) {
+        auto input_def = input->definition();
+        TORCH_INTERNAL_ASSERT(
+            input_def != nullptr, "Inconsistent input found: ", input);
+
+        Val* input_init = ir_utils::getReductionInitValOf(input);
+        if (input_init != nullptr && !mma->init()->sameAs(input_init)) {
+          return true;
+        }
+
+        if (non_predicated_exprs_.find(input_def) !=
+            non_predicated_exprs_.end()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  });
+
+  // An index can exceed the logical extent of the indexed domain if
+  // it's split. It can cause a reduction op to reduce the same value
+  // multiple times. Even a pointwise op can be a problem if the
+  // consumer is an alias of the producer. This check excludes such
+  // expressions from predicate elimination.
+  //
+  // This is not an issue if the index includes a zero domain (as defined in
+  // index_compute.cpp), the extent is calculated by multiplying the
+  // split output domains, so it never cross the domain boundary.
+  // So, if a root domain is split and none of its descendants is a
+  // zero domain, the expr needs to be predicated. See
+  // FusionPredicateElimination6 for a concrete example.
+  //
+  // It would be also possible to avoid register aliasing instead of
+  // giving up predicate elimination. Since this condition should be
+  // rather uncommon, either would be fine as long as correctness is
+  // provided.
+  filters.emplace_back([](Expr* expr) {
+    for (auto output : ir_utils::filterByType<TensorView>(expr->outputs())) {
+      const auto all_exprs = DependencyCheck::getAllExprsBetween(
+          {output->getMaybeRFactorDomain().begin(),
+           output->getMaybeRFactorDomain().end()},
+          {output->domain()->domain().begin(),
+           output->domain()->domain().end()});
+      std::unordered_set<Val*> split_root;
+      std::copy_if(
+          output->getMaybeRFactorDomain().begin(),
+          output->getMaybeRFactorDomain().end(),
+          std::inserter(split_root, split_root.end()),
+          [&](auto rf_root) {
+            if (rf_root->isBroadcast() ||
+                GpuLower::current()->trivialReductionInfo().isDerived(
+                    rf_root)) {
+              return false;
+            }
+            for (Expr* use : rf_root->uses()) {
+              if (std::find(all_exprs.begin(), all_exprs.end(), use) ==
+                  all_exprs.end()) {
+                continue;
+              }
+              return use->isA<Split>();
+            }
+            return false;
+          });
+      // If no root domain is split, no need to predicate
+      if (split_root.empty()) {
+        continue;
+      }
+      TORCH_INTERNAL_ASSERT(
+          output->getMemoryType() == MemoryType::Local,
+          "Local memory tensor is assumed: ",
+          output->toString());
+      std::vector<Val*> zero_leaf_ids;
+      for (const auto i : c10::irange(output->nDims())) {
+        auto leaf_id = output->axis(i);
+        if (i < output->getComputeAtPosition() || leaf_id->isThread() ||
+            leaf_id->isMma()) {
+          zero_leaf_ids.push_back(leaf_id);
+        }
+      }
+      if (zero_leaf_ids.empty()) {
+        return true;
+      }
+      const auto vals =
+          DependencyCheck::getAllValsBetween(split_root, zero_leaf_ids);
+      if (std::any_of(
+              split_root.begin(),
+              split_root.end(),
+              [&vals](auto split_root_id) {
+                return std::find(vals.begin(), vals.end(), split_root_id) ==
+                    vals.end();
+              })) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  // Always predicate if non-divisible split is found. It may be
+  // possible to make it less conservative.
+  // See FusionPredicateElimination7 for a concrete example.
+  filters.emplace_back([](Expr* expr) {
+    const auto& non_divisible_split_info =
+        GpuLower::current()->nonDivisibleSplitInfo();
+    for (auto output : ir_utils::filterByType<TensorView>(expr->outputs())) {
+      if (non_divisible_split_info.splitsToPredicate().find(output) !=
+          non_divisible_split_info.splitsToPredicate().end()) {
         return true;
       }
     }
@@ -375,7 +563,11 @@ void PredicateElimination::handle(Expr* expr) {
 
   // Ensure all inputs have some values set at the out-of-bound
   // regions
-  for (auto input : ir_utils::filterByType<TensorView>(expr->inputs())) {
+  for (const auto i : c10::irange(expr->inputs().size())) {
+    auto input = dynamic_cast<TensorView*>(expr->inputs()[i]);
+    if (input == nullptr) {
+      continue;
+    }
     auto input_def = input->definition();
     // When input_def is null, input must be an input to the fusion,
     // so that must be allocated on global memory. Since we don't omit
@@ -390,34 +582,26 @@ void PredicateElimination::handle(Expr* expr) {
     // initialied as it's allocated on local memory.
     if (input_def->isA<ReductionOp>() || input_def->isA<WelfordOp>()) {
       continue;
-    }
-
-    // If this expr is reduction, always initilize the input with the
-    // default value. NOTE: This can be done more
-    // intelligently. A garbage value can only cause a problem when
-    // it's reduced with non-garbage values, so if the non-reduction
-    // axes do not have any garbage, it should be just fine without
-    // explicit initialization. However, initialization cost should be
-    // cheap, so that further optimization should not make a large
-    // difference.
-    if (expr->isA<ReductionOp>()) {
+    } else if (expr->isA<ReductionOp>()) {
       setReductionInitValue(input, expr->as<ReductionOp>()->init());
       continue;
+    } else if (auto wop = dynamic_cast<WelfordOp*>(expr)) {
+      Val* init = wop->getInitVals().at(i);
+      setReductionInitValue(input, init);
+      continue;
     }
-
     if (expr->isA<MmaOp>()) {
       setReductionInitValue(input, expr->as<MmaOp>()->init());
       continue;
-    }
-
-    // If an input does not need a predicate either, then it should
-    // have some value, so no need to set a default value
-    if (non_predicated_exprs_.find(input_def) != non_predicated_exprs_.end()) {
+    } else if (
+        non_predicated_exprs_.find(input_def) != non_predicated_exprs_.end()) {
+      // If an input does not need a predicate either, then it should
+      // have some value, so no need to set a default value
       continue;
+    } else {
+      // Make sure input is initialized
+      setDefaultInitValue(input);
     }
-
-    // Make sure input is initialized
-    setDefaultInitValue(input);
   }
 }
 
@@ -435,6 +619,8 @@ bool PredicateElimination::setDefaultInitValue(TensorView* tv) {
 bool PredicateElimination::setReductionInitValue(
     TensorView* tv,
     Val* reduction_init) {
+  TORCH_INTERNAL_ASSERT(tv != nullptr);
+
   auto it = init_value_map_.find(tv);
   if (it == init_value_map_.end()) {
     init_value_map_.insert({tv, reduction_init});

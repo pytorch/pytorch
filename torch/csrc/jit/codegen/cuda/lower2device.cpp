@@ -288,10 +288,11 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
 
   validatePartialSplit(fusion_);
 
-  // Detects all exprssions that don't need predicates
-  predicateElimination().build(fusion_);
-
   nonDivisibleSplitInfo().build(fusion_);
+
+  // Detects all exprssions that don't need predicates. Depends on
+  // nonDivisibleSplitInfo.
+  predicateElimination().build(fusion_);
 
   doubleBufferInfo().build(fusion_);
 
