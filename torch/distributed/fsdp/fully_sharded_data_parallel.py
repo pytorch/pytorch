@@ -2417,17 +2417,18 @@ class FullyShardedDataParallel(nn.Module):
         Checks the validity of an all-gather to rebuild the full parameter
         ``param``. If on the first iteration, this uses an all-gather to check
         that all ranks plan to all-gather the same parameter, erroring if not,
-        and on subsequent iterations, this warns the user if the all-gather
-        execution order differs from that of the first iteration, meaning that
-        we can no longer guarantee correct execution. The warning is only
-        issued once per rank.
+        and on subsequent iterations, if the all-gather order differs from that
+        of the first iteration (meaning that we can no longer guarantee correct
+        execution), then we issue a warning to the user. This only issues
+        warnings on the first deviating iteration and stops checking
+        thereafter.
 
-        Executing in ``no_sync()`` does not affect the execution order check
-        for ``FULL_SHARD`` and ``SHARD_GRAD_OP``: (1) Being in ``no_sync()``
-        in the first iteration does not yield a different all-gather sequence,
-        and (2) being in ``no_sync()`` in a later iteration does not give
-        false positive warnings since the all-gather sequence still matches the
-        first iteration sequence (for ``FULL_SHARD``) or the first iteration
+        Executing in ``no_sync()`` does not affect this check for
+        ``FULL_SHARD`` and ``SHARD_GRAD_OP``: (1) Being in ``no_sync()`` in the
+        first iteration does not yield a different all-gather sequence, and (2)
+        being in ``no_sync()`` in a later iteration does not give false
+        positive warnings since the all-gather sequence still matches the first
+        iteration sequence (for ``FULL_SHARD``) or the first iteration
         sequence's prefix (for ``SHARD_GRAD_OP``).
         """
         # Only check all-gathers when rebuilding the full parameters in the
