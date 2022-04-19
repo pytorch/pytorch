@@ -247,6 +247,8 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._neg_view,
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
+        Tensor._nested_tensor_layer_norm,
+        Tensor.to_padded_tensor,
     }
 
 
@@ -1014,6 +1016,40 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.vstack: lambda tensors, out=None: -1,
         torch.where: lambda condition, x=None, y=None: -1,
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
+        torch._fw_primal_copy: lambda self, level: -1,
+        torch._make_dual_copy: lambda primal, tangent, level: -1,
+        torch.view_as_real_copy: lambda self: -1,
+        torch.view_as_complex_copy: lambda self: -1,
+        torch._conj_copy: lambda self: -1,
+        torch._neg_view_copy: lambda self: -1,
+        torch.as_strided_copy: lambda self, size, stride, storage_offset=None: -1,
+        torch._sparse_broadcast_to_copy: lambda self, size: -1,
+        torch.diagonal_copy: lambda self, offset=0, dim1=0, dim2=1: -1,
+        torch.expand_copy: lambda self, size, *, implicit=False: -1,
+        torch.narrow_copy: lambda self, dim, start, length: -1,
+        torch.permute_copy: lambda self, dims: -1,
+        torch._reshape_alias_copy: lambda self, size, stride: -1,
+        torch.select_copy: lambda self, dim, index: -1,
+        torch.detach_copy: lambda self: -1,
+        torch.slice_copy: lambda self, dim=0, start=None, end=None, step=1: -1,
+        torch.split_copy: lambda self, split_size, dim=0: -1,
+        torch.split_with_sizes_copy: lambda self, split_sizes, dim=0: -1,
+        torch.squeeze_copy: lambda self: -1,
+        torch.squeeze_copy: lambda self, dim: -1,
+        torch.t_copy: lambda self: -1,
+        torch.transpose_copy: lambda self, dim0, dim1: -1,
+        torch.unsqueeze_copy: lambda self, dim: -1,
+        torch._indices_copy: lambda self: -1,
+        torch._values_copy: lambda self: -1,
+        torch.indices_copy: lambda self: -1,
+        torch.values_copy: lambda self: -1,
+        torch.crow_indices_copy: lambda self: -1,
+        torch.col_indices_copy: lambda self: -1,
+        torch.unbind_copy: lambda self, dim=0: -1,
+        torch.view_copy: lambda self, size: -1,
+        torch.view_copy: lambda self, dtype: -1,
+        torch.unfold_copy: lambda self, dimension, size, step: -1,
+        torch.alias_copy: lambda self: -1,
         Tensor.__floordiv__: lambda self, other: -1,
         Tensor.__rfloordiv__: lambda self, other: -1,
         Tensor.__ifloordiv__: lambda self, other: -1,
@@ -1405,7 +1441,8 @@ def handle_torch_function(
         # This call needs to become a classmethod call in the future.
         # See https://github.com/pytorch/pytorch/issues/63767
         torch_func_method = overloaded_arg.__torch_function__
-        if hasattr(torch_func_method, "__self__") and torch_func_method.__self__ is overloaded_arg:
+        if hasattr(torch_func_method, "__self__") and torch_func_method.__self__ is overloaded_arg and \
+                torch_func_method is not torch._C._disabled_torch_function_impl:
             warnings.warn("Defining your `__torch_function__ as a plain method is deprecated and "
                           "will be an error in future, please define it as a classmethod.",
                           DeprecationWarning)

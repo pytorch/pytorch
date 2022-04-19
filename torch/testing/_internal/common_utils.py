@@ -1023,7 +1023,6 @@ def skipIfNoLapack(fn):
             fn(*args, **kwargs)
     return wrapper
 
-
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
 
@@ -1045,6 +1044,17 @@ def skipIfNotRegistered(op_name, message):
         skipper = unittest.skip("Cannot import `caffe2.python.core`")
     return skipper
 
+def _decide_skip_caffe2(expect_caffe2, reason):
+    def skip_dec(func):
+        def wrapper(self):
+            if torch.onnx._CAFFE2_ATEN_FALLBACK != expect_caffe2:
+                raise unittest.SkipTest(reason)
+            return func(self)
+        return wrapper
+    return skip_dec
+
+skipIfCaffe2 = _decide_skip_caffe2(False, "Not compatible with Caffe2")
+skipIfNoCaffe2 = _decide_skip_caffe2(True, "Caffe2 is not available")
 
 def skipIfNoSciPy(fn):
     @wraps(fn)
@@ -1086,20 +1096,6 @@ def slowTest(fn):
         else:
             fn(*args, **kwargs)
     wrapper.__dict__['slow_test'] = True
-    return wrapper
-
-
-# noarch tests are tests that should be only run on one CI configuration,
-# because they don't exercise any interesting platform specific code
-# and so if run once, indicate the test should pass everywhere.
-# See https://github.com/pytorch/pytorch/issues/53743
-def noarchTest(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_SKIP_NOARCH:
-            raise unittest.SkipTest("test is noarch: we are skipping noarch tests due to TEST_SKIP_NOARCH")
-        else:
-            fn(*args, **kwargs)
     return wrapper
 
 
@@ -2933,7 +2929,7 @@ def gradcheck(fn, inputs, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -2953,7 +2949,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
