@@ -105,13 +105,17 @@ TreeSpec from_str_internal(
       size_t child_idx = 0;
       size_t leaves_offset = 0;
 
-      while (spec[read_idx] != Config::kNodeDataEnd) {
-        // NOLINTNEXTLINE
-        auto next_delim_idx = spec_data.idxs[read_idx];
+      if (size > 0) {
+        while (spec[read_idx] != Config::kNodeDataEnd) {
+          // NOLINTNEXTLINE
+          auto next_delim_idx = spec_data.idxs[read_idx];
+          read_idx++;
+          c->items[child_idx] = from_str_internal(spec, read_idx, spec_data);
+          read_idx = next_delim_idx;
+          leaves_offset += layout[child_idx++];
+        }
+      } else {
         read_idx++;
-        c->items[child_idx] = from_str_internal(spec, read_idx, spec_data);
-        read_idx = next_delim_idx;
-        leaves_offset += layout[child_idx++];
       }
       c->leaves_num = leaves_offset;
       return c;
@@ -126,27 +130,31 @@ TreeSpec from_str_internal(
       size_t child_idx = 0;
       size_t leaves_offset = 0;
 
-      while (spec[read_idx] != Config::kNodeDataEnd) {
-        // NOLINTNEXTLINE
-        auto next_delim_idx = spec_data.idxs[read_idx];
-        read_idx++;
-        if (spec[read_idx] == Config::kDictStrKeyQuote) {
-          auto key_delim_idx = spec_data.idxs[read_idx];
-          read_idx++;
-          const size_t key_len = key_delim_idx - read_idx;
+      if (size > 0) {
+        while (spec[read_idx] != Config::kNodeDataEnd) {
           // NOLINTNEXTLINE
-          c->dict.keys[child_idx] = spec.substr(read_idx, key_len);
-          read_idx = key_delim_idx + 2;
-        } else {
-          assert(isdigit(spec[read_idx]));
-          size_t key = read_number(spec, read_idx);
-          c->dict.keys[child_idx] = KeyInt(key);
-          read_idx += 1;
-        }
+          auto next_delim_idx = spec_data.idxs[read_idx];
+          read_idx++;
+          if (spec[read_idx] == Config::kDictStrKeyQuote) {
+            auto key_delim_idx = spec_data.idxs[read_idx];
+            read_idx++;
+            const size_t key_len = key_delim_idx - read_idx;
+            // NOLINTNEXTLINE
+            c->dict.keys[child_idx] = spec.substr(read_idx, key_len);
+            read_idx = key_delim_idx + 2;
+          } else {
+            TORCH_INTERNAL_ASSERT(isdigit(spec[read_idx]));
+            size_t key = read_number(spec, read_idx);
+            c->dict.keys[child_idx] = KeyInt(key);
+            read_idx += 1;
+          }
 
-        c->items[child_idx] = from_str_internal(spec, read_idx, spec_data);
-        read_idx = next_delim_idx;
-        leaves_offset += layout[child_idx++];
+          c->items[child_idx] = from_str_internal(spec, read_idx, spec_data);
+          read_idx = next_delim_idx;
+          leaves_offset += layout[child_idx++];
+        }
+      } else {
+        read_idx++;
       }
       c->leaves_num = leaves_offset;
       return c;
@@ -155,7 +163,7 @@ TreeSpec from_str_internal(
     case Config::kLeaf:
       return new Container<TreeSpecLeaf>(nullptr);
   }
-  assert(false);
+  TORCH_INTERNAL_ASSERT(false);
   return new Container<TreeSpecLeaf>(Kind::None);
 }
 
@@ -197,7 +205,7 @@ StrTreeSpec to_str_internal(const TreeSpec& spec) {
         s.append(key.as_str());
         s.push_back(Config::kDictStrKeyQuote);
       } else {
-        assert(false);
+        TORCH_INTERNAL_ASSERT(false);
       }
       s.push_back(Config::kDictKeyValueSep);
       s.append(to_str_internal(spec[i]));

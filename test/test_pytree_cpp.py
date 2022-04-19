@@ -2,8 +2,8 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch._C._pytree import tree_flatten, tree_map, tree_unflatten, from_str, TreeSpec, broadcast_to_and_flatten#, LeafSpec
-from collections import namedtuple
+from torch._C._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, broadcast_to_and_flatten
+# from collections import namedtuple
 
 
 def spec(o):
@@ -57,8 +57,7 @@ class TestPytree(TestCase):
             unflattened = tree_unflatten(values, treespec)
             self.assertEqual(unflattened, lst)
             self.assertTrue(isinstance(unflattened, list))
-
-        #run_test([])
+        run_test([])
         run_test([1., 2])
         run_test([torch.tensor([1., 2]), 2, 10, 9, 11])
 
@@ -85,7 +84,7 @@ class TestPytree(TestCase):
             self.assertEqual(unflattened, tup)
             self.assertTrue(isinstance(unflattened, tuple))
 
-        #run_test(())
+        run_test(())
         run_test((1.,))
         run_test((1., 2))
         run_test((torch.tensor([1., 2]), 2, 10, 9, 11))
@@ -145,7 +144,7 @@ class TestPytree(TestCase):
             self.assertEqual(unflattened, d)
             self.assertTrue(isinstance(unflattened, dict))
 
-        #run_test({})
+        run_test({})
         run_test({'a': 1})
         run_test({'abcdefg': torch.randn(2, 3)})
         run_test({1: torch.randn(2, 3)})
@@ -163,9 +162,9 @@ class TestPytree(TestCase):
             self.assertEqual(unflattened, pytree)
 
         cases = [
-#            [()],
-#            ([],),
-#            {'a': ()},
+            [()],
+            ([],),
+            {'a': ()},
             {'a': 0, 'b': [{'c': 1}]},
             {'a': 0, 'b': [1, {'c': 2}, torch.randn(3)], 'c': (torch.randn(2, 3), 1)},
         ]
@@ -185,8 +184,8 @@ class TestPytree(TestCase):
             self.assertEqual(tree_flatten(tree_flatten(pytree, f), invf), pytree)
 
             cases = [
-#                [()],
-#                ([],),
+                [()],
+                ([],),
                 {'a': ()},
                 {'a': 1, 'b': [{'c': 2}]},
                 {'a': 0, 'b': [2, {'c': 3}, 4], 'c': (5, 6)},
