@@ -816,6 +816,17 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 
         T = torch.Tensor
         do_meta = func not in {
+            # These are known not to work and are fast-pathed out to
+            # avoid the slowdown induced by C++ exception throwing
+            T.cpu,
+            T.__bool__,
+            T.__int__,
+            torch.isclose,
+            T.to,
+            T.item,
+            # These perturb RNG and so should not be run
+            torch.randint,
+            torch.randn,
             # TODO: these should raise NotImplementedError, but raises a
             # different error
             T.numpy,
@@ -828,6 +839,7 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
             # TODO: IDK what's up with these.  TestTorch.test_sobolengine_bounds
             torch._sobol_engine_initialize_state_,
             torch._sobol_engine_draw,
+            torch._sobol_engine_scramble_,
         }
 
         if do_meta:
@@ -845,12 +857,13 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                     meta_args = args
                 meta_kwargs = tree_map(to_meta, kwargs)
             except NotImplementedError:
-                pass
+                do_meta = False
             except Exception as e:
                 raise RuntimeError(
                     f"failed to convert args to meta; "
                     f"originally (*{args}, **{kwargs})") from e
 
+        print(func)
         r = func(*args, **kwargs)
 
         # TODO: also handle cases where func raise an exception
@@ -859,7 +872,7 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
             try:
                 meta_r = func(*meta_args, **meta_kwargs)
             except NotImplementedError:
-                pass
+                print(func)
             except Exception as e:
                 raise RuntimeError(
                     f"failed to run {func}(*{meta_args}, **{meta_kwargs}); "
@@ -2190,6 +2203,8 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    # This is a speed optimization for crossref tests
+    @torch.overrides._no_torch_function_mode()
     def assertEqual(
             self,
             x,
