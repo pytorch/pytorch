@@ -266,7 +266,6 @@ bool isResurrectable(THPVariable* self) {
 // returns true if successfully rezzed; if so, cancel the
 // rest of deallocation
 static bool THPVariable_tryResurrect(THPVariable* self) {
-  // std::cout<<"resurrecting: "<<(intptr_t)self<<std::endl;
   const auto& tensor = THPVariable_Unpack(self);
 
   if (!isResurrectable(self)) {
@@ -312,9 +311,9 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
 
 static int THPVariable_clear(THPVariable* self) {
   // Is it OK for an object to still be live after running
-  // tp_clear? Yes. If Python is unlucky about the order it clears things,
-  // clearing one object may not actually induce deallocation of everything
-  // else. The source code explicitly handles this case:
+  // tp_clear? Yes. When Python is breaking reference cycles, it can't assume
+  // that an object will dealloc after it's cleared.  The source code explicitly
+  // handles this case:
   // https://github.com/python/cpython/blob/4e661cd69164318c1f871faa476c68a04092ddc4/Modules/gcmodule.c#L1010-L1025
 
   // Note that we don't need to actually resurrect here. There are 2 cases:
