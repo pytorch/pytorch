@@ -598,15 +598,15 @@ inline bool operator==(
 template <class TTarget1, class NullType1>
 inline bool operator==(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
-    std::nullptr_t rhs) noexcept {
-  return lhs.get() == rhs;
+    std::nullptr_t) noexcept {
+  return lhs.get() == nullptr;
 }
 
 template <class TTarget2, class NullType2>
 inline bool operator==(
-    std::nullptr_t lhs,
+    std::nullptr_t,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return lhs == rhs.get();
+  return nullptr == rhs.get();
 }
 
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
@@ -619,15 +619,15 @@ inline bool operator!=(
 template <class TTarget1, class NullType1>
 inline bool operator!=(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
-    std::nullptr_t rhs) noexcept {
-  return !operator==(lhs, rhs);
+    std::nullptr_t) noexcept {
+  return !operator==(lhs, nullptr);
 }
 
 template <class TTarget2, class NullType2>
 inline bool operator!=(
-    std::nullptr_t lhs,
+    std::nullptr_t,
     const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
-  return !operator==(lhs, rhs);
+  return !operator==(nullptr, rhs);
 }
 template <typename T>
 struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
