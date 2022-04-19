@@ -1,6 +1,7 @@
 import bz2
 import json
 import logging
+import os
 import subprocess
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -144,6 +145,19 @@ def get_cases(
     return cases
 
 
+def _get_stripped_CI_job() -> str:
+    """E.g. convert 'pytorch_windows_vs2019_py36_cuda10.1_build' to 'pytorch_windows_vs2019_py36_cuda10.1'.
+    """
+    job = os.environ.get("JOB_BASE_NAME", "").rstrip('0123456789')
+    if job.endswith('_slow_test'):
+        job = job[:len(job) - len('_slow_test')]
+    elif job.endswith('_test') or job.endswith('-test'):
+        job = job[:len(job) - len('_test')]
+    elif job.endswith('_build') or job.endswith('-build'):
+        job = job[:len(job) - len('_build')]
+    return job
+
+
 def _parse_master_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[Report]]:
     summary_dict = defaultdict(list)
     for summary in summaries:
@@ -154,6 +168,7 @@ def _parse_master_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[R
             string = bz2.decompress(binary).decode("utf-8")
             summary_dict[summary_job].append(json.loads(string))
     return summary_dict
+
 
 def _parse_pr_summaries(summaries: Any, job_prefix: str) -> Dict[str, List[Tuple[Report, str]]]:
     summary_dict = defaultdict(list)
@@ -181,6 +196,7 @@ def get_test_stats_summaries_for_job(*, sha: str, job_prefix: str) -> Dict[str, 
     bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
     summaries = bucket.objects.filter(Prefix=f"test_time/{sha}/{job_prefix}")
     return _parse_master_summaries(summaries, jobs=list())
+
 
 def get_test_stats_summaries_for_pr(*, pr: str, job_prefix: str) -> Dict[str, List[Tuple[Report, str]]]:
     bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
@@ -210,9 +226,15 @@ def get_previous_reports_for_branch(branch: str, ci_job_prefix: str = "") -> Lis
         logger.info(f'Grabbing reports from commit: {commit}')
         summaries = get_test_stats_summaries_for_job(sha=commit, job_prefix=ci_job_prefix)
         for job_name, summary in summaries.items():
-            reports.append(summary[0])
-            if len(summary) > 1:
-                logger.warning(f'WARNING: Multiple summary objects found for {commit}/{job_name}')
+            # due to naming, some slow tests might get included in the summaries by accident
+            # (specifically linux-bionic-py3.7-clang(-slow)-test), so check to make sure slow tests don't get
+            # included in the calculations for non-slow test times, as they are much slower than non-slow tests
+            # and heavily skew the calculation
+            if ("slow" in job_name and "slow" in os.environ.get("JOB_BASE_NAME", "")) or (
+                    "slow" not in job_name and "slow" not in os.environ.get("JOB_BASE_NAME", "")):
+                reports.append(summary[0])
+                if len(summary) > 1:
+                    logger.warning(f'WARNING: Multiple summary objects found for {commit}/{job_name}')
         commit_index += 1
     return reports
 
