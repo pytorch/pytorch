@@ -15,7 +15,7 @@ runs:
   steps:
     - name: Download PyTorch Build Artifacts from S3
       if: ${{ !inputs.use-gha }}
-      uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      uses: seemethere/download-artifact-s3@v3
       with:
         name: ${{ inputs.name }}
 

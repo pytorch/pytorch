@@ -2009,6 +2009,35 @@ class TestGraph(TestCase):
         self.assertEqual(expected, graph)
 
 
+class TestCircularSerialization(TestCase):
+
+    class CustomIterDataPipe(IterDataPipe):
+        def add_one(self, x):
+            return x + 1
+
+        def classify(self, x):
+            return 0
+
+        def __init__(self):
+            self._dp = dp.iter.IterableWrapper([1, 2, 4]).map(self.add_one).demux(2, self.classify)[0]
+
+        def __iter__(self):
+            yield from self._dp
+
+    def test_circular_reference(self):
+        self.assertEqual(
+            list(TestCircularSerialization.CustomIterDataPipe()),
+            list(pickle.loads(pickle.dumps(TestCircularSerialization.CustomIterDataPipe())))
+        )
+        _ = traverse(TestCircularSerialization.CustomIterDataPipe(), only_datapipe=True)
+        _ = traverse(TestCircularSerialization.CustomIterDataPipe(), only_datapipe=False)
+
+    # TODO: Ensure this works with `dill` installed
+    # @skipIfNoDill
+    # def test_circular_serialization_with_dill(self):
+    #     assert list(self._CustomIterDataPipe()) == list(dill.loads(dill.dumps(self._CustomIterDataPipe())))
+
+
 class TestSharding(TestCase):
 
     def _get_pipeline(self):

@@ -144,6 +144,7 @@ struct Capsule {
   _(Double)                  \
   _(ComplexDouble)           \
   _(Int)                     \
+  _(SymInt)   \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -560,6 +561,18 @@ public:
     payload.u.as_int = i;
   }
 
+  IValue(c10::SymInt i) : tag(Tag::SymInt), is_intrusive_ptr(false) {
+    payload.u.as_int = i.data();
+  }
+
+  bool isSymInt() const {
+    return Tag::SymInt == tag;
+  }
+
+  c10::SymInt toSymInt() const {
+    return c10::SymInt(payload.u.as_int);
+  }
+
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
 
@@ -635,6 +648,12 @@ public:
   c10::List<at::Tensor> toTensorList() &&;
   c10::List<at::Tensor> toTensorList() const&;
   std::vector<at::Tensor> toTensorVector() const;
+
+  // OptionalTensorList
+  bool isOptionalTensorList() const;
+  c10::List<c10::optional<at::Tensor>> toOptionalTensorList() &&;
+  c10::List<c10::optional<at::Tensor>> toOptionalTensorList() const&;
+  std::vector<c10::optional<at::Tensor>> toOptionalTensorVector() const;
 
   // GenericList
   IValue(c10::List<IValue> v);

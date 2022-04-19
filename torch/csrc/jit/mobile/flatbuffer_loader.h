@@ -62,6 +62,9 @@ TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_file_content(
 TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
     std::istream& in);
 
+TORCH_API uint64_t get_bytecode_version(std::istream& in);
+TORCH_API uint64_t get_bytecode_version(const std::string& filename);
+
 class TORCH_API FlatbufferLoader {
  public:
   FlatbufferLoader();

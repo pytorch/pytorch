@@ -38,9 +38,9 @@ struct ViewIndexState {
 };
 
 //! Base class for all tranformations
-class Transform {
+class Transform : public PolymorphicBase {
  public:
-  virtual void toString(std::stringstream& output) const = 0;
+  virtual void toString(std::ostream& output) const = 0;
 
   size_t index() const {
     return index_;
@@ -53,8 +53,6 @@ class Transform {
   size_t newIndex() const {
     return new_index_;
   }
-
-  virtual ~Transform() = default;
 
  protected:
   Transform(const ViewIndexState& state, size_t index)
@@ -80,7 +78,6 @@ class ViewTransform : public Transform {
   virtual void createRfactorDomain(
       const std::vector<IterDomain*>& new_root_domain,
       std::vector<IterDomain*>& rfactor_domain) = 0;
-  ~ViewTransform() override = default;
 
   virtual bool isOriginalAxisDynamic() const = 0;
 
@@ -105,7 +102,7 @@ class MergeTransform final : public ViewTransform {
   MergeTransform(const ViewIndexState& state, bool is_last_axis_rfactor)
       : ViewTransform(state), is_last_axis_rfactor_(is_last_axis_rfactor) {}
 
-  void toString(std::stringstream& output) const override {
+  void toString(std::ostream& output) const override {
     output << "Merge Index: " << index_ << " RF: " << is_last_axis_rfactor_
            << std::endl;
   }
@@ -164,7 +161,7 @@ class SplitTransform final : public ViewTransform {
         is_last_axis_rfactor_(is_last_axis_rfactor),
         split_factor_(split_factor) {}
 
-  void toString(std::stringstream& output) const override {
+  void toString(std::ostream& output) const override {
     output << "Split Index: " << index_ << " RF: " << is_last_axis_rfactor_
            << " ARG: " << split_factor_ << std::endl;
   }
@@ -228,7 +225,7 @@ class KeepTransform final : public ViewTransform {
  public:
   KeepTransform(const ViewIndexState& state) : ViewTransform(state) {}
 
-  void toString(std::stringstream& output) const override {
+  void toString(std::ostream& output) const override {
     output << "Keep Index: " << index_ << std::endl;
   }
 
@@ -257,7 +254,7 @@ class BroadcastTransform final : public Transform {
   BroadcastTransform(const ViewIndexState& state)
       : Transform(state, Transform::computeNewIndex(state)) {}
 
-  void toString(std::stringstream& output) const override {
+  void toString(std::ostream& output) const override {
     output << "Bcast Index: " << index_ << std::endl;
   }
 };
@@ -269,7 +266,7 @@ class TrivialReductionTransform final : public Transform {
   TrivialReductionTransform(const ViewIndexState& state)
       : Transform(state, TrivialReductionTransform::computeIndex(state)) {}
 
-  void toString(std::stringstream& output) const override {
+  void toString(std::ostream& output) const override {
     output << "1-Red Index: " << index_ << std::endl;
   }
 
@@ -320,10 +317,23 @@ class AnalyzeViewTransformation {
 
   AnalyzeViewResult run() {
     findTransformation();
+
     TORCH_INTERNAL_ASSERT(
         validate(),
         "Analyze View Transformation failed to find valid transformation.\n",
         toString());
+
+    // Skip view operations if all iterDomains are kept as-is
+    bool all_keep_transforms = std::all_of(
+        view_transforms_.begin(),
+        view_transforms_.end(),
+        [](std::shared_ptr<ViewTransform> vt) {
+          return vt->isA<KeepTransform>();
+        });
+    if (all_keep_transforms) {
+      view_transforms_.clear();
+    }
+
     return {
         !broadcast_transforms_.empty(),
         generateBroadcastAxes(),
@@ -761,12 +771,13 @@ AnalyzeViewResult analyzeView(
     const std::vector<int64_t>& new_sizes) {
   FUSER_PERF_SCOPE("analyzeView");
   TORCH_INTERNAL_ASSERT(
-      tv->getMaybeRFactorDomain().size() == original_sizes.size());
+      TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size() ==
+      original_sizes.size());
   auto sizes = inferNewViewShape(original_sizes, new_sizes);
   AnalyzeViewTransformation analyzer(
       sizes.first /* original_view */,
       sizes.second /* new_view */,
-      tv->getRootDomain());
+      TensorDomain::noReductions(tv->getMaybeRFactorDomain()));
   return analyzer.run();
 }
 

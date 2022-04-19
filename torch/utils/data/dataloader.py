@@ -164,7 +164,7 @@ class DataLoader(Generic[T_co]):
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
-                 shuffle: bool = False, sampler: Union[Sampler, Iterable, None] = None,
+                 shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
                  batch_sampler: Union[Sampler[Sequence], Iterable[Sequence], None] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
@@ -229,8 +229,10 @@ class DataLoader(Generic[T_co]):
             # this, and support custom samplers that specify the assignments to
             # specific workers.
             if isinstance(dataset, IterDataPipe):
-                torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
-            elif shuffle is not False:
+                if shuffle is not None:
+                    dataset = torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
+            # We cannot check `shuffle is not None` here, since previously `shuffle=False` was the default.
+            elif shuffle not in {False, None}:
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
                     "shuffle option, but got shuffle={}".format(shuffle))
@@ -246,6 +248,7 @@ class DataLoader(Generic[T_co]):
                     "DataLoader with IterableDataset: expected unspecified "
                     "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
         else:
+            shuffle = bool(shuffle)
             self._dataset_kind = _DatasetKind.Map
 
 
