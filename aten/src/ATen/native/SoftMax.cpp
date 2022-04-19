@@ -10,6 +10,7 @@
 
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 namespace at {
 namespace meta {
@@ -418,17 +419,40 @@ Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarTyp
   return result;
 }
 
-Tensor& softmax_out(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype, Tensor& output_) {
-  auto options = TensorOptions().dtype(output_.dtype());
-  output_.resize_(input_.sizes());
-  Tensor output_temp = at::zeros(output_.sizes(), options);
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float) {
-    at::_softmax_out(output_temp, input_, dim_, true);
+Tensor& softmax_out(
+    const Tensor& input_,
+    const int64_t dim_,
+    c10::optional<ScalarType> dtype,
+    Tensor& output_) {
+  Tensor output_temp;
+  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
+      dtype == ScalarType::Float) {
+    if (!output_.is_contiguous()) {
+      auto options =
+          TensorOptions().dtype(output_.dtype()).device(output_.device());
+      output_temp = at::empty(output_.sizes(), options);
+      at::_softmax_out(output_temp, input_, dim_, true);
+    } else {
+      at::_softmax_out(output_, input_, dim_, true);
+    }
   } else {
-    Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
-    at::_softmax_out(output_temp, converted, dim_, false);
+    Tensor converted =
+        dtype.has_value() ? input_.toType(dtype.value()) : input_;
+    if (!output_.is_contiguous()) {
+      auto options =
+          TensorOptions().dtype(output_.dtype()).device(output_.device());
+      output_temp = at::empty(output_.sizes(), options);
+      at::_softmax_out(output_temp, converted, dim_, false);
+    } else {
+      at::_softmax_out(output_, converted, dim_, false);
+    }
   }
-  output_.copy_(output_temp);
+
+  if (!output_.is_contiguous()) {
+    output_.resize_(output_temp.sizes());
+    output_.copy_(output_temp);
+  }
+
   return output_;
 }
 
@@ -460,17 +484,40 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<Scala
   return result;
 }
 
-Tensor& log_softmax_out(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype, Tensor& output_) {
-  auto options = TensorOptions().dtype(output_.dtype());
-  output_.resize_(input_.sizes());
-  Tensor output_temp = at::zeros(output_.sizes(), options);
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float) {
-    at::_log_softmax_out(output_temp, input_, dim_, true);
+Tensor& log_softmax_out(
+    const Tensor& input_,
+    const int64_t dim_,
+    c10::optional<ScalarType> dtype,
+    Tensor& output_) {
+  Tensor output_temp;
+  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
+      dtype == ScalarType::Float) {
+    if (!output_.is_contiguous()) {
+      auto options =
+          TensorOptions().dtype(output_.dtype()).device(output_.device());
+      output_temp = at::empty(output_.sizes(), options);
+      at::_log_softmax_out(output_temp, input_, dim_, true);
+    } else {
+      at::_log_softmax_out(output_, input_, dim_, true);
+    }
   } else {
-    Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
-    at::_log_softmax_out(output_temp, converted, dim_, false);
+    Tensor converted =
+        dtype.has_value() ? input_.toType(dtype.value()) : input_;
+    if (!output_.is_contiguous()) {
+      auto options =
+          TensorOptions().dtype(output_.dtype()).device(output_.device());
+      output_temp = at::empty(output_.sizes(), options);
+      at::_log_softmax_out(output_temp, converted, dim_, false);
+    } else {
+      at::_log_softmax_out(output_, converted, dim_, false);
+    }
   }
-  output_.copy_(output_temp);
+
+  if (!output_.is_contiguous()) {
+    output_.resize_(output_temp.sizes());
+    output_.copy_(output_temp);
+  }
+
   return output_;
 }
 
