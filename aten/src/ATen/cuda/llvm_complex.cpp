@@ -753,15 +753,15 @@ reciprocal(const complex<_Tp>& __x)
     // Handle extreme cases for numpy compatibility
     auto both_inf = [](_Tp real, _Tp imag) {
         return isinf(real) && isinf(imag);
-    }
+    };
 
     auto either_inf = [](_Tp real, _Tp imag) {
         return isinf(real) || isinf(imag);
-    }
+    };
 
     auto either_nan = [](_Tp real, _Tp imag) {
         return isnan(real) || isnan(imag);
-    }
+    };
 
     if (either_nan(__x.real(), __x.imag()) || both_inf(__x.real(), __x.imag())) {
         // If either is Nan or both are infinite, return {nan, nan}
