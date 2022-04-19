@@ -146,8 +146,11 @@ std::string get_named_tuple_str_or_default(
         name_type_pairs.emplace_back(
             c10::ivalue::Tuple::create({it->name(), named_tuple_type_str}));
 
-        named_tuple_str +=
-            "[" + named_tuple_name + ", " + named_tuple_type_str + "]";
+        named_tuple_str.append("[")
+            .append(named_tuple_name)
+            .append(", ")
+            .append(named_tuple_type_str)
+            .append("]");
         if (it != named_tuple_ptr->schema()->arguments().end() - 1) {
           named_tuple_str.append(",");
         }
@@ -216,8 +219,12 @@ std::pair<IValue, IValue> getFunctionTuple(
       // [[lengths, Tensor],[values,
       // __torch__.dper3.core.pytorch_schema_utils.IdScoreTuple[NamedTuple,
       // [[ids, Tensor],[scores, Tensor]]]],[offsets, Optional[Tensor]]]]]"
-      std::string dict_str =
-          "Dict[" + key_type_str + "," + value_type_str + "]";
+      std::string dict_str;
+      dict_str.append("Dict[")
+          .append(key_type_str)
+          .append(",")
+          .append(value_type_str)
+          .append("]");
       types.emplace_back(dict_str);
       continue;
     } else if (t->kind() == TypeKind::TupleType) {

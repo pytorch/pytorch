@@ -326,6 +326,8 @@ void HaloInfo::insertToInheritanceMap(
 void HaloInfo::initializeFromRootAxisInfo(IterDomain* id) {
   TORCH_INTERNAL_ASSERT(hasRootAxisInfo(id));
 
+  auto gpu_lower = GpuLower::current();
+
   const auto& halo_info = getRootAxisInfo(id);
   auto halo_width = halo_info.width();
 
@@ -348,6 +350,8 @@ void HaloInfo::setHaloWidth(IterDomain* id, int halo_width) {
 
 // Propagate extent information from root axes to descendants
 void HaloInfo::build(TensorDomain* td) {
+  auto gpu_lower = GpuLower::current();
+
   auto exprs = DependencyCheck::getAllExprsBetween(
       {td->getMaybeRFactorDomain().begin(), td->getMaybeRFactorDomain().end()},
       {td->domain().begin(), td->domain().end()});
