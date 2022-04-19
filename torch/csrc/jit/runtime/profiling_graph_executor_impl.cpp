@@ -378,8 +378,7 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
 
     EliminateCommonSubexpression(graph);
     GRAPH_DEBUG(
-        "After EliminateCommonSubexpression, before CheckInplace\n",
-        *graph);
+        "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
     CheckInplace(graph);
   }
   GRAPH_DEBUG(
@@ -558,8 +557,7 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
   DecomposeOps(graph);
   GRAPH_DEBUG("After DecomposeOps, before ConstantPropagation\n", *graph);
   ConstantPropagation(graph);
-  GRAPH_DEBUG(
-      "After ConstantPropagation, before EliminateDeadCode\n", *graph);
+  GRAPH_DEBUG("After ConstantPropagation, before EliminateDeadCode\n", *graph);
   EliminateDeadCode(graph);
   GRAPH_DEBUG(
       "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
