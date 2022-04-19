@@ -36,7 +36,7 @@ static RegisterInterface register_interface_;
 class RegisterPass {
  public:
   RegisterPass() {
-    RegisterCudaFuseGraph::registerPass(true);
+    RegisterCudaFuseGraph::registerPass(true, /* check_gpu */ false);
   }
 };
 

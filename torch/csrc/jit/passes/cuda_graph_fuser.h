@@ -13,7 +13,7 @@ namespace jit {
 // Register CudaFuseGraph in custom passes
 struct TORCH_API RegisterCudaFuseGraph
     : public PassManager<RegisterCudaFuseGraph> {
-  static bool registerPass(bool enabled) {
+  static bool registerPass(bool enabled, bool check_gpu = true) {
     bool old_flag = PassManager::isRegistered();
     if (enabled) {
       // TODO: this might not be the right place to put the ROCm logic.
@@ -24,9 +24,11 @@ struct TORCH_API RegisterCudaFuseGraph
 #else
       bool has_rocm = false;
 #endif
-      TORCH_CHECK(
-          at::globalContext().hasCUDA() && !has_rocm,
-          "Running CUDA fuser is only supported on CUDA builds.");
+      if (check_gpu) {
+        TORCH_CHECK(
+            at::globalContext().hasCUDA() && !has_rocm,
+            "Running CUDA fuser is only supported on CUDA builds.");
+      }
       PassManager::registerPass(fuser::cuda::fuseGraph);
     } else {
       PassManager::clearPass();
