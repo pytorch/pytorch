@@ -159,6 +159,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
     // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
     // is to use lt interface only when self is bias.
+    // The last two conditions are to work around cublasLtMatmul generating
+    // CUBLAS_STATUS_NOT_SUPPORTED when a matrix is sliced: e.g., when
+    // Adesc=[type=R_16F rows=2400 cols=128 ld=2400]
+    // Bdesc=[type=R_16F rows=2400 cols=2048 ld=25272]
+    // Cdesc=[type=R_16F rows=128 cols=2048 ld=128]
+    // Ddesc=[type=R_16F rows=128 cols=2048 ld=128]
+    // computeDesc=[computeType=COMPUTE_32F scaleType=R_32F transa=OP_T]
     useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
         result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
         self.is_contiguous() &&
@@ -166,7 +173,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
          scalar_type == at::ScalarType::Float ||
          scalar_type == at::ScalarType::Half ||
          scalar_type == at::ScalarType::BFloat16) &&
-        mat2_sizes[0] > 1 && mat2_sizes[1] > 1;
+        mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
+        (mat1.strides()[0] == 1 || mat1.strides()[0] == mat1_sizes[1]) &&
+        (mat2.strides()[0] == 1 || mat2.strides()[0] == mat2_sizes[1]);
 #endif
     if (!useLtInterface) {
       self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
