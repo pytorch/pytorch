@@ -10,7 +10,6 @@
 
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
 namespace at {
 namespace meta {
