@@ -9,6 +9,10 @@ import torch.distributed as dist
 
 from . import default_hooks as default
 
+__all__ = [
+    "PowerSGDState", "powerSGD_hook", "batched_powerSGD_hook"
+]
+
 logger = logging.getLogger(__name__)
 
 
