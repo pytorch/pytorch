@@ -18,6 +18,10 @@ def torch_relu_override(x):
     return x
 
 
+def torch_nn_relu_override(self, x):
+    return x
+
+
 def functional_relu_override(x, inplace=False):
     assert not inplace, 'dont support inplace functional.relu for metatensor analysis'
     return x
@@ -38,6 +42,7 @@ manual_meta_overrides = {
     torch.nn.LayerNorm: nn_layernorm_override,
     torch.relu: torch_relu_override,
     torch.nn.functional.relu: functional_relu_override,
+    torch.nn.ReLU: torch_nn_relu_override,
     torch.where: torch_where_override,
     torch.abs: torch_abs_override,
 }
@@ -190,7 +195,7 @@ class MetaTracer(torch.fx.Tracer):
             assert isinstance(rv, torch.fx.Proxy), 'Dont support composite output yet'
             rv.install_tensor_meta(meta_out)
         except Exception as e:
-            warnings.warn(f'Could not compute metadata for target {target}: {e}')
+            warnings.warn(f'Could not compute metadata for {kind} target {target}: {e}')
 
         return rv
 
