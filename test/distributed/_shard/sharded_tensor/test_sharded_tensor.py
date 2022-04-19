@@ -14,10 +14,10 @@ from torch.distributed._shard import (
     shard_parameter,
     sharded_tensor,
     _shard_tensor,
+    load_with_process_group,
 )
 from torch.distributed._shard.sharded_tensor import (
     sharded_op_impl,
-    load_with_process_group,
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
@@ -903,7 +903,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         st = sharded_tensor.empty(spec, 10, 20)
         tensor = torch.empty(10, 20)
-        with self.assertRaisesRegex(RuntimeError, "not supported for ShardedTensor!"):
+        with self.assertRaisesRegex(RuntimeError, "not supported yet for ShardedTensor!"):
             torch.add(st, tensor)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
