@@ -33,7 +33,8 @@ struct FUNCTORCH_API DynamicLayer {
       optional<int64_t> batchSize = nullopt,
       optional<RandomnessType> randomness = nullopt,
       optional<bool> prev_grad_mode = nullopt,
-      optional<bool> pre_fwd_grad_mode = nullopt);
+      optional<bool> pre_fwd_grad_mode = nullopt,
+      optional<bool> functionalize_add_back_views = nullopt);
 
   DispatchKey key() const;
   int64_t layerId() const;
@@ -52,6 +53,8 @@ struct FUNCTORCH_API DynamicLayer {
   void clearSavedLocalDispatchKeySet();
   c10::impl::LocalDispatchKeySet getSavedLocalDispatchKeySet() const;
 
+  // only valid for functionalization
+  optional<bool> functionalizeAddBackViews() const;
  private:
   DispatchKey key_;
   int64_t layerId_;
@@ -64,6 +67,8 @@ struct FUNCTORCH_API DynamicLayer {
   optional<bool> prevFwdGradMode_;
 
   optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
+
+  optional<bool> functionalizeAddBackViews_;
 };
 
 FUNCTORCH_API int64_t initAndPushDynamicLayer(
@@ -71,7 +76,8 @@ FUNCTORCH_API int64_t initAndPushDynamicLayer(
     optional<int64_t> batch_size = nullopt,
     optional<RandomnessType> randomness = nullopt,
     optional<bool> prev_grad_mode = nullopt,
-    optional<bool> prev_fwd_grad_mode = nullopt);
+    optional<bool> prev_fwd_grad_mode = nullopt,
+    optional<bool> functionalize_add_back_views = nullopt);
 FUNCTORCH_API DynamicLayer popDynamicLayerAndDeleteMetadata();
 FUNCTORCH_API c10::optional<DynamicLayer> maybeCurrentDynamicLayer();
 FUNCTORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();
