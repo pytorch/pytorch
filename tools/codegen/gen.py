@@ -22,8 +22,9 @@ from tools.codegen.model import (STRUCTURED_DISPATCH_KEYS, Argument,
                                  ViewSchemaKind,
                                  BaseOperatorName,
                                  Tag)
-from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
-                                     DispatcherSignature, NativeSignature)
+from tools.codegen.api.types import (Binding, CppSignatureGroup,
+                                     DispatcherSignature, NativeSignature,
+                                     SpecialArgName, NamedCType)
 from tools.codegen.api import cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
@@ -262,7 +263,7 @@ def static_dispatch_extra_headers(
 
 def generate_static_dispatch(
     f: NativeFunction,
-    cpp_sig: CppSignature, *,
+    sig: DispatcherSignature, *,
     method: bool,
     backend_index: Optional[BackendIndex]
 ) -> str:
@@ -270,7 +271,27 @@ def generate_static_dispatch(
         return ""
     target_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False).signature
     name = target_sig.name()
-    exprs = translate(cpp_sig.arguments(), target_sig.arguments(), method=method)
+
+    dp_sig_args = []
+
+    # TranslateAPI doesn't support translation of operators from DispatcherAPI->CppAPI when
+    # there is a memory_format argument after TensorOption arguments. For operators with such arguments,
+    # amend the dispatcher signature's memory_format argument to have the same nctype as the CPP signature
+    if len(target_sig.arguments()) > 0 and \
+            target_sig.arguments()[-1].nctype.name == SpecialArgName.possibly_redundant_memory_format:
+        last_disp_arg = sig.arguments()[-1]
+        dp_sig_args = sig.arguments()[:-1]
+        mem_format_arg = Binding(
+            nctype=NamedCType(SpecialArgName.possibly_redundant_memory_format, last_disp_arg.nctype.type),
+            name=last_disp_arg.name,
+            default=last_disp_arg.default,
+            argument=last_disp_arg,
+            )
+        dp_sig_args.append(mem_format_arg)
+    else:
+        dp_sig_args = sig.arguments()
+
+    exprs = translate(dp_sig_args, target_sig.arguments(), method=method)
     exprs_str = ', '.join(a.expr for a in exprs)
     if f.structured_delegate is not None:
         # TODO: for ops with structured_delegate it should check the dispatch table of
@@ -292,21 +313,16 @@ def generate_static_dispatch(
     return f'TORCH_CHECK(false, "Static dispatch does not support {name} for {backend_index.dispatch_key}.");'
 
 def static_dispatch(
-        f: NativeFunction, cpp_sig: CppSignature,
+        f: NativeFunction, sig: DispatcherSignature,
         *, method: bool, backend_indices: List[BackendIndex]
 ) -> Optional[str]:
     if len(backend_indices) == 0 or f.manual_kernel_registration:
         return None
-    target_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False).signature
-    name = target_sig.name()
-    exprs = translate(cpp_sig.arguments(), target_sig.arguments(), method=method)
-    exprs_str = ', '.join(a.expr for a in exprs)
-
     keys = [b for b in backend_indices if b.has_kernel(f) or f.structured_delegate is not None]
     if len(keys) == 1:
-        return generate_static_dispatch(f, cpp_sig, method=method, backend_index=keys[0])
+        return generate_static_dispatch(f, sig, method=method, backend_index=keys[0])
     elif len(keys) == 0:
-        return generate_static_dispatch(f, cpp_sig, method=method, backend_index=backend_indices[0])
+        return generate_static_dispatch(f, sig, method=method, backend_index=backend_indices[0])
     else:
         return f"""TORCH_CHECK(false, "Static dispatch does not support {f.func.name.unambiguous_name()} for\
 {', '.join([str(index.dispatch_key)for index in backend_indices])} as they have with multiple \
@@ -336,6 +352,7 @@ class ComputeOperators:
         Literal[Target.DECLARATION],
         Literal[Target.DEFINITION]
     ]
+    static_dispatch_backend_indices: List[BackendIndex]
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> str:
@@ -379,6 +396,7 @@ struct TORCH_API {name} {{
   static {sig.defn(name=call_method_name, is_redispatching_fn=False)};
   static {sig.defn(name=redispatch_method_name, is_redispatching_fn=True)};
 }};"""
+
         elif self.target is Target.DEFINITION:
             defns = f"""
 STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{f.func.name.name}")
@@ -392,22 +410,28 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
       .typed<{name}::schema>();
 }}
 """
-
             for is_redispatching_fn in [False, True]:
                 if is_redispatching_fn:
                     dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.name for a in sig.arguments()])
                     dispatcher_call = 'redispatch'
                     method_name = f'{name}::{redispatch_method_name}'
                 else:
+                    method_name = f'{name}::{call_method_name}'
                     dispatcher_exprs_str = ', '.join([a.name for a in sig.arguments()])
                     dispatcher_call = 'call'
-                    method_name = f'{name}::{call_method_name}'
 
+                fn_body = f"""
+    static auto op = create_{name}_typed_handle();
+    return op.{dispatcher_call}({dispatcher_exprs_str});"""
+
+                if not is_redispatching_fn and len(self.static_dispatch_backend_indices) > 0:
+                        # call() should go through static dispatch
+                        fn_body = static_dispatch(f, sig, method=False,
+                                                  backend_indices=self.static_dispatch_backend_indices)
                 defns += f"""
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
-    static auto op = create_{name}_typed_handle();
-    return op.{dispatcher_call}({dispatcher_exprs_str});
+    {fn_body}
 }}
 """
             return defns
@@ -444,27 +468,13 @@ class ComputeFunction:
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ', '.join([e.expr for e in exprs])
 
-            static_dispatch_block = static_dispatch(
-                f,
-                sig,
-                method=False,
-                backend_indices=self.static_dispatch_backend_indices
-            )
-
-            if static_dispatch_block is None:
-                return f"""
+            return f"""
 // aten::{f.func}
 TORCH_API inline {sig.decl()} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
-            else:
-                return f"""
-// aten::{f.func}
-TORCH_API inline {sig.decl()} {{
-    {static_dispatch_block}
-}}
-"""
+
         result = generate_defn(False)
         if sig_group.faithful_signature is not None:
             result += generate_defn(True)
@@ -515,27 +525,12 @@ class ComputeTensorMethod:
             exprs = translate(sig.arguments(), target_sig.arguments(), method=True)
             exprs_str = ', '.join([e.expr for e in exprs])
 
-            static_dispatch_block = static_dispatch(
-                f,
-                sig,
-                method=True,
-                backend_indices=self.static_dispatch_backend_indices
-            )
-            if static_dispatch_block is None:
-                return f"""
+            return f"""
 // aten::{f.func}
 inline {sig.defn(prefix="Tensor::")} const {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
-            else:
-                return f"""
-// aten::{f.func}
-inline {sig.defn(prefix="Tensor::")} const {{
-    {static_dispatch_block}
-}}
-"""
-
         result = generate_defn(faithful=False)
         if sig_group.faithful_signature is not None:
             result += generate_defn(faithful=True)
@@ -1148,12 +1143,13 @@ def gen_aggregated_headers(
     cpu_fm.write('MethodOperators.h', lambda: {
         'MethodOperators_includes': [],
         'MethodOperators_declarations': list(mapMaybe(ComputeOperators(
-            Target.DECLARATION), method_native_functions)),
+            Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx), method_native_functions)),
     })
     cpu_fm.write('Operators.h', lambda: {
         'Operators_includes': ['#include <ATen/MethodOperators.h>'],
+        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
         'Operators_declarations': list(mapMaybe(ComputeOperators(
-            Target.DECLARATION), non_method_native_functions)),
+            Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx), non_method_native_functions)),
     })
     cpu_fm.write('Functions.h', lambda: {
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
@@ -1232,8 +1228,9 @@ def gen_per_operator_headers(
     for name, functions in functions_by_root_name.items():
         ops_fm.write_with_template(
             f'{name}_ops.h', 'Operator.h', lambda: {
+                'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
                 'declarations': list(mapMaybe(ComputeOperators(
-                    Target.DECLARATION), functions)),
+                    Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx), functions)),
             })
 
         ops_fm.write_with_template(
@@ -1640,7 +1637,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
         key_fn=key_func,
         env_callable=lambda fn: {
             'operator_headers': [f'#include <ATen/ops/{fn.root_name}.h>'],
-            'definitions': [ComputeOperators(Target.DEFINITION)(fn)]},
+            'definitions': [ComputeOperators(Target.DEFINITION, static_dispatch_backend_indices=static_dispatch_idx)(fn)]},
         num_shards=5,
         sharded_keys={'operator_headers', 'definitions'}
     )

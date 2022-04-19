@@ -26,6 +26,8 @@
 
 ${Operators_includes}
 
+${static_dispatch_extra_headers}
+
 // Extension writers: do you write wrapper functions? Are you frustrated with
 // resolving overloads of operators? Are you frustrated with dealing with
 // pointer-to-methods and resolving overloads of pointer-to-methods?? Look no
