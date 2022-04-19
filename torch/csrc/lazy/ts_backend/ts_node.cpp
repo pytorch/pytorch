@@ -23,7 +23,7 @@ hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSize
       hash = HashCombine(hash, static_cast<uint64_t>(kNullOpt));
       continue;
     }
-    auto operand_hash = bakeInSizes ? operand.shapeHash() : operand.hash();
+    auto operand_hash = operand.hash();
     hash = HashCombine(hash, operand_hash);
   }
   return hash;
