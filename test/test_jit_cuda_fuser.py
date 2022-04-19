@@ -4610,10 +4610,7 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
             for val in vals:
                 yield _get_extremal_sample(sample, val, dtype)
 
-        # just take the first sample input, or else the tests take too long
-        gen = op.sample_inputs(device, dtype, requires_grad=False)
-        # sample = next(iter(gen))
-        for sample in gen:
+        for sample in op.sample_inputs(device, dtype, requires_grad=False):
 
             trace = create_traced_fn(self, op, cache_traced_fn=True)
             trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
