@@ -100,6 +100,9 @@ class DispatchKey(Enum):
     SparseHIP = auto()
     SparseXPU = auto()
 
+    NestedTensorCPU = auto()
+    NestedTensorCUDA = auto()
+
     AutogradCPU = auto()
     AutogradCUDA = auto()
     AutogradXLA = auto()
@@ -149,7 +152,8 @@ dispatch_keys = [
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
     DispatchKey.CompositeExplicitAutograd,
-    DispatchKey.NestedTensor,
+    DispatchKey.NestedTensorCPU,
+    DispatchKey.NestedTensorCUDA,
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,
@@ -168,6 +172,7 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.QuantizedCUDA,
         DispatchKey.SparseCUDA,
         DispatchKey.SparseCsrCUDA,
+        DispatchKey.NestedTensorCUDA,
         DispatchKey.AutogradCUDA,
         DispatchKey.CUDATensorId,
     }
