@@ -814,7 +814,6 @@ indexMapFromTV(
     kir::ForLoop* alloc_loop,
     bool as_consumer,
     kir::ForLoop* double_buffer_loop = nullptr) {
-
   bool within_alloc = false;
   if (alloc_loop == nullptr) {
     within_alloc = true;
