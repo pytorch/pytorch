@@ -138,9 +138,6 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   new_sizes.back() = weight_transposed.size(1);
   new_sizes[1] = weight_transposed.size(0);
   weight_transposed = weight_transposed.view(new_sizes);
-  // TODO: remove this with int8 matmul is supported
-  auto input_fp = input.int_repr().to(at::kFloat);
-  auto weight_fp = weight_transposed.int_repr().to(at::kFloat);
 
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
@@ -149,8 +146,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     std::vector<int64_t> uids;
     data_ptrs.reserve(9);
     uids.reserve(9);
-    data_ptrs = {input_fp.data_ptr(), weight_fp.data_ptr(), requantize_multiplier_tensor.data_ptr(),
-                 reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    data_ptrs = {reinterpret_cast<int8_t*>(input.data_ptr()), reinterpret_cast<int8_t*>(weight_transposed.data_ptr()),
+                 requantize_multiplier_tensor.data_ptr(), reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
     uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
@@ -177,13 +174,10 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   // where act_int8 and w_int8 are the input and weight variables, resp.
   // output is a fp32 tensor
   auto linear_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)
-      // TODO: make these 2 CUDNN_DATA_INT8 when cudnn enables int8 matmul
-      // .setaMatDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_FLOAT, 'x', key.input_alignment))
-      .setaMatDesc(cudnn_utils::getTensorDescriptor(input_fp.sizes(), input_fp.strides(), CUDNN_DATA_FLOAT, 'x', key.input_alignment))
-      // .setbMatDesc(cudnn_utils::getTensorDescriptor(orig_weight.sizes(), orig_weight.strides(), CUDNN_DATA_FLOAT, 'w', key.weight_alignment))
-      .setbMatDesc(cudnn_utils::getTensorDescriptor(weight_fp.sizes(), weight_fp.strides(), CUDNN_DATA_FLOAT, 'w', key.weight_alignment))
+      .setaMatDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_INT8, 'x', key.input_alignment))
+      .setbMatDesc(cudnn_utils::getTensorDescriptor(weight_transposed.sizes(), weight_transposed.strides(), CUDNN_DATA_INT8, 'w', key.weight_alignment))
       .setcMatDesc(cudnn_utils::getTensorDescriptor(linear_output, 'y', key.output_alignment, true))
-      .setmatmulDesc(getLinearDescriptor(CUDNN_DATA_FLOAT)) // is this right? should it be float?
+      .setmatmulDesc(getLinearDescriptor(key.params.dataType))
       .build();
   // std::cout << "operator:" << linear_op.describe() << std::endl;
 
@@ -351,7 +345,6 @@ class QLinearInt8 final {
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-    // TODO: if act is more than 2D, I think we should flatten the first n-1 dimensions?
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
     if (kReluFused) {
       return packed_weight->apply_relu(act, output_scale, output_zero_point);

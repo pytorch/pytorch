@@ -1369,6 +1369,8 @@ class IrParser {
         REGISTER_PARSE_RULE(
             ptr_op,
             {
+              auto fusion = FusionGuard::getCurFusion();
+
               // TODO: handle channels last
               MemoryFormat format;
               std::list<Val*> list_val;

@@ -325,11 +325,11 @@ class TestPublicBindings(TestCase):
                 if is_public != looks_public:
                     add_to_failure_list_if_not_in_allow_dict(modname, elem, elem_module)
 
-            if hasattr(mod, '__all__'):
+            if hasattr(modname, '__all__'):
                 public_api = mod.__all__
-                all_api = dir(mod)
+                all_api = dir(modname)
                 for elem in all_api:
-                    looks_public_or_not(elem, modname, mod, is_public=elem in public_api)
+                    looks_public_or_not(elem, modname, is_public=elem in public_api)
 
             else:
                 all_api = dir(mod)
