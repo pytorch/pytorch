@@ -71,8 +71,8 @@ from torch.ao.ns._numeric_suite_fx import (
     extract_shadow_logger_info,
     extend_logger_results_with_comparison,
 )
-from torch.ao.quantization.fx.backend_config import get_native_backend_config_dict
-from torch.ao.quantization.fx.backend_config.utils import get_pattern_to_quantize_handlers
+from torch.ao.quantization.backend_config import get_native_backend_config_dict
+from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 
 
 # Note: these models are not for use outside of this file. While it's good
