@@ -2153,7 +2153,8 @@
     "set_forkserver_preload",
     "set_start_method",
     "spawn",
-    "start_processes"
+    "start_processes",
+    "parent_process"
   ],
   "torch.multiprocessing.reductions": [
     "ForkingPickler",
