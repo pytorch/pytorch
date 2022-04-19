@@ -511,6 +511,7 @@ class TestTracer(JitTestCase):
         self.assertEqual(to_tensor_trace(x, y), to_tensor(x, y))
 
     @skipIfCompiledWithoutNumpy
+    @skipIfCrossRef
     def test_trace_warn(self):
         def fn(x):
             int(x)  # Warning 1.
@@ -1779,7 +1780,6 @@ class TestTracer(JitTestCase):
 
         torch.jit.trace(Mod(), (torch.rand(3, 4),))
 
-    # torch function interposition thwarts frame analysis
     @skipIfCrossRef
     def test_trace_records_names(self):
         def foo(bar, baz):
