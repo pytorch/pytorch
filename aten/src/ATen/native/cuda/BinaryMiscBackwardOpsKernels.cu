@@ -40,7 +40,8 @@ void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
         using comp_t = at::opmath_type<scalar_t>;
         const auto one = comp_t{1.};
         const auto comp_b = static_cast<comp_t>(b);
-        return static_cast<scalar_t>(comp_t{a} * std::conj((one - comp_b) * comp_b));
+        const auto comp_a = static_cast<comp_t>(a);
+        return static_cast<scalar_t>(comp_a * std::conj((one - comp_b) * comp_b));
       });
     });
 #endif
