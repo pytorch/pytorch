@@ -649,6 +649,12 @@ public:
   c10::List<at::Tensor> toTensorList() const&;
   std::vector<at::Tensor> toTensorVector() const;
 
+  // OptionalTensorList
+  bool isOptionalTensorList() const;
+  c10::List<c10::optional<at::Tensor>> toOptionalTensorList() &&;
+  c10::List<c10::optional<at::Tensor>> toOptionalTensorList() const&;
+  std::vector<c10::optional<at::Tensor>> toOptionalTensorVector() const;
+
   // GenericList
   IValue(c10::List<IValue> v);
   bool isList() const {
