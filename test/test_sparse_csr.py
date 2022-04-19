@@ -1780,10 +1780,8 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a.sum(), a.values().sum())
             if dtype in floating_types():
                 a.requires_grad_(True)
-                with self.assertRaisesRegex(RuntimeError,
-                                            ("Function SumBackward0 returned an invalid gradient at " +
-                                             "index 0 - expected layout SparseCsr but got Strided")):
-                    a.sum().backward()
+                a.sum().backward()
+                self.assertEqual(a.grad, torch.ones(shape, dtype=dtype, device=device))
         for shape, index_dtype in itertools.product(
                 [(10, 5), (10, 10)],
                 [torch.int32, torch.int64]):
