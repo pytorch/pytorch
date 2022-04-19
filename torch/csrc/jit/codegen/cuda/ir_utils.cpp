@@ -389,10 +389,11 @@ TensorView* rfactorHelper(
 
 namespace {
 
-std::vector<TensorView*> uniqueEntries(
-    const std::vector<TensorView*>& tv_deuqe) {
-  std::vector<TensorView*> unique_entries;
-  std::unordered_set<TensorView*> inserted;
+template<typename T>
+std::vector<T*> uniqueEntries(
+    const std::vector<T*>& tv_deuqe) {
+  std::vector<T*> unique_entries;
+  std::unordered_set<T*> inserted;
   for (auto tv_entry : tv_deuqe) {
     if (inserted.emplace(tv_entry).second) {
       unique_entries.emplace_back(tv_entry);
@@ -403,13 +404,58 @@ std::vector<TensorView*> uniqueEntries(
 
 } // namespace
 
+// Return immediate producers of val
+TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(Val* val) {
+  if (val->definition() == nullptr) {
+    return {};
+  }
+  auto producer_vals = val->definition()->inputs();
+  return uniqueEntries<Val>({producer_vals.begin(), producer_vals.end()});
+}
+
+// Return immediate consumers of val
+TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val) {
+  std::vector<Val*> consumer_vals;
+  for (auto use_expr : val->uses()) {
+    auto outputs = use_expr->outputs();
+    consumer_vals.insert(consumer_vals.end(), outputs.begin(), outputs.end());
+  }
+  return uniqueEntries<Val>(consumer_vals);
+}
+
+// Return immediate producers of val
+TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(
+    const std::vector<Val*>& vals) {
+  std::vector<Val*> all_producer_vals;
+  for (auto val : vals) {
+    auto producer_vals = producerValsOf(val);
+    all_producer_vals.insert(
+        all_producer_vals.end(), producer_vals.begin(), producer_vals.end());
+  }
+
+  return uniqueEntries<Val>(all_producer_vals);
+}
+
+// Return immediate consumers of val
+TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(
+    const std::vector<Val*>& vals) {
+  std::vector<Val*> all_consumer_vals;
+  for (auto val : vals) {
+    auto consumer_vals = consumerValsOf(val);
+    all_consumer_vals.insert(
+        all_consumer_vals.end(), consumer_vals.begin(), consumer_vals.end());
+  }
+
+  return uniqueEntries<Val>(all_consumer_vals);
+}
+
 std::vector<TensorView*> producerTvsOf(TensorView* tv) {
   if (tv->definition() == nullptr) {
     return {};
   }
   auto producer_vals =
       ir_utils::filterByType<TensorView>(tv->definition()->inputs());
-  return uniqueEntries({producer_vals.begin(), producer_vals.end()});
+  return uniqueEntries<TensorView>({producer_vals.begin(), producer_vals.end()});
 }
 
 std::vector<TensorView*> consumerTvsOf(TensorView* tv) {
@@ -418,7 +464,7 @@ std::vector<TensorView*> consumerTvsOf(TensorView* tv) {
     auto outputs = ir_utils::filterByType<TensorView>(use_expr->outputs());
     consumer_tvs.insert(consumer_tvs.end(), outputs.begin(), outputs.end());
   }
-  return uniqueEntries(consumer_tvs);
+  return uniqueEntries<TensorView>(consumer_tvs);
 }
 
 std::vector<TensorView*> producerTvsOf(const std::vector<TensorView*>& tvs) {
@@ -429,7 +475,7 @@ std::vector<TensorView*> producerTvsOf(const std::vector<TensorView*>& tvs) {
         all_producer_tvs.end(), producer_tvs.begin(), producer_tvs.end());
   }
 
-  return uniqueEntries(all_producer_tvs);
+  return uniqueEntries<TensorView>(all_producer_tvs);
 }
 
 std::vector<TensorView*> consumerTvsOf(const std::vector<TensorView*>& tvs) {
@@ -440,7 +486,7 @@ std::vector<TensorView*> consumerTvsOf(const std::vector<TensorView*>& tvs) {
         all_consumer_tvs.end(), consumer_tvs.begin(), consumer_tvs.end());
   }
 
-  return uniqueEntries(all_consumer_tvs);
+  return uniqueEntries<TensorView>(all_consumer_tvs);
 }
 
 std::vector<TensorView*> inputTvsOf(TensorView* tv) {
@@ -455,20 +501,33 @@ std::vector<TensorView*> inputTvsOf(std::vector<TensorView*> tvs) {
   auto inp_vals = IterVisitor::getInputsTo({tvs.begin(), tvs.end()});
   auto filtered = ir_utils::filterByType<TensorView>(inp_vals);
   std::vector<TensorView*> inp_tvs(filtered.begin(), filtered.end());
-  return uniqueEntries(inp_tvs);
+  return uniqueEntries<TensorView>(inp_tvs);
 }
 
 std::vector<TensorView*> outputTvsOf(std::vector<TensorView*> tvs) {
   auto out_vals = DependencyCheck::getAllOutputsOf({tvs.begin(), tvs.end()});
   auto filtered = ir_utils::filterByType<TensorView>(out_vals);
   std::vector<TensorView*> out_tvs(filtered.begin(), filtered.end());
-  return uniqueEntries(out_tvs);
+  return uniqueEntries<TensorView>(out_tvs);
 }
 
 std::vector<TensorView*> allTvs(Fusion* fusion) {
   auto used_vals = fusion->usedMathVals();
   auto used_tvs = ir_utils::filterByType<TensorView>(used_vals);
-  return uniqueEntries({used_tvs.begin(), used_tvs.end()});
+
+  // This shouldn't be necessary but FusionSegmentIoAlias_CUDA due to aliasing
+  // is having an input disconnected from outputs, and these iter domains are
+  // being checked in compute at maps in scheduling logic. This shouldn't hurt
+  // AFAICT.
+  auto tv_inputs = ir_utils::filterByType<TensorView>(fusion->inputs());
+
+  std::vector<TensorView*> all_tvs({used_tvs.begin(), used_tvs.end()});
+  // Sometimes inputs are not connected to outputs, however, we still include
+  // them when returning allTvs because they are registered as an input.
+  all_tvs.insert(all_tvs.end(), tv_inputs.begin(), tv_inputs.end());
+
+  // all_tvs has duplicates, to deduplicate it and return
+  return uniqueEntries<TensorView>(all_tvs);
 }
 
 std::vector<Expr*> getReductionOps(Fusion* fusion, bool ignore_trivial) {

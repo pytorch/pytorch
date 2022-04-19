@@ -170,15 +170,17 @@ struct TORCH_CUDA_CU_API IterDomainDependencySorter {
   IterDomainDependencySorter(
       const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
           concrete_id_dependencies,
-      const ComputeAtMap& compute_at_map)
+      const std::unique_ptr<ComputeAtMap>& compute_at_map)
       : concrete_id_dependencies_(concrete_id_dependencies),
         compute_at_map_(compute_at_map) {}
 
   // Return true if id0 should be before id1
   // Orders such that if x maps to {y}, x comes before y in final ordering.
   inline bool operator()(IterDomain* id0, IterDomain* id1) {
-    auto concrete_id_0 = compute_at_map_.getConcreteMappedID(id0);
-    auto concrete_id_1 = compute_at_map_.getConcreteMappedID(id1);
+    auto concrete_id_0 =
+        compute_at_map_->getConcreteMappedID(id0, IdMappingMode::LOOP);
+    auto concrete_id_1 =
+        compute_at_map_->getConcreteMappedID(id1, IdMappingMode::LOOP);
 
     if (concrete_id_dependencies_.find(concrete_id_0) !=
         concrete_id_dependencies_.end()) {
@@ -194,7 +196,7 @@ struct TORCH_CUDA_CU_API IterDomainDependencySorter {
 
   const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
       concrete_id_dependencies_;
-  const ComputeAtMap& compute_at_map_;
+  const std::unique_ptr<ComputeAtMap>& compute_at_map_;
 };
 
 } // namespace cuda

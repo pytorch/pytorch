@@ -651,13 +651,14 @@ ExprGroup* getProducer(ExprGroup* sg1, ExprGroup* sg2) {
 
 std::vector<IterDomain*> getLocalDomainOrdering(
     const std::vector<Expr*>& exprs,
-    const ComputeAtMap& ca_parallel_map,
     const std::unordered_set<IterDomain*> filter,
     const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
         concrete_id_dependencies) {
   if (exprs.empty()) {
     return std::vector<IterDomain*>();
   }
+
+  const auto& ca_map = GpuLower::current()->caMap();
 
   std::unordered_set<IterDomain*> domains;
 
@@ -677,17 +678,17 @@ std::vector<IterDomain*> getLocalDomainOrdering(
                   tv_input->getComputeAtPosition(),
                   tv_input->getMaxProducerPosition()),
           std::back_inserter(domain),
-          [&ca_parallel_map](IterDomain* id) {
-            return ca_parallel_map.getConcreteMappedID(id);
+          [&ca_map](IterDomain* id) {
+            return ca_map->getConcreteMappedID(id, IdMappingMode::LOOP);
           });
 
       domain.erase(
           std::remove_if(
               domain.begin(),
               domain.end(),
-              [&filter, &ca_parallel_map](IterDomain* id) {
-                return filter.find(ca_parallel_map.getConcreteMappedID(id)) ==
-                    filter.end();
+              [&filter, &ca_map](IterDomain* id) {
+                return filter.find(ca_map->getConcreteMappedID(
+                           id, IdMappingMode::LOOP)) == filter.end();
               }),
           domain.end());
 
@@ -700,7 +701,7 @@ std::vector<IterDomain*> getLocalDomainOrdering(
       merged_domain.begin(),
       merged_domain.end(),
       IterDomainDependencySorter(
-          concrete_id_dependencies, GpuLower::current()->caParallelMap()));
+          concrete_id_dependencies, GpuLower::current()->caMap()));
   return merged_domain;
 }
 } // namespace
@@ -785,8 +786,8 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     if (producer_of_consumer_edge->isA<TensorView>()) {
       auto tv = producer_of_consumer_edge->as<TensorView>();
       for (const auto tv_i : c10::irange(tv->getComputeAtPosition())) {
-        ca_ids.emplace(GpuLower::current()->caParallelMap().getConcreteMappedID(
-            tv->axis(tv_i)));
+        ca_ids.emplace(GpuLower::current()->caMap()->getConcreteMappedID(
+            tv->axis(tv_i), IdMappingMode::LOOP));
       }
     }
   }
@@ -800,8 +801,8 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     if (consumer_of_producer_edge->isA<TensorView>()) {
       auto tv = consumer_of_producer_edge->as<TensorView>();
       for (const auto tv_i : c10::irange(tv->getMaxProducerPosition())) {
-        pa_ids.emplace(GpuLower::current()->caParallelMap().getConcreteMappedID(
-            tv->axis(tv_i)));
+        pa_ids.emplace(GpuLower::current()->caMap()->getConcreteMappedID(
+            tv->axis(tv_i), IdMappingMode::LOOP));
       }
     }
   }
@@ -810,10 +811,7 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   all_ca_pa_ids.insert(pa_ids.begin(), pa_ids.end());
 
   auto ordered_ids = getLocalDomainOrdering(
-      joined_groups->exprs(),
-      GpuLower::current()->caParallelMap(),
-      all_ca_pa_ids,
-      concrete_id_dependencies);
+      joined_groups->exprs(), all_ca_pa_ids, concrete_id_dependencies);
 
   for (auto id : ordered_ids) {
     if (ca_ids.count(id)) {
@@ -859,8 +857,8 @@ bool canReducePA(ExprGroup* group) {
     // it can't decide if it can be reduced
     bool has_matching_pa = false;
     for (const auto i : c10::irange(consumer_tv->getMaxProducerPosition())) {
-      if (GpuLower::current()->caParallelMap().areMapped(
-              consumer_tv->axis(i), group_pa_last_id)) {
+      if (GpuLower::current()->caMap()->areMapped(
+              consumer_tv->axis(i), group_pa_last_id, IdMappingMode::LOOP)) {
         has_matching_pa = true;
         break;
       }
@@ -876,8 +874,10 @@ bool canReducePA(ExprGroup* group) {
              static_cast<int>(producer_tv->getComputeAtPosition());
          producer_pos_i > 0;
          producer_pos_i--) {
-      if (GpuLower::current()->caParallelMap().areMapped(
-              producer_tv->axis(producer_pos_i - 1), group_pa_last_id)) {
+      if (GpuLower::current()->caMap()->areMapped(
+              producer_tv->axis(producer_pos_i - 1),
+              group_pa_last_id,
+              IdMappingMode::LOOP)) {
         return false;
       }
     }
@@ -971,8 +971,8 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
          tv_id_i > 0;
          tv_id_i--) {
       auto tv_id = tv->axis((int)(tv_id_i - 1));
-      auto concrete_id =
-          GpuLower::current()->caParallelMap().getConcreteMappedID(tv_id);
+      auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
+          tv_id, IdMappingMode::LOOP);
 
       if (concrete_id_dependencies.find(concrete_id) ==
           concrete_id_dependencies.end()) {
@@ -983,8 +983,8 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
       }
 
       // Loops after tv_id are dependent on tv_id
-      dependencies.emplace(
-          GpuLower::current()->caParallelMap().getConcreteMappedID(tv_id));
+      dependencies.emplace(GpuLower::current()->caMap()->getConcreteMappedID(
+          tv_id, IdMappingMode::LOOP));
     }
   }
 
@@ -1125,8 +1125,6 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
     return false;
   }
 
-  const auto& parallel_map = GpuLower::current()->caParallelMap();
-
   // If inner loop dependencies have not been resolved, cannot merge.
   if (!loopReady(producer_ca_domain.back()) ||
       !loopReady(consumer_pa_domain.back())) {
@@ -1162,11 +1160,13 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
       continue;
     }
 
-    if (!parallel_map.areMapped(compute_at_dim, producer_ca_domain.back())) {
+    if (!GpuLower::current()->caMap()->areMapped(
+            compute_at_dim, producer_ca_domain.back(), IdMappingMode::LOOP)) {
       continue;
     }
 
-    if (parallel_map.areMapped(compute_at_dim, consumer_pa_domain.back())) {
+    if (GpuLower::current()->caMap()->areMapped(
+            compute_at_dim, consumer_pa_domain.back(), IdMappingMode::LOOP)) {
       return true;
     }
   }

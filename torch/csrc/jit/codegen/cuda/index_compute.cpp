@@ -43,8 +43,8 @@ void updateHaloInfoForReference(
   // First, propagate the halo information of the consumer root domain
   // to the reference root domain.
   for (auto consumer_root_id : consumer_tv->getRootDomain()) {
-    auto consumer_index_concrete_id =
-        gpu_lower->caIndexMap().getConcreteMappedID(consumer_root_id);
+    auto consumer_index_concrete_id = gpu_lower->caMap()->getConcreteMappedID(
+        consumer_root_id, IdMappingMode::EXACT);
     auto reference_it =
         reference.concrete_to_id.find(consumer_index_concrete_id);
     if (reference_it == reference.concrete_to_id.end()) {
@@ -185,8 +185,8 @@ Val* getProducerOffsetWithGather(
   // When index_map maps a reference tensor, find the corresponding
   // reference ID of window_id.
   if (use_reference_map) {
-    auto concrete_window_id =
-        gpu_lower->caIndexMap().getConcreteMappedID(window_id);
+    auto concrete_window_id = gpu_lower->caMap()->getConcreteMappedID(
+        window_id, IdMappingMode::EXACT);
     auto concrete_2_ref_it = concrete_to_ref_map.find(concrete_window_id);
     TORCH_INTERNAL_ASSERT(concrete_2_ref_it != concrete_to_ref_map.end());
     window_id = concrete_2_ref_it->second;
@@ -884,8 +884,10 @@ indexMapFromTV(
         [&](IterDomain* tv_id) {
           // Matching is done using the index and loop maps. See
           // validateParallelize as well.
-          return gpu_lower->caIndexMap().areMapped(id, tv_id) ||
-              (gpu_lower->caLoopMap().areMapped(id, tv_id) &&
+          return gpu_lower->caMap()->areMapped(
+                     id, tv_id, IdMappingMode::EXACT) ||
+              (GpuLower::current()->caMap()->areMapped(
+                   id, tv_id, IdMappingMode::PERMISSIVE) &&
                ir_utils::derivedFromRootCAAxes(tv, tv_id));
         });
     if (it == tv->domain()->domain().end()) {
@@ -1014,7 +1016,8 @@ void ensureStaticIndexing(
           if (id_replacement != id_map.end()) {
             id = id_replacement->second;
           }
-          return GpuLower::current()->caLoopMap().areMapped(loop_id, id);
+          return GpuLower::current()->caMap()->areMapped(
+              loop_id, id, IdMappingMode::PERMISSIVE);
         });
     if (it != tv->domain()->domain().end()) {
       loop->requireUnroll();
@@ -1031,7 +1034,7 @@ void ensureStaticIndexing(
 // operation.
 std::unordered_map<IterDomain*, IterDomain*> indexMapReferenceTo(
     const TensorView* tv,
-    const ComputeAtMap& ca_index_map,
+    const std::unique_ptr<ComputeAtMap>& ca_map,
     const std::unordered_map<IterDomain*, IterDomain*>&
         reference_concrete_to_id_map,
     bool root_only = false) {
@@ -1039,7 +1042,8 @@ std::unordered_map<IterDomain*, IterDomain*> indexMapReferenceTo(
 
   auto gen_map = [&](const auto& pids) {
     for (auto p_id : pids) {
-      auto concrete_id = ca_index_map.getConcreteMappedID(p_id);
+      auto concrete_id =
+          ca_map->getConcreteMappedID(p_id, IdMappingMode::EXACT);
       auto ref_id_it = reference_concrete_to_id_map.find(concrete_id);
       if (ref_id_it != reference_concrete_to_id_map.end()) {
         index_map_ref_to_producer[ref_id_it->second] = p_id;
@@ -1252,8 +1256,7 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   const auto p2c_map = invertOneToOneMap(c2p_map);
   {
     std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
-        indexMapReferenceTo(
-            consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
+        indexMapReferenceTo(consumer_tv, gpu_lower->caMap(), reference_id_map);
 
     for (auto entry : index_map_ref_to_consumer) {
       auto r_id = entry.first;
@@ -1592,8 +1595,7 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     p2c_index_map = invertOneToOneMap(c2p_index_map);
 
     std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
-        indexMapReferenceTo(
-            consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
+        indexMapReferenceTo(consumer_tv, gpu_lower->caMap(), reference_id_map);
 
     for (auto entry : index_map_ref_to_consumer) {
       auto r_id = entry.first;
@@ -1837,8 +1839,7 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
   // Map everything we can from reference to consumer using compute at index
   // map.
   std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
-      indexMapReferenceTo(
-          consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
+      indexMapReferenceTo(consumer_tv, gpu_lower->caMap(), reference_id_map);
 
   // Index into the reference tensor. Reference indexing will handle vectorized
   // dims where index should be set to 0
@@ -2034,8 +2035,7 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
   // Map everything we can from reference to consumer using compute at index
   // map.
   std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
-      indexMapReferenceTo(
-          consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
+      indexMapReferenceTo(consumer_tv, gpu_lower->caMap(), reference_id_map);
 
   // Grab roots that map into consumer and save them into the preferred roots
   // set for references indexing
@@ -2320,8 +2320,9 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
     // reference unless the concrete domain is also a broadcast
     // domain.
     if (consumer_root_id->isBroadcast() &&
-        !gpu_lower->caLoopMap()
-             .getConcreteMappedID(consumer_root_id)
+        !GpuLower::current()
+             ->caMap()
+             ->getConcreteMappedID(consumer_root_id, IdMappingMode::PERMISSIVE)
              ->isBroadcast()) {
       excluded_ids.insert(consumer_root_id);
       continue;
@@ -2395,7 +2396,8 @@ IterDomain* getMappedReferenceDomain(
     IterDomain* id,
     const ReferenceTensor& reference) {
   // Partially overlaps with getPredicateContigIds()
-  auto concrete_id = GpuLower::current()->caIndexMap().getConcreteMappedID(id);
+  auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::EXACT);
   auto it = reference.concrete_to_id.find(concrete_id);
   if (it == reference.concrete_to_id.end()) {
     return nullptr;
@@ -3104,7 +3106,7 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
   updateHaloInfoForReference(reference, consumer_tv);
 
   const auto ref_2_consumer = indexMapReferenceTo(
-      consumer_tv, gpu_lower->caIndexMap(), reference.concrete_to_id);
+      consumer_tv, gpu_lower->caMap(), reference.concrete_to_id);
 
   const auto reference_halo_extent_map =
       getReferenceHaloExtentMap(reference, ref_2_consumer);

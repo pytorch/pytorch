@@ -229,28 +229,12 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // with set unary op
   trivialReductionReplacement(fusion_, trivial_reduction_info_);
 
-  // Generate mappings to generate indices. Maps all iteration domains but
-  // doesn't map any broadcast iteration domains, nor forward them in replay.
-  // Generate the index map first because it's the map used to resolve the
-  // number of concrete domains in each iteration domain which is the mechanism
-  // that allows us to determine which ID in each disjoint group in the Parallel
-  // and Loop map actually has the largest extent. This is done in the index map
-  // because view rfactor domains must be propagated through the index map to
-  // tensor views before the view operator.
-  ca_index_map_ = ComputeAtMap(
-      fusion_, ComputeAtMap::MappingMode::INDEX, &trivial_reduction_info_);
-
-  // In the future we may directly use this map, but for now it will propagate
-  // and validate (to some extent) the parallelization strategy. Map only axes
-  // to the left of compute at position, forward broadcast in replay.
-  ca_parallel_map_ = ComputeAtMap(
-      fusion_, ComputeAtMap::MappingMode::PARALLEL, &trivial_reduction_info_);
-
-  // Generate mappings to generate and map to loop nests. Maps all iteration
-  // domains, forwards broadcasts, ensures root domain mappings exist (aren't
-  // replaced in forwarding).
-  ca_loop_map_ = ComputeAtMap(
-      fusion_, ComputeAtMap::MappingMode::LOOP, &trivial_reduction_info_);
+  // Build what's refered to as the compute at map. This map contains the
+  // mappings of all iteration domains across the fusion. There are three types
+  // of mappings Permissive, Exact, and Loop, see compute_at_map.h/cpp for more
+  // information.
+  compute_at_map_ = std::make_unique<ComputeAtMap>(fusion_);
+  compute_at_map_->validateAndPropagatePType();
 
   // Used in parallel dimension map
   concretized_broadcast_domains_.build(fusion_);

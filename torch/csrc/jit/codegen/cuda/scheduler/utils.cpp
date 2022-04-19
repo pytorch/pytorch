@@ -190,14 +190,14 @@ void parallelizeAllLike(
     const std::vector<TensorView*>& all_tvs) {
   FusionGuard fg(reference_tv->fusion());
 
-  // Use loop map as that is the most permissive.
-  auto ca_loop_map = ComputeAtMap(
-      FusionGuard::getCurFusion(), ComputeAtMap::MappingMode::LOOP);
+  auto ca_map = ComputeAtMap(FusionGuard::getCurFusion());
+
   for (auto id : reference_tv->domain()->domain()) {
-    ca_loop_map.getConcreteMappedID(id)->parallelize(id->getParallelType());
+    ca_map.getConcreteMappedID(id, IdMappingMode::PERMISSIVE)
+        ->parallelize(id->getParallelType());
     if (id->hasPaddingToMultipleOfWarp()) {
-      ca_loop_map.getConcreteMappedID(id)->padToMultipleOfWarp(
-          id->getMaybeSizeAfterPadding());
+      ca_map.getConcreteMappedID(id, IdMappingMode::PERMISSIVE)
+          ->padToMultipleOfWarp(id->getMaybeSizeAfterPadding());
     }
   }
 
@@ -206,7 +206,8 @@ void parallelizeAllLike(
       continue;
     }
     for (const auto i : c10::irange(tv->domain()->domain().size())) {
-      auto ca_id = ca_loop_map.getConcreteMappedID(tv->axis(i));
+      auto ca_id =
+          ca_map.getConcreteMappedID(tv->axis(i), IdMappingMode::PERMISSIVE);
       tv->axis(i)->parallelize(ca_id->getParallelType());
       if (ca_id->hasPaddingToMultipleOfWarp()) {
         tv->axis(i)->padToMultipleOfWarp(ca_id->getMaybeSizeAfterPadding());
@@ -461,17 +462,19 @@ PersistentBufferInfo persistentBuffers(Fusion* fusion) {
       persistent_buffer_info.projectable_persistent_buffers);
 
   // Map unmappable dims to inputs, doesn't matter which compute at map used
-  auto ca_index_map = ComputeAtMap(fusion, ComputeAtMap::MappingMode::INDEX);
+  auto ca_map = ComputeAtMap(fusion);
 
   std::unordered_set<IterDomain*> unmappable_concrete_ids;
   for (auto id : persistent_buffer_info.unmappable_dims) {
-    unmappable_concrete_ids.emplace(ca_index_map.getConcreteMappedID(id));
+    unmappable_concrete_ids.emplace(
+        ca_map.getConcreteMappedID(id, IdMappingMode::EXACT));
   }
 
   for (auto input : all_inputs) {
     bool has_unmappable_dim = false;
     for (auto input_id : input->getMaybeRFactorDomain()) {
-      auto concrete_input_id = ca_index_map.getConcreteMappedID(input_id);
+      auto concrete_input_id =
+          ca_map.getConcreteMappedID(input_id, IdMappingMode::EXACT);
       if (unmappable_concrete_ids.find(concrete_input_id) !=
           unmappable_concrete_ids.end()) {
         persistent_buffer_info.unamppable_dims_projected_to_inputs.emplace(
@@ -890,7 +893,7 @@ std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
 
   if (!mapped_to_trivial_reduction.empty()) {
     // Use the loop map as that is the most permissive
-    auto ca_loop_map = ComputeAtMap(fusion, ComputeAtMap::MappingMode::LOOP);
+    auto ca_map = ComputeAtMap(fusion);
     // Make a copy we need to check mappings of all
     auto trivial_ids = mapped_to_trivial_reduction;
     for (auto tv : all_tvs) {
@@ -901,8 +904,9 @@ std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
         if (std::any_of(
                 trivial_ids.begin(),
                 trivial_ids.end(),
-                [&ca_loop_map, &id](IterDomain* trivial_id) {
-                  return ca_loop_map.areMapped(id, trivial_id);
+                [&ca_map, &id](IterDomain* trivial_id) {
+                  return ca_map.areMapped(
+                      id, trivial_id, IdMappingMode::PERMISSIVE);
                 })) {
           mapped_to_trivial_reduction.emplace(id);
         }
@@ -1313,9 +1317,9 @@ std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv) {
     in_out_tvs.insert(in_out_tvs.end(), out_tvs.begin(), out_tvs.end());
   }
 
-  // Shouldn't matter which compute at map we use as we're just looking at the
-  // root mappings.
-  auto ca_index_map = ComputeAtMap(fusion, ComputeAtMap::MappingMode::INDEX);
+  // Shouldn't matter if we use EXACT or PERMISSIVE mapping mode for compute at
+  // map as we're just looking at the root mappings.
+  auto ca_map = ComputeAtMap(fusion);
 
   auto ref_root_domain = reference_tv->getMaybeRFactorDomain();
 
@@ -1337,8 +1341,8 @@ std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv) {
       auto map_it = std::find_if(
           in_out_tv_domain_list.begin(),
           in_out_tv_domain_list.end(),
-          [&ref_id, &ca_index_map](IterDomain* in_out_tv_id) {
-            return ca_index_map.areMapped(in_out_tv_id, ref_id);
+          [&ref_id, &ca_map](IterDomain* in_out_tv_id) {
+            return ca_map.areMapped(in_out_tv_id, ref_id, IdMappingMode::EXACT);
           });
 
       if (map_it == in_out_tv_domain_list.end()) {

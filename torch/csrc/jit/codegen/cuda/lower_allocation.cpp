@@ -123,8 +123,8 @@ class AllocationInserter : public kir::ExprMutator {
           info.buffer->axis(axis_i)->isBroadcast()) {
         continue;
       }
-      auto concrete_id = gpu_lower->caParallelMap().getConcreteMappedID(
-          info.buffer->axis(axis_i));
+      auto concrete_id = gpu_lower->caMap()->getConcreteMappedID(
+          info.buffer->axis(axis_i), IdMappingMode::LOOP);
       init_dims.push_back(concrete_id);
     }
     Expr* init_expr =
@@ -336,8 +336,8 @@ class AllocationInserter : public kir::ExprMutator {
         continue;
       }
 
-      auto concrete_id = gpu_lower->caParallelMap().getConcreteMappedID(
-          info.buffer->axis(axis_i));
+      auto concrete_id = gpu_lower->caMap()->getConcreteMappedID(
+          info.buffer->axis(axis_i), IdMappingMode::LOOP);
       const bool is_block_dim =
           isParallelTypeBlockDim(concrete_id->getParallelType());
       const bool is_thread_dim =

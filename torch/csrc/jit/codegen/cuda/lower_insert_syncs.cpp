@@ -547,8 +547,10 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
             for_loops_.begin(),
             for_loops_.end(),
             [&local_id](const auto& loop) {
-              return GpuLower::current()->caLoopMap().areMapped(
-                         loop->iter_domain(), local_id) ||
+              return GpuLower::current()->caMap()->areMapped(
+                         loop->iter_domain(),
+                         local_id,
+                         IdMappingMode::PERMISSIVE) ||
                   loop->iter_domain()->getParallelType() ==
                   ParallelType::Unroll;
             });

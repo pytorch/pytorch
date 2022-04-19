@@ -1098,8 +1098,10 @@ class AllocateReuseModifier {
 
     // Check index map for the corresponding axes.
     for (const auto id_it : c10::irange(alloc_domains.size())) {
-      if (!GpuLower::current()->caIndexMap().areMapped(
-              alloc_domains[id_it], reuse_domains[id_it])) {
+      if (!GpuLower::current()->caMap()->areMapped(
+              alloc_domains[id_it],
+              reuse_domains[id_it],
+              IdMappingMode::EXACT)) {
         return false;
       }
     }

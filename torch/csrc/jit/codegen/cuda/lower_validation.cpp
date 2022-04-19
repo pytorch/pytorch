@@ -480,7 +480,8 @@ void validateAndCollectVectorizeInfo(Fusion* fusion) {
     for (const auto i : c10::irange(tv->nDims())) {
       IterDomain* id = tv->axis(i);
       IterDomain* concrete_id =
-          GpuLower::current()->caParallelMap().getConcreteMappedID(id);
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              id, IdMappingMode::LOOP);
 
       auto ptype = concrete_id->getParallelType();
 

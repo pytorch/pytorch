@@ -1106,7 +1106,11 @@ std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
 // vectorize to the left of the computeAt domain, and could allow us to do some
 // simple validation of vectorize as it's inputs are right most and contiguous.
 void IterDomain::parallelize(ParallelType t) {
-  parallel_type_ = t;
+  if(parallel_type_ == t){
+    // No op, don't do any more checks, it was already set to this value.
+    return;
+  }
+
   if (t == ParallelType::Unroll || isParallelTypeVectorize(t)) {
     TORCH_CHECK(
         start()->isZeroInt() && extent()->isConstScalar(),
@@ -1123,6 +1127,8 @@ void IterDomain::parallelize(ParallelType t) {
         t == ParallelType::Vectorize,
         "Parallel type other than vectorize not allowed for warp mapped ids");
   }
+
+  parallel_type_ = t;
 }
 
 bool IterDomain::maybePartial() const {

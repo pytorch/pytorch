@@ -264,6 +264,14 @@ enum class IterType {
 
 enum class SwizzleType { NoSwizzle, Transpose };
 
+// Used for Iteration Domain mapping modes in ComputeAtMap
+enum class IdMappingMode { PERMISSIVE, EXACT, LOOP };
+
+static constexpr std::array<IdMappingMode, 3> kIdMappingModes = {
+    IdMappingMode::PERMISSIVE,
+    IdMappingMode::EXACT,
+    IdMappingMode::LOOP};
+
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf
 bool needFloatSuffix(UnaryOpType t);
@@ -286,6 +294,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IdMappingMode);
 
 std::string stringifyBooleanOp(const UnaryOpType);
 std::string stringifyBooleanOp(const BinaryOpType);

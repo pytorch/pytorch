@@ -48,7 +48,8 @@ IterDomain* IndexReferenceReplay::idCopy(IterDomain* id) {
 }
 
 IterDomain* IndexReferenceReplay::toConcrete(IterDomain* id) {
-  return ca_index_map_.getConcreteMappedID(id);
+  return GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::EXACT);
 }
 
 void IndexReferenceReplay::handle(Split* split) {
@@ -137,8 +138,10 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
        ++it_i) {
     for (auto it_j = it_i + 1; it_j != loop_structure_.end(); ++it_j) {
       TORCH_INTERNAL_ASSERT(
-          !ca_index_map_.areMapped(
-              (*it_i)->iter_domain(), (*it_j)->iter_domain()),
+          !GpuLower::current()->caMap()->areMapped(
+              (*it_i)->iter_domain(),
+              (*it_j)->iter_domain(),
+              IdMappingMode::EXACT),
           "Unsupported loop structure. Two loops are mapped together.");
     }
   }
@@ -171,8 +174,10 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     }
     auto expr = out_id->definition();
 
+    // TODO: Need to thoroughly check this is right
     auto rfactor_ids =
-        GpuLower::current()->caLoopMap().getViewRfactorDomainsOfIdGroup(out_id);
+        GpuLower::current()->caMap()->getViewRfactorDomainsOfIdGroup(
+            out_id, IdMappingMode::PERMISSIVE);
     for (auto rfactor_id : rfactor_ids) {
       // TODO: Why not this line? Surprised it worked without mapping to
       // concrete but breaks with the following line
@@ -212,8 +217,8 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     auto ref_id_it = std::find_if(
         replayed_ids_.begin(), replayed_ids_.end(), [&](IterDomain* ref_id) {
           return ref_id->uses().empty() &&
-              GpuLower::current()->caLoopMap().areMapped(
-                  refIdToConcrete(ref_id), loop_id);
+              GpuLower::current()->caMap()->areMapped(
+                  refIdToConcrete(ref_id), loop_id, IdMappingMode::PERMISSIVE);
         });
 
     TORCH_INTERNAL_ASSERT(

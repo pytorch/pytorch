@@ -153,8 +153,8 @@ class KernelIrScanner : private IrVisitor {
     summary_.has_grid_reductions = true;
 
     for (const auto i : c10::irange(dom->nDims())) {
-      const auto id = GpuLower::current()->caParallelMap().getConcreteMappedID(
-          dom->domain()[i]);
+      const auto id = GpuLower::current()->caMap()->getConcreteMappedID(
+          dom->domain()[i], IdMappingMode::LOOP);
 
       summary_.has_cooperative_grid_reduction =
           summary_.has_cooperative_grid_reduction ||
@@ -219,7 +219,8 @@ class ValidateAllocation : private OptOutConstDispatch {
           continue;
         }
         for (const auto& axis : tv->domain()->domain()) {
-          if (!GpuLower::current()->caParallelMap().areMapped(loop_id, axis)) {
+          if (!GpuLower::current()->caMap()->areMapped(
+                  loop_id, axis, IdMappingMode::LOOP)) {
             continue;
           }
           if (isParallelTypeThreadDim(loop_id->getParallelType())) {

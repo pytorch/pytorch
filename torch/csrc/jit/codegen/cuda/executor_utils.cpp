@@ -1283,8 +1283,8 @@ std::vector<IterDomain*> getParallelBindingsIterDomains(
           // Want to keep the broadcast dimensions if they are not resolved
           // TODO: piping down the parallel dimension map here would
           //  be helpful
-          auto& parallel_map = lower->caParallelMap();
-          if (parallel_map.getConcreteMappedID(id) == id) {
+          if (lower->caMap()->getConcreteMappedID(id, IdMappingMode::LOOP) ==
+              id) {
             parallel_ids.push_back(id);
           }
         } else {
@@ -1330,16 +1330,14 @@ std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
     GpuLower* lower,
     std::vector<IterDomain*>& parallel_binding_ids) {
   auto parallel_iter_extents_ptr = std::make_unique<ParallelExtentMap>();
-  auto& parallel_map = lower->caParallelMap();
+  const auto& ca_map = lower->caMap();
   std::vector<IterDomain*> mapped;
   bool is_tidx_warp_padded = lower->getWarpPaddedParallelInfo().is_tidx_padded;
 
   for (auto id : parallel_binding_ids) {
     if (std::any_of(
-            mapped.begin(),
-            mapped.end(),
-            [id, &parallel_map](IterDomain* mapped_id) {
-              return parallel_map.areMapped(mapped_id, id);
+            mapped.begin(), mapped.end(), [id, &ca_map](IterDomain* mapped_id) {
+              return ca_map->areMapped(mapped_id, id, IdMappingMode::LOOP);
             })) {
       if (id->getParallelType() != ParallelType::TIDx || !is_tidx_warp_padded) {
         continue;
@@ -1347,7 +1345,8 @@ std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
     }
 
     insertParallelExtent(
-        parallel_map.getConcreteMappedID(id), parallel_iter_extents_ptr);
+        ca_map->getConcreteMappedID(id, IdMappingMode::LOOP),
+        parallel_iter_extents_ptr);
     mapped.push_back(id);
   }
 

@@ -34,7 +34,8 @@ bool isOutputLocal(const Expr* expr) {
 } // namespace
 
 bool ParallelizedDomainPredicate::PredicateInfo::addDomain(IterDomain* id) {
-  auto concrete_id = GpuLower::current()->caIndexMap().getConcreteMappedID(id);
+  auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::EXACT);
   if (std::find(ids_.begin(), ids_.end(), concrete_id) == ids_.end()) {
     ids_.push_back(concrete_id);
     return true;
@@ -53,7 +54,8 @@ Bool* ParallelizedDomainPredicate::PredicateInfo::getPredicate() const {
     // Just sanity check that pred_id is concrete
     TORCH_INTERNAL_ASSERT(
         pred_id ==
-        GpuLower::current()->caIndexMap().getConcreteMappedID(pred_id));
+        GpuLower::current()->caMap()->getConcreteMappedID(
+            pred_id, IdMappingMode::EXACT));
     auto new_pred = SimplifyingIrBuilder::ltExpr(index, pred_id->extent());
     pred = SimplifyingIrBuilder::andExpr(pred, new_pred)->as<Bool>();
   }
@@ -88,7 +90,8 @@ std::unordered_set<Val*> getNonUnswitchedRootDomains(
           non_unswitched_concrete_root_domains,
           non_unswitched_concrete_root_domains.end()),
       [&](auto root_dom) {
-        return GpuLower::current()->caIndexMap().getConcreteMappedID(root_dom);
+        return GpuLower::current()->caMap()->getConcreteMappedID(
+            root_dom, IdMappingMode::EXACT);
       });
 
   return non_unswitched_concrete_root_domains;
@@ -104,7 +107,8 @@ bool isFullyUnswitched(
   return std::none_of(
       root_domains.begin(), root_domains.end(), [&](auto root_dom) {
         auto concrete_root_dom =
-            GpuLower::current()->caIndexMap().getConcreteMappedID(root_dom);
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                root_dom, IdMappingMode::EXACT);
         return non_unswitched_root_domains.count(concrete_root_dom) > 0;
       });
 }
@@ -170,7 +174,8 @@ ParallelizedDomainPredicate::getPredicateMap(
           tv->domain()->domain().begin(),
           tv->domain()->domain().end(),
           [&](auto tv_id) {
-            return gpu_lower->caIndexMap().areMapped(loop_id, tv_id);
+            return gpu_lower->caMap()->areMapped(
+                loop_id, tv_id, IdMappingMode::EXACT);
           });
       if (it == tv->domain()->domain().end()) {
         continue;
@@ -281,8 +286,8 @@ UnswitchPredicateKey::UnswitchPredicateKey(
   // Find the corresponding concrete id for each parallel type
   for (auto consumer_leaf : parallelized_consumer_leaf_ids) {
     auto pt = consumer_leaf->getParallelType();
-    auto concrete_leaf =
-        GpuLower::current()->caIndexMap().getConcreteMappedID(consumer_leaf);
+    auto concrete_leaf = GpuLower::current()->caMap()->getConcreteMappedID(
+        consumer_leaf, IdMappingMode::EXACT);
     parallel_concrete_ids_.at(pt) = concrete_leaf;
   }
 }
@@ -468,8 +473,8 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
     bool first_key_set = false;
 
     for (auto root_id : root_ids) {
-      auto concrete_root_id =
-          gpu_lower->caIndexMap().getConcreteMappedID(root_id);
+      auto concrete_root_id = gpu_lower->caMap()->getConcreteMappedID(
+          root_id, IdMappingMode::EXACT);
 
       if (root_id->isBroadcast()) {
         continue;

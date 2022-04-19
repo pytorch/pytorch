@@ -265,7 +265,6 @@ BasicAllocInfo getAllocInformation(
     bool use_id_map) {
   BasicAllocInfo info;
   auto gpu_lower = GpuLower::current();
-  const auto& loop_map = gpu_lower->caLoopMap();
 
   bool outer_alloc_found = false;
 
@@ -319,7 +318,8 @@ BasicAllocInfo getAllocInformation(
       }
     }
 
-    if (loop_map.areMapped(local_id, fl_id)) {
+    if (GpuLower::current()->caMap()->areMapped(
+            local_id, fl_id, IdMappingMode::PERMISSIVE)) {
       info.alloc_pos++;
     }
 

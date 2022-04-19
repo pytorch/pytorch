@@ -186,8 +186,8 @@ IterDomain* ContigIDs::getCAIndexConcreteId(IterDomain* id) const {
   TORCH_INTERNAL_ASSERT(
       GpuLower::current() != nullptr, "GpuLower is not found");
 
-  auto c_id =
-      GpuLower::current()->caIndexMap().getConcreteMappedID(getMappedId(id));
+  auto c_id = GpuLower::current()->caMap()->getConcreteMappedID(
+      getMappedId(id), IdMappingMode::EXACT);
   return c_id;
 }
 

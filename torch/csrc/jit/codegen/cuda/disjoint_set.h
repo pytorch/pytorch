@@ -7,10 +7,19 @@
 #include <unordered_set>
 #include <vector>
 
+// For printing of the set when using a Statement as the type for the set
+#include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+namespace {
+std::string toString(Statement* stmt) {
+  return stmt->toString();
+}
+} // namespace
 
 //! Container class DisjointSet models equivalence relationships
 //!
@@ -96,22 +105,60 @@ class DisjointSet {
     next_index_ = 0;
   }
 
-  //! Dumps the equivalent relationships
-  std::ostream& print(std::ostream& os) const {
-    std::unordered_map<int, std::unordered_set<T, Hash>> fixedPointMap;
+  //! Generates all the disjoint sets as maps and returns them.
+  // TODO: unify fixed_point_map creation with print.
+  std::vector<std::unordered_set<T, Hash>> generateDisjointSets() const {
+    std::unordered_map<int, std::unordered_set<T, Hash>> fixed_point_map;
+    int num_sets = 0;
     for (const auto& kv : entry_map) {
       int fixed_point = fixedPoint(kv.first);
-      auto it = fixedPointMap.find(fixed_point);
-      if (it == fixedPointMap.end()) {
-        it = fixedPointMap.insert({fixed_point, {}}).first;
+      num_sets = std::max(num_sets, fixed_point + 1);
+      auto it = fixed_point_map.find(fixed_point);
+      if (it == fixed_point_map.end()) {
+        it = fixed_point_map.insert({fixed_point, {}}).first;
+      }
+      it->second.insert(kv.first);
+    }
+
+    std::vector<std::unordered_set<T, Hash>> disjoint_sets;
+    disjoint_sets.resize(num_sets);
+    for (auto entry : fixed_point_map) {
+      TORCH_INTERNAL_ASSERT(
+          entry.first < num_sets, "Unexpected error generating disjoint sets.");
+      disjoint_sets[entry.first] = entry.second;
+    }
+
+    // Vector may contain some empty sets, remove them
+    disjoint_sets.erase(
+        std::remove_if(
+            disjoint_sets.begin(),
+            disjoint_sets.end(),
+            [](std::unordered_set<T, Hash> set) { return set.empty(); }),
+        disjoint_sets.end());
+
+    return disjoint_sets;
+  }
+
+  //! Dumps the equivalent relationships
+  // TOOD: Change to "toString" for consistency
+  std::ostream& print(std::ostream& os) const {
+    std::unordered_map<int, std::unordered_set<T, Hash>> fixed_point_map;
+    for (const auto& kv : entry_map) {
+      int fixed_point = fixedPoint(kv.first);
+      auto it = fixed_point_map.find(fixed_point);
+      if (it == fixed_point_map.end()) {
+        it = fixed_point_map.insert({fixed_point, {}}).first;
       }
       it->second.insert(kv.first);
     }
     os << "{\n";
-    for (const auto& kv : fixedPointMap) {
+    for (const auto& kv : fixed_point_map) {
       os << "\t{ ";
       for (const auto& val : kv.second) {
-        os << toString(val) << " ";
+        // TODO: Fix printing to avoid trailing ; Tried using std::prev to
+        // easily identify the last val, but that seems to have modified the
+        // .end() value in kv.second and ended in an infinite loop
+        os << toString(val) << "; ";
       }
       os << "}\n";
     }
@@ -166,6 +213,167 @@ class DisjointSet {
   // Running counter for generating new index when
   // Creating new equiv classes
   int next_index_ = 0;
+};
+
+// Vector like class that will prevent adding duplicate entries by also
+// maintaing a set
+template <typename T>
+class UniquePtrVector {
+ public:
+  // Returns if a node was actually added
+  bool pushBack(T* entry) {
+    if (set_.emplace(entry).second) {
+      vector_.push_back(entry);
+      return true;
+    }
+    return false;
+  }
+
+  // Returns if any node was added
+  bool pushBack(const UniquePtrVector<T>& other) {
+    bool any_added = false;
+    for (auto entry : other) {
+      any_added = any_added | pushBack(entry);
+    }
+    return any_added;
+  }
+
+  const std::vector<T*>& vector() const {
+    return vector_;
+  }
+
+  T* back() const {
+    return vector_.back();
+  }
+
+  bool has(T* entry) const {
+    return set_.find(entry) != set_.end();
+  }
+
+  std::string toString() {
+    std::stringstream ss;
+    ss << "{ ";
+    for (auto entry : vector()) {
+      ss << entry->toString();
+      if (entry != vector().back()) {
+        ss << "; ";
+      }
+    }
+    ss << " }";
+    return ss.str();
+  }
+
+ private:
+  std::vector<T*> vector_;
+  std::unordered_set<T*> set_;
+};
+
+// Disjoint set using the approach originally from compute at map
+//
+// TODO: Unify with the above disjoint set in the codebase.
+template <typename T, typename Hash = std::hash<T>>
+class DisjointSetsOfPointers {
+ public:
+  DisjointSetsOfPointers() = default;
+
+  // Warning: returned values should never be modified. This accessor isn't
+  // strictly safe as UniquePtrVector is not returned as a const.
+  const std::unordered_map<T*, std::shared_ptr<UniquePtrVector<T>>>&
+  disjointSetMap() const {
+    return disjoint_set_maps_;
+  }
+
+  // Warning: returned values should never be modified. This accessor isn't
+  // strictly safe as UniquePtrVector is not returned as a const.
+  const std::vector<std::shared_ptr<UniquePtrVector<T>>>& disjointSets() const {
+    return disjoint_sets_;
+  }
+
+  const UniquePtrVector<T*>& getDisjointSetOf(T* entry) const{
+    auto set_it = disjoint_set_maps_.find(entry);
+    TORCH_INTERNAL_ASSERT(
+        set_it != disjoint_set_maps_.end(),
+        "Could not find entry for ",
+        entry->toString());
+    return *set_it.second;
+  }
+
+  // TODO: Return iterator
+  void initializeSet(T* entry) {
+    disjoint_sets_.push_back(std::make_shared<UniquePtrVector<T>>());
+    disjoint_sets_.back()->pushBack(entry);
+    disjoint_set_maps_.emplace(std::make_pair(entry, disjoint_sets_.back()));
+  }
+
+  void mapEntries(T* entry0, T* entry1) {
+    auto set_it_0 = disjoint_set_maps_.find(entry0);
+    auto set_it_1 = disjoint_set_maps_.find(entry1);
+
+    // Track if we need to reset iterators, optimize for case where both entries
+    // exist
+    bool invalid_iterators = false;
+    if (set_it_0 == disjoint_set_maps_.end()) {
+      initializeSet(entry0);
+      invalid_iterators = true;
+    }
+
+    if (set_it_1 == disjoint_set_maps_.end()) {
+      initializeSet(entry1);
+      invalid_iterators = true;
+    }
+
+    // TODO: We can avoid refinding one iterator if initialize set returns an
+    // iterator, though if we insert entry1 we'd have to refind entry0 as it
+    // could invalidate all iterators
+    if (invalid_iterators) {
+      set_it_0 = disjoint_set_maps_.find(entry0);
+      set_it_1 = disjoint_set_maps_.find(entry1);
+    }
+
+    auto set0_shared_ptr = set_it_0->second;
+    auto set1_shared_ptr = set_it_1->second;
+
+    // If the sets are already the same, do nothing
+    if (set0_shared_ptr == set1_shared_ptr) {
+      return;
+    }
+
+    // Place everything in set1 into set0 and remap all entries in set1 to set0
+    for (auto entry : set1_shared_ptr->vector()) {
+      set0_shared_ptr->pushBack(entry);
+      disjoint_set_maps_[entry] = set0_shared_ptr;
+    }
+
+    // set1 no longer needed as its entries are copied into set0
+    disjoint_sets_.erase(std::find(
+        disjoint_sets_.begin(), disjoint_sets_.end(), set1_shared_ptr));
+  }
+
+  std::string toString() const {
+    std::stringstream ss;
+    ss << "disjoint sets{\n";
+    for (auto s_ptr : disjoint_sets_) {
+      auto& set = *s_ptr;
+      ss << "  { ";
+      for (auto entry : set.vector()) {
+        ss << entry->toString();
+        if (entry != set.back()) {
+          ss << "; ";
+        }
+      }
+      ss << " }\n";
+    }
+    ss << "}";
+    return ss.str();
+  }
+
+ private:
+  // Disjoint sets
+  std::unordered_map<T*, std::shared_ptr<UniquePtrVector<T>>>
+      disjoint_set_maps_;
+
+  // Keep a list of disjoint_sets that's deterministic to iterate over
+  std::vector<std::shared_ptr<UniquePtrVector<T>>> disjoint_sets_;
 };
 
 } // namespace cuda

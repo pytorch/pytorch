@@ -152,17 +152,87 @@ TORCH_CUDA_CU_API TensorView* rfactorHelper(
     TensorView* red_tv,
     const std::vector<int>& axes);
 
-// Return immediate producers of tv
+// Return immediate producers of val, this function can be used on any Val and
+// will return producers through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(Val* val);
+
+// Return immediate consumers of val, this function can be used on any Val and
+// will return consumers through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val);
+
+// Return immediate producers of vals, this function can be used on any vals and
+// will return producers through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(
+    const std::vector<Val*>& vals);
+
+// Return immediate consumers of vals, this function can be used on any vals and
+// will return consumers through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(
+    const std::vector<Val*>& vals);
+
+// Return immediate producers of tv, this function will return all immediate
+// producers of tv through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
 TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(TensorView* tv);
 
-// Return immediate consumers of tv
+// Return immediate consumers of tv, this function will return all immediate
+// consumers of tv through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
 TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(TensorView* tv);
 
-// Return immediate producers of tvs (can return tvs input)
+// Return immediate producers of tvs, this function will return all immediate
+// producers of tvs through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
 TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(
     const std::vector<TensorView*>& tvs);
 
-// Return immediate consumers of tvs (can return tvs input)
+// Return immediate consumers of tvs, this function will return all immediate
+// consumers of tvs through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
 TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(
     const std::vector<TensorView*>& tvs);
 

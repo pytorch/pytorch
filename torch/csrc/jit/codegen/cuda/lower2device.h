@@ -75,16 +75,8 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return thread_pred_map_;
   }
 
-  const ComputeAtMap& caLoopMap() const {
-    return ca_loop_map_;
-  }
-
-  const ComputeAtMap& caIndexMap() const {
-    return ca_index_map_;
-  }
-
-  const ComputeAtMap& caParallelMap() const {
-    return ca_parallel_map_;
+  const std::unique_ptr<ComputeAtMap>& caMap() const {
+    return compute_at_map_;
   }
 
   const TrivialReductionInfo& trivialReductionInfo() const {
@@ -191,9 +183,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   ConcretizedBroadcastDomains concretized_broadcast_domains_;
   ThreadPredicateMap thread_pred_map_;
   PredicateElimination pred_elimination_;
-  ComputeAtMap ca_loop_map_;
-  ComputeAtMap ca_index_map_;
-  ComputeAtMap ca_parallel_map_;
+  std::unique_ptr<ComputeAtMap> compute_at_map_;
   TrivialReductionInfo trivial_reduction_info_;
   HaloInfo halo_info_;
   LocalAllocationInfoMap local_allocation_info_map_;

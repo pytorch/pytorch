@@ -1707,7 +1707,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAt1_CUDA) {
 
   tv0->computeAt(tv7, 1);
 
-  ComputeAtMap loop_map(&fusion, ComputeAtMap::MappingMode::LOOP);
+  ComputeAtMap ca_map(&fusion);
 
   // The this-position of the last tensor should be zero.
   TORCH_CHECK(
@@ -1720,7 +1720,8 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAt1_CUDA) {
   for (auto tv : {tv1, tv2, tv3, tv4, tv5}) {
     TORCH_CHECK(tv->nDims() == 3 && tv->getComputeAtPosition() == 1);
 
-    TORCH_CHECK(loop_map.areMapped(tv7->axis(0), tv->axis(0)));
+    TORCH_CHECK(
+        ca_map.areMapped(tv7->axis(0), tv->axis(0), IdMappingMode::PERMISSIVE));
   }
 
   for (Val* val : fusion.vals()) {
@@ -2204,12 +2205,13 @@ TEST_F(NVFuserTest, FusionAdvancedComputeWith1_CUDA) {
       tv7->nDims() == 3 && tv6->getComputeAtPosition() == 0 &&
       tv6->getMaxProducerPosition() == 1);
 
-  ComputeAtMap loop_map(&fusion, ComputeAtMap::MappingMode::LOOP);
+  ComputeAtMap ca_map(&fusion);
 
   // The position of every other tensor should be 1.
   for (auto tv : {tv1, tv2, tv3, tv4, tv5}) {
     TORCH_CHECK(tv->nDims() == 3 && tv->getComputeAtPosition() == 1);
-    TORCH_CHECK(loop_map.areMapped(tv7->axis(0), tv->axis(0)));
+    TORCH_CHECK(
+        ca_map.areMapped(tv7->axis(0), tv->axis(0), IdMappingMode::PERMISSIVE));
   }
 
   for (Val* val : fusion.vals()) {
@@ -2557,11 +2559,12 @@ TEST_F(NVFuserTest, FusionComputeAtMultiConsumers_CUDA) {
   TORCH_CHECK(
       tv3->getComputeAtPosition() == 0 && tv3->getMaxProducerPosition() == 1);
 
-  ComputeAtMap loop_map(&fusion, ComputeAtMap::MappingMode::LOOP);
+  ComputeAtMap ca_map(&fusion);
 
   // Note that tv2 is also computed at tv3.
   for (auto tv : {tv1, tv2}) {
-    TORCH_CHECK(loop_map.areMapped(tv->axis(0), computeAtTarget->axis(0)));
+    TORCH_CHECK(ca_map.areMapped(
+        tv->axis(0), computeAtTarget->axis(0), IdMappingMode::PERMISSIVE));
   }
 
   TORCH_CHECK(tv3->getComputeAtPosition() == 0);
@@ -16061,7 +16064,11 @@ TEST_F(NVFuserTest, FusionZeroSizeTensorPW_CUDA) {
   auto tv2 = add(tv0, IrBuilder::create<Double>(2.5));
   fusion.addOutput(tv2);
 
-  auto tv3 = makeConcreteTensor({0});
+  // This test used to just have:
+  // auto tv3 = makeConcreteTensor({0});
+  // and somehow that was running through our system fine, but size-0 tensors
+  // are not supported, so making sure this fails.
+  auto tv3 = set(tv1);
   fusion.addOutput(tv3);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -16071,22 +16078,10 @@ TEST_F(NVFuserTest, FusionZeroSizeTensorPW_CUDA) {
   at::Tensor cg_output2 = at::empty({2}, options);
   at::Tensor cg_output3 = at::empty({0}, options);
 
-  auto lparams = schedulePointwise(&fusion, {input0, input1});
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, {input0, input1});
-  fe.runFusion({input0, input1}, {cg_output2, cg_output3}, lparams);
-
-  auto aten_output2 = input0.add(2.5);
-  at::Tensor aten_output3 = at::empty({0}, options);
-
-  testValidate(
-      &fusion,
-      {cg_output2, cg_output3},
-      {input0, input1},
-      {aten_output2, aten_output3},
-      __LINE__,
-      __FILE__);
+  // Fails at schedule pointwise because our (maybe only) size-0 check is in
+  // binding input sizes which the scheduler ends up calling.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(schedulePointwise(&fusion, {input0, input1}));
 }
 
 TEST_F(NVFuserTest, FusionZeroSizeTensorReduction_CUDA) {
@@ -21981,12 +21976,13 @@ TEST_F(NVFuserTest, FusionTrivialReductionForwarding1_CUDA) {
 
   // All tensors must be transformed to a 2D tensor with each axis
   // mapped with each other in the LOOP map.
-  ComputeAtMap loop_map(&fusion, ComputeAtMap::MappingMode::LOOP);
+  ComputeAtMap ca_map(&fusion);
   for (auto tv : ir_utils::allTvs(&fusion)) {
     TORCH_CHECK(
         tv->nDims() == 2, "Expected to be a 2D tensor but: ", tv->toString());
     for (const auto i : c10::irange(2)) {
-      TORCH_CHECK(loop_map.areMapped(tv->axis(i), tv3->axis(i)));
+      TORCH_CHECK(ca_map.areMapped(
+          tv->axis(i), tv3->axis(i), IdMappingMode::PERMISSIVE));
     }
   }
 }

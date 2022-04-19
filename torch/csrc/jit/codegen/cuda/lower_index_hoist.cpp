@@ -48,8 +48,8 @@ CommonIndexKey::CommonIndexKey(
     const std::vector<kir::ForLoop*>& loops) {
   auto gpu_lower = GpuLower::current();
 
-  concrete_indexed_id_ =
-      gpu_lower->caIndexMap().getConcreteMappedID(consumer_indexed_id);
+  concrete_indexed_id_ = gpu_lower->caMap()->getConcreteMappedID(
+      consumer_indexed_id, IdMappingMode::EXACT);
 
   const auto consumer_leaf_ids =
       getUsedLeafIds(consumer_indexed_id, consumer_td);
@@ -58,14 +58,14 @@ CommonIndexKey::CommonIndexKey(
   std::unordered_set<IterDomain*> concrete_leaf_ids;
   for (auto& id : consumer_leaf_ids) {
     concrete_leaf_ids.insert(
-        gpu_lower->caParallelMap().getConcreteMappedID(id));
+        gpu_lower->caMap()->getConcreteMappedID(id, IdMappingMode::LOOP));
   }
 
   // Find used loops and their index vals
   for (const auto i : c10::irange(loops.size())) {
     auto loop = loops.at(i);
-    auto loop_id =
-        gpu_lower->caParallelMap().getConcreteMappedID(loop->iter_domain());
+    auto loop_id = gpu_lower->caMap()->getConcreteMappedID(
+        loop->iter_domain(), IdMappingMode::LOOP);
     auto it = concrete_leaf_ids.find(loop_id);
     if (it != concrete_leaf_ids.end()) {
       // This leaf reference id is used for indexing the consumer id
@@ -115,8 +115,10 @@ bool CommonIndexKey::operator==(const CommonIndexKey& other) const {
     if (lhs_loop == rhs_loop) {
       continue;
     }
-    if (gpu_lower->caIndexMap().areMapped(
-            lhs_loop->iter_domain(), rhs_loop->iter_domain()) &&
+    if (gpu_lower->caMap()->areMapped(
+            lhs_loop->iter_domain(),
+            rhs_loop->iter_domain(),
+            IdMappingMode::EXACT) &&
         lhs_loop->isTrivial() && rhs_loop->isTrivial()) {
       continue;
     }

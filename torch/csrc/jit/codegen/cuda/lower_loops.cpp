@@ -159,7 +159,7 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   // dependencies are in opposite order, inner loops are dependant on outer
   // loops.
 
-  const auto& parallel_map = GpuLower::current()->caParallelMap();
+  const auto& ca_map = GpuLower::current()->caMap();
 
   std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
       concrete_id_dependencies;
@@ -167,7 +167,8 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
     std::unordered_set<IterDomain*> dependencies;
 
     for (auto tv_id : tv->domain()->domain()) {
-      auto concrete_id = parallel_map.getConcreteMappedID(tv_id);
+      auto concrete_id =
+          ca_map->getConcreteMappedID(tv_id, IdMappingMode::LOOP);
 
       if (concrete_id_dependencies.find(concrete_id) ==
           concrete_id_dependencies.end()) {
@@ -178,7 +179,8 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
       }
 
       // Loops after tv_id are dependent on tv_id
-      dependencies.emplace(parallel_map.getConcreteMappedID(tv_id));
+      dependencies.emplace(
+          ca_map->getConcreteMappedID(tv_id, IdMappingMode::LOOP));
     }
   }
 
@@ -236,8 +238,8 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
       continue;
     }
 
-    auto last_id_concrete =
-        parallel_map.getConcreteMappedID(tv->axis((int)(tv->nDims() - 1)));
+    auto last_id_concrete = ca_map->getConcreteMappedID(
+        tv->axis((int)(tv->nDims() - 1)), IdMappingMode::LOOP);
     auto all_loops_it = concrete_id_dependencies.find(last_id_concrete);
     TORCH_INTERNAL_ASSERT(
         all_loops_it != concrete_id_dependencies.end(),
@@ -253,7 +255,7 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
         loop_structure.rbegin(),
         loop_structure.rend(),
         IterDomainDependencySorter(
-            concrete_id_dependencies, GpuLower::current()->caParallelMap()));
+            concrete_id_dependencies, GpuLower::current()->caMap()));
     loop_structures_[tv] = loop_structure;
   }
 

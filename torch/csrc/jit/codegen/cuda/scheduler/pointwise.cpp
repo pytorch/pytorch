@@ -27,9 +27,7 @@ constexpr int64_t kThreadX = 128;
 // that maps to all iterDomains in the fusion.
 class DomainMap {
  public:
-  DomainMap(Fusion* fusion)
-      : fusion_(fusion),
-        ca_index_map_(ComputeAtMap(fusion, ComputeAtMap::MappingMode::INDEX)) {
+  DomainMap(Fusion* fusion) : fusion_(fusion), ca_map_(ComputeAtMap(fusion)) {
     view_tvs_ = scheduler_utils::getViewTVs(fusion);
   }
 
@@ -87,9 +85,11 @@ class DomainMap {
     // Get concrete IDs for input root or rfactor domain
     std::unordered_set<IterDomain*> in_concrete_ids;
     for (auto in_id : input_tv->getMaybeRFactorDomain()) {
-      if (!ca_index_map_.getConcreteMappedID(in_id)->isBroadcast() &&
+      if (!ca_map_.getConcreteMappedID(in_id, IdMappingMode::EXACT)
+               ->isBroadcast() &&
           !in_id->isReduction()) {
-        in_concrete_ids.insert(ca_index_map_.getConcreteMappedID(in_id));
+        in_concrete_ids.insert(
+            ca_map_.getConcreteMappedID(in_id, IdMappingMode::EXACT));
       }
     }
 
@@ -109,7 +109,8 @@ class DomainMap {
   bool eraseIfMapped(
       std::unordered_set<IterDomain*>& in_concrete_ids,
       IterDomain* out_id) const {
-    auto out_concrete_id = ca_index_map_.getConcreteMappedID(out_id);
+    auto out_concrete_id =
+        ca_map_.getConcreteMappedID(out_id, IdMappingMode::EXACT);
     auto in_concrete_id_iter = in_concrete_ids.find(out_concrete_id);
     bool found_match = in_concrete_id_iter != in_concrete_ids.end();
     if (found_match) {
@@ -149,7 +150,7 @@ class DomainMap {
       const std::vector<IterDomain*> domain,
       IterDomain* target) const {
     for (auto id : domain) {
-      if (ca_index_map_.areMapped(id, target)) {
+      if (ca_map_.areMapped(id, target, IdMappingMode::EXACT)) {
         return id;
       }
     }
@@ -157,7 +158,7 @@ class DomainMap {
   }
 
   Fusion* fusion_ = nullptr;
-  ComputeAtMap ca_index_map_;
+  ComputeAtMap ca_map_;
   std::vector<TensorView*> view_tvs_;
 };
 
@@ -229,7 +230,7 @@ size_t expandVectorizationToContigMergedDomains(
     return default_word_size;
   }
 
-  auto ca_map = ComputeAtMap(fusion, ComputeAtMap::MappingMode::INDEX);
+  auto ca_map = ComputeAtMap(fusion);
 
   // Merge the domains right of the break point
   const auto& ref_root = reference_tv->getMaybeRFactorDomain();
@@ -279,7 +280,7 @@ size_t expandVectorizationToContigMergedDomains(
       auto ref_id = ref_root.at(ref_root.size() - 1 - i);
       IterDomain* tv_id = tv_root.at(tv_root.size() - 1 - i);
       // If not mapped, stop expanding.
-      if (!ca_map.areMapped(ref_id, tv_id)) {
+      if (!ca_map.areMapped(ref_id, tv_id, IdMappingMode::EXACT)) {
         break;
       } else {
         ++tv_num_merged_domains;

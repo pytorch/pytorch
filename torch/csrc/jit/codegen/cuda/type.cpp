@@ -527,7 +527,7 @@ static const char* ternary_op_type2string(TernaryOpType t) {
     case TernaryOpType::Where:
       return "where";
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected TernaryOpType", t);
+      TORCH_INTERNAL_ASSERT(false, "Unexpected TernaryOpType");
   }
 }
 
@@ -558,7 +558,7 @@ static const char* parallel_type2string(ParallelType t) {
     case ParallelType::Serial:
       return "S";
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected ParallelType", t);
+      TORCH_INTERNAL_ASSERT(false, "Unexpected ParallelType");
   }
 }
 
@@ -571,7 +571,21 @@ static const char* memory_type2string(MemoryType t) {
     case MemoryType::Global:
       return "global";
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected MemoryType", t);
+      TORCH_INTERNAL_ASSERT(false, "Unexpected MemoryType");
+  }
+}
+
+static const char* id_map_mode_type2string(IdMappingMode t) {
+  switch (t) {
+    case IdMappingMode::PERMISSIVE:
+      return "permissive";
+    case IdMappingMode::EXACT:
+      return "exact";
+    case IdMappingMode::LOOP:
+      return "loop";
+    default:
+      // Don't try to print t as it would recursively call this function
+      TORCH_INTERNAL_ASSERT(false, "Unexpected IdMappingMode Type.");
   }
 }
 
@@ -610,7 +624,7 @@ static const char* thread_size2string(ParallelType t) {
     case ParallelType::TIDx:
       return "blockDim.x";
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected parallel type", t);
+      TORCH_INTERNAL_ASSERT(false, "Unexpected parallel type");
   }
 }
 
@@ -772,6 +786,10 @@ std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
 
 std::ostream& operator<<(std::ostream& out, const MemoryType mtype) {
   return out << memory_type2string(mtype);
+}
+
+std::ostream& operator<<(std::ostream& out, const IdMappingMode immtype) {
+  return out << id_map_mode_type2string(immtype);
 }
 
 TORCH_CUDA_CU_API std::ostream& operator<<(
