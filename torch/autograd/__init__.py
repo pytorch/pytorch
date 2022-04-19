@@ -249,6 +249,7 @@ def grad(
             create_graph=create_graph,
             only_inputs=only_inputs,
             allow_unused=allow_unused,
+            is_grads_batched=is_grads_batched,
         )
 
     if not only_inputs:
