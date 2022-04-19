@@ -379,7 +379,8 @@ static int THPVariable_clear(THPVariable* self) {
   // from a dead cycle, and nowhere else. But if resurrection did not occur,
   // then the reference to C++ from the PyObject must be the ONLY reference to
   // the C++ object.
-  TORCH_INTERNAL_ASSERT(self->cdata.unsafeIsBorrowed() || (!self->cdata.unsafeIsBorrowed() && tensor.use_count() == 1));
+
+  TORCH_INTERNAL_ASSERT(self->cdata.unsafeIsBorrowed() || (!self->cdata.unsafeIsBorrowed() && tensor.use_count() <= 1));
   self->cdata = MaybeOwned<Variable>();
   return 0;
 }
