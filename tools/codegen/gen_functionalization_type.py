@@ -423,7 +423,7 @@ If this causes problems in your program, consider upstreaming the out-of-place o
                 unwrapped_args_ctx, functional_sig.arguments(), method=False
             )
         ]
-        functional_call_str = f"tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});"
+        functional_call_str = f"tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});"  # noqa: B950
 
     if f.func.is_out_fn():
         mutable_input_post_processing = "\n".join(
