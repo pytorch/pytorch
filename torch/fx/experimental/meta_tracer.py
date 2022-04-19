@@ -4,7 +4,7 @@ import warnings
 import functools
 import builtins
 
-from typing import Dict
+from typing import Callable, Dict
 
 def embedding_override(self, input):
     return torch.empty(*input.shape, self.weight.shape[-1], device='meta')
@@ -37,7 +37,7 @@ def torch_abs_override(input, *, out=None):
     assert out is None, 'Dont support in-place abs for MetaTensor analysis'
     return input
 
-manual_meta_overrides = {
+manual_meta_overrides : Dict[Callable, Callable] = {
     torch.nn.Embedding: embedding_override,
     torch.nn.LayerNorm: nn_layernorm_override,
     torch.relu: torch_relu_override,
