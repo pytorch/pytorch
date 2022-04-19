@@ -3541,17 +3541,22 @@ class TestQuantizedLinear(TestCase):
                 Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
 
     @given(batch_size=st.integers(1, 4),
-           input_channels=st.integers(16, 32),
-           output_channels=st.integers(4, 8),
+           # in cudnn v. 8.4.0, there is a limitation that input channels
+           # should be a multiple of 4 for int8 tensors. in cudnn v.8.3.3
+           # this should be a multiple of 16
+           input_channels=st.sampled_from([4, 8, 12, 16, 32]),
+           # constraints on output channels appear to be relax, as it seems we can use any positive integer here
+           # except 1. It is not clear why 1 will not work. TODO: check with Yang
+           output_channels=st.integers(2, 36),
            use_bias=st.booleans(),
            use_relu=st.booleans(),
            use_multi_dim_input=st.booleans(),
            use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qlinear_cudnn op is bulid "
-                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
-                   "after it is built by default")
+    # @skipIfNoFBGEMM
+    # @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    # @unittest.skip("Local only - currently the qlinear_cudnn op is bulid "
+    #                "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+    #                "after it is built by default")
     # TODO: check with yang regarding CUDNN flags
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
                            use_relu, use_multi_dim_input, use_channelwise):
