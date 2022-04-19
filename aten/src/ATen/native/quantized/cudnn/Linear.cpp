@@ -17,6 +17,7 @@
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
 #include <c10/core/ScalarType.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <cudnn_frontend.h>
 #include <torch/library.h>
 
@@ -31,16 +32,49 @@ cudnn_frontend::MatMulDesc_v8 getLinearDescriptor(cudnnDataType_t dataType) {
     .build();
 }
 
+// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
+namespace {
+// we currently set the maximum number of input dimensions to 5
+// this can be increased, if necessary
+constexpr uint8_t max_num_input_dim = 5;
+struct LinearParams {
+  c10::DeviceIndex device_id;
+  cudnnDataType_t dataType;
+  int input_size[max_num_input_dim];
+  uint8_t input_dim;
+  at::MemoryFormat memory_format;
+  int64_t weight_size[2];
+  bool deterministic;
+  bool allow_tf32;
+};
 struct CacheKey {
+  LinearParams params;
   uint8_t input_alignment;
   uint8_t weight_alignment;
   uint8_t output_alignment;
   // default to -1 when no bias
   int8_t bias_alignment;
+  bool kReluFused;
 };
-
-// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
-namespace {
+void setLinearParams(
+    LinearParams* params, const at::Tensor& input, const at::Tensor& weight,
+    bool deterministic, bool allow_tf32) {
+  // operator datatype needs to be int32 for int8 matmul, but we can
+  // set the datatype for output tensor to int32 or fp32
+  memset(params, 0, sizeof(LinearParams));
+  params->device_id = at::cuda::current_device();
+  params->dataType = CUDNN_DATA_INT32;
+  params->input_dim = input.dim();
+  params->memory_format = input.suggest_memory_format();
+  for (int i = 0; i < params->input_dim; ++i) {
+    params->input_size[i] = input.sizes()[i];
+  }
+  for (int i = 0; i < 2; ++i) {
+    params->weight_size[i] = weight.sizes()[i];
+  }
+  params->deterministic = deterministic;
+  params->allow_tf32 = allow_tf32;
+}
 std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
@@ -69,13 +103,13 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
   if (bias_.has_value()) {
-    // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
+    // the input bias is a 1-D tensor whose size is the same as the size of the last dimension of quantized_output
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
     // the number of trailling dimensions is quantized_output.dim() - 2. We also prepend a leading dimension for clarity
     std::vector<int64_t> new_size(quantized_output.dim(), 1);
-    new_size[1] = bias_.value().size(0);
-    broadcasted_bias = bias_.value().reshape(new_size);
-    broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
+    new_size.back() = bias_.value().size(0);
+    broadcasted_bias = bias_.value().clone().reshape(new_size);
+    broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes()).contiguous();
     bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
     auto bias_multiplier = 1.0 / (act_scale * weight_scale);
     bias_multiplier_tensor.value().fill_(bias_multiplier);
@@ -85,6 +119,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   CacheKey key;
   bool deterministic{true};
   bool allow_tf32{false};
+  setLinearParams(&key.params, input, orig_weight, deterministic, allow_tf32);
 
   key.input_alignment = cudnn_utils::getAlignment(input);
   key.output_alignment = cudnn_utils::getAlignment(linear_output);
@@ -94,6 +129,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   } else {
     key.bias_alignment = -1;
   }
+  key.kReluFused = kReluFused;
   // the matmul operation is input * transpose(weight), so we will work with the transposed weight
   auto weight_transposed = transpose(orig_weight, 0, 1);
   // cudnn expects tensors to be at least 3D. weight_transposed is currently 2D. we will create a 3D view
