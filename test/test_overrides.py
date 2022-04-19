@@ -563,13 +563,17 @@ class TestTorchFunctionOverride(TestCase):
         # did not get wrapped into unary tuples before being passed into
         # handle_torch_function, in contradiction with how Tensor-likes
         # were handled
+        #
+        # NB: this asserts that the arguments get normalized into a tuple
+        # before entering the torch function handler; it could go the
+        # other way but beware https://github.com/pytorch/pytorch/issues/76037
 
         class Dummy:
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
                 inputs, outputs = args
-                self.assertIs(inputs, x)
-                self.assertIs(outputs, x)
+                self.assertEqual(inputs, (x,))
+                self.assertEqual(outputs, (x,))
                 return -1
 
         x = Dummy()
