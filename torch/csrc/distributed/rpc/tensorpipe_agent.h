@@ -423,6 +423,27 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // Mutex to guard timeSeriesMetrics_
   std::mutex metricsMutex_;
 
+  // Custom lock guard used to check if the RPC group is dynamic and lock the
+  // mutex if so
+  struct GroupMembershipLockGuard {
+    GroupMembershipLockGuard(std::mutex& mutex, bool isStaticGroup)
+        : ref_(mutex), isStaticGroup_(isStaticGroup) {
+      if (isStaticGroup_) {
+        ref_.lock();
+      }
+    }
+
+    ~GroupMembershipLockGuard() {
+      if (isStaticGroup_) {
+        ref_.unlock();
+      }
+    }
+
+   private:
+    GroupMembershipLockGuard(const GroupMembershipLockGuard&);
+    std::mutex& ref_;
+    bool isStaticGroup_;
+  };
   // Mutex to guard access to group membership data
   // e.g. updates to (workerIdToInfo_, workerNameToInfo_, workerNameToURL_)
   mutable std::mutex groupMembershipMutex_;

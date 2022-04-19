@@ -562,10 +562,8 @@ void TensorPipeAgent::pipeRead(
     }
 
     std::vector<c10::Stream> streams;
-    if (isStaticGroup_) {
-      streams = getStreamsFromPoolForDevices(devices_);
-    } else {
-      std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+    {
+      GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
       streams = getStreamsFromPoolForDevices(devices_);
     }
     tensorpipe::Allocation tpAllocation;
@@ -647,25 +645,26 @@ void TensorPipeAgent::sendCompletedResponseMessage(
 
     for (const auto& tensor : responseMessage->tensors()) {
       const auto device = tensor.device();
-      std::unique_lock<std::mutex> lock(groupMembershipMutex_);
-      if (!device.is_cpu() &&
-          std::find(devices_.begin(), devices_.end(), device) ==
-              devices_.end()) {
-        std::ostringstream oss;
-        std::copy(
-            devices_.begin(),
-            devices_.end(),
-            std::ostream_iterator<c10::Device>(oss, ", "));
-        responseMessage = createExceptionResponse(
-            c10::str(
-                "RPC detected that a user-function output tensor on device ",
-                device,
-                ". This device is not one of the input tensor devices: ",
-                oss.str(),
-                "which is not yet supported. Please file a feature request "
-                "issue in PyTorch GitHub repo."),
-            messageId);
-        break;
+      if (!device.is_cpu()) {
+        GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+        if (std::find(devices_.begin(), devices_.end(), device) ==
+            devices_.end()) {
+          std::ostringstream oss;
+          std::copy(
+              devices_.begin(),
+              devices_.end(),
+              std::ostream_iterator<c10::Device>(oss, ", "));
+          responseMessage = createExceptionResponse(
+              c10::str(
+                  "RPC detected that a user-function output tensor on device ",
+                  device,
+                  ". This device is not one of the input tensor devices: ",
+                  oss.str(),
+                  "which is not yet supported. Please file a feature request "
+                  "issue in PyTorch GitHub repo."),
+              messageId);
+          break;
+        }
       }
     }
 
@@ -830,10 +829,8 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
 
   std::shared_ptr<torch::distributed::rpc::TensorPipeAgent::AtomicJitFuture>
       futureResponseMessage;
-  if (isStaticGroup_) {
-    futureResponseMessage = std::make_shared<AtomicJitFuture>(devices_);
-  } else {
-    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
     futureResponseMessage = std::make_shared<AtomicJitFuture>(devices_);
   }
   uint64_t messageId = nextMessageID_++;
@@ -896,10 +893,8 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
   std::vector<c10::Stream> streams;
-  if (isStaticGroup_) {
-    streams = getStreamsFromPoolForDevices(devices_);
-  } else {
-    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
     streams = getStreamsFromPoolForDevices(devices_);
   }
   makeStreamsWaitOnOthers(
@@ -1154,10 +1149,8 @@ void TensorPipeAgent::shutdownImpl() {
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(
     const std::string& workerName) const {
   std::unordered_map<std::string, WorkerInfo>::const_iterator it;
-  if (isStaticGroup_) {
-    it = workerNameToInfo_.find(workerName);
-  } else {
-    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
     it = workerNameToInfo_.find(workerName);
   }
   TORCH_CHECK(
@@ -1167,10 +1160,8 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(worker_id_t workerId) const {
   std::unordered_map<worker_id_t, WorkerInfo>::const_iterator it;
-  if (isStaticGroup_) {
-    it = workerIdToInfo_.find(workerId);
-  } else {
-    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
     it = workerIdToInfo_.find(workerId);
   }
   TORCH_CHECK(
@@ -1189,10 +1180,8 @@ std::vector<WorkerInfo> TensorPipeAgent::getWorkerInfos() const {
 const std::string& TensorPipeAgent::findWorkerURL(
     const WorkerInfo& worker) const {
   std::unordered_map<std::string, std::string>::const_iterator it;
-  if (isStaticGroup_) {
-    it = workerNameToURL_.find(worker.name_);
-  } else {
-    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
     it = workerNameToURL_.find(worker.name_);
   }
   TORCH_CHECK(
@@ -1209,7 +1198,7 @@ void TensorPipeAgent::updateGroupMembership(
   worker_id_t id = workerInfo.id_;
   // Rank with workerInfo is joining the group, update internal mappings
   if (isJoin) {
-    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
     workerIdToInfo_.emplace(id, workerInfo);
     workerNameToInfo_.emplace(name, workerInfo);
 
@@ -1365,10 +1354,8 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
     const std::string& remoteName,
     const Message& message) const {
   std::unordered_map<std::string, DeviceMap> deviceMaps;
-  if (isStaticGroup_) {
-    deviceMaps = message.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
-  } else {
-    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
     deviceMaps = message.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
   }
 
@@ -1409,12 +1396,8 @@ TensorPipeRpcBackendOptions TensorPipeAgent::getBackendOptions() const {
 }
 
 const std::vector<c10::Device>& TensorPipeAgent::getDevices() const {
-  if (isStaticGroup_) {
-    return devices_;
-  } else {
-    std::unique_lock<std::mutex> lock(groupMembershipMutex_);
-    return devices_;
-  }
+  GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+  return devices_;
 }
 
 size_t TensorPipeAgent::timeoutMapSize() {
