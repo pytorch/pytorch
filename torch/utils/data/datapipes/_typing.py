@@ -341,12 +341,17 @@ def _simplify_obj_name(obj) -> str:
     """
     Simplify the display strings of objects for the purpose of rendering within DataPipe error messages.
     """
-    if inspect.isfunction(obj):
+    default_str = str(obj)
+    # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+    if "object at" in default_str:
+        try:
+            return str(obj.__class__.__qualname__)
+        except Exception as _:
+            return default_str
+    elif inspect.isfunction(obj):
         return obj.__name__
-    try:
-        return str(obj.__class__.__qualname__)
-    except Exception as _:
-        return str(obj)
+    else:
+        return default_str
 
 
 def _generate_input_args_string(obj):
