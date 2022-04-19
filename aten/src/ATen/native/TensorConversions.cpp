@@ -76,9 +76,13 @@ Tensor _to_copy(
     }
   }
   // See Note [Explicit nullopt MemoryFormat argument]
-  auto r = at::empty(self.sizes(),
-                     options.memory_format(memory_format).pinned_memory(pin_out),
-                     c10::nullopt);
+  // TODO: empty_quantized does not work here. It raises an exception in CheckMemoryFormat.h prior to
+  // empty_affine_quantizd/_empty_per_channel_affine_quantized calls
+  // at::empty also does not work here because there is no proper at::empty support for quantized tensors
+  // as it would return a quantized tensor with an UnknownQuantizer
+  auto r = self.is_quantized() ? at::empty_like(self, memory_format)
+                               : at::empty(self.sizes(),
+                                 options.memory_format(memory_format).pinned_memory(pin_out), c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
 }
