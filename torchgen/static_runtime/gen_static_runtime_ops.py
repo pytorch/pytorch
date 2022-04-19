@@ -11,8 +11,9 @@ from typing import Sequence
 # Given a list of `grouped_native_functions` sorted by their op names, return a list of
 # lists each of which groups ops that share the base name. For example, `mean` and
 # `mean.dim` are grouped together by this function.
-def group_functions_by_op_name(grouped_native_functions:
-                               Sequence[NativeFunctionsGroup]) -> Sequence[Sequence[NativeFunctionsGroup]]:
+def group_functions_by_op_name(
+    grouped_native_functions: Sequence[NativeFunctionsGroup],
+) -> Sequence[Sequence[NativeFunctionsGroup]]:
     if not grouped_native_functions:
         return []
     groups = []
@@ -24,12 +25,22 @@ def group_functions_by_op_name(grouped_native_functions:
             return gen_structured.is_supported(g)
 
     eligible_ops = (g for g in grouped_native_functions if is_supported(g))
-    groups = [list(group) for k, group in (itertools.groupby(eligible_ops, key=lambda g: g.functional.func.name.name.base))]
+    groups = [
+        list(group)
+        for k, group in (
+            itertools.groupby(
+                eligible_ops, key=lambda g: g.functional.func.name.name.base
+            )
+        )
+    ]
     return groups
+
 
 def clang_format(cpp_file_path: str) -> None:
     import subprocess
+
     subprocess.run(["clang-format", "-i", cpp_file_path])
+
 
 def write_cpp(cpp_ops: Sequence[str], file_path: str) -> None:
     code = "\n".join(cpp_ops)
@@ -104,45 +115,63 @@ using c10::IValue;
         f.write(generated)
     clang_format(file_path)
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Generate ATen source files')
+    parser = argparse.ArgumentParser(description="Generate ATen source files")
     parser.add_argument(
-        '-s',
-        '--source-path',
-        help='path to source directory for ATen',
-        default='aten/src/ATen')
+        "-s",
+        "--source-path",
+        help="path to source directory for ATen",
+        default="aten/src/ATen",
+    )
     parser.add_argument(
-        '-p',
-        '--generated-ops-cpp-path',
-        help='path to directory to generate op dispatcher .cpp file',
-        default='torch/csrc/jit/runtime/static/generated_ops.cpp')
+        "-p",
+        "--generated-ops-cpp-path",
+        help="path to directory to generate op dispatcher .cpp file",
+        default="torch/csrc/jit/runtime/static/generated_ops.cpp",
+    )
     parser.add_argument(
-        '-t',
-        '--generated-ops-test-cpp-path',
-        help='path to directory to generate op dispatcher .cpp file',
-        default='benchmarks/static_runtime/test_generated_ops.cc')
+        "-t",
+        "--generated-ops-test-cpp-path",
+        help="path to directory to generate op dispatcher .cpp file",
+        default="benchmarks/static_runtime/test_generated_ops.cc",
+    )
     options = parser.parse_args()
-    native_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
+    native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
     parsed_yaml = gen.parse_native_yaml(native_yaml_path)
-    native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
+    native_functions, backend_indices = (
+        parsed_yaml.native_functions,
+        parsed_yaml.backend_indices,
+    )
     grouped_native_functions = gen.get_grouped_native_functions(native_functions)
-    structured_native_functions = [g for g in grouped_native_functions
-                                   if isinstance(g, NativeFunctionsGroup)]
+    structured_native_functions = [
+        g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)
+    ]
     supported_function_groups = group_functions_by_op_name(structured_native_functions)
 
     gen_out_variant_dispatcher = gen_structured.GenOutVariantDispatcher()
-    result = [gen_out_variant_dispatcher(groups) for groups in supported_function_groups]
+    result = [
+        gen_out_variant_dispatcher(groups) for groups in supported_function_groups
+    ]
 
-    gen_out_variant_dispatcher_test_case = gen_structured.GenOutVariantDispatcherTestCase()
-    test_result = [gen_out_variant_dispatcher_test_case(groups) for groups in supported_function_groups]
+    gen_out_variant_dispatcher_test_case = (
+        gen_structured.GenOutVariantDispatcherTestCase()
+    )
+    test_result = [
+        gen_out_variant_dispatcher_test_case(groups)
+        for groups in supported_function_groups
+    ]
 
     write_cpp(result, options.generated_ops_cpp_path)
     write_test_cpp(test_result, options.generated_ops_test_cpp_path)
 
     print("total grouped native ops: %d" % len(grouped_native_functions))
     print("structured grouped native ops: %d" % len(structured_native_functions))
-    supported_grouped_functions = sum([len(groups) for groups in supported_function_groups])
+    supported_grouped_functions = sum(
+        [len(groups) for groups in supported_function_groups]
+    )
     print("generated grouped native ops: %d" % supported_grouped_functions)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
