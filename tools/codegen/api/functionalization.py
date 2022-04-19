@@ -1,8 +1,8 @@
 from tools.codegen.model import (
-    FunctionSchema, BaseTy, BaseType, NativeFunction, Argument, Tag,
+    FunctionSchema, BaseTy, BaseType, NativeFunctionsViewGroup, NativeFunction, Argument,
 )
 from tools.codegen.api.types import (
-    Binding, NamedCType, ConstRefCType, BaseCType, CType, tensorT, longT
+    Binding, NamedCType, ConstRefCType, BaseCType, CType, tensorT, longT, boolT
 )
 from tools.codegen.api import dispatcher
 from typing import List, Optional
@@ -39,22 +39,40 @@ mutated_view_idx_binding = Binding(
     nctype=NamedCType(name='mutated_view_idx', type=BaseCType(longT)),
     argument=Argument(name='base', type=BaseType(BaseTy.Tensor), default=None, annotation=None),
     default=None)
+reapply_views_binding = Binding(
+    name='reapply_views',
+    nctype=NamedCType(name='reapply_views', type=BaseCType(boolT)),
+    argument=Argument(name='reapply_views', type=BaseType(BaseTy.bool), default=None, annotation=None),
+    default=None)
 
 # The lambda capture itself doesn't have a name.
 # The name returned here corresponds to the name of the inner function called by the lambda.
-def name(f: NativeFunction, *, functional_op: NativeFunction, is_reverse: bool, include_namespace: bool) -> str:
-    # For inplace_view ops, the lambda calls out to the corresponding functional view op
-    fn = functional_op if f.tag is Tag.inplace_view else f
-    name = fn.func.name.unambiguous_name()
+def name(
+        g: NativeFunctionsViewGroup,
+        *,
+        is_reverse: bool,
+        include_namespace: bool,
+        reapply_views: Optional[bool] = None) -> str:
+    if reapply_views is None:
+        # reapply_views is only important for the fwd lambda,
+        # since we always plumb the runtime "reapply_views" argument into the reverse function.
+        assert is_reverse
     if is_reverse:
+        # for the reverse: the name of the inverse function always involves "view_copy",
+        # and we plumb the "reapply_views" flag into that function.
+        # (We could avoid doing that, but that would require writing out twice as many view inverse functions).
+        assert g.view_copy is not None
+        api_name = g.view_copy.func.name.unambiguous_name()
         # in the reverse case, we codegen both the call-sites (which need the full namespace) and the declarations (which don't)
         if include_namespace:
-            return f'at::functionalization::FunctionalInverses::{name}_inverse'
+            return f'at::functionalization::FunctionalInverses::{api_name}_inverse'
         else:
-            return f'{name}_inverse'
-    # in the forward case, we just diretly call into the at::_ops API (so we always need the namespace)
+            return f'{api_name}_inverse'
+    # in the forward case, we just directly call into the at::_ops API (so we always need the namespace)
     assert include_namespace
-    return f'at::_ops::{name}::call'
+    assert g.view_copy is not None
+    api_name = g.view.func.name.unambiguous_name() if reapply_views else g.view_copy.func.name.unambiguous_name()
+    return f'at::_ops::{api_name}::call'
 
 
 def capture_arguments(f: NativeFunction, *, is_reverse: bool) -> List[Binding]:
@@ -68,7 +86,8 @@ def capture_arguments(f: NativeFunction, *, is_reverse: bool) -> List[Binding]:
         dispatcher.argument(a, remove_non_owning_ref_types=True, structured_type_override=f.part_of_structured_group)
         for a in non_self_args
     ]
-    return non_self_value_bindings
+    all_bindings = [reapply_views_binding] + non_self_value_bindings
+    return all_bindings
 
 
 def returns_type(func: FunctionSchema) -> CType:
@@ -112,6 +131,6 @@ def inner_arguments(f: NativeFunction, is_reverse: bool) -> List[Binding]:
         # their corresponding view_inverse function takes in an additional index argument.
         index_binding = inner_call_index(f.func)
         if index_binding is not None:
-            return [base_binding, mutated_view_binding, index_binding] + non_self_bindings
+            return [base_binding, mutated_view_binding, reapply_views_binding, index_binding] + non_self_bindings
         else:
-            return [base_binding, mutated_view_binding] + non_self_bindings
+            return [base_binding, mutated_view_binding, reapply_views_binding] + non_self_bindings
