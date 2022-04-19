@@ -1,7 +1,10 @@
 import torch
-from torch.distributed import group, ReduceOp
+import torch.distributed as dist
 from torch.autograd import Function
-
+# The two imports below are not always available depending on the
+# USE_DISTRIBUTED compile flag. Make sure they raise import error
+# if we're trying to use them.
+from torch.distributed import group, ReduceOp
 
 def broadcast(tensor, src, group=group.WORLD):
     """
