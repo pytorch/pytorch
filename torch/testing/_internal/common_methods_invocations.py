@@ -6455,7 +6455,6 @@ def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dt
         for shape, dim in cases
     ]
 
-
 def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
     """Sample inputs for masked softmax, log_softmax, and softmin.
 
@@ -6471,7 +6470,6 @@ def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dty
             inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
-
 
 def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked normalize.
@@ -10504,7 +10502,8 @@ op_db: List[OpInfo] = [
                # we skip gradient checks for this suite as they are tested in
                # variant_test_name='grad_oriented'
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               # At this time ROCm uses magma instead of rocSolver, and the test passes
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', active_if=(not TEST_WITH_ROCM)),
                # The values for attribute 'shape' do not match
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
            )),
@@ -10526,7 +10525,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               # At this time ROCm uses magma instead of rocSolver, and the test passes
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', active_if=(not TEST_WITH_ROCM)),
            )),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),

@@ -80,10 +80,7 @@
     "Union",
     "get_combined_dict"
   ],
-  "torch.ao.quantization.fx.backend_config.fuse_handler": [
-    "DefaultFuseHandler"
-  ],
-  "torch.ao.quantization.fx.backend_config.native": [
+  "torch.ao.quantization.backend_config.native": [
     "Any",
     "Dict",
     "FixedQParamsFakeQuantize",
@@ -100,39 +97,21 @@
     "reverse3",
     "reverse_sequential_wrapper2"
   ],
-  "torch.ao.quantization.fx.backend_config.observation_type": [
+  "torch.ao.quantization.backend_config.observation_type": [
     "Enum"
   ],
-  "torch.ao.quantization.fx.backend_config.quantize_handler": [
-    "Any",
-    "Callable",
-    "Dict",
-    "NodePattern",
-    "ObservationType",
-    "Optional",
-    "Pattern",
-    "QuantizeHandler",
-    "activation_dtype"
-  ],
-  "torch.ao.quantization.fx.backend_config.tensorrt": [
+  "torch.ao.quantization.backend_config.tensorrt": [
     "ObservationType",
     "reverse_sequential_wrapper2"
   ],
-  "torch.ao.quantization.fx.backend_config.utils": [
-    "Any",
-    "Callable",
-    "Dict",
-    "List",
-    "Pattern",
-    "QuantizerCls",
-    "Tuple",
-    "Union",
-    "get_combined_dict",
-    "get_default_quant_patterns",
-    "get_fuse_handler_cls",
-    "get_native_backend_config_dict",
-    "get_quantize_handler_cls",
-    "sorted_patterns_dict"
+  "torch.ao.quantization.quantization_types": [
+      "Any",
+      "Node",
+      "NodePattern",
+      "Pattern",
+      "QuantizerCls",
+      "Tuple",
+      "Union"
   ],
   "torch.ao.quantization.fx.convert": [
     "Any",
@@ -377,6 +356,23 @@
     "is_per_tensor",
     "map_arg",
     "namedtuple"
+  ],
+  "torch.ao.quantization.fx.backend_config_utils": [
+    "Any",
+    "Callable",
+    "DefaultFuseHandler",
+    "Dict",
+    "NodePattern",
+    "ObservationType",
+    "Optional",
+    "Pattern",
+    "QuantizeHandler",
+    "QuantizerCls",
+    "activation_dtype",
+    "get_combined_dict",
+    "get_default_quant_patterns",
+    "get_native_backend_config_dict",
+    "sorted_patterns_dict"
   ],
   "torch.ao.quantization.observer": [
     "ABC",
@@ -3063,7 +3059,9 @@
     "_linalg_svd",
     "_linalg_svd_out",
     "_lu_with_info",
-    "_unpack_dual"
+    "_unpack_dual",
+    "attr",
+    "pytree_register_structseq"
   ],
   "torch.serialization": [
     "Any",
