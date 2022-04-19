@@ -400,6 +400,8 @@ TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,
     int64_t dim);
 
+TORCH_API autograd::Variable getNumelOf(const autograd::Variable& var);
+
 } // namespace tracer
 } // namespace jit
 } // namespace torch
