@@ -9,7 +9,7 @@
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 #include <memory>
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/lazy/core/dynamic_ir.h>
+#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 
 namespace torch {
 namespace lazy {
