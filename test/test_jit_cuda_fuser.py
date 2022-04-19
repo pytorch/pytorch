@@ -36,7 +36,7 @@ RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM and not IS_WINDOWS
 CUDA_MAJOR, CUDA_MINOR = 0, 0
 
 if RUN_NVFUSER and torch.version.cuda is not None:
-    CUDA_MAJOR, CUDA_MINOR = (int(x) for x in torch.version.cuda.split('.'))
+    CUDA_MAJOR, CUDA_MINOR = (int(x) for x in torch.version.cuda.split('.')[:2])
 
 os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = '1'
 os.environ['PYTORCH_NVFUSER_DISABLE_FMA'] = '1'
@@ -2549,6 +2549,23 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_linear_symbolic_shapes(self):
+        def fn(x: int):
+            y = torch.zeros((x, x + 2)).cuda()
+            for i in range(2):
+                inp = torch.rand((x, x + i)).cuda()
+                weight = torch.rand((x + 2, x + i)).cuda()
+                bias = torch.rand((x, x + 2)).cuda()
+                y += torch.sin(torch.nn.functional.linear(inp, weight, bias))
+            return y
+
+        fn_s = torch.jit.script(fn)
+        fn_s(5)
+        fn_s(5)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_backward_type(self):
         # not super useful to check gradient of integer/bool, so skipping here
         type_pairs = [
@@ -4075,6 +4092,8 @@ class TestCudaFuser(JitTestCase):
             t_jit = torch.jit.script(t)
             self._run_helper(t_jit, t, x)
 
+    # TODO: revert disabled aten::view
+    @unittest.skipIf(True, "skipping this test since reshape is disabled now")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
@@ -4391,6 +4410,59 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(prof.events().table().find("fallback"), -1)
         torch._C._jit_set_nvfuser_guard_mode(old_guard)
 
+    # TODO: generalize this
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    def test_inf_quick_patch(self):
+        inputs = [torch.tensor([-float('inf'), float('inf'), 4.0], device="cuda"),
+                  torch.tensor([1.0, float('inf'), 4.0], device="cuda"),
+                  torch.tensor([-float('inf'), -1.5, 4.0], device="cuda"),
+                  torch.tensor([1.0, -3.0, float('nan')], device="cuda"),
+                  torch.tensor([-float('inf'), -float('inf'), -float('inf')], device="cuda"),
+                  torch.tensor([float('inf'), float('inf'), float('inf')], device="cuda"),
+                  torch.tensor([float('nan'), float('nan'), float('nan')], device="cuda")]
+
+        def fn_amax(x):
+            return x.amax(dim=0)
+
+        def fn_amin(x):
+            return x.amin(dim=0)
+
+        def fn_add_nan(x):
+            return x.relu() + float('nan')
+
+        def fn_add(x):
+            return x + 1.0
+
+        with nvfuser_singleton_fusion(True):
+            for t in [fn_amax, fn_amin, fn_add, fn_add_nan]:
+                for x in inputs:
+                    t_jit = torch.jit.script(t)
+                    self._run_helper(t_jit, t, x)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_clamp(self):
+        x = torch.tensor([1., float('inf'), 2., float('nan'), float('-inf')], device="cuda")
+
+        def clamp_max(x):
+            return x.clamp(max=1.5)
+
+        def clamp_min_max(x):
+            return x.clamp(min=1.5)
+
+        def clamp_min(x):
+            return x.clamp(min=1., max=3.)
+
+        with nvfuser_singleton_fusion(True):
+            for t in [clamp_max, clamp_min, clamp_min_max]:
+                t_jit = torch.jit.script(t)
+                self._run_helper(t_jit, t, x)
+
+
 class TestPassManagerCudaFuser(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -4447,6 +4519,18 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
 
+    @unittest.skipIf(RUN_CUDA, "Testing on CPU only")
+    def test_register_fuser_cpu(self):
+        with self.assertRaises(RuntimeError):
+            torch._C._jit_set_nvfuser_enabled(True)
+            torch._C._jit_set_nvfuser_enabled(False)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCM test only")
+    def test_register_fuser_rocm(self):
+        with self.assertRaises(RuntimeError):
+            torch._C._jit_set_nvfuser_enabled(True)
+            torch._C._jit_set_nvfuser_enabled(False)
 
 class TestCudaFuserOpInfo(JitCommonTestCase):
     def setUp(self):
