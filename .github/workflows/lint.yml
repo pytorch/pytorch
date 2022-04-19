@@ -20,9 +20,10 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          needs-history-and-master: true
 
       - name: Install lintrunner
-        run: pip install lintrunner==0.5.*
+        run: pip install lintrunner==0.6.*
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -43,35 +44,27 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          MERGE_BASE=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")
-          lintrunner -vv --force-color --revision "${MERGE_BASE}"
+          lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}"
           echo ""
           echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
           echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
 
-      - name: Store annotations
-        # Don't run on forked pull requests
-        if: failure() && github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          lintrunner --json \
-            | python .github/scripts/convert_lintrunner_annotations_to_github.py \
-            > annotations.json
-
-          cat annotations.json
-
-      - name: Add annotations
-        # Don't run on forked pull requests
-        if: failure() && github.event.pull_request.head.repo.full_name == github.repository
-        uses: pytorch/add-annotations-github-action@master
+      - name: Store annotatations
+        if: always() && github.event_name == 'pull_request'
+        # Don't show this as an error; the above step will have already failed.
+        continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          check_name: 'lintrunner'
-          linter_output_path: annotations.json
-          commit_sha: ${{ github.event.pull_request.head.sha }}
-          mode: json
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # The easiest way to get annotations is to just run lintrunner again
+          # in JSON mode and add a GitHub problem matcher to pattern match the
+          # output.
+          echo "::add-matcher::.github/lintrunner_problem_matcher.json"
+
+          # Use jq to massage the output to look a little nicer in GitHub.
+          lintrunner --merge-base-with "${PR_BASE_SHA}" --json \
+            | jq '{file: .path, line: .line, column: .char, severity: .severity, code: .code, message: ("["+.code+"] "+ .name + ": " +.description)}' -c
 
   quick-checks:
     name: quick-checks
@@ -114,14 +107,9 @@ jobs:
         run: |
           set -eux
           python torch/testing/_check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
-      - name: Ensure all test files have header containing ownership information
-        if: always()
-        run: |
-          python3 -m pip install boto3==1.19.12
-          .github/scripts/lint_test_ownership.py
 
-  shellcheck:
-    name: shellcheck
+  workflow-checks:
+    name: workflow-checks
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -158,51 +146,10 @@ jobs:
             echo 'onto a more recent commit from the PyTorch master branch.'
             false
           fi
-      - name: Install ShellCheck
-        id: install_shellcheck
-        if: always()
-        # https://github.com/koalaman/shellcheck/tree/v0.7.2#installing-a-pre-compiled-binary
-        run: |
-          set -x
-          scversion="v0.7.2"
-          wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
-          mkdir -p ~/.local/bin
-          cp "shellcheck-${scversion}/shellcheck" ~/.local/bin/
-          rm -r "shellcheck-${scversion}"
-          ~/.local/bin/shellcheck --version
-      - name: Extract scripts from GitHub Actions workflows
-        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
-        run: |
-          # For local lints, remove the .extracted_scripts folder if it was already there
-          rm -rf .extracted_scripts
-          tools/extract_scripts.py --out=.extracted_scripts
-      - name: Run ShellCheck
-        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
-        run: |
-          if ! tools/linter/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
-            echo
-            echo 'ShellCheck gave a nonzero exit code. Please fix the warnings'
-            echo 'listed above. Note that if a path in one of the above warning'
-            echo 'messages starts with .extracted_scripts/ then that means it'
-            echo 'is referring to a shell script embedded within another file,'
-            echo 'whose path is given by the path components immediately'
-            echo 'following the .extracted_scripts/ prefix.'
-            false
-          fi
       - name: Check that jobs will be cancelled
         if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
           .github/scripts/ensure_actions_will_cancel.py
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Run actionlint
-        with:
-          timeout_minutes: 1
-          max_attempts: 3
-          command: |
-            set -eux
-            bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-            ./actionlint --color
-            rm actionlint
 
   toc:
     name: toc
@@ -260,6 +207,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          needs-history-and-master: true
       - name: Install dependencies
         # mypy and boto3 versions copied from
         # .circleci/docker/common/install_conda.sh
