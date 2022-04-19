@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# Tests implemented in this file are relying on GitHub GraphQL APIs
+# In order to avoid test flakiness, results of the queries
+# are cached in gql_mocks.json
+# PyTorch Lint workflow does not have GITHUB_TOKEN defined to avoid
+# flakiness, so if you are making changes to merge_rules or
+# GraphQL queries in trymerge.py, please make sure to delete `gql_mocks.json`
+# And re-run the test locally with ones PAT
+
 import json
 import os
 from hashlib import sha256
@@ -6,6 +14,7 @@ from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, 
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any
 from unittest import TestCase, main, mock
+from urllib.error import HTTPError
 
 def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     gql_db_fname = os.path.join(os.path.dirname(__file__), "gql_mocks.json")
@@ -27,7 +36,16 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     if key in mocked_queries:
         return mocked_queries[key]
 
-    rc = gh_graphql(query, **kwargs)
+    try:
+        rc = gh_graphql(query, **kwargs)
+    except HTTPError as err:
+        if err.code == 401:
+            err_msg = "If you are seeing this message during workflow run, please make sure to update gql_mocks.json"
+            err_msg += f" locally, by deleting it and running {os.path.basename(__file__)} with "
+            err_msg += " GitHub Personal Access Token passed via GITHUB_TOKEN environment variable"
+            if os.getenv("GITHUB_TOKEN") is None:
+                err_msg = "Failed to update cached GraphQL queries as GITHUB_TOKEN is not defined." + err_msg
+            raise RuntimeError(err_msg) from err
     mocked_queries[key] = rc
 
     save_mocked_queries(mocked_queries)

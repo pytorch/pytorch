@@ -29,15 +29,23 @@
 
 namespace at {
 namespace meta {
-TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
-  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
-  auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
+#define ADDMM_META() \
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor"); \
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor"); \
+  TORCH_CHECK( \
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (", \
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
+ \
+  auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
   set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+
+TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+  ADDMM_META();
+}
+
+TORCH_META_FUNC(_addmm_activation)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu) {
+  ADDMM_META();
 }
 
 TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
@@ -1126,6 +1134,19 @@ static void addmm_impl_cpu_(
     return;
   }
 
+  // Some paths in the code below do not handle multiplications of the form [a, 0] x [0, b]
+  if (m1_sizes[1] == 0) {
+    if (beta.toComplexDouble() == 0.0) {
+      result.zero_();
+    } else {
+      if (!self.is_same(result)) {
+        result.copy_(self);
+      }
+      result.mul_(beta);
+    }
+    return;
+  }
+
   if (beta.toComplexDouble() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
   }
@@ -1202,7 +1223,7 @@ static void addmm_impl_cpu_(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
   // Apply BLAS routine
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
         at::native::cpublas::gemm(
@@ -1287,6 +1308,19 @@ TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Ten
   {
     at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
+  }
+}
+
+TORCH_IMPL_FUNC(addmm_activation_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor &result) {
+  auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
+  {
+    at::NoNamesGuard guard;
+    addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
+    if (use_gelu) {
+      at::gelu_(const_cast<Tensor&>(result));
+    } else {
+      at::relu_(const_cast<Tensor&>(result));
+    }
   }
 }
 
@@ -1394,20 +1428,6 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
   Tensor& self_or_result = const_cast<Tensor&>(self_or_result_);
-  CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
-
-  auto checkOnCPU = [](const Tensor& t, CheckedFrom c) {
-    TORCH_CHECK(
-        !t.is_cuda(),
-        "Expect tensor to have CPU backend, but got tensor with ",
-        toString(t.options().backend()),
-        " Backend (while checking arguments for ",
-        c);
-  };
-
-  checkOnCPU(self_or_result, c);
-  checkOnCPU(batch1, c);
-  checkOnCPU(batch2, c);
 
   const auto batch1_sizes = batch1.sizes();
   const auto batch2_sizes = batch2.sizes();
@@ -1444,16 +1464,15 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, batch1.scalar_type(), "bmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, batch1.scalar_type(), "bmm", [&] {
           baddbmm_cpu_kernel<scalar_t, true>(self_or_result, batch1, batch2, beta, alpha);
         });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, batch1.scalar_type(), "baddbmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, batch1.scalar_type(), "baddbmm", [&] {
           baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
         });
     }
   } else if (at::hasMKL() && ((
-            self_or_result.scalar_type() != kHalf &&
             self_or_result.scalar_type() != kBFloat16 &&
             at::native::is_floating_point(self_or_result)) ||
             at::native::is_complex(self_or_result))

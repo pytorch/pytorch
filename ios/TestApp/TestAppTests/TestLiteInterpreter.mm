@@ -23,7 +23,7 @@
 
 - (void)testModel:(NSString*)filename {
   // model generated using the current pytorch revision
-  // [self runModel:[NSString stringWithFormat:@"%@_temp", filename]];
+  [self runModel:[NSString stringWithFormat:@"%@_temp", filename]];
   // model generated using older pyotrch revision
   [self runModel:filename];
 }
