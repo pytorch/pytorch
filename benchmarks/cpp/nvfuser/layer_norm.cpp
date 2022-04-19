@@ -90,9 +90,9 @@ static void Baseline_LayerNorm(
 
   std::vector<int64_t> input_shape{
       benchmark_state.range(0), benchmark_state.range(1)};
-  const int kReductionAxis = 1;
+  const size_t kReductionAxis = 1;
   std::vector<int64_t> norm_shape;
-  for (int idx = kReductionAxis; idx < input_shape.size(); ++idx) {
+  for (auto idx = kReductionAxis; idx < input_shape.size(); ++idx) {
     norm_shape.push_back(input_shape[idx]);
   }
 

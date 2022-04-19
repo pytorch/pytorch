@@ -53,6 +53,12 @@ FIXME_xfail_vectorized_logging_tensor = (
                                             decorators=[unittest.expectedFailure]),
                                     subtest((False, logging_tensor_ctors), name="logging_tensor")]))
 
+vectorized_logging_tensor = (
+    parametrize("vectorize,ctors", [subtest((True, base_ctors), name="vectorized_base_tensor"),
+                                    subtest((False, base_ctors), name="base_tensor"),
+                                    subtest((True, logging_tensor_ctors), name="vectorized_logging_tensor"),
+                                    subtest((False, logging_tensor_ctors), name="logging_tensor")]))
+
 
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):
@@ -613,8 +619,7 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNotNone(res.grad_fn)
         self.assertNotEqual(res, ctors.zeros(4, 4))
 
-    @parametrize("vectorize", [True, False])
-    @base_and_logging_tensor
+    @vectorized_logging_tensor
     def test_jacobian_output(self, vectorize, ctors):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
@@ -642,8 +647,7 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
 
-    @parametrize("vectorize", [True, False])
-    @base_and_logging_tensor
+    @vectorized_logging_tensor
     def test_jacobian_scalar(self, vectorize, ctors):
         def reducer(x):
             return x.sum()
@@ -932,8 +936,7 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNotNone(res[1][1].grad_fn)
         self.assertNotEqual(res, ctors.zeros(2, 2, 2))
 
-    @parametrize("vectorize", [True, False])
-    @base_and_logging_tensor
+    @vectorized_logging_tensor
     def test_hessian_output(self, vectorize, ctors):
         def pow_reducer(x):
             return x.pow(3).sum()

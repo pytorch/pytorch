@@ -14,12 +14,37 @@ from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, Bas
                                      tensorGeometryT, scalarTypeT, SpecialArgName,
                                      OptionalCType, stringT)
 from tools.codegen.api import cpp
-from tools.codegen.gen import parse_native_yaml
+from tools.codegen.gen import parse_native_yaml, get_grouped_by_view_native_functions
 from tools.codegen.context import with_native_function
-from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type
-from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader
+from tools.codegen.model import (
+    FunctionSchema, NativeFunction, Variant, Type,
+    NativeFunctionsViewGroup, OperatorName
+)
+from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader, concatMap
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
+
+# This function directly adds derivative entries for {view}_copy variants of each view op.
+# Since every {view} and {view}_copy op shares the same derivative formula,
+# we generate them here instead of duplicating them in the yaml.
+# See Note [Codegen'd {view}_copy Operators]
+def add_view_copy_derivatives(
+    infos: List[DifferentiabilityInfo],
+    view_groups: List[NativeFunctionsViewGroup]
+) -> List[DifferentiabilityInfo]:
+    # Get the map from each view op's name to its corresponding view group
+    view_name_to_group: Dict[OperatorName, NativeFunctionsViewGroup] = {
+        g.view.func.name: g for g in view_groups}
+
+    view_copy_differentiability_infos = []
+    for info in infos:
+        maybe_view_group = view_name_to_group.get(info.func.func.name, None)
+        if maybe_view_group is not None and maybe_view_group.view_copy is not None:
+            view_copy_info = info.create_view_copy_from_view_derivative(maybe_view_group)
+            if view_copy_info is not None:
+                view_copy_differentiability_infos.append(view_copy_info)
+
+    return view_copy_differentiability_infos
 
 def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
     # Do some caching as this is a deterministic function
@@ -30,7 +55,16 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
         with open(derivatives_yaml_path, 'r') as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
-        functions = parse_native_yaml(native_yaml_path).native_functions
+        funcs = parse_native_yaml(native_yaml_path).native_functions
+        # From the parsed native functions, separate out the (generated) view_copy functions,
+        # so we can generate derivatives for them separately.
+        native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)
+        native_functions_without_view_copies = concatMap(
+            # We need to pull out the view_inplace ops too, since they might have their own derivative entries.
+            lambda g: [g] if isinstance(g, NativeFunction) else list(g.functions(include_copy=False)),
+            native_functions_with_view_groups
+        )
+        view_groups = [g for g in native_functions_with_view_groups if isinstance(g, NativeFunctionsViewGroup)]
 
         # What's the difference between function schema v.s. signature?
         # function schema is the complete declaration including mutability annotation / default value and etc.
@@ -38,7 +72,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
         # that are semantically related.
         functions_by_signature: Dict[FunctionSchema, List[NativeFunction]] = defaultdict(list)
         functions_by_schema: Dict[str, NativeFunction] = dict()
-        for function in functions:
+        for function in native_functions_without_view_copies:
             functions_by_signature[function.func.signature()].append(function)
             assert str(function.func) not in functions_by_schema
             functions_by_schema[str(function.func)] = function
@@ -50,6 +84,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
         infos = [
             create_differentiability_info(defn, functions_by_signature, functions_by_schema, op_counter)
             for defn in definitions]
+        infos += add_view_copy_derivatives(infos, view_groups)
 
         _GLOBAL_LOAD_DERIVATIVE_CACHE[key] = infos
 
