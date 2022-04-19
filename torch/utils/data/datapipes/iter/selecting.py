@@ -1,9 +1,9 @@
-from typing import Callable, Iterator, TypeVar
+from typing import Callable, Iterator, Optional, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import _check_lambda_fn, _deprecation_warning
 
 __all__ = ["FilterIterDataPipe", ]
 
@@ -18,7 +18,12 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
     Args:
         datapipe: Iterable DataPipe being filtered
         filter_fn: Customized function mapping an element to a boolean.
-        drop_empty_batches: By default, drops a batch if it is empty after filtering instead of keeping an empty list
+        drop_empty_batches (Deprecated): By default, drops a batch if it is empty after filtering instead of keeping an empty list
+        input_col: Index or indices of data which ``filter_fn`` is applied, such as:
+
+            - ``None`` as default to apply ``filter_fn`` to the data directly.
+            - Integer(s) is used for list/tuple.
+            - Key(s) is used for dict.
 
     Example:
         >>> from torchdata.datapipes.iter import IterableWrapper
@@ -33,17 +38,31 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
     filter_fn: Callable
     drop_empty_batches: bool
 
-    def __init__(self,
-                 datapipe: IterDataPipe,
-                 filter_fn: Callable,
-                 drop_empty_batches: bool = True,
-                 ) -> None:
+    def __init__(
+        self,
+        datapipe: IterDataPipe,
+        filter_fn: Callable,
+        drop_empty_batches: Optional[bool] = None,
+        input_col=None,
+    ) -> None:
         super().__init__()
         self.datapipe = datapipe
-        _check_lambda_fn(filter_fn)
 
+        _check_lambda_fn(filter_fn)
         self.filter_fn = filter_fn  # type: ignore[assignment]
+
+        if drop_empty_batches is None:
+            drop_empty_batches = True
+        else:
+            _deprecation_warning(
+                type(self).__name__,
+                deprecation_version="1.12",
+                removal_version="1.13",
+                old_argument_name="drop_empty_batches",
+            )
         self.drop_empty_batches = drop_empty_batches
+
+        self.input_col = input_col
 
     def __iter__(self) -> Iterator[T_co]:
         res: bool
