@@ -52,6 +52,7 @@ enum class BackendComponent : uint8_t {
   HIPBit,
   XLABit,
   MLCBit,
+  IPUBit,
   XPUBit,
   HPUBit,
   VEBit,
@@ -203,7 +204,7 @@ enum class DispatchKey : uint16_t {
   // as other functionality keys
   EndOfNonCustomizableBackends = SparseCsrCUDA,
 
-  NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
+  NestedTensor,
 
   // In some situations, it is not immediately obvious what the correct
   // backend for function is, because the function in question doesn't
@@ -346,6 +347,7 @@ enum class DispatchKey : uint16_t {
   VmapMode,
 
   FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
+
   // Alias and mutation removal.
   // If some backends want to opt into only alias removal or only mutation
   // removal,
@@ -393,6 +395,7 @@ enum class DispatchKey : uint16_t {
   // CUDA]
   XLA, // lives out of tree at https://github.com/pytorch/xla
   MLC, // lives out of tree at https://github.com/pytorch/MLCompute
+  IPU, // lives out of tree at https://github.com/graphcore/poptorch
   XPU, // For out of tree Intel's heterogeneous computing plug-in
   HPU, // For out of tree & closed source integration of HPU / Habana
   VE, // For out of tree & closed source integration of SX-Aurora / NEC
@@ -416,6 +419,7 @@ enum class DispatchKey : uint16_t {
   _QuantizedHIP,
   _QuantizedXLA,
   _QuantizedMLC,
+  _QuantizedIPU,
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
   _QuantizedHPU,
   _QuantizedVE,
@@ -437,6 +441,7 @@ enum class DispatchKey : uint16_t {
   // [Masquerading as CUDA]
   _SparseXLA,
   _SparseMLC,
+  _SparseIPU,
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
   _SparseHPU,
   SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
@@ -445,6 +450,30 @@ enum class DispatchKey : uint16_t {
   _SparsePrivateUse2,
   _SparsePrivateUse3,
   EndOfSparseBackends = _SparsePrivateUse3,
+
+  // ~~~~~~~~~~~~~~ "NestedTensor" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~
+  // //
+  // keys starting with an _ are not currently used,
+  // but are needed to ensure that every backend is indexed correctly.
+
+  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
+  StartOfNestedTensorBackends,
+  // registered at build/aten/src/ATen/RegisterNestedTensorCPU.cpp
+  NestedTensorCPU,
+  // registered at build/aten/src/ATen/RegisterNestedTensorCUDA.cpp
+  NestedTensorCUDA,
+  _NestedTensorHIP,
+  _NestedTensorXLA,
+  _NestedTensorMLC,
+  _NestedTensorIPU,
+  _NestedTensorXPU,
+  _NestedTensorHPU,
+  _NestedTensorVE,
+  _NestedTensorLazy,
+  _NestedTensorPrivateUse1,
+  _NestedTensorPrivateUse2,
+  _NestedTensorPrivateUse3,
+  EndOfNestedTensorBackends = _NestedTensorPrivateUse3,
 
   // ~~~~~~~~~~~~~~ "Autograd" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~ //
   // keys starting with an _ are not currently used,
@@ -457,6 +486,7 @@ enum class DispatchKey : uint16_t {
   _AutogradHIP,
   AutogradXLA,
   AutogradMLC,
+  AutogradIPU,
   AutogradXPU,
   AutogradHPU,
   _AutogradVE,
@@ -557,7 +587,8 @@ constexpr bool isAliasDispatchKey(DispatchKey k) {
 
 constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
   if (k == DispatchKey::Dense || k == DispatchKey::Quantized ||
-      k == DispatchKey::Sparse || k == DispatchKey::AutogradFunctionality) {
+      k == DispatchKey::Sparse || k == DispatchKey::AutogradFunctionality ||
+      k == DispatchKey::NestedTensor) {
     return true;
   } else {
     return false;
@@ -644,6 +675,12 @@ constexpr BackendComponent toBackendComponent(DispatchKey k) {
         static_cast<uint8_t>(k) -
         static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
   } else if (
+      k >= DispatchKey::StartOfNestedTensorBackends &&
+      k <= DispatchKey::EndOfNestedTensorBackends) {
+    return static_cast<BackendComponent>(
+        static_cast<uint8_t>(k) -
+        static_cast<uint8_t>(DispatchKey::StartOfNestedTensorBackends));
+  } else if (
       k >= DispatchKey::StartOfAutogradBackends &&
       k <= DispatchKey::EndOfAutogradBackends) {
     return static_cast<BackendComponent>(
@@ -663,6 +700,8 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
     return DispatchKey::Quantized;
   } else if (k <= DispatchKey::EndOfSparseBackends) {
     return DispatchKey::Sparse;
+  } else if (k <= DispatchKey::EndOfNestedTensorBackends) {
+    return DispatchKey::NestedTensor;
   } else if (k <= DispatchKey::EndOfAutogradBackends) {
     return DispatchKey::AutogradFunctionality;
   } else {
@@ -691,6 +730,11 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
   if (functionality_k == DispatchKey::Quantized) {
     return static_cast<DispatchKey>(
         static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends) +
+        static_cast<uint8_t>(backend_k));
+  }
+  if (functionality_k == DispatchKey::NestedTensor) {
+    return static_cast<DispatchKey>(
+        static_cast<uint8_t>(DispatchKey::StartOfNestedTensorBackends) +
         static_cast<uint8_t>(backend_k));
   }
   if (functionality_k == DispatchKey::AutogradFunctionality) {

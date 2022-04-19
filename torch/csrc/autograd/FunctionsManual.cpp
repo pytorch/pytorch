@@ -189,7 +189,12 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
   return norm_backward(grad, self, p_, norm, {}, true);
 }
 
-Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+Tensor norm_backward(
+    Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+  // NB: We mask fill the NaNs in the output to be zero but still do float division
+  //     by zero, which ASAN complains about. One way to appease ASAN is to fill the problematic
+  //     values with something arbitrary before the division, but we decide not to due to
+  //     the perf hit. Instead we just silence ASAN where necessary
   size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -205,31 +210,99 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   } else if (p == 1.0) {
     return self.sgn() * grad;
   } else if (p == 2.0) {
-    self_scaled = self;
-    scale_v = grad / norm;
+    return self * (grad / norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
     const auto& self_and_norm_isnan = areAnyTensorSubclassLike({self, norm}) ?
       self_isnan.logical_and(norm_isnan) :
       self_isnan.logical_and_(norm_isnan);
-    Tensor is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
+    auto is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
     self_scaled = self.sgn() * is_eq_max;
-    Tensor nb_max = is_eq_max.count_nonzero(dim);
+    auto nb_max = is_eq_max.count_nonzero(dim);
     if (self.dim() != 0) {
       nb_max = unsqueeze_multiple(nb_max, dim, ndim);
     }
     scale_v = grad / nb_max;
+    return self_scaled * scale_v;
+  } else if (p < 1.0) {
+    self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self == 0, 0);
+    return self_scaled * grad * norm.pow(1 - p);
   } else if (p < 2.0) {
-    self_scaled = self.sgn() * self.abs().pow(p - 1);
+    self_scaled = self.sgn() * self.abs().pow_(p - 1);
     scale_v = grad / norm.pow(p - 1);
+    scale_v.masked_fill_(norm == 0, 0);
+    return self_scaled * scale_v;
   } else {
-    self_scaled = self * self.abs().pow(p - 2);
+    self_scaled = self * self.abs().pow_(p - 2);
     scale_v = grad / norm.pow(p - 1);
+    scale_v.masked_fill_(norm == 0, 0);
+    return self_scaled * scale_v;
   }
-  // handle case at 0 where we return a subgradient containing 0
-  scale_v.masked_fill_(norm == 0, 0);
-  return self_scaled * scale_v;
+}
+
+// See norm_backward above for a note on ignoring the sanitizer
+Tensor norm_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const optional<Scalar> & p_,
+  Tensor norm,
+  IntArrayRef dim,
+  bool keepdim
+) {
+  // NB: currently norm_jvp is also reused for dist's jvp (which haas two differentiable inputs)
+  //     but self_t still cannot be a ZT because that would require both self_t and other_t to be ZT
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor());
+  size_t ndim = self_p.dim();  // composite compliance?
+  double p = p_.value_or(2.0).toDouble();
+
+  if (p == 0.0) {
+    return at::zeros_like(norm);
+  } else if (p == 1.0) {
+    auto result = self_p.sgn();
+    result = areAnyTensorSubclassLike({self_t}) ? result.mul(self_t.conj()) : result.mul_(self_t.conj());
+    result = at::real(result);
+    return result.sum(dim, keepdim);
+  } else if (p == 2.0) {
+    auto result = self_p.mul(self_t.conj());
+    result = at::real(result);
+    result = result.sum(dim, keepdim);
+    return result.div_(norm).masked_fill_(norm == 0, 0);
+  } else if (std::isinf(p)) {
+    if (!keepdim && self_p.dim() != 0) {
+      norm = unsqueeze_multiple(norm, dim, ndim);
+    }
+    const auto self_isnan = self_p.isnan();
+    const auto norm_isnan = norm.isnan();
+    const auto& self_and_norm_isnan = areAnyTensorSubclassLike({norm}) ?
+      self_isnan.logical_and(norm_isnan) :
+      self_isnan.logical_and_(norm_isnan);
+    const auto is_eq_max = (self_p.abs() == norm).logical_or_(self_and_norm_isnan).type_as(norm);
+    auto nb_max = is_eq_max.count_nonzero(dim);
+    if (self_p.dim() != 0) {
+      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
+    }
+    return (at::real(self_p.sgn() * self_t.conj()) * is_eq_max / nb_max).sum(dim, keepdim);
+  } else if (p < 1.0) {
+    auto sumpow_t = (self_p.abs().pow_(p - 1).masked_fill_(self_p == 0, 0) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
+    return sumpow_t * norm.pow(1 - p);
+  } else if (p < 2.0) {
+    auto sumpow_t = (self_p.abs().pow_(p - 1) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
+    auto out = sumpow_t / norm.pow(p - 1);
+    return out.masked_fill_(norm == 0, 0);
+  } else {
+    auto sumpow_t = (self_p.abs().pow_(p - 2) * at::real(self_p * self_t.conj())).sum(dim, keepdim);
+    auto out = sumpow_t / norm.pow(p - 1);
+    return out.masked_fill_(norm == 0, 0);
+  }
+}
+
+Tensor norm_jvp(const Tensor& self_p, const Tensor& self_t, const optional<Scalar> & p_, Tensor norm) {
+  return norm_jvp(self_p, self_t, p_, norm, {}, true);
+}
+
+Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+  auto dim = opt_dim.value_or(IntArrayRef({}));
+  return norm_jvp(self_p, self_t, scalar_ord, norm, dim, keepdim);
 }
 
 Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
@@ -780,7 +853,7 @@ Tensor convolution_backward_jvp_grad_bias(
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 4, but got: ",
+        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 5, but got: ",
         grad_out_t.dim());
   }
 }
@@ -4733,7 +4806,7 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
@@ -4756,7 +4829,7 @@ Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
     out_fw_grad = at::stack(fw_grads, dim);
   }
@@ -5325,6 +5398,16 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
 
 }
 
+Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_options) {
+  // Handle R->C copies without raising a warning
+  const auto self_type = self_options.dtype().toScalarType();
+  auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grad_);
+  if (!c10::isComplexType(self_type) && grad->is_complex()) {
+    grad = c10::MaybeOwned<at::Tensor>::owned(at::real(grad_));
+  }
+
+  return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
+}
 
 } // namespace details
 } // namespace generated

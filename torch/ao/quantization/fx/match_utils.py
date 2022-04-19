@@ -4,11 +4,9 @@ from torch.fx.graph import (
     Graph,
     Node,
 )
-from .quantization_types import Pattern
+from torch.ao.quantization.quantization_types import Pattern
 from .quantization_patterns import (
     QuantizeHandler,
-    CustomModuleQuantizeHandler,
-    StandaloneModuleQuantizeHandler,
 )
 from ..qconfig import (
     QConfigAny,
@@ -198,7 +196,7 @@ def find_matches(
            type(modules[node.target]) in custom_module_classes:
             custom_module_qconfig = qconfig_map[node.name]
             match_map[node.name] = (
-                node, node, None, CustomModuleQuantizeHandler(node, modules),
+                node, node, None, QuantizeHandler(node, modules, is_custom_module=True),
                 custom_module_qconfig)
 
     def is_standalone_module(node_target: str, modules: Dict[str, torch.nn.Module]):
@@ -214,10 +212,10 @@ def find_matches(
            (is_standalone_module(node.target, modules) or
                 is_observed_standalone_module(modules[node.target])):
             # add node to matched nodes
-            custom_module_qconfig = qconfig_map[node.name]
+            standalone_module_qconfig = qconfig_map[node.name]
             match_map[node.name] = (
                 node, node, None,
-                StandaloneModuleQuantizeHandler(node, modules),
-                custom_module_qconfig)
+                QuantizeHandler(node, modules, is_standalone_module=True),
+                standalone_module_qconfig)
 
     return match_map
