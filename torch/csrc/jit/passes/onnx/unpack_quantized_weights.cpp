@@ -184,7 +184,8 @@ std::vector<Node*> CreateQuantizedWeights(
   auto qschema = weight.qscheme();
   std::vector<Node*> unpacked_wt;
 
-  // Retrieve scales and zero_points. Their formats are different depending on different weight qschema.
+  // Retrieve scales and zero_points. Their formats are different depending on
+  // different weight qschema.
   std::vector<float> scale_data;
   std::vector<int64_t> scale_shapes;
   std::vector<int64_t> zero_point_data;
@@ -204,24 +205,31 @@ std::vector<Node*> CreateQuantizedWeights(
       auto* scale_data_raw =
           reinterpret_cast<double*>(q_scales.data_ptr<double>());
       scale_shapes = q_scales.sizes().vec();
-      TORCH_INTERNAL_ASSERT(scale_shapes.size() == 1, "quantized per channel scales are expected as 1-d array.");
+      TORCH_INTERNAL_ASSERT(
+          scale_shapes.size() == 1,
+          "quantized per channel scales are expected as 1-d array.");
       scale_data.resize(scale_shapes[0]);
-      std::transform(scale_data_raw, scale_data_raw + scale_shapes[0], scale_data.begin(), [](double x) { return static_cast<float>(x); });
+      std::transform(
+          scale_data_raw,
+          scale_data_raw + scale_shapes[0],
+          scale_data.begin(),
+          [](double x) { return static_cast<float>(x); });
 
       auto q_zero_points = weight.q_per_channel_zero_points();
       auto* zero_point_data_raw =
           reinterpret_cast<int64_t*>(q_zero_points.data_ptr<int64_t>());
       zero_point_shapes = q_zero_points.sizes().vec();
-      TORCH_INTERNAL_ASSERT(zero_point_shapes.size() == 1, "quantized per channel zero points are expected as 1-d array.");
-      zero_point_data = std::vector<int64_t>(zero_point_data_raw, zero_point_data_raw + zero_point_shapes[0]);
+      TORCH_INTERNAL_ASSERT(
+          zero_point_shapes.size() == 1,
+          "quantized per channel zero points are expected as 1-d array.");
+      zero_point_data = std::vector<int64_t>(
+          zero_point_data_raw, zero_point_data_raw + zero_point_shapes[0]);
       axis_data = {weight.q_per_channel_axis()};
       break;
     }
     default:
       TORCH_CHECK(
-          false,
-          "Unsupported qschema for weight, got ",
-          toString(qschema));
+          false, "Unsupported qschema for weight, got ", toString(qschema));
   }
 
   Node* data_node = graph->create(prim::Constant);
@@ -235,7 +243,8 @@ std::vector<Node*> CreateQuantizedWeights(
 
   Node* scale_node = graph->create(prim::Constant);
   auto scale_value =
-      at::from_blob(scale_data.data(), c10::IntArrayRef(scale_shapes), at::kFloat)
+      at::from_blob(
+          scale_data.data(), c10::IntArrayRef(scale_shapes), at::kFloat)
           .to(at::kCPU);
   scale_node->t_(Symbol::attr("value"), scale_value.clone());
 
@@ -249,7 +258,9 @@ std::vector<Node*> CreateQuantizedWeights(
   Node* axis_node = graph->create(prim::Constant);
   if (axis_data.size() > 0) {
     auto axis_value =
-        at::from_blob(axis_data.data(), c10::IntArrayRef(axis_data.size()), at::kLong).to(at::kCPU);
+        at::from_blob(
+            axis_data.data(), c10::IntArrayRef(axis_data.size()), at::kLong)
+            .to(at::kCPU);
     axis_node->t_(attr::value, axis_value.clone());
   } else {
     axis_node->output()->setType(NoneType::get());
@@ -292,24 +303,18 @@ void ConvertQuantizedWeight(
     Node* node,
     at::Tensor& weight,
     bool is_caffe2) {
-
   std::vector<int64_t> wt_sizes = weight.sizes().vec();
   std::vector<int64_t> wt_strides = weight.strides().vec();
   if (weight.ndimension() == 4 && is_caffe2) {
     // Permute weights
     weight.permute({0, 2, 3, 1});
-    wt_sizes = {
-        weight.size(0),
-        weight.size(2),
-        weight.size(3),
-        weight.size(1)};
+    wt_sizes = {weight.size(0), weight.size(2), weight.size(3), weight.size(1)};
   }
 
   // Remove packed_params
   node->removeInput(1);
 
-  auto* wt_data =
-      reinterpret_cast<int8_t*>(weight.data_ptr<c10::qint8>());
+  auto* wt_data = reinterpret_cast<int8_t*>(weight.data_ptr<c10::qint8>());
 
   if (is_caffe2) {
     // Convert from int8 to uint8
@@ -326,10 +331,11 @@ void ConvertQuantizedWeight(
     c2_weight->insertBefore(node);
     node->insertInput(1, c2_weight->output());
   } else {
-    std::vector<Node*> unpacked_wt = CreateQuantizedWeights(graph, weight, wt_data, wt_sizes, wt_strides);
+    std::vector<Node*> unpacked_wt =
+        CreateQuantizedWeights(graph, weight, wt_data, wt_sizes, wt_strides);
     graph->setInsertPoint(node);
     Node* quant_node = graph->create(prim::TupleConstruct);
-    for (auto* n : unpacked_wt){
+    for (auto* n : unpacked_wt) {
       n->insertBefore(node);
       quant_node->addInput(n->output());
     }
