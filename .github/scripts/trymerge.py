@@ -57,7 +57,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       commits(last: 1) {
         nodes {
           commit {
-            checkSuites(first: 50) {
+            checkSuites(first: 10) {
               nodes {
                 app {
                   name
@@ -68,7 +68,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
                     name
                   }
                 }
-                checkRuns(first: 10) {
+                checkRuns(first: 50) {
                   nodes {
                     name
                     conclusion
@@ -156,7 +156,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
         nodes {
           commit {
             oid
-            checkSuites(first: 100, after: $cursor) {
+            checkSuites(first: 10, after: $cursor) {
               nodes {
                 app {
                   name
@@ -167,7 +167,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
                     name
                   }
                 }
-                checkRuns(first: 10) {
+                checkRuns(first: 50) {
                   nodes {
                     name
                     conclusion
