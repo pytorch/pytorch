@@ -799,48 +799,224 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # as we had before.  By default, we don't run these tests.
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
+def skipIfCrossRef(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_CROSSREF:
+            raise unittest.SkipTest("test doesn't currently with crossref")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+meta_exclude_set = {
+    # These happen so frequently, it's worth not continually running
+    # them
+    torch.Tensor.tolist, torch.Tensor.unbind, torch.Tensor.__repr__,
+    torch.Tensor.__deepcopy__, torch.Tensor.to, torch.Tensor.add_,
+    torch.Tensor.__getitem__, torch.Tensor.__setitem__, torch.Tensor.mul,
+    torch.Tensor.dtype, torch.Tensor.numpy, torch.Tensor.cpu,
+    torch.Tensor.layout, torch.Tensor.__bool__, torch.Tensor.dtype,
+    torch.Tensor.requires_grad, torch.Tensor.shape, torch.Tensor.is_complex,
+    torch.Tensor.add, torch.Tensor.requires_grad_, torch.Tensor.clone,
+    torch.Tensor.numel, torch.Tensor.device, torch.Tensor.grad,
+    torch.Tensor.copy_, torch.Tensor.reshape, torch.Tensor.size,
+    torch.Tensor.sub, torch.Tensor.gt, torch.Tensor.lt,
+    torch.Tensor.is_floating_point, torch.Tensor.detach, torch.rand,
+    torch.Tensor.sum, torch.Tensor.__format__, torch.Tensor.is_sparse,
+    torch.Tensor.div, torch.Tensor.__rsub__, torch.Tensor.item,
+    # These need to get implemented and are excluded for now
+    torch.Tensor.__contains__,
+    torch.Tensor.__float__,
+    torch.Tensor.__index__,
+    torch.Tensor.__lshift__,
+    torch.Tensor.__reversed__,
+    torch.Tensor.__rshift__,
+    torch.Tensor.abs,
+    torch.Tensor.abs_,
+    torch.Tensor.argsort,
+    torch.Tensor.backward,
+    torch.Tensor.bincount,
+    torch.Tensor.conj_physical,
+    torch.Tensor.count_nonzero,
+    torch.Tensor.cummax,
+    torch.Tensor.cummin,
+    torch.Tensor.dot,
+    torch.Tensor.equal,
+    torch.Tensor.flip,
+    torch.Tensor.histc,
+    torch.Tensor.imag.__get__,
+    torch.Tensor.index_select,
+    torch.Tensor.is_nonzero,
+    torch.Tensor.is_set_to,
+    torch.Tensor.kthvalue,
+    torch.Tensor.logcumsumexp,
+    torch.Tensor.logit,
+    torch.Tensor.masked_select,
+    torch.Tensor.max,
+    torch.Tensor.median,
+    torch.Tensor.mode,
+    torch.Tensor.nanmedian,
+    torch.Tensor.nonzero,
+    torch.Tensor.real.__get__,
+    torch.Tensor.repeat,
+    torch.Tensor.repeat_interleave,
+    torch.Tensor.roll,
+    torch.Tensor.sort,
+    torch.Tensor.std,
+    torch.Tensor.storage,
+    torch.Tensor.storage_type,
+    torch.Tensor.take,
+    torch.Tensor.to_mkldnn,
+    torch.Tensor.to_sparse,
+    torch.Tensor.to_sparse_csr,
+    torch.Tensor.unfold,
+    torch.Tensor.var,
+    torch._VF.unique_dim,
+    torch.var_mean,
+    torch.add,  # this one is weird, it should work...
+    torch._assert_async,
+    torch._unique,
+    torch._unique2,
+    torch.allclose,
+    torch.bernoulli,
+    torch.bincount,
+    torch.bucketize,
+    torch.complex,
+    torch.corrcoef,
+    torch.cov,
+    torch.cummax,
+    torch.cummin,
+    torch.cumsum,
+    torch.diagflat,
+    torch.diff,
+    torch.eig,
+    torch.equal,
+    torch.flip,
+    torch.functional.cdist,
+    torch.functional.unique,
+    torch.functional.unique_consecutive,
+    torch.geqrf,
+    torch.histc,
+    torch.imag,
+    torch.index_select,
+    torch.isfinite,
+    torch.isnan,
+    torch.kthvalue,
+    torch.linalg.cholesky,
+    torch.linalg.eigh,
+    torch.linalg.qr,
+    torch.logcumsumexp,
+    torch.logit,
+    torch.masked_select,
+    torch.median,
+    torch.mode,
+    torch.multinomial,
+    torch.nan_to_num,
+    torch.nanmedian,
+    torch.symeig,
+    torch.nn.functional.adaptive_avg_pool2d,
+    torch.nn.functional.adaptive_avg_pool3d,
+    torch.nn.functional.batch_norm,
+    torch.nn.functional.conv_transpose1d,
+    torch.nn.functional.conv_transpose3d,
+    torch.nn.functional.ctc_loss,
+    torch.nn.functional.embedding_bag,
+    torch.nn.functional.grid_sample,
+    torch.nn.functional.instance_norm,
+    torch.nn.functional.layer_norm,
+    torch.nn.functional.max_pool3d,
+    torch.nn.functional.multi_margin_loss,
+    torch.nn.functional.multilabel_margin_loss,
+    torch.nn.functional.nll_loss,
+    torch.nn.functional.pad,
+    torch.nn.functional.pdist,
+    torch.normal,
+    torch.orgqr,
+    torch.prod,
+    torch.quantize_per_tensor,
+    torch.randn_like,
+    torch.real,
+    torch.repeat_interleave,
+    torch.searchsorted,
+    torch.sort,
+    torch.std,
+    torch.take,
+    torch.tensor,
+    torch.threshold,
+    torch.var,
+    torch.view_as_complex,
+    torch.view_as_real,
+    torch.where,
+    # These are known not to work and are fast-pathed out to
+    # avoid the slowdown induced by C++ exception throwing
+    torch.Tensor.cpu,
+    torch.Tensor.__bool__,
+    torch.Tensor.__int__,
+    torch.isclose,
+    torch.Tensor.to,
+    torch.Tensor.item,
+    # These perturb RNG and so should not be run
+    torch.randint,
+    torch.randn,
+    # TODO: these should raise NotImplementedError, but raises a
+    # different error
+    torch.Tensor.new,
+    torch.Tensor.numpy,
+    torch.Tensor.__array__,
+    torch.Tensor.__dlpack_device__,
+    torch.Tensor.__dlpack__,
+    torch.to_dlpack,
+    # TODO: our conversion to meta is not accurate enough (doesn't
+    # preserve storage_offset, e.g.)
+    torch.Tensor.as_strided,
+    # TODO: segfaults
+    torch.Tensor.type,
+    # TODO: IDK what's up with these.  TestTorch.test_sobolengine_bounds
+    torch._sobol_engine_initialize_state_,
+    torch._sobol_engine_draw,
+    torch._sobol_engine_scramble_,
+    torch._sobol_engine_ff_,
+    # TODO: this seems wrong; also it's structured, weird
+    torch.Tensor.index_add_,
+    # TODO: we're incapable of cloning the history, so this won't work
+    torch.autograd.grad,
+    # TODO: sparse
+    torch.sparse_coo_tensor,
+}
+
+skipped = set()
+
+import namer
+def print_skipped():
+    for s in skipped:
+        print(f"{namer.resolve_func(s)},")
+
+import atexit
+atexit.register(print_skipped)
+
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
+        hit = False
+
         def to_meta(t):
-            if isinstance(t, torch.Tensor):
+            nonlocal hit
+            # Don't try to do subclasses
+            if type(t) is torch.Tensor:
+                hit = True
                 # Now, you might think that to('meta') is enough, but it
                 # isn't, because this will destroy stride/view/base
                 # information.  For now, excluding as_strided but more stuff
                 # might need to get axed.
-                with torch.no_grad():
+                if t.is_leaf:
                     return t.to('meta').requires_grad_(t.requires_grad)
+                else:
+                    return t.to('meta')
             else:
                 return t
 
-        T = torch.Tensor
-        do_meta = func not in {
-            # These are known not to work and are fast-pathed out to
-            # avoid the slowdown induced by C++ exception throwing
-            T.cpu,
-            T.__bool__,
-            T.__int__,
-            torch.isclose,
-            T.to,
-            T.item,
-            # These perturb RNG and so should not be run
-            torch.randint,
-            torch.randn,
-            # TODO: these should raise NotImplementedError, but raises a
-            # different error
-            T.numpy,
-            T.new,
-            # TODO: our conversion to meta is not accurate enough (doesn't
-            # preserve storage_offset, e.g.)
-            T.as_strided,
-            # TODO: segfaults
-            T.type,
-            # TODO: IDK what's up with these.  TestTorch.test_sobolengine_bounds
-            torch._sobol_engine_initialize_state_,
-            torch._sobol_engine_draw,
-            torch._sobol_engine_scramble_,
-        }
+        do_meta = hit and func not in meta_exclude_set
 
         if do_meta:
             try:
@@ -863,20 +1039,31 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                     f"failed to convert args to meta; "
                     f"originally (*{args}, **{kwargs})") from e
 
-        print(func)
+        # print(func)
         r = func(*args, **kwargs)
 
         # TODO: also handle cases where func raise an exception
 
         if do_meta:
             try:
-                meta_r = func(*meta_args, **meta_kwargs)
+                # suppress warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    meta_r = func(*meta_args, **meta_kwargs)
             except NotImplementedError:
-                print(func)
+                skipped.add(func)
+                # print(func)
+                pass
             except Exception as e:
-                raise RuntimeError(
-                    f"failed to run {func}(*{meta_args}, **{meta_kwargs}); "
-                    f"originally (*{args}, **{kwargs})") from e
+                raise RuntimeError(f"""\
+failed to run:
+  {namer.resolve_func(func)}(
+    *{meta_args},
+    **{meta_kwargs}
+  );
+originally
+  *{args}
+  **{kwargs}""") from e
 
         return r
 

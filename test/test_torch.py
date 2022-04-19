@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
+    skipIfCrossRef,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     skipIfNotRegistered, bytes_to_scalar, parametrize)
 from multiprocessing.reduction import ForkingPickler
@@ -7378,6 +7379,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
 
     # Tests to make sure we still handle .data properly until it is removed
+    # crossref skip see https://github.com/pytorch/pytorch/issues/76008
+    @skipIfCrossRef
     def test_dot_data_use(self):
         # .data allows to change the Tensors types inplace, check that we still
         # raise a nice error.
