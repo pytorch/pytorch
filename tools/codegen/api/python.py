@@ -1221,25 +1221,16 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return "dimnamelist"
         elif str(t.elem) == "int":
             # accept definite size
-<<<<<<< HEAD
             return "intlist"
         elif str(t) == "float[]":
             return "doublelist"
+        elif str(t.elem) == 'SymInt':
+            # accept definite size
+            return 'symintlist'
         elif str(t) == "Scalar[]":
             return "scalarlist"
     raise RuntimeError(f"type '{t}' is not supported by PythonArgParser")
 
-=======
-            return 'intlist'
-        elif str(t.elem) == 'SymInt':
-            # accept definite size
-            return 'symintlist'
-        elif str(t) == 'float[]':
-            return 'doublelist'
-        elif str(t) == 'Scalar[]':
-            return 'scalarlist'
-    raise RuntimeError(f'type \'{t}\' is not supported by PythonArgParser')
->>>>>>> 4b8e108f3e (adding symint list)
 
 # Return RHS expression for python argument using PythonArgParser output.
 # e.g. for arg name 'foo', arg type 'bool', arg_index = 2, returns '_r.toBool(2)'
