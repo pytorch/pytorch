@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/CPUAllocator.h>
+#include <caffe2/serialize/versions.h>
 #include <flatbuffers/flatbuffers.h>
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
@@ -27,6 +28,10 @@ using mobile::serialization::CreateTensorMetadataDirect;
 using mobile::serialization::CreateTupleDirect;
 
 namespace {
+
+// TODO: remove once caffe2::kProducedBytecodeVersion is >= 9 and flatbuffer is
+// launched.
+constexpr uint32_t kMinVersion = 9;
 
 // We will store IValue NONE in index 0 in flatbuffer.
 constexpr int kNoneIndex = 0;
@@ -383,9 +388,12 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
   for (const auto& ival : jit_constants) {
     jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
   }
-
-  const uint32_t bytecode_version =
-      static_cast<uint32_t>(module.bytecode_version());
+  const uint32_t operator_version =
+      static_cast<uint32_t>(module.min_operator_version());
+  uint32_t bytecode_version = static_cast<uint32_t>(module.bytecode_version());
+  if (bytecode_version < kMinVersion) {
+    bytecode_version = kMinVersion;
+  }
 
   auto mod = CreateModule(
       fbb,
@@ -398,7 +406,8 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
       storage_data_offset,
       fbb.CreateVector(obj_types_offset_),
       jit_source_offset,
-      fbb.CreateVector(jit_constants_indexes));
+      fbb.CreateVector(jit_constants_indexes),
+      operator_version);
   FinishModuleBuffer(fbb, mod);
   return fbb.Release();
 }
