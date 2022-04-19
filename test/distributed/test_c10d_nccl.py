@@ -2014,15 +2014,12 @@ class DistributedDataParallelTest(
 
         # Get GPU model with the hook registered.
         # Test the hook with different algorithmic configs.
-        for use_error_feedback, warm_start, batch_tensors_with_same_shape in product(
-            [True, False], [True, False], [True, False],
-        ):
+        for use_error_feedback, warm_start in product([True, False], [True, False]):
             state = powerSGD.PowerSGDState(
                 process_group=process_group,
                 matrix_approximation_rank=1,
                 use_error_feedback=use_error_feedback,
                 warm_start=warm_start,
-                batch_tensors_with_same_shape=batch_tensors_with_same_shape,
             )
             for hook in [powerSGD.powerSGD_hook, powerSGD.batched_powerSGD_hook]:
                 gpu_model = self._gpu_model_with_ddp_comm_hook(
