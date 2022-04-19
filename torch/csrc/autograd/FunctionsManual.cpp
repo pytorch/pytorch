@@ -5056,7 +5056,6 @@ Tensor group_norm_jvp(
 Tensor group_norm_mean_jvp(
     const Tensor& input_t, const Tensor& mean_p, int64_t groups) {
   int64_t N = input_t.size(0);
-  int64_t C = input_t.size(1);
   std::array<int64_t, 3> view_shape = {1, N * groups, N ? -1 : 1};
   auto input_t_reshaped = input_t.view(view_shape);
   return input_t_reshaped.mean({2}, false).view_as(mean_p);
@@ -5067,7 +5066,6 @@ Tensor group_norm_invstd_jvp(
     const Tensor& mean_p, const Tensor& invstd_p,
     int64_t groups) {
   int64_t N = input_p.size(0);
-  int64_t C = input_p.size(1);
 
   std::vector<int64_t> view_shape = {1, N * groups, N ? -1 : 1};
 
@@ -5399,6 +5397,16 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
 
 }
 
+Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_options) {
+  // Handle R->C copies without raising a warning
+  const auto self_type = self_options.dtype().toScalarType();
+  auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grad_);
+  if (!c10::isComplexType(self_type) && grad->is_complex()) {
+    grad = c10::MaybeOwned<at::Tensor>::owned(at::real(grad_));
+  }
+
+  return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
+}
 
 } // namespace details
 } // namespace generated

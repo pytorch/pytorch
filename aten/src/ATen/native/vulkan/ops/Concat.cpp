@@ -199,7 +199,6 @@ Tensor cat_height(const TensorList tensors, vTensor& v_output) {
 Tensor cat(
   const at::TensorList tensors,
   const int64_t dim) {
-  const auto norm_dim = normalize_dim(dim, 4);
   TORCH_CHECK(
     tensors.size() > 0,
     "Vulkan cat expects at least one tensor");
