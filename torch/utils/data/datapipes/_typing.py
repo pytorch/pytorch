@@ -343,7 +343,7 @@ def _simplify_obj_name(obj) -> str:
     """
     default_str = str(obj)
     # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
-    if "object at" in default_str:
+    if isinstance(type(obj), _DataPipeMeta):  # Only applies to DataPipes
         try:
             return str(obj.__class__.__qualname__)
         except Exception as _:
