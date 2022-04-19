@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
 
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
 /*
@@ -30,6 +31,18 @@ class RegisterInterface {
 };
 
 static RegisterInterface register_interface_;
+
+#ifndef USE_ROCM
+class RegisterPass {
+ public:
+  RegisterPass() {
+    RegisterCudaFuseGraph::registerPass(true);
+  }
+};
+
+RegisterPass register_pass_;
+#endif
+
 } // namespace
 
 } // namespace cuda
