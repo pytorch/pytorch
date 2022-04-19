@@ -129,18 +129,19 @@ class CudaFusionManager {
     return graph_cache_[kernel_id]->runGraphWithInputs(inputs);
   }
 
-  Code* getFallbackCode(
-      int32_t kernel_id,
-      const Node* fusion_node) {
+  bool hasFallbackCode(int32_t kernel_id) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return graph_cache_.count(kernel_id);
+  }
+
+  Code* getFallbackCode(int32_t kernel_id, const Node* fusion_node) {
     {
-      std::cerr << " CREATING A NEW GRAPH " << std::endl;
       std::lock_guard<std::mutex> guard(mutex_);
       auto it = fallback_cache_.find(kernel_id);
       if (it != fallback_cache_.end()) {
         return it->second.get();
       }
     }
-    std::cerr << " CREATING A NEW GRAPH " << std::endl;
 
     auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
     EraseShapeInformation(copied_graph);
@@ -180,7 +181,7 @@ class CudaFusionManager {
 
   std::unordered_map<std::string, int32_t> graph_cache_ids_;
   std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
-  std::unordered_map<int64_t, std::unique_ptr<Code>>  fallback_cache_;
+  std::unordered_map<int64_t, std::unique_ptr<Code>> fallback_cache_;
 
   int32_t next_unique_id_ = 0;
 };
@@ -235,8 +236,8 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   // Fallback to use if anything goes wrong
   auto take_fallback = [&](Stack& stack) {
     int32_t kernel_id = fusion_node->i(attr::cache_id);
-    auto fallback_code = CudaFusionManager::getManager().getFallbackCode(
-        kernel_id, fusion_node);
+    auto fallback_code =
+        CudaFusionManager::getManager().getFallbackCode(kernel_id, fusion_node);
     InterpreterState{*fallback_code}.run(stack);
   };
 
@@ -287,7 +288,17 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
 
   if (useFallback()) {
     try {
-      run_fusion();
+      // if fusion failed once, it's likely to fail again; and failures are
+      // slow. So if the fusion fails, then record the failure and always use
+      // the fallback instead
+      int32_t kernel_id = fusion_node->i(attr::cache_id);
+      bool force_fallback = 
+        CudaFusionManager::getManager().hasFallbackCode(kernel_id);
+      if (force_fallback) {
+        take_fallback(stack);
+      } else {
+        run_fusion();
+      }
     } catch (...) {
       TORCH_WARN(
           "FALLBACK path has been taken. This is an indication that codegen"
