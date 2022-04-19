@@ -301,6 +301,9 @@ def is_inplace(op, variant):
 vjp_fail = {
     skip('nn.functional.dropout'),  # randomness testing artifact
     skip('nn.functional.rrelu'),  # randomness testing artifact
+    skip('bernoulli'),  # randomness testing artifact
+    skip('normal', ''),  # randomness testing artifact
+    skip('normal', 'number_mean'),  # randomness testing artifact
     xfail('tensor_split'),
     xfail('to_sparse'),
     xfail('nn.functional.ctc_loss'),
@@ -565,8 +568,14 @@ class TestOperators(TestCase):
         # The following are not bugs and are expected behavior
         xfail('fill_'),  # Not possible, wontfix
         xfail('masked_select'),  # Not possible due to dynamic shapes
+        skip('bernoulli'),  # randomness
+        skip('normal', ''),  # randomness
+        skip('normal', 'number_mean'),  # randomness
 
         # All of the following are bugs and need to be fixed
+        xfail('bfloat16', 'channels_last'),
+        xfail('float', 'channels_last'),
+        xfail('half', 'channels_last'),
         xfail('eig'),
         xfail('view_as_complex'),
         xfail('fft.ihfft'),
@@ -650,6 +659,7 @@ class TestOperators(TestCase):
         skip('nn.functional.rrelu'),  # randomness
         skip('nn.functional.fractional_max_pool2d'),  # randomness
         skip('nn.functional.fractional_max_pool3d'),  # randomness
+        skip('bernoulli', ''),  # randomness
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
 
         # TODO: fails in core due to in-place batched nto non-batched
@@ -730,6 +740,7 @@ class TestOperators(TestCase):
                 self.assertEqual(loop_out, batched_out)
 
     vmapjvpall_fail = {
+        skip('bernoulli', ''),  # randomness
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.rrelu'),  # randomness
         xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
@@ -1004,6 +1015,10 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvmap', vjp_fail.union({
+        skip('bernoulli', ''),  # vjpvmap testing can't handle randomness
+        skip('normal', ''),  # vjpvmap testing can't handle randomness
+        skip('normal', 'number_mean'),  # vjpvmap testing can't handle randomness
+
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
         xfail('__getitem__', ''),
@@ -1028,6 +1043,10 @@ class TestOperators(TestCase):
         xfail('pca_lowrank', ''),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
+        xfail('bfloat16', 'channels_last'),
+        xfail('float', 'channels_last'),
+        xfail('half', 'channels_last'),
+
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1081,6 +1100,9 @@ class TestOperators(TestCase):
         skip('nn.functional.fractional_max_pool2d'),  # Random
         skip('nn.functional.fractional_max_pool3d'),  # Random
 
+        # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
+        # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
+        xfail('normal', ''),
         xfail('_masked.amax', ''),
         xfail('_masked.amin', ''),
         xfail('_masked.log_softmax', ''),
