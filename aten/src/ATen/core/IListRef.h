@@ -381,12 +381,12 @@ class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T
   IListRefIterator(const IListRefIterator& iterator)
       : tag_(iterator.tag_) {
     switch (tag_) {
-      case ITensorListRefTag::Boxed:
+      case IListRefTag::Boxed:
         payload_.boxed_iterator = iterator.payload_.boxed_iterator;
-      case ITensorListRefTag::Unboxed:
+      case IListRefTag::Unboxed:
         payload_.unboxed_iterator = iterator.payload_.unboxed_iterator;
       default:
-        TORCH_INTERNAL_ASSERT(false, "invalid ITensorListRef tag.");
+        TORCH_INTERNAL_ASSERT(false, "invalid IListRef tag.");
     }
   }
 #endif
@@ -395,12 +395,12 @@ class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T
   // See [Note: MSVC Iterator Debug]
   ~IListRefIterator() {
     switch (tag_) {
-      case ITensorListRefTag::Boxed:
+      case IListRefTag::Boxed:
         payload_.boxed_iterator.~boxed_iterator_type();
-      case ITensorListRefTag::Unboxed:
+      case IListRefTag::Unboxed:
         payload_.unboxed_iterator.~unboxed_iterator_type();
       default:
-        TORCH_INTERNAL_ASSERT(false, "invalid ITensorListRef tag.");
+        TORCH_INTERNAL_ASSERT(false, "invalid IListRef tag.");
     }
   }
 #endif
