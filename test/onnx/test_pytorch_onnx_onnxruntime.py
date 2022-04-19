@@ -7880,8 +7880,8 @@ class _TestONNXRuntime:
         y = torch.randint(10, (5, 5), dtype=torch.int16)
         self.run_test(MinimumModel(), (x, y))
 
-        x = torch.randint(10, (5, 5), dtype=torch.int8)
-        y = torch.randint(10, (5, 5), dtype=torch.int16)
+        x = torch.randint(10, (5, 5), dtype=torch.int16)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
         self.run_test(MinimumModel(), (x, y))
 
         x = torch.randint(10, (5, 5), dtype=torch.int)
