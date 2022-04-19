@@ -632,18 +632,6 @@ to do the following in addition:
 
 There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_dict` (an argument of the `prepare_fx` function).
 
-High Level API::
-.. image:: fx-graph-mode-flow.jpeg
-   :width: 100%
-
-Post Training Quantization Flow Example::
-.. image:: fx-graph-mode-flow-ptq-example.jpeg
-   :width: 100%
-
-Quantization Aware Training Flow Example::
-.. image:: fx-graph-mode-flow-qat-example.jpeg
-   :width: 100%           
-
 API Example::
 
   import torch.quantization.quantize_fx as quantize_fx
