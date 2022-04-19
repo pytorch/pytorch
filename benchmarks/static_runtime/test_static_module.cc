@@ -1603,7 +1603,7 @@ TEST(UseSplitAndSqueeze, Fusion) {
   auto graph = getGraphFromIR(src);
   UseSplitAndSqueeze(graph);
   EXPECT_TRUE(
-      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze"));
+      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze_copy"));
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::split"));
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::squeeze"));
   EXPECT_FALSE(hasNodeWithKind(graph, "prim::ListUnpack"));

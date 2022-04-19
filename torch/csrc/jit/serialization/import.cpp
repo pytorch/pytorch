@@ -21,6 +21,7 @@
 
 #if defined(ENABLE_FLATBUFFER)
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #endif
 
 #include <caffe2/serialize/file_adapter.h>
@@ -528,13 +529,13 @@ Module jitModuleFromSourceAndConstants(
   SourceImporter importer(
       compilation_unit,
       &constants,
-      [&source](const std::string& qualifier) -> std::shared_ptr<SourceView> {
+      [&source](const std::string& qualifier) -> std::shared_ptr<Source> {
         auto source_iter = source.find(qualifier);
         if (source_iter == source.end()) {
           return nullptr;
         }
         return std::make_shared<Source>(
-            source_iter->second, qualifier, 1, nullptr);
+            source_iter->second, qualifier, 1, nullptr, Source::COPIES_STRING);
       },
       version);
   auto type_resolver = [&](const c10::QualifiedName& qn) {

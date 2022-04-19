@@ -4,6 +4,7 @@
 #include <ATen/FunctionalInverses.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
 
@@ -176,6 +177,9 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
   value_ = other;
+  // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
+  // We need to propagate that metadata mutation to the wrapper (new size).
+  set_sizes_and_strides(value_.sizes(), value_.strides());
 }
 
 
@@ -183,8 +187,10 @@ void FunctionalTensorWrapper::sync_() {
   if (is_up_to_date()) {
     return;
   }
-  apply_updates();
-  regenerate_from_base();
+  auto any_updates = apply_updates();
+  if (any_updates) {
+    regenerate_from_base();
+  }
 }
 
 void FunctionalTensorWrapper::regenerate_from_base() {
@@ -201,10 +207,10 @@ void FunctionalTensorWrapper::regenerate_from_base() {
   generation_ = storage_impl->generation();
 }
 
-void FunctionalTensorWrapper::apply_updates() {
+bool FunctionalTensorWrapper::apply_updates() {
   // Apply all updates on alias_
   auto storage_impl = functional_storage_impl();
-  storage_impl->apply_updates();
+  return storage_impl->apply_updates();
 }
 
 const char* FunctionalTensorWrapper::tensorimpl_type_name() const {
@@ -221,6 +227,20 @@ Tensor to_functional_tensor(const Tensor& tensor) {
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isFunctionalTensor(tensor));
   return at::detail::make_tensor<FunctionalTensorWrapper>(tensor);
+}
+c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) {
+  if (tensor.has_value()) {
+    return c10::make_optional<Tensor>(to_functional_tensor(*tensor));
+  }
+  return c10::nullopt;
+}
+c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
+  c10::List<c10::optional<Tensor>> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto i : c10::irange(t_list.size())) {
+    outputs.push_back(to_functional_tensor(t_list[i]));
+  }
+  return outputs;
 }
 c10::List<Tensor> to_functional_tensor(ITensorListRef t_list) {
   c10::List<Tensor> outputs;
@@ -399,6 +419,14 @@ void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector
   }
 }
 
+thread_local bool _functionalizationReapplyViews;
+
+bool getFunctionalizationReapplyViewsTLS() {
+  return _functionalizationReapplyViews;
+}
+void setFunctionalizationReapplyViewsTLS(bool reapply_views) {
+  _functionalizationReapplyViews = reapply_views;
+}
 
 } // namespace impl
 } // namespace functionalization
