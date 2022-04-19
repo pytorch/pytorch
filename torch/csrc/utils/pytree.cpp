@@ -9,26 +9,18 @@ namespace pytree {
 namespace {
 struct StrTreeSpecData {
   std::vector<size_t> idxs;
-  size_t containers_num = 0;
 };
 
 StrTreeSpecData pre_parse(const StrTreeSpec& spec) {
   StrTreeSpecData ret;
   std::stack<std::pair<size_t, size_t>> stack;
   size_t i = 0;
-  size_t containers_num = 0;
   const size_t size = spec.size();
 
   ret.idxs.resize(size);
   while (i < size) {
     const auto c = spec[i];
     switch (c) {
-      case Config::kDict:
-      case Config::kList:
-      case Config::kLeaf: {
-        ret.containers_num++;
-        break;
-      }
       case Config::kNodeDataBegin: {
         stack.push({i, i});
         break;
@@ -90,17 +82,21 @@ TreeSpec from_str_internal(
     const StrTreeSpec& spec,
     size_t read_idx,
     const StrTreeSpecData& spec_data) {
-  bool isTuple = false;
-  switch (spec[read_idx]) {
+  const auto kind_char = spec[read_idx];
+  switch (kind_char) {
     case Config::kTuple:
-      isTuple = true;
-      [[fallthrough]];
+    case Config::kNamedTuple:
     case Config::kList: {
       read_idx++;
       auto layout = read_node_layout(spec, read_idx);
       const auto size = layout.size();
-      auto c =
-          new Container<TreeSpecLeaf>(isTuple ? Kind::Tuple : Kind::List, size);
+      Kind kind = Kind::List;
+      if (Config::kNamedTuple == kind_char) {
+        kind = Kind::NamedTuple;
+      } else if (Config::kTuple == kind_char) {
+        kind = Kind::Tuple;
+      }
+      auto c = new Container<TreeSpecLeaf>(kind, size);
 
       size_t child_idx = 0;
       size_t leaves_offset = 0;
@@ -172,6 +168,9 @@ StrTreeSpec to_str_internal(const TreeSpec& spec) {
   switch (spec.kind()) {
     case Kind::List:
       s.push_back(Config::kList);
+      break;
+    case Kind::NamedTuple:
+      s.push_back(Config::kNamedTuple);
       break;
     case Kind::Tuple:
       s.push_back(Config::kTuple);

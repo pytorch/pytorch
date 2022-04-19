@@ -3,11 +3,41 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch._C._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, broadcast_to_and_flatten
-# from collections import namedtuple
+from collections import namedtuple
 
-
-def spec(o):
+def _spec(o):
     _, spec = tree_flatten(o)
+    return spec
+
+def _spec_str(type_char, n):
+    spec = type_char + str(n)
+    for i in range(n):
+        spec += '#1'
+    spec += '('
+    for i in range(n):
+        if i > 0:
+            spec += ','
+        spec += '$'
+    spec += ')'
+    return spec
+
+def _spec_str_dict(d):
+    n = len(d)
+    spec = 'D' + str(n)
+    for i in range(n):
+        spec += '#1'
+    spec += '('
+    i = 0
+    for key in d.keys():
+        if i > 0:
+            spec += ','
+        if isinstance(key, str):
+            spec += '\'' + key + '\''
+        else:
+            spec += str(key)
+        spec += ':$'
+        i += 1
+    spec += ')'
     return spec
 
 
@@ -15,9 +45,9 @@ class TestPytree(TestCase):
 
     def test_treespec_equality(self):
         self.assertTrue(TreeSpec.from_str("$") == TreeSpec.from_str("$"))
-        self.assertTrue(spec([1]) == TreeSpec.from_str("L1#1($)"))
-        self.assertTrue(spec((1)) != spec([1]))
-        self.assertTrue(spec((1)) == spec((2)))
+        self.assertTrue(_spec([1]) == TreeSpec.from_str("L1#1($)"))
+        self.assertTrue(_spec((1)) != _spec([1]))
+        self.assertTrue(_spec((1)) == _spec((2)))
 
     def test_flatten_unflatten_leaf(self):
         def run_test_with_leaf(leaf):
@@ -37,16 +67,7 @@ class TestPytree(TestCase):
 
     def test_flatten_unflatten_list(self):
         def run_test(lst):
-            n = len(lst)
-            spec = 'L' + str(n)
-            for i in range(n):
-                spec += '#1'
-            spec += '('
-            for i in range(n):
-                if i > 0:
-                    spec += ','
-                spec += '$'
-            spec += ')'
+            spec = _spec_str('L', len(lst))
 
             expected_spec = TreeSpec.from_str(spec)
             values, treespec = tree_flatten(lst)
@@ -63,19 +84,13 @@ class TestPytree(TestCase):
 
     def test_flatten_unflatten_tuple(self):
         def run_test(tup):
-            n = len(tup)
-            spec = 'T' + str(n)
-            for i in range(n):
-                spec += '#1'
-            spec += '('
-            for i in range(n):
-                if i > 0:
-                    spec += ','
-                spec += '$'
-            spec += ')'
+            spec = _spec_str('T', len(tup))
 
             expected_spec = TreeSpec.from_str(spec)
             values, treespec = tree_flatten(tup)
+            print("XXX 91: treespec:", treespec)
+            print("XXX 91: spec_str:", spec)
+            print("XXX 91: expected_spec:", expected_spec)
             self.assertTrue(isinstance(values, list))
             self.assertEqual(values, list(tup))
             self.assertEqual(treespec, expected_spec)
@@ -89,51 +104,38 @@ class TestPytree(TestCase):
         run_test((1., 2))
         run_test((torch.tensor([1., 2]), 2, 10, 9, 11))
 
-#    def test_flatten_unflatten_namedtuple(self):
-#        Point = namedtuple('Point', ['x', 'y'])
-#
-#        def run_test(tup):
-#            expected_spec = TreeSpec(namedtuple, Point, [LeafSpec() for _ in tup])
-#            values, treespec = tree_flatten(tup)
-#            self.assertTrue(isinstance(values, list))
-#            self.assertEqual(values, list(tup))
-#            self.assertEqual(treespec, expected_spec)
-#
-#            unflattened = tree_unflatten(values, treespec)
-#            self.assertEqual(unflattened, tup)
-#            self.assertTrue(isinstance(unflattened, Point))
-#
-#        run_test(Point(1., 2))
-#        run_test(Point(torch.tensor(1.), 2))
-#
-#    def test_flatten_unflatten_torch_namedtuple_return_type(self):
-#        x = torch.randn(3, 3)
-#        expected = torch.max(x, dim=0)
-#
-#        values, spec = tree_flatten(expected)
-#        result = tree_unflatten(values, spec)
-#
-#        self.assertEqual(type(result), type(expected))
-#        self.assertEqual(result, expected)
+    def test_flatten_unflatten_namedtuple(self):
+        Point = namedtuple('Point', ['x', 'y'])
+
+        def run_test(tup):
+            spec = _spec_str('N', len(tup))
+            expected_spec = TreeSpec.from_str(spec)
+
+            values, treespec = tree_flatten(tup)
+            self.assertTrue(isinstance(values, list))
+
+            self.assertEqual(values, list(tup))
+            self.assertEqual(treespec, expected_spec)
+
+            unflattened = tree_unflatten(values, treespec)
+            self.assertEqual(unflattened, tup)
+
+        run_test(Point(1., 2))
+        run_test(Point(torch.tensor(1.), 2))
+
+    def test_flatten_unflatten_torch_namedtuple_return_type(self):
+        x = torch.randn(3, 3)
+        expected = torch.max(x, dim=0)
+
+        values, spec = tree_flatten(expected)
+        result = tree_unflatten(values, spec)
+
+        self.assertEqual(type(result), type(expected))
+        self.assertEqual(result, expected)
 
     def test_flatten_unflatten_dict(self):
         def run_test(d):
-            n = len(d)
-            spec = 'D' + str(n)
-            for i in range(n):
-                spec += '#1'
-            spec += '('
-            i = 0
-            for key in d.keys():
-                if i > 0:
-                    spec += ','
-                if isinstance(key, str):
-                    spec += '\'' + key + '\''
-                else:
-                    spec += str(key)
-                spec += ':$'
-                i += 1
-            spec += ')'
+            spec = _spec_str_dict(d)
 
             values, treespec = tree_flatten(d)
             self.assertTrue(isinstance(values, list))
@@ -156,8 +158,6 @@ class TestPytree(TestCase):
             self.assertTrue(isinstance(values, list))
             self.assertEqual(len(values), treespec.num_leaves)
 
-            # NB: python basic data structures (dict list tuple) all have
-            # contents equality defined on them, so the following works for them.
             unflattened = tree_unflatten(values, treespec)
             self.assertEqual(unflattened, pytree)
 
@@ -195,7 +195,6 @@ class TestPytree(TestCase):
 
 
     def test_treespec_repr(self):
-        # Check that it looks sane
         pytree = (0, [0, 0, 0])
         _, spec = tree_flatten(pytree)
         self.assertEqual(

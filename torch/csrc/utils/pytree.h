@@ -12,7 +12,7 @@
 namespace torch {
 namespace pytree {
 
-enum class Kind { List, Tuple, Dict, Leaf, None };
+enum class Kind { List, Tuple, NamedTuple, Dict, Leaf, None };
 
 using KeyStr = std::string;
 using KeyInt = int32_t;
@@ -32,7 +32,7 @@ struct Key {
   }
 
   const KeyInt& as_int() const {
-    assert(kind_ == Key::Kind::Int);
+    TORCH_INTERNAL_ASSERT(kind_ == Key::Kind::Int);
     return as_int_;
   }
 
@@ -41,7 +41,7 @@ struct Key {
   }
 
   const KeyStr& as_str() const {
-    assert(kind_ == Key::Kind::Str);
+    TORCH_INTERNAL_ASSERT(kind_ == Key::Kind::Str);
     return as_str_;
   }
 
@@ -123,22 +123,22 @@ struct ContainerHandle {
   /*implicit*/ ContainerHandle(Container<T>* c) : handle(c) {}
 
   void set_leaf(T* leaf) {
-    assert(handle->kind == Kind::Leaf);
+    TORCH_INTERNAL_ASSERT(handle->kind == Kind::Leaf);
     handle->leaf = leaf;
   }
 
   operator T() const {
-    assert(handle->kind == Kind::Leaf);
+    TORCH_INTERNAL_ASSERT(handle->kind == Kind::Leaf);
     return *handle->leaf;
   }
 
   const T& leaf() const {
-    assert(handle->kind == Kind::Leaf);
+    TORCH_INTERNAL_ASSERT(handle->kind == Kind::Leaf);
     return *handle->leaf;
   }
 
   const T* leaf_ptr() const {
-    assert(handle->kind == Kind::Leaf);
+    TORCH_INTERNAL_ASSERT(handle->kind == Kind::Leaf);
     return handle->leaf;
   }
 
@@ -152,12 +152,12 @@ struct ContainerHandle {
     return handle->items[idx];
   }
   ContainerHandle& operator[](size_t idx) {
-    assert(idx < handle->size);
+    TORCH_INTERNAL_ASSERT(idx < handle->size);
     return handle->items[idx];
   }
 
   bool contains(const KeyStr& key) const {
-    assert(isDict());
+    TORCH_INTERNAL_ASSERT(isDict());
     for (size_t i = 0; i < handle->size; ++i) {
       if (Container<T>::Dict::key_eq(handle->dict.keys[i], key)) {
         return true;
@@ -168,7 +168,7 @@ struct ContainerHandle {
 
   template <typename U, typename K>
   const ContainerHandle& at(const U& lookup_key, K kind) const {
-    assert(isDict());
+    TORCH_INTERNAL_ASSERT(isDict());
     for (size_t i = 0; i < handle->size; ++i) {
       Key& key = handle->dict.keys[i];
       if (key.kind() == kind && Key::eq(key, lookup_key)) {
@@ -187,11 +187,11 @@ struct ContainerHandle {
   }
 
   const Key& key(size_t idx) const {
-    assert(isDict());
+    TORCH_INTERNAL_ASSERT(isDict());
     return handle->dict.keys[idx];
   }
   Key& key(size_t idx) {
-    assert(isDict());
+    TORCH_INTERNAL_ASSERT(isDict());
     return handle->dict.keys[idx];
   }
 
@@ -213,6 +213,10 @@ struct ContainerHandle {
 
   bool isList() const {
     return handle->kind == Kind::List;
+  }
+
+  bool isNamedTuple() const {
+    return handle->kind == Kind::NamedTuple;
   }
 
   bool isTuple() const {
@@ -294,6 +298,7 @@ void traverse(
 
 struct Config final {
   static constexpr char kTuple = 'T';
+  static constexpr char kNamedTuple = 'N';
   static constexpr char kList = 'L';
   static constexpr char kDict = 'D';
   static constexpr char kLeaf = '$';

@@ -75,6 +75,9 @@ class PyTree {
     if (reg) {
       return reg->kind;
     }
+    if (py::isinstance<py::tuple>(x) && py::hasattr(x, "_fields")) {
+      return Kind::NamedTuple;
+    }
     return Kind::Leaf;
   }
 
@@ -112,6 +115,20 @@ class PyTree {
         s.set_leaves_num(leaves_num);
         break;
       }
+      case Kind::NamedTuple: {
+        py::tuple tuple = py::reinterpret_borrow<py::tuple>(x);
+        const size_t n = tuple.size();
+        s = TreeSpec(Kind::NamedTuple, n);
+        size_t i = 0;
+        size_t leaves_num = 0;
+        for (py::handle entry : tuple) {
+          TreeSpec& child = s.handle->items[i++];
+          flatten_internal(entry, leaves, child);
+          leaves_num += child.leaves_num();
+        }
+        s.set_leaves_num(leaves_num);
+        break;
+      }
       case Kind::Dict: {
         py::dict dict = py::reinterpret_borrow<py::dict>(x);
         py::list keys =
@@ -126,7 +143,7 @@ class PyTree {
           } else if (py::isinstance<py::int_>(key)) {
             s.handle->dict.keys[i] = py::cast<int32_t>(key);
           } else {
-            assert(false);
+            TORCH_INTERNAL_ASSERT(false);
           }
 
           TreeSpec& child = s.handle->items[i];
@@ -144,13 +161,14 @@ class PyTree {
         break;
       }
       case Kind::None:
-        assert(false);
+        TORCH_INTERNAL_ASSERT(false);
     }
   }
 
   template <typename T>
   py::object unflatten_internal(const TreeSpec& spec, T&& leaves_it) const {
     switch (spec.kind()) {
+      case Kind::NamedTuple:
       case Kind::Tuple: {
         const size_t size = spec.size();
         py::tuple tuple(size);
@@ -179,9 +197,9 @@ class PyTree {
               case Key::Kind::Str:
                 return py::cast(key.as_str()).release();
               case Key::Kind::None:
-                assert(false);
+                TORCH_INTERNAL_ASSERT(false);
             }
-            assert(false);
+            TORCH_INTERNAL_ASSERT(false);
             return py::none();
           }();
           dict[py_key] = unflatten_internal(spec[i], leaves_it);
@@ -198,7 +216,7 @@ class PyTree {
         return py::none();
       }
     }
-    assert(false);
+    TORCH_INTERNAL_ASSERT(false);
   }
 
  public:
