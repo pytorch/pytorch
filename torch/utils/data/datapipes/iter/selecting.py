@@ -57,7 +57,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
             _deprecation_warning(
                 type(self).__name__,
                 deprecation_version="1.12",
-                removal_version="1.13",
+                removal_version="1.14",
                 old_argument_name="drop_empty_batches",
             )
         self.drop_empty_batches = drop_empty_batches
