@@ -305,7 +305,7 @@ Tensor collapse_dims_1_and_2(const Tensor& sizes) {
 
 } // namespace
 // compute q = (q + q_bias) / sqrt(dim_per_head), k = k + k_bias, v = v + v_bias
-std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
+__host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
     const Tensor& qkv,
     const Tensor& qkv_bias,
     const int64_t num_head) {

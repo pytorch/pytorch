@@ -266,7 +266,6 @@ class TransformerEncoderLayer(Module):
     Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
     Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
     in a different way during application.
-
     forward() will use a special optimized implementation if all of the following
     conditions are met:
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
@@ -277,7 +276,6 @@ class TransformerEncoderLayer(Module):
     - at most one of ``src_mask`` and ``src_key_padding_mask`` is passed
     - if src is a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_, neither ``src_mask`` nor ``src_key_padding_mask`` is passed
     - the two ``LayerNorm`` instances have a consistent ``eps`` value (this will naturally be the case unless the caller has manually modified one without modifying the other)
-
     If the optimized implementation is in use, a
    `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be
     passed for ``src`` to represent padding more efficiently than using a padding
