@@ -136,7 +136,7 @@ class TestFSDPExecOrder(FSDPTest):
             fsdp_model.module.run_backward(loss)
         # Match the warning message with the following prefix
         regex = "^(All-gather order differs from that of the first iteration " \
-            f"on rank {self.rank}; collectives are unchecked and may give " \
+            f"on rank {self.rank} -- collectives are unchecked and may give " \
             "incorrect results or hang)"
         context = self.assertWarnsRegex(
             expected_warning=UserWarning, expected_regex=regex,
@@ -144,8 +144,20 @@ class TestFSDPExecOrder(FSDPTest):
         if self.rank != 0:
             fsdp_model.flip_path()
         inp = fsdp_model.module.get_input(self.device)
+        # Expect a warning for the forward pass all-gather
+        with context:  # warning for forward pass all-gather
+            output = fsdp_model(*inp)
+        loss = fsdp_model.module.get_loss(inp, output).to(self.device)
+        # Expect a warning for the pre-backward pass all-gather for `FULL_SHARD`
+        if sharding_strategy != ShardingStrategy.FULL_SHARD:
+            context = suppress()
         with context:
-            fsdp_model(*inp)
+            fsdp_model.module.run_backward(loss)
+        # Run an additional iteration to check that there are no more warnings
+        inp = fsdp_model.module.get_input(self.device)
+        output = fsdp_model(*inp)
+        loss = fsdp_model.module.get_loss(inp, output).to(self.device)
+        fsdp_model.module.run_backward(loss)
 
 
 instantiate_parametrized_tests(TestFSDPExecOrder)
