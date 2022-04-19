@@ -56,6 +56,28 @@ struct Key {
   static bool eq(const KeyInt& l, const KeyInt& r) {
     return l == r;
   }
+
+  bool operator==(const Key& rhs) const {
+    if (kind_ != rhs.kind_) {
+      return false;
+    }
+    switch (kind_) {
+      case Kind::Str: {
+        return as_str_ == rhs.as_str_;
+      }
+      case Kind::Int: {
+        return as_int_ == rhs.as_int_;
+      }
+      case Kind::None: {
+        return true;
+      }
+    }
+    TORCH_INTERNAL_ASSERT(false);
+  }
+
+  bool operator!=(const Key& rhs) const {
+    return !operator==(rhs);
+  }
 };
 
 template <typename T>
@@ -203,6 +225,35 @@ struct ContainerHandle {
 
   Kind kind() const {
     return handle->kind;
+  }
+
+  // Checks only structure, no leaves comparison
+  bool operator==(const ContainerHandle& rhs) {
+    const Kind knd = kind();
+    if (knd != rhs.kind()) {
+      return false;
+    }
+    if (knd == Kind::Leaf) {
+      return true;
+    }
+    const size_t _size = size();
+    if (_size != rhs.size()) {
+      return false;
+    }
+
+    for (size_t i = 0; i < _size; ++i) {
+      if (knd == Kind::Dict && (key(i) != rhs.key(i))) {
+        return false;
+      }
+      if (operator[](i) != rhs[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool operator!=(const ContainerHandle& rhs) {
+    return !operator==(rhs);
   }
 };
 

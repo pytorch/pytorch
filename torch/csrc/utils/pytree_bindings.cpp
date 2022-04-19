@@ -233,6 +233,10 @@ class PyTree {
   py::object tree_unflatten(T leaves) const {
     return unflatten_internal(spec_, leaves.begin());
   }
+
+  bool operator==(const PyTree& rhs) {
+    return spec_ == rhs.spec_;
+  }
 };
 
 inline std::pair<std::vector<py::object>, std::unique_ptr<PyTree>> tree_flatten(
@@ -259,7 +263,7 @@ static std::unique_ptr<PyTree> py_from_str(std::string spec) {
   return std::make_unique<PyTree>(from_str(spec));
 }
 
-static std::vector<py::object> broadcast_to_and_flatten(
+static py::object broadcast_to_and_flatten(
     py::object x,
     py::object py_tree_spec) {
   auto p = tree_flatten(x);
@@ -268,7 +272,7 @@ static std::vector<py::object> broadcast_to_and_flatten(
 
   PyTree* tree_spec = py_tree_spec.cast<PyTree*>();
 
-  std::vector<py::object> result;
+  py::list ret;
   struct StackItem {
     const TreeSpec* tree_spec_node;
     const TreeSpec* x_spec_node;
@@ -280,32 +284,46 @@ static std::vector<py::object> broadcast_to_and_flatten(
     const auto top = stack.top();
     stack.pop();
     if (top.x_spec_node->isLeaf()) {
-      // TODO: optimize in one call?
       for (size_t i = 0; i < top.tree_spec_node->leaves_num(); ++i) {
-        result.push_back(x_leaves[top.x_leaves_offset]);
+        ret.append(x_leaves[top.x_leaves_offset]);
       }
     } else {
-      if (top.tree_spec_node->kind() != top.x_spec_node->kind()) {
-        // TODO: return py::none; change return type to be
-        // None|Vector[py::object]
+      const auto kind = top.tree_spec_node->kind();
+      if (kind != top.x_spec_node->kind()) {
+        return py::none();
       }
       TORCH_INTERNAL_ASSERT(
           top.tree_spec_node->kind() == top.x_spec_node->kind());
       const size_t child_num = top.tree_spec_node->size();
+      if (child_num != top.x_spec_node->size()) {
+        return py::none();
+      }
       TORCH_INTERNAL_ASSERT(child_num == top.x_spec_node->size());
 
       size_t x_leaves_offset =
           top.x_leaves_offset + top.x_spec_node->leaves_num();
-      for (size_t i = child_num - 1; i < child_num; --i) {
+      auto fn_i = [&](size_t i) {
         x_leaves_offset -= (*top.x_spec_node)[i].leaves_num();
         stack.push(
             {&(*top.tree_spec_node)[i],
              &(*top.x_spec_node)[i],
              x_leaves_offset});
+      };
+      if (Kind::Dict == kind) {
+        for (size_t i = child_num - 1; i < child_num; --i) {
+          if (top.tree_spec_node->key(i) != top.x_spec_node->key(i)) {
+            return py::none();
+          }
+          fn_i(i);
+        }
+      } else {
+        for (size_t i = child_num - 1; i < child_num; --i) {
+          fn_i(i);
+        }
       }
     }
   }
-  return result;
+  return std::move(ret);
 }
 
 } // namespace
@@ -327,6 +345,8 @@ void init_bindings(PyObject* module) {
           "tree_unflatten",
           static_cast<py::object (PyTree::*)(py::iterable leaves) const>(
               &PyTree::tree_unflatten))
+      .def("__repr__", &PyTree::py_to_str)
+      .def("__eq__", &PyTree::operator==)
       .def("to_str", &PyTree::py_to_str);
 }
 
