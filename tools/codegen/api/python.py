@@ -1168,7 +1168,7 @@ def dispatch_lambda_exprs(
             # optional<ArrayRef<T>>. One needs to unwrap the optional and rewrap.
             inits.extend([
                 f'auto __{name} = {arg_parser_expr};',
-                f'c10::optional<DimnameList> {name} = __{name} ? c10::make_optional(DimnameList(__{name}.value())) : c10::nullopt;',
+                f'c10::optional<DimnameList> {name} = __{name} ? c10::make_optional(DimnameList(__{name}.value())) : c10::nullopt;',  # noqa: B950
             ])
             lambda_args_exprs[name] = name
         else:
