@@ -898,10 +898,8 @@ class MultiheadAttention(Module):
 
     ``forward()`` will use a special optimized implementation if all of the following
     conditions are met:
-    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same
-      tensor. This restriction will be loosened in the future.)
-    - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``)
-      or no tensor argument ``requires_grad``
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This restriction will be loosened in the future.)
+    - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
     - dropout is 0
     - ``add_bias_kv`` is ``False``
@@ -909,8 +907,7 @@ class MultiheadAttention(Module):
     - ``batch_first`` is ``True`` and the input is batched
     - ``kdim`` and ``vdim`` are equal to ``embed_dim``
     - at most one of ``key_padding_mask`` or ``attn_mask`` is passed
-    - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither
-      ``key_padding_mask`` nor ``attn_mask`` is passed
+    - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither ``key_padding_mask`` nor ``attn_mask`` is passed
 
     If the optimized implementation is in use, a
     `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
