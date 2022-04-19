@@ -6455,7 +6455,6 @@ def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dt
         for shape, dim in cases
     ]
 
-
 def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
     """Sample inputs for masked softmax, log_softmax, and softmin.
 
@@ -6471,7 +6470,6 @@ def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dty
             inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
-
 
 def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked normalize.
