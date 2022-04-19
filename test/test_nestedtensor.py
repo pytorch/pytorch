@@ -341,27 +341,98 @@ class TestMHADeviceType(TestCase):
                 self.num_heads = num_heads
 
             def forward(self, q, k, v, key_padding_mask):
+                # 0.
                 # return torch._native_multi_head_attention(
-                r, w = torch.nn.functional.multi_head_attention_forward(
-                    q.transpose(1, 0),
-                    k.transpose(1, 0),
-                    v.transpose(1, 0),
-                    self.embed_dim,
-                    self.num_heads,
-                    self.qkv.weight,
-                    self.qkv.bias,
-                    None,
-                    None,
-                    False,
-                    0,
-                    self.proj.weight,
-                    self.proj.bias,
-                    training=False,
-                    key_padding_mask=key_padding_mask,
-                    need_weights=need_weights,
-                    average_attn_weights=average_attn_weights,
-                )
-                return r.transpose(0, 1), w
+
+                # 1.
+                # r, w = torch.nn.functional.multi_head_attention_forward(
+                #     q.transpose(1, 0),
+                #     k.transpose(1, 0),
+                #     v.transpose(1, 0),
+                #     self.embed_dim,
+                #     self.num_heads,
+                #     self.qkv.weight,
+                #     self.qkv.bias,
+                #     None,
+                #     None,
+                #     False,
+                #     0,
+                #     self.proj.weight,
+                #     self.proj.bias,
+                #     training=False,
+                #     key_padding_mask=key_padding_mask,
+                #     need_weights=need_weights,
+                #     average_attn_weights=average_attn_weights,
+                # )
+                # return r.transpose(0, 1), w
+
+                query = q.transpose(1, 0)
+                key = k.transpose(1, 0)
+                value = v.transpose(1, 0)
+                in_proj_weight = self.qkv.weight
+                in_proj_bias = self.qkv.bias
+
+                # set up shape vars
+                tgt_len, bsz, embed_dim = query.shape
+                src_len, _, _ = key.shape
+                # assert embed_dim == embed_dim_to_check, \
+                #     f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
+                head_dim = embed_dim // num_heads
+                assert head_dim * num_heads == embed_dim, f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
+                assert key.shape == value.shape, f"key shape {key.shape} does not match value shape {value.shape}"
+
+                q, k, v = torch.nn.functional._in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+
+                attn_mask = None
+                if key_padding_mask is not None:
+                    attn_mask = key_padding_mask.to(torch.bool)
+                    # attn_mask = attn_mask.masked_fill(key_padding_mask, float("-inf"))
+
+                #
+                # reshape q, k, v for multihead attention and make em batch first
+                #
+                q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+                k = k.contiguous().view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+                v = v.contiguous().view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+
+                # update source sequence length after adjustments
+                src_len = k.size(1)
+
+                # merge key padding and attention masks
+                if key_padding_mask is not None:
+                    assert key_padding_mask.shape == (bsz, src_len), \
+                        f"expecting key_padding_mask shape of {(bsz, src_len)}, but got {key_padding_mask.shape}"
+                    key_padding_mask = key_padding_mask.view(bsz, 1, 1, src_len).   \
+                        expand(-1, num_heads, -1, -1).reshape(bsz * num_heads, 1, src_len)
+                    attn_mask = key_padding_mask
+
+                # convert mask to float
+                if attn_mask is not None and attn_mask.dtype == torch.bool:
+                    new_attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
+                    new_attn_mask.masked_fill_(attn_mask, float("-inf"))
+                    attn_mask = new_attn_mask
+
+                #
+                # (deep breath) calculate attention and out projection
+                #
+                dropout_p = 0.0
+                attn_output, attn_output_weights = torch.nn.functional._scaled_dot_product_attention(q, k, v, attn_mask, dropout_p)
+                attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
+
+                out_proj_weight = self.proj.weight
+                out_proj_bias = self.proj.bias
+                attn_output = torch.nn.functional.linear(attn_output, out_proj_weight, out_proj_bias)
+                attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
+
+                # optionally average attention weights over heads
+                attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+                if average_attn_weights:
+                    attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+
+                if not need_weights:
+                    attn_output_weights = None
+
+                return attn_output.transpose(0, 1), attn_output_weights
 
         npt = NativeMHA(
             embed_dim=embed_dim, num_heads=num_heads, qkv=qkv, proj=proj
