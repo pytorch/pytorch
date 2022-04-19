@@ -13,6 +13,7 @@ from torch._C._distributed_rpc import (
     PyRRef,
     RemoteProfilerManager,
     WorkerInfo,
+    TensorPipeAgent,
     get_rpc_timeout,
     _cleanup_python_rpc_handler,
     _delete_all_user_and_unforked_owner_rrefs,
@@ -336,7 +337,7 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     if graceful:
         try:
             agent = _get_current_rpc_agent()
-            if agent.is_static_group:
+            if not isinstance(agent, TensorPipeAgent) or agent.is_static_group:
                 _wait_all_workers(timeout)
                 _delete_all_user_and_unforked_owner_rrefs()
                 agent.join(shutdown=True)
