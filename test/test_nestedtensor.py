@@ -287,6 +287,11 @@ class TestNestedTensorDeviceType(TestCase):
         padded = nt.to_padded_tensor(pad)
         self.assertEqual(padded, correct_output)
 
+    @skipMeta
+    def test_device_checks(self, device):
+        nt = torch.nested_tensor([], device=device)
+        is_cuda = 'cuda' in str(device)
+        self.assertEqual(nt.is_cuda, is_cuda)
 
 class TestMHADeviceType(TestCase):
     def _test_multihead_attention_impl(
