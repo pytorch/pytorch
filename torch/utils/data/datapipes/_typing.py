@@ -414,7 +414,7 @@ def hook_iterator(namespace, profile_name):
                 msg = "thrown by __iter__ of"
                 full_msg = f"{msg} {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
                 if len(e.args) >= 1 and msg not in e.args[0]:
-                    e.args = (e.args[0] + f'\n This exception is {full_msg}',) + e.args[1:]
+                    e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
                 raise
 
         namespace['__iter__'] = wrap_generator
