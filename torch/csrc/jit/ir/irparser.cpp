@@ -543,7 +543,6 @@ void IRParser::parse() {
     TORCH_INTERNAL_ASSERT(dtype);
     auto options = at::TensorOptions(*device).dtype(*dtype);
     auto t = n->t_(attr::value, at::empty_strided(*sizes, *strides, options));
-    (void)t;
   }
 }
 

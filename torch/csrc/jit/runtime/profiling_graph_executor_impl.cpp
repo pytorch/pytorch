@@ -121,6 +121,7 @@ FusionStrategy setFusionStrategy(FusionStrategy& strategy) {
 }
 
 static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
+static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
