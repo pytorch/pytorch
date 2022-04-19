@@ -238,6 +238,7 @@ class OptimStateKeyType(Enum):
 
 
 class _ExecOrderWarnStatus(Enum):
+    """Used internally for execution order validation."""
     NONE = auto()     # no deviation yet
     WARNING = auto()  # deviated this iteration; currently issuing warnings
     WARNED = auto()   # deviated in a previous iteration
@@ -248,6 +249,12 @@ class _ExecOrderData():
     This contains the data used for validating execution order across ranks.
 
     Attributes:
+        _all_flat_params (List[FlatParameter]): A :class:`list` of all
+            flattened parameters contained in the FSDP module hierarchy with
+            the list index implicitly giving a unique parameter index.
+        param_to_unflat_param_names (Dict[FlatParameter, List[str]]): A mapping
+            from flattened parameter to the comprising unflattened parameters'
+            names.
         is_first_iter (bool): Whether executing in the first iteration or not.
         param_order (List[int]): Order that parameters participate in the
             forward pass; constructed on the first iteration and validated
@@ -263,7 +270,7 @@ class _ExecOrderData():
     # only consist of `FlatParameter`s to avoid `.parameters()` being dependent
     # on the calling context
     _all_flat_params: List[FlatParameter] = []
-    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = []
+    param_to_unflat_param_names: Dict[FlatParameter, List[str]] = []
     # Modified in the first iteration:
     is_first_iter: bool = True
     param_order: List[int] = []
@@ -275,7 +282,10 @@ class _ExecOrderData():
         assert root_module._is_root, "This data structure should only be " \
             "initialized on an FSDP root module"
         self._all_flat_params = list(root_module.parameters())
-        self.param_to_unflat_param_names = _get_param_to_unflat_param_names(root_module)
+        self.param_to_unflat_param_names = cast(
+            Dict[FlatParameter, List[str]],
+            _get_param_to_unflat_param_names(root_module)
+        )
 
     def get_param_index(self, param: FlatParameter):
         """Returns a unique parameter index for ``param``. Critically, this
