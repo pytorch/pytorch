@@ -10,7 +10,7 @@ import doctest
 import inspect
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
@@ -209,8 +209,6 @@ class TestFFT(TestCase):
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.OneD],
          allowed_dtypes=(torch.float, torch.cfloat))
     def test_reference_1d(self, device, dtype, op):
-        if dtype is torch.complex32 or dtype is torch.half:
-            raise unittest.SkipTest("No reference implementation for complex32 in NumPy")
         if op.ref is None:
             raise unittest.SkipTest("No reference implementation")
 
@@ -292,7 +290,7 @@ class TestFFT(TestCase):
 
     # Note: NumPy will throw a ValueError for an empty input
     @onlyNativeDeviceTypes
-    @ops(spectral_funcs, allowed_dtypes=(torch.float, torch.cfloat))
+    @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.float, torch.complex32, torch.cfloat))
     def test_empty_fft(self, device, dtype, op):
         t = torch.empty(1, 0, device=device, dtype=dtype)
         match = r"Invalid number of data points \([-\d]*\) specified"
@@ -325,8 +323,12 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
-    @dtypes(torch.int8, torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypes(torch.int8, torch.half, torch.float, torch.double,
+            torch.complex32, torch.complex64, torch.complex128)
     def test_fft_type_promotion(self, device, dtype):
+        if dtype in (torch.half, torch.complex32) and torch.device(device).type == 'cpu':
+            raise unittest.SkipTest("half and complex32 not supported on CPU")
+
         if dtype.is_complex or dtype.is_floating_point:
             t = torch.randn(64, device=device, dtype=dtype)
         else:
@@ -334,8 +336,10 @@ class TestFFT(TestCase):
 
         PROMOTION_MAP = {
             torch.int8: torch.complex64,
+            torch.half: torch.complex32,
             torch.float: torch.complex64,
             torch.double: torch.complex128,
+            torch.complex32: torch.complex32,
             torch.complex64: torch.complex64,
             torch.complex128: torch.complex128,
         }
@@ -344,17 +348,24 @@ class TestFFT(TestCase):
 
         PROMOTION_MAP_C2R = {
             torch.int8: torch.float,
+            torch.half: torch.half,
             torch.float: torch.float,
             torch.double: torch.double,
+            torch.complex32: torch.half,
             torch.complex64: torch.float,
             torch.complex128: torch.double,
         }
-        R = torch.fft.hfft(t)
+        if dtype in (torch.half, torch.complex32):
+            x = torch.randn(65, device=device, dtype=dtype)
+            R = torch.fft.hfft(x)
+        else:
+            R = torch.fft.hfft(t)
         self.assertEqual(R.dtype, PROMOTION_MAP_C2R[dtype])
 
         if not dtype.is_complex:
             PROMOTION_MAP_R2C = {
                 torch.int8: torch.complex64,
+                torch.half: torch.complex32,
                 torch.float: torch.complex64,
                 torch.double: torch.complex128,
             }
@@ -366,14 +377,10 @@ class TestFFT(TestCase):
          allowed_dtypes=[torch.half, torch.bfloat16])
     def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
-        x = torch.randn(8, 8, device=device).to(dtype)
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         err_msg = "Unsupported dtype "
-        if dtype is torch.half and self.device_type == 'cpu':
-            err_msg = "MKL FFT doesn't support"
-        if dtype is torch.half and self.device_type == 'cpu' and op.name == 'fft.hfft':
-            err_msg = '"conj_cpu" not implemented for '
         with self.assertRaisesRegex(RuntimeError, err_msg):
-            op(x)
+            op(sample.input, *sample.args, **sample.kwargs)
 
     # nd-fft tests
     @skipCUDAIfRocm
@@ -382,8 +389,6 @@ class TestFFT(TestCase):
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
          allowed_dtypes=(torch.cfloat, torch.cdouble))
     def test_reference_nd(self, device, dtype, op):
-        if dtype is torch.complex32 or dtype is torch.half:
-            raise unittest.SkipTest("No reference implementation for complex32 in NumPy")
         if op.ref is None:
             raise unittest.SkipTest("No reference implementation")
 
