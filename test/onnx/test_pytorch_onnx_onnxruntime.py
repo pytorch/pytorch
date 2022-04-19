@@ -3541,6 +3541,33 @@ class _TestONNXRuntime:
         x = torch.randn(3, 3)
         self.run_test(MyReluModule(), x)
 
+    def test_clip_int(self):
+        class MyClipInt(torch.nn.Module):
+            def forward(self, x):
+                return torch.clamp(x, 0, 1)
+        self.run_test(MyClipInt(), torch.randn(3, 3).to(torch.int64))
+
+    def test_relu_int(self):
+        self.run_test(torch.nn.ReLU(), torch.randn(3, 3).to(torch.int32))
+
+    def test_pad_int(self):
+        class MyPadInt(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.pad(x, (1, 1))
+        self.run_test(MyPadInt(), torch.randn(3, 3).to(torch.int32))
+
+    def test_min_int(self):
+        class MyMinInt(torch.nn.Module):
+            def forward(self, x):
+                return torch.min(x, x + 1)
+        self.run_test(MyMinInt(), torch.randn(3, 3).to(torch.int32))
+
+    def test_max_int(self):
+        class MyMaxnInt(torch.nn.Module):
+            def forward(self, x):
+                return torch.max(x, x + 1)
+        self.run_test(MyMaxnInt(), torch.randn(3, 3).to(torch.int32))
+
     @skipIfUnsupportedOpsetVersion([7])
     def test_normalize(self):
         class Model(torch.nn.Module):
@@ -4341,6 +4368,15 @@ class _TestONNXRuntime:
 
         model = Model()
         x = torch.randn(4, 4)
+        self.run_test(model, x)
+
+    def test_aminmax(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.aminmax(x, dim=1, keepdim=True), torch.aminmax(x, keepdim=False)
+
+        model = Model()
+        x = torch.randn(3, 4)
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -6524,7 +6560,12 @@ class _TestONNXRuntime:
         model = EmbeddingModel()
         x = torch.randint(7, (2, 3))
         w = torch.randn(2, 3)
-        self.run_test(model, (embedding_matrix, x, w))
+
+        x2 = torch.randint(7, (4, 3))
+        w2 = torch.randn(4, 3)
+        self.run_test(model, (embedding_matrix, x, w),
+                      input_names=['embed', 'x', 'w'], dynamic_axes={'x': [0], 'w': [0]},
+                      test_with_inputs=[(embedding_matrix, x2, w2)])
 
     @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -6614,24 +6655,28 @@ class _TestONNXRuntime:
         self.run_test(model, (x, batch1, batch2, alpha, beta))
 
     def test_numel(self):
-        class MyModule(torch.jit.ScriptModule):
-            @torch.jit.script_method
+        class MyModule(torch.nn.Module):
             def forward(self, input):
                 return input.numel() * input
 
         x = torch.randn(2, 3, 5)
+        x2 = torch.randn(4, 5, 6)
         model = MyModule()
-        self.run_test(model, (x,))
+        self.run_test(model, (x,),
+                      input_names=['x'], dynamic_axes={'x': [0, 1, 2]},
+                      test_with_inputs=[(x2,)])
 
     def test_numel_empty(self):
-        class MyModule(torch.jit.ScriptModule):
-            @torch.jit.script_method
+        class MyModule(torch.nn.Module):
             def forward(self, input):
                 return input.numel() * input
 
         x = torch.randn(0)
+        x2 = torch.randn(4)
         model = MyModule()
-        self.run_test(model, (x,))
+        self.run_test(model, (x,),
+                      input_names=['x'], dynamic_axes={'x': [0]},
+                      test_with_inputs=[(x2,)])
 
     def test_dtype(self):
         class MyModel(torch.jit.ScriptModule):
@@ -7821,6 +7866,28 @@ class _TestONNXRuntime:
         y = torch.rand(1, 3)
         self.run_test(ModelWithNan(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_minimum_dtypes(self):
+        class MinimumModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.minimum(x, y)
+
+        x = torch.randn((5, 5), dtype=torch.float16)
+        y = torch.randn((5, 5), dtype=torch.float)
+        self.run_test(MinimumModel(), (x, y))
+
+        x = torch.randn((5, 5), dtype=torch.float16)
+        y = torch.randint(10, (5, 5), dtype=torch.int16)
+        self.run_test(MinimumModel(), (x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int16)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(MinimumModel(), (x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int)
+        y = torch.full_like(x, True)
+        self.run_test(MinimumModel(), (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_any(self):
         class M(torch.nn.Module):
@@ -8570,6 +8637,19 @@ class _TestONNXRuntime:
 
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerTensorModel(), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_fake_quantize_per_tensor_dynamic_scale_zeropoint(self):
+        class FakeQuantizePerTensorModel(torch.nn.Module):
+            def forward(self, input, scale, zero_point):
+                quant_min = -128
+                quant_max = 127
+                return torch.fake_quantize_per_tensor_affine(input, scale, zero_point, quant_min, quant_max)
+
+        x = torch.randn(6, 4, 3, 3)
+        scale = torch.tensor(1. / 127)
+        zero_point = torch.tensor(0)
+        self.run_test(FakeQuantizePerTensorModel(), (x, scale, zero_point))
 
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_fake_quantize_per_channel(self):
