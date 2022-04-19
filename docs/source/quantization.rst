@@ -208,7 +208,7 @@ PyTorch provides two modes of quantization: Eager Mode Quantization and FX Graph
 
 Eager Mode Quantization is a beta feature. User needs to do fusion and specify where quantization and dequantization happens manually, also it only supports modules and not functionals.
 
-FX Graph Mode Quantization is a new automated quantization framework in PyTorch, and currently it's a prototype feature. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process, although people might need to refactor the model to make the model compatible with FX Graph Mode Quantization (symbolically traceable with ``torch.fx``). Note that FX Graph Mode Quantization is not expected to work on arbitrary models since the model might not be symbolically traceable, we will integrate it into domain libraries like torchvision and users will be able to quantize models similar to the ones in supported domain libraries with FX Graph Mode Quantization. For arbitrary models we'll provide general guidelines, but to actually make it work, users might need to be familiar with ``torch.fx``, especially on how to make a model symbolically traceable.
+FX Graph Mode Quantization is an automated quantization framework in PyTorch, and currently it's a prototype feature. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process, although people might need to refactor the model to make the model compatible with FX Graph Mode Quantization (symbolically traceable with ``torch.fx``). Note that FX Graph Mode Quantization is not expected to work on arbitrary models since the model might not be symbolically traceable, we will integrate it into domain libraries like torchvision and users will be able to quantize models similar to the ones in supported domain libraries with FX Graph Mode Quantization. For arbitrary models we'll provide general guidelines, but to actually make it work, users might need to be familiar with ``torch.fx``, especially on how to make a model symbolically traceable.
 
 New users of quantization are encouraged to try out FX Graph Mode Quantization first, if it does not work, user may try to follow the guideline of `using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide.html>`_ or fall back to eager mode quantization.
 
@@ -359,7 +359,7 @@ This is the simplest to apply form of quantization where the weights are
 quantized ahead of time but the activations are dynamically quantized
 during inference. This is used for situations where the model execution time
 is dominated by loading weights from memory rather than computing the matrix
-multiplications. This is true for for LSTM and Transformer type models with
+multiplications. This is true for LSTM and Transformer type models with
 small batch size.
 
 Diagram::
@@ -632,6 +632,18 @@ to do the following in addition:
 
 There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_dict` (an argument of the `prepare_fx` function).
 
+High Level API::
+.. image:: fx-graph-mode-flow.jpeg
+   :width: 100%
+
+Post Training Quantization Flow Example::
+.. image:: fx-graph-mode-flow-ptq-example.jpeg
+   :width: 100%
+
+Quantization Aware Training Flow Example::
+.. image:: fx-graph-mode-flow-qat-example.jpeg
+   :width: 100%           
+
 API Example::
 
   import torch.quantization.quantize_fx as quantize_fx
@@ -704,6 +716,17 @@ and supported quantized modules and functions.
     quantization-support
     torch.ao.ns._numeric_suite
     torch.ao.ns._numeric_suite_fx
+
+Quantization Backend Configuration
+----------------------------------
+
+The :doc:`Quantization Backend Configuration <quantization-backend-configuration>` contains documentation
+on how to configure the quantization workflows for various backends.
+
+.. toctree::
+    :hidden:
+
+    quantization-backend-configuration
 
 Quantization Customizations
 ---------------------------

@@ -417,7 +417,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     COMMAND
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
-      --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
@@ -597,6 +596,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_bytecode.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer_jit.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
@@ -793,6 +793,10 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
+if(HAS_WERROR_SIGN_COMPARE AND WERROR)
+  # target_compile_options(torch_cpu PRIVATE "-Werror=sign-compare")
+  set_property(SOURCE ${ATen_CORE_SRCS} ${ATen_CPU_SRCS} APPEND PROPERTY COMPILE_OPTIONS "-Werror=sign-compare")
+endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
@@ -970,59 +974,7 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_CUDA OR USE_ROCM)
-  if(BUILD_SPLIT_CUDA)
-    set(TORCHLIB_FLAVOR torch_cuda_cu) # chose torch_cuda_cu here since JIT is in torch_cuda_cpp
-  elseif(USE_CUDA)
-    set(TORCHLIB_FLAVOR torch_cuda)
-  elseif(USE_ROCM)
-    set(TORCHLIB_FLAVOR torch_hip)
-  endif()
-
-  # The list of NVFUSER runtime files
-  list(APPEND NVFUSER_RUNTIME_FILES
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_broadcast.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_sync.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/index_utils.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/welford.cu
-    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
-    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
-  )
-
-  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include/nvfuser_resources")
-
-  # "stringify" NVFUSER runtime sources
-  # (generate C++ header files embedding the original input as a string literal)
-  set(NVFUSER_STRINGIFY_TOOL "${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tools/stringify_file.py")
-  foreach(src ${NVFUSER_RUNTIME_FILES})
-    get_filename_component(filename ${src} NAME_WE)
-    set(dst "${CMAKE_BINARY_DIR}/include/nvfuser_resources/${filename}.h")
-    add_custom_command(
-      COMMENT "Stringify NVFUSER runtime source file"
-      OUTPUT ${dst}
-      DEPENDS ${src}
-      COMMAND ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst}
-    )
-    add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
-    add_dependencies(${TORCHLIB_FLAVOR} nvfuser_rt_${filename})
-
-    # also generate the resource headers during the configuration step
-    # (so tools like clang-tidy can run w/o requiring a real build)
-    execute_process(COMMAND
-      ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst})
-  endforeach()
-
-  target_include_directories(${TORCHLIB_FLAVOR} PRIVATE "${CMAKE_BINARY_DIR}/include")
+  include(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/nvfuser.cmake)
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
@@ -1991,6 +1943,8 @@ if(BUILD_PYTHON)
   # ---[ Python.
   if(BUILD_CAFFE2)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
+  target_compile_definitions(torch PRIVATE BUILD_CAFFE2)
+  target_compile_definitions(torch_python PRIVATE BUILD_CAFFE2)
   if(USE_NUMPY)
     target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
     target_link_libraries(caffe2_pybind11_state  PRIVATE numpy::numpy)

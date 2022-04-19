@@ -5,8 +5,11 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <torch/csrc/jit/codegen/cuda/vectorization_info.h>
 
 #include <memory>
 #include <unordered_map>
@@ -78,12 +81,31 @@ struct KernelSummary {
   //! Effective ParallelTypes of broadcast ops
   std::unordered_map<const BroadcastOp*, ParallelTypeBitmap>
       broadcast_parallel_types;
+
+  //! Track which tensor views are inputs or outputs of a vectorized operation
+  //! and their maximum vectorized access size
+  std::unordered_map<TensorView*, int> vectorized_accesses;
+
+  // Sync map is needed to figure out if global memory buffers need to be marked
+  // as volatile because they're used for communication.
+  SyncMap sync_map;
+
+  // Parallel dimension map needed to set the correct properties of grid buffers
+  // (is a dim inactive)
+  ParallelDimensionMap parallel_dimension_map_;
+
+  //! Track information on vectorized set operations for runtime validation
+  std::vector<VectorizedSetInfo> vectorized_set_info;
 };
+
+class KernelInternalProxy;
 
 //! Container for a lowered Kernel IR
 //!
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API Kernel final : public Fusion {
+  friend KernelInternalProxy;
+
  public:
   // Kernel starts by grabbing all the nodes from the provided fusion.
   // Kernel is not SSA, if a definition is not set, we should update it, but
@@ -91,7 +113,9 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   // we do something like generate an initialization statement for a reduction
   // TV, we may want to continue to do fusion like analysis on the original
   // expression.
-  Kernel(Fusion* fusion) : Fusion(*fusion) {}
+  // TODO: Assert index type is int or int32
+  Kernel(Fusion* fusion, DataType index_type = DataType::Int)
+      : Fusion(*fusion), index_type_(index_type) {}
 
   Kernel() = delete;
 
@@ -102,8 +126,7 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   //! Finalize a kernel definition
   //!
   //! At this point we have a complete kernel definition and we can
-  //! run analysis passes to build a KernelSummary
-  //!
+  //! run analysis passes to build a KernelSummary.
   void finalize(std::vector<Expr*> top_level_exprs);
 
   const std::vector<Expr*>& topLevelExprs() const {
@@ -112,6 +135,10 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
 
   const KernelSummary& summary() const {
     return summary_;
+  }
+
+  DataType indexType() const {
+    return index_type_;
   }
 
   //! Checks if parallel type is padded
@@ -140,14 +167,30 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   // Analyze the kernel IR and caches the summary of interesting data
   void analyze();
 
- private:
   // Top level statements
   std::vector<Expr*> top_level_exprs_;
 
   // Summary of interesting kernel data
   KernelSummary summary_;
 
+  // Is this kernel being compiled with int32 or int64 indexing. This
+  // information is required to resolve DataType::Index
+  DataType index_type_ = DataType::Int;
+
   WarpPaddedParallelInfo warp_padded_parallel_info_;
+};
+
+//! A special debugging proxy for Kernel.
+//!
+//! Should not be used for other than testing and debugging.
+class TORCH_CUDA_CU_API KernelInternalProxy {
+ public:
+  KernelInternalProxy(Kernel* kernel) : kernel_(kernel) {}
+
+  std::vector<Expr*>& topLevelExprs();
+
+ private:
+  Kernel* kernel_ = nullptr;
 };
 
 } // namespace kir
