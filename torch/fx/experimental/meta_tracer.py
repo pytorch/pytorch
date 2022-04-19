@@ -2,6 +2,7 @@ import torch
 import torch.fx
 import warnings
 import functools
+import builtins
 
 from typing import Dict
 
@@ -17,10 +18,28 @@ def torch_relu_override(x):
     return x
 
 
+def functional_relu_override(x, inplace=False):
+    assert not inplace, 'dont support inplace functional.relu for metatensor analysis'
+    return x
+
+
+def torch_where_override(condition, x, y):
+    # torch.where returns the broadcasted tensor of condition, x, and y,
+    # so hack it by using addition
+    return condition.to(device='meta') + x.to(device='meta') + y.to(device='meta')
+
+
+def torch_abs_override(input, *, out=None):
+    assert out is None, 'Dont support in-place abs for MetaTensor analysis'
+    return input
+
 manual_meta_overrides = {
     torch.nn.Embedding: embedding_override,
     torch.nn.LayerNorm: nn_layernorm_override,
     torch.relu: torch_relu_override,
+    torch.nn.functional.relu: functional_relu_override,
+    torch.where: torch_where_override,
+    torch.abs: torch_abs_override,
 }
 
 def gen_constructor_wrapper(target):
@@ -59,7 +78,19 @@ class MetaProxy(torch.fx.Proxy):
     def shape(self):
         if hasattr(self, '_tensor_meta') and self._tensor_meta is not None:
             return self._tensor_meta.shape
-        return self.tracer.create_proxy('call_method', 'size', (self,), {})
+        return self.tracer.create_proxy('call_function', builtins.getattr, (self, 'shape'), {})
+
+    @property
+    def dtype(self):
+        if hasattr(self, '_tensor_meta') and self._tensor_meta is not None:
+            return self._tensor_meta.dtype
+        return self.tracer.create_proxy('call_function', builtins.getattr, (self, 'dtype'), {})
+
+    @property
+    def device(self):
+        # Hack so we can track when devices are used. During meta-tensor propagation,
+        # replace these values with a constant 'meta'
+        return MetaDeviceAttribute(self, 'device')
 
     def __getattr__(self, k):
         if k == '_tensor_meta':
@@ -87,7 +118,12 @@ class MetaAttribute(MetaProxy):
     def __call__(self, *args, **kwargs):
         return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
 
+class MetaDeviceAttribute(MetaAttribute):
+    pass
+
 def proxys_to_metas(v):
+    if isinstance(v, MetaDeviceAttribute):
+        return 'meta'
     if isinstance(v, torch.fx.Proxy):
         assert isinstance(v, MetaProxy), f'Expected MetaProxy but got {type(v)}'
         assert hasattr(v, '_tensor_meta'), 'MetaProxy does not have an associated meta'
@@ -136,8 +172,18 @@ class MetaTracer(torch.fx.Tracer):
                         meta_out = self.orig_forward(*args_metas, **kwargs_metas)
                 finally:
                     self._disable_module_getattr = False
+            elif kind == 'get_attr':
+                self._disable_module_getattr = True
+                try:
+                    attr_itr = self.root
+                    atoms = target.split('.')
+                    for atom in atoms:
+                        attr_itr = getattr(attr_itr, atom)
+                    assert isinstance(attr_itr, torch.Tensor)
+                    meta_out = attr_itr.to(device='meta')
+                finally:
+                    self._disable_module_getattr = False
             else:
-                assert kind in ['placeholder'], f'Unsupported node kind {kind}'
                 return rv
 
             # TODO
