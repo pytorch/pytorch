@@ -5,6 +5,7 @@
          ".jenkins/caffe2/*",
          "docs/source/onnx.rst",
          "test/onnx/**",
+         "test/jit/test_export_modes.py",
          "tools/onnx/**",
          "torch/_C/__init__.pyi.in",
          "torch/csrc/jit/passes/onnx.*",
