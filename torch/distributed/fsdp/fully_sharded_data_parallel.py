@@ -266,9 +266,6 @@ class _ExecOrderData():
             only issue warnings throughout the first deviating iteration and no
             longer check thereafter; this tracks the warning status.
     """
-    # Save in the constructor when `root_module.parameters()` is guaranteed to
-    # only consist of `FlatParameter`s to avoid `.parameters()` being dependent
-    # on the calling context
     _all_flat_params: List[FlatParameter] = []
     param_to_unflat_param_names: Dict[FlatParameter, List[str]] = []
     # Modified in the first iteration:
@@ -281,6 +278,9 @@ class _ExecOrderData():
     def init(self, root_module: "FullyShardedDataParallel"):
         assert root_module._is_root, "This data structure should only be " \
             "initialized on an FSDP root module"
+        # Save `_all_flat_params` instead of materializing
+        # `root_modules.parameters()` each time to avoid the result depending
+        # on the calling context (e.g. some parameters may be rebuilt)
         self._all_flat_params = list(root_module.parameters())
         self.param_to_unflat_param_names = cast(
             Dict[FlatParameter, List[str]],
