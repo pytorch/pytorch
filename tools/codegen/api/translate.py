@@ -1,12 +1,32 @@
 from typing import Dict, Sequence, List, NoReturn, Union
-from tools.codegen.api.types import (ListCType, BaseCType, Binding, ConstRefCType,
-                                     Expr, MutRefCType, OptionalCType,
-                                     NamedCType, SpecialArgName, tensorT,
-                                     memoryFormatT, tensorOptionsT, scalarTypeT,
-                                     boolT, deviceT, layoutT, optionalTensorRefT,
-                                     iOptTensorListRefT, scalarT, optionalScalarRefT,
-                                     VectorCType, longT, intArrayRefT,
-                                     scalar_t, opmath_t, optionalIntArrayRefT)
+from tools.codegen.api.types import (
+    ListCType,
+    BaseCType,
+    Binding,
+    ConstRefCType,
+    Expr,
+    MutRefCType,
+    OptionalCType,
+    NamedCType,
+    SpecialArgName,
+    tensorT,
+    memoryFormatT,
+    tensorOptionsT,
+    scalarTypeT,
+    boolT,
+    deviceT,
+    layoutT,
+    optionalTensorRefT,
+    iOptTensorListRefT,
+    scalarT,
+    optionalScalarRefT,
+    VectorCType,
+    longT,
+    intArrayRefT,
+    scalar_t,
+    opmath_t,
+    optionalIntArrayRefT,
+)
 
 # This file implements a small program synthesis engine that implements
 # conversions between one API to another.
@@ -43,8 +63,10 @@ optionalLongVec_ctype = OptionalCType(VectorCType(BaseCType(longT)))
 optionalScalar_ctype = OptionalCType(BaseCType(scalarT))
 optionalTensor_ctype = OptionalCType(BaseCType(tensorT))
 
+
 class UnsatError(RuntimeError):
     pass
+
 
 # Given a set of in-scope bindings and a set of target bindings, synthesize
 # a list of expressions that uses only the in-scope bindings (bindings) that
@@ -66,17 +88,20 @@ class UnsatError(RuntimeError):
 def translate(
     bindings: Sequence[Union[Expr, Binding]],
     goals: Sequence[Union[NamedCType, Binding]],
-    *, method: bool = False,
-    allow_expensive_conversions: bool = False
+    *,
+    method: bool = False,
+    allow_expensive_conversions: bool = False,
 ) -> List[Expr]:
 
     binding_exprs: List[Expr] = []
     for b in bindings:
         if isinstance(b, Binding):
-            binding_exprs.append(Expr(
-                expr=b.name,
-                type=b.nctype,
-            ))
+            binding_exprs.append(
+                Expr(
+                    expr=b.name,
+                    type=b.nctype,
+                )
+            )
         else:
             binding_exprs.append(b)
 
@@ -123,39 +148,57 @@ def translate(
         # to matter in practice as compiler is often unwilling to CSE nontrivial
         # expressions like scalar.to<scalar_t>()
         t = b.type
-        if isinstance(t, ConstRefCType) and isinstance(t.elem, OptionalCType) and \
-                isinstance(t.elem.elem, BaseCType) and str(t.elem.elem.type) == 'at::Tensor':
-            ctx[NamedCType(t.elem.elem.name, ConstRefCType(BaseCType(tensorT)))] = \
-                f'({b.expr}.has_value() ? *{b.expr} : at::Tensor())'
+        if (
+            isinstance(t, ConstRefCType)
+            and isinstance(t.elem, OptionalCType)
+            and isinstance(t.elem.elem, BaseCType)
+            and str(t.elem.elem.type) == "at::Tensor"
+        ):
+            ctx[
+                NamedCType(t.elem.elem.name, ConstRefCType(BaseCType(tensorT)))
+            ] = f"({b.expr}.has_value() ? *{b.expr} : at::Tensor())"
 
         if t.type == ConstRefCType(OptionalCType(BaseCType(tensorT))):
-            ctx[NamedCType(t.name, BaseCType(optionalTensorRefT))] = \
-                f'(({b.expr}.has_value() && (*{b.expr}).defined()) ? at::OptionalTensorRef(*{b.expr}) : at::OptionalTensorRef())'
+            ctx[
+                NamedCType(t.name, BaseCType(optionalTensorRefT))
+            ] = f"(({b.expr}.has_value() && (*{b.expr}).defined()) ? at::OptionalTensorRef(*{b.expr}) : at::OptionalTensorRef())"
 
         if t.type == ConstRefCType(BaseCType(scalarT)):
-            ctx[NamedCType(t.name, BaseCType(opmath_t))] = f'({b.expr}).to<opmath_t>()'
+            ctx[NamedCType(t.name, BaseCType(opmath_t))] = f"({b.expr}).to<opmath_t>()"
 
         if t.type == ConstRefCType(OptionalCType(BaseCType(scalarT))):
-            ctx[NamedCType(t.name, BaseCType(optionalScalarRefT))] = \
-                f'({b.expr}.has_value() ? at::OptionalScalarRef(&({b.expr}.value())) : at::OptionalScalarRef())'
+            ctx[
+                NamedCType(t.name, BaseCType(optionalScalarRefT))
+            ] = f"({b.expr}.has_value() ? at::OptionalScalarRef(&({b.expr}.value())) : at::OptionalScalarRef())"
 
         if t.type == BaseCType(scalar_t):
-            ctx[NamedCType(t.name, BaseCType(opmath_t))] = f'static_cast<opmath_t>({b.expr})'
+            ctx[
+                NamedCType(t.name, BaseCType(opmath_t))
+            ] = f"static_cast<opmath_t>({b.expr})"
 
         # [Note: IOptTensorListRef]
         if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):
-            ctx[NamedCType(t.name, BaseCType(iOptTensorListRefT))] = f"at::IOptTensorListRef({b.expr})"
+            ctx[
+                NamedCType(t.name, BaseCType(iOptTensorListRefT))
+            ] = f"at::IOptTensorListRef({b.expr})"
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
-        ctx[NamedCType("self", MutRefCType(BaseCType(tensorT)))] = "const_cast<Tensor&>(*this)"
-        ctx[NamedCType("self", ConstRefCType(BaseCType(tensorT)))] = "const_cast<Tensor&>(*this)"
+        ctx[
+            NamedCType("self", MutRefCType(BaseCType(tensorT)))
+        ] = "const_cast<Tensor&>(*this)"
+        ctx[
+            NamedCType("self", ConstRefCType(BaseCType(tensorT)))
+        ] = "const_cast<Tensor&>(*this)"
         # This is better!  Byte-for-byte compat
         # ctx[NamedCType("self", ConstRefCType(BaseCType(tensorT)))] = "*this"
 
     def unsat(goal: NamedCType) -> NoReturn:
-        ctx_desc = '\n'.join(f"  {t.cpp_type()} {t.name}; // {e}" for t, e in ctx.items())
-        raise UnsatError(f'''
+        ctx_desc = "\n".join(
+            f"  {t.cpp_type()} {t.name}; // {e}" for t, e in ctx.items()
+        )
+        raise UnsatError(
+            f"""
 Failed to synthesize the expression "{goal.cpp_type()} {goal.name}".
 When I failed, the following bindings were available in the context:
 
@@ -163,7 +206,8 @@ When I failed, the following bindings were available in the context:
 
 This probably means there is a missing rule in the rules of tools.codegen.api.translate.
 Check this module for more information.
-''')
+"""
+        )
 
     # A shitty backtracking search implementation.  It's shitty because it
     # does backtracking via stack (bad idea!) and for the most part tries to
@@ -186,7 +230,9 @@ Check this module for more information.
                 # WARNING: not strictly decreasing; be careful not
                 # to add a direct conversion that goes satisfies
                 # mutable& with const&
-                return solve(NamedCType(goal.name, MutRefCType(goal.type.elem)), direct=direct)
+                return solve(
+                    NamedCType(goal.name, MutRefCType(goal.type.elem)), direct=direct
+                )
             except UnsatError:
                 pass
 
@@ -203,7 +249,10 @@ Check this module for more information.
         # For now, all of these rules are mutually exclusive.
         if goal == NamedCType("memory_format", OptionalCType(BaseCType(memoryFormatT))):
             memory_format = direct_solve(
-                NamedCType(SpecialArgName.possibly_redundant_memory_format, OptionalCType(BaseCType(memoryFormatT)))
+                NamedCType(
+                    SpecialArgName.possibly_redundant_memory_format,
+                    OptionalCType(BaseCType(memoryFormatT)),
+                )
             )
             # No need to join "memory_format" and "options" if the target API takes "options" directly.
             # Otherwise it will cause the redundant memory_format error.
@@ -215,27 +264,35 @@ Check this module for more information.
             except UnsatError:
                 return memory_format
         elif goal == NamedCType("options", BaseCType(tensorOptionsT)):
-            dtype = direct_solve(NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT))))
-            pin_memory = direct_solve(NamedCType("pin_memory", OptionalCType(BaseCType(boolT))))
-            device = direct_solve(NamedCType("device", OptionalCType(BaseCType(deviceT))))
-            layout = direct_solve(NamedCType("layout", OptionalCType(BaseCType(layoutT))))
-            return f'TensorOptions().dtype({dtype}).layout({layout}).device({device}).pinned_memory({pin_memory})'
+            dtype = direct_solve(
+                NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT)))
+            )
+            pin_memory = direct_solve(
+                NamedCType("pin_memory", OptionalCType(BaseCType(boolT)))
+            )
+            device = direct_solve(
+                NamedCType("device", OptionalCType(BaseCType(deviceT)))
+            )
+            layout = direct_solve(
+                NamedCType("layout", OptionalCType(BaseCType(layoutT)))
+            )
+            return f"TensorOptions().dtype({dtype}).layout({layout}).device({device}).pinned_memory({pin_memory})"
 
         elif goal == NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT))):
             options = direct_solve(options_ctype)
-            return f'optTypeMetaToScalarType({options}.dtype_opt())'
+            return f"optTypeMetaToScalarType({options}.dtype_opt())"
 
         elif goal == NamedCType("layout", OptionalCType(BaseCType(layoutT))):
             options = direct_solve(options_ctype)
-            return f'{options}.layout_opt()'
+            return f"{options}.layout_opt()"
 
         elif goal == NamedCType("device", OptionalCType(BaseCType(deviceT))):
             options = direct_solve(options_ctype)
-            return f'{options}.device_opt()'
+            return f"{options}.device_opt()"
 
         elif goal == NamedCType("pin_memory", OptionalCType(BaseCType(boolT))):
             options = direct_solve(options_ctype)
-            return f'{options}.pinned_memory_opt()'
+            return f"{options}.pinned_memory_opt()"
 
         # We can always do translations from value types to reference types, like vector<int> -> IntArrayRef
         elif goal.type == BaseCType(intArrayRefT):
@@ -246,7 +303,6 @@ Check this module for more information.
             return direct_solve(NamedCType(goal.name, optionalScalar_ctype))
         elif goal.type == BaseCType(optionalTensorRefT):
             return direct_solve(NamedCType(goal.name, optionalTensor_ctype))
-
 
         # Note [translation from C++ reference to value types]
         # The below cases are all for when we have an argument with a reference type,
@@ -260,19 +316,25 @@ Check this module for more information.
             if goal.type == VectorCType(BaseCType(longT)):
                 intArrayRef_ctype = NamedCType(goal.name, BaseCType(intArrayRefT))
                 argname = direct_solve(intArrayRef_ctype)
-                return f'{argname}.vec()'
+                return f"{argname}.vec()"
             elif goal.type == OptionalCType(VectorCType(BaseCType(longT))):
-                optionalIntArrayRef_ctype = NamedCType(goal.name, BaseCType(optionalIntArrayRefT))
+                optionalIntArrayRef_ctype = NamedCType(
+                    goal.name, BaseCType(optionalIntArrayRefT)
+                )
                 argname = direct_solve(optionalIntArrayRef_ctype)
-                return f'{argname}.has_value() ? c10::make_optional({argname}->vec()) : c10::nullopt'
+                return f"{argname}.has_value() ? c10::make_optional({argname}->vec()) : c10::nullopt"
             elif goal.type == OptionalCType(BaseCType(scalarT)):
-                optionalScalarRef_ctype = NamedCType(goal.name, BaseCType(optionalScalarRefT))
+                optionalScalarRef_ctype = NamedCType(
+                    goal.name, BaseCType(optionalScalarRefT)
+                )
                 argname = direct_solve(optionalScalarRef_ctype)
-                return f'{argname}.has_value() ? c10::make_optional({argname}) : c10::nullopt'
+                return f"{argname}.has_value() ? c10::make_optional({argname}) : c10::nullopt"
             elif goal.type == OptionalCType(BaseCType(scalarT)):
-                optionalTensorRef_ctype = NamedCType(goal.name, BaseCType(optionalTensorRefT))
+                optionalTensorRef_ctype = NamedCType(
+                    goal.name, BaseCType(optionalTensorRefT)
+                )
                 argname = direct_solve(optionalTensorRef_ctype)
-                return f'{argname}.has_value() ? c10::make_optional({argname}) : c10::nullopt'
+                return f"{argname}.has_value() ? c10::make_optional({argname}) : c10::nullopt"
             # Technically, we also need to handle cases of C++ containers holding reference types.
             # But there currently aren't any ops that require lambda capture codegen
             # With arguments like std::vector<IntArrayRef>.
