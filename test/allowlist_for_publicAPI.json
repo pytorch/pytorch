@@ -3063,7 +3063,9 @@
     "_linalg_svd",
     "_linalg_svd_out",
     "_lu_with_info",
-    "_unpack_dual"
+    "_unpack_dual",
+    "attr",
+    "pytree_register_structseq"
   ],
   "torch.serialization": [
     "Any",
