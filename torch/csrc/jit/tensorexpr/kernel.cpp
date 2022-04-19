@@ -1281,6 +1281,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   }
   auto const_tensor = toIValue(v)->toTensor();
   auto scalar_type = c10::typeMetaToScalarType(const_tensor.options().dtype());
+  const auto& tt = v->type()->expect<TensorType>();
   auto sizes = const_tensor.sizes();
   std::vector<ExprHandle> te_sizes;
   te_sizes.reserve(sizes.size());
