@@ -7816,16 +7816,24 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_binary_cross_entropy_with_logits(
     op_info, device, dtype, requires_grad, **kwargs
 ):
-    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
-    for input, target, base_dict in _generate_sample_inputs_nn_loss(
-        op_info, device, dtype, requires_grad, **kwargs
-    ):
-        weight_lst = [None, random.uniform(-9, 9)]
-        pos_weight_lst = [None, random.uniform(-9, 9)]
-        for weight, pos_weight in product(weight_lst, pos_weight_lst):
-            base_dict["weight"] = _make_tensor(input.shape)
-            base_dict["pos_weight"] = _make_tensor(1, low=0)
-            yield SampleInput(input, args=(target,), kwargs=base_dict)
+    make = partial(make_tensor, device=device, dtype=dtype)
+    make_prob = partial(make, low=0, high=1)
+
+    reductions = ("mean", "sum", "none")
+
+    shapes_and_kwargs = [
+        *[(shape, None) for shape in ((), (1,), (S,), (S, S), (S, S, S))],
+        *[((S, S), dict(reduction=reduction)) for reduction in reductions],
+        *[((S, S), dict(reduction=reduction, weight=make((S, S)))) for reduction in reductions],
+        *[((S, S), dict(reduction=reduction, pos_weight=make((S,), low=0))) for reduction in reductions]
+    ]
+
+    for shape, kwargs in shapes_and_kwargs:
+        yield SampleInput(
+            make(shape, requires_grad=requires_grad),
+            args=(make_prob(shape, requires_grad=requires_grad),),
+            kwargs=kwargs,
+        )
 
 def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(torch.tensor([1, 0, 2, 0], dtype=dtype, device=device, requires_grad=requires_grad))
@@ -11567,43 +11575,6 @@ op_db: List[OpInfo] = [
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         sample_inputs_func=sample_inputs_binary_cross_entropy_with_logits,
         skips=(
-            # RuntimeError: expected int at position 0, but got: Tensor
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_correctness",
-            ),
-            # RuntimeError: expected int at position 0, but got: Tensor
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestNNCOpInfo",
-                "test_nc_correctness",
-            ),
-            # The Weight tensor requires_grad = False
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_floating_inputs_are_differentiable",
-                dtypes=(torch.float32,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                'TestCompositeCompliance',
-                'test_forward_ad'),
-            # Pos Weight is required to be positve
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestMathBits",
-                "test_neg_view",
-                dtypes=(torch.float64,)
-            ),
-            # Test Gradient failures CI
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestGradients",
-                "test_neg_view",
-                dtypes=(torch.float64,)
-            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 'TestJit',
