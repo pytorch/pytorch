@@ -48,7 +48,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
-  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
+  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then

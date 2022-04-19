@@ -814,15 +814,15 @@ meta_exclude_set = {
     torch.Tensor.tolist, torch.Tensor.unbind, torch.Tensor.__repr__,
     torch.Tensor.__deepcopy__, torch.Tensor.to, torch.Tensor.add_,
     torch.Tensor.__getitem__, torch.Tensor.__setitem__, torch.Tensor.mul,
-    torch.Tensor.dtype, torch.Tensor.numpy, torch.Tensor.cpu,
-    torch.Tensor.layout, torch.Tensor.__bool__, torch.Tensor.dtype,
-    torch.Tensor.requires_grad, torch.Tensor.shape, torch.Tensor.is_complex,
+    torch.Tensor.dtype.__get__, torch.Tensor.numpy, torch.Tensor.cpu,
+    torch.Tensor.layout.__get__, torch.Tensor.__bool__, torch.Tensor.dtype.__get__,
+    torch.Tensor.requires_grad.__get__, torch.Tensor.shape.__get__, torch.Tensor.is_complex,
     torch.Tensor.add, torch.Tensor.requires_grad_, torch.Tensor.clone,
-    torch.Tensor.numel, torch.Tensor.device, torch.Tensor.grad,
+    torch.Tensor.numel, torch.Tensor.device.__get__, torch.Tensor.grad.__get__,
     torch.Tensor.copy_, torch.Tensor.reshape, torch.Tensor.size,
     torch.Tensor.sub, torch.Tensor.gt, torch.Tensor.lt,
     torch.Tensor.is_floating_point, torch.Tensor.detach, torch.rand,
-    torch.Tensor.sum, torch.Tensor.__format__, torch.Tensor.is_sparse,
+    torch.Tensor.sum, torch.Tensor.__format__, torch.Tensor.is_sparse.__get__,
     torch.Tensor.div, torch.Tensor.__rsub__, torch.Tensor.item,
     # These need to get implemented and are excluded for now
     torch.Tensor.__contains__,
@@ -872,11 +872,10 @@ meta_exclude_set = {
     torch.Tensor.unfold,
     torch.Tensor.var,
     torch._VF.unique_dim,
-    torch.var_mean,
-    torch.add,  # this one is weird, it should work...
     torch._assert_async,
     torch._unique,
     torch._unique2,
+    torch.add,  # this one is weird, it should work...
     torch.allclose,
     torch.bernoulli,
     torch.bincount,
@@ -913,7 +912,6 @@ meta_exclude_set = {
     torch.multinomial,
     torch.nan_to_num,
     torch.nanmedian,
-    torch.symeig,
     torch.nn.functional.adaptive_avg_pool2d,
     torch.nn.functional.adaptive_avg_pool3d,
     torch.nn.functional.batch_norm,
@@ -940,10 +938,12 @@ meta_exclude_set = {
     torch.searchsorted,
     torch.sort,
     torch.std,
+    torch.symeig,
     torch.take,
     torch.tensor,
     torch.threshold,
     torch.var,
+    torch.var_mean,
     torch.view_as_complex,
     torch.view_as_real,
     torch.where,
@@ -983,16 +983,6 @@ meta_exclude_set = {
     # TODO: sparse
     torch.sparse_coo_tensor,
 }
-
-skipped = set()
-
-import torch._namer as namer
-def print_skipped():
-    for s in skipped:
-        print(f"{namer.resolve_func(s)},")
-
-import atexit
-atexit.register(print_skipped)
 
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -1039,7 +1029,6 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                     f"failed to convert args to meta; "
                     f"originally (*{args}, **{kwargs})") from e
 
-        # print(func)
         r = func(*args, **kwargs)
 
         # TODO: also handle cases where func raise an exception
@@ -1051,8 +1040,6 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                     warnings.simplefilter("ignore")
                     meta_r = func(*meta_args, **meta_kwargs)
             except NotImplementedError:
-                skipped.add(func)
-                # print(func)
                 pass
             except Exception as e:
                 raise RuntimeError(f"""\
@@ -3207,7 +3194,7 @@ def gradcheck(fn, inputs, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -3227,7 +3214,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
