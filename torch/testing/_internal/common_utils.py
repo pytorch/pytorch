@@ -986,7 +986,7 @@ meta_exclude_set = {
 
 skipped = set()
 
-import namer
+import torch._namer as namer
 def print_skipped():
     for s in skipped:
         print(f"{namer.resolve_func(s)},")

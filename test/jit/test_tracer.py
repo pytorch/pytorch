@@ -17,7 +17,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import suppress_warnings, \
     skipIfCompiledWithoutNumpy, enable_profiling_mode_for_profiling_tests, \
-    IS_SANDCASTLE, TemporaryFileName
+    IS_SANDCASTLE, TemporaryFileName, skipIfCrossRef
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
     _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, \
     RUN_CUDA_MULTI_GPU, make_global
@@ -1779,6 +1779,8 @@ class TestTracer(JitTestCase):
 
         torch.jit.trace(Mod(), (torch.rand(3, 4),))
 
+    # torch function interposition thwarts frame analysis
+    @skipIfCrossRef
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3
