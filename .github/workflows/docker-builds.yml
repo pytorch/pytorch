@@ -52,7 +52,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required for git merge-base
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@clee2000/testing-back-to-fetch-depth-0
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
