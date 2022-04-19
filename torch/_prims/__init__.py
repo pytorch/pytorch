@@ -112,7 +112,13 @@ __all__ = [
 # Common datastructures and helpers
 #
 
-
+# Describes the return type of the primitive:
+#
+#   - NEW, a new tensor is created
+#   - VIEW, a view of an input tensor is returned
+#   - INPLACE, one or more input tensors is modified
+#
+# these descriptors are mututally exclusive and exhaustive.
 class RETURN_TYPE(Enum):
     NEW = (0,)
     VIEW = (1,)
@@ -122,10 +128,25 @@ class RETURN_TYPE(Enum):
 def _make_prim(
     *, meta: Callable, impl_aten: Callable, return_type: RETURN_TYPE, doc: str
 ):
-    """ """
+    """
+    Creates a primitive operation.
+
+    """
 
     def _prim(*args, **kwargs):
-        meta(*args, **kwargs)
+        # TODO: refactor this to not incur such a latency hit
+        return_meta = False
+        for arg in args:
+            if isinstance(arg, TensorMeta):
+                return_meta = True
+        for v in kwargs.values():
+            if isinstance(v, TensorMeta):
+                return_meta = True
+        meta_result = meta(*args, **kwargs)
+
+        if return_meta:
+            return meta_result
+
         return impl_aten(*args, **kwargs)
 
     _prim.__doc__ = doc
@@ -136,6 +157,12 @@ def _make_prim(
 
 
 def _elementwise_meta(*args):
+    """
+    Meta function for elementwise operations.
+
+    Stride logic is currently incorrect.
+    """
+
     assert len(args) > 0
 
     utils.check_same_device(*args, allow_scalars=True)
@@ -157,18 +184,27 @@ def _elementwise_meta(*args):
                 return TensorMeta(
                     arg, strides=utils.make_contiguous_strides_for(arg.shape)
                 )
-        if isinstance(arg, Number):
+        elif isinstance(arg, Number):
             if number is None:
                 number = arg
 
+    # TODO: fix strides
     if tensor is not None:
-        return TensorMeta(tensor)
+        if 0 in tensor.stride() and tensor.numel() > 0:
+            return TensorMeta(
+                tensor, strides=utils.make_contiguous_strides_for(tensor.shape)
+            )
+        else:
+            return TensorMeta(tensor)
 
     return TensorMeta(number)
 
 
 def _make_elementwise_unary_prim(impl_aten: Callable, doc: str):
-    """ """
+    """
+    Creates an elementwise unary prim.
+    """
+
     return _make_prim(
         meta=_elementwise_meta,
         impl_aten=impl_aten,
@@ -178,7 +214,10 @@ def _make_elementwise_unary_prim(impl_aten: Callable, doc: str):
 
 
 def _make_elementwise_binary_prim(impl_aten: Callable, doc: str):
-    """ """
+    """
+    Creates an elementwise binary prim.
+    """
+
     return _make_prim(
         meta=_elementwise_meta,
         impl_aten=impl_aten,
@@ -405,7 +444,8 @@ bitwise_xor = _make_elementwise_binary_prim(
 #   doc="",
 # )
 
-# div prim performs truncation division on integers
+# div prim performs truncation division on integer inputs
+#   and true division for floating and complex inputs
 def _div(a, b):
     if isinstance(a, (bool, int)):
         return torch.div(a, b, rounding_mode="trunc")
@@ -494,9 +534,9 @@ sub = _make_elementwise_binary_prim(
     doc="",
 )
 
+#
 # View operations
-
-
+#
 def _broadcast_in_dim_meta(
     a: TensorLike, shape: Sequence[int], broadcast_dimensions: Sequence[int]
 ):
@@ -533,7 +573,8 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
-        new_strides.append(1)
+        else:
+            new_strides.append(0)
 
     return TensorMeta(a, shape=shape, strides=new_strides)
 
@@ -738,6 +779,7 @@ def collapse(a: Tensor, start: int, end: int) -> Tensor:
     return reshape(a, new_shape)
 
 
+# TODO: review stride logic
 def _concatenate_meta(tensors: Sequence, dim: int) -> TensorLike:
     assert len(tensors) > 0
 
@@ -776,7 +818,6 @@ _concatenate_doc = """
   The tensors' shapes must have the same rank and same length for other dimensions.
   """
 
-# TODO: review stride logic
 concatenate = _make_prim(
     meta=_concatenate_meta,
     impl_aten=_concatenate_aten,
@@ -804,7 +845,6 @@ _reshape_doc = """
   Creates a contiguous tensor with the specified shape
   containing a copy of the data in a.
   """
-
 reshape = _make_prim(
     meta=_reshape_meta,
     impl_aten=_reshape_aten,
@@ -843,14 +883,6 @@ select = _make_prim(
     doc=_select_doc,
 )
 
-
-def select(pred: Tensor, a: Tensor, b: Tensor) -> Tensor:
-    """ """
-
-    _select_meta(pred, a, b)
-    return _select_aten(pred, a, b)
-
-
 #
 # Type conversions
 #
@@ -858,7 +890,7 @@ def select(pred: Tensor, a: Tensor, b: Tensor) -> Tensor:
 
 def _convert_element_type_meta(a: TensorLike, dtype: torch.dtype) -> TensorLike:
     # Type checks
-    assert isinstance(a, Tensor)
+    assert isinstance(a, TensorLike)
     assert isinstance(dtype, torch.dtype)
 
     return TensorMeta(a, dtype=dtype)
@@ -956,7 +988,7 @@ def _resize_aten(a: Tensor, shape: Sequence) -> Tensor:
 _resize_doc = """
   Gives a tensor with no elements a new shape, returning the modified tensor.
 
-  The tensor's strides are contiguous. The tensor's values are unitialized.
+  The tensor's strides are contiguous and its values are unitialized.
   """
 
 # TODO: review support arbitrary resizes

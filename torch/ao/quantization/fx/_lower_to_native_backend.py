@@ -823,7 +823,8 @@ def special_pattern_replacement(model: QuantizedGraphModule):
     for n in model.graph.nodes:
         q_node = n
         is_quantize = q_node.target == torch.quantize_per_tensor
-        is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16
+        is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and \
+            len(q_node.args) == 2 and q_node.args[1] == torch.float16
         if not (is_quantize or is_to_fp16):
             continue
         ref_node = q_node.args[0]

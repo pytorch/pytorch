@@ -3,11 +3,15 @@ from torch._C import _add_docstr  # type: ignore[attr-defined]
 
 import torch._prims as prims
 import torch._prims.utils as utils
+from torch._prims import TensorLike as TensorLike
 
 from functools import reduce
 from enum import Enum
 from numbers import Number, Complex
 from typing import Sequence, Optional, Union, Callable
+
+# Experimental module containing prototype Python references for existing
+#   PyTorch operations.
 
 all = [
     #
@@ -125,7 +129,7 @@ def _elementwise_dtypes(*_args, type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND)
 
     # Type checking
     for arg in args:
-        assert isinstance(arg, (Number, Tensor))
+        assert isinstance(arg, (Number, TensorLike))
 
     # Determines datatypes for each category
     scalar_args = filter(lambda x: isinstance(x, Number), args)
@@ -133,13 +137,15 @@ def _elementwise_dtypes(*_args, type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND)
         lambda acc, x: utils.get_higher_type(acc, type(x)), scalar_args, bool
     )
 
-    scalar_tensors = filter(lambda t: isinstance(t, Tensor) and t.ndim == 0, args)
+    scalar_tensors = filter(lambda t: isinstance(t, TensorLike) and t.ndim == 0, args)
     scalar_tensor_dtype = reduce(
         utils.get_higher_dtype, (t.dtype for t in scalar_tensors), torch.bool
     )
     scalar_tensor_type = utils.dtype_to_type(scalar_tensor_dtype)
 
-    nonscalar_tensors = filter(lambda t: isinstance(t, Tensor) and t.ndim != 0, args)
+    nonscalar_tensors = filter(
+        lambda t: isinstance(t, TensorLike) and t.ndim != 0, args
+    )
     nonscalar_tensor_dtype = reduce(
         utils.get_higher_dtype, (t.dtype for t in nonscalar_tensors), torch.bool
     )
@@ -222,7 +228,7 @@ def _broadcast_shapes(*_shapes):
 def broadcast(*args):
     # Computes common shape
     common_shape = _broadcast_shapes(
-        *map(lambda t: t.shape if isinstance(t, Tensor) else None, args)
+        *map(lambda t: t.shape if isinstance(t, TensorLike) else None, args)
     )
 
     def _maybe_broadcast(x, shape):
@@ -230,7 +236,7 @@ def broadcast(*args):
             return None
         elif isinstance(x, Number):
             return x
-        elif isinstance(x, Tensor):
+        elif isinstance(x, TensorLike):
             common_rank = len(common_shape) + 1
             start = common_rank - (len(x.shape) + 1)
             dims = tuple(range(start, len(x.shape) + start))
@@ -246,7 +252,7 @@ def broadcast(*args):
 # TODO: implement ref with safe casting
 def _convert_dtype(*args, dtype: torch.dtype):
     def _convert(x):
-        if isinstance(x, Tensor):
+        if isinstance(x, TensorLike):
             return prims.convert_element_type(x, dtype)
         elif isinstance(x, Number):
             typ = utils.dtype_to_type(dtype)
@@ -268,9 +274,9 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Cal
     def _ref(
         a: Union[Tensor, Number], b: Union[Tensor, Number], out: Optional[Tensor] = None
     ) -> Tensor:
-        assert isinstance(a, (Tensor, Number))
-        assert isinstance(b, (Tensor, Number))
-        assert out is None or isinstance(out, Tensor)
+        assert isinstance(a, (TensorLike, Number))
+        assert isinstance(b, (TensorLike, Number))
+        assert out is None or isinstance(out, TensorLike)
 
         # Special-cases Number x Number case
         if isinstance(a, Number) and isinstance(b, Number):
@@ -313,9 +319,9 @@ def add(
     """
 
     # Type checks
-    assert isinstance(a, (Tensor, Number))
-    assert isinstance(b, (Tensor, Number))
-    assert out is None or isinstance(out, Tensor)
+    assert isinstance(a, (TensorLike, Number))
+    assert isinstance(b, (TensorLike, Number))
+    assert out is None or isinstance(out, TensorLike)
     assert alpha is None or isinstance(alpha, Number)
 
     # Special-cases Number x Number case
@@ -393,7 +399,7 @@ def float_power(
 
     assert isinstance(a, (Tensor, Number))
     assert isinstance(b, (Tensor, Number))
-    assert out is None or isinstance(out, Tensor)
+    assert out is None or isinstance(out, TensorLike)
 
     # Special-cases Number x Number case
     if isinstance(a, Number) and isinstance(b, Number):
@@ -486,9 +492,9 @@ def sub(
     """
 
     # Type checks
-    assert isinstance(a, (Tensor, Number))
-    assert isinstance(b, (Tensor, Number))
-    assert out is None or isinstance(out, Tensor)
+    assert isinstance(a, (TensorLike, Number))
+    assert isinstance(b, (TensorLike, Number))
+    assert out is None or isinstance(out, TensorLike)
     assert alpha is None or isinstance(alpha, Number)
 
     # Special-cases Number x Number case
@@ -544,11 +550,11 @@ def where(
         raise NotImplemented
 
     # Type checking
-    assert isinstance(pred, Tensor)
-    assert isinstance(a, Tensor)
-    assert isinstance(b, Tensor)
+    assert isinstance(pred, TensorLike)
+    assert isinstance(a, TensorLike)
+    assert isinstance(b, TensorLike)
     if out is not None:
-        assert isinstance(out, Tensor)
+        assert isinstance(out, TensorLike)
 
     _, result_dtype = _elementwise_dtypes(
         a, b, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT

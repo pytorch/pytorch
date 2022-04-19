@@ -6,6 +6,12 @@ from functools import reduce
 
 
 class TensorMeta(object):
+    """
+    Temporary helper class to model tensor metadata.
+
+    To be replaced with an actual meta tensor.
+    """
+
     def __init__(
         self, tensorlike=None, *, shape=None, strides=None, dtype=None, device=None
     ):
@@ -15,14 +21,12 @@ class TensorMeta(object):
             self.strides = ()
             self.dtype = type_to_dtype(type(tensorlike))
             self.device = torch.device("cpu")
-
-        if tensorlike is not None:
+        elif tensorlike is not None:
             self.shape = tensorlike.shape
             self.strides = tensorlike.stride()
             self.dtype = tensorlike.dtype
             self.device = tensorlike.device
-
-        if tensorlike is None:
+        else:
             assert shape is not None
             assert strides is not None
             assert dtype is not None
@@ -38,6 +42,8 @@ class TensorMeta(object):
         assert isinstance(self.dtype, torch.dtype)
         assert isinstance(self.device, torch.device)
 
+        self.ndim = len(self.shape)
+
     def stride(self):
         return self.strides
 
@@ -49,6 +55,18 @@ class TensorMeta(object):
 
 
 TensorLike = (torch.Tensor, TensorMeta)
+
+
+def compare_tensor_meta(a, b):
+    assert isinstance(a, TensorLike)
+    assert isinstance(b, TensorLike)
+
+    for x, y in zip(a.shape, b.shape):
+        assert x == y
+
+    assert a.dtype == b.dtype
+    assert a.device == b.device
+
 
 #
 # Common helper functions

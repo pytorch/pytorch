@@ -17,8 +17,7 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs, _NOTHING)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyNativeDeviceTypes,
-    onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
-    OpDTypes)
+    onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     floating_types_and, all_types_and_complex_and, integral_types_and, get_all_math_dtypes,
@@ -273,14 +272,18 @@ class TestUnaryUfuncs(TestCase):
         elif isinstance(expected, np.ndarray):
             # Handles exact dtype comparisons between arrays and tensors
             if exact_dtype:
-                # Allows array dtype to be float32 when comparing with bfloat16 tensors
-                #   since NumPy doesn't support the bfloat16 dtype
-                # Also ops like scipy.special.erf, scipy.special.erfc, etc, promote float16
-                # to float32
-                if expected.dtype == np.float32:
-                    assert actual.dtype in (torch.float16, torch.bfloat16, torch.float32)
-                else:
-                    assert expected.dtype == torch_to_numpy_dtype_dict[actual.dtype]
+                if actual.dtype is torch.bfloat16 or expected.dtype != torch_to_numpy_dtype_dict[actual.dtype]:
+                    # Allows array dtype to be float32 when comparing with bfloat16 tensors
+                    #   since NumPy doesn't support the bfloat16 dtype
+                    # Also ops like scipy.special.erf, scipy.special.erfc, etc, promote float16
+                    # to float32
+                    if expected.dtype == np.float32:
+                        assert actual.dtype in (torch.float16, torch.bfloat16, torch.float32)
+                    elif expected.dtype == np.float64:
+                        assert actual.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+                    else:
+                        self.fail("Expected dtype {0} but got {1}!".format(
+                            expected.dtype, actual.dtype))
 
             self.assertEqual(actual,
                              torch.from_numpy(expected).to(actual.dtype),
@@ -485,34 +488,6 @@ class TestUnaryUfuncs(TestCase):
         expected = torch.stack([op(slice, **torch_kwargs) for slice in input])
 
         self.assertEqual(actual, expected)
-
-    def _test_out_arg(self, op, input, output, expected, **kwargs):
-        if op.safe_casts_outputs:
-            expect_fail = not torch.can_cast(expected.dtype, output.dtype)
-        else:
-            expect_fail = output.dtype != expected.dtype
-
-        if expect_fail:
-            with self.assertRaises(RuntimeError):
-                op(input, out=output, **kwargs)
-        else:
-            res = op(input, out=output, **kwargs)
-            self.assertTrue(res is output)
-            self.assertEqual(output, expected.to(output.dtype))
-
-    @ops(unary_ufuncs, dtypes=OpDTypes.supported)
-    def test_out_arg_all_dtypes(self, device, dtype, op):
-        if not op.supports_out:
-            self.skipTest("Skipped! Op doesn't support out= kwarg.")
-
-        input = make_tensor((64, 64), dtype=dtype, device=device,
-                            low=op.domain[0], high=op.domain[1])
-        torch_kwargs, _ = op.sample_kwargs(device, dtype, input)
-        expected = op(input, **torch_kwargs)
-
-        for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
-            out = torch.empty_like(input, dtype=out_dtype)
-            self._test_out_arg(op, input, out, expected, **torch_kwargs)
 
     @dtypes(*all_types_and(torch.bool, torch.half))
     def test_nan_to_num(self, device, dtype):
@@ -866,7 +841,7 @@ class TestUnaryUfuncs(TestCase):
 
     # TODO: opinfo hardshrink
     @onlyCPU
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardshrink(self, device, dtype):
         data = torch.tensor([1, 0.5, 0.3, 0.6], dtype=dtype, device=device).view(2, 2)
         self.assertEqual(torch.tensor([1, 0.5, 0, 0.6], dtype=dtype, device=device).view(2, 2),
@@ -882,7 +857,7 @@ class TestUnaryUfuncs(TestCase):
                          data.t().hardshrink(0.3))
 
     @onlyCPU
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardshrink_edge_cases(self, device, dtype) -> None:
         def h(values, l_expected):
             for l, expected in l_expected.items():
@@ -917,8 +892,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(a, b.expand(2 ** 31))
 
     @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardswish(self, device, dtype):
         inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
         expectedOutput = np.multiply(
@@ -939,8 +913,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(inputTensorCpy, expectedOutputTensor)
 
     @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardsigmoid(self, device, dtype):
         inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
         expectedOutput = np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0
@@ -957,8 +930,7 @@ class TestUnaryUfuncs(TestCase):
                          torch.tensor(expectedOutput, dtype=dtype, device=device))
 
     @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardsigmoid_backward(self, device, dtype):
         inputValues = [-3.0, 3.0, -2.0, 2.0, -6.0, 6.0]
         expectedValues = [0.0, 0.0, 1.0 / 6.0, 1.0 / 6.0, 0.0, 0.0]
