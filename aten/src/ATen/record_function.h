@@ -99,6 +99,174 @@ struct ObserverContext {
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
 typedef c10::SmallVector<std::unique_ptr<ObserverContext>, kSoftLimitCallbacks> ObserverContextList;
 typedef uint64_t RecordFunctionHandle;
+struct RecordFunction;
+
+//
+// PyTorch callbacks/observers API:
+//
+
+/**
+ * RecordFunctionCallback represents a pair of callbacks to be used with
+ * RecordFunction, members:
+ *   start, end - the callbacks to run when entering and exiting the scope;
+ *     optionally, the start callback may return an ObserverContext which will
+ *     be passed to the end callback, use appropriate constructor accordingly.
+ *   needs_inputs - whether the callbacks need the inputs passed from the observed
+ *     function/range; NOTE: passing the inputs incurs an additional overhead;
+ *   sampling_probability - if not 1.0, then the callback is probabilistically sampled
+ *     to run; NOTE: start and end callbacks always run as a pair and are sampled
+ *     together;
+ *   scopes - types of scopes to execute the callbacks on (see RecordScope);
+ *     passing empty set means the callbacks will be executed for all possible
+ *     scope types
+ *   should_run - optional function that returns whether this callback should run;
+ *     overwrites the effect of setting sampling_probability
+ */
+class TORCH_API RecordFunctionCallback {
+ public:
+  using StartCallback = std::unique_ptr<ObserverContext>(*)(const RecordFunction&);
+  using EndCallback = void (*)(const RecordFunction&, ObserverContext*);
+
+  // This interface supports observers that require passing an ObserverContext
+  // between start and end callbacks.
+  explicit RecordFunctionCallback(
+      StartCallback start,
+      EndCallback end = nullptr) :
+      start_(start),
+      end_(end) {
+    scopes_.fill(true);
+  }
+
+  RecordFunctionCallback& needsInputs(bool needs_inputs) {
+    needs_inputs_ = needs_inputs;
+    return *this;
+  }
+
+  RecordFunctionCallback& needsOutputs(bool needs_outputs) {
+    needs_outputs_ = needs_outputs;
+    return *this;
+  }
+
+  RecordFunctionCallback& needsIds(bool needs_ids) {
+    needs_ids_ = needs_ids;
+    return *this;
+  }
+
+  RecordFunctionCallback& samplingProb(double sampling_prob) {
+    TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob <= 1.0,
+        "Invalid sampling probability");
+    sampling_prob_ = sampling_prob;
+    return *this;
+  }
+
+  RecordFunctionCallback& scopes(
+      const std::unordered_set<RecordScope, std::hash<RecordScope>>& scopes) {
+    if (!scopes.empty()) {
+      scopes_.fill(false);
+      for (auto sc : scopes) {
+        scopes_[static_cast<size_t>(sc)] = true;
+      }
+    } else {
+      scopes_.fill(true);
+    }
+    return *this;
+  }
+
+  bool needsInputs() const {
+    return needs_inputs_;
+  }
+
+  bool needsOutputs() const {
+    return needs_outputs_;
+  }
+
+  bool needsIds() const {
+    return needs_ids_;
+  }
+
+  double samplingProb() const {
+    return sampling_prob_;
+  }
+
+  bool checkScope(RecordScope sc) const {
+    return scopes_[(size_t)sc];
+  }
+
+  StartCallback start() const {
+    return start_;
+  }
+
+  EndCallback end() const {
+    return end_;
+  }
+
+ private:
+  friend class CallbackManager;
+  StartCallback start_;
+  EndCallback end_;
+  double sampling_prob_ = 1.0;
+  std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
+  bool needs_inputs_ = false;
+  bool needs_outputs_ = false;
+  bool needs_ids_ = false;
+};
+
+// Notes:
+//  - two types of callbacks are provided: thread local and global
+//     - thread local callbacks are added/removed only for the given thread
+//       and are stored locally for each thread and separately from the list
+//       of the global callbacks
+//     - global callbacks are stored in a single per process list and are
+//       invoked by every RecordFunction, in addition to the thread local
+//       callbacks specific to the given thread
+//  - we allow the added callbacks to be sampled, by specifying a sampling
+//    probability for each callback pair, if the start callback is
+//    not picked to run, the corresponding end callback won't be called
+//  - a typical use case for the global callbacks is passive monitoring
+//    in the background (e.g. fleet-wide monitoring), without focusing on
+//    the specific peice of code
+//  - in contrast, thread local callbacks are enabled locally, on demand,
+//    for the specific piece of code (range) and are not sampled
+//  - a typical use case for thread local callbacks is profiler and code
+//    execution tracer
+//  - note, thread local callbacks are automatically propagated with
+//    ThreadLocalState across JIT continuations and async tasks (at::launch)
+//  - adding/removing global callbacks is not thread safe and should be done
+//    only when no other code is running, e.g. during the initialization
+
+typedef uint64_t CallbackHandle;
+
+// It is unnecessary to use atomic operations for enabling
+// thread-local function callbacks. Moreover, it prevents saving to
+// ThreadLocalState because std::atomic is non-copyable.
+struct ThreadLocalRecordFunctionCallbacksEntry {
+  RecordFunctionCallback callback;
+  bool enabled = true;
+  CallbackHandle handle;
+
+  ThreadLocalRecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+      : callback(std::move(cb)), handle(h) {}
+
+  bool disable() {
+    auto old = enabled;
+    enabled = false;
+    return old != enabled;
+  }
+
+  bool enable() {
+    auto old = enabled;
+    enabled = true;
+    return old != enabled;
+  }
+
+  bool isEnabled() const {
+    return enabled;
+  }
+};
+
+// Holds pairs (callbacks, unique_id)
+using ThreadLocalRecordFunctionCallbacks =
+  std::vector<ThreadLocalRecordFunctionCallbacksEntry>;
 
 struct TORCH_API RecordFunction {
   // Default constructor is used with before function called afterwards:
@@ -356,116 +524,6 @@ struct TORCH_API RecordFunction {
   c10::optional<State> state_;
 };
 
-//
-// PyTorch callbacks/observers API:
-//
-
-/**
- * RecordFunctionCallback represents a pair of callbacks to be used with
- * RecordFunction, members:
- *   start, end - the callbacks to run when entering and exiting the scope;
- *     optionally, the start callback may return an ObserverContext which will
- *     be passed to the end callback, use appropriate constructor accordingly.
- *   needs_inputs - whether the callbacks need the inputs passed from the observed
- *     function/range; NOTE: passing the inputs incurs an additional overhead;
- *   sampling_probability - if not 1.0, then the callback is probabilistically sampled
- *     to run; NOTE: start and end callbacks always run as a pair and are sampled
- *     together;
- *   scopes - types of scopes to execute the callbacks on (see RecordScope);
- *     passing empty set means the callbacks will be executed for all possible
- *     scope types
- *   should_run - optional function that returns whether this callback should run;
- *     overwrites the effect of setting sampling_probability
- */
-class TORCH_API RecordFunctionCallback {
- public:
-  using StartCallback = std::unique_ptr<ObserverContext>(*)(const RecordFunction&);
-  using EndCallback = void (*)(const RecordFunction&, ObserverContext*);
-
-  // This interface supports observers that require passing an ObserverContext
-  // between start and end callbacks.
-  explicit RecordFunctionCallback(
-      StartCallback start,
-      EndCallback end = nullptr) :
-      start_(start),
-      end_(end) {
-    scopes_.fill(true);
-  }
-
-  RecordFunctionCallback& needsInputs(bool needs_inputs) {
-    needs_inputs_ = needs_inputs;
-    return *this;
-  }
-
-  RecordFunctionCallback& needsOutputs(bool needs_outputs) {
-    needs_outputs_ = needs_outputs;
-    return *this;
-  }
-
-  RecordFunctionCallback& needsIds(bool needs_ids) {
-    needs_ids_ = needs_ids;
-    return *this;
-  }
-
-  RecordFunctionCallback& samplingProb(double sampling_prob) {
-    TORCH_CHECK(sampling_prob >= 0.0 && sampling_prob <= 1.0,
-        "Invalid sampling probability");
-    sampling_prob_ = sampling_prob;
-    return *this;
-  }
-
-  RecordFunctionCallback& scopes(
-      const std::unordered_set<RecordScope, std::hash<RecordScope>>& scopes) {
-    if (!scopes.empty()) {
-      scopes_.fill(false);
-      for (auto sc : scopes) {
-        scopes_[static_cast<size_t>(sc)] = true;
-      }
-    } else {
-      scopes_.fill(true);
-    }
-    return *this;
-  }
-
-  bool needsInputs() const {
-    return needs_inputs_;
-  }
-
-  bool needsOutputs() const {
-    return needs_outputs_;
-  }
-
-  bool needsIds() const {
-    return needs_ids_;
-  }
-
-  double samplingProb() const {
-    return sampling_prob_;
-  }
-
-  bool checkScope(RecordScope sc) const {
-    return scopes_[(size_t)sc];
-  }
-
-  StartCallback start() const {
-    return start_;
-  }
-
-  EndCallback end() const {
-    return end_;
-  }
-
- private:
-  friend class CallbackManager;
-  StartCallback start_;
-  EndCallback end_;
-  double sampling_prob_ = 1.0;
-  std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
-  bool needs_inputs_ = false;
-  bool needs_outputs_ = false;
-  bool needs_ids_ = false;
-};
-
 // Using macro to minimize inputs copies,
 // optional argument - function's seq_no
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
@@ -516,63 +574,6 @@ class TORCH_API RecordFunctionCallback {
     fn, debug_handle, inputs)                                       \
     RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(                      \
         at::RecordScope::LITE_INTERPRETER, fn, debug_handle, inputs)
-
-// Notes:
-//  - two types of callbacks are provided: thread local and global
-//     - thread local callbacks are added/removed only for the given thread
-//       and are stored locally for each thread and separately from the list
-//       of the global callbacks
-//     - global callbacks are stored in a single per process list and are
-//       invoked by every RecordFunction, in addition to the thread local
-//       callbacks specific to the given thread
-//  - we allow the added callbacks to be sampled, by specifying a sampling
-//    probability for each callback pair, if the start callback is
-//    not picked to run, the corresponding end callback won't be called
-//  - a typical use case for the global callbacks is passive monitoring
-//    in the background (e.g. fleet-wide monitoring), without focusing on
-//    the specific peice of code
-//  - in contrast, thread local callbacks are enabled locally, on demand,
-//    for the specific piece of code (range) and are not sampled
-//  - a typical use case for thread local callbacks is profiler and code
-//    execution tracer
-//  - note, thread local callbacks are automatically propagated with
-//    ThreadLocalState across JIT continuations and async tasks (at::launch)
-//  - adding/removing global callbacks is not thread safe and should be done
-//    only when no other code is running, e.g. during the initialization
-
-typedef uint64_t CallbackHandle;
-
-// It is unnecessary to use atomic operations for enabling
-// thread-local function callbacks. Moreover, it prevents saving to
-// ThreadLocalState because std::atomic is non-copyable.
-struct ThreadLocalRecordFunctionCallbacksEntry {
-  RecordFunctionCallback callback;
-  bool enabled = true;
-  CallbackHandle handle;
-
-  ThreadLocalRecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
-      : callback(std::move(cb)), handle(h) {}
-
-  bool disable() {
-    auto old = enabled;
-    enabled = false;
-    return old != enabled;
-  }
-
-  bool enable() {
-    auto old = enabled;
-    enabled = true;
-    return old != enabled;
-  }
-
-  bool isEnabled() const {
-    return enabled;
-  }
-};
-
-// Holds pairs (callbacks, unique_id)
-using ThreadLocalRecordFunctionCallbacks =
-  std::vector<ThreadLocalRecordFunctionCallbacksEntry>;
 
 /**
  * addThreadLocalCallback adds a thread local callback to run with RecordFunction,
