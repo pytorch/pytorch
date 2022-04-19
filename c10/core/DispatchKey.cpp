@@ -178,6 +178,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::AutocastCPU:
       return "AutocastCPU";
 
+    case DispatchKey::AutocastXPU:
+      return "AutocastXPU";
+
     case DispatchKey::Batched:
       return "Batched";
 
@@ -276,6 +279,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
+      {"AutocastXPU", c10::DispatchKey::AutocastXPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
