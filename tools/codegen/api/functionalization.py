@@ -1,8 +1,19 @@
 from tools.codegen.model import (
-    FunctionSchema, BaseTy, BaseType, NativeFunctionsViewGroup, Argument,
+    FunctionSchema,
+    BaseTy,
+    BaseType,
+    NativeFunctionsViewGroup,
+    Argument,
 )
 from tools.codegen.api.types import (
-    Binding, NamedCType, ConstRefCType, BaseCType, CType, tensorT, longT, boolT
+    Binding,
+    NamedCType,
+    ConstRefCType,
+    BaseCType,
+    CType,
+    tensorT,
+    longT,
+    boolT,
 )
 from tools.codegen.api import dispatcher
 from typing import List, Optional
@@ -25,34 +36,47 @@ from typing import List, Optional
 
 # Define some specific lambda input arguments.
 base_binding = Binding(
-    name='base',
-    nctype=NamedCType(name='base', type=ConstRefCType(BaseCType(tensorT))),
-    argument=Argument(name='base', type=BaseType(BaseTy.Tensor), default=None, annotation=None),
-    default=None)
+    name="base",
+    nctype=NamedCType(name="base", type=ConstRefCType(BaseCType(tensorT))),
+    argument=Argument(
+        name="base", type=BaseType(BaseTy.Tensor), default=None, annotation=None
+    ),
+    default=None,
+)
 mutated_view_binding = Binding(
-    name='mutated_view',
-    nctype=NamedCType(name='mutated_view', type=ConstRefCType(BaseCType(tensorT))),
-    argument=Argument(name='base', type=BaseType(BaseTy.Tensor), default=None, annotation=None),
-    default=None)
+    name="mutated_view",
+    nctype=NamedCType(name="mutated_view", type=ConstRefCType(BaseCType(tensorT))),
+    argument=Argument(
+        name="base", type=BaseType(BaseTy.Tensor), default=None, annotation=None
+    ),
+    default=None,
+)
 mutated_view_idx_binding = Binding(
-    name='mutated_view_idx',
-    nctype=NamedCType(name='mutated_view_idx', type=BaseCType(longT)),
-    argument=Argument(name='base', type=BaseType(BaseTy.Tensor), default=None, annotation=None),
-    default=None)
+    name="mutated_view_idx",
+    nctype=NamedCType(name="mutated_view_idx", type=BaseCType(longT)),
+    argument=Argument(
+        name="base", type=BaseType(BaseTy.Tensor), default=None, annotation=None
+    ),
+    default=None,
+)
 reapply_views_binding = Binding(
-    name='reapply_views',
-    nctype=NamedCType(name='reapply_views', type=BaseCType(boolT)),
-    argument=Argument(name='reapply_views', type=BaseType(BaseTy.bool), default=None, annotation=None),
-    default=None)
+    name="reapply_views",
+    nctype=NamedCType(name="reapply_views", type=BaseCType(boolT)),
+    argument=Argument(
+        name="reapply_views", type=BaseType(BaseTy.bool), default=None, annotation=None
+    ),
+    default=None,
+)
 
 # The lambda capture itself doesn't have a name.
 # The name returned here corresponds to the name of the inner function called by the lambda.
 def name(
-        g: NativeFunctionsViewGroup,
-        *,
-        is_reverse: bool,
-        include_namespace: bool,
-        reapply_views: Optional[bool] = None) -> str:
+    g: NativeFunctionsViewGroup,
+    *,
+    is_reverse: bool,
+    include_namespace: bool,
+    reapply_views: Optional[bool] = None,
+) -> str:
     if reapply_views is None:
         # reapply_views is only important for the fwd lambda,
         # since we always plumb the runtime "reapply_views" argument into the reverse function.
@@ -65,14 +89,18 @@ def name(
         api_name = g.view_copy.func.name.unambiguous_name()
         # in the reverse case, we codegen both the call-sites (which need the full namespace) and the declarations (which don't)
         if include_namespace:
-            return f'at::functionalization::FunctionalInverses::{api_name}_inverse'
+            return f"at::functionalization::FunctionalInverses::{api_name}_inverse"
         else:
-            return f'{api_name}_inverse'
+            return f"{api_name}_inverse"
     # in the forward case, we just directly call into the at::_ops API (so we always need the namespace)
     assert include_namespace
     assert g.view_copy is not None
-    api_name = g.view.func.name.unambiguous_name() if reapply_views else g.view_copy.func.name.unambiguous_name()
-    return f'at::_ops::{api_name}::call'
+    api_name = (
+        g.view.func.name.unambiguous_name()
+        if reapply_views
+        else g.view_copy.func.name.unambiguous_name()
+    )
+    return f"at::_ops::{api_name}::call"
 
 
 def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding]:
@@ -82,7 +110,9 @@ def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding
     args = func.arguments.flat_all
     assert args[0].type == BaseType(BaseTy.Tensor)
     non_self_args = args[1:]
-    non_self_value_bindings = [dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args]
+    non_self_value_bindings = [
+        dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args
+    ]
     all_bindings = [reapply_views_binding] + non_self_value_bindings
     return all_bindings
 
@@ -107,7 +137,9 @@ def outer_arguments(*, is_reverse: bool) -> List[Binding]:
 def inner_call_index(func: FunctionSchema) -> Optional[Binding]:
     # For view ops that return multiple tensors (like `split`), we generate a separate lambda for each output.
     # When we replay a view op that returns multiple tensors, we need to index into the output appropriately
-    if len(func.returns) > 1 or (len(func.returns) == 1 and func.returns[0].type.is_list_like()):
+    if len(func.returns) > 1 or (
+        len(func.returns) == 1 and func.returns[0].type.is_list_like()
+    ):
         return mutated_view_idx_binding
     return None
 
@@ -128,6 +160,15 @@ def inner_arguments(func: FunctionSchema, is_reverse: bool) -> List[Binding]:
         # their corresponding view_inverse function takes in an additional index argument.
         index_binding = inner_call_index(func)
         if index_binding is not None:
-            return [base_binding, mutated_view_binding, reapply_views_binding, index_binding] + non_self_bindings
+            return [
+                base_binding,
+                mutated_view_binding,
+                reapply_views_binding,
+                index_binding,
+            ] + non_self_bindings
         else:
-            return [base_binding, mutated_view_binding, reapply_views_binding] + non_self_bindings
+            return [
+                base_binding,
+                mutated_view_binding,
+                reapply_views_binding,
+            ] + non_self_bindings
