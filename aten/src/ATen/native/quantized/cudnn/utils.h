@@ -193,6 +193,11 @@ uint8_t getAlignment(const at::Tensor &t) {
   return alignment;
 }
 
+// For the two getTensorDescriptor functions, there is a is_virtual parameter. This parameter is used to set the cudnn
+// tensor as virtual or not. Setting the tensor as virtual is expected to have some performance benefits as the cudnn
+// backend cudnn will no longer directly save to the tensor, allowing us to omit this tensor from the variant pack.
+// See third_party/cudnn_frontend/samples/fusion_sample.cpp for other examples
+
 cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint8_t alignment, bool is_virtual = false) {
   auto shape = t.sizes();
   auto strides = t.strides();
