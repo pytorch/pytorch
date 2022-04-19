@@ -8,8 +8,6 @@ import torch.distributed as dist
 from torch.distributed.rpc.utils import group_membership_management, update_group_membership
 
 from . import api
-from . import TensorPipeAgent
-from . import TensorPipeRpcBackendOptions
 from . import constants as rpc_constants
 
 BackendValue = collections.namedtuple(
@@ -256,12 +254,14 @@ def _create_reverse_mapping(my_name, all_names, all_device_maps):
     return reverse_device_maps
 
 def _get_device_infos():
+    from . import TensorPipeAgent
     agent = cast(TensorPipeAgent, api._get_current_rpc_agent())
     opts = agent._get_backend_options()
     device_count = torch.cuda.device_count()
     return device_count, opts.device_maps, opts.devices
 
 def _set_devices_and_reverse_device_map(agent):
+    from . import TensorPipeAgent
     agent = cast(TensorPipeAgent, agent)
     # Group state is retrieved from local agent
     # On initialization, tensorpipe agent retrieves information from all existing workers, so group state is valid
@@ -294,6 +294,8 @@ def _set_devices_and_reverse_device_map(agent):
                      args=(my_worker_info, all_devices[worker_name], reverse_device_maps, True))
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
+    from . import TensorPipeAgent
+    from . import TensorPipeRpcBackendOptions
     if not isinstance(store, dist.Store):
         raise TypeError("`store` must be a c10d::Store. {}".format(store))
 

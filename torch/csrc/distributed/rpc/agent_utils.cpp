@@ -41,25 +41,19 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   return nameToId;
 }
 
-std::vector<std::string> splitStringRemoveEmpties(
+std::vector<std::string> splitString(
     const std::string& s,
     const std::string& delim) {
   std::vector<std::string> tokens;
   size_t start = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t end;
-  std::string token{};
+  // Iterate through each delimiter
   while ((end = s.find(delim, start)) != std::string::npos) {
-    token = s.substr(start, end - start);
-    if (!token.empty()) {
-      tokens.emplace_back(token);
-    }
+    tokens.emplace_back(s.substr(start, end - start));
     start = end + delim.length();
   }
-  token = s.substr(start);
-  if (!token.empty()) {
-    tokens.emplace_back(token);
-  }
+  tokens.emplace_back(s.substr(start));
   return tokens;
 }
 
@@ -100,11 +94,11 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
     std::vector<uint8_t> allWorkerInfosKeyVector = store.get(allWorkerInfosKey);
     allWorkerInfos = std::string(
         (char*)allWorkerInfosKeyVector.data(), allWorkerInfosKeyVector.size());
-    // workerInfos are comma separated with a comma in the beginning, (e.g.
-    // ",Name1-Rank1,Name2-Rank2,Name3-Rank2") parse list of workers
-    for (const std::string& workerInfo :
-         splitStringRemoveEmpties(allWorkerInfos, ",")) {
-      auto workerInfoVec = splitStringRemoveEmpties(workerInfo, "-");
+    // workerInfos are comma separated with a comma at the end (e.g.
+    // "Name1-Rank1,Name2-Rank2,Name3-Rank2,") parse list of workers.
+    for (const std::string& workerInfoString : splitString(
+             allWorkerInfos.substr(0, allWorkerInfos.size() - 1), ",")) {
+      auto workerInfoVec = splitString(workerInfoString, "-");
       std::string workerName = workerInfoVec.at(0);
       int workerId = std::stoi(workerInfoVec.at(1));
 
@@ -122,7 +116,7 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
     }
   }
   // Add own name to worker list
-  allWorkerInfos = fmt::format("{},{}-{}", allWorkerInfos, selfName, selfId);
+  allWorkerInfos = fmt::format("{}{}-{},", allWorkerInfos, selfName, selfId);
   std::vector<uint8_t> allWorkerInfosVector(
       (uint8_t*)allWorkerInfos.c_str(),
       (uint8_t*)allWorkerInfos.c_str() + allWorkerInfos.length());
@@ -141,7 +135,7 @@ void removeCurrentName(
       (char*)allWorkerInfosKeyVector.data(), allWorkerInfosKeyVector.size());
 
   // Remove the current name and rank
-  std::string str_to_erase = fmt::format(",{}-{}", selfName, selfId);
+  std::string str_to_erase = fmt::format("{}-{},", selfName, selfId);
   int start_position_to_erase = allWorkerInfos.find(str_to_erase);
   allWorkerInfos.erase(start_position_to_erase, str_to_erase.length());
 
