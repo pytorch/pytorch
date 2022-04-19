@@ -347,6 +347,7 @@ enum class DispatchKey : uint16_t {
   VmapMode,
 
   FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
+
   // Alias and mutation removal.
   // If some backends want to opt into only alias removal or only mutation
   // removal,
