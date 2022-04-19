@@ -57,7 +57,9 @@ class PythonTensor(torch.Tensor):
 
         r = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
         r.proxy = proxy
-        if not elem.is_sparse:
+        if elem.is_sparse:
+            proxy.node.meta['tensor_meta'] = {}
+        else:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
         return r
 
