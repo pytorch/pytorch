@@ -81,7 +81,8 @@ def to_numpy(elem):
 def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True,
                     keep_initializers_as_inputs=True, dynamic_axes=None,
                     input_names=None, output_names=None,
-                    fixed_batch_size=False, training=None):
+                    fixed_batch_size=False, training=None,
+                    verbose=False):
     f = io.BytesIO()
     input_copy = copy.deepcopy(input)
     torch.onnx._export(model, input_copy, f,
@@ -90,7 +91,8 @@ def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True
                        keep_initializers_as_inputs=keep_initializers_as_inputs,
                        dynamic_axes=dynamic_axes,
                        input_names=input_names, output_names=output_names,
-                       fixed_batch_size=fixed_batch_size, training=training)
+                       fixed_batch_size=fixed_batch_size, training=training,
+                       verbose=verbose)
 
     # compute onnxruntime output prediction
     so = onnxruntime.SessionOptions()
@@ -139,7 +141,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    test_with_inputs=None, input_names=None,
                    output_names=None, fixed_batch_size=False,
                    dict_check=True, training=None,
-                   remained_onnx_input_idx=None, flatten=True):
+                   remained_onnx_input_idx=None, flatten=True,
+                   verbose=False):
     if training is not None and training == torch.onnx.TrainingMode.TRAINING:
         model.train()
     elif training is None or training == torch.onnx.TrainingMode.EVAL:
@@ -173,7 +176,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    do_constant_folding=do_constant_folding,
                                    keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                    dynamic_axes=dynamic_axes, input_names=input_names,
-                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=training)
+                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=training,
+                                   verbose=verbose)
         # compute onnxruntime output prediction
         if remained_onnx_input_idx is not None:
             input_onnx = []
@@ -310,7 +314,7 @@ class _TestONNXRuntime:
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False, dict_check=True,
-                 training=None, remained_onnx_input_idx=None):
+                 training=None, remained_onnx_input_idx=None, verbose=False):
         def _run_test(m, remained_onnx_input_idx, flatten=True):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
@@ -319,7 +323,7 @@ class _TestONNXRuntime:
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size, dict_check=dict_check,
                                   training=training, remained_onnx_input_idx=remained_onnx_input_idx,
-                                  flatten=flatten)
+                                  flatten=flatten, verbose=verbose)
 
         if isinstance(remained_onnx_input_idx, dict):
             scripting_remained_onnx_input_idx = remained_onnx_input_idx['scripting']
