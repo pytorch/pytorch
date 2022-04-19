@@ -340,7 +340,7 @@ class TestMHADeviceType(TestCase):
                 self.embed_dim = embed_dim
                 self.num_heads = num_heads
 
-            def forward(self, q, k, v, key_padding_mask):
+            def forward(self, query, key, value, key_padding_mask):
                 # 0.
                 # return torch._native_multi_head_attention(
 
@@ -366,15 +366,12 @@ class TestMHADeviceType(TestCase):
                 # )
                 # return r.transpose(0, 1), w
 
-                query = q.transpose(1, 0)
-                key = k.transpose(1, 0)
-                value = v.transpose(1, 0)
                 in_proj_weight = self.qkv.weight
                 in_proj_bias = self.qkv.bias
 
                 # set up shape vars
-                tgt_len, bsz, embed_dim = query.shape
-                src_len, _, _ = key.shape
+                bsz, tgt_len, embed_dim = query.shape
+                _, src_len, _ = key.shape
                 # assert embed_dim == embed_dim_to_check, \
                 #     f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
                 head_dim = embed_dim // num_heads
@@ -382,6 +379,7 @@ class TestMHADeviceType(TestCase):
                 assert key.shape == value.shape, f"key shape {key.shape} does not match value shape {value.shape}"
 
                 q, k, v = torch.nn.functional._in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+
 
                 attn_mask = None
                 if key_padding_mask is not None:
@@ -391,9 +389,11 @@ class TestMHADeviceType(TestCase):
                 #
                 # reshape q, k, v for multihead attention and make em batch first
                 #
-                q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
-                k = k.contiguous().view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
-                v = v.contiguous().view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+                k_shape_1 = k.shape[1]
+                v_shape_1 = v.shape[1]
+                q = q.transpose(1, 0).reshape(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+                k = k.transpose(1, 0).reshape(k_shape_1, bsz * num_heads, head_dim).transpose(0, 1)
+                v = v.transpose(1, 0).reshape(v_shape_1, bsz * num_heads, head_dim).transpose(0, 1)
 
                 # update source sequence length after adjustments
                 src_len = k.size(1)
