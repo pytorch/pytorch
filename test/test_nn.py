@@ -14597,7 +14597,7 @@ class TestNNDeviceType(NNTestCase):
                             # 2, for that matter) so it can't hit the fast path, nor can we give a
                             # result.
                             with self.assertRaisesRegex(
-                                    AssertionError, 'MultiheadAttention does not support NestedTensor outside''):
+                                    AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
                                 self._test_module_empty_input(encoder_layer, torch.nested_tensor([], device=device), check_size=False, inference=True)
 
                             self._test_module_empty_input(encoder_layer, torch.nested_tensor([torch.rand(0, 512, device=device)], device=device), check_size=False, inference=True)

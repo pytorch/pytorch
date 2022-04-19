@@ -900,7 +900,8 @@ class MultiheadAttention(Module):
     conditions are met:
     - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same
       tensor. This restriction will be loosened in the future.)
-    - inference mode is enabled (using the ``torch.inference_mode()`` context manager)
+    - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``)
+      or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
     - dropout is 0
     - ``add_bias_kv`` is ``False``
@@ -1060,8 +1061,7 @@ class MultiheadAttention(Module):
             `batch_first` argument is ignored for unbatched inputs.
         """
         is_batched = query.dim() == 3
-        if (torch.is_inference_mode_enabled() and is_batched and not self.training
-            and self.batch_first and self.bias_k is None and
+        if (is_batched and not self.training and self.batch_first and self.bias_k is None and
             self.bias_v is None and self.dropout == 0 and
             not self.add_zero_attn and self._qkv_same_embed_dim and
             ((key_padding_mask is None and attn_mask is None)
@@ -1080,7 +1080,8 @@ class MultiheadAttention(Module):
             if (not torch.overrides.has_torch_function(tensor_args) and
                     # We have to use a list comprehension here because
                     # Torchscript doesn't support generator expressions.
-                    all([x.is_cuda or 'cpu' in str(x.device) for x in tensor_args])):
+                    all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]) and
+                    not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args])):
                 return torch._native_multi_head_attention(
                     query,
                     key,

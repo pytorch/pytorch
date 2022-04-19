@@ -269,7 +269,8 @@ class TransformerEncoderLayer(Module):
 
     forward() will use a special optimized implementation if all of the following
     conditions are met:
-    - inference mode is enabled (using the ``torch.inference_mode()`` context manager)
+    - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``)
+      or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
     - batch_first is ``True`` and the input is batched (i.e., ``src.dim() == 3``)
     - norm_first is ``False`` (this restriction may be loosened in the future)
@@ -364,7 +365,7 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
-        if (torch.is_inference_mode_enabled() and not self.norm_first and not self.training and
+        if (not self.norm_first and not self.training and
             self.self_attn.batch_first and src.dim() == 3 and self.self_attn._qkv_same_embed_dim and
             self.activation_relu_or_gelu and self.norm1.eps == self.norm2.eps and
             ((src_mask is None and src_key_padding_mask is None)
@@ -385,7 +386,11 @@ class TransformerEncoderLayer(Module):
                 self.linear2.weight,
                 self.linear2.bias,
             )
-            if not torch.overrides.has_torch_function(tensor_args) and all([x.is_cuda or 'cpu' in str(x.device) for x in tensor_args]):
+            if (not torch.overrides.has_torch_function(tensor_args) and
+                    # We have to use a list comprehension here because TorchScript
+                    # doesn't support generator expressions.
+                    all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]) and
+                    (not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args]))):
                 return torch._transformer_encoder_layer_fwd(
                     src,
                     self.self_attn.embed_dim,
