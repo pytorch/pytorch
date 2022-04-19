@@ -147,26 +147,15 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     auto workspace = at::empty({workspace_size}, input.options().dtype(at::kByte));
     std::vector<void *> data_ptrs;
     std::vector<int64_t> uids;
-    data_ptrs.reserve(10);
-    uids.reserve(10);
-    data_ptrs = {input_fp.data_ptr(), linear_output.data_ptr(),
-                                           weight_fp.data_ptr(),
-                                           requantize_multiplier_tensor.data_ptr(),
-                                           reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
-    uids = {'x', 'y', 'w', 's', 'r'};
+    data_ptrs.reserve(9);
+    uids.reserve(9);
+    data_ptrs = {input_fp.data_ptr(), weight_fp.data_ptr(), requantize_multiplier_tensor.data_ptr(),
+                 reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
                                          broadcasted_bias.value().data_ptr(), linear_output.data_ptr()});
       uids.insert(uids.end(), {'b', 'c', 'd', 'e'});
-      if (kReluFused) {
-        data_ptrs.emplace_back(linear_output.data_ptr()),
-        uids.emplace_back('f');
-      }
-    } else {
-      if (kReluFused) {
-        data_ptrs.emplace_back(linear_output.data_ptr());
-        uids.emplace_back('f');
-      }
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setWorkspacePointer(workspace.data_ptr())
@@ -193,7 +182,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
       .setaMatDesc(cudnn_utils::getTensorDescriptor(input_fp.sizes(), input_fp.strides(), CUDNN_DATA_FLOAT, 'x', key.input_alignment))
       // .setbMatDesc(cudnn_utils::getTensorDescriptor(orig_weight.sizes(), orig_weight.strides(), CUDNN_DATA_FLOAT, 'w', key.weight_alignment))
       .setbMatDesc(cudnn_utils::getTensorDescriptor(weight_fp.sizes(), weight_fp.strides(), CUDNN_DATA_FLOAT, 'w', key.weight_alignment))
-      .setcMatDesc(cudnn_utils::getTensorDescriptor(linear_output, 'y', key.output_alignment))
+      .setcMatDesc(cudnn_utils::getTensorDescriptor(linear_output, 'y', key.output_alignment, true))
       .setmatmulDesc(getLinearDescriptor(CUDNN_DATA_FLOAT)) // is this right? should it be float?
       .build();
   // std::cout << "operator:" << linear_op.describe() << std::endl;
@@ -212,6 +201,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     bias_mult_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'b', cudnn_utils::getAlignment(broadcasted_bias.value())))
       .setbDesc(cudnn_utils::getTensorDescriptor(bias_multiplier_tensor.value(), 'c', cudnn_utils::getAlignment(bias_multiplier_tensor.value())))
+      // TODO: I think we should be able to make this a virtual tensor, but we would need cudnn to support
+      // setbdesc(ManagedOpaqueDescriptor const &raw_tensor) first
       .setyDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'd', cudnn_utils::getAlignment(broadcasted_bias.value())))
       .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(bias_multiplier_tensor.value())))
       .build());
@@ -237,7 +228,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     // we use inplace operation here where the output is assigned to the input
     relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(tensor2requant_ptr)
-      .setyDesc(cudnn_utils::getTensorDescriptor(linear_output, 'f', key.output_alignment))
+      .setyDesc(cudnn_utils::getTensorDescriptor(linear_output, 'f', key.output_alignment, true))
       .setpwDesc(cudnn_utils::getPointWiseReluDescriptor(at::native::getCudnnDataType(linear_output)))
       .build());
   }
