@@ -130,6 +130,10 @@ class TestExpandedWeightHelperFunction(TestCase):
         res = sum_over_all_but_batch_and_last_n(input, 4)
         self.assertEqual(res, input)
 
+    def test_repr(self, device):
+        w = ExpandedWeight(torch.zeros(1, 1, device=device), 1)
+        self.assertTrue("ExpandedWeight" in repr(w))
+
 class TestExpandedWeightFunctional(TestCase):
     @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
     def test_expanded_weight_per_sample_grad(self, device, dtype, op):

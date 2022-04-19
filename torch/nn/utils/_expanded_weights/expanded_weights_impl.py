@@ -46,6 +46,9 @@ class ExpandedWeight(torch.Tensor):
             kwargs = {}
         if func in cls.handled_functions:
             return cls.handled_functions[func].apply(tuple(kwargs.keys()), func, *(args + tuple(kwargs.values())))
+        if func is torch.Tensor.__repr__:
+            arg, = args
+            return f"ExpandedWeight({arg.orig_weight}, {arg.batch_size})"
         # We cannot use a fallback here because we do not know the batch dimension for any regular tensor inputs,
         # i.e. torch.add(torch.Tensor, ExpandedWeight)
         raise RuntimeError(f"Expanded Weights encountered but cannot handle function {func.__name__}")
