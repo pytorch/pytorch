@@ -48,7 +48,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
-  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
+  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -101,7 +101,7 @@ fi
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Suppress vptr violations arising from multiple copies of pybind11
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true:detect_odr_violation=0
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
@@ -450,6 +450,8 @@ test_xla() {
 # nightly version.
 test_forward_backward_compatibility() {
   set -x
+  # create a dummy ts model at this version
+  python test/create_dummy_torchscript_model.py /tmp/model_new.pt
   pushd test/forward_backward_compatibility
   python -m venv venv
   # shellcheck disable=SC1091
@@ -457,10 +459,21 @@ test_forward_backward_compatibility() {
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
+  # FC: verify newmodel can be load with old code.
+  if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
+      echo "FC check failed: new model cannot be load in old code"
+      return 1
+  fi
+  python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
   rm -r venv
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
+  # BC: verify old model can be load with new code
+  if ! python ../load_torchscript_model.py /tmp/model_old.pt; then
+      echo "BC check failed: old model cannot be load in new code"
+      return 1
+  fi
   popd
   set +x
   assert_git_not_dirty
