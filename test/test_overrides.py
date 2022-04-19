@@ -8,7 +8,7 @@ import pprint
 import pickle
 import collections
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -1107,6 +1107,7 @@ class TestTorchFunctionWarning(TestCase):
                 # Function that handles torch_function in C++
                 torch.abs(a)
 
+@skipIfCrossRef
 class TestTorchFunctionMode(TestCase):
     def test_basic(self):
         class A(TorchFunctionMode):
