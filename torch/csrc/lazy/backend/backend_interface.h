@@ -33,14 +33,6 @@ class TORCH_API BackendImplInterface {
   virtual void SetRngSeed(size_t seed) const = 0;
 
   /**
-   * IR Tracing
-   * */
-
-  // Compute the shape using the provided shape function with the given hash
-  // Gives a backend the ability to implement a caching mechanism
-  virtual Shape ComputeShape(std::function<Shape()> shape_fn, hash_t hash) const;
-
-  /**
    * Data Transfer
    * */
 

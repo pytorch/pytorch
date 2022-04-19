@@ -85,31 +85,21 @@ class TORCH_API Node {
   //
   // None leaf node's node_hash does not contains shape information always.
   // So we pass in the hash value rather than a function.
-  Node(OpKind op, size_t num_outputs, hash_t node_hash, std::function<hash_t(bool)> dag_hash_fn);
-
-  // Contructor used to create leaf nodes.
-  Node(OpKind op, size_t num_outputs, std::function<hash_t(bool)> node_hash_fn);
+  Node(OpKind op, size_t num_outputs);
 
   // Construct node with operands and shapes
-  Node(OpKind op, OpList operands, std::vector<Shape>&& shapes,
-       size_t num_outputs = 1, hash_t hash_seed = kHashSeed);
+  Node(OpKind op, OpList operands, std::vector<Shape>&& shapes, size_t num_outputs = 1);
 
   // Construct node with operands and shape generated from a function
-  Node(OpKind op, OpList operands,
-       const std::function<Shape()>& shape_fn,
-       size_t num_outputs = 1, hash_t hash_seed = kHashSeed);
+  Node(OpKind op, OpList operands, const std::function<Shape()>& shape_fn, size_t num_outputs = 1);
 
   // Construct node with operands and no shape
-  Node(OpKind op, OpList operands, size_t num_outputs = 1,
-       hash_t hash_seed = kHashSeed);
+  Node(OpKind op, OpList operands, size_t num_outputs = 1);
 
   // Construct node with shape and no operands
-  Node(OpKind op, Shape shape, size_t num_outputs = 1,
-       hash_t hash_seed = kHashSeed);
+  Node(OpKind op, Shape shape, size_t num_outputs = 1);
 
   virtual ~Node();
-
-  static hash_t GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed, bool bakeInSizes);
 
   const OpKind& op() const {
     return op_;
@@ -122,34 +112,23 @@ class TORCH_API Node {
   // Retrieves the full shape of the IR Node.
   virtual c10::ArrayRef<Shape> shapes() const;
 
-  // Retrieves the shape of the output at a given index.
   virtual const Shape& shape(size_t output_index = 0) const;
 
   // Add the shape computed by the shape_fn
   void addComputedShape(const std::function<Shape()>& shape_fn);
 
-  // Compute the shape using the provided shape_fn
+  // Compute the shape using the provided shape_fn if not previously cached
   Shape computeShape(const std::function<Shape()>& shape_fn);
 
   virtual const std::vector<Output>& operands() const;
 
   virtual const Output& operand(size_t i) const;
 
-  hash_t node_hash() const {
-    return node_hash_;
-  }
+  // Returns the hash of the dag used to look up the compiled graph
+  virtual hash_t hash() const = 0;
 
-  hash_t hash() const {
-    return enableDynamicShape() ? dag_hash_without_sizes_ : dag_hash_with_sizes_;
-  }
-
-  hash_t hash_without_sizes() const {
-    return dag_hash_without_sizes_;
-  }
-
-  hash_t hash_with_sizes() const {
-    return dag_hash_with_sizes_;
-  }
+  // Returns the hash of the dag used to for shape caching
+  virtual hash_t shapeHash() const = 0;
 
   const MetaData& metadata() const {
     return metadata_;
@@ -172,19 +151,6 @@ class TORCH_API Node {
   OpKind op_;
   size_t num_outputs_ = 1;
 
-  // dag_hash represents the hash value of the graph rooted at this node. There are 2 variants, one
-  // with sizes info and one without. We need 2 such hashes to support dynamic
-  // shape. Here are the logic to pick the hash in the 2 major scenarios that a hash is needed:
-  // - shape cache: in this case, we always use the dag hash with size info. This way, looking up the
-  //   shape for one node does not get the shape for another node with the same rank but different sizes
-  // - lookup the compiled graph by a hash: in this case, we will use the dag hash
-  //   WITHOUT size info if dynamic shape is enabled and use the dag hash WITH size info otherwise.
-  // The different requirement for the hash in these 2 scenarios forces us to maintain 2
-  // different hashes.
-  hash_t dag_hash_without_sizes_;
-  hash_t dag_hash_with_sizes_;
-  // The hash value of this node.
-  hash_t node_hash_;
   // The IR specific metadata attached to the IR node.
   MetaData metadata_;
   // The IR framework user can attach a user defined metadata object deriving
@@ -277,8 +243,7 @@ struct TORCH_API Value {
   /* implicit */ Value(const NodePtr& node, size_t index = 0) : node(node), index(index) {}
 
   hash_t hash() const;
-  hash_t hash_with_sizes() const;
-  hash_t hash_without_sizes() const;
+  hash_t shapeHash() const;
 
   operator bool() const {
     return node != nullptr;

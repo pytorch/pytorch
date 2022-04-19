@@ -15,9 +15,21 @@ using TSOpVector = std::vector<torch::jit::Value*>;
 
 class TORCH_API TsNode : public lazy::Node {
  public:
-  using Node::Node;
+  TsNode(OpKind op, OpList operands, std::vector<Shape>&& shapes,
+         size_t num_outputs, hash_t hash_seed = kHashSeed);
+
+  TsNode(OpKind op, OpList operands, const std::function<Shape()>& shape_fn,
+                size_t num_outputs, hash_t hash_seed = kHashSeed);
+
+  TsNode(OpKind op, OpList operands, size_t num_outputs, hash_t hash_seed = kHashSeed);
+
+  TsNode(OpKind op, Shape shape, size_t num_outputs, hash_t hash_seed = kHashSeed);
 
   ~TsNode() override = default;
+
+  hash_t hash() const override;
+
+  hash_t shapeHash() const override;
 
   const std::string& getPythonStacktrace() const { return python_stacktrace_; }
 
@@ -28,6 +40,12 @@ class TORCH_API TsNode : public lazy::Node {
                            TSLoweringContext* loctx) const;
 
  private:
+  // The hash of the dag WITH size info. Used for shape caching
+  hash_t shape_hash_;
+  // The hash of the dag used to look up the compiled graph by a hash
+  // in this case, we will use the dag hash WITHOUT size info if dynamic shape is enabled
+  // and use the dag hash WITH size info otherwise.
+  hash_t dag_hash_;
   std::string python_stacktrace_;
 };
 
