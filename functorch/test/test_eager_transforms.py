@@ -2774,16 +2774,25 @@ class TestFunctionalize(TestCase):
     def _check_functionalize_correctness(self, f, inpt):
         inpt1 = inpt.clone()
         inpt2 = inpt.clone()
+        inpt3 = inpt.clone()
 
         expected_outputs = f(inpt1)
         actual_outputs = vmap(functionalize(f))(inpt2.unsqueeze(0))[0].squeeze()
+        # Right now the flavor of functionalize that also removes view ops
+        # isn't being used with vmap
+        # That's because {view}_copy ops don't have batching rules yet
+        # (although we should probably fix that)
+        actual_outputs_view_copy = functionalize(f, remove='mutations_and_views')(inpt3)
         # Check that outputs are the same
         self.assertEqual(actual_outputs, expected_outputs)
+        self.assertEqual(actual_outputs_view_copy, expected_outputs)
 
         # Inputs might have been mutated by f: check that they were mutated properly
         self.assertEqual(inpt1, inpt2)
+        self.assertEqual(inpt1, inpt3)
 
     def test_simple_view(self, device):
+
         def f(x: torch.Tensor) -> torch.Tensor:
             tmp = torch.ones(2, device=device)
             y = x.view(4, 2)
@@ -2792,6 +2801,7 @@ class TestFunctionalize(TestCase):
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
 
     def test_multioutput_view(self, device):
+
         def f(x: torch.Tensor) -> torch.Tensor:
             tmp = torch.ones(2, device=device)
             y1, y2 = x.split(2)
@@ -2801,6 +2811,7 @@ class TestFunctionalize(TestCase):
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
 
     def test_inplace_view(self, device):
+
         def f(x: torch.Tensor) -> torch.Tensor:
             tmp = torch.ones(4, device=device)
             y = x + x
@@ -2811,6 +2822,7 @@ class TestFunctionalize(TestCase):
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
 
     def test_multioutput_inplace_slice_view(self, device):
+
         def f(x: torch.Tensor) -> torch.Tensor:
             tmp = torch.ones(2, 2, device=device)
             y = x.view(8)
@@ -2822,6 +2834,117 @@ class TestFunctionalize(TestCase):
             z2.add_(tmp)
             return x
         self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+
+    def test_functionalize_fx_simple(self, device):
+
+        def f(x: torch.Tensor) -> torch.Tensor:
+            tmp = torch.ones(2, device=device)
+            y = x.view(4, 2)
+            y.add_(tmp)
+            return x
+        # There's a copy_ in the graph, because the input (x) was mutated.
+        # To preserve semantics, functionalize() needs to propagate the mutation.
+        out = make_fx(functionalize(f, remove='mutations_and_views'))(torch.zeros(4, 2, device=device))
+        self.assertExpectedInline((out.code), """\
+
+
+
+def forward(self, x_1) -> torch.Tensor:
+    view_copy = torch.ops.aten.view_copy(x_1, [4, 2])
+    _tensor_constant0 = self._tensor_constant0
+    add = torch.ops.aten.add(view_copy, _tensor_constant0);  view_copy = _tensor_constant0 = None
+    view_copy_1 = torch.ops.aten.view_copy(add, [4, 2]);  add = None
+    copy_ = torch.ops.aten.copy_(x_1, view_copy_1);  x_1 = None
+    return view_copy_1
+    """)
+
+    def test_functionalize_fx_transpose_simple(self, device):
+
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return x.transpose(1, 0)
+        out = make_fx(functionalize(f, remove='mutations_and_views'))(torch.zeros(4, 2, device=device))
+        self.assertExpectedInline(out.code, """\
+
+
+
+def forward(self, x_1) -> torch.Tensor:
+    transpose_copy = torch.ops.aten.transpose_copy(x_1, 1, 0);  x_1 = None
+    return transpose_copy
+    """)
+
+    def test_functionalize_fx_out_op(self, device):
+
+        def f(inpt: torch.Tensor) -> torch.Tensor:
+            out = torch.empty((), dtype=torch.float32)
+            torch.add(inpt, inpt, out=out)
+            out_view = out.view(4)
+            out_view.add_(1)
+            return out
+
+        fn = make_fx(functionalize(f, remove='mutations_and_views'))
+        out = fn(torch.arange(4, device=device, dtype=torch.float32))
+        self.assertExpectedInline(out.code, """\
+
+
+
+def forward(self, inpt_1) -> torch.Tensor:
+    add = torch.ops.aten.add(inpt_1, inpt_1);  inpt_1 = None
+    view_copy = torch.ops.aten.view_copy(add, [4])
+    view_copy_1 = torch.ops.aten.view_copy(add, [4]);  add = None
+    _tensor_constant0 = self._tensor_constant0
+    add_1 = torch.ops.aten.add(view_copy_1, _tensor_constant0);  view_copy_1 = _tensor_constant0 = None
+    view_copy_2 = torch.ops.aten.view_copy(add_1, [4]);  add_1 = None
+    return view_copy_2
+    """)
+
+    def test_functionalize_fx_multi_out_op(self, device):
+
+        def f(inpt: torch.Tensor) -> torch.Tensor:
+            mins = torch.empty(4, dtype=torch.float32)
+            maxs = torch.empty(2, 2, dtype=torch.float32)
+            maxs_view = maxs.view(4)
+            inpt_view = inpt.view(2, 4)
+            torch.aminmax(inpt_view, dim=0, out=(mins, maxs_view))
+            return (maxs, mins)
+
+        fn = make_fx(functionalize(f, remove='mutations_and_views'))
+        out = fn(torch.arange(8, device=device, dtype=torch.float32))
+        self.assertExpectedInline(out.code, """\
+
+
+
+def forward(self, inpt_1) -> torch.Tensor:
+    view_copy = torch.ops.aten.view_copy(inpt_1, [2, 4]);  inpt_1 = None
+    aminmax = torch.ops.aten.aminmax(view_copy, dim = 0);  view_copy = None
+    getitem = aminmax[0]
+    getitem_1 = aminmax[1];  aminmax = None
+    view_copy_1 = torch.ops.aten.view_copy(getitem_1, [2, 2]);  getitem_1 = None
+    return (view_copy_1, getitem)
+    """)
+
+    def test_functionalize_fx_reapply_views_simple(self, device):
+
+        def f(x: torch.Tensor) -> torch.Tensor:
+            tmp = torch.ones(2, device=device)
+            y = x.view(4, 2)
+            y.add_(tmp)
+            return x
+
+        out = make_fx(functionalize(f))(torch.zeros(4, 2, device=device))
+        self.assertExpectedInline(out.code, """\
+
+
+
+def forward(self, x_1) -> torch.Tensor:
+    view = torch.ops.aten.view(x_1, [4, 2])
+    detach = torch.ops.aten.detach(view);  view = None
+    _tensor_constant0 = self._tensor_constant0
+    add = torch.ops.aten.add(detach, _tensor_constant0);  detach = _tensor_constant0 = None
+    view_1 = torch.ops.aten.view(add, [4, 2]);  add = None
+    detach_1 = torch.ops.aten.detach(view_1);  view_1 = None
+    copy_ = torch.ops.aten.copy_(x_1, detach_1);  x_1 = None
+    return detach_1
+    """)
 
 
 only_for = ("cpu", "cuda")
@@ -2861,12 +2984,12 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(
-    TestFunctionalize,
+    TestCustomFunction,
     globals(),
     only_for=only_for,
 )
 instantiate_device_type_tests(
-    TestCustomFunction,
+    TestFunctionalize,
     globals(),
     only_for=only_for,
 )
