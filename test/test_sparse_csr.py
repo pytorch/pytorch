@@ -1677,6 +1677,7 @@ class TestSparseCSR(TestCase):
                 c, b = sample.input, sample.args[1]
                 if reverse and a.shape != b.shape:
                     continue
+
                 def fn(a):
                     inputs = (c, b, a) if reverse else (c, a, b)
                     output = torch.addmm(*inputs, **sample.kwargs)
