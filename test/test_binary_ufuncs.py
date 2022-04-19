@@ -2827,7 +2827,7 @@ class TestBinaryUfuncs(TestCase):
     def test_lerp_lowp(self, device, dtype):
         ref_dtype = torch.float
         xvals = (0., -30000.)
-        yvals = (0.1, 20000.)
+        yvals = (0.1, -20000.)
         xs = [torch.full((4,), xval, device=device, dtype=dtype) for xval in xvals]
         ys = [torch.full((4,), yval, device=device, dtype=dtype) for yval in yvals]
         weights = [70000, torch.full((4,), 8, device=device, dtype=dtype)]
