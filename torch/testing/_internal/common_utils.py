@@ -30,7 +30,7 @@ import subprocess
 import time
 from collections.abc import Sequence, Mapping
 from contextlib import contextmanager, closing
-from functools import wraps
+from functools import wraps, partial
 from itertools import product
 from copy import deepcopy
 import tempfile
@@ -811,19 +811,19 @@ def skipIfCrossRef(fn):
 meta_exclude_set = {
     # These happen so frequently, it's worth not continually running
     # them
-    torch.Tensor.tolist, torch.Tensor.unbind, torch.Tensor.__repr__,
-    torch.Tensor.__deepcopy__, torch.Tensor.to, torch.Tensor.add_,
-    torch.Tensor.__getitem__, torch.Tensor.__setitem__, torch.Tensor.mul,
-    torch.Tensor.dtype.__get__, torch.Tensor.numpy, torch.Tensor.cpu,
-    torch.Tensor.layout.__get__, torch.Tensor.__bool__, torch.Tensor.dtype.__get__,
-    torch.Tensor.requires_grad.__get__, torch.Tensor.shape.__get__, torch.Tensor.is_complex,
-    torch.Tensor.add, torch.Tensor.requires_grad_, torch.Tensor.clone,
-    torch.Tensor.numel, torch.Tensor.device.__get__, torch.Tensor.grad.__get__,
-    torch.Tensor.copy_, torch.Tensor.reshape, torch.Tensor.size,
-    torch.Tensor.sub, torch.Tensor.gt, torch.Tensor.lt,
-    torch.Tensor.is_floating_point, torch.Tensor.detach, torch.rand,
-    torch.Tensor.sum, torch.Tensor.__format__, torch.Tensor.is_sparse.__get__,
-    torch.Tensor.div, torch.Tensor.__rsub__, torch.Tensor.item,
+    #   torch.Tensor.tolist, torch.Tensor.unbind, torch.Tensor.__repr__,
+    #   torch.Tensor.__deepcopy__, torch.Tensor.to, torch.Tensor.add_,
+    #   torch.Tensor.__getitem__, torch.Tensor.__setitem__, torch.Tensor.mul,
+    #   torch.Tensor.dtype.__get__, torch.Tensor.numpy, torch.Tensor.cpu,
+    #   torch.Tensor.layout.__get__, torch.Tensor.__bool__, torch.Tensor.dtype.__get__,
+    #   torch.Tensor.requires_grad.__get__, torch.Tensor.shape.__get__, torch.Tensor.is_complex,
+    #   torch.Tensor.add, torch.Tensor.requires_grad_, torch.Tensor.clone,
+    #   torch.Tensor.numel, torch.Tensor.device.__get__, torch.Tensor.grad.__get__,
+    #   torch.Tensor.copy_, torch.Tensor.reshape, torch.Tensor.size,
+    #   torch.Tensor.sub, torch.Tensor.gt, torch.Tensor.lt,
+    #   torch.Tensor.is_floating_point, torch.Tensor.detach, torch.rand,
+    #   torch.Tensor.sum, torch.Tensor.__format__, torch.Tensor.is_sparse.__get__,
+    #   torch.Tensor.div, torch.Tensor.__rsub__, torch.Tensor.item,
     # These need to get implemented and are excluded for now
     torch.Tensor.__contains__,
     torch.Tensor.__float__,
@@ -985,6 +985,9 @@ meta_exclude_set = {
 }
 
 class CrossRefMode(torch.overrides.TorchFunctionMode):
+    def __init__(self, test_case):
+        self.test_case = test_case
+
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
@@ -1006,7 +1009,7 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
             else:
                 return t
 
-        do_meta = hit and func not in meta_exclude_set
+        do_meta = func not in meta_exclude_set
 
         if do_meta:
             try:
@@ -1029,6 +1032,8 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                     f"failed to convert args to meta; "
                     f"originally (*{args}, **{kwargs})") from e
 
+        do_meta = do_meta and hit
+
         r = func(*args, **kwargs)
 
         # TODO: also handle cases where func raise an exception
@@ -1040,17 +1045,21 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                     warnings.simplefilter("ignore")
                     meta_r = func(*meta_args, **meta_kwargs)
             except NotImplementedError:
+                print(func)
                 pass
             except Exception as e:
                 raise RuntimeError(f"""\
 failed to run:
-  {namer.resolve_func(func)}(
+  {func}(
     *{meta_args},
     **{meta_kwargs}
   );
 originally
   *{args}
   **{kwargs}""") from e
+            else:
+                pass
+                # self.test_case.assertEqual(meta_r.dtype, r.dtype)
 
         return r
 
@@ -2099,7 +2108,7 @@ class TestCase(expecttest.TestCase):
     def run(self, result=None):
         with contextlib.ExitStack() as stack:
             if TEST_WITH_CROSSREF:
-                stack.enter_context(torch.overrides.push_torch_function_mode(CrossRefMode))
+                stack.enter_context(torch.overrides.push_torch_function_mode(partial(CrossRefMode, self)))
             num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
             self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
 
