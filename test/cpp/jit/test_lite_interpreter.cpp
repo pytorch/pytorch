@@ -28,17 +28,6 @@
 namespace torch {
 namespace jit {
 
-// TEST(LiteInterpreterTest, DebugDper) {
-//   std::string path =
-//       "/data/sandcastle/boxes/fbsource/fbcode/caffe2/test/cpp/jit/namedtuple.ptl";
-//   // mobile::Module bc = _load_for_mobile(path);
-//   Module jit_m = load(path);
-//   std::string resave_path =
-//       "/data/sandcastle/boxes/fbsource/fbcode/caffe2/test/cpp/jit/namedtuple_reave.ptl";
-//   jit_m._save_for_mobile(resave_path);
-//   mobile::Module bc = _load_for_mobile(resave_path);
-// }
-
 TEST(LiteInterpreterTest, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
