@@ -621,6 +621,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       std::cout << "[Rank " << rank_  << "] createProcessGroupUCC not found.";
     }
   }
+#else
+  std::cout << "PyTorch not built with USE_NCCL_WITH_UCC=1" << std::endl;
 #endif
 }
 
