@@ -837,16 +837,8 @@ Tensor mm_mat1_backward(const Tensor& grad, const Tensor& mat2, at::IntArrayRef 
     }
   }
 
-  auto result = maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
-
-  switch (mat1_layout) {
-    case c10::kStrided:
-      return result.to_dense();
-    case c10::kSparseCsr:
-      return result.to_sparse_csr();
-    default:
-      TORCH_CHECK(false, "mm_mat1_backward is not implemented for grad layout ", grad.layout(), ", mat2 layout ", mat2.layout(), ", mat1 layout ", mat1_layout);
-  }
+  // General fallback, should work for any layout
+  return maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
 }
 
 Tensor mm_mat2_backward(const Tensor& grad, const Tensor& mat1, IntArrayRef mat2_sizes, IntArrayRef mat2_strides, c10::Layout mat2_layout, const Scalar& alpha) {
@@ -857,18 +849,8 @@ Tensor mm_mat2_backward(const Tensor& grad, const Tensor& mat1, IntArrayRef mat2
     }
   }
 
-  auto result = maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
-
-  switch (mat2_layout) {
-    case c10::kStrided:
-      return result.to_dense();
-    case c10::kSparseCsr:
-      return result.to_sparse_csr();
-    case c10::kSparse:
-      return result.to_sparse();
-    default:
-      TORCH_CHECK(false, "mm_mat2_backward is not implemented for grad layout ", grad.layout(), ", mat1 layout ", mat1.layout(), ", mat2 layout ", mat2_layout);
-  }
+  // General fallback, should work for any layout
+  return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
 }
 
 Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {

@@ -1689,7 +1689,7 @@ class TestSparseCSR(TestCase):
                 covector = torch.randn_like(output)
                 output.backward(covector)
                 self.assertTrue(torch.is_tensor(a.grad))
-                self.assertTrue(a.grad.is_sparse_csr)
+                self.assertTrue(a.grad.layout == torch.strided)
 
                 # Compute dense result and compare with sparse result
                 dense_a = a.detach().to_dense().requires_grad_(True)
