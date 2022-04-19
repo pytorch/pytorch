@@ -1099,20 +1099,6 @@ def slowTest(fn):
     return wrapper
 
 
-# noarch tests are tests that should be only run on one CI configuration,
-# because they don't exercise any interesting platform specific code
-# and so if run once, indicate the test should pass everywhere.
-# See https://github.com/pytorch/pytorch/issues/53743
-def noarchTest(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_SKIP_NOARCH:
-            raise unittest.SkipTest("test is noarch: we are skipping noarch tests due to TEST_SKIP_NOARCH")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
-
 def slowAwareTest(fn):
     fn.__dict__['slow_test'] = True
     return fn
@@ -2943,7 +2929,7 @@ def gradcheck(fn, inputs, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -2963,7 +2949,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
