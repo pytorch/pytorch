@@ -483,7 +483,6 @@ class TestPartitioning(TestCase):
         assert torch.allclose(ref_a.grad, res_a.grad, atol=1e-3, rtol=1e-3)
         assert torch.allclose(ref_b.grad, res_b.grad, atol=1e-3, rtol=1e-3)
 
-
     def test_meta_tensor_inplace_op(self):
         # Following module results in inplace ops while tracing. The test checks
         # that the meta tensor information is stored for inplace ops.
@@ -510,13 +509,14 @@ class TestPartitioning(TestCase):
         aot_mod = aot_module(mod, fw_compiler=check_meta_tensor)
         aot_mod(*inputs)
 
-
     def test_default_partitioner_getitem(self):
         mod = nn.LayerNorm([10])
+
         def f(x, mod_weight, mod_bias):
             return torch.nn.functional.layer_norm(x, [10], mod_weight, mod_bias, eps=1e-6)
 
-        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(3, 10, requires_grad=True), mod.weight, mod.bias], partitioner=default_partition)
+        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(3, 10, requires_grad=True), mod.weight, mod.bias],
+                                             partitioner=default_partition)
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 6))
         self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
 
