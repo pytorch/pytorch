@@ -839,14 +839,14 @@ inline
 complex<_Tp>
 lerp(const complex<_Tp>& self_val, const complex<_Tp>& end_val, const complex<_Tp>& weight_val)
 {
-    return (std::abs(weight_val.real()) < 0.5)
+    return ((std::abs(weight_val.real()) < 0.5)
         ? self_val.real() + weight_val.real() * (end_val.real() - self_val.real())
         : end_val.real() -
-            (end_val.real() - self_val.real()) * (static_cast<scalar_t>(1) - weight_val.real())
-        + (std::abs(weight_val.imag()) < 0.5)
+            (end_val.real() - self_val.real()) * (static_cast<_Tp>(1) - weight_val.real()))
+	+ ((std::abs(weight_val.imag()) < 0.5)
             ? self_val.imag() + weight_val.imag() * (end_val.imag() - self_val.imag())
             : end_val.imag() -
-                (end_val.imag() - self_val.imag()) * (static_cast<scalar_t>(1) - weight_val.imag());
+                (end_val.imag() - self_val.imag()) * (static_cast<_Tp>(1) - weight_val.imag()));
 }
 
 // __sqr, computes pow(x, 2)

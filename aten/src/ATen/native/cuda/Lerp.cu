@@ -9,18 +9,18 @@ namespace at {
 namespace native {
 namespace {
 
-const char lerp_tensor_name[] = "lerp_kernel";
+const char lerp_tensor_name[] = "lerp_tensor_kernel";
 void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if(at::isComplexType(dtype)) {
 #if AT_USE_JITERATOR()
   static const auto lerp_tensor_string = jiterator_stringify(
       template <typename T>
-      T lerp_tensor_kernel(scalar_t self_val, scalar_t end_val, scalar_t weight_val) {
+      T lerp_tensor_kernel(T self_val, T end_val, T weight_val) {
         return (std::abs(weight_val) < 0.5)
             ? self_val + weight_val * (end_val - self_val)
             : end_val -
-                (end_val - self_val) * (static_cast<scalar_t>(1) - weight_val);
+                (end_val - self_val) * (static_cast<T>(1) - weight_val);
         }
       ); // lerp_tensor_string
   AT_DISPATCH_COMPLEX_TYPES(dtype, "lerp_cuda", [&] {
@@ -66,19 +66,19 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
   }
 }
 
-const char lerp_scalar_name[] = "lerp_kernel";
+const char lerp_scalar_name[] = "lerp_scalar_kernel";
 void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
 #if AT_USE_JITERATOR()
   static const auto lerp_scalar_string = jiterator_stringify(
-      auto weight_val = weight.to<scalar_t>();
       template <typename T>
-      T lerp_scalar_kernel(scalar_t self_val, scalar_t end_val) {
+      T lerp_scalar_kernel(T self_val, T end_val) {
+        auto weight_val = weight.to<T>();
         return (std::abs(weight_val) < 0.5)
             ? self_val + weight_val * (end_val - self_val)
             : end_val -
-                (end_val - self_val) * (static_cast<scalar_t>(1) - weight_val);
+                (end_val - self_val) * (static_cast<T>(1) - weight_val);
       }
   ); // lerp_scalar_string
   AT_DISPATCH_COMPLEX_TYPES(dtype, "lerp_cuda", [&] {
@@ -98,7 +98,7 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
               ? self_val + weight_val * (end_val - self_val)
               : end_val -
                   (end_val - self_val) * (static_cast<scalar_t>(1) - weight_val);
-         });
+        });
   });
 #endif
   } else {
@@ -113,7 +113,7 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
                   ? self_val + weight_val * (end_val - self_val)
                   : end_val -
                       (end_val - self_val) * (static_cast<scalar_t>(1) - weight_val);
-            });
+        });
       });
     }
 }
