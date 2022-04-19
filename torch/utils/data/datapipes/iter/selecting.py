@@ -64,15 +64,23 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
 
         self.input_col = input_col
 
+    def _apply_filter_fn(self, data) -> bool:
+        if self.input_col is None:
+            return self.filter_fn(data)
+        elif isinstance(self.input_col, (list, tuple)):
+            args = tuple(data[col] for col in self.input_col)
+            return self.filter_fn(*args)
+        else:
+            return self.filter_fn(data[self.input_col])
+
     def __iter__(self) -> Iterator[T_co]:
-        res: bool
         for data in self.datapipe:
             filtered = self._returnIfTrue(data)
             if self._isNonEmpty(filtered):
                 yield filtered
 
     def _returnIfTrue(self, data):
-        condition = self.filter_fn(data)
+        condition = self._apply_filter_fn(data)
 
         if df_wrapper.is_column(condition):
             # We are operating on DataFrames filter here
