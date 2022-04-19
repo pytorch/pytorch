@@ -104,18 +104,18 @@ void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
 #if AT_USE_JITERATOR()
   static const auto reciprocal_string = jiterator_stringify(
       template <typename T>
-      T reciprocal_kernel(c10::complex<T> v) {
+      T reciprocal_kernel(T v) {
         // Handle extreme cases for numpy compatibility
         auto both_inf = [](T real, T imag) {
-          return ::isinf(real) && ::isinf(imag);
+          return std::isinf(real) && std::isinf(imag);
         };
 
         auto either_inf = [](T real, T imag) {
-          return ::isinf(real) || ::isinf(imag);
+          return std::isinf(real) || std::isinf(imag);
         };
 
         auto either_nan = [](T real, T imag) {
-          return ::isnan(real) || ::isnan(imag);
+          return std::isnan(real) || std::isnan(imag);
         };
 
         if (either_nan(v.real(), v.imag()) || both_inf(v.real(), v.imag())) {
@@ -138,7 +138,7 @@ void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
   });
 #else
   AT_DISPATCH_COMPLEX_TYPES(dtype, "reciprocal_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return reciprocal_wrapper(a);
     });
   });
