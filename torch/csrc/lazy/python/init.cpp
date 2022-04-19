@@ -11,6 +11,7 @@
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
+#include <torch/csrc/lazy/core/config.h>
 #if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #endif // FBCODE_CAFFE2 || OVRSOURCE
@@ -157,6 +158,17 @@ void initLazyBindings(PyObject* module){
       },
       py::arg("tensors"), py::arg("devices"), py::arg("wait") = true,
       py::arg("sync_ltc_data") = true);
+
+  lazy.def(
+    "_get_force_fallback", []() {
+        return torch::lazy::getLTCForceFallback();
+    }
+  );
+  lazy.def(
+    "_set_force_fallback", [](std::string newval) {
+        torch::lazy::getLTCForceFallback() = newval;
+    }
+  );
 
   lazy_ts_backend.def(
     "_init",

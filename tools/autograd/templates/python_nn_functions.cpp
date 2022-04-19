@@ -43,7 +43,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {
-    return handle_torch_function(r, args, kwargs, THPNNVariableFunctionsModule, "torch.nn");
+    return handle_torch_function(r, args, kwargs, THPNNVariableFunctionsModule, "torch.nn", "_parse_to");
   }
   auto parsed = parse_to_conversion(r, /*allow_copy*/ false); // we don't want copy for nn.Module.to
   auto& device = std::get<0>(parsed);

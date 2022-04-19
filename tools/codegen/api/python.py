@@ -1044,6 +1044,8 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return 'toDouble'
         elif t.name == BaseTy.str:
             return 'stringView'
+        elif t.name == BaseTy.Layout:
+            return 'layout'
 
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
