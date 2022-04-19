@@ -37,6 +37,7 @@ class TestJit(JitCommonTestCase):
     #   and runtimes (eager, traced, scripted).
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @_variant_ops(op_db)
+    # TODO remove this comment - just to create a non-empty commit
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = (dtype in op.supported_backward_dtypes(torch.device(device).type))
 
