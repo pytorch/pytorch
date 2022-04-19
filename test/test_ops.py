@@ -758,10 +758,10 @@ class TestCompositeCompliance(TestCase):
     @unittest.skipIf(TEST_ROCM, "The CUDA tests give sufficient signal")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    def test_forward_composite(self, device, dtype, op):
+    def test_forward_ad(self, device, dtype, op):
         if not op.supports_forward_ad:
-            unittest.skip("Does not support forward_ad")
-            return
+            raise unittest.SkipTest("Does not support forward_ad")
+
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample in samples:

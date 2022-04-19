@@ -9,12 +9,11 @@ from torch.utils._python_dispatch import enable_python_mode
 import torch.autograd.forward_ad as fwAD
 import re
 
-# See Note [Alias Result]
-alias_result = True
-
 # Since Forward AD doesn't work with `set_`
 # used for aliasing result (See Note [Alias Result]),
-# we temporarily disable it.
+# we temporarily disable it with `no_alias_result`
+alias_result = True
+
 @contextlib.contextmanager
 def no_alias_result():
     global alias_result
@@ -23,6 +22,20 @@ def no_alias_result():
         yield
     finally:
         alias_result = True
+
+# enable dispatch in
+# CCT __torch_dispatch__
+# NOTE: This overrides the no_dispatch
+# while calling the operator with CCT.
+dispatch = False
+@contextlib.contextmanager
+def disable_no_dispatch():
+    global dispatch
+    dispatch = True
+    try:
+        yield
+    finally:
+        dispatch = False
 
 # TODO: move this into library proper
 @contextlib.contextmanager
@@ -125,6 +138,7 @@ class CompositeCompliantTensor(torch.Tensor):
     elem: torch.Tensor
 
     __slots__ = ['elem']
+    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
@@ -174,7 +188,7 @@ class CompositeCompliantTensor(torch.Tensor):
                     'regular Tensor but the other tensors are Tensor Subclasses. '
                     'Please try to avoid this in-place operation.')
 
-        with no_dispatch():
+        with contextlib.nullcontext() if dispatch else no_dispatch():
             unwrapped_args = tree_map(unwrap, args)
             unwrapped_kwargs = tree_map(unwrap, kwargs)
             unwrapped_rs = func(*unwrapped_args, **unwrapped_kwargs)
@@ -464,23 +478,26 @@ def check_forward_formula(op, args, kwargs):
             flat_kwargs, spec = tree_flatten(kwargs)
             flat_tangent_kwargs = tuple(maybe_tangent(arg) for arg in flat_kwargs)
             tangent_kwargs = tree_unflatten(flat_tangent_kwargs, spec)
-            for tang_choice in generate_subclass_choices_args_kwargs_with_filter(tangent_args, tangent_kwargs,
-                                                                                 which_args_are_wrapped,
-                                                                                 which_kwargs_are_wrapped):
+
+            for tang_choice in generate_subclass_choices_args_kwargs(tangent_args, tangent_kwargs):
                 new_tang_args, new_tang_kwargs, \
                     which_tang_args_are_wrapped, which_tang_kwargs_are_wrapped = tang_choice
+
                 with fwAD.dual_level():
                     def maybe_make_dual(dual):
                         t, tangent = dual
-                        if isinstance(t, torch.Tensor) and t.requires_grad:
-                            # `t` is Tensor in which case, tangent could only be Tensor
+                        if isinstance(t, torch.Tensor):
                             return fwAD.make_dual(t, tangent)
+                        elif is_tensorlist(t):
+                            return tuple(fwAD.make_dual(pri, tang) for pri, tang in zip(t, tangent))
                         return t
 
-                    new_args = tuple(map(maybe_make_dual, zip(new_args, new_tang_args)))
-                    new_kwargs = {k: maybe_make_dual((v, new_tang_kwargs[k])) for k, v in new_kwargs.items()}
+                    op_args = tuple(map(maybe_make_dual, zip(new_args, new_tang_args)))
+                    op_kwargs = {k: maybe_make_dual((v, new_tang_kwargs[k])) for k, v in new_kwargs.items()}
+
                     try:
-                        op.gradcheck_wrapper(op.get_op(), *new_args, **new_kwargs)
+                        with disable_no_dispatch():
+                            op.gradcheck_wrapper(op.get_op(), *op_args, **op_kwargs)
                     # see NOTE: [What errors are Composite Compiance trying to catch?]
                     except RuntimeError as err:
                         raise_composite_compliance_error(
