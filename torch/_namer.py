@@ -5,42 +5,6 @@ import torch.fx.node
 import functools
 import __future__
 
-def fullname(o):
-    module = o.__module__
-    if module is None:
-        return o.__qualname__
-    return module + '.' + o.__qualname__
-
-
-public_docs = [
-    (torch.nn.functional, 'torch.nn.functional', 'docs/source/nn.functional.rst'),
-    (torch.fft, 'torch.fft', 'docs/source/fft.rst'),
-    (torch.special, 'torch.special', 'docs/source/special.rst'),
-    (torch.linalg, 'torch.linalg', 'docs/source/linalg.rst'),
-    (torch, 'torch', 'docs/source/torch.rst'),
-    (torch.Tensor, 'torch.Tensor', 'docs/source/tensors.rst'),
-]
-
-def get_public_overridable_functions():
-    results = {}
-    all_overridable_apis = set(torch.overrides.get_testing_overrides().keys())
-    for module, module_name, src in public_docs:
-        with open(src) as f:
-            lines = f.readlines()
-        # APIs eitehr begin with 4 spaces or ".. autofunction::"
-        api_lines1 = [line.strip() for line in lines if line.startswith(' ' * 4)]
-        api_lines2 = [line.strip()[len('.. autofunction:: '):]
-                      for line in lines if line.startswith('.. autofunction::')]
-        lines = api_lines1 + api_lines2
-        lines = [line[7:] if line.startswith('Tensor.') else line for line in lines]
-        lines = [line for line in lines if hasattr(module, line)]
-        for line in lines:
-            api = getattr(module, line)
-            if api in all_overridable_apis:
-                results[f'{module_name}.{line}'] = api
-    return results
-
-
 # copied from torch.overrides
 @functools.lru_cache(None)
 def get_overridable_functions_index():
@@ -93,7 +57,7 @@ def get_overridable_functions_index():
                 continue
 
             if not callable(func) and hasattr(func, "__get__"):
-                index[func.__get__] = f"{namespace_str}.{func_name}"
+                index[func.__get__] = f"{namespace_str}.{func_name}.__get__"
                 continue
 
             if not callable(func):
