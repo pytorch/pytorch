@@ -3553,10 +3553,10 @@ class TestQuantizedLinear(TestCase):
            use_multi_dim_input=st.booleans(),
            use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
     # @skipIfNoFBGEMM
-    # @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    # @unittest.skip("Local only - currently the qlinear_cudnn op is bulid "
-    #                "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
-    #                "after it is built by default")
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skip("Local only - currently the qlinear_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     # TODO: check with yang regarding CUDNN flags
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
                            use_relu, use_multi_dim_input, use_channelwise):
