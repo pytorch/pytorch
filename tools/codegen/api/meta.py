@@ -6,6 +6,7 @@ from tools.codegen.model import NativeFunctionsGroup
 #   - No tensor returns; instead we return a TensorMeta describing
 #     the tensor in question
 
+
 def name(g: NativeFunctionsGroup) -> str:
     # use the overload name from the functional version
-    return str(g.functional.func.name).replace('.', '_')
+    return str(g.functional.func.name).replace(".", "_")

@@ -12,7 +12,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty_like.h>
-#include <ATen/ops/sort_native.h>
+#include <ATen/ops/sort_cuda_dispatch.h>
 #include <ATen/ops/topk_native.h>
 #endif
 
@@ -26,7 +26,7 @@ void topk_out_with_sort(
   const Tensor& indices
 ) {
   Tensor sorted_values, sorted_indices;
-  std::tie(sorted_values, sorted_indices) = at::native::sort_cuda(self, dim, largest);
+  std::tie(sorted_values, sorted_indices) = at::cuda::sort(self, /* stable= */false, dim, largest);
   values.copy_(sorted_values.narrow(dim, 0, k));
   indices.copy_(sorted_indices.narrow(dim, 0, k));
 }
@@ -83,7 +83,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
       Tensor sortedIndices = at::empty_like(indices);
       Tensor sortedValues = at::empty_like(values);
-      sort_out_cuda(values, dim, largest, sortedValues, sortedIndices);
+      at::cuda::sort_outf(values, /* stable= */ false, dim, largest, sortedValues, sortedIndices);
       indices.copy_(indices.gather(dim, sortedIndices));
       values.copy_(sortedValues);
     }
