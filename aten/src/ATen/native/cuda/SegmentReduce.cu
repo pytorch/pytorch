@@ -40,6 +40,14 @@ struct CustomSum {
   }
 };
 
+struct CustomProd {
+  template <typename OutputT>
+  __host__ __device__ __forceinline__ OutputT
+  operator()(const OutputT& a, const OutputT& b) const {
+    return a * b;
+  }
+};
+
 struct CustomMin {
   template <typename OutputT>
   __host__ __device__ __forceinline__ OutputT
@@ -127,6 +135,9 @@ __global__ void segment_reduce_forward_kernel(
     } else if (reduction == SegmentReductionType::MIN) {
       initial_value =
           at::_isnan(data) ? data : std::min<scalar_t>(initial_value, data);
+    } else if (
+      reduction == SegmentReductionType::PROD) {
+      initial_value = initial_value * data;
     }
   }
 
@@ -205,6 +216,16 @@ __global__ void segment_reduce_backward_kernel(
     for (int64_t j = offset_start; j < offset_end; ++j) {
       int64_t starting_index = (j * stride_count) + lane_id;
       grad_input_data[starting_index] = grad_val;
+    }
+  } else if (reduction == SegmentReductionType::PROD) {
+    const auto& grad_val = grad_data[output_index] * output_data[output_index];
+    for (int64_t j = offset_start; j < offset_end; ++j) {
+      int64_t starting_index = (j * stride_count) + lane_id;
+      if (values_data[starting_index] == 0) {
+        grad_input_data[starting_index] = values_data[starting_index];
+      } else {
+        grad_input_data[starting_index] = grad_val / values_data[starting_index];
+      }
     }
   }
 }
@@ -319,6 +340,8 @@ Tensor _segment_reduce_cuda_kernel(
                 initial_value = 0;
               } else if (reduction == SegmentReductionType::MIN) {
                 initial_value = std::numeric_limits<scalar_t>::infinity();
+              } else if (reduction == SegmentReductionType::PROD) {
+                initial_value = 1;
               }
 
               if (output_shape.size() > 1) {
@@ -396,6 +419,18 @@ Tensor _segment_reduce_cuda_kernel(
                       offsets_data_ptr,
                       offsets_data_ptr + 1,
                       sum_op,
+                      initial_value,
+                      at::cuda::getCurrentCUDAStream());
+                } else if (reduction == SegmentReductionType::PROD) {
+                  CustomProd prod_op{};
+                  CUB_WRAPPER(
+                      cub::DeviceSegmentedReduce::Reduce,
+                      data_data_ptr,
+                      output_data_ptr,
+                      segment_count,
+                      offsets_data_ptr,
+                      offsets_data_ptr + 1,
+                      prod_op,
                       initial_value,
                       at::cuda::getCurrentCUDAStream());
                 }

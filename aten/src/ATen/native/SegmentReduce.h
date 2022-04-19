@@ -9,7 +9,7 @@ class Tensor;
 
 namespace native {
 
-enum SegmentReductionType { MAX, MEAN, MIN, SUM };
+enum SegmentReductionType { MAX, MEAN, MIN, SUM, PROD};
 
 using segment_reduce_fn = Tensor (*)(
     SegmentReductionType,

@@ -22,8 +22,10 @@ SegmentReductionType get_reduction_enum(const c10::string_view& reduce) {
     return SegmentReductionType::MIN;
   } else if (reduce == "sum") {
     return SegmentReductionType::SUM;
+  } else if (reduce == "prod") {
+    return SegmentReductionType::PROD;
   } else {
-    TORCH_CHECK(false, "unsopported reduction given! ", reduce);
+    TORCH_CHECK(false, "unsupported reduction given! ", reduce);
   }
 }
 
@@ -56,6 +58,8 @@ void _segment_reduce_cpu_kernel1(
               initial_value = 0;
             } else if (reduction == SegmentReductionType::MIN) {
               initial_value = std::numeric_limits<scalar_t>::infinity();
+            } else if (reduction == SegmentReductionType::PROD) {
+              initial_value = 1;
             }
 
             // ===== step2: apply reduction
@@ -76,6 +80,8 @@ void _segment_reduce_cpu_kernel1(
                 initial_value = at::_isnan(data)
                     ? data
                     : std::min<scalar_t>(initial_value, data);
+              } else if (reduction == SegmentReductionType::PROD) {
+                initial_value = initial_value * data;
               }
             }
 
@@ -188,6 +194,17 @@ void _segment_reduce_cpu_backward_kernel1(
                 int64_t starting_index =
                     ((lengths_cum_sum + j) * stride_count) + l;
                 grad_input_data[starting_index] = grad_val;
+              }
+            } else if (reduction == SegmentReductionType::PROD) {
+              const auto& grad_val = grad_data[output_index] * output_data[output_index];
+              for (const auto j : c10::irange(lengths_data[i])) {
+                int64_t starting_index =
+                    ((lengths_cum_sum + j) * stride_count) + l;
+                if (values_data[starting_index] == 0) {
+                  grad_input_data[starting_index] = values_data[starting_index];
+                } else {
+                  grad_input_data[starting_index] = grad_val / values_data[starting_index];
+                }
               }
             }
           }
