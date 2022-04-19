@@ -83,6 +83,7 @@ uint64_t _get_model_bytecode_version(std::istream& in) {
           false,
           "Flatbuffer input file but the build hasn't enabled flatbuffer");
 #else
+      std::cout << __FILE__ << " flatbuffer file" << std::endl;
       return get_bytecode_version(in);
 #endif
     }

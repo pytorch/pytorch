@@ -636,7 +636,7 @@ void backportAllVersionCheck(
     std::vector<IValue>& expect_result_list,
     const uint64_t expect_from_version) {
   auto from_version = _get_model_bytecode_version(test_model_file_stream);
-  AT_ASSERT(from_version == expect_from_version);
+  ASSERT_EQ(from_version, expect_from_version);
   AT_ASSERT(from_version > 0);
 
   // Backport script_module_v5.ptl to an older version
@@ -749,7 +749,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       input_model_stream,
       input_data,
       expect_result_list,
-      caffe2::serialize::kProducedBytecodeVersion);
+      caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 #endif // !defined(FB_XPLAT_BUILD)
 
