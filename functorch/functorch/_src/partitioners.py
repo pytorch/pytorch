@@ -141,10 +141,20 @@ def default_partition(
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
     forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
     forward_node_names = set([node.name for node in forward_only_graph.nodes if node.op != 'output'])
+    saved_values = []
+    for node in joint_module.graph.nodes:
+        if node.name not in forward_node_names:
+            continue
+        # Since we can't save tuple of tensor values, we need to flatten out what we're saving
+        if 'tensor_meta' not in node.meta:
+            users = node.users
+            assert all([user.target == operator.getitem for user in users])
+            for user in users:
+                saved_values.append(user)
+        else:
+            saved_values.append(node)
+    saved_values = list(set(saved_values))
 
-    def node_saved(node):
-        return node.name in forward_node_names and 'tensor_meta' in node.meta
-    saved_values = [node for node in joint_module.graph.nodes if node_saved(node)]
     return _extract_fwd_bwd_modules(joint_module, saved_values)
 
 

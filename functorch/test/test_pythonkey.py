@@ -21,7 +21,7 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations
+    num_of_recompilations, default_partition
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -447,13 +447,13 @@ def get_num_ins_outs(fx_g):
     return num_inps, num_outs
 
 
-def get_fw_bw_graph(f, inps):
+def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition):
     fw_graph_cell = [None]
     bw_graph_cell = [None]
     aot_function(f,
                  fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                  bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
-                 partition_fn=min_cut_rematerialization_partition)(*inps)
+                 partition_fn=partitioner)(*inps)
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
@@ -483,6 +483,7 @@ class TestPartitioning(TestCase):
         assert torch.allclose(ref_a.grad, res_a.grad, atol=1e-3, rtol=1e-3)
         assert torch.allclose(ref_b.grad, res_b.grad, atol=1e-3, rtol=1e-3)
 
+
     def test_meta_tensor_inplace_op(self):
         # Following module results in inplace ops while tracing. The test checks
         # that the meta tensor information is stored for inplace ops.
@@ -508,6 +509,16 @@ class TestPartitioning(TestCase):
         mod = MockModule().to(device="cpu")
         aot_mod = aot_module(mod, fw_compiler=check_meta_tensor)
         aot_mod(*inputs)
+
+
+    def test_default_partitioner_getitem(self):
+        mod = nn.LayerNorm([10])
+        def f(x, mod_weight, mod_bias):
+            return torch.nn.functional.layer_norm(x, [10], mod_weight, mod_bias, eps=1e-6)
+
+        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(3, 10, requires_grad=True), mod.weight, mod.bias], partitioner=default_partition)
+        self.assertEqual(get_num_ins_outs(fw_graph), (3, 6))
+        self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner(self):
