@@ -40,7 +40,6 @@ from tools.codegen.context import (method_with_native_function,
                                    with_native_function)
 import tools.codegen.dest as dest
 from tools.codegen.gen_functionalization_type import (
-    needs_functionalization,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
@@ -1604,11 +1603,8 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
     def functionalization_env_callable(
             g: Union[NativeFunction, NativeFunctionsViewGroup]
     ) -> Dict[str, List[str]]:
-        functions_needing_functionalization = [g] if needs_functionalization(selector, g) else []
 
         def gen_op_headers(g: Union[NativeFunction, NativeFunctionsViewGroup]) -> List[str]:
-            if not needs_functionalization(selector, g):
-                return []
             if isinstance(g, NativeFunctionsViewGroup):
                 # view ops always get a functionalization kernel
                 headers = [
@@ -1630,18 +1626,18 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
 
         return {
             'ops_headers': gen_op_headers(g),
-            'func_definitions': list(concatMap(
-                lambda f: gen_functionalization_definition(
-                    selector,
-                    g,
-                    # We need to manually map inplace ops to their out-of-place variants
-                    # (we can't do this with NativeFunctionsGroup today because not all inplace ops have out= variants)
-                    None if isinstance(g, NativeFunctionsViewGroup) else to_functional_op.get(g.func.name, None)),
-                functions_needing_functionalization)),
-            'func_registrations': list(concatMap(
-                lambda f: gen_functionalization_registration(
-                    selector, f, backend_indices[DispatchKey.CompositeImplicitAutograd]),
-                functions_needing_functionalization)),
+            'func_definitions': gen_functionalization_definition(
+                selector,
+                g,
+                # We need to manually map inplace ops to their out-of-place variants
+                # (we can't do this with NativeFunctionsGroup today because not all inplace ops have out= variants)
+                None if isinstance(g, NativeFunctionsViewGroup) else to_functional_op.get(g.func.name, None),
+            ),
+            'func_registrations': gen_functionalization_registration(
+                selector,
+                g,
+                backend_indices[DispatchKey.CompositeImplicitAutograd],
+            ),
         }
 
 
@@ -1651,7 +1647,13 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
         key_fn=key_func,
         env_callable=functionalization_env_callable,
         num_shards=4,
-        sharded_keys={'ops_headers', 'func_definitions', 'func_registrations'}
+        sharded_keys={
+            'ops_headers',
+            'func_definitions',
+            'func_registrations',
+            'func_add_back_views_definitions',
+            'func_add_back_views_registrations',
+        }
     )
 
     cpu_fm.write('FunctionalInverses.h', lambda: {
