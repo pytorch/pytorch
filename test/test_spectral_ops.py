@@ -10,12 +10,13 @@ import doctest
 import inspect
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncInfo, SpectralFuncType)
+from torch.testing._internal.common_cuda import SM53OrLater
 
 from setuptools import distutils
 from typing import Optional, List
@@ -378,7 +379,13 @@ class TestFFT(TestCase):
     def test_fft_half_and_bfloat16_errors(self, device, dtype, op):
         # TODO: Remove torch.half error when complex32 is fully implemented
         sample = first_sample(self, op.sample_inputs(device, dtype))
-        err_msg = "Unsupported dtype "
+        device_type = torch.device(device).type
+        if device_type == 'cuda' and TEST_WITH_ROCM:
+            err_msg = "hipFFT doesn't support transforms of type: Half"
+        elif device_type == 'cuda' and not SM53OrLater:
+            err_msg = "cuFFT doesn't support signals of half type with compute capability less than SM_53"
+        else:
+            err_msg = "Unsupported dtype "
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
 
