@@ -23,8 +23,6 @@ from torch.testing._internal.common_device_type import \
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
 
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
-
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
 
@@ -69,7 +67,8 @@ class TestCommon(TestCase):
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
-        include_complex32 = ((torch.complex32,) if op.supports_dtype(torch.complex32, torch.device(device).type) else ())
+        device_type = torch.device(device).type
+        include_complex32 = ((torch.complex32,) if op.supports_dtype(torch.complex32, device_type) else ())
 
         # dtypes to try to backward in
         allowed_backward_dtypes = floating_and_complex_types_and(
@@ -738,10 +737,6 @@ class TestCompositeCompliance(TestCase):
             composite_compliance.check_with_mode(op, args, kwargs)
             composite_compliance.check_all_permutations(op, args, kwargs)
 
-    # There are some weird unexpected successe here that imply rocm goes down
-    # a different path than CUDA sometimes. There's not an easy way to describe
-    # this in OpInfo so we're just going to skip all ROCM tests...
-    @unittest.skipIf(TEST_ROCM, "The CUDA tests give sufficient signal")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     def test_backward(self, device, dtype, op):
