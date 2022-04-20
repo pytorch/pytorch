@@ -8,6 +8,7 @@ from typing import (
     Sequence,
     Union
 )
+import copy
 import weakref
 
 import threading
@@ -24,13 +25,13 @@ from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
 from .reshard import reshuffle_local_shard, reshard_local_shard
 from .utils import (
-    get_current_process_group,
     _flatten_tensor_size,
     _parse_and_validate_remote_device,
     _validate_output_tensor_for_gather,
     build_metadata_from_local_shards,
     build_global_metadata
 )
+from torch.overrides import handle_torch_function
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -149,7 +150,7 @@ class ShardedTensor(object):
         dims = _flatten_tensor_size(size)
 
         if not isinstance(sharding_spec, shard_spec.ShardingSpec):
-            raise ValueError(f'Expecting ShardingSpec but got: {type(self._sharding_spec)}')
+            raise ValueError(f'Expecting ShardingSpec but got: {type(sharding_spec)}')
 
         self._sharding_spec = sharding_spec
 
@@ -280,17 +281,19 @@ class ShardedTensor(object):
 
         world_size = dist.get_world_size(self._process_group)
 
-        gathered_shards = [None] * world_size
-        # will revise this part with CPU support and use dist.gather()
-        # once NCCL support for gather() is ready
-        # https://github.com/pytorch/pytorch/issues/66187
-        dist.all_gather_object(
+        gathered_shards: List[Optional[List[Shard]]] = [None] * world_size if rank == dst else []
+        # TODO: see how we could use dist.gather() instead of dist.gather_object
+        # as the latter one involves pickling on CPU, see more context
+        # https://github.com/pytorch/pytorch/issues/73935
+        dist.gather_object(
             obj=local_shards,
-            object_list=gathered_shards,
+            object_gather_list=gathered_shards,
+            dst=dst,
             group=self._process_group,
         )
-
         if rank == dst:
+            if out is None:
+                raise ValueError("`out` Tensor must be provided on dst rank!")
             dims = len(full_size)
             for shards in gathered_shards:
                 if shards is None:
@@ -310,6 +313,61 @@ class ShardedTensor(object):
                         )
 
                     out_narrow_view.copy_(tensor)
+
+    def cpu(
+        self,
+        memory_format=torch.preserve_format,
+        process_group=None
+    ) -> ShardedTensor:
+        """
+        Returns a copy of this object in CPU memory.
+
+        If this ShardedTensor is already on CPU memory, then no copy is
+        performed and original object is returned.
+
+        .. note:: When moving a ShardedTensor from GPU to CPU, the ShardedTensor might
+            need to be managed by a different type of ProcessGroup(i.e. ProcessGroupGloo),
+            it is the user's responsiblity to explicitly pass in a new process_group that
+            is compatible with CPU.
+        """
+        # TODO: make this a __torch_function__ op once ShardedTensor becomes a
+        # torch.Tensor subclass, see https://github.com/pytorch/pytorch/issues/75402
+        if memory_format != torch.preserve_format and \
+                memory_format != torch.contiguous_format:
+            raise RuntimeError("Only `torch.contiguous_format` or "
+                               "`torch.preserve_format` is supported!")
+        all_on_cpu = True
+        for meta in self.metadata().shards_metadata:
+            all_on_cpu &= (meta.placement.device().type == "cpu")  # type: ignore[union-attr]
+
+        # if every shard is already on CPU, return the original object
+        if all_on_cpu:
+            return self
+
+        # if not, returns a copy of this object on CPU
+        list_shards: List[Shard] = []
+        # move all local shards to cpu, and change metadata
+        for shard in self._local_shards:
+            cpu_tensor = shard.tensor.cpu(memory_format=memory_format)  # type: ignore[call-arg]
+            metadata = copy.deepcopy(shard.metadata)
+            metadata.placement._device = torch.device("cpu")  # type: ignore[union-attr]
+            list_shards.append(
+                Shard(cpu_tensor, metadata)
+            )
+
+        st_meta = copy.deepcopy(self.metadata())
+        for meta in st_meta.shards_metadata:
+            if meta.placement.device().type != "cpu":  # type: ignore[union-attr]
+                meta.placement._device = torch.device("cpu")  # type: ignore[union-attr]
+
+        pg = self._process_group if process_group is None else process_group
+        st_cpu = ShardedTensor._init_from_local_shards_and_global_metadata(
+            list_shards,
+            sharded_tensor_metadata=st_meta,
+            process_group=pg,
+            init_rrefs=self._init_rrefs
+        )
+        return st_cpu
 
     @classmethod
     def _init_from_local_shards(
@@ -681,9 +739,18 @@ class ShardedTensor(object):
             raise NotImplementedError("Only single local shard is supported.")
         return self.local_shards()[0].tensor
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if func in _SHARDED_OPS:
-            return _SHARDED_OPS[func](types, args, kwargs, self._process_group)
+            # Find ShardedTensor instance to get process_group.
+            for arg in args:
+                if isinstance(arg, ShardedTensor):
+                    return _SHARDED_OPS[func](types, args, kwargs, arg._process_group)
+
+            for kwarg in kwargs.values():
+                if isinstance(kwarg, ShardedTensor):
+                    return _SHARDED_OPS[func](types, args, kwargs, kwarg._process_group)
+
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")
@@ -779,6 +846,30 @@ class ShardedTensor(object):
     def __repr__(self):
         return f'ShardedTensor({self._metadata})'
 
+    def __add__(self, other):
+        return handle_torch_function(torch.Tensor.__add__, (self, other), self, other)
+
+    def __radd__(self, other):
+        return handle_torch_function(torch.Tensor.__radd__, (self, other), self, other)
+
+    def __sub__(self, other):
+        return handle_torch_function(torch.Tensor.__sub__, (self, other), self, other)
+
+    def __rsub__(self, other):
+        return handle_torch_function(torch.Tensor.__rsub__, (self, other), self, other)
+
+    def __mul__(self, other):
+        return handle_torch_function(torch.Tensor.__mul__, (self, other), self, other)
+
+    def __rmul__(self, other):
+        return handle_torch_function(torch.Tensor.__rmul__, (self, other), self, other)
+
+    def __truediv__(self, other):
+        return handle_torch_function(torch.Tensor.__div__, (self, other), self, other)
+
+    def __rtruediv__(self, other):
+        return handle_torch_function(torch.Tensor.__rdiv__, (self, other), self, other)
+
     @dataclass
     class ProcessGroupState:
         """
@@ -809,7 +900,8 @@ class ShardedTensor(object):
         self._local_shards, self._metadata, pg_state, self._sharding_spec, self._init_rrefs = state
 
         # Setup process group
-        self._process_group = get_current_process_group()
+        from torch.distributed._shard.api import _get_current_process_group
+        self._process_group = _get_current_process_group()
 
         # Validate process group.
         local_rank = distributed_c10d.get_rank(self._process_group)

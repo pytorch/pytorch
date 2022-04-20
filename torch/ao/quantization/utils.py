@@ -6,6 +6,7 @@ import functools
 import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
 from typing import Tuple, Any, Union, Callable
+from torch.nn.utils.parametrize import is_parametrized
 
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
@@ -184,6 +185,16 @@ def activation_is_statically_quantized(qconfig):
     """
     return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
 
+def activation_is_dynamically_quantized(qconfig):
+    """ Given a qconfig, decide if the activation needs to be
+    dynamically quantized or not, this includes dynamically quantizing to
+    quint8, qint8 and float16
+    """
+    activation_dtype, _, activation_compute_dtype = \
+        get_qconfig_dtypes(qconfig)
+    return activation_dtype == torch.float and \
+        activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
+
 def activation_is_int8_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized to int8 or not, this includes quantizing to quint8, qint8
@@ -200,7 +211,7 @@ def weight_is_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be
     quantized or not
     """
-    return weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
+    return weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16, torch.quint4x2]
 
 def weight_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be statically
@@ -235,7 +246,7 @@ def get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8]
+    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2]
     if weight.dtype in static_dtypes:
         if activation.dtype in static_dtypes:
             return QuantType.STATIC
@@ -289,6 +300,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
     r"""Calculates actual qmin and qmax based on the quantization range,
     observer datatype and if range is reduced.
     """
+    # TODO(jerryzh): Figure out why custom quant_min/quant_max are still adjusted.
     if has_customized_qrange:
         # This initialization here is to be resolve TorchScript compilation issues and allow
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
@@ -315,10 +327,6 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             assert (
                 0 < qrange_len <= 2**31
             ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
-        if dtype == torch.qint8:
-            quant_min, quant_max = -qrange_len // 2, qrange_len // 2 - 1
-        else:
-            quant_min, quant_max = 0, qrange_len - 1
         if reduce_range:
             quant_min, quant_max = quant_min // 2, quant_max // 2
     else:
@@ -349,3 +357,16 @@ def _parent_name(target):
         return '', r[0]
     else:
         return r[0], r[1]
+
+def has_no_children_ignoring_parametrizations(module):
+    """
+    Checks if module._modules is empty or
+    if module is a parametrization, checks that module._modules only has
+    the 'parametrizations' module
+    """
+    if len(module._modules) == 0:
+        return True
+    elif is_parametrized(module):
+        return len(module._modules) == 1 and 'parametrizations' in module._modules
+    else:
+        return False
