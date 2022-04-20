@@ -467,6 +467,14 @@ struct TORCH_API SymbolicShape {
   // result will be unranked.
   SymbolicShape merge(const SymbolicShape& other) const;
 
+  friend bool operator==(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return lhs.dims_ == rhs.dims_;
+  }
+
+  friend bool operator!=(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return !(lhs == rhs);
+  }
+
   private:
     c10::optional<std::vector<ShapeSymbol>> dims_;
 };
@@ -1818,6 +1826,13 @@ template <class T>
 struct getTypePtr_<c10::ArrayRef<T>> final {
   static const auto& call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template <>
+struct getTypePtr_<c10::SymIntArrayRef> final {
+  static const auto& call() {
+    static auto type = ListType::create(getTypePtr_<c10::SymInt>::call());
     return type;
   }
 };

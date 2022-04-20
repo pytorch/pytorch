@@ -20,8 +20,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    skipIfRocm
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -620,7 +619,6 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
-    @skipIfRocm
     def test_adadelta(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 4e-3

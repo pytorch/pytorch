@@ -1603,7 +1603,7 @@ TEST(UseSplitAndSqueeze, Fusion) {
   auto graph = getGraphFromIR(src);
   UseSplitAndSqueeze(graph);
   EXPECT_TRUE(
-      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze"));
+      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze_copy"));
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::split"));
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::squeeze"));
   EXPECT_FALSE(hasNodeWithKind(graph, "prim::ListUnpack"));
@@ -1617,6 +1617,7 @@ TEST(EliminateNoOpSlice, IntegerStart) {
   torch::jit::Module mod("m");
   mod.define(src);
   auto graph = mod.get_method("forward").graph();
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::slice"));
   EliminateNoOpSlice(graph);
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::slice"));
 }
