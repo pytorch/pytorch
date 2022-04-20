@@ -630,6 +630,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
+    DispatchKey::AutocastXPU,
 });
 
 // See Note [TLS Initialization]
@@ -641,6 +642,7 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
+    DispatchKey::AutocastXPU,
 });
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
@@ -806,10 +808,13 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
 // Returns a DispatchKeySet of autocast related keys mapped to backend.
 inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastCPU);
+  constexpr auto autocast_xpu_ks = DispatchKeySet(DispatchKey::AutocastXPU);
   constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
   switch (t) {
     case BackendComponent::CPUBit:
       return autocast_cpu_ks;
+    case BackendComponent::XPUBit:
+      return autocast_xpu_ks;
     case BackendComponent::CUDABit:
     case BackendComponent::XLABit:
       return autocast_cuda_ks;

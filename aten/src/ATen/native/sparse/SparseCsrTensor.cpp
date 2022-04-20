@@ -254,7 +254,7 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
                                                  c10::optional<Device> device,
                                                  c10::optional<bool> pin_memory) {
   Layout layout_ = layout.value_or(required_layout);
-  if (required_layout == Layout::Unspecified) {
+  if (required_layout == kUnspecified) {
     // checks that sparse compressed layout is specified
     AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
   } else {
@@ -278,7 +278,7 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
     return _sparse_compressed_tensor_unsafe_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
   }
 
-SPARSE_COMPRESSED_TENSOR_UNSAFE(compressed, Layout::Unspecified);
+SPARSE_COMPRESSED_TENSOR_UNSAFE(compressed, kUnspecified);
 SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
 
 inline DimVector _estimate_sparse_compressed_tensor_size(
