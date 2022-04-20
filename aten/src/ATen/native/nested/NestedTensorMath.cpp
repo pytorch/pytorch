@@ -172,7 +172,7 @@ Tensor nested_tensor(
           pin_memory);
 
   if (list.size() == 0) {
-    return wrap_buffer(ones({0}), ones({}));
+    return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
   }
   std::vector<Tensor> sizes;
   std::vector<Tensor> flat_tensors;

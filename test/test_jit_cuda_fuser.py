@@ -17,7 +17,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, IS_WINDOWS, slowTest
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, slowTest
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
@@ -32,7 +32,7 @@ from torch.autograd.gradcheck import gradcheck
 
 from typing import List
 
-RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM and not IS_WINDOWS
+RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM
 CUDA_MAJOR, CUDA_MINOR = 0, 0
 
 if RUN_NVFUSER and torch.version.cuda is not None:
@@ -2545,6 +2545,23 @@ class TestCudaFuser(JitTestCase):
         # since the output value is not used at all, the fusion operator should
         # have been optimized away
         self.assertGraphContainsExactly(t_jit.graph_for(x, weight, bias), FUSION_GUARD, 1)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_linear_symbolic_shapes(self):
+        def fn(x: int):
+            y = torch.zeros((x, x + 2)).cuda()
+            for i in range(2):
+                inp = torch.rand((x, x + i)).cuda()
+                weight = torch.rand((x + 2, x + i)).cuda()
+                bias = torch.rand((x, x + 2)).cuda()
+                y += torch.sin(torch.nn.functional.linear(inp, weight, bias))
+            return y
+
+        fn_s = torch.jit.script(fn)
+        fn_s(5)
+        fn_s(5)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
