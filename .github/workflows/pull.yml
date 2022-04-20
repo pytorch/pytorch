@@ -295,8 +295,8 @@ jobs:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
 
-  ? pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
-  : name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
+  pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit:
+    name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
     uses: ./.github/workflows/_android-build-test.yml
     with:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
