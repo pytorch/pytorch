@@ -21,63 +21,66 @@ class TestMHADeviceType(TestCase):
             (24, 2, 4, 2),
             # Make sure CUDA can handle small input sizes
             (2, 2, 2, 2),
-            # dim_per_head = 6 does not divide evenly by CUDA vectorization length of 4, causes alignment issues
+            # dim_per_head = 6 does not divide evenly by CUDA vectorization length of 4,
+            # causes alignment issues
             (24, 4, 4, 2),
             (48, 4, 16, 8),
         ]
         for (embed_dim, num_heads, bs, sl) in tests:
-            torch.manual_seed(9343)
-            dense_x = x = (
-                torch.randn(bs, sl, 3 * embed_dim, device=device, dtype=dtype) * 10
-            )
-            if use_padding:
-                x[0][-1] = torch.full(x[0][-1].shape, float("-Inf"))
-            if use_nt:
-                xs = list(torch.unbind(x))
-                if use_padding:
-                    xs[0] = xs[0][:-1]
-                x = torch.nested_tensor(xs, device=device, dtype=dtype)
-            qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
-
-            with torch.no_grad():
-                (q, k, v) = torch._transform_bias_rescale_qkv(
-                    x, qkv.bias, num_heads=num_heads
+            with self.subTest(embed_dim=embed_dim, num_heads=num_heads, bs=bs, sl=sl):
+                torch.manual_seed(9343)
+                dense_x = x = (
+                    torch.randn(bs, sl, 3 * embed_dim, device=device, dtype=dtype) * 10
                 )
+                if use_padding:
+                    x[0][-1] = torch.full(x[0][-1].shape, float("-Inf"))
+                if use_nt:
+                    xs = list(torch.unbind(x))
+                    if use_padding:
+                        xs[0] = xs[0][:-1]
+                    x = torch.nested_tensor(xs, device=device, dtype=dtype)
+                qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
 
-                def simple_transform_bias_rescale_qkv(qkv, bias):
-                    (q, k, v) = torch.split(qkv, embed_dim, dim=-1)
-                    (q_bias, k_bias, v_bias) = torch.split(bias, embed_dim, dim=-1)
-                    return tuple(
-                        x.reshape(
-                            (bs, sl, num_heads, embed_dim // num_heads)
-                        ).transpose(2, 1)
-                        for x in (
-                            (q + q_bias) / math.sqrt(embed_dim // num_heads),
-                            (k + k_bias),
-                            (v + v_bias),
-                        )
+                with torch.no_grad():
+                    (q, k, v) = torch._transform_bias_rescale_qkv(
+                        x, qkv.bias, num_heads=num_heads
                     )
 
-                correct_q, correct_k, correct_v = simple_transform_bias_rescale_qkv(
-                    dense_x, qkv.bias
-                )
-                if use_nt and use_padding:
-                    for t in (correct_q, correct_k, correct_v):
-                        t[t == float("-Inf")] = 0
+                    def simple_transform_bias_rescale_qkv(qkv, bias):
+                        (q, k, v) = torch.split(qkv, embed_dim, dim=-1)
+                        (q_bias, k_bias, v_bias) = torch.split(bias, embed_dim, dim=-1)
+                        return tuple(
+                            x.reshape(
+                                (bs, sl, num_heads, embed_dim // num_heads)
+                            ).transpose(2, 1)
+                            for x in (
+                                (q + q_bias) / math.sqrt(embed_dim // num_heads),
+                                (k + k_bias),
+                                (v + v_bias),
+                            )
+                        )
 
-            self.assertEqual(q.size(), correct_q.size())
-            torch.testing.assert_close(q, correct_q)
-            torch.testing.assert_close(k, correct_k)
-            torch.testing.assert_close(v, correct_v)
+                    correct_q, correct_k, correct_v = simple_transform_bias_rescale_qkv(
+                        dense_x, qkv.bias
+                    )
+                    if use_nt and use_padding:
+                        for t in (correct_q, correct_k, correct_v):
+                            t[t == float("-Inf")] = 0
+
+                self.assertEqual(q.size(), correct_q.size())
+                torch.testing.assert_close(q, correct_q)
+                torch.testing.assert_close(k, correct_k)
+                torch.testing.assert_close(v, correct_v)
 
     @dtypesIfCUDA(torch.float)
     @dtypes(torch.float)
     @skipMeta
     def test_transform_bias_rescale_qkv(self, device, dtype):
         for use_padding in (False, True):
-            self._test_transform_bias_rescale_qkv_impl(
-                device, dtype, use_nt=False, use_padding=use_padding
-            )
+            with self.subTest(use_padding=use_padding):
+                self._test_transform_bias_rescale_qkv_impl(
+                    device, dtype, use_nt=False, use_padding=use_padding
+                )
 
     @dtypesIfCUDA(torch.float)
     @dtypes(torch.float)
@@ -85,9 +88,10 @@ class TestMHADeviceType(TestCase):
     @onlyCUDA
     def test_transform_bias_rescale_qkv_nested(self, device, dtype):
         for use_padding in (False, True):
-            self._test_transform_bias_rescale_qkv_impl(
-                device, dtype, use_nt=True, use_padding=use_padding
-            )
+            with self.subTest(use_padding=use_padding):
+                self._test_transform_bias_rescale_qkv_impl(
+                    device, dtype, use_nt=True, use_padding=use_padding
+                )
 
     def _test_multihead_attention_impl(
         self, device, dtype, mode, use_nt, need_weights, average_attn_weights, use_padding=False, pad_all=False
@@ -245,16 +249,19 @@ class TestMHADeviceType(TestCase):
                 # because padding doesn't especially affect the intermediate weights.
                 for need_weights in (False, not pad_all):
                     for average_attn_weights in (False, True):
-                        self._test_multihead_attention_impl(
-                            device,
-                            dtype,
-                            "self",
-                            use_nt=use_nt,
-                            use_padding=use_padding,
-                            pad_all=pad_all,
-                            need_weights=need_weights,
-                            average_attn_weights=average_attn_weights,
-                        )
+                        with self.subTest(use_padding=use_padding, pad_all=pad_all,
+                                          use_nt=use_nt, need_weights=need_weights,
+                                          average_attn_weights=average_attn_weights):
+                            self._test_multihead_attention_impl(
+                                device,
+                                dtype,
+                                "self",
+                                use_nt=use_nt,
+                                use_padding=use_padding,
+                                pad_all=pad_all,
+                                need_weights=need_weights,
+                                average_attn_weights=average_attn_weights,
+                            )
 
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)

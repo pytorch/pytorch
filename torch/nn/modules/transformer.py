@@ -266,22 +266,6 @@ class TransformerEncoderLayer(Module):
     Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
     Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
     in a different way during application.
-    forward() will use a special optimized implementation if all of the following
-    conditions are met:
-    - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
-    - training is disabled (using ``.eval()``)
-    - batch_first is ``True`` and the input is batched (i.e., ``src.dim() == 3``)
-    - norm_first is ``False`` (this restriction may be loosened in the future)
-    - activation is one of: ``"relu"``, ``"gelu"``, ``torch.functional.relu``, or ``torch.functional.gelu``
-    - at most one of ``src_mask`` and ``src_key_padding_mask`` is passed
-    - if src is a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_, neither ``src_mask`` nor ``src_key_padding_mask`` is passed
-    - the two ``LayerNorm`` instances have a consistent ``eps`` value (this will naturally be the case unless the caller has manually modified one without modifying the other)
-    If the optimized implementation is in use, a
-   `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be
-    passed for ``src`` to represent padding more efficiently than using a padding
-    mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ will be
-    returned, and an additional speedup proportional to the fraction of the input that
-    is padding can be expected.
 
     Args:
         d_model: the number of expected features in the input (required).
@@ -305,6 +289,24 @@ class TransformerEncoderLayer(Module):
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True)
         >>> src = torch.rand(32, 10, 512)
         >>> out = encoder_layer(src)
+
+    Fast path:
+        forward() will use a special optimized implementation if all of the following
+        conditions are met:
+        - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
+        - training is disabled (using ``.eval()``)
+        - batch_first is ``True`` and the input is batched (i.e., ``src.dim() == 3``)
+        - norm_first is ``False`` (this restriction may be loosened in the future)
+        - activation is one of: ``"relu"``, ``"gelu"``, ``torch.functional.relu``, or ``torch.functional.gelu``
+        - at most one of ``src_mask`` and ``src_key_padding_mask`` is passed
+        - if src is a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_, neither ``src_mask`` nor ``src_key_padding_mask`` is passed
+        - the two ``LayerNorm`` instances have a consistent ``eps`` value (this will naturally be the case unless the caller has manually modified one without modifying the other)
+        If the optimized implementation is in use, a
+       `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be
+        passed for ``src`` to represent padding more efficiently than using a padding
+        mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ will be
+        returned, and an additional speedup proportional to the fraction of the input that
+        is padding can be expected.
     """
     __constants__ = ['batch_first', 'norm_first']
 
