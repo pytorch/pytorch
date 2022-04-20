@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -105,7 +106,7 @@ def shard_parameter(
     """
     # Perform some validation first.
     if not hasattr(module, param_name):
-        raise ValueError(f'module: {module} does not have parameter with name: {param_name}')
+        raise AttributeError(f'{module._get_name()} has no attribute `{param_name}`')
 
     tensor = getattr(module, param_name)
     if not isinstance(tensor, torch.Tensor):
@@ -143,6 +144,35 @@ def _replicate_tensor(tensor: torch.Tensor, process_group=None) -> ReplicatedTen
     """
     return ReplicatedTensor(tensor, process_group=process_group)
 
+# Tracks the current process group in the load context manager.
+_CURRENT_PROCESS_GROUP = None
+
+@contextmanager
+def load_with_process_group(process_group):
+    """
+    Context manager to set the process group with which to load a ShardedTensor/ReplicatedTensor.
+    """
+    global _CURRENT_PROCESS_GROUP
+    if _CURRENT_PROCESS_GROUP is not None:
+        raise RuntimeError(
+            'ProcessGroup already set by previous "load_with_process_group" '
+            'context manager')
+    _CURRENT_PROCESS_GROUP = process_group
+    try:
+        yield process_group
+    finally:
+        _CURRENT_PROCESS_GROUP = None
+
+def _get_current_process_group():
+    """
+    Retrieves the current process group set by ``load_with_process_group``.
+    If not set, it just returns the default group.
+    """
+    global _CURRENT_PROCESS_GROUP
+    if _CURRENT_PROCESS_GROUP is None:
+        return distributed_c10d._get_default_group()
+    else:
+        return _CURRENT_PROCESS_GROUP
 
 def _reshard_output(
         module: torch.nn.Module,
@@ -165,7 +195,6 @@ def _reshard_output(
         return output
     module.register_forward_hook(hook_func)
     return module
-
 
 def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
     """
@@ -198,8 +227,6 @@ def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
     module.register_forward_hook(hook_func)
     return module
 
-
-
 def shard_module(
     module: nn.Module,
     plan: ShardingPlan,
@@ -208,13 +235,12 @@ def shard_module(
 ):
     """
     Shards a given module according to the provided sharding_plan. This method
-    first shards all the parameters according to the given sharding_plan. Next,
-    If sharded_module_swapper is specified, it recursively traverses the module
-    tree and calls ``sharded_module_swapper.process()`` for each submodule.
-    If ``sharded_module_swapper.process()`` returns ``None``, the method continues
-    to recurse further down the tree. If ``sharded_module_swapper.process()``
-    returns an ``nn.Module``, then the current module is replaced with the return
-    value and we don't recurse further.
+    first shards all the parameters according to the given sharding_plan. Then if
+    `output_plan` and `return_local_tensor` are specified in the sharding_plan, it
+    will tag the output of modules according `output_plan`, convert the module's
+    output back to data parallel according to `return_local_tensor`.
+
+    Needs to be called on all ranks in an SPMD fashion.
 
     Args:
         module (:class:`torch.nn.Module`): The module to apply sharding to
@@ -230,32 +256,33 @@ def shard_module(
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
     """
-    for mod_prefix, mod in module.named_modules():
-        # memo is used to avoid duplicate params between modules, this logic
-        # is mostly copied from the module._named_members(), with adaptions
-        # to handle parameter sharding.
-        memo = set()
-        # check if specified module parameters for sharding
-        param_keys = list(mod._parameters.keys())
-        for k in param_keys:
-            v = mod._parameters[k]
-            name = mod_prefix + ('.' if mod_prefix else '') + k
-            if v is None or v in memo:
-                continue
-            memo.add(v)
-            if name in plan.plan:
-                shard_parameter(
-                    mod,
-                    k,
-                    plan.plan[name],
-                    src_rank=src_rank,
-                    process_group=process_group
-                )
+    # shard the parameter according to the ShardingPlan
+    for name, spec in plan.plan.items():
+        if isinstance(spec, ShardingSpec):
+            # if found a sharding spec, try to shard the parameter
+            module_path, _, param_name = name.rpartition(".")
+            mod = module.get_submodule(module_path)
+            shard_parameter(
+                mod,
+                param_name,
+                plan.plan[name],
+                src_rank=src_rank,
+                process_group=process_group
+            )
+        else:
+            raise TypeError(f"Only `ShardingSpec` is supported to shard '{name}'")
 
-        # reshard output if there's an entry in `reshard_output` for this module
-        if plan.output_plan is not None and mod_prefix in plan.output_plan:
-            _reshard_output(mod, plan.output_plan[mod_prefix])
-        # convert the output back to data parallel by calling `_collect_local_shard`
-        # if it's specified in the plan.
-        if plan.collect_local_shards is not None and mod_prefix in plan.collect_local_shards:
+    # reshard output if there's an entry in `reshard_output` for this module
+    if plan.output_plan is not None:
+        for module_path, output_spec in plan.output_plan.items():
+            if isinstance(output_spec, ShardingSpec):
+                mod = module.get_submodule(module_path)
+                _reshard_output(mod, output_spec)
+            else:
+                raise TypeError(f"Only `ShardingSpec` is supported as output_plan for '{module_path}'")
+    # convert the output back to data parallel by calling `_collect_local_shard`
+    # if it's specified in the plan.
+    if plan.return_local_tensor is not None:
+        for module_path in plan.return_local_tensor:
+            mod = module.get_submodule(module_path)
             _collect_local_shard(mod)

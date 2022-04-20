@@ -420,7 +420,6 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       case aten::atan2:
       case aten::bilinear:
       case aten::cat:
-      case aten::_cat:
       case aten::cross:
       case aten::dot:
       case aten::equal:
