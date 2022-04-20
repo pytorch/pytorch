@@ -1300,8 +1300,13 @@ meta_exclude_set = {
     torch.special.logsumexp,
     torch.special.multigammaln,
     torch.spmm,
+    torch.quantize_per_channel,
     torch.sqrt,
     torch.square,
+    torch.Tensor.logical_or_,
+    torch.Tensor.logical_xor_,
+    torch.Tensor.addcmul,
+    torch.Tensor.logical_and_,
     torch.stack,
     torch.std,
     torch.std_mean,
@@ -1373,9 +1378,11 @@ meta_exclude_set = {
     torch._sobol_engine_ff_,
     # TODO: maybe we can do this?  need to be tricky
     torch.tensor_split,
+    torch.Tensor.tensor_split,
     # TODO: this seems wrong; also it's structured, weird
     torch.Tensor.index_add_,
     torch.index_add,
+    torch.Tensor.index_add,
     # TODO: we're incapable of cloning the history, so this won't work
     torch.autograd.grad,
     # TODO: sparse
@@ -1456,14 +1463,14 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
             # TODO: zero tensors?
             elif type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
                 if t.is_sparse or t.is_sparse_csr:
+                    hit = True
                     return t.to("meta")
                 elif t.is_complex():
                     # TODO: get rid of this, storage stuf should work, just
                     # need to make storage on complex not complain
+                    hit = True
                     return t.to("meta")
-                elif not any([
-                    t.is_mkldnn, t.is_quantized, t.is_nested
-                ]):
+                elif not any([t.is_mkldnn, t.is_quantized, t.is_nested]):
                     hit = True
                     r = meta_tensor(t)
                     if type(t) is torch.nn.Parameter:
@@ -1472,6 +1479,7 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                 return t
             elif isinstance(t, torch.Tensor):
                 # It's some subclass; convert it to meta and pray (lol)
+                hit = True
                 return t.to("meta")
             else:
                 return t

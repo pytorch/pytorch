@@ -370,6 +370,7 @@ class TensorLike(object):
         # In this case _torch_function_ should override TensorLike objects
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
 
+@skipIfCrossRef
 class TestTorchFunctionOverride(TestCase):
     def test_mean_semantics(self):
         """Test that a function with one argument can be overrided"""
@@ -1065,6 +1066,7 @@ class TestIterator(TestCase):
 
 class TestRNN(TestCase):
     # Regression test for gh-55868
+    @skipIfCrossRef
     def test_rnn(self):
         model = torch.nn.RNN(10, 20, 2)
         input = Wrapper(torch.randn(1, 5, 10))
