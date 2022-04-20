@@ -16,6 +16,10 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
+#if defined(ENABLE_FLATBUFFER)
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
+#endif
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -76,6 +80,88 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   return func;
 }
 
+/**
+ * If the type is not NamedTuple, it will return default_type_str. If the type
+ * is a NamedTuple, it will return a string with following structure to describe
+ * the content in the NamedTuple: "qualified_named[ NamedTuple, [ [filed_name_1,
+ * field_type_1], [filed_name_2, field_type_2]
+ *   ]
+ * ]"
+ *  Example NamedTuple type:
+ *  "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
+ *     NamedTuple, [
+ *         [float_features, Tensor],
+ *         [id_list_features, List[Tensor]],
+ *         [label,  Tensor],
+ *         [weight, Tensor],
+ *         ]
+ *     ]"
+ *
+ * @param compilation_unit Jit compilcation unit to look up function schema.
+ * @param type_ptr A type pointer and it can be possibly any type.
+ * @param default_type_str The default string representation. The string can
+ * either from type_ptr->str(), type_ptr->annotation_str(), or
+ * type_ptr->repr_str(). In some cases, they could be different in different
+ * scenario. For example, Tensor type can be "Tensor", "Tensor (inferred)" and
+ * "Tensor[]", and we only want "Tensor". Leave it as part of arguments as the
+ * default return, when type_ptr is not a NamedTuple.
+ * @return string representation.
+ */
+std::string get_named_tuple_str_or_default(
+    const CompilationUnit& compilation_unit,
+    const TypePtr& type_ptr,
+    std::string default_type_str) {
+  if (type_ptr->kind() == TypeKind::TupleType) {
+    TORCH_CHECK(
+        compilation_unit.get_named_tuple(type_ptr->str()),
+        "Can't find definition for the qualified name: ",
+        type_ptr->str(),
+        "(TypeKind::TupleType)  in compilation unit.",
+        "Please report a bug to PyTorch.");
+    auto named_tuple_ptr = compilation_unit.get_named_tuple(type_ptr->str());
+    if (named_tuple_ptr != nullptr) {
+      std::string named_tuple_str = type_ptr->str();
+      named_tuple_str.append("[NamedTuple, [");
+      std::vector<IValue> name_type_pairs;
+
+      // Get the field name and field type for the NamedTuple
+      for (auto it = named_tuple_ptr->schema()->arguments().begin();
+           it != named_tuple_ptr->schema()->arguments().end();
+           it++) {
+        const std::string named_tuple_name = it->name();
+        const c10::TypePtr& named_tuple_type = it->type();
+        // When it->type() is Tensor type, in Python, if it's inferred type,
+        // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
+        // it's not inferred type, str() return "Tensor[]" and repr_str()
+        // return "Tensor". In cpp, repr_str() will always return "Tensor"
+        // regardless inferred type. When exporing custom type in bytecode,
+        // "Tensor" is the preferred way to deserialize Tensor type
+        std::string named_tuple_type_str = it->is_inferred_type()
+            ? named_tuple_type->str()
+            : named_tuple_type->repr_str();
+        // The type can also be NamedTuple. Will parse it recursively and get
+        // it's string representation.
+        named_tuple_type_str = get_named_tuple_str_or_default(
+            compilation_unit, named_tuple_type, named_tuple_type->repr_str());
+        name_type_pairs.emplace_back(
+            c10::ivalue::Tuple::create({it->name(), named_tuple_type_str}));
+
+        named_tuple_str.append("[")
+            .append(named_tuple_name)
+            .append(", ")
+            .append(named_tuple_type_str)
+            .append("]");
+        if (it != named_tuple_ptr->schema()->arguments().end() - 1) {
+          named_tuple_str.append(",");
+        }
+      }
+      named_tuple_str.append("]]");
+      return named_tuple_str;
+    }
+  }
+  return default_type_str;
+}
+
 std::pair<IValue, IValue> getFunctionTuple(
     const CompilationUnit& compilation_unit,
     const mobile::Function& func,
@@ -116,59 +202,36 @@ std::pair<IValue, IValue> getFunctionTuple(
       t = dyn->fallback();
     }
     std::string type_str = t->annotation_str();
-    if (t->kind() == TypeKind::TupleType) {
-      TORCH_CHECK(
-          compilation_unit.get_named_tuple(t->str()),
-          "Can't find definition for the qualified name: ",
-          t->str(),
-          "(TypeKind::TupleType)  in compilation unit.",
-          "Please report a bug to PyTorch.");
-      auto named_tuple_type = compilation_unit.get_named_tuple(t->str());
-      if (named_tuple_type != nullptr) {
-        std::string named_tuple_str = t->str();
-        named_tuple_str.append("[NamedTuple, [");
-        std::vector<IValue> name_type_pairs;
+    if (t->kind() == TypeKind::DictType) {
+      // For DictType, there are two items in t->containedTypes(), the first one
+      // is key and the second one is value. Both of them could be NamedTuple
+      // type.
+      const TypePtr& key_type = t->containedTypes()[0];
+      const TypePtr& value_type = t->containedTypes()[1];
+      std::string key_type_str = get_named_tuple_str_or_default(
+          compilation_unit, key_type, key_type->annotation_str());
+      std::string value_type_str = get_named_tuple_str_or_default(
+          compilation_unit, value_type, value_type->annotation_str());
 
-        // Get the field name and field type for the NamedTuple
-        for (auto it = named_tuple_type->schema()->arguments().begin();
-             it != named_tuple_type->schema()->arguments().end();
-             it++) {
-          name_type_pairs.emplace_back(
-              c10::ivalue::Tuple::create({it->name(), it->type()->repr_str()}));
-
-          // When it->type() is Tensor type, in Python, if it's inferred type,
-          // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
-          // it's not inferred type, str() return "Tensor[]" and repr_str()
-          // return "Tensor". In cpp, repr_str() will always return "Tensor"
-          // regardless inferred type. When exporing custom type in bytecode,
-          // "Tensor" is the preferred way to deserialize Tensor type
-          type_str = it->is_inferred_type() ? it->type()->str()
-                                            : it->type()->repr_str();
-          named_tuple_str.append("[" + it->name() + ", " + type_str + "]");
-          if (it != named_tuple_type->schema()->arguments().end() - 1) {
-            named_tuple_str.append(",");
-          }
-        }
-        named_tuple_str.append("]]");
-        // Create a named_tuple type with following structure
-        // "qualified_named[
-        //   NamedTuple, [
-        //       [filed_name_1, field_type_1],
-        //       [filed_name_2, field_type_2]
-        //   ]
-        // ]"
-        //  Example NamedTuple type:
-        //  "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
-        //     NamedTuple, [
-        //         [float_features, Tensor],
-        //         [id_list_features, List[Tensor]],
-        //         [label,  Tensor],
-        //         [weight, Tensor],
-        //         ]
-        //     ]"
-        types.emplace_back(named_tuple_str);
-        continue;
-      }
+      // Construct the dict representation after achieving correct string
+      // representation for both key and value, like
+      // "Dict[str,__torch__.dper3.core.pytorch_schema_utils.IdScoreListFeatureTuple[NamedTuple,
+      // [[lengths, Tensor],[values,
+      // __torch__.dper3.core.pytorch_schema_utils.IdScoreTuple[NamedTuple,
+      // [[ids, Tensor],[scores, Tensor]]]],[offsets, Optional[Tensor]]]]]"
+      std::string dict_str;
+      dict_str.append("Dict[")
+          .append(key_type_str)
+          .append(",")
+          .append(value_type_str)
+          .append("]");
+      types.emplace_back(dict_str);
+      continue;
+    } else if (t->kind() == TypeKind::TupleType) {
+      std::string named_tuple_str =
+          get_named_tuple_str_or_default(compilation_unit, t, type_str);
+      types.emplace_back(named_tuple_str);
+      continue;
     } else if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
@@ -508,8 +571,12 @@ void ScriptModuleSerializer::writeArchive(
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
 
   for (const auto& td : data_pickle.tensorData()) {
-    WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string tensor_name = tensor_names[i++];
+    if (td.is_meta()) {
+      writer_.writeRecord(tensor_dir + tensor_name, nullptr, 0);
+      continue;
+    }
+    WriteableTensorData writable_td = getWriteableTensorData(td);
     if (use_storage_context && serialized_tensors.count(tensor_name)) {
       // storage has been serialzed already, skip
       continue;
@@ -784,20 +851,49 @@ SerializationStorageContext& ScriptModuleSerializer::storage_context() {
   return storage_context_;
 }
 
+#if defined(ENABLE_FLATBUFFER)
+void save_mobile_module_to(
+    const Module& module,
+    const ExtraFilesMap& extra_files,
+    bool save_mobile_debug_info,
+    const std::function<size_t(const void*, size_t)>& writer_func) {
+  ExtraFilesMap jitFiles;
+  CompilationOptions options = getOptionsFromGlobal();
+  std::vector<IValue> constants;
+  jitModuleToPythonCodeAndConstants(module, &jitFiles, &constants);
+  mobile::Module mod = jitModuleToMobile(module, options);
+  auto buffer =
+      save_mobile_module_to_bytes(mod, extra_files, jitFiles, constants);
+  writer_func(reinterpret_cast<void*>(buffer.data()), buffer.size());
+}
+#endif
+
 void ExportModule(
     const Module& module,
     std::ostream& out,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(
-      [&](const void* buf, size_t nbytes) -> size_t {
-        out.write(static_cast<const char*>(buf), nbytes);
-        return !out ? 0 : nbytes;
-      });
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    out.write(static_cast<const char*>(buf), nbytes);
+    return !out ? 0 : nbytes;
+  };
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+#else
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
+#endif
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(writer_func);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 void ExportModule(
@@ -805,11 +901,29 @@ void ExportModule(
     const std::string& filename,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(filename);
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+      std::fstream ofile(filename, std::ios::binary | std::ios::out);
+      ofile.write(static_cast<const char*>(buf), nbytes);
+      ofile.close();
+      return !ofile ? 0 : nbytes;
+    };
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+#else
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
+#endif
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(filename);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 void ExportModule(
@@ -817,11 +931,23 @@ void ExportModule(
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(writer_func);
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+#else
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
+#endif
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(writer_func);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 namespace {

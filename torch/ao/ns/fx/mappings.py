@@ -26,9 +26,13 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.Conv1d,
             nnq.Conv1d,
             nnqd.Conv1d,
+            nnqat.Conv1d,
             nniqat.ConvBn1d,
             nniqat.ConvBnReLU1d,
+            nniqat.ConvReLU1d,
             nniq.ConvReLU1d,
+            nni.ConvBn1d,
+            nni.ConvBnReLU1d,
             nni.ConvReLU1d,
         ]),
         set([
@@ -40,6 +44,8 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nniqat.ConvBnReLU2d,
             nniqat.ConvReLU2d,
             nniq.ConvReLU2d,
+            nni.ConvBn2d,
+            nni.ConvBnReLU2d,
             nni.ConvReLU2d,
         ]),
         set([
@@ -51,6 +57,8 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nniqat.ConvBnReLU3d,
             nniqat.ConvReLU3d,
             nniq.ConvReLU3d,
+            nni.ConvBn3d,
+            nni.ConvBnReLU3d,
             nni.ConvReLU3d,
         ]),
         # conv functionals
@@ -74,6 +82,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.Linear,
             nnq.Linear,
             nni.LinearReLU,
+            nni.LinearBn1d,
             nniq.LinearReLU,
             nniqd.LinearReLU,
             nnqat.Linear,
@@ -447,10 +456,10 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.dropout,
         F.silu,
         F.mish,
-        # TODO(future PR): implement shadowing for binary ops and
-        # uncomment below
-        # operator.add,
-        # operator.mul,
+        operator.add,
+        torch.add,
+        operator.mul,
+        torch.mul,
         torch.sum,
     ])
 
@@ -513,6 +522,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         torch.squeeze,
         torch.stack,
         torch.unsqueeze,
+        operator.add,
     ])
 
     MODS_IO_TYPE_FP32: Set[NSNodeTargetType] = set([
@@ -527,6 +537,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnqd.Conv1d,
         nnqd.Conv2d,
         nnqd.Conv3d,
+        nnqat.Conv1d,
         nnqat.Conv2d,
         nnqat.Conv3d,
         nnqat.Embedding,
@@ -561,6 +572,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nni.ConvReLU2d,
         nni.ConvReLU3d,
         nni.LinearReLU,
+        nni.LinearBn1d,
         nni.ConvBn1d,
         nni.ConvBn2d,
         nni.ConvBn3d,
@@ -570,6 +582,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.ConvBnReLU1d,
         nniqat.ConvBnReLU2d,
         nniqat.ConvBnReLU3d,
+        nniqat.ConvReLU1d,
         nniqat.ConvReLU2d,
         nniqat.ConvReLU3d,
         nniqat.LinearReLU,
@@ -581,7 +594,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Linear,
         nnq.Conv1d,
         nnq.Conv2d,
-        nniq.ConvReLU2d,
         nnq.Conv3d,
         nnq.BatchNorm2d,
         nnq.BatchNorm3d,

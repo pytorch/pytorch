@@ -22,6 +22,8 @@ from torch.testing import FileCheck
 from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
+    QConfig,
+    MinMaxObserver,
 )
 from torch.quantization.quantize_fx import (
     prepare_fx,
@@ -33,6 +35,9 @@ import torch.ao.quantization._quantize_dbr as _quantize_dbr
 import torch.ao.ns._numeric_suite_dbr as ns
 # TODO(future PR): move these utils out of the FX folder
 import torch.ao.ns._numeric_suite_fx as ns_fx
+from torch.ao.quantization._dbr.torchscript_utils import (
+    remove_redundant_aliases,
+)
 
 def _allclose(a, b):
     if isinstance(a, tuple):
@@ -248,9 +253,9 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
                 x = torch.cat([x, x], dim=1)
                 return x
 
-        m = M().eval()
         qconfig = torch.quantization.default_qconfig
         for dtype in (torch.int32, torch.int64):
+            m = M().eval()
             self._test_auto_tracing(
                 m, qconfig, (torch.zeros(1, 1, 1, 1, dtype=dtype),),
                 # FX graph mode quant does not support this yet
@@ -422,6 +427,10 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         """
         Tests that fusion works if the modules to fuse get called multiple
         times in the same forward.
+
+        Currently, observers are not shared between successive calls of
+        the same module.
+        TODO(future PR): make them shared (this is easy to detect)
         """
         class M(torch.nn.Module):
             def __init__(self):
@@ -437,7 +446,10 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
 
         m = M().eval()
         qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+        # fx graph mode quant doesn't support using a single module multiple times
+        # right now, so this would crash, we can handle this case later
+        # if it is needed
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),), do_fx_comparison=False)
 
     def test_fusion_functions(self):
         class M(torch.nn.Module):
@@ -553,6 +565,7 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         # test backprop does not crash
         inputs = torch.randn(1, 1, 1, 1)
         inputs.requires_grad = True
+        m = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
         mp = _quantize_dbr.prepare(m, {'': qconfig}, (inputs,))
         output = mp(inputs)
         labels = torch.randn(1, 1, 1, 1)
@@ -1303,6 +1316,52 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         input_shape = (1, 1, 1, 1)
         self._test_serialization(M, input_shape)
 
+    def test_jit_tracing_removes_aliases(self):
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.Sequential(
+                nn.Conv2d(1, 1, 1),
+            ),
+        )
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mq = _quantize_dbr.convert(mp)
+        mqs = torch.jit.trace(mq, example_args)
+        FileCheck().check_count("aten::alias", 5, exactly=True).run(
+            mqs.inlined_graph)
+        res1 = mqs(*example_args)
+        mqs = remove_redundant_aliases(mqs)
+        res2 = mqs(*example_args)
+        self.assertTrue(torch.allclose(res1, res2))
+        # TODO(future PR): figure out why aliasing still appears in the inlined
+        # graph, and if that is fixed then just check the inlined graph.
+        for graph in (
+            mqs.graph,
+            getattr(mqs, '1').graph,
+            getattr(getattr(mqs, '1'), '0').graph,
+        ):
+            FileCheck().check_count("aten::alias", 0, exactly=True).run(graph)
+
+    def test_conv_int32_reference_model(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        int32_obs_ctr = MinMaxObserver.with_args(dtype=torch.qint32)
+        int32_qconfig = QConfig(weight=int32_obs_ctr, activation=int32_obs_ctr)
+        qconfig_dict = {'': int32_qconfig}
+        mp = _quantize_dbr.prepare(m, qconfig_dict, (torch.randn(1, 1, 1, 1),))
+        mp(torch.randn(1, 1, 1, 1))
+        mq = _quantize_dbr.convert(mp)
+        res = mq(torch.randn(1, 1, 1, 1))
+        mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
+        # verify the right ops are present:
+        # x0 -> quant -> (dequant -> conv_ref -> quant) -> dequant -> x1
+        FileCheck()\
+            .check_count("aten::quantize_per_tensor", 2, exactly=True)\
+            .run(mqt.graph)
+        FileCheck()\
+            .check_count("aten::dequantize", 2, exactly=True)\
+            .run(mqt.graph)
+
 @skipIfNoFBGEMM
 class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
     """
@@ -1543,3 +1602,18 @@ class TestQuantizeDBRModels(QuantizeDBRTestCase):
             m, qconfig, (torch.randn(1, 3, 224, 224),),
             # TODO fix this (reason TBD)
             do_torchscript_checks=False)
+
+    @skip_if_no_torchvision
+    def test_mobilenet_v2_removes_aliases(self):
+        import torchvision
+        m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False)\
+            .eval().float()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        example_args = (torch.randn(1, 3, 224, 224),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mq = _quantize_dbr.convert(mp)
+        mqs = torch.jit.trace(mq, example_args)
+        res1 = mqs(*example_args)
+        mqs = remove_redundant_aliases(mqs)
+        res2 = mqs(*example_args)
+        self.assertTrue(torch.allclose(res1, res2))

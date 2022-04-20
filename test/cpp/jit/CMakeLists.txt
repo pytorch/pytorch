@@ -90,12 +90,16 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_script_profile.cpp
   ${JIT_TEST_ROOT}/test_shape_analysis.cpp
   ${JIT_TEST_ROOT}/test_jit_logging_levels.cpp
+  ${JIT_TEST_ROOT}/test_file_format.cpp
   ${JIT_TEST_ROOT}/test_flatbuffer.cpp
 )
 
 if(USE_CUDA)
-  list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu.cpp)
-  list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu_shift.cpp)
+  list(APPEND JIT_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/test/test_gpu.cpp)
+  list(APPEND JIT_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/test/test_gpu_fused_reduction.cpp)
+  list(APPEND JIT_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/test/test_gpu_shift.cpp)
+  list(APPEND JIT_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/test/test_gpu_tensorcore.cpp)
+  list(APPEND JIT_TEST_SRCS ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/test/test_gpu_view.cpp)
 endif()
 
 add_executable(test_jit
@@ -139,6 +143,10 @@ if(USE_CUDA)
     ${TORCH_CUDA_LIBRARIES})
 
   target_compile_definitions(test_jit PRIVATE USE_CUDA)
+  # Suppress sign compare checks for NVFUSER JIT tests
+  if(NOT MSVC)
+    target_compile_options(test_jit PRIVATE -Wno-sign-compare)
+  endif()
 elseif(USE_ROCM)
   target_link_libraries(test_jit PRIVATE
     ${ROCM_HIPRTC_LIB}

@@ -1,12 +1,31 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Union
+from typing import TYPE_CHECKING
+
 import torch
 
 from ._internals import (
-    ShardMetadata,
+    check_tensor,
+    get_chunked_dim_size,
+    get_split_size,
     validate_non_overlapping_shards_metadata
 )
+from torch.distributed._shard.metadata import ShardMetadata
+
+from torch.distributed._shard.sharded_tensor.utils import (
+    _parse_and_validate_remote_device
+)
+
+import torch.distributed as dist
+import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
+from torch.distributed._shard.sharded_tensor.shard import Shard
+from torch.distributed._shard._utils import narrow_tensor
+
+if TYPE_CHECKING:
+    # Only include ShardedTensor when do type checking, exclude it
+    # from run-time to resolve circular dependency.
+    from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 class PlacementSpec(ABC):
     """
@@ -32,14 +51,46 @@ class DevicePlacementSpec(PlacementSpec):
         if not isinstance(self.device, torch.distributed._remote_device):
             self.device = torch.distributed._remote_device(self.device)
 
-
-class ShardingSpec(PlacementSpec):
+class ShardingSpec(object):
     """
-    Base class representing sharding specifications. It is special type of
-    PlacementSpec.
+    Base class representing sharding specifications.
     """
-    pass
+    @abstractmethod
+    def build_metadata(self,
+                       tensor_sizes: torch.Size,
+                       tensor_properties: sharded_tensor_meta.TensorProperties,
+                       ) -> sharded_tensor_meta.ShardedTensorMetadata:
+        """
+        Given a global tensor size, define how to shard a tensor like this shape
+        across ranks, return ShardedTensorMetadata
+        Args:
+            tensor_sizes (:class:`torch.Size`):
+                The tensor shape to shard on, a `torch.Size` object that represents the
+                tensor shape to be sharded according to the ShardingSpec.
+            tensor_properties(:class:`torch.distributed._shard.sharded_tensor.TensorProperties):
+                Tensor properties used to create a ShardedTensor.
+        Returns:
+            A :class:`ShardedTensorMetadata` object that encodes the information about
+            the layout of the ShardedTensor and its properties.
+        """
 
+    @abstractmethod
+    def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
+        """
+        Given a global tensor on src_rank, shard this tensor
+        across ranks within the process group, return a ShardedTensor.
+        Args:
+            tensor (:class:`torch.Tensor`): Tensor needs to be sharded.
+        Keyword args:
+            src_rank (int, optional): The source rank which is used as the ground truth of
+                the data for the parameter that would be sharded and scattered
+                across the rest of the ranks.
+                Default: 0.
+            process_group (ProcessGroup, optional): The process group to work on. If None,
+                the default process group will be used.
+        Returns:
+            A :class:`ShardedTensor` sharded from the given tensor.
+        """
 
 @dataclass
 class ChunkShardingSpec(ShardingSpec):
@@ -57,7 +108,7 @@ class ChunkShardingSpec(ShardingSpec):
         dim (int or str):
             The dimension to shard on, could be an integer representing the
             dimension or a string in case of named tensors where dimensions are
-            named.
+            named. Note that named tensor support is not added yet.
         placement(List[Union[_remote_device, str]]):
             Specifies the placement of each shard of the Tensor. The size of
             the list represents the number of shards to be created. This could
@@ -81,8 +132,98 @@ class ChunkShardingSpec(ShardingSpec):
 
     @staticmethod
     def _verify_dim(dim):
-        if not (isinstance(dim, int) or isinstance(dim, str)):
-            raise ValueError(f'{dim} needs to either be an int or str')
+        # Validate the sharding spec.
+        # TODO: support named dimension
+        if isinstance(dim, str):
+            raise NotImplementedError(
+                "ChunkShardingSpec does not support named dimension yet!"
+            )
+
+        if not isinstance(dim, int):
+            raise ValueError(
+                f"Sharding dim needs to be an integer, found: {dim}"
+            )
+
+    def build_metadata(self,
+                       tensor_sizes: torch.Size,
+                       tensor_properties: sharded_tensor_meta.TensorProperties,
+                       ) -> sharded_tensor_meta.ShardedTensorMetadata:
+        tensor_num_dim = len(tensor_sizes)
+
+        self._verify_dim(self.dim)
+        if self.dim >= tensor_num_dim or self.dim < -tensor_num_dim:  # type: ignore[operator]
+            raise ValueError(f"Invalid sharding dim: {self.dim}")
+
+        shards_metadata = []
+        sharding_dim_size = tensor_sizes[self.dim]  # type: ignore[index]
+        chunks = len(self.placements)
+        split_size = get_split_size(sharding_dim_size, chunks)
+        for idx, placement in enumerate(self.placements):
+            # generate ShardMetadata for each placement device
+            chunked_dim_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
+            if chunked_dim_size > 0:
+                shard_size = list(tensor_sizes)
+                current_offsets = [0] * tensor_num_dim
+                current_offsets[self.dim] = split_size * idx  # type: ignore[index]
+                shard_size[self.dim] = chunked_dim_size  # type: ignore[index]
+
+                shard_metadata = ShardMetadata(
+                    shard_offsets=current_offsets,
+                    shard_sizes=shard_size,
+                    placement=placement,
+                )
+                shards_metadata.append(shard_metadata)
+
+                # current_offsets[self.dim] += chunked_dim_size  # type: ignore[index]
+
+        return sharded_tensor_meta.ShardedTensorMetadata(
+            shards_metadata,
+            tensor_sizes,
+            tensor_properties
+        )
+
+
+    def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
+        # relative imports to avoid circular dependency
+        from torch.distributed._shard.sharded_tensor import (
+            ShardedTensor
+        )
+        tensor_properties = sharded_tensor_meta.TensorProperties(
+            dtype=tensor.dtype,
+            layout=tensor.layout,
+            requires_grad=tensor.requires_grad,
+            memory_format=torch.contiguous_format,
+            pin_memory=tensor.is_pinned()
+        )
+        tensor_meta = self.build_metadata(tensor.size(), tensor_properties)
+        local_shards = []
+
+        current_rank = dist.get_rank(process_group)
+        # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
+        dist.broadcast(tensor, src=src_rank, group=process_group)
+
+        for shard_meta in tensor_meta.shards_metadata:
+            rank, device = _parse_and_validate_remote_device(process_group, shard_meta.placement)
+            if rank == current_rank:
+                # Reshape to get shard for this rank and we don't want autograd
+                # recording here for the narrow op and 'local_shard' should be a
+                # leaf variable in the autograd graph.
+                local_tensor = narrow_tensor(tensor, shard_meta).clone().detach().contiguous()
+
+                # Sync requires_grad to local_shard.
+                local_tensor.requires_grad = tensor.requires_grad
+                local_shards.append(
+                    Shard(
+                        tensor=local_tensor,
+                        metadata=shard_meta
+                    )
+                )
+
+        st = ShardedTensor._init_from_local_shards(local_shards, tensor.size(), process_group=process_group)
+        # Manually set sharding_spec
+        st._sharding_spec = self
+
+        return st
 
 
 @dataclass
@@ -111,12 +252,30 @@ class EnumerableShardingSpec(ShardingSpec):
 
         validate_non_overlapping_shards_metadata(self.shards)
 
+    def build_metadata(self,
+                       tensor_sizes: torch.Size,
+                       tensor_properties: sharded_tensor_meta.TensorProperties,
+                       ) -> sharded_tensor_meta.ShardedTensorMetadata:
+        # check if shards form a valid tensor
+        check_tensor(self.shards, tensor_sizes)
+        return sharded_tensor_meta.ShardedTensorMetadata(
+            self.shards,
+            tensor_sizes,
+            tensor_properties
+        )
+
+    def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
+        # TODO: figure out a generic and efficient way to scatter the shards for EnumerableShardingSpec
+        raise NotImplementedError("EnumerableShardingSpec.shard not implemented yet!")
+
 
 def _infer_sharding_spec_from_shards_metadata(shards_metadata):
     """
     Infer the sharding spec from the metadata of each shard of a ShardedTensor.
-    If the tensor is sharded only on one dimension, we then assume it's a ChunkShardingSpec.
-    Otherwise, we assume it's enum sharded.
+    If the tensor is sharded only on one dimension, we can then verify whether it's
+    a ChunkShardingSpec or not. The way to verify it is to first get the total length
+    and perform a chunk sharding with the given placements to see if we can have the
+    same chunk size as the given shards_metadata. If not, we assume it's enum sharded.
 
     Args:
         shards_metadata (List[ShardMetadata]): List of Metadata of local shards.
@@ -162,19 +321,16 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
             dim=chunk_sharding_dim,
             placements=placements,
         )
-        shard_sizes = [
-            x[chunk_sharding_dim]
-            for _, x in sorted(zip(chunk_offset_list, shard_size_list))
-        ]
-        if len(shard_sizes) == 1 or (
-            len(set(shard_sizes[:-1])) == 1 and shard_sizes[0] >= shard_sizes[-1]
-        ):
-            return chunk_spec
-        # Corner case when length = 5 and chunks = 4, local size is [2, 2, 1, 0]
-        if (
-            len(set(shard_sizes[:-2])) == 1
-            and shard_sizes[0] >= shard_sizes[-2]
-            and shard_sizes[-2] >= shard_sizes[-1]
-        ):
+        shard_sizes = sorted([x[chunk_sharding_dim] for x in shard_size_list])
+        shard_total_length = sum(shard_sizes)
+        chunks = len(placements)
+        split_size = get_split_size(shard_total_length, chunks)
+        chunk_shard_sizes = sorted(
+            [
+                get_chunked_dim_size(shard_total_length, split_size, idx)
+                for idx in range(len(placements))
+            ]
+        )
+        if shard_sizes == chunk_shard_sizes:
             return chunk_spec
     return EnumerableShardingSpec(shards_metadata)

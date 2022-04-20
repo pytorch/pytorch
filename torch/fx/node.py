@@ -26,7 +26,9 @@ Argument = Optional[Union[
 ]]
 
 _side_effectful_functions: Set[Callable] = {
-    torch._assert, torch.ops.profiler._record_function_enter,
+    torch._assert,
+    torch.ops.profiler._record_function_enter,
+    torch.ops.profiler._record_function_enter_new,
     torch.ops.profiler._record_function_exit}
 
 # this is fixed on master, WAR for 1.5
@@ -68,16 +70,18 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
     return f'{module}.{name}'
 
-def _format_arg(arg) -> str:
-    if hasattr(arg, "_custom_fx_repr_fn"):
+def _format_arg(arg, max_list_len=float('inf')) -> str:
+    if hasattr(arg, '_custom_fx_repr_fn'):
         return arg._custom_fx_repr_fn()
     elif isinstance(arg, list):
-        items = ', '.join(_format_arg(a) for a in arg)
-        return f'[{items}]'
+        items = ', '.join(_format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len)
+        maybe_len = '' if len(arg) < max_list_len + 1 else f', ...[total_len={len(arg)}]'
+        return f'[{items}{maybe_len}]'
     elif isinstance(arg, tuple):
-        items = ', '.join(_format_arg(a) for a in arg)
+        items = ', '.join(_format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len)
+        maybe_len = '' if len(arg) < max_list_len + 1 else f', ...[total_len={len(arg)}]'
         maybe_comma = ',' if len(arg) == 1 else ''
-        return f'({items}{maybe_comma})'
+        return f'({items}{maybe_comma}{maybe_len})'
     elif isinstance(arg, dict):
         items_str = ', '.join(f'{k}: {_format_arg(v)}' for k, v in arg.items())
         return f'{{{items_str}}}'
@@ -459,20 +463,30 @@ class Node:
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
 
     @compatibility(is_backward_compatible=True)
-    def replace_all_uses_with(self, replace_with : 'Node') -> List['Node']:
+    def replace_all_uses_with(self,
+                              replace_with : 'Node',
+                              delete_user_cb: Callable[['Node'], bool] = lambda user: True
+                              ) -> List['Node']:
         """
         Replace all uses of ``self`` in the Graph with the Node ``replace_with``.
 
         Args:
 
             replace_with (Node): The node to replace all uses of ``self`` with.
+            delete_user_cb (Callable): Callback that is called to determine
+              whether a given user of the self node should be removed.
 
         Returns:
 
             The list of Nodes on which this change was made.
         """
         to_process = list(self.users)
+        skipped = []
         for use_node in to_process:
+            if not delete_user_cb(use_node):
+                skipped.append(use_node)
+                continue
+
             def maybe_replace_node(n : Node) -> Node:
                 if n == self:
                     return replace_with
@@ -485,8 +499,8 @@ class Node:
             assert isinstance(new_kwargs, dict)
             use_node.__update_args_kwargs(new_args, new_kwargs)
 
-        assert len(self.users) == 0
-        return to_process
+        assert len(self.users) - len(skipped) == 0
+        return [n for n in to_process if n not in skipped]
 
     @compatibility(is_backward_compatible=False)
     def is_impure(self):

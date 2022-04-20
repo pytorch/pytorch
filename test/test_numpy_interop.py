@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, skipMeta)
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import all_types_and_complex_and
 
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.
@@ -234,6 +234,28 @@ class TestNumPyInterop(TestCase):
         with self.assertWarnsOnceRegex(UserWarning, warning_msg):
             torch.tensor([np.array([0]), np.array([1])], device=device)
 
+    def test_ctor_with_invalid_numpy_array_sequence(self, device):
+        # Invalid list of numpy array
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
+            torch.tensor([np.random.random(size=(3, 3)), np.random.random(size=(3, 0))], device=device)
+
+        # Invalid list of list of numpy array
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
+            torch.tensor([[np.random.random(size=(3, 3)), np.random.random(size=(3, 2))]], device=device)
+
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
+            torch.tensor([[np.random.random(size=(3, 3)), np.random.random(size=(3, 3))],
+                          [np.random.random(size=(3, 3)), np.random.random(size=(3, 2))]], device=device)
+
+        # expected shape is `[1, 2, 3]`, hence we try to iterate over 0-D array
+        # leading to type error : not a sequence.
+        with self.assertRaisesRegex(TypeError, "not a sequence"):
+            torch.tensor([[np.random.random(size=(3)), np.random.random()]], device=device)
+
+        # list of list or numpy array.
+        with self.assertRaisesRegex(ValueError, "expected sequence of length"):
+            torch.tensor([[1, 2, 3], np.random.random(size=(2,)), ], device=device)
+
     @onlyCPU
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
         dtypes = [
@@ -397,7 +419,7 @@ class TestNumPyInterop(TestCase):
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.long).storage())
             self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.uint8).storage())
 
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_numpy_scalar_cmp(self, device, dtype):
         if dtype.is_complex:
             tensors = (torch.tensor(complex(1, 3), dtype=dtype, device=device),

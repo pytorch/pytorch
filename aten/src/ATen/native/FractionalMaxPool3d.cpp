@@ -106,8 +106,9 @@ static std::vector<int> generate_intervals(
         static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
     }
   }
-  sequence[outputSize - 1] = inputSize - poolSize;
-
+  if (outputSize > 0) {
+    sequence[outputSize - 1] = inputSize - poolSize;
+  }
   return sequence;
 }
 
@@ -238,7 +239,6 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
   int64_t inputW,
   const at::Tensor& output,
   const at::Tensor& indices) {
-
   /* get contiguous input */
   auto input = input_.contiguous();
 

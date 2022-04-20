@@ -65,10 +65,10 @@ __m256i pack_saturate_and_clamp(
 
 template <>
 inline __m256i pack_saturate_and_clamp<int32_t>(
-    __m256i first,
-    __m256i second,
-    int32_t min_val,
-    int32_t max_val) {
+    __m256i /*first*/,
+    __m256i /*second*/,
+    int32_t /*min_val*/,
+    int32_t /*max_val*/) {
   // This function is for linkage only, will not be used
   AT_ERROR("pack_saturate_and_clamp<int32_t> is not supported");
 }
@@ -259,7 +259,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
 
     float_vec_return_type dequantize(
         Vectorized<float> scale,
-        Vectorized<float> zero_point,
+        Vectorized<float> /*zero_point*/,
         Vectorized<float> scale_zp_premul) const {
       __m256 float_vals = _mm256_cvtepi32_ps(vals);
       return {vec::fmadd(scale, Vectorized<float>(float_vals), scale_zp_premul)};
@@ -269,7 +269,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
         const float_vec_return_type& rhs,
         float scale,
         int32_t zero_point,
-        float inverse_scale) {
+        float /*inverse_scale*/) {
       Vectorized<c10::qint32> retval;
       auto rhs_data = (__m256)rhs[0];
       at::native::quantize_vec<c10::qint32, /*precision=*/32>(
@@ -442,7 +442,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
  public:
   float_vec_return_type dequantize(
       Vectorized<float> scale,
-      Vectorized<float> zero_point,
+      Vectorized<float> /*zero_point*/,
       Vectorized<float> scale_neg_zp_premul) const {
     __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
     __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
@@ -467,7 +467,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
 
   static Vectorized<c10::qint8> quantize(
       const float_vec_return_type& rhs,
-      float scale,
+      float /*scale*/,
       int32_t zero_point,
       float inverse_scale) {
     auto* rhs_data = (float*)rhs.data();
@@ -605,7 +605,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
  public:
   float_vec_return_type dequantize(
       Vectorized<float> scale,
-      Vectorized<float> zero_point,
+      Vectorized<float> /*zero_point*/,
       Vectorized<float> scale_zp_premul) const {
     __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
     __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
@@ -630,7 +630,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
 
   static Vectorized<c10::quint8> quantize(
       const float_vec_return_type& rhs,
-      float scale,
+      float /*scale*/,
       int32_t zero_point,
       float inverse_scale) {
     auto* rhs_data = (float*)rhs.data();
@@ -763,7 +763,7 @@ struct VectorizedQuantizedConverter {
   float_vec_return_type dequantize(
       Vectorized<float> scale,
       Vectorized<float> zero_point,
-      Vectorized<float> scale_zp_premul) const {
+      Vectorized<float> /*scale_zp_premul*/) const {
     float_vec_return_type rv;
     for (const auto i : c10::irange(float_num_vecs())) {
       float tmp_vals[8];
@@ -820,7 +820,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
       const float_vec_return_type& rhs,
       float scale,
       int32_t zero_point,
-      float inverse_scale) {
+      float /*inverse_scale*/) {
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 8> float_vals;
 
@@ -952,7 +952,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
       const float_vec_return_type& rhs,
       float scale,
       int32_t zero_point,
-      float inverse_scale) {
+      float /*inverse_scale*/) {
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 8> float_vals;
 
@@ -1072,7 +1072,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
       const float_vec_return_type& rhs,
       float scale,
       int32_t zero_point,
-      float inverse_scale) {
+      float /*inverse_scale*/) {
     std::array<value_type, size()> qvals;
     std::array<float, float_num_vecs() * 8> float_vals;
 

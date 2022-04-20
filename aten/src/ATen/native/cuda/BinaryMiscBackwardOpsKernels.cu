@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/BinaryOps.h>
 
 #include <limits>
@@ -7,6 +8,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/JitLoops.cuh>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
@@ -14,15 +16,37 @@
 namespace at {
 namespace native {
 
+const char sigmoid_backward_name[] = "sigmoid_backward";
 void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
-  if(isComplexType(iter.dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sigmoid_backward_cuda", [&]() {
+  auto dtype = iter.dtype();
+  if(isComplexType(dtype)) {
+#if AT_USE_JITERATOR()
+    static const auto sigmoid_backward_string = jiterator_stringify(
+        template <typename T>
+        T sigmoid_backward(T a, T b) {
+          return a * std::conj((T{1.} - b) * b);
+        }
+    ); // sigmoid_backward_string
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "sigmoid_backward_cuda", [&]() {
+        jitted_gpu_kernel<
+          /*name=*/ sigmoid_backward_name,
+          /*return_dtype=*/ scalar_t,
+          /*common_dtype=*/ scalar_t,
+          /*arity=*/ 2>(iter, sigmoid_backward_string);
+    });
+#else
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "sigmoid_backward_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return a * std::conj((scalar_t{1.} - b) * b);
+        using comp_t = at::opmath_type<scalar_t>;
+        const auto one = comp_t{1.};
+        const auto comp_b = static_cast<comp_t>(b);
+        const auto comp_a = static_cast<comp_t>(a);
+        return static_cast<scalar_t>(comp_a * std::conj((one - comp_b) * comp_b));
       });
     });
+#endif
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "sigmoid_backward_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, dtype, "sigmoid_backward_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * (scalar_t(1.) - b) * b;
       });

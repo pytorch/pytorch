@@ -1,19 +1,82 @@
 #!/usr/bin/env python3
-# coding=utf-8
-from trymerge import GitHubPR, GH_GET_PR_INFO_QUERY
-from unittest import TestCase, main, mock
-from typing import Any
+# Tests implemented in this file are relying on GitHub GraphQL APIs
+# In order to avoid test flakiness, results of the queries
+# are cached in gql_mocks.json
+# PyTorch Lint workflow does not have GITHUB_TOKEN defined to avoid
+# flakiness, so if you are making changes to merge_rules or
+# GraphQL queries in trymerge.py, please make sure to delete `gql_mocks.json`
+# And re-run the test locally with ones PAT
 
+import json
+import os
+from hashlib import sha256
+from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, GitHubPR
+from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
+from typing import Any
+from unittest import TestCase, main, mock
+from urllib.error import HTTPError
 
 def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
-    if query != GH_GET_PR_INFO_QUERY or set(kwargs.keys()) != {"name", "owner", "number"}:
-        raise RuntimeError(f"Unexpected query {query}")
-    if kwargs["name"] == "pytorch" and kwargs["owner"] == "pytorch" and kwargs["number"] == 71759:
-        return {'data': {'repository': {'pullRequest': {'closed': False, 'isCrossRepository': True, 'author': {'login': 'coolteemf'}, 'title': 'Optimize grid sample 3d', 'body': "Fixes #71415\r\nI have implemented the changes that replicate what @to-mi did in this [PR](https://github.com/pytorch/pytorch/pull/65986#issue-1012959443) for the 3D case :\r\n\r\n> Fixes #64977\r\n> \r\n> Avoids creating a tensor for and calculating `input` gradient if it's not needed in the backward pass of `grid_sample` (2d case, native CPU & CUDA kernels). Especially the tensor creation seemed time consuming (see #64977).\r\n> \r\n> Brief description of the changes:\r\n> \r\n>     * I have tried to go with rather minimal changes. It would probably be possible to make a more elegant version with a bit larger refactoring (or possibly with better understanding of PyTorch internals and C++ functionalities).\r\n> \r\n>     * Changed the `native_functions.yaml` and `derivatives.yaml` so that the gradient input mask is passed to the functions.\r\n> \r\n>     * Changed the CPU kernels:\r\n>       (1) added `bool input_requires_grad` template parameter to the `backward` function,\r\n>       (2) added if branches based on it to remove `input` gradient computations if it's not requested,\r\n>       (3) feed in `TensorAccessor<scalar_t, 3>* gInp_slice_ptr` instead of `TensorAccessor<scalar_t, 3>& gInp_slice` so that I can pass a `nullptr` in case gradient for `input` is not requested. (A bit inelegant perhaps, but allows to keep one signature for `backward` function and not require breaking it to smaller pieces. Perhaps there's a more elegant way to achieve this?)\r\n> \r\n>     * Changed CUDA kernel:\r\n>       (1) added ~`bool input_requires_grad` template parameter~ `const bool input_requires_grad` argument to the `backward` function,\r\n>       (2) added if branches based on it to remove `input` gradient computations if it's not requested,\r\n>       (3) feed in `TensorInfo<scalar_t, index_t>()` instead of `getTensorInfo<scalar_t, index_t>(grad_input)` in case gradient for `input` is not requested.\r\n> \r\n>     * Modified tests in `test/test_nn.py` so that they run also cases with no `input` gradient needed.\r\n> \r\n>     * Have not touched the CPU fallback kernel.\r\n\r\nNote: the changes number (3) are N/A in this case.\r\n\r\n", 'headRefName': 'optimize_grid_sample_3d', 'headRepository': {'nameWithOwner': 'coolteemf/pytorch'}, 'baseRefName': 'master', 'baseRepository': {'nameWithOwner': 'pytorch/pytorch', 'isPrivate': False, 'defaultBranchRef': {'name': 'master'}}, 'mergeCommit': None, 'commits': {'nodes': [{'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': 'e0b0d1e695aeddceaf265da602c4704592053e9e', 'checkSuites': {'nodes': []}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': '563ec73747ad53b63b36736c47c4342f962c2a09', 'checkSuites': {'nodes': []}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': '51abe41a132d9dd5b1c0551bdca902aacc028ff8', 'checkSuites': {'nodes': []}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': 'be9898205992034a00e8ace8a55c2ecdcee2c2f8', 'checkSuites': {'nodes': []}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': '2929c60b64384c2deae0f7dea8bab94ad4bc9ec8', 'checkSuites': {'nodes': []}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': '9241b737e7e2b257905cc74ad9c50b737d7f9d0a', 'checkSuites': {'nodes': []}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': '64d6b795d0636928a8aa2fd3da01302fb5f5f7af', 'checkSuites': {'nodes': []}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': '4503577e53760a0006f1e80ca6bfe04d2be90470', 'checkSuites': {'nodes': []}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': 'b16f4b11ffbbbf2ca2098f9702af4ef6b6fc5e1f', 'checkSuites': {'nodes': [{'app': {'databaseId': 12274}, 'conclusion': 'SUCCESS'}]}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': '7ffc23368a604afdc92d2818747f730ce31a2bb5', 'checkSuites': {'nodes': []}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': 'b85292604b9ad6c31706b76b5a5498c4f6d94309', 'checkSuites': {'nodes': [{'app': {'databaseId': 12274}, 'conclusion': 'SUCCESS'}]}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': '9d81d7bae8ad91aaa24b3ceab83e3138894dbc69', 'checkSuites': {'nodes': [{'app': {'databaseId': 12274}, 'conclusion': 'SUCCESS'}]}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': 'e79f6a2202512b294c55bf4bfb2e0524fafd4c48', 'checkSuites': {'nodes': [{'app': {'databaseId': 12274}, 'conclusion': 'SUCCESS'}]}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': 'f683e8aec7aea76097a264eec01511e704c31154', 'checkSuites': {'nodes': [{'app': {'databaseId': 12274}, 'conclusion': 'SUCCESS'}]}}}, {'commit': {'author': {'user': {'login': 'coolteemf'}, 'email': '67541941+coolteemf@users.noreply.github.com', 'name': 'François Lecomte'}, 'oid': 'b932e9e286c22aaf352375186df851ef060b295a', 'checkSuites': {'nodes': [{'app': {'databaseId': 12274}, 'conclusion': 'SUCCESS'}]}}}, {'commit': {'author': {'user': None, 'email': 'ghp_XXXXXXXXXXXXX', 'name': 'coolteemf'}, 'oid': '346e0c547953d98eb84d23c1391a95badb9c4a22', 'checkSuites': {'nodes': [{'app': {'databaseId': 12274}, 'conclusion': 'SUCCESS'}]}}}], 'totalCount': 16}, 'changedFiles': 9, 'files': {'nodes': [{'path': 'aten/src/ATen/native/GridSampler.cpp'}, {'path': 'aten/src/ATen/native/cpu/GridSamplerKernel.cpp'}, {'path': 'aten/src/ATen/native/cuda/GridSampler.cpp'}, {'path': 'aten/src/ATen/native/cuda/GridSampler.cu'}, {'path': 'aten/src/ATen/native/cuda/GridSampler.h'}, {'path': 'aten/src/ATen/native/native_functions.yaml'}, {'path': 'test/forward_backward_compatibility/check_forward_backward_compatibility.py'}, {'path': 'test/test_nn.py'}, {'path': 'tools/autograd/derivatives.yaml'}]}, 'reviews': {'nodes': [{'author': {'login': 'albanD'}, 'state': 'COMMENTED'}, {'author': {'login': 'coolteemf'}, 'state': 'COMMENTED'}, {'author': {'login': 'albanD'}, 'state': 'COMMENTED'}, {'author': {'login': 'coolteemf'}, 'state': 'COMMENTED'}, {'author': {'login': 'albanD'}, 'state': 'COMMENTED'}, {'author': {'login': 'coolteemf'}, 'state': 'COMMENTED'}, {'author': {'login': 'coolteemf'}, 'state': 'COMMENTED'}, {'author': {'login': 'albanD'}, 'state': 'COMMENTED'}, {'author': {'login': 'coolteemf'}, 'state': 'COMMENTED'}, {'author': {'login': 'albanD'}, 'state': 'COMMENTED'}, {'author': {'login': 'albanD'}, 'state': 'COMMENTED'}, {'author': {'login': 'coolteemf'}, 'state': 'COMMENTED'}, {'author': {'login': 'albanD'}, 'state': 'COMMENTED'}, {'author': {'login': 'coolteemf'}, 'state': 'COMMENTED'}, {'author': {'login': 'albanD'}, 'state': 'COMMENTED'}, {'author': {'login': 'albanD'}, 'state': 'APPROVED'}, {'author': {'login': 'albanD'}, 'state': 'APPROVED'}], 'totalCount': 17}, 'comments': {'nodes': [{'bodyText': 'Thanks for the update! The windows failure is not your fault, you can ignore it!\n\nThank you very much for all of your feedback and sorry for the delay !', 'author': {'login': 'coolteemf'}, 'authorAssociation': 'NONE', 'editor': None}]}}}}}  # noqa: B950
-    raise RuntimeError("Unexpected request")
+    gql_db_fname = os.path.join(os.path.dirname(__file__), "gql_mocks.json")
+
+    def get_mocked_queries() -> Any:
+        if not os.path.exists(gql_db_fname):
+            return {}
+        with open(gql_db_fname, encoding="utf-8") as f:
+            return json.load(f)
+
+    def save_mocked_queries(obj: Any) -> None:
+        with open(gql_db_fname, encoding="utf-8", mode="w") as f:
+            json.dump(obj, f, indent=2)
+            f.write("\n")
+
+    key = f"query_sha={sha256(query.encode('utf-8')).hexdigest()} " + " ".join([f"{k}={kwargs[k]}" for k in sorted(kwargs.keys())])
+    mocked_queries = get_mocked_queries()
+
+    if key in mocked_queries:
+        return mocked_queries[key]
+
+    try:
+        rc = gh_graphql(query, **kwargs)
+    except HTTPError as err:
+        if err.code == 401:
+            err_msg = "If you are seeing this message during workflow run, please make sure to update gql_mocks.json"
+            err_msg += f" locally, by deleting it and running {os.path.basename(__file__)} with "
+            err_msg += " GitHub Personal Access Token passed via GITHUB_TOKEN environment variable"
+            if os.getenv("GITHUB_TOKEN") is None:
+                err_msg = "Failed to update cached GraphQL queries as GITHUB_TOKEN is not defined." + err_msg
+            raise RuntimeError(err_msg) from err
+    mocked_queries[key] = rc
+
+    save_mocked_queries(mocked_queries)
+
+    return rc
 
 
 class TestGitHubPR(TestCase):
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_match_rules(self, mocked_gql: Any) -> None:
+        "Tests that PR passes merge rules"
+        pr = GitHubPR("pytorch", "pytorch", 71759)
+        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_lint_fails(self, mocked_gql: Any) -> None:
+        "Tests that PR fails mandatory lint check"
+        pr = GitHubPR("pytorch", "pytorch", 74649)
+        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        self.assertRaises(RuntimeError, lambda: find_matching_merge_rule(pr, repo))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_last_comment(self, mocked_gql: Any) -> None:
+        "Tests that last comment can be fetched"
+        pr = GitHubPR("pytorch", "pytorch", 71759)
+        comment = pr.get_last_comment()
+        self.assertEqual(comment.author_login, "github-actions")
+        self.assertIsNone(comment.editor_login)
+        self.assertTrue("You've committed this PR" in comment.body_text)
+
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_get_author_null(self, mocked_gql: Any) -> None:
         """ Tests that PR author can be computed
@@ -23,6 +86,52 @@ class TestGitHubPR(TestCase):
         author = pr.get_author()
         self.assertTrue(author is not None)
         self.assertTrue("@" in author)
+        self.assertTrue(pr.get_diff_revision() is None)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_large_diff(self, mocked_gql: Any) -> None:
+        "Tests that PR with 100+ files can be fetched"
+        pr = GitHubPR("pytorch", "pytorch", 73099)
+        self.assertTrue(pr.get_changed_files_count() > 100)
+        flist = pr.get_changed_files()
+        self.assertEqual(len(flist), pr.get_changed_files_count())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_internal_changes(self, mocked_gql: Any) -> None:
+        "Tests that PR with internal changes is detected"
+        pr = GitHubPR("pytorch", "pytorch", 73969)
+        self.assertTrue(pr.has_internal_changes())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_checksuites_pagination(self, mocked_gql: Any) -> None:
+        "Tests that PR with lots of checksuits can be fetched"
+        pr = GitHubPR("pytorch", "pytorch", 73811)
+        self.assertGreater(len(pr.get_checkrun_conclusions()), 0)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_comments_pagination(self, mocked_gql: Any) -> None:
+        "Tests that PR with 50+ comments can be fetched"
+        pr = GitHubPR("pytorch", "pytorch", 31093)
+        self.assertGreater(len(pr.get_comments()), 50)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_gql_complexity(self, mocked_gql: Any) -> None:
+        "Fetch comments and conclusions for PR with 60 commits"
+        # Previous version of GrapQL query used to cause HTTP/502 error
+        # see https://gist.github.com/malfet/9b93bc7eeddeaf1d84546efc4f0c577f
+        pr = GitHubPR("pytorch", "pytorch", 68111)
+        self.assertGreater(len(pr.get_comments()), 20)
+        self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
+        self.assertGreater(pr.get_commit_count(), 60)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_team_members(self, mocked_gql: Any) -> None:
+        "Test fetching team members works"
+        dev_infra_team = gh_get_team_members("pytorch", "pytorch-dev-infra")
+        self.assertGreater(len(dev_infra_team), 2)
+        with self.assertWarns(Warning):
+            non_existing_team = gh_get_team_members("pytorch", "qwertyuiop")
+            self.assertEqual(len(non_existing_team), 0)
 
 
 if __name__ == "__main__":

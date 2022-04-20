@@ -332,14 +332,14 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
 #if defined(__ANDROID__) || defined(__APPLE__) || defined(__XROS__) || \
-    (defined(USE_ROCM) && ROCM_VERSION < 40100)
+    defined(USE_ROCM)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
 extern "C" {
 C10_IMPORT
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__) || defined(__HIP__)
+#if defined(__CUDA_ARCH__)
 __host__ __device__
 #endif // __CUDA_ARCH__
     void
@@ -360,8 +360,7 @@ extern SYCL_EXTERNAL void __assert_fail(
     unsigned int line,
     const char* func);
 #else // __SYCL_DEVICE_ONLY__
-#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
-    defined(__HIP_ARCH__) || defined(__HIP__)
+#if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__)))
 __host__ __device__
 #endif // __CUDA_ARCH__
     void

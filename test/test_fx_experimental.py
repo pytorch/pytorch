@@ -26,6 +26,7 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
+from torch.fx.experimental.meta_tracer import MetaTracer
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -667,6 +668,28 @@ class TestFXExperimental(JitTestCase):
         # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
 
+    def test_meta_tracer(self):
+        mt = MetaTracer()
+
+        class MetaTracerTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(num_embeddings=42, embedding_dim=16)
+                self.layernorm = torch.nn.LayerNorm(16)
+
+            def forward(self, x):
+                emb = self.emb(x)
+                lol = self.layernorm(emb)
+                return torch.relu(lol) if lol.shape[0] < 30 else torch.sigmoid(lol)
+
+        mttm = MetaTracerTestModule()
+        for BS in [15, 35]:
+            x = torch.zeros(BS, dtype=torch.long).random_(42)
+            graph = mt.trace(mttm, meta_args={'x' : x.to(device='meta')})
+            gm = torch.fx.GraphModule(mttm, graph)
+            torch.testing.assert_close(gm(x), mttm(x))
+
+
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -813,6 +836,29 @@ terrible spacing
         submodules_out = module_with_submodules(x, y)
 
         self.assertEqual(orig_out, submodules_out)
+
+    def test_split_module_kwargs_expansion(self):
+        class ModuleWithKwargsExpansion(torch.nn.Module):
+            def forward(self, x, **kwargs):
+                return x + kwargs['foo']
+
+        mod = ModuleWithKwargsExpansion()
+        traced = torch.fx.symbolic_trace(mod)
+
+        seen_getitem = False
+
+        def split_callback(n):
+            nonlocal seen_getitem
+            split_idx = int(seen_getitem)
+            if n.target == operator.getitem:
+                seen_getitem = True
+            return split_idx
+
+        split = split_module(traced, mod, split_callback)
+
+        x = torch.randn(5, 3)
+        foo = torch.randn(5, 3)
+        torch.testing.assert_allclose(split(x, foo=foo), traced(x, foo=foo))
 
     @skipIfNoTorchVision
     def test_subgraph_trivial_resnet(self):
@@ -1124,6 +1170,47 @@ class {test_classname}(torch.nn.Module):
 
         module_with_submodule = split_module(traced, mm, split_cb)
         self.assertEqual(module_with_submodule(a, b, c, d), traced(a, b, c, d))
+
+    def test_split_qualname_mapping(self):
+        d_hid = 4
+
+        class ExampleCode(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.lin = torch.nn.Linear(d_hid, d_hid)
+
+            def forward(self, x):
+                x = torch.mm(x, self.mm_param)
+                x = torch.relu(x)
+                x = torch.mm(x, self.mm_param)
+                x = self.lin(x)
+                x = torch.relu(x)
+                x = torch.mm(x, self.mm_param2)
+                x = self.lin(x)
+                return x
+
+        my_module = ExampleCode()
+        my_module_traced = symbolic_trace(my_module)
+
+        part_idx = 0
+
+        def split_callback(n : torch.fx.Node):
+            nonlocal part_idx
+            if (n.op, n.target) == ('call_module', 'lin'):
+                part_idx += 1
+            return part_idx
+
+        # split module in module with submodules
+        qualname_map : Dict[str, str] = {}
+        module_with_submodules = split_module(
+            my_module_traced, my_module, split_callback, qualname_map
+        )
+        expected_qualname_map = {
+            'submod_1.lin': 'lin', 'submod_2.lin': 'lin'
+        }
+        self.assertEqual(qualname_map, expected_qualname_map)
 
     def test_traceable_function_with_nonstandard_name(self):
         def foo(x):
@@ -1454,101 +1541,6 @@ class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
-        # Sorted and one entry on each line to minimize merge conflicts.
-        op_skip = {
-            # See: https://github.com/pytorch/pytorch/issues/64997
-            "as_strided",
-            "block_diag",
-            "broadcast_tensors",
-            "cartesian_prod",
-            "contiguous",
-            "einsum",
-            "expand",
-            "expand_as",
-            "fill_",
-            "T",   # Implemented with a lambda
-            "H",   # Implemented with a lambda
-            "mT",  # Implemented with a lambda
-            "mH",  # Implemented with a lambda
-            "gradient",
-            "histogramdd",
-            "igamma",
-            "igammac",
-            "index_put",
-            "nn.functional.conv2d",
-            "nn.functional.dropout",
-            "nn.functional.dropout2d",
-            "nn.functional.embedding",  # Implemented with a lambda
-            "nn.functional.embedding_bag",  # Implemented with a lambda
-            "nn.functional.rrelu",  # Implemented with a lambda
-            "nn.functional.feature_alpha_dropout",  # Implemented with a lambda
-            "nonzero",
-            "polygamma",
-            "special.polygamma",
-            "repeat",
-            "reshape_as",
-            "resize_",
-            "resize_as_",
-            "special.zeta",
-            "sum_to_size",
-            "to_sparse",
-            "unique",
-            "unique_consecutive",
-            "view",
-            "view_as",
-            "unfold",
-            "where",
-            "zero_",
-            'bfloat16',
-            'bool',
-            'byte',
-            'char',
-            'double',
-            'float',
-            'half',
-            'int',
-            'long',
-            'short',
-            'empty_like',
-            'ones_like',
-            'randn_like',
-            'zeros_like',
-            'full_like',
-            'rand_like',
-            'randint_like',
-            'new_ones',
-            'new_empty',
-            'new_zeros',
-            'new_full',
-            'normal',
-            'multinomial',
-            'bernoulli',
-            "__getitem__",
-            "__radd__",
-            "__rsub__",
-            "__rmul__",
-            "__rdiv__",
-            "__rmod__",
-            "__rpow__",
-            '__rand__',
-            '__ror__',
-            '__rxor__',
-            "__rmatmul__",
-            "atleast_1d",
-            "atleast_2d",
-            "atleast_3d",
-            "svd_lowrank",  # implemented with a lambda
-            "pca_lowrank",  # implemented with a lambda
-            "column_stack",
-        }
-
-        # Unsupported input types
-        if op.name in op_skip:
-            return
-
-        if op.name.startswith('_masked.'):
-            return
-
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)

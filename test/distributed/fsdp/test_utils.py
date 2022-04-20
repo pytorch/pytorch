@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+from collections import OrderedDict
 import random
 import sys
 import unittest
@@ -8,6 +9,7 @@ import torch
 from torch import distributed as dist
 from torch.distributed.fsdp.utils import (
     _apply_to_tensors,
+    _replace_by_prefix,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -57,7 +59,7 @@ class TestUtils(TestCase):
         data.append({"key1": get_a_tensor(), "key2": {1: get_a_tensor()}, "key3": 3})
         data.insert(0, set(["x", get_a_tensor(), get_a_tensor()]))
         data.append(([1], get_a_tensor(), (1), [get_a_tensor()], set((1, 2))))
-        od = dict()
+        od = OrderedDict()
         od["k"] = "value"
         data.append(od)
 
@@ -72,6 +74,22 @@ class TestUtils(TestCase):
         self.assertEqual(total, expected)
         for i, v in enumerate(data):
             self.assertEqual(type(new_data[i]), type(v))
+
+    def test_replace_by_prefix(self):
+        state_dict = {
+            "layer.a": torch.tensor(1),
+            "abc.layer.def": torch.tensor(2),
+            "layer.b": torch.tensor(3),
+        }
+        original_state_dict = state_dict.copy()
+        _replace_by_prefix(state_dict, "layer.", "module.layer.")
+        assert state_dict == {
+            "module.layer.a": torch.tensor(1),
+            "abc.layer.def": torch.tensor(2),
+            "module.layer.b": torch.tensor(3),
+        }
+        _replace_by_prefix(state_dict, "module.layer.", "layer.")
+        assert state_dict == original_state_dict
 
 
 instantiate_parametrized_tests(TestUtils)

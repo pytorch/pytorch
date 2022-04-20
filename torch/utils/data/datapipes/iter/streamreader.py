@@ -1,5 +1,5 @@
 from typing import Tuple
-from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 
 
 class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):

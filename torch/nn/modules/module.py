@@ -8,7 +8,6 @@ from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
-import typing
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
 
@@ -199,7 +198,7 @@ def _forward_unimplemented(self, *input: Any) -> None:
         instead of this since the former takes care of running the
         registered hooks while the latter silently ignores them.
     """
-    raise NotImplementedError
+    raise NotImplementedError(f"Module [{type(self).__name__}] is missing the required \"forward\" function")
 
 
 class Module:
@@ -556,7 +555,7 @@ class Module:
         """
         raise RuntimeError(
             "Reached a code path in Module.get_extra_state() that should never be called. "
-            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
     def set_extra_state(self, state: Any):
@@ -571,7 +570,7 @@ class Module:
         """
         raise RuntimeError(
             "Reached a code path in Module.set_extra_state() that should never be called. "
-            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
     def _apply(self, fn):
@@ -687,6 +686,25 @@ class Module:
             Module: self
         """
         return self._apply(lambda t: t.cuda(device))
+
+    def ipu(self: T, device: Optional[Union[int, device]] = None) -> T:
+        r"""Moves all model parameters and buffers to the IPU.
+
+        This also makes associated parameters and buffers different objects. So
+        it should be called before constructing optimizer if the module will
+        live on IPU while being optimized.
+
+        .. note::
+            This method modifies the module in-place.
+
+        Arguments:
+            device (int, optional): if specified, all parameters will be
+                copied to that device
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: t.ipu(device))
 
     def xpu(self: T, device: Optional[Union[int, device]] = None) -> T:
         r"""Moves all model parameters and buffers to the XPU.
@@ -896,7 +914,7 @@ class Module:
                 warnings.warn(
                     "Complex modules are a new feature under active development whose design may change, "
                     "and some modules might not work as expected when using complex tensors as parameters or buffers. "
-                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
                     "if a complex module does not work as expected.")
 
         def convert(t):
@@ -1312,10 +1330,11 @@ class Module:
     def state_dict(self, destination: T_destination, prefix: str = ..., keep_vars: bool = ...) -> T_destination:
         ...
 
-    # TODO: Remove string escape once Python-3.6 no longer supported
-    # See https://github.com/python/mypy/issues/6904#issuecomment-496207426
+    # TODO: Remove string escape once Python-3.7.0 is no longer supported
+    # typing.OrderedDict with generics can be used in Python-3.7.2+ or later
+    # See https://github.com/pytorch/pytorch/issues/74087
     @overload
-    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> typing.OrderedDict[str, Tensor]:
+    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> "OrderedDict[str, Tensor]":
         ...
 
     def state_dict(self, *args, destination=None, prefix='', keep_vars=False):

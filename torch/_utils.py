@@ -209,6 +209,12 @@ def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
     return torch.empty_strided(size, stride, dtype=dtype, device='meta', requires_grad=requires_grad)
 
 
+def _rebuild_wrapper_subclass(cls, dtype, size, stride, storage_offset, layout, device, requires_grad):
+    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        cls, size, strides=stride, storage_offset=storage_offset, layout=layout,
+        device=device, requires_grad=requires_grad)
+
+
 # TODO: Once we decide to break serialization FC, `storage` no longer needs to
 # be a _TypedStorage
 def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
