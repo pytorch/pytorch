@@ -1062,7 +1062,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Generator.cpp",
     "aten/src/ATen/core/List.cpp",
     "aten/src/ATen/core/NamedTensor.cpp",
-    "aten/src/ATen/core/SymIntArrayRef.cpp",
+    "aten/src/c10/core/SymIntArrayRef.cpp",
     "aten/src/ATen/core/Tensor.cpp",
     "aten/src/ATen/core/VariableFallbackKernel.cpp",
     "aten/src/ATen/core/VariableHooksInterface.cpp",

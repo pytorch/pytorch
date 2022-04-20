@@ -9,7 +9,7 @@
 
 #pragma once
 
-#include <ATen/core/SymInt.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Deprecated.h>

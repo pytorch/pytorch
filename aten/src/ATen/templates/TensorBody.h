@@ -32,7 +32,7 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
-#include <ATen/core/SymInt.h>
+#include <c10/core/SymInt.h>
 #include <ATen/core/TensorBase.h>
 
 
