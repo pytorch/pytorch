@@ -11,7 +11,7 @@
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
-#if defined(ENABLE_FLATBUFFER)
+
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #endif
 #include <torch/csrc/jit/mobile/interpreter.h>
@@ -546,7 +546,7 @@ mobile::Module _load_for_mobile(
       auto module = _load_for_mobile(std::move(rai), device, extra_files);
       return module;
     }
-#if defined(ENABLE_FLATBUFFER)
+
     case FileFormat::FlatbufferFileFormat: {
       std::shared_ptr<char> data;
       size_t size = 0;
@@ -558,13 +558,7 @@ mobile::Module _load_for_mobile(
       parseExtraFiles(flatbuffer_module, extra_files);
       return m;
     }
-#else
-    case FileFormat::FlatbufferFileFormat: {
-      TORCH_CHECK(
-          false,
-          "Flatbuffer input file but the build hasn't enabled flatbuffer");
-    }
-#endif
+
     default: {
       TORCH_CHECK(false, "Format error");
     }
@@ -596,7 +590,7 @@ mobile::Module _load_for_mobile(
           std::move(rai), device, extra_files, module_load_options);
       return module;
     }
-#if defined(ENABLE_FLATBUFFER)
+
     case FileFormat::FlatbufferFileFormat: {
       std::shared_ptr<char> data;
       size_t size = 0;
@@ -608,13 +602,7 @@ mobile::Module _load_for_mobile(
       parseExtraFiles(flatbuffer_module, extra_files);
       return m;
     }
-#else
-    case FileFormat::FlatbufferFileFormat: {
-      TORCH_CHECK(
-          false,
-          "Flatbuffer input file but the build hasn't enabled flatbuffer");
-    }
-#endif
+
     default: {
       TORCH_CHECK(false, "Format error");
     }

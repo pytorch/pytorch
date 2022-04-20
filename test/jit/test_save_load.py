@@ -16,7 +16,6 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, clear_class_registry
 
-ENABLE_FLATBUFFER = os.environ.get("ENABLE_FLATBUFFER", "0") == "1"
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -559,9 +558,6 @@ def script_module_to_buffer(script_module):
     return module_buffer
 
 
-@unittest.skipIf(
-    not ENABLE_FLATBUFFER, "Need to enable flatbuffer to run the below tests"
-)
 class TestSaveLoadFlatbuffer(JitTestCase):
     def test_different_modules(self):
         """

@@ -16,10 +16,10 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
-#if defined(ENABLE_FLATBUFFER)
+
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
-#endif
+
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -792,7 +792,6 @@ SerializationStorageContext& ScriptModuleSerializer::storage_context() {
   return storage_context_;
 }
 
-#if defined(ENABLE_FLATBUFFER)
 void save_mobile_module_to(
     const Module& module,
     const ExtraFilesMap& extra_files,
@@ -807,7 +806,6 @@ void save_mobile_module_to(
       save_mobile_module_to_bytes(mod, extra_files, jitFiles, constants);
   writer_func(reinterpret_cast<void*>(buffer.data()), buffer.size());
 }
-#endif
 
 void ExportModule(
     const Module& module,
@@ -821,14 +819,9 @@ void ExportModule(
     return !out ? 0 : nbytes;
   };
   if (use_flatbuffer) {
-#if defined(ENABLE_FLATBUFFER)
     save_mobile_module_to(
         module, extra_files, save_mobile_debug_info, writer_func);
-#else
-    TORCH_CHECK(
-        false,
-        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
-#endif
+
   } else {
     caffe2::serialize::PyTorchStreamWriter writer(writer_func);
     ScriptModuleSerializer serializer(writer);
@@ -845,7 +838,6 @@ void ExportModule(
     bool save_mobile_debug_info,
     bool use_flatbuffer) {
   if (use_flatbuffer) {
-#if defined(ENABLE_FLATBUFFER)
     auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
       std::fstream ofile(filename, std::ios::binary | std::ios::out);
       ofile.write(static_cast<const char*>(buf), nbytes);
@@ -854,11 +846,7 @@ void ExportModule(
     };
     save_mobile_module_to(
         module, extra_files, save_mobile_debug_info, writer_func);
-#else
-    TORCH_CHECK(
-        false,
-        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
-#endif
+
   } else {
     caffe2::serialize::PyTorchStreamWriter writer(filename);
     ScriptModuleSerializer serializer(writer);
@@ -875,14 +863,9 @@ void ExportModule(
     bool save_mobile_debug_info,
     bool use_flatbuffer) {
   if (use_flatbuffer) {
-#if defined(ENABLE_FLATBUFFER)
     save_mobile_module_to(
         module, extra_files, save_mobile_debug_info, writer_func);
-#else
-    TORCH_CHECK(
-        false,
-        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
-#endif
+
   } else {
     caffe2::serialize::PyTorchStreamWriter writer(writer_func);
     ScriptModuleSerializer serializer(writer);
