@@ -3000,6 +3000,11 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
 TEST(TestShapeGraphLinting, Basic) {
   auto schemas = RegisteredShapeComputeSchemas();
   for (const auto& schema : schemas) {
+    // arange does not acually support complex, leave as
+    // union[int, float] for now
+    if (schema->name() == "aten::arange") {
+      continue;
+    }
     auto g = shapeComputeGraphForSchema(*schema);
     TORCH_INTERNAL_ASSERT(g);
     LintShapeComputeGraph(schema, *g);
