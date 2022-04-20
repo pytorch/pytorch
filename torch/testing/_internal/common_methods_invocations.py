@@ -9427,7 +9427,12 @@ op_db: List[OpInfo] = [
                    supports_sparse=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   supports_out=False),
+                   supports_out=False,
+                   skips=(
+                       # numpy() raises TypeError: Got unsupported ScalarType ComplexHalf
+                       DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_normal",
+                                    dtypes=(torch.complex32,)),
+                   )),
     UnaryUfuncInfo('conj_physical',
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool,
