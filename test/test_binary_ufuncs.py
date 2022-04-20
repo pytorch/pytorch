@@ -2143,7 +2143,6 @@ class TestBinaryUfuncs(TestCase):
             self.assertTrue(torch.all(fn(x, zero).isnan()))
 
     @onlyNativeDeviceTypes  # Check Issue https://github.com/pytorch/pytorch/issues/48130
-    @skipCUDAIfRocm  # Error happens on both ROCM and XLA
     @dtypes(*integral_types())
     def test_fmod_remainder_by_zero_integral(self, device, dtype):
         fn_list = (torch.fmod, torch.remainder)
@@ -2155,13 +2154,16 @@ class TestBinaryUfuncs(TestCase):
             if self.device_type == 'cpu':
                 with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
                     fn(x, zero)
-            # Different value for different dtype on CUDA:
-            # Due to it's an undefined behavior, CUDA returns a pattern of all 1s
-            # for integral dividend (other than int64) divided by zero. For int64,
-            # CUDA returns all 1s for negative dividend, half 1s for positive dividend.
-            # uint8: 0xff -> 255
-            # int32: 0xffffffff -> -1
+            elif torch.version.hip is not None:
+                # ROCm behavior: x % 0 is a no-op; x is returned
+                self.assertEqual(fn(x, zero), x)
             else:
+                # CUDA behavior: Different value for different dtype
+                # Due to it's an undefined behavior, CUDA returns a pattern of all 1s
+                # for integral dividend (other than int64) divided by zero. For int64,
+                # CUDA returns all 1s for negative dividend, half 1s for positive dividend.
+                # uint8: 0xff -> 255
+                # int32: 0xffffffff -> -1
                 if dtype == torch.int64:
                     self.assertEqual(fn(x, zero) == 4294967295, x >= 0)
                     self.assertEqual(fn(x, zero) == -1, x < 0)
