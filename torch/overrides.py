@@ -40,6 +40,7 @@ __all__ = [
     "get_testing_overrides",
     "handle_torch_function",
     "has_torch_function",
+    "resolve_name",
     "is_tensor_like",
     "is_tensor_method_or_property",
     "wrap_torch_function",
