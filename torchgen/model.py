@@ -101,6 +101,9 @@ class DispatchKey(Enum):
     SparseHIP = auto()
     SparseXPU = auto()
 
+    NestedTensorCPU = auto()
+    NestedTensorCUDA = auto()
+
     AutogradCPU = auto()
     AutogradCUDA = auto()
     AutogradXLA = auto()
@@ -151,7 +154,8 @@ dispatch_keys = [
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
     DispatchKey.CompositeExplicitAutograd,
-    DispatchKey.NestedTensor,
+    DispatchKey.NestedTensorCPU,
+    DispatchKey.NestedTensorCUDA,
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,
@@ -174,6 +178,7 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.QuantizedCUDA,
         DispatchKey.SparseCUDA,
         DispatchKey.SparseCsrCUDA,
+        DispatchKey.NestedTensorCUDA,
         DispatchKey.AutogradCUDA,
         DispatchKey.CUDATensorId,
     }
@@ -1997,6 +2002,13 @@ class NativeFunctionsViewGroup:
         if self.view_inplace is not None:
             assert self.view.func.signature() == self.view_inplace.func.signature()
 
+        if self.view.has_composite_implicit_autograd_kernel:
+            if self.view_inplace is not None:
+                assert self.view_inplace.has_composite_implicit_autograd_kernel, (
+                    f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
+                    " both have CompositeImplicitAutograd kernels, or both not have composite kernels."
+                )
+
     def functions(self, *, include_copy: bool = True) -> Iterator[NativeFunction]:
         yield self.view
         if self.view_inplace is not None:
@@ -2007,6 +2019,12 @@ class NativeFunctionsViewGroup:
     @property
     def root_name(self) -> str:
         return self.view.root_name
+
+    @property
+    def composite(self) -> bool:
+        # We currently assert that the "group" is consistent.
+        # If the view op is composite, then its view_inplace op is too.
+        return self.view.has_composite_implicit_autograd_kernel
 
 
 def gets_generated_view_copy(f: NativeFunction) -> bool:

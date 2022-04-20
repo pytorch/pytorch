@@ -10,7 +10,7 @@ from torchgen.api.autograd import (
     dispatch_strategy,
 )
 from torchgen.api.types import (Binding, DispatcherSignature, CType, BaseCType,
-                                     OptionalCType, longT, boolT, intArrayRefT)
+                                     OptionalCType, longT, boolT, intArrayRefT, symIntArrayRefT)
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
 from torchgen.model import (
@@ -242,7 +242,8 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
         BaseCType(longT),
         OptionalCType(BaseCType(longT)),
         BaseCType(boolT),
-        BaseCType(intArrayRefT)]
+        BaseCType(intArrayRefT),
+        BaseCType(symIntArrayRefT)]
     for unpacked_binding in unpacked_bindings:
         arg, arg_type = unpacked_binding.name, unpacked_binding.nctype.type
         if arg == 'self_':
@@ -255,7 +256,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
                             'over by value, also add a test in pytorch/xla/test/test_operations.py where this code '
                             'is exercised.')
 
-        if arg_type == BaseCType(intArrayRefT):
+        if arg_type == BaseCType(intArrayRefT) or arg_type == BaseCType(symIntArrayRefT):
             # It's not safe to close over IntArrayRef by value, since this is a
             # reference type, so materialize a vector to close over by value
             arg_vec = arg + '_vec'

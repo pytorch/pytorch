@@ -4,7 +4,12 @@ from typing import Optional, Sequence, Set, List, Tuple, Match
 
 from torchgen.api import cpp
 from torchgen.api.types import Binding, NamedCType
-from torchgen.model import NativeFunction, Type, SchemaKind, NativeFunctionsViewGroup
+from torchgen.model import (
+    NativeFunction,
+    Type,
+    SchemaKind,
+    NativeFunctionsViewGroup,
+)
 from torchgen.utils import IDENT_REGEX
 
 # Represents a saved attribute involved in backward calculation.

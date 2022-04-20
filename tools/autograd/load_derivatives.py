@@ -10,7 +10,7 @@ import yaml
 from torchgen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
 from torchgen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
-                                     intArrayRefT, tensorOptionsT, typeAndSizeT, longT, boolT,
+                                     intArrayRefT, tensorOptionsT, typeAndSizeT, longT, boolT, layoutT,
                                      tensorGeometryT, scalarTypeT, SpecialArgName,
                                      OptionalCType, stringT)
 from torchgen.api import cpp
@@ -603,6 +603,11 @@ def saved_variables(
             'suffix': '_strides',
             'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
             'expr': stride_expr,
+        }),
+        # replace self.layout() with self_layout
+        (r'{}.layout\(\)', {
+            'suffix': '_layout',
+            'nctype': lambda name: NamedCType(name, BaseCType(layoutT)),
         }),
         # replace self.is_conj() with self_conjugate
         (r'{}.is_conj\(\)', {

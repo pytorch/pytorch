@@ -3,9 +3,19 @@ from typing import List, Union
 from dataclasses import dataclass
 from torchgen.context import method_with_native_function
 from torchgen.model import BackendIndex, NativeFunction, NativeFunctionsGroup
-from torchgen.api.types import BaseCType, OptionalCType, VectorCType, kernel_signature
+from torchgen.api.types import (
+    BaseCType,
+    OptionalCType,
+    VectorCType,
+    kernel_signature,
+)
 import torchgen.api.dispatcher as dispatcher
-from torchgen.api.lazy import LazyIrSchema, LazyArgument, isValueType, tensorListValueT
+from torchgen.api.lazy import (
+    LazyIrSchema,
+    LazyArgument,
+    isValueType,
+    tensorListValueT,
+)
 from torchgen.dest.lazy_ts_lowering import ts_lowering_body
 
 
