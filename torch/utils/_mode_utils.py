@@ -28,7 +28,7 @@ class ModeMeta(type):
 
 # a class for the helper function to package all the info about the Mode class
 # so the helper function can access it without needing a circular import
-class ModeInfo:
+class _ModeInfo:
     def __init__(self, mode_type: str, mode_class: type, base_mode_class: type, mode_class_name: str):
         if mode_type not in ['torch_function', 'python']:
             raise RuntimeError(f"only support torch_function or python modes, got mode_type of {mode_type}")
@@ -38,7 +38,7 @@ class ModeInfo:
         self.base_mode_class = base_mode_class
         self.mode_class_name = mode_class_name
 
-def _enable_mode(mode, mode_info: ModeInfo, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
+def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
     if not (
         mode is None or
         isinstance(mode, mode_info.mode_class) or
@@ -79,7 +79,7 @@ def _enable_mode(mode, mode_info: ModeInfo, *, replace=None, ignore_preexisting=
     finally:
         _set_torch_function_mode(old) if mode_info.is_torch_function_mode else _set_python_mode(old)
 
-def _push_mode(ctor, mode_info: ModeInfo) -> Iterator[type]:
+def _push_mode(ctor, mode_info: _ModeInfo) -> Iterator[type]:
     # Helper function for pushing a mode onto the stack
     if isinstance(ctor, mode_info.mode_class):
         raise ValueError(

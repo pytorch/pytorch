@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 import contextlib
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, ModeInfo, _wrap_init
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
 
 __all__ = [
     "get_ignored_functions",
@@ -1783,9 +1783,9 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
         ignore_preexisting (bool): if True, ignore any preexisting mode
             and overwrite it with the passed mode.
     """
-    mode_info = ModeInfo(mode_type="torch_function", mode_class=TorchFunctionMode, base_mode_class=BaseTorchFunctionMode, mode_class_name="TorchFunctionMode")
-    return _enable_mode(mode, mode_info, replace=replace, ignore_preexisting=ignore_preexisting)
-
+    mode_info = _ModeInfo(mode_type="torch_function", mode_class=TorchFunctionMode,
+                          base_mode_class=BaseTorchFunctionMode, mode_class_name="BaseTorchFunctionMode")
+    return _enable_mode(mode, mode_info=mode_info, replace=replace, ignore_preexisting=ignore_preexisting)
 
 @contextlib.contextmanager
 def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
@@ -1804,5 +1804,5 @@ def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
             non-inner arguments (e.g.,
             ``push_torch_function_mode(partial(MyMode, arg))``)
     """
-    mode_info = ModeInfo(mode_type="torch_function", mode_class=TorchFunctionMode, base_mode_class=BaseTorchFunctionMode, mode_class_name="TorchFunctionMode")
+    mode_info = _ModeInfo(mode_type="torch_function", mode_class=TorchFunctionMode, base_mode_class=BaseTorchFunctionMode, mode_class_name="TorchFunctionMode")
     return _push_mode(ctor, mode_info=mode_info)

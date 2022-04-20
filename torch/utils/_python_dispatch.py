@@ -2,7 +2,7 @@ import contextlib
 from typing import Iterator
 import functools
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, ModeInfo, _wrap_init 
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
 
 # NB: Calling an operator inside __torch_dispatch__ does go through
 # __torch_dispatch__ again. Please use _DisableTorchDispatch inside
@@ -47,7 +47,8 @@ def enable_python_mode(mode, *, replace=None, ignore_preexisting=False) -> Itera
         ignore_preexisting (bool): if True, ignore any preexisting mode
             and overwrite it with the passed mode.
     """
-    mode_info = ModeInfo(mode_type="python", mode_class=PythonMode, base_mode_class=BasePythonMode, mode_class_name="PythonMode")
+    mode_info = _ModeInfo(mode_type="python", mode_class=PythonMode,
+                          base_mode_class=BasePythonMode, mode_class_name="PythonMode")
     return _enable_mode(mode, mode_info=mode_info, replace=replace, ignore_preexisting=ignore_preexisting)
 
 def _wrap_torch_dispatch(f):
@@ -140,5 +141,6 @@ class BasePythonMode(PythonMode):
 
 @contextlib.contextmanager
 def push_python_mode(ctor) -> Iterator[PythonMode]:
-    mode_info = ModeInfo(mode_type="python", mode_class=PythonMode, base_mode_class=BasePythonMode, mode_class_name="PythonMode")
+    mode_info = _ModeInfo(mode_type="python", mode_class=PythonMode,
+                          base_mode_class=BasePythonMode, mode_class_name="PythonMode")
     return _push_mode(ctor, mode_info=mode_info)
