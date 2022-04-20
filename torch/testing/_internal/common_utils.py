@@ -1250,7 +1250,7 @@ meta_exclude_set = {
     torch.nn.functional.prelu,
     torch.nn.functional.relu,
     torch.nn.functional.relu6,
-    torch.nn.functional.rrelu, 
+    torch.nn.functional.rrelu,
     torch.nn.functional.smooth_l1_loss,
     torch.nn.functional.softmin,
     torch.nn.functional.softsign,
@@ -1302,6 +1302,10 @@ meta_exclude_set = {
     torch.fused_moving_avg_obs_fake_quant,
     torch.batch_norm,
     torch.binary_cross_entropy_with_logits,
+    torch.Tensor.__complex__,
+    torch.Tensor.unsqueeze,
+    torch._make_per_tensor_quantized_tensor,
+    torch.Tensor.topk,
     torch.instance_norm,
     torch.as_tensor,
     torch.slogdet,
@@ -1376,6 +1380,10 @@ meta_exclude_set = {
     torch._nnpack_spatial_convolution,
     torch.lstm,
     torch.Tensor.conj_physical_,
+    torch.rnn_tanh,
+    torch.fbgemm_linear_quantize_weight,
+    torch._reshape_from_tensor,
+    torch.gru,
     # This is suspicious
     torch.nn.functional.max_pool1d,
     # TODO: our conversion to meta is not accurate enough (doesn't
@@ -1425,7 +1433,7 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         hit = False
 
         # Doesn't actually return a storage
-        @functools.cache
+        @functools.lru_cache(None)
         def meta_storage(s):
             return torch.empty(s.size(), dtype=s.dtype, device='meta')
 
@@ -1436,11 +1444,11 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                 # inference mode can trigger this
                 return False
 
-        @functools.cache
+        @functools.lru_cache(None)
         def meta_tensor(t):
             with torch.inference_mode(t.is_inference()):
                 s = meta_storage(t.storage())
-                is_leaf = safe_is_leaf(t) 
+                is_leaf = safe_is_leaf(t)
                 if is_leaf or not t._is_view():
                     r = torch.empty(
                         (0,), dtype=t.dtype, device='meta'
@@ -1474,7 +1482,10 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                 return t
             # TODO: zero tensors?
             elif type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
-                if t.is_sparse or t.is_sparse_csr or t.device.type == "lazy":
+                if t.is_sparse_csr:
+                    # TODO: sparse_csr should support meta
+                    return t
+                elif t.is_sparse or t.device.type == "lazy":
                     hit = True
                     return t.to("meta")
                 elif t.is_complex():
