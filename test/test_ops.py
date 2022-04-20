@@ -68,7 +68,8 @@ class TestCommon(TestCase):
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
-        include_complex32 = ((torch.complex32,) if op.supports_dtype(torch.complex32, device) else ())
+        device_type = torch.device(device).type
+        include_complex32 = ((torch.complex32,) if op.supports_dtype(torch.complex32, device_type) else ())
 
         # dtypes to try to backward in
         allowed_backward_dtypes = floating_and_complex_types_and(
