@@ -1453,9 +1453,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for inp in list(
             mapMaybe(
                 gen_differentiable_input,
-                f.func.arguments.non_out + list(f.func.arguments.out),
+                f.func.arguments.non_out + list(f.func.arguments.out),  # type: ignore[operator]
             )
-        ):  # type: ignore[operator]
+        ):
             if is_tensor_type(inp.type):
                 to_check.append(
                     FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)

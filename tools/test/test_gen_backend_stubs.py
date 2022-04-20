@@ -190,8 +190,8 @@ autograd:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_out is listed under "autograd".""",
-        )  # noqa: B950
+            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_out is listed under "autograd".""",  # noqa: B950
+        )
 
     # in an operator group, currently all operators must either be registered to the backend or autograd kernel.
     # Here, functional and inplace mismatch
@@ -206,8 +206,8 @@ autograd:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_ is listed under "autograd".""",
-        )  # noqa: B950
+            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add_ is listed under "autograd".""",  # noqa: B950
+        )
 
     # Currently, the same operator can't be listed under both 'supported' and 'autograd', which would
     # involve registering the same kernel to both the XLA and AutogradXLA keys.
@@ -223,8 +223,8 @@ autograd:
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add is listed under "autograd".""",
-        )  # noqa: B950
+            """Currently, all variants of an op must either be registered to a backend key, or to a backend's autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! add is listed under "supported", but add is listed under "autograd".""",  # noqa: B950
+        )
 
     # unrecognized extra yaml key
     def test_unrecognized_key(self) -> None:
@@ -237,8 +237,8 @@ invalid_key: invalid_val"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """ contains unexpected keys: invalid_key. Only the following keys are supported: backend, class_name, cpp_namespace, extra_headers, supported, autograd, full_codegen""",
-        )  # noqa: B950
+            """ contains unexpected keys: invalid_key. Only the following keys are supported: backend, class_name, cpp_namespace, extra_headers, supported, autograd, full_codegen""",  # noqa: B950
+        )
 
     # if use_out_as_primary is provided, it must be a bool
     def test_use_out_as_primary_non_bool(self) -> None:
