@@ -462,14 +462,11 @@ $3 = torch._ops.aten.add.Tensor($2, $0)""")
         with capture_logs() as logs:
             y = f(x1_not_functional, x2_functional)
 
-        # I think the alias trace is coming from the fact that x2 is technically *not*
-        # a LoggingTensor (instead it *contains* a LoggingTensor), but x1 *is* a LoggingTensor.
-        # The important thing here though is that functionalization ran the "+" kernel
+        # Make sure that functionalization ran the "+" kernel
         # with a functional + non-functional tensor, and wrapped the output appropriately.
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)
-$3 = torch._ops.aten.alias_copy.default($2)
-$4 = torch._ops.aten.add.Tensor($3, tensor(1))""")
+$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
 
     def test_mixed_wrappers_invalid(self):
         x1_not_functional = torch.ones(4)
