@@ -256,7 +256,7 @@ std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list) {
   }
   return outputs;
 }
-TensorList to_functional_tensor(const TensorList& t_list) {
+std::vector<Tensor> to_functional_tensor(const TensorList& t_list) {
   std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs[i] = to_functional_tensor(t_list[i]);
@@ -295,7 +295,7 @@ c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::opt
   }
   return outputs;
 }
-TensorList from_functional_tensor(const TensorList& t_list) {
+std::vector<Tensor> from_functional_tensor(const TensorList& t_list) {
   std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(from_functional_tensor(t_list[i]));
@@ -338,6 +338,30 @@ void sync(const at::TensorList t_list) {
 void sync(const c10::List<c10::optional<Tensor>> t_list) {
   for (const auto i : c10::irange(t_list.size())) {
     sync(t_list[i]);
+  }
+}
+
+void replace_(const Tensor& functional_tensor, const Tensor& other) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
+  unsafeGetFunctionalWrapper(functional_tensor)->replace_(other);
+}
+
+void replace_(const TensorList functional_tensor, TensorList other) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
+  for (const auto i : c10::irange(functional_tensor.size())) {
+    replace_(functional_tensor[i], other[i]);
+  }
+}
+
+
+void commit_update(const Tensor& functional_tensor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
+  unsafeGetFunctionalWrapper(functional_tensor)->commit_update();
+}
+
+void commit_update(const TensorList functional_tensor) {
+  for (const auto i : c10::irange(functional_tensor.size())) {
+    commit_update(functional_tensor[i]);
   }
 }
 
