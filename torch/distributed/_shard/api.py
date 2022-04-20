@@ -266,7 +266,7 @@ def shard_module(
             shard_parameter(
                 mod,
                 param_name,
-                plan.plan[name],
+                spec,
                 src_rank=src_rank,
                 process_group=process_group
             )
