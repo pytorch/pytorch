@@ -1,4 +1,5 @@
-__all__ = ["shutdown", "get_worker_info", "remote", "rpc_sync", "rpc_async", "RRef", "AllGatherStates", "method_factory", "new_method"]
+__all__ = ["shutdown", "get_worker_info", "remote", "rpc_sync",
+           "rpc_async", "RRef", "AllGatherStates", "method_factory", "new_method"]
 
 import collections
 import contextlib
