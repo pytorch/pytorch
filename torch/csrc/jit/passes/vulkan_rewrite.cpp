@@ -82,6 +82,23 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   transpose_rewriter.runOnGraph(graph);
 }
 
+void insertPrePackedGruOp(std::shared_ptr<Graph>& graph) {
+  std::string gru_pattern = R"(
+      graph(%input.1, %hx.1, %params_cpu:Tensor[], %has_biases:bool, %num_layers:int, %dropout:float, %train:bool, %bidirectional:bool, %batch_first:bool):
+        %y.1 : Tensor, %hn.1 : Tensor = aten::gru(%input.1, %hx.1, %params_cpu, %has_biases, %num_layers, %dropout, %train, %bidirectional, %batch_first)
+        return (%y.1, %hn.1) )";
+  std::string prepacked_ops_pattern = R"(
+      graph(%input.1, %hx.1, %params_cpu:Tensor[], %has_biases:bool, %num_layers:int, %dropout:float, %train:bool, %bidirectional:bool, %batch_first:bool):
+        %packed_weights_biases = vulkan_prepack::gru_prepack(
+            %params_cpu, %has_biases, %num_layers, %dropout, %train, %bidirectional, %batch_first)
+        %y.1 : Tensor, %hn.1 : Tensor = vulkan_prepack::gru_run(%input.1, %hx.1, %packed_weights_biases)
+        return (%y.1, %hn.1) )";
+
+  SubgraphRewriter gru_rewriter;
+  gru_rewriter.RegisterRewritePattern(gru_pattern, prepacked_ops_pattern);
+  gru_rewriter.runOnGraph(graph);
+}
+
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
 
@@ -170,6 +187,7 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
 void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertPrePackedLinearOp(graph);
   insertPrePackedConv2dOp(graph);
+  insertPrePackedGruOp(graph);
 }
 
 void vulkanInsertPrePackedOps(script::Module& module) {

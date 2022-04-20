@@ -1,9 +1,8 @@
-from typing import Dict, List, Tuple, Union, Any, Callable, Set, TYPE_CHECKING
+from typing import Dict, List, Tuple, Union, Any, Callable, Set
 
 import torch
 
-if TYPE_CHECKING:
-    from collections import OrderedDict  # noqa: F401
+from collections import OrderedDict
 
 """Useful functions to deal with tensor types with other python container types."""
 
@@ -13,9 +12,14 @@ def _apply_to_tensors(
 ) -> Any:
     """Recursively apply to all tensor in different kinds of container types."""
 
-    def apply(x: Union[torch.Tensor, Dict, List, Tuple, Set]) -> Any:
+    def apply(x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict]) -> Any:
         if torch.is_tensor(x):
             return fn(x)
+        elif isinstance(x, OrderedDict):
+            od = x.__class__()
+            for key, value in x.items():
+                od[key] = apply(value)
+            return od
         elif isinstance(x, dict):
             return {key: apply(value) for key, value in x.items()}
         elif isinstance(x, (list, tuple, set)):

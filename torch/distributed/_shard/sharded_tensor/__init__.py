@@ -16,7 +16,6 @@ from .api import (
 )
 from .metadata import ShardMetadata  # noqa: F401
 from .partial_tensor import _PartialTensor
-from .utils import load_with_process_group
 
 
 def empty(sharding_spec: shard_spec.ShardingSpec,
@@ -366,7 +365,7 @@ def sharded_op_impl(func):
     parameters, the function provided will be invoked for that operator.
 
     Example::
-        >>> @custom_sharded_op(torch.nn.functional.linear)
+        >>> @sharded_op_impl(torch.nn.functional.linear)
         >>> def my_custom_sharded_linear(types, args, kwargs, process_group):
         >>>   ....
         >>>

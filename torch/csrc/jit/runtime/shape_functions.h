@@ -77,7 +77,7 @@ def slice(
         end_val += self[dim]
     if start_val < 0:
         start_val = 0
-    elif start_val >= self[dim]:
+    elif start_val > self[dim]:
         start_val = self[dim]
     if end_val < start_val:
         end_val = start_val
@@ -343,7 +343,7 @@ def conv2d(
 
 def batch_norm(
     input: List[int],
-    weight: List[int],
+    weight: Optional[List[int]],
     bias: Optional[List[int]],
     running_mean: Optional[List[int]],
     running_var: Optional[List[int]],
