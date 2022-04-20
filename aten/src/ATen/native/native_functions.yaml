@@ -2106,6 +2106,16 @@
 - func: unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
   variants: method
 
+- func: fill.Scalar(Tensor self, Scalar value) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: fill
+
+- func: fill.Tensor(Tensor self, Tensor value) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: fill
+
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
