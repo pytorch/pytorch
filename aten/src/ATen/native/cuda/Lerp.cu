@@ -93,6 +93,7 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
       }
   ); // lerp_scalar_string
   AT_DISPATCH_COMPLEX_TYPES(dtype, "lerp_cuda", [&] {
+      using opmath_t = at::opmath_t<scalar_t>;
       jitted_gpu_kernel<
         /*name=*/ lerp_scalar_name,
         /*return_dtype=*/ scalar_t,
@@ -108,10 +109,10 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
         [=] GPU_LAMBDA(scalar_t self_val, scalar_t end_val) {
           opmath_t self_val_f = self_val;
           opmath_t end_val_f = end_val;
-          return (std::abs(weight_val_f) < 0.5)
-              ? self_val_f + weight_val_f * (end_val_f - self_val_f)
+          return (std::abs(weight_val) < 0.5)
+              ? self_val_f + weight_val * (end_val_f - self_val_f)
               : end_val_f -
-                  (end_val_f - self_val_f) * (opmath_t{1} - weight_val_f);
+                  (end_val_f - self_val_f) * (opmath_t{1} - weight_val);
         });
   });
 #endif
