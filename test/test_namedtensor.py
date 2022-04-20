@@ -1,7 +1,7 @@
 # Owner(s): ["module: named tensor"]
 
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY, skipIfCrossRef
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import get_all_device_types
 from collections import namedtuple, OrderedDict
@@ -67,6 +67,7 @@ def out_fn(operator):
     return fn
 
 
+@skipIfCrossRef
 class TestNamedTensor(TestCase):
     def test_aaa_must_run_first_check_experimental_warning(self):
         # TODO(rzou): It would be nice for this to be a "real" python warning.
