@@ -758,7 +758,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 )
                 sig_body.append(f"op.impl({impl_exprs});")
 
-            if k is SchemaKind.out:
+            # Go over each output, and check if there is a proxy created for it.
+            # If so, copy it over to the original output.
+            if k is SchemaKind.out or k is SchemaKind.inplace:
                 for i in range(len(f.func.returns)):
                     sig_body.append(
                         f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(**op.proxy_outputs_[{i}]);")
