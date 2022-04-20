@@ -793,6 +793,10 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
+if(HAS_WERROR_SIGN_COMPARE AND WERROR)
+  # target_compile_options(torch_cpu PRIVATE "-Werror=sign-compare")
+  set_property(SOURCE ${ATen_CORE_SRCS} ${ATen_CPU_SRCS} APPEND PROPERTY COMPILE_OPTIONS "-Werror=sign-compare")
+endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
@@ -1939,6 +1943,8 @@ if(BUILD_PYTHON)
   # ---[ Python.
   if(BUILD_CAFFE2)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
+  target_compile_definitions(torch PRIVATE BUILD_CAFFE2)
+  target_compile_definitions(torch_python PRIVATE BUILD_CAFFE2)
   if(USE_NUMPY)
     target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
     target_link_libraries(caffe2_pybind11_state  PRIVATE numpy::numpy)

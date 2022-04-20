@@ -10,7 +10,7 @@ import yaml
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
 from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
-                                     intArrayRefT, tensorOptionsT, typeAndSizeT, longT, boolT,
+                                     intArrayRefT, tensorOptionsT, typeAndSizeT, longT, boolT, layoutT,
                                      tensorGeometryT, scalarTypeT, SpecialArgName,
                                      OptionalCType, stringT)
 from tools.codegen.api import cpp
@@ -127,29 +127,33 @@ def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...
     )
 
 def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str, ...]) -> ForwardDerivative:
-    assert len(names) == 1, "Forward derivatives can define gradients for only one output at a time"
-    var_name = names[0]
-    var_type: Optional[Type] = None
+    var_names = names
+    var_types: Optional[Tuple[Type, ...]] = None
     for r in f.func.returns:
-        if r.name == var_name:
-            var_type = r.type
-            break
-    # Handle default return names
-    if var_type is None:
-        if var_name == "result":
-            assert len(f.func.returns) == 1
-            var_type = f.func.returns[0].type
-        else:
-            res = re.findall(r"^result(\d+)$", var_name)
-            if len(res) == 1:
-                arg_idx = int(res[0])
-                var_type = f.func.returns[arg_idx].type
+        if r.name in var_names:
+            if var_types is None:
+                var_types = tuple()
+            var_types = var_types + (r.type,)
 
-    assert var_type is not None, "No matching output for forward derivative definition"
+    # Handle default return names
+    if var_types is None:
+        if var_names == ("result",):
+            assert len(f.func.returns) == 1
+            var_types = (f.func.returns[0].type,)
+        else:
+            for var_name in var_names:
+                res = re.findall(r"^result(\d+)$", var_name)
+                if len(res) == 1:
+                    if var_types is None:
+                        var_types = tuple()
+                    arg_idx = int(res[0])
+                    var_types = var_types + (f.func.returns[arg_idx].type,)
+
+    assert var_types is not None, "No matching output for forward derivative definition"
     return ForwardDerivative(
         formula=formula,
-        var_name=var_name,
-        var_type=var_type,
+        var_names=var_names,
+        var_types=var_types,
         required_inputs_fw_grad=None,
         required_inputs_primal=None,
         required_original_self_value=False,
@@ -190,7 +194,8 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
-            if (not len(args_with_derivatives) == 1) or len(forward_derivatives) > 1:
+            if ((not len(args_with_derivatives) == 1) or len(forward_derivatives) > 1
+               or len(forward_derivatives[0].var_names) > 1):
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
                                    "forward definition of gradient as element_wise but this only "
                                    "works for functions with a single differentiable input and a "
@@ -235,7 +240,7 @@ def postprocess_forward_derivatives(
             required_inputs_tangent = tuple(all_arg_names)
             formula = fw_formula
         elif formula == "auto_linear":
-            if len(forward_derivatives) > 1:
+            if len(forward_derivatives) > 1 or len(forward_derivatives[0].var_names) > 1:
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
                                    "forward definition of gradient as linear but this only works "
                                    "for functions with a single differentiable output.")
@@ -278,8 +283,8 @@ def postprocess_forward_derivatives(
 
         updated_derivatives.append(ForwardDerivative(
             formula=formula,
-            var_name=defn.var_name,
-            var_type=defn.var_type,
+            var_names=defn.var_names,
+            var_types=defn.var_types,
             required_inputs_fw_grad=required_inputs_tangent,
             required_inputs_primal=required_inputs_primal,
             required_original_self_value=False,
@@ -288,14 +293,12 @@ def postprocess_forward_derivatives(
     return updated_derivatives
 
 def is_forward_derivative_definition(all_arg_names: List[str], names: Tuple[str, ...]) -> bool:
-    if len(names) > 1:
-        # Forward definition are always for a single output at a time
-        return False
-    name = names[0]
-    if name not in all_arg_names:
-        return True
-    else:
-        return False
+    for name in names:
+        if name not in all_arg_names:
+            return True
+        else:
+            return False
+    raise RuntimeError("Expected `names` to be non-empty")
 
 def create_differentiability_info(
     defn: Dict[Any, Any],
@@ -377,7 +380,7 @@ def create_differentiability_info(
         args_with_derivatives_set: Set[str] = set()
 
         all_arg_names = [a.name for a in cpp_arguments(f)]
-
+        all_ret_names = [r.name for r in f.func.returns]  # only used for the assert below
         # output_differentiability is captured from the enclosed
         # scope. Don't modify it.
         #
@@ -401,6 +404,11 @@ def create_differentiability_info(
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
+
+            for name in names:
+                assert not (name in all_arg_names and name in all_ret_names), (
+                    f"While processing the derivative formula for '{f.func.name}' wrt '{name}', "
+                    f"expected '{name}' to not be both an input arg and named return. ")
 
             if is_forward_derivative_definition(all_arg_names, names):
                 forward_derivatives.append(create_forward_derivative(f, formula, names))
@@ -595,6 +603,11 @@ def saved_variables(
             'suffix': '_strides',
             'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
             'expr': stride_expr,
+        }),
+        # replace self.layout() with self_layout
+        (r'{}.layout\(\)', {
+            'suffix': '_layout',
+            'nctype': lambda name: NamedCType(name, BaseCType(layoutT)),
         }),
         # replace self.is_conj() with self_conjugate
         (r'{}.is_conj\(\)', {
