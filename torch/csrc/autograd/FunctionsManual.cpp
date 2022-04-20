@@ -3155,170 +3155,171 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
 std::tuple<Tensor, Tensor> linalg_qr_jvp(
   const Tensor& dA,
   const Tensor& Q,
-  const Tensor& R
+  const Tensor& R,
+  const c10::string_view mode
 ) {
+  // dA = dQR + QdR
+  //
+  // Case m >= n
+  // We can put dQ in terms of dR
+  // dQ = dAR^{-1} - QdRR^{-1}
+  // Then we have
+  // Q^H dA R^{-1} = Q^HdQ + dRR^{-1}
+  // where Q^HdQ is skew Hermitian and dRR^{-1} is upper triangular
+  // Define sym(X) = X + X^H
+  // sym(dRR^{-1}) = sym(Q^H dA R^{-1})
+  // and define syminv(X) = triu(X) - 0.5 * diag(X) the inverse of sym : Triu(k) -> Her(k) to give
+  // dR = syminv(sym(Q^H dA R^{-1}))R
+  //
+  // Case m <= n
+  // Put dR as a function of dQ
+  // dR = Q^H dA - Q^H dQ R
+  // Let X_1 be the main m x m submatrix of a matrix X \in C^{m x n}
+  // Q^H A_1 R_1^{-1} = Q^H dQ + dR_1 R_1^{-1}
+  // Define trilIm(X) = X.tril(-1) + i * Im diag(X)
+  // trilIm(Q^H dQ) = trilIm(Q^H A_1 R_1^{-1})
+  // and define trilIminv(X) = X - X^H - 0.5*i*Im diag(X). This is the inverse of trilIm : Skew_C(m) -> Tril(m, imaginary diag)
+  // dQ = Q trilImInv(trilIm(Q^H A_1 R_1^{-1}))
   at::NoTF32Guard disable_tf32;
-  auto m = dA.size(-2);
-  auto n = dA.size(-1);
-  auto k = std::min(m, n);
 
-  auto dA1 = dA.narrow(-1, 0, k);
-  auto R1 = R.narrow(-1, 0, k);
-
-  // dB1 = Q^H dA1 R1^{-1}
-  auto dB1 = at::linalg_solve_triangular(R1, Q.mH().matmul(dA1), /*upper=*/true, /*left=*/false);
-
-  // dC1 = (dB1 + dB1^H).triu(-1) + (dB1 + dB1^H) * 0.5 I
-  auto dC1 = (dB1 + dB1.mH()).triu();
-  dC1.diagonal(0, -2, -1).mul_(0.5);
-
-  auto dR1 = dC1.matmul(R1);
-
-  // dQ = (dA1 - Q dR1) R1^{-1}
-  auto dQ = at::linalg_solve_triangular(R1, dA1 - Q.matmul(dR1), /*upper=*/true, /*left=*/false);
-
-  Tensor dR;
-  if (m >= n) {
-    dR = dR1;
-  }
-  else {
-    auto dA2 = dA.narrow(-1, k, n - k);
-    auto R2 = R.narrow(-1, k, n - k);
-    auto dR2 = Q.mH().matmul(dA2 - dQ.matmul(R2));
-    dR = at::cat({dR1, dR2}, -1);
-  }
-
-  return std::make_tuple(dQ, dR);
-}
-
-Tensor linalg_qr_jvp_Q(
-  const Tensor& dA,
-  const Tensor& Q,
-  const Tensor& R
-) {
-  return std::get<0>(linalg_qr_jvp(dA, Q, R));
-}
-
-Tensor linalg_qr_jvp_R(
-  const Tensor& dA,
-  const Tensor& Q,
-  const Tensor& R
-) {
-  return std::get<1>(linalg_qr_jvp(dA, Q, R));
-}
-
-Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                          c10::string_view mode, const Tensor& q, const Tensor& r){
-  at::NoTF32Guard disable_tf32;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
-  TORCH_CHECK(compute_q, "The derivative of qr is not implemented when mode='r'. "
-                         "Please use torch.linalg.qr(..., mode='reduced')");
 
-  auto square_deep_case_backward = [](const Tensor& grad_Q,
-                                      const Tensor& grad_R,
-                                      const Tensor& A,
-                                      const Tensor& Q,
-                                      const Tensor& R) -> Tensor {
-    // For square and deep (tall) case we refer:
-    // Matthias Seeger, Asmus Hetzel, Zhenwen Dai, Eric Meissner, Neil D. Lawrence (2018). Auto-Differentiating Linear Algebra.
-    // https://arxiv.org/abs/1710.08717 Section 4.3 LQ Decomposition (Note that LQ decomposition is the transpose of QR decomposition)
-    // Hai-Jun Liao, Jin-Guo Liu, Lei Wang, Tao Xiang (2019). Differentiable Programming Tensor Networks.
-    // https://arxiv.org/abs/1903.09650 Section 3. QR factorization
-    // For derivations of complex-valued input case, see https://giggleliu.github.io/2019/04/02/einsumbp.html
+  auto m = dA.size(-2);
+  auto n = dA.size(-1);
 
-    // Compute R grad_R^H
-    Tensor R_term;
-    if (grad_R.defined()) {
-      R_term = at::matmul(R, grad_R.mH());
-    } else {
-      // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
-      R_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-
-    // Compute grad_Q^H Q
-    Tensor Q_term;
-    if (grad_Q.defined()) {
-      Q_term = at::matmul(grad_Q.mH(), Q);
-    } else {
-      // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
-      Q_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-
-    Tensor M = R_term - Q_term;
-
-    // Compute M = (tril(M) + tril(M).mH()) * 0.5 Identity
-    Tensor M_tril = at::tril(M);
-    M = M_tril + M_tril.mH();
-    M.diagonal(0, -2, -1).mul_(0.5);
-
-    Tensor rhs_term;
-    if (grad_Q.defined()) {
-      rhs_term = grad_Q + at::matmul(Q, M);
-    } else {
-      rhs_term = at::matmul(Q, M);
-    }
-
-    // Compute rhs_term @ R^{-H}
-    Tensor grad_A = at::linalg_solve_triangular(
-        R.transpose(-2, -1).conj(),
-        rhs_term,
-        /*upper=*/false,
-        /*left=*/false,
-        /*unitriangular=*/false);
-
-    return grad_A;
-  };
-
-  auto m = self.size(-2);
-  auto n = self.size(-1);
-
-  TORCH_CHECK(
-      ((m <= n && (!reduced)) || reduced),
-      "The derivative of qr is not implemented when mode='complete' and nrows > ncols.");
-
-  auto grad_Q = grads[0];
-  auto grad_R = grads[1];
-
- if (m >= n) {
-    return square_deep_case_backward(grad_Q, grad_R, self, q, r);
+  TORCH_CHECK(compute_q, "The derivative of linalg.qr is not implemented when mode='r'. "
+                         "Please use torch.linalg.qr(A, mode='reduced')");
+  TORCH_CHECK(reduced || m <= n, "The QR decomposition is not differentiable when "
+                                 "mode='complete' and nrows > ncols.");
+  if (m >= n) {
+    const auto sym = [](const Tensor& X) { return X + X.mH(); };
+    const auto syminv = [](const Tensor& X) {
+      auto ret = X.triu();
+      ret.diagonal(0, -2, -1).mul_(0.5);
+      return ret;
+    };
+    auto dARinv = at::linalg_solve_triangular(R, dA, /*upper=*/true, /*left=*/false);
+    auto dR = syminv(sym(Q.mH().matmul(dARinv)));
+    auto dQ = dARinv - Q.matmul(dR);
+    dR = dR.matmul(R);
+    return std::make_tuple(std::move(dQ), std::move(dR));
   } else {
-    // For wide (m < n) input matrices A,  partition A = [X|Y] and R = [U|V]
-    // X and U are square full rank matrices. We will partition grads,
-    // grad_R = [grad_U | grad_V] and grad_A = [grad_X | grad_Y].
-    // To obtain grad_X we reuse the gradient formula from the square case.
-    // Formulae: grad_X = square_case_grad(grad_Q_prime, grad_U, Q, U),
-    // where grad_Q_prime = grad_Q + Y @ grad_V^H
-    // and grad_Y = Q @ grad_V.
-    // Then concatenate grads to get grad_A = [grad_X | grad_Y].
+    const auto trilim = [](const Tensor& X) {
+      if (X.is_complex()) {
+        auto ret = X.tril();
+        at::real(ret.diagonal(0, -2, -1)).zero_();
+        return ret;
+      } else {
+        return X.tril(-1);
+      }
+    };
+    const auto triliminv = [](const Tensor& X) {
+      if (X.is_complex()) {
+        auto ret = X - X.mH();
+        ret.diagonal(0, -2, -1).mul_(0.5);
+        return ret;
+      } else {
+        return X - X.mT() ;
+      }
+    };
 
-    auto Y = self.narrow(-1, m, n - m);
-    auto U = r.narrow(-1, 0, m);
-    Tensor grad_Y, grad_X, grad_V, grad_Q_prime;
+    auto QHdA = Q.mH().matmul(dA);
+    auto QHdA1Rinv = at::linalg_solve_triangular(R.narrow(-1, 0, m), QHdA.narrow(-1, 0, m), /*upper=*/true, /*left=*/false);
+    auto dQ = triliminv(trilim(QHdA1Rinv));
+    auto dR = QHdA - dQ.matmul(R);
+    dQ = Q.matmul(dQ);
+    return std::make_tuple(std::move(dQ), std::move(dR));
+  }
+}
 
-    if (grad_R.defined()) {
-      grad_V = grad_R.narrow(-1, m, n - m);
-      // reuse grad_R to store grad_U
-      grad_R = grad_R.narrow(-1, 0, m);
-      // grad_Q_prime starts with the value of Y @ grad_V^H
-      grad_Q_prime = at::matmul(Y, grad_V.mH());
+Tensor linalg_qr_backward(const Tensor& gQ, const Tensor& gR,
+                          const Tensor& Q, const Tensor& R,
+                          const c10::string_view mode) {
+  // Nb. We won't be too formal below, as writing this proof formaly is a pain
+  // We'll link here a formal writing of all this at some point in the future
+  //
+  // Case m >= n
+  // dQ = dAR^{-1} - Qsyminv(sym(Q^H dA R^{-1}))
+  // dR = syminv(sym(Q^H dA R^{-1}))R
+  //
+  // With the notation from the JVP formla, the only two computations that we need are
+  // syminv*(R) = 0.5 * (R.triu() + R.triu()^H - Re diag(R))
+  // sym*(X) = 2 * X
+  // Using these, after a few simplifications we get that
+  // gA = (gQ + syminvadj(triu(gR R^H - Q^H gQ)))R^{-H}
+  //
+  // Case m < n
+  // dR = Q^H dA - Q^H dQ R
+  // dQ = Q trilImInv(trilIm(Q^H A_1 R_1^{-1}))
+  //
+  // In this case trilIm*(X) = X (it's the trivial embedding)
+  // while trilImInv*(X) = tril(Y) - 0.5 * diag(Y)
+  // with Y = X - X^H
+  //
+  // We also have that if X \in C^{m, n} an dpi(X) = X_1,
+  // projects X into its leading m x m submatrix,
+  // pi*(X) = cat(X, 0_{m,n-m}, dim=-1)
+  //
+  // Using this, we get that
+  // gA = QgR + pi*(Q trilImInv*(Q^H gQ - gR R^H)R_1^{-H})
+
+  if (!gQ.defined() && !gR.defined()) {
+    return {};
+  }
+
+  at::NoTF32Guard disable_tf32;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  bool compute_q, reduced;
+  std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
+
+  auto m = Q.size(-2);
+  auto n = R.size(-1);
+
+  TORCH_CHECK(compute_q, "The derivative of linalg.qr is not implemented when mode='r'. "
+                         "Please use torch.linalg.qr(A, mode='reduced')");
+  TORCH_CHECK(reduced || m <= n, "The QR decomposition is not differentiable when "
+                                 "mode='complete' and nrows > ncols.");
+  Tensor gA;
+  if (gQ.defined()) {
+    if (gR.defined()) {
+      gA = gR.matmul(R.mH()) - Q.mH().matmul(gQ);
     } else {
-      // when grad_R is not defined then grad_V and grad_Q_prime
-      // get initialized with zeros
-      grad_V = at::zeros_like(Y, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      grad_Q_prime = at::zeros_like(q, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      gA = -Q.mH().matmul(gQ);
     }
-
-    if (grad_Q.defined()) {
-      // add the grad_Q term into grad_Q_prime when defined o/w is 0
-      grad_Q_prime = grad_Q_prime + grad_Q;
+  } else {
+      gA = gR.matmul(R.mH());
+  }
+  if (m >= n) {
+    const auto syminvadj = [](const Tensor& X) {
+      return X + X.mH() - at::diag_embed(at::real(X.diagonal(0, -2, -1)));
+    };
+    gA = Q.matmul(syminvadj(gA.triu()));
+    if (gQ.defined()) {
+      gA = gA + gQ;
     }
-    // Calculate grad_X using the helper. Grad_R contains the grad_U value
-    grad_X = square_deep_case_backward(grad_Q_prime, grad_R, self, q, U);
-    grad_Y = at::matmul(q, grad_V);
-    // Concatenate grad_X and grad_Y to get grad_A.
-    return at::cat({grad_X, grad_Y}, -1);
+    gA = at::linalg_solve_triangular(R.mH(), gA, /*upper*/false, /*left*/false);
+    return gA;
+  } else {
+    auto trilImInvAdjSkew = [](const Tensor& X) {
+      if (!X.is_complex()) {
+        return (X - X.mH()).tril();
+      } else {
+        auto ret = (X - X.mH()).tril();
+        return ret - at::diag_embed(0.5 * ret.diagonal(0, -2, -1));
+      }
+    };
+    gA = Q.matmul(trilImInvAdjSkew(-gA));
+    gA = at::linalg_solve_triangular(R.narrow(-1, 0, m).mH(), gA, /*upper*/false, /*left*/false);
+    auto shape = R.sizes().vec();
+    shape.end()[-1] = n - m;
+    gA = at::cat({gA, gA.new_zeros(shape)}, /*dim=*/-1);
+    if (gR.defined()) {
+      gA = gA + Q.matmul(gR);
+    }
+    return gA;
   }
 }
 

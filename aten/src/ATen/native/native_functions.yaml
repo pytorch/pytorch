@@ -11238,13 +11238,13 @@
   python_module: linalg
   variants: function
 
-- func: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
+- func: linalg_qr(Tensor A, str mode='reduced') -> (Tensor Q, Tensor R)
   python_module: linalg
   variants: function
   dispatch:
     CompositeExplicitAutograd: linalg_qr
 
-- func: linalg_qr.out(Tensor self, str mode='reduced', *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
+- func: linalg_qr.out(Tensor A, str mode='reduced', *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
   python_module: linalg
   variants: function
   dispatch:
