@@ -34,8 +34,8 @@ or break or early return in a loop). Those may be improved in the future, please
 file an issue if necessary.
 
 To debug (and write initially) the recommended flow is to define these functions
-in python and iterate there. Functions in `shape_functions.h` and
-`shape_functions_1.h` should be executable in python.
+in python and iterate there. Functions should be added to
+torch/jit/_shape_functions.
 
 To test operators, the preferred flow is through OpInfos, with
 `assert_jit_shape_analysis=True`. If this is not feasible, you can look at tests

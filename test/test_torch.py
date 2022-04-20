@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
+    TEST_WITH_CROSSREF,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
@@ -629,6 +630,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
     # Uses mismatched arange out size to trigger a warning
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref perturbs line numbering")
     def test_cpp_warnings_have_python_context(self, device):
         # Creates long string in advance to avoid a too-long Python line
         s = ".+Triggered internally at.+RangeFactories.+"
