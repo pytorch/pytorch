@@ -302,7 +302,7 @@ class TransformerEncoderLayer(Module):
         - if src is a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_, neither ``src_mask`` nor ``src_key_padding_mask`` is passed
         - the two ``LayerNorm`` instances have a consistent ``eps`` value (this will naturally be the case unless the caller has manually modified one without modifying the other)
         If the optimized implementation is in use, a
-       `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be
+        `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be
         passed for ``src`` to represent padding more efficiently than using a padding
         mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ will be
         returned, and an additional speedup proportional to the fraction of the input that
