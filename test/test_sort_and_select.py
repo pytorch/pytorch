@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
+     onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
 
 # TODO: remove this
 SIZE = 100
@@ -376,7 +376,6 @@ class TestSortAndSelect(TestCase):
         # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
-    @skipCUDAIfRocm
     def test_unique_dim(self, device):
         self.assertFalse(hasattr(torch, 'unique_dim'))
 
