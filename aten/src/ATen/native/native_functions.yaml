@@ -1810,7 +1810,7 @@
 - func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   dispatch:
     CompositeExplicitAutograd: embedding
-    NestedTensor: NestedTensor_embedding
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_embedding
 
 - func: embedding_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
 
@@ -2058,6 +2058,13 @@
     CPU, CUDA: expm1_out
     SparseCPU, SparseCUDA: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr_out
+
+- func: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: expand_symint
 
 - func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -3733,7 +3740,7 @@
     CPU, CUDA: relu
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: relu_quantized_cpu
-    NestedTensor: NestedTensor_relu
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3742,7 +3749,7 @@
     CPU, CUDA: relu_
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: relu_quantized_cpu_
-    NestedTensor: NestedTensor_relu_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu_
 
 - func: relu6(Tensor self) -> Tensor
   python_module: nn
@@ -3776,7 +3783,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    NestedTensor: NestedTensor_gelu_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_gelu_
 
 - func: gelu(Tensor self, *, str approximate='none') -> Tensor
   structured_delegate: gelu.out
@@ -3785,7 +3792,7 @@
   dispatch:
     MkldnnCPU: mkldnn_gelu
     QuantizedCPU: gelu_quantized_cpu
-    NestedTensor: NestedTensor_gelu
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_gelu
 
 - func: gelu_backward.grad_input(Tensor grad_output, Tensor self, *, str approximate='none', Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -4652,7 +4659,7 @@
 # _nested_from_padded_and_nested_example is available for testing.
 - func: _nested_from_padded_and_nested_example(Tensor padded, Tensor nt_example) -> Tensor
   dispatch:
-    NestedTensor: NestedTensor_from_padded_and_nested_example
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_from_padded_and_nested_example
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
@@ -5551,7 +5558,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind
-    NestedTensor: NestedTensor_unbind
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_unbind
 
 - func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
@@ -7745,23 +7752,27 @@
 - func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CompositeExplicitAutograd: sort_out
+    CPU: sort_out_cpu
+    CUDA: sort_out_cuda
 
 - func: sort.values_stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  structured: True
   dispatch:
-    CPU, CUDA: sort_stable_out
+    CPU: sort_out_cpu_stable
+    CUDA: sort_out_stable_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CompositeExplicitAutograd: sort
+    CPU: sort_cpu
+    CUDA: sort_cuda
+    QuantizedCPU: sort_quantized_cpu
 
 - func: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
-  structured_delegate: sort.values_stable
   variants: method, function
   dispatch:
+    CPU: sort_cpu_stable
+    CUDA: sort_stable_cuda
     QuantizedCPU: sort_quantized_cpu_stable
 
 - func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
@@ -11429,6 +11440,12 @@
     CompositeExplicitAutograd: expand_copy
   tags: view_copy
 
+- func: expand_copy.SymInt(Tensor self, SymInt[] size, *, bool implicit=False) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: expand_copy_SymInt
+  tags: view_copy
+
 - func: permute_copy(Tensor self, int[] dims) -> Tensor
   variants: function
   dispatch:
@@ -11570,9 +11587,9 @@
 - func: to_padded_tensor(Tensor self, float padding) -> Tensor
   variants: method
   dispatch:
-    NestedTensor: NestedTensor_to_padded_tensor
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_to_padded_tensor
 
 - func: _nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
   variants: method
   dispatch:
-    NestedTensor: NestedTensor_layer_norm
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_layer_norm

@@ -22,6 +22,12 @@ void _dim_apply(
     int64_t dim,
     const std::string& method_name,
     const func_t& f) {
+  dim = maybe_wrap_dim(dim, values.dim());
+  TORCH_CHECK(
+    dim >= 0 && dim < values.dim(),
+    method_name, "(): invalid dimension parameter ", dim
+  );
+
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
@@ -84,9 +90,8 @@ struct KeyValueCompDesc {
 };
 
 static void sort_kernel(
-    const TensorBase& self,
-    const TensorBase& values,
-    const TensorBase& indices,
+    const TensorBase &values,
+    const TensorBase &indices,
     int64_t dim,
     bool descending,
     bool stable) {
