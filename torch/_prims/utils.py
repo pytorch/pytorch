@@ -1,5 +1,3 @@
-# type: ignore
-
 import torch
 
 from numbers import Number

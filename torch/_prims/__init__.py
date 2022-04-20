@@ -1,5 +1,3 @@
-# type: ignore
-
 import torch
 from torch._C import _add_docstr  # type: ignore[attr-defined]
 
@@ -632,8 +630,8 @@ def _collapse_view_meta(a: TensorLike, start: int, end: int) -> TensorLike:
         length = length * shape[idx]
         stride = stride * strides[idx]
 
-    new_shape = shape[:start] + [length] + start[end:]
-    new_strides = strides[:start] + [stride] + start[end:]
+    new_shape = shape[:start] + [length] + shape[end:]
+    new_strides = strides[:start] + [stride] + shape[end:]
 
     return TensorMeta(a, shape=new_shape, strides=new_strides)
 

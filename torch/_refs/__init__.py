@@ -1,5 +1,3 @@
-# type: ignore
-
 import torch
 from torch._C import _add_docstr  # type: ignore[attr-defined]
 
