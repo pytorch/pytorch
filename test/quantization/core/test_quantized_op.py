@@ -840,9 +840,6 @@ class TestQuantizedOps(TestCase):
         add_relu = torch.ops.quantized.add_relu
         add = torch.ops.quantized.add
 
-        # NB: This is a strange size so that we exercise both the vectorized
-        # implementation (64-element chunks at at time) as well as the scalar
-        # implementation
         A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
         B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
         scale_A = 2.5
@@ -3546,25 +3543,19 @@ class TestQuantizedLinear(TestCase):
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
            output_channels=st.integers(4, 8),
-           use_bias=st.sampled_from([False]),
-           use_relu=st.sampled_from([False]),
+           use_bias=st.booleans(),
+           use_relu=st.booleans(),
            use_multi_dim_input=st.booleans(),
            use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    @unittest.skip("Local only - currently the qlinear_cudnn op is bulid "
                    "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
                    "after it is built by default")
     # TODO: check with yang regarding CUDNN flags
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
                            use_relu, use_multi_dim_input, use_channelwise):
         qlinear_prepack = torch.ops.quantized.linear_prepack
-        batch_size = 1
-        input_channels = 10
-        output_channels = 20
-        use_bias = False
-        use_relu = False
-        use_channelwise = False
         if use_relu:
             qlinear_op = torch.ops.quantized.linear_relu
         else:

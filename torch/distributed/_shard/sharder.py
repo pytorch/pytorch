@@ -2,18 +2,26 @@ import abc
 import torch.nn as nn
 
 class Sharder(abc.ABC):
+    """
+    This is an interface which allows user to create more advanced
+    sharding strategies that are not easily be composed by the
+    `ShardingSpec`.
+
+    :class:`torch.distributed._shard.sharding_plan.ShardingPlan` could
+    take an object of the `Sharder` and call `shard` to shard the module,
+    then replace the original module with sharded module returned.
+    """
     @abc.abstractmethod
     def shard(self, module: nn.Module) -> nn.Module:
         """
-        Processes a module and if needed swaps it with a custom sharded
-        Implementation. Should return ``None`` if no swapping should be
-        performed.
+        Shard a module base on the implementation of this method, and
+        return the sharded version of the module.
 
-        The Sharder would produce ShardedTensors for the module based on
-        ShardingPlan, and then call the ShardedModuleSwapper. The passed
-        in module would consist of ShardedTensors and a common way to
-        perform module swapping would be to use the state_dict of the passed
-        in module and apply it to the new sharded module via its
-        load_state_dict method.
+        Args:
+            module (:class:`torch.nn.Module`):
+                The module to apply sharding to.
+        Returns:
+            A :class:`torch.nn.Module` object that represents a module
+            that's already been sharded (i.e. contains ShardedTensor parameters).
         """
         pass

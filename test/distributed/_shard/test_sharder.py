@@ -21,10 +21,6 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common import (
-    generate_chunk_sharding_specs_for_test,
-)
-from torch.testing._internal.distributed._shard.test_common import SimpleMegatronLM
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -33,7 +29,58 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+# a simple collection of embedding bag implementation
+class CustomEmbeddingBagCollection(nn.Module):
+    def __init__(self, num_bags, num_embeddings_per_bag, num_dims):
+        super().__init__()
+        self.num_bags = num_bags
+        self.embedding_bags: nn.ModuleDict = nn.ModuleDict()
 
+        for i in range(num_bags):
+            self.embedding_bags[f"embedding_bag_{i}"] = nn.EmbeddingBag(
+                num_embeddings_per_bag,
+                num_dims,
+                mode="sum")
+
+    def forward(self, inputs):
+        outputs = []
+        for bag in self.embedding_bags.values():
+            outputs.append(bag(inputs))
+        return torch.cat(outputs)
+
+# a simple sharded version of EBC
+class CustomShardedEBC(nn.Module):
+    def __init__(self, ebc, split_idx, specs):
+        super().__init__()
+        self.split_idx = split_idx
+        row_spec, col_spec = specs
+
+        # create embedding bags base on the spec
+        self.embedding_bags: nn.ModuleDict = nn.ModuleDict()
+
+        assert self.split_idx < ebc.num_bags
+        for i in range(ebc.num_bags):
+            bag_key = f"embedding_bag_{i}"
+            if i < self.split_idx:
+                shard_module(ebc, plan=ShardingPlan(plan={f"embedding_bags.{bag_key}.weight": row_spec}))
+            else:
+                shard_module(ebc, plan=ShardingPlan(plan={f"embedding_bags.{bag_key}.weight": col_spec}))
+
+            self.embedding_bags[bag_key] = ebc.embedding_bags[bag_key]
+
+
+class CustomSharder(Sharder):
+    def __init__(self, devices, split_sharding_idx):
+        self.devices = devices
+        self.split_sharding_idx = split_sharding_idx
+        self.rowwise_spec = ChunkShardingSpec(dim=0, placements=devices)
+        self.colwise_spec = ChunkShardingSpec(dim=1, placements=devices)
+
+    def shard(self, ebc: nn.Module) -> nn.Module:
+        if not isinstance(ebc, CustomEmbeddingBagCollection):
+            raise RuntimeError("The custom sharder only supports CustomEmbeddingBagCollection")
+
+        return CustomShardedEBC(ebc, self.split_sharding_idx, (self.rowwise_spec, self.colwise_spec))
 
 
 class TestCustomSharder(ShardedTensorTestBase):
@@ -41,43 +88,64 @@ class TestCustomSharder(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
-    def test_basic_sharding_plan(self):
-        colwise_sharding_spec = generate_chunk_sharding_specs_for_test(0)
-        rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)
-        for spec in zip(colwise_sharding_spec, rowwise_sharding_spec):
-            # test each sharding spec pair and see if we can apply sharding
-            reshard_spec = copy.deepcopy(spec[1])
-            reshard_spec.placements.sort(key=lambda placement: placement.rank())
-            reshard_spec.dim = 0
+    def test_custom_sharder(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.ebc = CustomEmbeddingBagCollection(10, 10, 8)
 
-            sharding_plan = ShardingPlan(
-                plan={
-                    "fc1.weight": spec[0],
-                    "fc2.weight": spec[1]
-                },
-                output_plan={
-                    "": reshard_spec
-                },
-                collect_local_shards=[""])
+            def forward(self, inputs):
+                return self.ebc(inputs)
 
-            # Use same seed.
-            torch.manual_seed(0)
-            local_megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).cuda(self.rank)
-            megatron_lm = copy.deepcopy(local_megatron_lm)
+        custom_sharder = CustomSharder(
+            devices=[f"rank:{i}/cuda:{i}" for i in range(TEST_GPU_NUM)],
+            split_sharding_idx=TEST_GPU_NUM // 2
+        )
 
+        sharding_plan = ShardingPlan(
+            plan={
+                "ebc": custom_sharder,
+            })
+
+        local_model = MyModule().cuda(self.rank)
+        sharded_model = copy.deepcopy(local_model)
+
+        # shard the module with the provided sharding plan
+        shard_module(sharded_model, sharding_plan)
+
+        # check to make sure the module already been sharded
+        emb_bags = sharded_model.ebc.embedding_bags
+        self.assertTrue(isinstance(emb_bags["embedding_bag_0"].weight, ShardedTensor))
+        self.assertTrue(isinstance(emb_bags["embedding_bag_9"].weight, ShardedTensor))
+        self.assertEqual(emb_bags["embedding_bag_0"].weight.sharding_spec(), custom_sharder.rowwise_spec)
+        self.assertEqual(emb_bags["embedding_bag_9"].weight.sharding_spec(), custom_sharder.colwise_spec)
+
+        # make sure we can run sharded computation and compare outputs
+        # with the local model version
+        input = torch.arange(8).reshape((2, 4)).cuda(self.rank)
+        local_output = local_model(input)
+        sharded_output = sharded_model(input)
+
+        self.assertEqual(local_output, sharded_output)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_custom_sharder_errors(self):
+        custom_sharder = CustomSharder(
+            devices=[f"rank:{i}/cuda:{i}" for i in range(TEST_GPU_NUM)],
+            split_sharding_idx=TEST_GPU_NUM // 2
+        )
+
+        sharding_plan = ShardingPlan(
+            plan={
+                "": custom_sharder,
+            })
+
+        sharded_model = CustomEmbeddingBagCollection(10, 10, 8).cuda(self.rank)
+
+        with self.assertRaisesRegex(
+            KeyError, "path must not be empty for custom sharder!"
+        ):
             # shard the module with the provided sharding plan
-            shard_module(megatron_lm, sharding_plan)
-
-            # check to make sure the module already been sharded
-            self.assertTrue(isinstance(megatron_lm.fc1.weight, ShardedTensor))
-            self.assertTrue(isinstance(megatron_lm.fc2.weight, ShardedTensor))
-            self.assertEqual(megatron_lm.fc1.weight.sharding_spec(), spec[0])
-            self.assertEqual(megatron_lm.fc2.weight.sharding_spec(), spec[1])
-
-            # make sure we can run sharded computation
-            input = torch.rand(22, 17).cuda(self.rank)
-            sharded_output = megatron_lm(input)
-            local_output = local_megatron_lm(input)
-
-            # verify and make sure local and sharded output matches
-            self.assertEqual(local_output, sharded_output)
+            shard_module(sharded_model, sharding_plan)
