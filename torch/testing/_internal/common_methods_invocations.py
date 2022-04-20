@@ -12048,7 +12048,8 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
             # 76046
-            DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+                         dtypes=(torch.float16,)),
         ),
     ),
     OpInfo('nn.functional.avg_pool2d',
