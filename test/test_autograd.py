@@ -7829,6 +7829,16 @@ class TestAutogradDeviceType(TestCase):
 
         self.assertNotWarn(do_test)
 
+    def test_to_r_to_c(self, device):
+        def do_test():
+            inp_r = torch.randn(3, 2, dtype=torch.double, device=device,
+                                requires_grad=True)
+            out = inp_r.to(torch.complex128)
+            out.sum().backward()
+            self.assertEqual(inp_r.grad, torch.ones_like(inp_r))
+
+        self.assertNotWarn(do_test)
+
     def test_non_differentiable_ops(self, device):
         # Just make sure the op doesn't raise an error
         # and resulting tensor has requires_grad=False.

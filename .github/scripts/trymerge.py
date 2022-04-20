@@ -57,7 +57,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       commits(last: 1) {
         nodes {
           commit {
-            checkSuites(first: 50) {
+            checkSuites(first: 10) {
               nodes {
                 app {
                   name
@@ -68,7 +68,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
                     name
                   }
                 }
-                checkRuns(first: 10) {
+                checkRuns(first: 50) {
                   nodes {
                     name
                     conclusion
@@ -156,7 +156,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
         nodes {
           commit {
             oid
-            checkSuites(first: 100, after: $cursor) {
+            checkSuites(first: 10, after: $cursor) {
               nodes {
                 app {
                   name
@@ -167,7 +167,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
                     name
                   }
                 }
-                checkRuns(first: 10) {
+                checkRuns(first: 50) {
                   nodes {
                     name
                     conclusion
@@ -626,7 +626,11 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
         return cast(List[MergeRule], rc)
 
 
-def find_matching_merge_rule(pr: GitHubPR, repo: Optional[GitRepo] = None, force: bool = False) -> MergeRule:
+def find_matching_merge_rule(pr: GitHubPR,
+                             repo: Optional[GitRepo] = None,
+                             force: bool = False,
+                             skip_internal_checks: bool = False
+                             ) -> MergeRule:
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
@@ -680,7 +684,7 @@ def find_matching_merge_rule(pr: GitHubPR, repo: Optional[GitRepo] = None, force
                     pass_checks = False
             if not pass_checks:
                 continue
-        if pr.has_internal_changes():
+        if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
     raise RuntimeError(reject_reason)
