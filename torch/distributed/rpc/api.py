@@ -39,7 +39,7 @@ from .internal import (
 
 from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
 
-from .utils import group_membership_management, update_group_membership
+from .utils import _group_membership_management, _update_group_membership
 
 logger = logging.getLogger(__name__)
 
@@ -345,11 +345,11 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
                 # This is a dynamic group so we need to grab the token for the operation
                 my_worker_info = agent.get_worker_info()
                 my_name = my_worker_info.name
-                with group_membership_management(agent.store, my_name, False):
+                with _group_membership_management(agent.store, my_name, False):
                     all_worker_infos = agent.get_worker_infos()
                     for worker in all_worker_infos:
                         if worker.name != my_name:
-                            rpc_sync(worker.name, update_group_membership, args=(my_worker_info, [], {}, False))
+                            rpc_sync(worker.name, _update_group_membership, args=(my_worker_info, [], {}, False))
                     agent.join(shutdown=True)
         finally:
             # In case of errors, continue to complete the local shutdown.

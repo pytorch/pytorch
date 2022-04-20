@@ -5,7 +5,7 @@ from typing import cast, Dict, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
-from torch.distributed.rpc.utils import group_membership_management, update_group_membership
+from torch.distributed.rpc.utils import _group_membership_management, _update_group_membership
 
 from . import api
 from . import constants as rpc_constants
@@ -290,7 +290,7 @@ def _set_devices_and_reverse_device_map(agent):
     for worker_name in all_names:
         # Set device list for each worker
         all_devices[worker_name] = _create_device_list(all_devices[worker_name], all_device_maps[worker_name], reverse_device_maps)
-        api.rpc_sync(worker_name, update_group_membership,
+        api.rpc_sync(worker_name, _update_group_membership,
                      args=(my_worker_info, all_devices[worker_name], reverse_device_maps, True))
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
@@ -360,7 +360,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         return agent
     # initialization for dynamic rpc (ranks can join and leave)
     else:
-        with group_membership_management(store, name, True):
+        with _group_membership_management(store, name, True):
             # Construct TPAgent with empty reverse_device_map and devices
             # these properties will be updated after initialization
             agent = TensorPipeAgent(

@@ -4,7 +4,7 @@ from . import api
 from . import TensorPipeAgent
 
 @contextmanager
-def group_membership_management(store, name, is_join):
+def _group_membership_management(store, name, is_join):
     token_key = "RpcGroupManagementToken"
     my_token = f"Token{name}-{int(is_join)}"
     while True:
@@ -24,7 +24,7 @@ def group_membership_management(store, name, is_join):
             # Store will wait for the token to be released
             store.wait([returned])
 
-def update_group_membership(worker_info, my_devices, reverse_device_map, is_join):
+def _update_group_membership(worker_info, my_devices, reverse_device_map, is_join):
     agent = cast(TensorPipeAgent, api._get_current_rpc_agent())
     ret = agent._update_group_membership(worker_info, my_devices, reverse_device_map, is_join)
     return ret
