@@ -58,11 +58,13 @@ def main() -> None:
     gha_expressions_found = False
 
     for p in Path('.github/workflows').iterdir():
-        with open(p) as f:
+        with open(p, "rb") as f:
             workflow = yaml.safe_load(f)
 
         for job_name, job in workflow['jobs'].items():
             job_dir = out / p / job_name
+            if "steps" not in job:
+                continue
             steps = job['steps']
             index_chars = len(str(len(steps) - 1))
             for i, step in enumerate(steps, start=1):

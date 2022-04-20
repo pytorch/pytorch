@@ -352,6 +352,43 @@ class ConvBnReLU1d(ConvBn1d):
     def from_float(cls, mod):
         return super(ConvBnReLU1d, cls).from_float(mod)
 
+class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
+    r"""A ConvReLU1d module is a fused module of Conv1d and ReLU, attached with
+    FakeQuantize modules for weight for
+    quantization aware training.
+
+    We combined the interface of :class:`~torch.nn.Conv1d` and
+    :class:`~torch.nn.BatchNorm1d`.
+
+    Attributes:
+        weight_fake_quant: fake quant module for weight
+
+    """
+    _FLOAT_MODULE = nni.ConvReLU1d
+    _FLOAT_CONV_MODULE = nn.Conv1d
+    _FLOAT_BN_MODULE = None
+    _FLOAT_RELU_MODULE = nn.ReLU
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1,
+                 bias=True, padding_mode='zeros',
+                 qconfig=None):
+        super(ConvReLU1d, self).__init__(in_channels, out_channels, kernel_size,
+                                         stride=stride, padding=padding, dilation=dilation,
+                                         groups=groups, bias=bias, padding_mode=padding_mode,
+                                         qconfig=qconfig)
+        assert qconfig, 'qconfig must be provided for QAT module'
+        self.qconfig = qconfig
+        self.weight_fake_quant = self.qconfig.weight()
+
+    def forward(self, input):
+        return F.relu(
+            self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias))
+
+    @classmethod
+    def from_float(cls, mod):
+        return super(ConvReLU1d, cls).from_float(mod)
+
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
     r"""
     A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,

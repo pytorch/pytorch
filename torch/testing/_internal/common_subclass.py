@@ -100,7 +100,7 @@ def DiagTensorBelow_in_place_add(a, b, *, alpha=1.0):
     for i in range(a.diag.shape[0]):
         a.diag[i].add_(b[i, i] * alpha)
 
-DiagTensorBelow.handled_ops['add_'] = DiagTensorBelow_in_place_add
+DiagTensorBelow.handled_ops['add_.Tensor'] = DiagTensorBelow_in_place_add
 
 
 class SparseTensor(WrapperTensor):

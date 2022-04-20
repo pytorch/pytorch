@@ -1,5 +1,6 @@
 import torch.utils.data.graph
-
+from torch.utils.data.datapipes.iter import Shuffler
+import warnings
 
 def get_all_graph_pipes(graph):
     results = set()
@@ -27,9 +28,21 @@ def apply_sharding(datapipe, num_of_instances, instance_id):
 
 
 def apply_shuffle_settings(datapipe, shuffle):
-    if shuffle is not None:
-        graph = torch.utils.data.graph.traverse(datapipe, only_datapipe=True)
-        all_pipes = get_all_graph_pipes(graph)
-        for pipe in all_pipes:
-            if hasattr(pipe, 'set_shuffle_settings'):
-                pipe.set_shuffle_settings(shuffle)
+    if shuffle is None:
+        return datapipe
+
+    graph = torch.utils.data.graph.traverse(datapipe, only_datapipe=True)
+    all_pipes = get_all_graph_pipes(graph)
+    shufflers = {pipe for pipe in all_pipes if isinstance(pipe, Shuffler)}
+    if not shufflers and shuffle:
+        warnings.warn(
+            "`shuffle=True` was set, but the datapipe does not contain a `Shuffler`. Adding one at the end. "
+            "Be aware that the default buffer size might not be sufficient for your task."
+        )
+        datapipe = datapipe.shuffle()
+        shufflers = {datapipe}
+
+    for shuffler in shufflers:
+        shuffler.set_shuffle(shuffle)
+
+    return datapipe

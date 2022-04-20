@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import torch
 import torch.distributed as dist
 from torch.distributed import distributed_c10d
@@ -7,6 +8,7 @@ from torch.distributed._shard.sharded_tensor import (
 from .sharding_spec import (
     ShardingSpec,
 )
+from .replicated_tensor import ReplicatedTensor
 
 def _shard_tensor(
     tensor: torch.Tensor, sharding_spec: ShardingSpec, src_rank=0, process_group=None
@@ -118,3 +120,50 @@ def shard_parameter(
 
     # Now we can set the attribute appropriately.
     setattr(module, param_name, st)
+
+
+def _replicate_tensor(tensor: torch.Tensor, process_group=None) -> ReplicatedTensor:
+    """
+    Given a :class:`torch.Tensor`, mark it as a ReplicatedTensor where all
+    ranks have the same value.
+
+    Args:
+        tensor (:class:`torch.Tensor`): the tensor to be marked as replicated.
+    Keyword args:
+        process_group (ProcessGroup, optional): The process group to replicate on.
+            If None, the default process group will be used.
+    Returns:
+        A :class:`ReplicatedTensor` from the given tensor.
+
+    """
+    return ReplicatedTensor(tensor, process_group=process_group)
+
+# Tracks the current process group in the load context manager.
+_CURRENT_PROCESS_GROUP = None
+
+@contextmanager
+def load_with_process_group(process_group):
+    """
+    Context manager to set the process group with which to load a ShardedTensor/ReplicatedTensor.
+    """
+    global _CURRENT_PROCESS_GROUP
+    if _CURRENT_PROCESS_GROUP is not None:
+        raise RuntimeError(
+            'ProcessGroup already set by previous "load_with_process_group" '
+            'context manager')
+    _CURRENT_PROCESS_GROUP = process_group
+    try:
+        yield process_group
+    finally:
+        _CURRENT_PROCESS_GROUP = None
+
+def _get_current_process_group():
+    """
+    Retrieves the current process group set by ``load_with_process_group``.
+    If not set, it just returns the default group.
+    """
+    global _CURRENT_PROCESS_GROUP
+    if _CURRENT_PROCESS_GROUP is None:
+        return distributed_c10d._get_default_group()
+    else:
+        return _CURRENT_PROCESS_GROUP
