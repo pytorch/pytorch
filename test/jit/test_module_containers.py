@@ -687,7 +687,7 @@ class TestModuleContainers(JitTestCase):
 
             def forward(self, x):
                 r = x
-                for i, p in enumerate(self.parameter_list)
+                for i, p in enumerate(self.parameter_list):
                     r = r + p + i
                 return r
 
