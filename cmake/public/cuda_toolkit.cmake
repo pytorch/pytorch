@@ -1,6 +1,6 @@
 
 # If using a recent CMake, use system FindCUDAToolkit.cmake
-# if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.17)
+# if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.17)
 #     find_package(CUDAToolkit)
 #     return()
 # endif()
@@ -74,7 +74,7 @@ The CUDA Toolkit search behavior uses the following order:
    .. note::
 
        When multiple CUDA Toolkits are installed in the default location of a
-       system (e.g., both ``/usr/local/cuda-9.0`` and ``/usr/local/cuda-10.0``
+       system(e.g., both ``/usr/local/cuda-9.0`` and ``/usr/local/cuda-10.0``
        exist but the ``/usr/local/cuda`` symbolic link does **not** exist), this
        package is marked as **not** found.
 
@@ -747,7 +747,7 @@ if(CMAKE_CROSSCOMPILING)
   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
     if(ANDROID_ARCH_NAME STREQUAL "arm64")
       set(CUDAToolkit_TARGET_NAME "aarch64-linux-androideabi")
-    elseif (CMAKE_SYSTEM_NAME STREQUAL "QNX")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "QNX")
       set(CUDAToolkit_TARGET_NAME "aarch64-qnx")
     else()
       set(CUDAToolkit_TARGET_NAME "aarch64-linux")
@@ -877,7 +877,7 @@ if(CUDAToolkit_FOUND)
 
     mark_as_advanced(CUDA_${lib_name}_LIBRARY)
 
-    if (NOT TARGET CUDA::${lib_name} AND CUDA_${lib_name}_LIBRARY)
+    if(NOT TARGET CUDA::${lib_name} AND CUDA_${lib_name}_LIBRARY)
       add_library(CUDA::${lib_name} UNKNOWN IMPORTED)
       set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
           INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
@@ -948,7 +948,7 @@ if(CUDAToolkit_FOUND)
   endif()
 
   _CUDAToolkit_find_and_add_import_lib(culibos) # it's a static library
-  foreach (cuda_lib cublasLt cublas cufft curand cusparse nppc nvjpeg)
+  foreach(cuda_lib cublasLt cublas cufft curand cusparse nppc nvjpeg)
     _CUDAToolkit_find_and_add_import_lib(${cuda_lib})
     _CUDAToolkit_find_and_add_import_lib(${cuda_lib}_static DEPS culibos)
   endforeach()
@@ -993,7 +993,7 @@ if(CUDAToolkit_FOUND)
   _CUDAToolkit_find_and_add_import_lib(nvgraph_static DEPS curand_static cusolver_static)
 
   # Process the majority of the NPP libraries.
-  foreach (cuda_lib nppial nppicc nppidei nppif nppig nppim nppist nppitc npps nppicom nppisu)
+  foreach(cuda_lib nppial nppicc nppidei nppif nppig nppim nppist nppitc npps nppicom nppisu)
     _CUDAToolkit_find_and_add_import_lib(${cuda_lib} DEPS nppc)
     _CUDAToolkit_find_and_add_import_lib(${cuda_lib}_static DEPS nppc_static)
   endforeach()
