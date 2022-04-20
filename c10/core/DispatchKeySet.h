@@ -563,7 +563,7 @@ class DispatchKeySet final {
         auto next_key = toRuntimePerBackendFunctionalityKey(
             functionality_key,
             static_cast<BackendComponent>(current_backendcomponent_idx_));
-        // We expect all of the Dense, Sparse, Quantized, and Autograd keys to
+        // We expect all of the Dense, Sparse, SparseCsr, Quantized, Autograd and Autocast keys to
         // be ordered the same way with respect to their backends
         TORCH_INTERNAL_ASSERT(
             toBackendComponent(next_key) ==
