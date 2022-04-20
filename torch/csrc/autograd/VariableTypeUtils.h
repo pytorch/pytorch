@@ -110,6 +110,12 @@ inline void increment_version(const at::Tensor & t) {
   impl::bump_version(t);
 }
 
+inline void increment_version(const at::TensorList & t_list) {
+  for (const auto i : c10::irange(t_list.size())) {
+    impl::bump_version(t_list[i]);
+  }
+}
+
 struct Flatten : IterArgs<Flatten> {
   Flatten(variable_list& out) : out(out) {}
   variable_list& out;

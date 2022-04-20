@@ -9,6 +9,7 @@ from tools.codegen.api.types import (
     BaseCType,
     VectorCType,
     tensorListT,
+    iTensorListRefT,
     tensorT,
 )
 from tools.codegen.api.translate import translate
@@ -129,6 +130,8 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
 def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
         return VectorCType(BaseCType(tensorT)), lambda x: f'{x}.vec()'
+    if t == BaseCType(iTensorListRefT):
+        return VectorCType(BaseCType(tensorT)), lambda x: f'std::vector{x}.begin(), {x}.end()'
     # There are technically other non-owning types out there (like IntArrayRef),
     # but functionalization only actually cares about the ones involving tensors.
     return t, lambda x: x

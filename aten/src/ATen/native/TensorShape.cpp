@@ -2777,5 +2777,264 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     return output;
 }
 
+at::Tensor& _fw_primal_copy_out(const at::Tensor & self, int64_t level, at::Tensor & out) {
+  auto tmp = self._fw_primal(level);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& _make_dual_copy_out(const at::Tensor & primal, const at::Tensor & tangent, int64_t level, at::Tensor & out) {
+  auto tmp = at::_make_dual(primal, tangent, level);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& view_as_real_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = at::view_as_real(self);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& view_as_complex_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = at::view_as_complex(self);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& _conj_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self._conj();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& _neg_view_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self._neg_view();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& as_strided_copy_out(const at::Tensor & self, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset, at::Tensor & out) {
+  auto tmp = self.as_strided(size, stride, storage_offset);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& _sparse_broadcast_to_copy_out(const at::Tensor & self, at::IntArrayRef size, at::Tensor & out) {
+  auto tmp = at::_sparse_broadcast_to(self, size);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t dim1, int64_t dim2, at::Tensor & out) {
+  auto tmp = self.diagonal(offset, dim1, dim2);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& expand_copy_SymInt_out(const at::Tensor & self, c10::SymIntArrayRef size, bool implicit, at::Tensor & out) {
+  auto tmp = self.expand(size, implicit);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& expand_copy_out(const at::Tensor & self, at::IntArrayRef size, bool implicit, at::Tensor & out) {
+  auto tmp = self.expand(size, implicit);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& narrow_copy_out(const at::Tensor & self, int64_t dim, int64_t start, int64_t length, at::Tensor & out) {
+  auto tmp = self.narrow(dim, start, length);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& permute_copy_out(const at::Tensor & self, at::IntArrayRef dims, at::Tensor & out) {
+  auto tmp = self.permute(dims);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& _reshape_alias_copy_out(const at::Tensor & self, at::IntArrayRef size, at::IntArrayRef stride, at::Tensor & out) {
+  auto tmp = self._reshape_alias(size, stride);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& select_copy_int_out(const at::Tensor & self, int64_t dim, int64_t index, at::Tensor & out) {
+  auto tmp = self.select(dim, index);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& detach_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self.detach();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& slice_copy_Tensor_out(const at::Tensor & self, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step, at::Tensor & out) {
+  auto tmp = self.slice(dim, start, end, step);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::ITensorListRef split_copy_Tensor_out(const at::Tensor & self, int64_t split_size, int64_t dim, at::TensorList  out) {
+  auto tmp = self.split(split_size, dim);
+
+  TORCH_CHECK(out.size() == tmp.size(), "split_copy_Tensor_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
+  for (const auto i : c10::irange(out.size())) {
+    out[i].copy_(tmp[i]);
+  }
+
+  return out;
+}
+
+
+at::ITensorListRef split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_sizes, int64_t dim, at::TensorList  out) {
+  auto tmp = self.split_with_sizes(split_sizes, dim);
+
+  TORCH_CHECK(out.size() == tmp.size(), "split_with_sizes_copy_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
+  for (const auto i : c10::irange(out.size())) {
+    out[i].copy_(tmp[i]);
+  }
+
+  return out;
+}
+
+
+at::Tensor& squeeze_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self.squeeze();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& squeeze_copy_dim_out(const at::Tensor & self, int64_t dim, at::Tensor & out) {
+  auto tmp = self.squeeze(dim);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& t_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self.t();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& transpose_copy_int_out(const at::Tensor & self, int64_t dim0, int64_t dim1, at::Tensor & out) {
+  auto tmp = self.transpose(dim0, dim1);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& unsqueeze_copy_out(const at::Tensor & self, int64_t dim, at::Tensor & out) {
+  auto tmp = self.unsqueeze(dim);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& _indices_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self._indices();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& _values_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self._values();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& indices_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self.indices();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& values_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self.values();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& crow_indices_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self.crow_indices();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& col_indices_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self.col_indices();
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::ITensorListRef unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  out) {
+  auto tmp = self.unbind(dim);
+
+  TORCH_CHECK(out.size() == tmp.size(), "unbind_copy_int_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
+  for (const auto i : c10::irange(out.size())) {
+    out[i].copy_(tmp[i]);
+  }
+
+  return out;
+}
+
+
+at::Tensor& view_copy_out(const at::Tensor & self, at::IntArrayRef size, at::Tensor & out) {
+  auto tmp = self.view(size);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& view_copy_dtype_out(const at::Tensor & self, at::ScalarType dtype, at::Tensor & out) {
+  auto tmp = self.view(dtype);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& unfold_copy_out(const at::Tensor & self, int64_t dimension, int64_t size, int64_t step, at::Tensor & out) {
+  auto tmp = self.unfold(dimension, size, step);
+  out.copy_(tmp);
+  return out;
+}
+
+
+at::Tensor& alias_copy_out(const at::Tensor & self, at::Tensor & out) {
+  auto tmp = self.alias();
+  out.copy_(tmp);
+  return out;
+}
+
 } // namespace native
 } // namespace at

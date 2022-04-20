@@ -7,6 +7,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/Generator.h>
+#include <ATen/core/ITensorListRef.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/core/Tensor.h>
 #include <c10/core/Scalar.h>
