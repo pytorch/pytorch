@@ -443,11 +443,27 @@ $3 = torch._ops.aten.add.Tensor($2, $0)""")
 
         self.assert_functionalization(f, torch.ones(2, 2))
         logs = self.get_logs(f, torch.ones(2, 2))
+        # zero() should decompose into zeros_like(), which will show up in the trace
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = input('input')
 $1 = torch._ops.aten.add.Tensor($0, $0)
 $2 = torch._ops.aten.diagonal_copy.default($1)
-$3 = torch._ops.aten.zero.default($2)""")
+$3 = torch._ops.aten.zeros_like.default($2)""")
+
+    def test_fill_(self):
+        def f(x):
+            y = x + x
+            z = y.diagonal()
+            z.fill_(0)
+            return y
+
+        self.assert_functionalization(f, torch.ones(2, 2))
+        logs = self.get_logs(f, torch.ones(2, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.add.Tensor($0, $0)
+$2 = torch._ops.aten.diagonal_copy.default($1)
+$3 = torch._ops.aten.fill.Scalar($2, 0)""")
 
     def test_nested_functions_propagate_updates(self):
         def g(x):

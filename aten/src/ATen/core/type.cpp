@@ -242,6 +242,15 @@ ListTypePtr ListType::ofStrings() {
   return value;
 }
 
+TypePtr OptionalType::get(TypePtr inner) {
+  static ska::flat_hash_map<TypePtr, TypePtr> optionalTypePtrs;
+  if (optionalTypePtrs.find(inner) == optionalTypePtrs.end()) {
+    TypePtr t = TypeFactory::create<OptionalType>(inner);
+    optionalTypePtrs.emplace(inner, t);
+  }
+  return optionalTypePtrs[inner];
+}
+
 AnyListTypePtr AnyListType::get() {
   static AnyListTypePtr value(new AnyListType());
   return value;

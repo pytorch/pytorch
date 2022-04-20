@@ -1,12 +1,28 @@
 from dataclasses import dataclass
 from typing import Union, Optional, List, Tuple, Dict, Sequence
 from tools.codegen.api.translate import translate
-from tools.codegen.model import NativeFunctionsGroup, ScalarType, UfuncKey, DispatchKey, BaseType, BaseTy, Argument
+from tools.codegen.model import (
+    NativeFunctionsGroup,
+    ScalarType,
+    UfuncKey,
+    DispatchKey,
+    BaseType,
+    BaseTy,
+    Argument,
+)
 import tools.codegen.api.ufunc as ufunc
 from tools.codegen.api.ufunc import UfunctorBindings
 from tools.codegen.api.types import (
-    StructuredImplSignature, scalar_t, opmath_t, Binding, CType,
-    BaseCType, Expr, NamedCType, ScalarTypeToCppMapping, VectorizedCType
+    StructuredImplSignature,
+    scalar_t,
+    opmath_t,
+    Binding,
+    CType,
+    BaseCType,
+    Expr,
+    NamedCType,
+    ScalarTypeToCppMapping,
+    VectorizedCType,
 )
 from tools.codegen.context import with_native_function
 
@@ -46,7 +62,9 @@ class UfunctorSignature:
     name: str
 
     def arguments(self) -> UfunctorBindings:
-        return ufunc.ufunctor_arguments(self.g, scalar_tensor_idx=self.scalar_tensor_idx, scalar_t=scalar_t)
+        return ufunc.ufunctor_arguments(
+            self.g, scalar_tensor_idx=self.scalar_tensor_idx, scalar_t=scalar_t
+        )
 
     def fields(self) -> List[Binding]:
         # fields are renamed to have a trailing underscore, as is conventional
@@ -61,14 +79,14 @@ class UfunctorSignature:
         return "\n".join(f"{f.type} {f.name};" for f in self.fields())
 
     def inline_defn_ctor(self) -> str:
-        args_str = ', '.join(a.decl() for a in self.arguments().ctor)
+        args_str = ", ".join(a.decl() for a in self.arguments().ctor)
         # NB: hypothetically could do this with translate but the
         # transition here is very regular
-        init_str = ', '.join(f"{a.name}_({a.name})" for a in self.arguments().ctor)
+        init_str = ", ".join(f"{a.name}_({a.name})" for a in self.arguments().ctor)
         return f"{self.name}({args_str}) : {init_str} {{}}"
 
     def decl_apply(self) -> str:
-        args_str = ', '.join(a.decl() for a in self.arguments().apply)
+        args_str = ", ".join(a.decl() for a in self.arguments().apply)
         return f"{self.returns_type().cpp_type()} operator()({args_str}) const"
 
 
@@ -102,11 +120,17 @@ class UfuncSignature:
 #   ~> template sig
 #
 
+
 def eligible_for_binary_scalar_specialization(g: NativeFunctionsGroup) -> bool:
-    num_tensors = sum(1 for a in g.functional.func.arguments.flat_non_out if a.type.is_tensor_like())
+    num_tensors = sum(
+        1 for a in g.functional.func.arguments.flat_non_out if a.type.is_tensor_like()
+    )
     return num_tensors == 2
 
-def compute_ufunc_cuda_functors(g: NativeFunctionsGroup) -> Tuple[Dict[ScalarType, Dict[UfuncKey, UfunctorSignature]], str]:
+
+def compute_ufunc_cuda_functors(
+    g: NativeFunctionsGroup,
+) -> Tuple[Dict[ScalarType, Dict[UfuncKey, UfunctorSignature]], str]:
     # First, build the functors.
     ufunctor_sigs: Dict[ScalarType, Dict[UfuncKey, UfunctorSignature]] = {}
     ufunctors: List[str] = []
@@ -114,10 +138,14 @@ def compute_ufunc_cuda_functors(g: NativeFunctionsGroup) -> Tuple[Dict[ScalarTyp
     scalar_tensor_idx_lookup = {
         UfuncKey.CUDAFunctorOnSelf: 1,
         UfuncKey.CUDAFunctorOnOther: 0,
-        UfuncKey.CUDAFunctor: None
+        UfuncKey.CUDAFunctor: None,
     }
     if eligible_for_binary_scalar_specialization(g):
-        keys = [UfuncKey.CUDAFunctorOnSelf, UfuncKey.CUDAFunctorOnOther, UfuncKey.CUDAFunctor]
+        keys = [
+            UfuncKey.CUDAFunctorOnSelf,
+            UfuncKey.CUDAFunctorOnOther,
+            UfuncKey.CUDAFunctor,
+        ]
     else:
         keys = [UfuncKey.CUDAFunctor]
         for k in [UfuncKey.CUDAFunctorOnSelf, UfuncKey.CUDAFunctorOnOther]:
@@ -126,7 +154,9 @@ def compute_ufunc_cuda_functors(g: NativeFunctionsGroup) -> Tuple[Dict[ScalarTyp
         # If the key was directly defined, skip functor codegen; we assume the
         # user already done it for us
         if k in loops:
-            ufunctor_sig = UfunctorSignature(g, scalar_tensor_idx=scalar_tensor_idx_lookup[k], name=loops[k].name)
+            ufunctor_sig = UfunctorSignature(
+                g, scalar_tensor_idx=scalar_tensor_idx_lookup[k], name=loops[k].name
+            )
             for dtype in loops[k].supported_dtypes:
                 ufunctor_sigs.setdefault(dtype, {})[k] = ufunctor_sig
             continue
@@ -147,18 +177,25 @@ def compute_ufunc_cuda_functors(g: NativeFunctionsGroup) -> Tuple[Dict[ScalarTyp
                 ufunc_name = loops[lk].name
             else:
                 # See Note [ScalarOnly and Generic must match names for CUDA]
-                assert ufunc_name == loops[lk].name, "ScalarOnly and Generic must have same ufunc name"
+                assert (
+                    ufunc_name == loops[lk].name
+                ), "ScalarOnly and Generic must have same ufunc name"
             supported_dtypes |= loops[lk].supported_dtypes
         assert ufunc_name is not None
 
         name = f"{k}_{ufunc_name}"
-        ufunctor_sig = UfunctorSignature(g, scalar_tensor_idx=scalar_tensor_idx_lookup[k], name=name)
+        ufunctor_sig = UfunctorSignature(
+            g, scalar_tensor_idx=scalar_tensor_idx_lookup[k], name=name
+        )
         for dtype in supported_dtypes:
             ufunctor_sigs.setdefault(dtype, {})[k] = ufunctor_sig
 
-        ufunc_sig = UfuncSignature(g, name=f"ufunc::{ufunc_name}", compute_t=BaseCType(opmath_t))
+        ufunc_sig = UfuncSignature(
+            g, name=f"ufunc::{ufunc_name}", compute_t=BaseCType(opmath_t)
+        )
         apply_ctx = ufunctor_sig.fields() + ufunctor_sig.arguments().apply
-        ufunctors.append(f"""
+        ufunctors.append(
+            f"""
 template <typename scalar_t>
 struct {ufunctor_sig.name} {{
   using opmath_t = at::opmath_type<scalar_t>;
@@ -168,9 +205,11 @@ struct {ufunctor_sig.name} {{
     return {ufunc_sig.call(apply_ctx)};
   }}
 }};
-""")
+"""
+        )
 
     return ufunctor_sigs, "\n".join(ufunctors)
+
 
 @dataclass(frozen=True)
 class BinaryScalarSpecializationConfig:
@@ -178,22 +217,22 @@ class BinaryScalarSpecializationConfig:
     ctor_tensor: str
     ufunc_key: UfuncKey
 
+
 BinaryScalarSpecializationConfigs = [
     BinaryScalarSpecializationConfig(
-        scalar_idx=0,
-        ctor_tensor='self',
-        ufunc_key=UfuncKey.CUDAFunctorOnOther,
+        scalar_idx=0, ctor_tensor="self", ufunc_key=UfuncKey.CUDAFunctorOnOther,
     ),
     BinaryScalarSpecializationConfig(
-        scalar_idx=1,
-        ctor_tensor='other',
-        ufunc_key=UfuncKey.CUDAFunctorOnSelf,
+        scalar_idx=1, ctor_tensor="other", ufunc_key=UfuncKey.CUDAFunctorOnSelf,
     ),
 ]
 
+
 def compute_ufunc_cuda_dtype_body(
-    g: NativeFunctionsGroup, dtype: ScalarType,
-    inner_loops: Dict[UfuncKey, UfunctorSignature], parent_ctx: Sequence[Binding]
+    g: NativeFunctionsGroup,
+    dtype: ScalarType,
+    inner_loops: Dict[UfuncKey, UfunctorSignature],
+    parent_ctx: Sequence[Binding],
 ) -> str:
     body = "using opmath_t = at::opmath_type<scalar_t>;"
     body += "if (false) {}\n"  # for ease of codegen
@@ -205,11 +244,15 @@ def compute_ufunc_cuda_dtype_body(
         # Make a copy and at the same time widen the type (not permissible
         # without copy; we don't want to mutate the input argument anyway)
         ctx: List[Union[Expr, Binding]] = list(parent_ctx)
-        ctx.append(Expr(
-            expr=f"iter.scalar_value<opmath_t>({scalar_idx})",
-            type=NamedCType(config.ctor_tensor, BaseCType(opmath_t)),
-        ))
-        ufunctor_ctor_exprs_str = ', '.join(a.expr for a in translate(ctx, ufunctor_sig.arguments().ctor))
+        ctx.append(
+            Expr(
+                expr=f"iter.scalar_value<opmath_t>({scalar_idx})",
+                type=NamedCType(config.ctor_tensor, BaseCType(opmath_t)),
+            )
+        )
+        ufunctor_ctor_exprs_str = ", ".join(
+            a.expr for a in translate(ctx, ufunctor_sig.arguments().ctor)
+        )
 
         # NB: ufunctor must be allocated before iter.remove_operand is called,
         # as it relies on iter
@@ -221,13 +264,16 @@ else if (iter.is_cpu_scalar({scalar_idx})) {{
 }}"""
 
     ufunctor_sig = inner_loops[UfuncKey.CUDAFunctor]
-    ufunctor_ctor_exprs_str = ', '.join(a.expr for a in translate(parent_ctx, ufunctor_sig.arguments().ctor))
+    ufunctor_ctor_exprs_str = ", ".join(
+        a.expr for a in translate(parent_ctx, ufunctor_sig.arguments().ctor)
+    )
     body += f"""
 else {{
   gpu_kernel(iter, {ufunctor_sig.name}<scalar_t>({ufunctor_ctor_exprs_str}));
 }}
     """
     return body
+
 
 @with_native_function
 def compute_ufunc_cuda(g: NativeFunctionsGroup) -> str:
@@ -238,13 +284,15 @@ def compute_ufunc_cuda(g: NativeFunctionsGroup) -> str:
     sig = StructuredImplSignature(g, ufunc.kernel_name(g, DispatchKey.CUDA))
     dtype_cases = []
     for dtype, inner_ufunctor_sigs in ufunctor_sigs.items():
-        dtype_cases.append(f"""
+        dtype_cases.append(
+            f"""
 AT_PRIVATE_CASE_TYPE("{sig.name}", at::ScalarType::{dtype}, {ScalarTypeToCppMapping[dtype]},
   [&]() {{
     {compute_ufunc_cuda_dtype_body(g, dtype, inner_ufunctor_sigs, sig.arguments())}
   }}
 )
-""")
+"""
+        )
 
     dtype_cases_str = "\n".join(dtype_cases)
 
@@ -272,11 +320,13 @@ REGISTER_DISPATCH({stub_sig.name}, &{stub_sig.kernel_name});
 }}
 """
 
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                                   CPU STUFF
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
 
 @dataclass(frozen=True)
 class StubSignature:
@@ -321,6 +371,7 @@ class StubSignature:
     def direct_call(self, ctx: Sequence[Binding]) -> str:
         return f"{self.kernel_name}(*this, {', '.join(a.expr for a in translate(ctx, self.arguments()))})"
 
+
 @with_native_function
 def compute_ufunc_cpu(g: NativeFunctionsGroup) -> str:
     stub_sig = StubSignature(g)
@@ -336,9 +387,12 @@ def compute_ufunc_cpu(g: NativeFunctionsGroup) -> str:
 }}
 """
 
+
 def compute_ufunc_cpu_dtype_body(
-    g: NativeFunctionsGroup, dtype: ScalarType, inner_loops: Dict[UfuncKey, UfuncSignature],
-    parent_ctx: Sequence[Binding]
+    g: NativeFunctionsGroup,
+    dtype: ScalarType,
+    inner_loops: Dict[UfuncKey, UfuncSignature],
+    parent_ctx: Sequence[Binding],
 ) -> str:
     assert UfuncKey.CPUScalar in inner_loops, f"{dtype}, {inner_loops.keys()}"
     assert inner_loops.keys() <= {UfuncKey.CPUScalar, UfuncKey.CPUVector}
@@ -357,16 +411,27 @@ def compute_ufunc_cpu_dtype_body(
     body = []
     ctx = []
     for b in parent_ctx:
-        if isinstance(b.argument, Argument) and b.argument.type != BaseType(BaseTy.Scalar):
+        if isinstance(b.argument, Argument) and b.argument.type != BaseType(
+            BaseTy.Scalar
+        ):
             continue
         body.append(f"auto _s_{b.name} = {b.name}.to<scalar_t>();")
         ctx.append(Expr(f"_s_{b.name}", NamedCType(b.nctype.name, BaseCType(scalar_t))))
     if vec_loop is not None:
         for b in parent_ctx:
-            if isinstance(b.argument, Argument) and b.argument.type != BaseType(BaseTy.Scalar):
+            if isinstance(b.argument, Argument) and b.argument.type != BaseType(
+                BaseTy.Scalar
+            ):
                 continue
-            body.append(f"auto _v_{b.name} = at::vec::Vectorized<scalar_t>(_s_{b.name});")
-            ctx.append(Expr(f"_v_{b.name}", NamedCType(b.nctype.name, VectorizedCType(BaseCType(scalar_t)))))
+            body.append(
+                f"auto _v_{b.name} = at::vec::Vectorized<scalar_t>(_s_{b.name});"
+            )
+            ctx.append(
+                Expr(
+                    f"_v_{b.name}",
+                    NamedCType(b.nctype.name, VectorizedCType(BaseCType(scalar_t))),
+                )
+            )
 
     # Setup lambda signature
     # NB: simplified version of ufunctor_arguments
@@ -376,17 +441,19 @@ def compute_ufunc_cpu_dtype_body(
         if not a.type.is_tensor_like():
             continue
         assert a.type == BaseType(BaseTy.Tensor)
-        scalar_bindings.append(Binding(
-            name=a.name,
-            nctype=NamedCType(a.name, BaseCType(scalar_t)),
-            argument=a,
-        ))
+        scalar_bindings.append(
+            Binding(
+                name=a.name, nctype=NamedCType(a.name, BaseCType(scalar_t)), argument=a,
+            )
+        )
         if vec_loop is not None:
-            vec_bindings.append(Binding(
-                name=a.name,
-                nctype=NamedCType(a.name, VectorizedCType(BaseCType(scalar_t))),
-                argument=a,
-            ))
+            vec_bindings.append(
+                Binding(
+                    name=a.name,
+                    nctype=NamedCType(a.name, VectorizedCType(BaseCType(scalar_t))),
+                    argument=a,
+                )
+            )
 
     def with_ctx(b: Sequence[Binding]) -> List[Union[Expr, Binding]]:
         r: List[Union[Expr, Binding]] = []
@@ -394,7 +461,7 @@ def compute_ufunc_cpu_dtype_body(
         r.extend(b)
         return r
 
-    body_str = '\n'.join(body)
+    body_str = "\n".join(body)
     if vec_loop is not None:
         return f"""
 {body_str}
@@ -410,6 +477,7 @@ cpu_kernel(iter,
   [=]({', '.join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(with_ctx(scalar_bindings))}; }}
 );
 """
+
 
 @with_native_function
 def compute_ufunc_cpu_kernel(g: NativeFunctionsGroup) -> str:
@@ -440,20 +508,21 @@ def compute_ufunc_cpu_kernel(g: NativeFunctionsGroup) -> str:
                 inner_ufunc_sigs = ufunc_sigs.setdefault(dtype, {})
                 if k not in inner_ufunc_sigs:
                     inner_ufunc_sigs[k] = UfuncSignature(
-                        g, name=f"ufunc::{loops[lk].name}",
-                        compute_t=compute_t
+                        g, name=f"ufunc::{loops[lk].name}", compute_t=compute_t
                     )
 
     # Build the conditionals
     dtype_cases = []
     for dtype, inner_ufunc_sigs in ufunc_sigs.items():
-        dtype_cases.append(f"""
+        dtype_cases.append(
+            f"""
 AT_PRIVATE_CASE_TYPE("{stub_sig.name}", at::ScalarType::{dtype}, {ScalarTypeToCppMapping[dtype]},
   [&]() {{
     {compute_ufunc_cpu_dtype_body(g, dtype, inner_ufunc_sigs, stub_sig.arguments())}
   }}
 )
-""")
+"""
+        )
 
     dtype_cases_str = "\n".join(dtype_cases)
     return f"""
