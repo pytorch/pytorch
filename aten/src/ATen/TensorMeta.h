@@ -79,6 +79,7 @@ namespace impl {
 struct TORCH_API MetaBase {
   virtual const Tensor& maybe_get_output(int64_t output_idx) = 0;
 
+  // See: https://github.com/pytorch/pytorch/issues/69813
   // Whenever defining the output properties in the META function of a structured
   // kernel (what was usually done with `set_output`), use one of these 3 variants,
   // instead.
