@@ -36,6 +36,8 @@ class LoggingTensor(torch.Tensor):
 
     __slots__ = ['elem']
 
+    context = contextlib.nullcontext
+
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
@@ -55,22 +57,28 @@ class LoggingTensor(torch.Tensor):
         return r
 
     def __repr__(self):
-        return f"LoggingTensor({self.elem})"
+        return f"{self.__class__.__name__}({self.elem})"
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(e):
-            return e.elem if isinstance(e, LoggingTensor) else e
+            return e.elem if isinstance(e, cls) else e
 
         def wrap(e):
-            return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
+            return cls(e) if isinstance(e, torch.Tensor) else e
 
-        # no_dispatch is only needed if you use enable_python_mode.
-        # It prevents infinite recursion.
-        with no_dispatch():
+        with cls.context():
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
         logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
         return rs
+
+class LoggingTensorMode(LoggingTensor):
+    # no_dispatch is only needed if you use enable_python_mode.
+    # It prevents infinite recursion.
+    context = no_dispatch
+
+class LoggingTensorReentrant(LoggingTensor):
+    context = torch.overrides.enable_reentrant_dispatch
 
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
 class LoggingTensorHandler(logging.Handler):
