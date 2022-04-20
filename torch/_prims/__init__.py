@@ -4,6 +4,7 @@ from torch._C import _add_docstr  # type: ignore[attr-defined]
 
 import torch._prims.utils as utils
 from torch._prims.utils import TensorLike, TensorMeta
+from torch.overrides import has_torch_function, handle_torch_function
 
 from typing import Sequence, Optional, Union, Callable
 from numbers import Number
@@ -135,18 +136,15 @@ def _make_prim(
 
     def _prim(*args, **kwargs):
         # TODO: refactor this to not incur such a latency hit
-        return_meta = False
-        for arg in args:
-            if isinstance(arg, TensorMeta):
-                return_meta = True
-        for v in kwargs.values():
-            if isinstance(v, TensorMeta):
-                return_meta = True
-        meta_result = meta(*args, **kwargs)
+        # ezyang: not sure what you mean by "latency hit" here
+        #
+        # TODO: allow dispatch to be overridden here
+        if has_torch_function(args):
+            return handle_torch_function(_prim, args, *args, **kwargs)
 
-        if return_meta:
-            return meta_result
-
+        # ezyang: for some reason, always run the meta function,
+        # even if the result is thrown out?
+        meta(*args, **kwargs)
         return impl_aten(*args, **kwargs)
 
     _prim.__doc__ = doc
