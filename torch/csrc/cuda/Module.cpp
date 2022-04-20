@@ -6,6 +6,7 @@
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/cuda/jiterator.h>
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
@@ -215,6 +216,60 @@ PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject
   void* mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
   return PyLong_FromVoidPtr(mem);
   END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
+  HANDLE_TH_ERRORS
+
+  PyObject* op_string_o = nullptr;
+  PyObject* optional_name_o = nullptr;
+  PyObject* optional_fusion_class_o = nullptr;
+  PyObject* tensors_o = nullptr;
+
+  if(!PyArg_ParseTuple(args, "OOOO",
+      &op_string_o, &optional_name_o, &optional_fusion_class_o, &tensors_o)) {
+    // THPUtils_invalidArguments(
+    //     args,
+    //     nullptr,
+    //     "caching_allocator_alloc",
+    //     1,
+    //     "(ssize_t size, intptr_t stream);");
+    return nullptr;
+  }
+
+  std::string op_string = THPUtils_unpackString(op_string_o);
+  std::string optional_name = THPUtils_unpackString(optional_name_o);
+  std::string optional_fusion_class = THPUtils_unpackString(optional_fusion_class_o);
+
+  THPUtils_assert(PyTuple_Check(tensors_o), "tensors argument is expected to "
+      "be a tuple, but got %s", THPUtils_typename(tensors_o));
+  Py_ssize_t num_tensors = PyTuple_GET_SIZE(tensors_o);
+
+  std::vector<at::Tensor> tensors;
+  for(const auto i : c10::irange(num_tensors)) {
+    PyObject *_tensor = PyTuple_GET_ITEM(tensors_o, i);
+    THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
+        "tuple is not a Tensor", i);
+
+    tensors.emplace_back(THPVariable_Unpack(_tensor));
+    // std::cout<<"tensor "<< i <<": "<< tensor.toString() <<std::endl;
+    // tensor should be proper at::Tensor now!!!
+  }
+
+  // std::cout<< op_string << std::endl;
+  // std::cout<< optional_name << std::endl;
+  // std::cout<< optional_fusion_class << std::endl;
+
+  at::cuda::CompileKernel(op_string, optional_name, optional_fusion_class, tensors);
+
+
+  // // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  // cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
+  // // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  // void* mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  // return PyLong_FromVoidPtr(mem);
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
 }
 
 PyObject * THCPModule_cudaCachingAllocator_raw_delete(PyObject *_unused, PyObject *obj){
@@ -597,6 +652,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
   {"_cuda_set_sync_debug_mode", THCPModule_cudaSetSyncDebugMode, METH_O, nullptr},
   {"_cuda_get_sync_debug_mode", THCPModule_cudaGetSyncDebugMode, METH_NOARGS, nullptr},
+  {"_cuda_compile_kernel", THCPModule_cudaCompileKernel, METH_VARARGS, nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
