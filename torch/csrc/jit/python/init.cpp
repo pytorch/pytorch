@@ -635,7 +635,8 @@ void initJITBindings(PyObject* module) {
           [](const std::string& op_name, bool flip = true) {
             return fuser::cuda::skipNode(op_name, flip);
           })
-      .def("_jit_set_nvfuser_enabled",
+      .def(
+          "_jit_set_nvfuser_enabled",
           [](bool enable) {
             return RegisterCudaFuseGraph::registerPass(enable);
           })
