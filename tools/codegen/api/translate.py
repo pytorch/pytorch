@@ -27,7 +27,7 @@ from tools.codegen.api.types import (
     intArrayRefT,
     scalar_t,
     opmath_t,
-    optionalIntArrayRefT,
+    optionalIntArrayRefT
 )
 
 # This file implements a small program synthesis engine that implements
