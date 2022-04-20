@@ -5,6 +5,11 @@ from tools.codegen.api.types import (
     FunctionalizationLambda,
     ViewInverseSignature,
     NativeSignature,
+    CType,
+    BaseCType,
+    VectorCType,
+    tensorListT,
+    tensorT,
 )
 from tools.codegen.api.translate import translate
 from tools.codegen.context import (
@@ -28,7 +33,7 @@ from tools.codegen.model import (
 )
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Union, Tuple, Callable
 
 # This file contains codegen that relates to the functionalization pass.
 # It includes:
@@ -117,6 +122,17 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
         isinstance(a, Argument) and a.type.is_tensor_like()
     )
 
+# We need to wrap / unwrap various arguments from the op in the functionalization kernels.
+# Some op schemas include non-owning types though (like TensorList),
+# and when we unwrap them we expect to get out an owning type!.
+# We also return a lambda that tells you how to conver the non-owning type argument into the owning type.
+def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
+    if t == BaseCType(tensorListT):
+        return VectorCType(BaseCType(tensorT)), lambda x: f'{x}.vec()'
+    # There are technically other non-owning types out there (like IntArrayRef),
+    # but functionalization only actually cares about the ones involving tensors.
+    return t, lambda x: x
+
 
 # unwraps all tensor-like arguments, returning:
 # (1) a string containing all of the logic that does the unwrapping
@@ -137,14 +153,15 @@ def unwrap_tensor_args(
             maybe_sync_input = (
                 "" if is_view_op else f"at::functionalization::impl::sync({arg.name});"
             )
+            unwrapped_type, conversion_fn = get_owning_type(arg.nctype.remove_const_ref().type)
             unwrapped_tensor_args.append(
                 f"""
-      {arg.nctype.remove_const_ref().cpp_type()} {unwrapped_name};
+      {unwrapped_type.cpp_type()} {unwrapped_name};
       if (at::functionalization::impl::isFunctionalTensor({arg.name})) {{
         {maybe_sync_input}
         {unwrapped_name} = at::functionalization::impl::from_functional_tensor({arg.name});
       }} else {{
-        {unwrapped_name} = {arg.name};
+        {unwrapped_name} = {conversion_fn(arg.name)};
       }}"""
             )
             context.append(arg.with_name(unwrapped_name))
@@ -414,9 +431,9 @@ If this causes problems in your program, consider upstreaming the out-of-place o
         mutable_input_post_processing = "\n".join(
             [
                 f"""
-      auto {a.name}_functional = at::functionalization::impl::unsafeGetFunctionalWrapper({a.name});
-      {a.name}_functional->replace_({'std::get<' + str(i) + '>(tmp_output)' if len(f.func.returns) > 1 else 'tmp_output'});
-      {a.name}_functional->commit_update();"""
+      at::functionalization::impl::replace_(
+        {a.name}, {'std::get<' + str(i) + '>(tmp_output)' if len(f.func.returns) > 1 else 'tmp_output'});
+      at::functionalization::impl::commit_update({a.name});"""
                 for (i, a) in enumerate(f.func.arguments.out)
                 if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
             ]
@@ -425,9 +442,8 @@ If this causes problems in your program, consider upstreaming the out-of-place o
         mutable_input_post_processing = "\n".join(
             [
                 f"""
-      auto {a.name}_functional = at::functionalization::impl::unsafeGetFunctionalWrapper({a.name});
-      {a.name}_functional->replace_(tmp_output);
-      {a.name}_functional->commit_update();"""
+      at::functionalization::impl::replace_({a.name}, tmp_output);
+      at::functionalization::impl::commit_update({a.name});"""
                 for a in f.func.arguments.flat_all
                 if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
             ]
