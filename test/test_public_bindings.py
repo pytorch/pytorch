@@ -306,13 +306,8 @@ class TestPublicBindings(TestCase):
                 if elem.startswith("_"):
                     return
 
-            def add_to_failure_list_if_not_in_allow_dict(modname, elem, elem_module):
-                if modname in allow_dict and elem in allow_dict[modname]:
-                    return
-                failure_list.append((modname, elem, elem_module))
-
             # verifies that each public API has the correct module name and naming semantics
-            def looks_public_or_not(elem, modname, mod, is_public=True):
+            def check_one_element(elem, modname, mod, *, is_public):
                 obj = getattr(mod, elem)
                 if not (isinstance(obj, Callable) or inspect.isclass(obj)):
                     return
@@ -323,19 +318,21 @@ class TestPublicBindings(TestCase):
                 # SHOULD start with it's current module since it's a public API
                 looks_public = not elem.startswith('_') and elem_modname_starts_with_mod
                 if is_public != looks_public:
-                    add_to_failure_list_if_not_in_allow_dict(modname, elem, elem_module)
+                    if modname in allow_dict and elem in allow_dict[modname]:
+                        return
+                    failure_list.append((modname, elem, elem_module))
 
             if hasattr(mod, '__all__'):
                 public_api = mod.__all__
                 all_api = dir(mod)
                 for elem in all_api:
-                    looks_public_or_not(elem, modname, mod, is_public=elem in public_api)
+                    check_one_element(elem, modname, mod, is_public=elem in public_api)
 
             else:
                 all_api = dir(mod)
                 for elem in all_api:
                     if not elem.startswith('_'):
-                        looks_public_or_not(elem, modname, mod, is_public=True)
+                        check_one_element(elem, modname, mod, is_public=True)
 
         for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             test_module(modname)
@@ -343,7 +340,7 @@ class TestPublicBindings(TestCase):
         test_module('torch')
         msg = "Following new APIs ( displayed in the form (module, element, element module) )" \
               " were added that do not meet our guidelines for public API" \
-              " Please review  https://docs.google.com/document/d/10yx2-4gs0gTMOimVS403MnoAWkqitS8TUHX73PN8EjE/edit?pli=1#" \
+              " Please review  https://github.com/pytorch/pytorch/wiki/Public-API-definition-and-documentation" \
               " for more information:\n" + "\n".join(map(str, failure_list))
 
         # empty lists are considered false in python
