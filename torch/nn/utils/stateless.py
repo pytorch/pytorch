@@ -85,10 +85,10 @@ def functional_call(
     and buffers with the provided ones.
 
     .. note:: If the module has active parametrizations, passing a value in the
-        `parameters_and_buffers` argument with the name set to the regular parameter
-         name will completely disable the parametrization.
-         If you want to apply the parametrization function to the value passed
-         please set the key as `{submodule_name}.parametrizations.{parameter_name}.original`.
+        :attr:`parameters_and_buffers` argument with the name set to the regular parameter
+        name will completely disable the parametrization.
+        If you want to apply the parametrization function to the value passed
+        please set the key as ``{submodule_name}.parametrizations.{parameter_name}.original``.
 
     Args:
         module (torch.nn.Module): the module to call
