@@ -36,6 +36,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           no-sudo: true
+          needs-history-and-master: true
 
       - name: Setup Windows
         uses: ./.github/actions/setup-win
@@ -118,13 +119,12 @@ jobs:
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         shell: bash
         run: |
           set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
-          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
-          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Windows

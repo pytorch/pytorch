@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+from torch.distributed._shard import _shard_tensor
 import torch.distributed._shard.sharded_tensor as sharded_tensor
 import torch.distributed as dist
 
@@ -15,17 +16,19 @@ from torch.testing._internal.common_distributed import (
 )
 
 from torch.testing._internal.distributed._shard.sharded_tensor import (
+    TEST_GPU_NUM,
     ShardedTensorTestBase,
     with_comms,
 )
 
 from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common import (
-    gen_binary_op_func
+    gen_binary_op_func,
+    generate_chunk_sharding_specs_for_test,
 )
 
 class TestMathOps(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_basic_math_ops(self):
         ops = ["torch.add", "torch.sub", "torch.mul", "torch.div", "+", "-", "*", "/"]
@@ -83,9 +86,9 @@ class TestMathOps(ShardedTensorTestBase):
 
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
-    def test_math_ops_errors(self):
+    def test_basic_math_ops_errors(self):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
@@ -128,3 +131,57 @@ class TestMathOps(ShardedTensorTestBase):
 
         with self.assertRaisesRegex(TypeError, 'with ChunkShardingSpec supports'):
             torch.add(st, sharded_rhs)
+
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_bmm_error(self):
+        for spec in generate_chunk_sharding_specs_for_test(0):
+            lhs = torch.rand(15, 4, 5).cuda(self.rank)
+            rhs = torch.rand(15, 5, 6).cuda(self.rank)
+            tensor = lhs.bmm(rhs)
+            st_lhs = _shard_tensor(lhs, spec)
+            st_rhs = _shard_tensor(rhs, spec)
+            st_expected = _shard_tensor(tensor, spec)
+            st_expected._metadata.shards_metadata.sort(
+                key=lambda x: x.shard_offsets[0],
+            )
+            self.assertTrue(torch.allclose(torch.bmm(st_lhs, st_rhs), st_expected))
+            self.assertTrue(torch.allclose(st_lhs.bmm(st_rhs), st_expected))
+
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_bmm_errors(self):
+        specs = generate_chunk_sharding_specs_for_test(0)
+        st_lhs = sharded_tensor.rand(specs[0], (15, 5, 6))
+        st_rhs = sharded_tensor.rand(specs[1], (15, 5, 6))
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            'Both st and mat2 need to have same placements for bmm',
+        ):
+            torch.bmm(st_lhs, st_rhs)
+        for spec in specs:
+            st_lhs = sharded_tensor.rand(spec, (20, 3))
+            st_rhs = sharded_tensor.rand(spec, (20, 3))
+            with self.assertRaisesRegex(
+                TypeError,
+                'both st and mat2 need to be a 3D ShardedTensor',
+            ):
+                torch.bmm(st_lhs, st_rhs)
+            rhs = torch.rand(15, 5, 6).cuda(self.rank)
+            with self.assertRaisesRegex(
+                TypeError,
+                'mat2 needs to be a ShardedTensor for torch.bmm',
+            ):
+                torch.bmm(st_lhs, rhs)
+            spec.dim = 1
+            st_lhs = sharded_tensor.rand(spec, (15, 5, 6))
+            st_rhs = sharded_tensor.rand(spec, (15, 5, 6))
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                'Only support performing bmm on tensors sharded on dim 0 now',
+            ):
+                torch.bmm(st_lhs, st_rhs)

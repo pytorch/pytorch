@@ -9,6 +9,7 @@ import sys
 import torch
 import torch.distributed as dist
 from torch.distributed import rpc
+from torch.distributed import distributed_c10d
 from torch.distributed._shard import (
     shard_parameter,
     sharded_tensor,
@@ -420,6 +421,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
         st_metadata = st.metadata()
         self.assertEqual(torch.Size([10, 20]), st_metadata.size)
+        self.assertEqual(torch.Size([10, 20]), st.size())
         self.assertEqual(torch.float, st.dtype)
         self.assertEqual(torch.strided, st.layout)
         self.assertEqual(False, st.requires_grad)
@@ -448,7 +450,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         # test read only properties, they're read only as we can't simply change
         # the global metadata without changing the underlying shard's properties
-        with self.assertRaisesRegex(AttributeError, "can't set attribute"):
+        with self.assertRaisesRegex(RuntimeError, "torch function '__set__'"):
             st.requires_grad = True
 
     @with_comms
@@ -902,12 +904,12 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         st = sharded_tensor.empty(spec, 10, 20)
         tensor = torch.empty(10, 20)
-        with self.assertRaisesRegex(RuntimeError, "not supported for ShardedTensor!"):
+        with self.assertRaisesRegex(RuntimeError, "not supported yet for ShardedTensor!"):
             torch.add(st, tensor)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Only torch.strided layout is currently supported'):
-            sharded_tensor.empty(spec, 10, 20, layout=torch.sparse)
+            sharded_tensor.empty(spec, 10, 20, layout=torch.sparse_coo)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Only torch.contiguous_format memory_format is currently supported'):
@@ -1024,35 +1026,21 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         self.assertEqual(st.size(1), 20)
 
+        # Test with negative indexed size
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        self.assertEqual(st.size(-1), 20)
+
+        # Test with dim/ndim
+        self.assertEqual(st.dim(), 2)
+        self.assertEqual(st.ndim, 2)
+
         # Test with invalid input
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
-            st.size(-1)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
             st.size(2)
 
         with self.assertRaises(TypeError):
             st = sharded_tensor.empty(spec, 'foo')
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_sharded_tensor_dim(self):
-        spec = ChunkShardingSpec(
-            dim=0,
-            placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
-            ],
-        )
-
-        st = sharded_tensor.empty(spec, 10, 20, 5, init_rrefs=True)
-        self.assertEqual(3, st.dim())
-
-        st = sharded_tensor.empty(spec, 10, init_rrefs=True)
-        self.assertEqual(1, st.dim())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1483,6 +1471,92 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(full_tensor, torch.ones(h, w))
         else:
             self.assertIsNone(full_tensor)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sharded_tensor_to_cpu(self):
+        cpu_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cpu",
+                "rank:1/cpu",
+                "rank:2/cpu",
+                "rank:3/cpu",
+            ],
+        )
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        gloo_pg = dist.new_group(backend="gloo")
+
+        # CPU sharded tensor should return the same instance (no copy)
+        st_cpu = sharded_tensor.zeros(cpu_spec, h, w, process_group=gloo_pg)
+        new_st_cpu = st_cpu.cpu()
+        self.assertTrue(st_cpu is new_st_cpu)
+
+        # GPU sharded tensor to cpu
+        st = sharded_tensor.zeros(spec, h, w)
+        # test ability to move st to CPU
+        spec_before_move = st.sharding_spec()
+        new_st = st.cpu(process_group=gloo_pg)
+        # return a copy of orginal st
+        self.assertFalse(st is new_st)
+        # check the spec is still ChunkShardingSpec
+        spec_after_move = new_st.sharding_spec()
+        self.assertIsInstance(spec_after_move, ChunkShardingSpec)
+        # now it should be ProcessGroupGloo since it's on CPU
+        self.assertIsInstance(new_st._process_group, distributed_c10d.ProcessGroupGloo)
+        # test specs before and after the move almost the same except placement device
+        self.assertEqual(spec_before_move.dim, spec_after_move.dim)
+        self.assertEqual(len(spec_before_move.placements), len(spec_after_move.placements))
+        for i, remote_device_after in enumerate(spec_after_move.placements):
+            remote_device_before = spec_before_move.placements[i]
+            self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
+            self.assertEqual(str(remote_device_after.device()), "cpu")
+
+        # ensure metdata also get changed to CPU
+        metas = new_st.metadata().shards_metadata
+        for meta in metas:
+            self.assertEqual(str(meta.placement.device()), "cpu")
+
+        # Test if a mixed sharded tensor (ShardedTensor with different devices) to cpu
+        mixed_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cpu",
+                "rank:1/cpu",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        st = sharded_tensor.zeros(mixed_spec, h, w, process_group=gloo_pg)
+        new_st = st.cpu()
+        # return a copy of orginal st
+        self.assertFalse(st is new_st)
+        # check the spec is still ChunkShardingSpec
+        spec_after_move = new_st.sharding_spec()
+        self.assertIsInstance(spec_after_move, ChunkShardingSpec)
+        # test specs before and after the move almost the same except placement device
+        self.assertEqual(mixed_spec.dim, spec_after_move.dim)
+        self.assertEqual(len(mixed_spec.placements), len(spec_after_move.placements))
+        for i, remote_device_after in enumerate(spec_after_move.placements):
+            remote_device_before = mixed_spec.placements[i]
+            self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
+            self.assertEqual(str(remote_device_after.device()), "cpu")
+
+        # ensure metdata also get changed to CPU
+        metas = new_st.metadata().shards_metadata
+        for meta in metas:
+            self.assertEqual(str(meta.placement.device()), "cpu")
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()

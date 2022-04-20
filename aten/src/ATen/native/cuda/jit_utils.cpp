@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>

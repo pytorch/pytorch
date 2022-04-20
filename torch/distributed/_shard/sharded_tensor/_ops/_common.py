@@ -1,9 +1,16 @@
 # coding=utf-8
 
+import functools
 from typing import List
 
 import torch
 import torch.distributed as dist
+import torch.distributed._shard.sharding_spec as shard_spec
+from torch.distributed._shard.sharded_tensor import (
+    sharded_op_impl,
+    Shard,
+    ShardedTensor,
+)
 from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
@@ -12,6 +19,171 @@ from torch.distributed.nn.functional import (
     all_gather,
     all_to_all_single,
 )
+
+
+def _chunk_sharding_spec_check(spec, op):
+    """
+    For the given op implementation check if the sharding spec is ChunkShardingSpec.
+    """
+    if not isinstance(spec, shard_spec.ChunkShardingSpec):
+        raise NotImplementedError(
+            f"Only ChunkShardingSpec supported for '{op.__name__}'."
+        )
+
+
+def _sharded_op_common(op, early_stop_func, extra_check):
+    """
+    Inject sharded tensor op registration with common logics executed before
+    different behaviors are done on either local shards or a local tensor.
+
+    Example::
+        >>> op = torch.transpose
+        >>> @sharded_op_impl(op)
+        >>> @_sharded_op_common(op, early_stop_func, extra_check)
+        >>> def sharded_tensor_op(types, args, kwargs, process_group):
+        >>>   ....
+        >>>
+        >>> st = sharded_tensor.rand(32, 16)
+        >>> st.transpose(1, 2)
+        >>> # This will call '_sharded_op_common'
+
+    Args:
+        op: The op to be registered and applied to all shards of the st.
+        early_stop_func (Callable, optional): the func for early stop.
+            Default: if ``None``, no early stop.
+        extra_check (Callable, optional): the func for extra condition check.
+            Default: if ``None``, no extra check.
+
+    Return:
+        func (Callable): Torch function for which we want to provide a sharded
+            implementation (ex: torch.transpose)
+    """
+    def decorator_sharded_func(wrapped_func):
+        @functools.wraps(wrapped_func)
+        def wrapper(types, args=(), kwargs=None, pg=None):
+            if len(args) == 0:
+                raise ValueError(f" No input for '{op.__name__}'!")
+            # Validate types
+            st = args[0]
+            if not isinstance(st, ShardedTensor):
+                raise TypeError(
+                    f"torch function '{op.__name__}', with args: {args} and "
+                    f"kwargs: {kwargs} are called for non ShardedTensor!"
+                )
+            if kwargs is None:
+                kwargs = {}
+            if extra_check:
+                extra_check(*args, **kwargs)
+            if early_stop_func:
+                early_stop = early_stop_func(*args, **kwargs)
+                if early_stop:
+                    return st
+            return wrapped_func(types, args, kwargs, pg)
+
+        return wrapper
+
+    return decorator_sharded_func
+
+
+def _register_sharded_op_on_local_shards(
+    op, early_stop_func=None, extra_check=None, customized_func=None
+):
+    """
+    Handles ``__torch_function__`` dispatch for ops which are performed on
+    each shard of the sharded tensor such as elementwise op like
+    ``torch.nn.functional.gelu`` or ``torch.nn.functional.relu``.
+
+    For more complicated ops, a customized func can be used to generate
+    the new shards and sharded tensor size.
+
+    Args:
+        op: The op to be registered and applied to all shards of the st.
+        early_stop_func (Callable, optional): the func for early stop.
+            Default: if ``None``, no early stop.
+        extra_check (Callable, optional): the func for extra condition check.
+            Default: if ``None``, no extra check.
+        customized_func (Callable, optional): the func for customized logic
+            to generate new shards and sharded tensor size.
+            Default: if ``None``, we simply lower to the real op call with
+                all local shards of the st.
+
+    Return:
+        func (Callable): registered implementation for sharded op for
+        ``__torch_function__`` dispatch.
+    """
+    @sharded_op_impl(op)
+    @_sharded_op_common(op, early_stop_func, extra_check)
+    def sharded_tensor_op_on_local_shards(types, args=(), kwargs=None, pg=None):
+        st = args[0]
+        st_metadata = st.metadata()
+        local_shards = st.local_shards()
+        local_shards_new = []
+        if customized_func:
+            local_shards_new, st_metadata = customized_func(args, kwargs, pg)
+        else:
+            for local_shard in local_shards:
+                args = (local_shard.tensor, *args[1:])
+                local_shards_new.append(
+                    Shard(op(*args, **kwargs), local_shard.metadata)
+                )
+        return ShardedTensor._init_from_local_shards_and_global_metadata(
+            local_shards_new,
+            st_metadata,
+            process_group=pg,
+            init_rrefs=st._init_rrefs,
+        )
+
+
+def _register_sharded_op_on_local_tensor(
+    op, early_stop_func=None, extra_check=None, customized_func=None
+):
+    """
+    Handles ``__torch_function__`` dispatch for ops which are performed on
+    the single local tensor of the sharded tensor such as op like
+    ``torch.nn.functional.softmax`` or ``torch.Tensor.view``.
+
+    For more complicated ops, a customized func can be used to generate
+    the new local tensor, sharding spec and sharded tensor size.
+
+    Args:
+        op: The op to be registered and applied to all shards of the st.
+        early_stop_func (Callable, optional): the func for early stop.
+            Default: if ``None``, no early stop.
+        extra_check (Callable, optional): the func for extra condition check.
+            Default: if ``None``, no extra check.
+        customized_func (Callable, optional): the func for customized logic
+            to generate the new local tensor, sharding spec and sharded tensor size.
+            Default: if ``None``, we simply lower to the real op call with
+                the single local tensor of the st.
+
+    Return:
+        func (Callable): registered implementation for sharded op for
+        ``__torch_function__`` dispatch.
+    """
+    @sharded_op_impl(op)
+    @_sharded_op_common(op, early_stop_func, extra_check)
+    def sharded_tensor_op_on_local_shards(types, args=(), kwargs=None, pg=None):
+        st = args[0]
+        sharding_spec = st.sharding_spec()
+        _chunk_sharding_spec_check(sharding_spec, op)
+        if len(st.local_shards()) != 1:
+            raise TypeError(
+                f"torch function '{op.__name__}', with args: {args} and "
+                f"kwargs: {kwargs} only supported for single local tensor!"
+            )
+        st_size = st.size()
+        if customized_func:
+            local_tensor, sharding_spec, st_size = customized_func(args, kwargs, pg)
+        else:
+            args = (st.local_tensor(), *args[1:])
+            local_tensor = op(*args, **kwargs)
+        return ShardedTensor._init_from_local_tensor(
+            local_tensor.contiguous(),
+            sharding_spec,
+            st_size,  # type: ignore[arg-type]
+            process_group=pg,
+            init_rrefs=st._init_rrefs,
+        )
 
 
 def _handle_col_wise_sharding_base(

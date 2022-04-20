@@ -203,7 +203,6 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
-    "distributed/_shard/sharded_tensor/test_sharded_tensor_matrix_ops",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/test_partial_tensor",
     "distributed/_shard/sharded_tensor/ops/test_chunk",
@@ -227,7 +226,6 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
-    "distributed/_shard/sharded_tensor/test_sharded_tensor_matrix_ops",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/test_partial_tensor",
     "distributed/_shard/sharded_tensor/ops/test_chunk",
@@ -879,6 +877,10 @@ def get_selected_tests(options):
 
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
+
+    # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
+    if torch.version.cuda is not None and LooseVersion(torch.version.cuda) == "11.6":
+        options.exclude.extend(["distributions/test_constraints"])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 

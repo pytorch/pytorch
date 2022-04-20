@@ -7,6 +7,12 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 
+from ._common import (
+    _chunk_sharding_spec_check,
+    _register_sharded_op_on_local_tensor,
+)
+
+
 from torch.distributed._shard._utils import narrow_tensor
 
 def register_math_op(op):
@@ -120,3 +126,70 @@ binary_ops = [
 
 for op in binary_ops:
     register_math_op(op)
+
+
+def sharded_bmm_check(*args, **kwargs):
+    """
+    Perform extra checks for the sharded_bmm op, for example, mat2 needs to
+    be a sharded tensor and both tensors need to sharded by dim 0, etc.
+
+    Args: same as ``torch.bmm``.
+
+    Return: None
+    """
+    if len(args) < 2:
+        raise TypeError("Needs two tensors to perform torch.bmm.")
+    st = args[0]
+    mat2 = args[1]
+    # Validate types
+    if not isinstance(mat2, ShardedTensor):
+        raise TypeError("mat2 needs to be a ShardedTensor for torch.bmm.")
+    _chunk_sharding_spec_check(mat2.sharding_spec(), torch.bmm)
+    if st.dim() != 3 or mat2.dim() != 3:
+        raise TypeError("both st and mat2 need to be a 3D ShardedTensor")
+    if (
+        st.sharding_spec().dim != mat2.sharding_spec().dim
+        or st.sharding_spec().dim != 0
+    ):
+        raise NotImplementedError(
+            "Only support performing bmm on tensors sharded on dim 0 now."
+        )
+    if st.sharding_spec().placements != mat2.sharding_spec().placements:
+        raise NotImplementedError(
+            "Both st and mat2 need to have same placements for bmm."
+        )
+
+
+def sharded_bmm(args, kwargs, pg):
+    """
+    Handles ``__torch_function__`` dispatch for the sharded_bmm op.
+
+    Warning: For now we only supports the case when both tensors are sharded
+             by dim 0 so that no local communication.
+
+    Args: same as ``torch.bmm``.
+
+    Return:
+        local_tensor (Tensor): New local tensor to build the sharded tensor.
+        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`):
+            sharding spec of the new sharded tensor.
+        new_st_size (torch.Size): Size of the new sharded tensor.
+    """
+    st = args[0]
+    mat2 = args[1]
+    local_tensor = torch.bmm(st.local_tensor(), mat2.local_tensor())
+    new_st_size = (*st.size()[:-1], mat2.size(-1))
+    return local_tensor, st.sharding_spec(), new_st_size
+
+
+_register_sharded_op_on_local_tensor(
+    torch.Tensor.bmm,
+    extra_check=sharded_bmm_check,
+    customized_func=sharded_bmm,
+)
+
+_register_sharded_op_on_local_tensor(
+    torch.bmm,
+    extra_check=sharded_bmm_check,
+    customized_func=sharded_bmm,
+)
