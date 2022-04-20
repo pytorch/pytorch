@@ -201,7 +201,7 @@ class CompositeCompliantTensor(torch.Tensor):
             rs = tree_map(wrap, unwrapped_rs)
 
         if is_view_fn(func) and alias_result:
-            # Note [Alias Result] 
+            # Note [Alias Result]
             # Autograd asserts that for B = A.view_fn(...), B and A's storages
             # are the same. Here we try to make B alias A to avoid those asserts.
             # See https://github.com/pytorch/pytorch/issues/65339 for more information
