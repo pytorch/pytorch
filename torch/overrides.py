@@ -836,7 +836,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.init.constant_: lambda tensor, val: -1,
         torch.nn.init.normal_: lambda tensor, mean=0., std=1.: -1,
         torch.nn.init.constant_: lambda tensor, val: -1,
-        torch.nn.init.dirac_: lambda tensor, groups: -1,
         torch.nn.init.kaiming_uniform_: lambda tensor, a=0, mode='fan_in', nonlinearity='leaky_relu': -1,
         torch.nonzero: lambda input, as_tuple=False: -1,
         torch.argwhere: lambda input: -1,
