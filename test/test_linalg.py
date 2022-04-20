@@ -2867,7 +2867,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    @skipCUDAIfRocm
     def test_inv_ex_singular(self, device, dtype):
         # if the input matrix is not invertible, info with positive integer is returned
         A = torch.eye(3, 3, dtype=dtype, device=device)
@@ -5390,7 +5389,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
-    @skipCUDAIfRocm
     def test_lobpcg_basic(self, device, dtype):
         self._test_lobpcg_method(device, dtype, 'basic')
 
@@ -5732,7 +5730,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else [],
-                  *[torch.half] if not TEST_WITH_ROCM else []))
+                  *[torch.half]))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         # have to use torch.randn(...).to(bfloat16) instead of

@@ -183,6 +183,20 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
+        # Doesn't actually take or return tensor arguments
+        torch.nn.init.calculate_gain,
+        # These are deprecated; don't test them
+        torch.nn.init.uniform,
+        torch.nn.init.normal,
+        torch.nn.init.constant,
+        torch.nn.init.eye,
+        torch.nn.init.dirac,
+        torch.nn.init.xavier_uniform,
+        torch.nn.init.xavier_normal,
+        torch.nn.init.kaiming_uniform,
+        torch.nn.init.kaiming_normal,
+        torch.nn.init.orthogonal,
+        torch.nn.init.sparse,
         has_torch_function,
         handle_torch_function,
         torch.set_autocast_enabled,
@@ -820,6 +834,11 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                                                                 distance_function=None, margin=1.0,
                                                                 swap=False, reduction='mean': -1),
         torch.nn.functional.unfold: lambda input, kernel_size, dilation=1, padding=0, stride=1: -1,
+        torch.nn.init.uniform_: lambda tensor, a=0., b=1.: -1,
+        torch.nn.init.constant_: lambda tensor, val: -1,
+        torch.nn.init.normal_: lambda tensor, mean=0., std=1.: -1,
+        torch.nn.init.constant_: lambda tensor, val: -1,
+        torch.nn.init.kaiming_uniform_: lambda tensor, a=0, mode='fan_in', nonlinearity='leaky_relu': -1,
         torch.nonzero: lambda input, as_tuple=False: -1,
         torch.argwhere: lambda input: -1,
         torch.norm: lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1,
@@ -1313,7 +1332,7 @@ def wrap_torch_function(dispatcher: Callable):
         def wrapped(*args, **kwargs):
             relevant_args = dispatcher(*args, **kwargs)
             if has_torch_function(relevant_args):
-                return handle_torch_function(func, relevant_args, *args, **kwargs)
+                return handle_torch_function(wrapped, relevant_args, *args, **kwargs)
 
             return func(*args, **kwargs)
 
@@ -1528,6 +1547,7 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
         (torch, torch.__all__ + dir(torch._C._VariableFunctions)),
         (torch.functional, torch.functional.__all__),
         (torch.nn.functional, dir(torch.nn.functional)),
+        (torch.nn.init, dir(torch.nn.init)),
         (torch.Tensor, dir(torch.Tensor)),
         (torch.linalg, dir(torch.linalg)),
         (torch.fft, dir(torch.fft)),
