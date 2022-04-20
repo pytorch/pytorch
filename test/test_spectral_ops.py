@@ -380,9 +380,9 @@ class TestFFT(TestCase):
         # TODO: Remove torch.half error when complex32 is fully implemented
         sample = first_sample(self, op.sample_inputs(device, dtype))
         device_type = torch.device(device).type
-        if device_type == 'cuda' and TEST_WITH_ROCM:
+        if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = "hipFFT doesn't support transforms of type: Half"
-        elif device_type == 'cuda' and not SM53OrLater:
+        elif dtype is torch.half and device_type == 'cuda' and not SM53OrLater:
             err_msg = "cuFFT doesn't support signals of half type with compute capability less than SM_53"
         else:
             err_msg = "Unsupported dtype "
