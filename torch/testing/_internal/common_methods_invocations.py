@@ -11966,6 +11966,9 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         # doesn't support grad on target
         sample_inputs_func=partial(sample_inputs_loss, rhs_requires_grad=False),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+        )
     ),
     OpInfo('nn.functional.upsample_nearest',
            supports_autograd=True,
