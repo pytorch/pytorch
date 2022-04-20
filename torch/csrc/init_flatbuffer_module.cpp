@@ -27,6 +27,11 @@ static std::shared_ptr<char> copyStr(const std::string& bytes) {
   std::shared_ptr<char> bytes_copy(
       static_cast<char*>(_aligned_malloc(size, FLATBUFFERS_MAX_ALIGNMENT)),
       _aligned_free);
+#elif defined(__APPLE__)
+  void* p;
+  ::posix_memalign(&p, FLATBUFFERS_MAX_ALIGNMENT, size);
+  TORCH_INTERNAL_ASSERT(p, "Could not allocate memory for flatbuffer");
+  std::shared_ptr<char> bytes_copy(static_cast<char*>(p), free);
 #else
   std::shared_ptr<char> bytes_copy(
       static_cast<char*>(aligned_alloc(FLATBUFFERS_MAX_ALIGNMENT, size)), free);

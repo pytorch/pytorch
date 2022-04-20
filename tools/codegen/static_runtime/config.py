@@ -6,13 +6,36 @@ from typing import Dict
 def func_name_base_str(g: NativeFunctionsGroup) -> str:
     return str(g.functional.func.name.name.base)
 
-is_hand_written_ops_ = frozenset(("add", "addmm", "all", "any", "argmin", "bmm", "clamp",
-                                  "cumsum", "div", "fmod", "leaky_relu", "log", "mul", "pow",
-                                  "remainder", "sigmoid", "sign", "sub", "tanh"))
+
+is_hand_written_ops_ = frozenset(
+    (
+        "add",
+        "addmm",
+        "all",
+        "any",
+        "argmin",
+        "bmm",
+        "clamp",
+        "cumsum",
+        "div",
+        "fmod",
+        "leaky_relu",
+        "log",
+        "mul",
+        "pow",
+        "remainder",
+        "sigmoid",
+        "sign",
+        "sub",
+        "tanh",
+    )
+)
+
 
 def is_hand_written(g: NativeFunctionsGroup) -> bool:
     name_base = func_name_base_str(g)
     return name_base in is_hand_written_ops_
+
 
 def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> None:
     assert index == 0 or index == 1
@@ -67,20 +90,20 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
     if op_name == "gelu":
         if index == 0:
             arg_map["self"] = "at::rand({6, 6, 6})"
-            arg_map["approximate"] = "\"tanh\""
+            arg_map["approximate"] = '"tanh"'
         else:
             arg_map["self"] = "at::rand({22, 22, 22})"
-            arg_map["approximate"] = "\"tanh\""
+            arg_map["approximate"] = '"tanh"'
         return
     if op_name == "gelu_backward":
         if index == 0:
             arg_map["grad_output"] = "at::rand({6, 6, 6})"
             arg_map["self"] = "at::rand({6, 6, 6})"
-            arg_map["approximate"] = "\"tanh\""
+            arg_map["approximate"] = '"tanh"'
         else:
             arg_map["grad_output"] = "at::rand({22, 22, 22})"
             arg_map["self"] = "at::rand({22, 22, 22})"
-            arg_map["approximate"] = "\"tanh\""
+            arg_map["approximate"] = '"tanh"'
         return
     if op_name == "index_add":
         if index == 0:
@@ -146,7 +169,7 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
             arg_map["index"] = "at::randint(0, 1, {5,5,5}, torch::kInt64)"
             arg_map["src"] = "at::randint(1, 100, {5,5,5}, torch::kInt64)"
         if "reduce" in arg_map:
-            arg_map["reduce"] = "\"sum\"" if op_name == "_scatter_reduce" else "\"add\""
+            arg_map["reduce"] = '"sum"' if op_name == "_scatter_reduce" else '"add"'
         return
     if op_name == "special_zeta":
         if index == 0:
@@ -163,7 +186,9 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
             arg_map["out_int32"] = "false"
         else:
             arg_map["crow_indices"] = "torch::tensor({0}, torch::kInt32)"
-            arg_map["col_indices"] = "torch::tensor({0, 1, 0, 2, 1, 2, 0, 1, 0, 2, 1, 2}, torch::kInt32)"
+            arg_map[
+                "col_indices"
+            ] = "torch::tensor({0, 1, 0, 2, 1, 2, 0, 1, 0, 2, 1, 2}, torch::kInt32)"
             arg_map["out_int32"] = "false"
         return
     if op_name == "_convert_indices_from_coo_to_csr":
