@@ -749,7 +749,12 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       input_model_stream,
       input_data,
       expect_result_list,
-      caffe2::serialize::kMaxSupportedBytecodeVersion);
+#if defined(ENABLE_FLATBUFFER)
+      caffe2::serialize::kMaxSupportedBytecodeVersion /* 0x09 */
+#else
+      caffe2::serialize::kProducedBytecodeVersion /* 0x08 */
+#endif
+  );
 }
 #endif // !defined(FB_XPLAT_BUILD)
 

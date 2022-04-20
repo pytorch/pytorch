@@ -554,6 +554,7 @@ mobile::Module _load_for_mobile(
       auto* flatbuffer_module =
           mobile::serialization::GetMutableModule(data.get());
       mobile::Module m = initialize_mobile_module(flatbuffer_module);
+      m.set_delete_memory(std::move(data));
       parseExtraFiles(flatbuffer_module, extra_files);
       return m;
     }
@@ -603,6 +604,7 @@ mobile::Module _load_for_mobile(
       auto* flatbuffer_module =
           mobile::serialization::GetMutableModule(data.get());
       mobile::Module m = initialize_mobile_module(flatbuffer_module);
+      m.set_delete_memory(std::move(data));
       parseExtraFiles(flatbuffer_module, extra_files);
       return m;
     }
