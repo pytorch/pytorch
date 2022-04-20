@@ -194,6 +194,7 @@ class AccTestCase(TRTTestCase):
         apply_passes=None,
         test_explicit_batch_dim=True,
         test_implicit_batch_dim=True,
+        test_explicit_precision=False,
         rtol=1e-03,
         atol=1e-03,
         precision=LowerPrecision.FP32,
@@ -214,6 +215,16 @@ class AccTestCase(TRTTestCase):
                 mod, InputTensorSpec.from_tensors(inputs), explicit_batch_dimension=True
             )
             super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol, precision)
+
+        if test_explicit_precision:
+            interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs), explicit_precision=test_explicit_precision)
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)
+
+            interp = TRTInterpreter(
+                mod, InputTensorSpec.from_tensors(inputs), explicit_batch_dimension=True, explicit_precision=test_explicit_precision
+            )
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol, precision)
+
 
     def run_test_with_assert_error(
         self,
