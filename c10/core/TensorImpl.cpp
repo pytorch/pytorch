@@ -20,43 +20,6 @@ C10_DEFINE_int64(
 
 namespace c10 {
 
-namespace impl {
-
-static std::string noop_name_fn(const PyInterpreter*) {
-  return "<unloaded interpreter>";
-}
-
-static void noop_decref_fn(const PyInterpreter*, PyObject*, bool) {
-  // no-op
-}
-
-static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
-    const PyInterpreter*,
-    const TensorImpl*) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to detach (shallow_copy_and_detach) Tensor with nontrivial PyObject after corresponding interpreter died");
-}
-
-static void noop_dispatch_fn(
-    const PyInterpreter*,
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    const std::shared_ptr<TorchDispatchTypeObject>& type) {
-  TORCH_INTERNAL_ASSERT(
-      0,
-      "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
-}
-
-void PyInterpreter::disarm() noexcept {
-  name_fn_ = &noop_name_fn;
-  decref_fn_ = &noop_decref_fn;
-  detach_fn_ = &noop_detach_fn;
-  dispatch_fn_ = &noop_dispatch_fn;
-}
-
-} // namespace impl
-
 const char* const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "is not allowed on a Tensor created from .data or .detach().\n"
     "If your intent is to change the metadata of a Tensor (such as sizes / strides / storage / storage_offset)\n"
@@ -148,10 +111,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(
-          key_set.remove(DispatchKey::Python)
-              .remove(DispatchKey::PythonTLSSnapshot)) { // See [Note: Python
-                                                         // key removal]
+      key_set_(key_set - c10::python_ks) { // See [Note: Python key removal]
   init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
@@ -192,14 +152,12 @@ TensorImpl::TensorImpl(
 
   // TODO: be more explicit about the full key set at call sites so we
   // don't have to keep recomputing it here
-  DispatchKey k = key_set.highestPriorityBackendTypeId();
+  auto k = key_set.highestBackendKey();
 
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
-  key_set =
-      key_set.remove(DispatchKey::Python)
-          .remove(
-              DispatchKey::PythonTLSSnapshot); // See [Note: Python key removal]
+  // See [Note: Python key removal]
+  key_set = key_set - c10::python_ks;
 
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
@@ -375,11 +333,11 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  if (owns_pyobj_) {
+  if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
     pyobj_interpreter_.load(std::memory_order_acquire)
-        ->decref(pyobj_, /*is_tensor*/ true);
+        ->decref(_unchecked_untagged_pyobj(), /*is_tensor*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
     // to the PyObject (if there are references to the PyObject,
@@ -420,7 +378,7 @@ void TensorImpl::throw_storage_access_error() const {
 bool TensorImpl::is_contiguous_nondefault_policy_impl(
     at::MemoryFormat memory_format) const {
   if (has_contiguity_ ==
-      static_cast<uint8_t>(HasContiguityPolicy::ContiguityNotSupported)) {
+      static_cast<uint8_t>(CustomizableMethodPolicy::ContiguityNotSupported)) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "Tensors of type ",
@@ -429,7 +387,7 @@ bool TensorImpl::is_contiguous_nondefault_policy_impl(
   } else {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         has_contiguity_ ==
-        static_cast<uint8_t>(HasContiguityPolicy::CustomBehavior));
+        static_cast<uint8_t>(CustomizableMethodPolicy::CustomBehavior));
     return is_contiguous_custom(memory_format);
   }
 }
@@ -439,6 +397,22 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
       false,
       "TensorImpl::is_contiguous_custom should never be called; did you "
       "set_has_contiguity_policy and forget to override is_contiguous_custom?");
+}
+
+IntArrayRef TensorImpl::sizes_nondefault_policy_impl() const {
+  if (sizes_customization_policy_ ==
+      static_cast<uint8_t>(CustomizableMethodPolicy::NotSupported)) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Tensors of type ",
+        tensorimpl_type_name(),
+        " do not have sizes");
+  } else {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "custom behavior for sizes() is not supported; please add it or file "
+        "an issue.")
+  }
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -557,8 +531,12 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python)
-                            .remove(DispatchKey::PythonTLSSnapshot);
+  // Copying tensor metadata doesn't change the PyObject (maybe
+  // it should), which means that we have to preserve whatever the
+  // original Python keyset was (as it's associated with the PyObject
+  // being a tensor subclass or not)
+  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
+      (dest_impl->key_set_ & c10::python_ks);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =
@@ -572,6 +550,8 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  dest_impl->sizes_customization_policy_ =
+      src_impl->sizes_customization_policy_;
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
   if (src_impl->named_tensor_meta_ != nullptr) {
@@ -604,23 +584,6 @@ void TensorImpl::copy_tensor_metadata(
   if (!dest_impl->is_inference()) {
     dest_impl->set_version_counter(std::move(version_counter));
   }
-}
-
-TorchDispatchTypeObject::TorchDispatchTypeObject(
-    PyObject* type_object,
-    c10::impl::PyInterpreter* pyinterpreter)
-    : data_(type_object), pyinterpreter_(pyinterpreter) {}
-
-TorchDispatchTypeObject::~TorchDispatchTypeObject() {
-  pyinterpreter_->decref(data_, /*is_tensor*/ false);
-}
-
-c10::impl::PyInterpreter* TorchDispatchTypeObject::pyinterpreter() const {
-  return pyinterpreter_;
-}
-
-PyObject* TorchDispatchTypeObject::ptr() const {
-  return data_;
 }
 
 namespace impl {

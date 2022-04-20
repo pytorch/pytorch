@@ -209,7 +209,8 @@ Tensor computeQuantizedAdd(
       ExprHandleVectorToExprVector(outputShape),
       out_dtype,
       nullptr,
-      c10::nullopt,
+      isChannelsLast(QA) ? make_channels_last_strides(outputShape)
+                         : make_contiguous_strides(outputShape),
       out_qscale.node(),
       out_qzero.node());
   return Tensor(buf, vars, exprHandle.node());
@@ -706,12 +707,14 @@ Tensor computeUpsampleNearest2d(
     return A.load(newAxes);
   };
   auto e = body_func(args);
+  auto strides = isChannelsLast(A) ? make_channels_last_strides(outputShape)
+                                   : make_contiguous_strides(outputShape);
   BufHandle buf = Buf::make(
-      "quantize_upsample_nearest2d",
+      "upsample_nearest2d",
       outputShape,
       Dtype(*outputType),
-      c10::nullopt,
-      c10::nullopt,
+      c10::nullopt, // initializer
+      fmap(strides, [&](ExprPtr stride) { return ExprHandle(stride); }),
       ExprHandle(A.node()->qscale()),
       ExprHandle(A.node()->qzero()));
   return Tensor(buf, args, e);
@@ -787,12 +790,18 @@ Tensor computeQuantizedSigmoidExternalCall(
   const double out_qscale = 1.0f / 256.0f;
   const int64_t out_qzero = (out_qdtype == ScalarType::QInt8) ? -128 : 0;
 
-  auto ResultBuf = makeQBufHandleChannelsLast(
-      "quantized_sigmoid",
-      outputShape,
-      Dtype(out_qdtype),
-      out_qscale,
-      out_qzero);
+  auto ResultBuf = isChannelsLast(qx) ? makeQBufHandleChannelsLast(
+                                            "quantized_sigmoid",
+                                            outputShape,
+                                            Dtype(out_qdtype),
+                                            out_qscale,
+                                            out_qzero)
+                                      : makeQBufHandleContiguous(
+                                            "quantized_sigmoid",
+                                            outputShape,
+                                            Dtype(out_qdtype),
+                                            out_qscale,
+                                            out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_sigmoid",

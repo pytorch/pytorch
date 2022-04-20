@@ -4,7 +4,8 @@ from pprint import pformat
 
 from tools.codegen.model import Variant
 from tools.codegen.api.python import (PythonSignatureGroup,
-                                      PythonSignatureNativeFunctionPair)
+                                      PythonSignatureNativeFunctionPair,
+                                      returns_named_tuple_pyi)
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.utils import FileManager
 from typing import Sequence, List, Dict
@@ -397,7 +398,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         name = group.signature.name
         unsorted_function_hints[name] += generate_type_hints(group)
 
-        named_tuple = group.signature.returns.named_tuple_pyi()
+        named_tuple = returns_named_tuple_pyi(group.signature)
         if named_tuple is not None and not group.signature.deprecated:
             # deprecated namedtuples are currently not included for torch functions
             tuple_name, tuple_def = named_tuple
@@ -468,6 +469,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         '_is_view': ['def _is_view(self) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
+        'is_nested': ['is_nested: _bool'],
         'is_sparse': ['is_sparse: _bool'],
         'is_sparse_csr' : ['is_sparse_csr: _bool'],
         'is_quantized': ['is_quantized: _bool'],
@@ -475,6 +477,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'is_ort': ['is_ort: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],
         'is_vulkan': ['is_vulkan: _bool'],
+        'is_ipu': ['is_ipu: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '
@@ -524,7 +527,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         name = group.signature.name
         unsorted_tensor_method_hints[name] += generate_type_hints(group)
 
-        named_tuple = group.signature.returns.named_tuple_pyi()
+        named_tuple = returns_named_tuple_pyi(group.signature)
         if named_tuple is not None and not group.signature.deprecated:
             # deprecated namedtuples are currently not included for torch functions
             tuple_name, tuple_def = named_tuple
@@ -613,6 +616,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     })
     fm.write_with_template('torch/_VF.pyi', 'torch/_C/_VariableFunctions.pyi.in', lambda: {
         'generated_comment': '@' + 'generated from torch/_C/_VariableFunctions.pyi.in',
+        **env,
+    })
+    fm.write_with_template('torch/return_types.pyi', 'torch/_C/return_types.pyi.in', lambda: {
+        'generated_comment': '@' + 'generated from torch/_C/return_types.pyi',
         **env,
     })
     gen_nn_functional(fm)

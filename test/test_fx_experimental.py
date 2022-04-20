@@ -814,6 +814,29 @@ terrible spacing
 
         self.assertEqual(orig_out, submodules_out)
 
+    def test_split_module_kwargs_expansion(self):
+        class ModuleWithKwargsExpansion(torch.nn.Module):
+            def forward(self, x, **kwargs):
+                return x + kwargs['foo']
+
+        mod = ModuleWithKwargsExpansion()
+        traced = torch.fx.symbolic_trace(mod)
+
+        seen_getitem = False
+
+        def split_callback(n):
+            nonlocal seen_getitem
+            split_idx = int(seen_getitem)
+            if n.target == operator.getitem:
+                seen_getitem = True
+            return split_idx
+
+        split = split_module(traced, mod, split_callback)
+
+        x = torch.randn(5, 3)
+        foo = torch.randn(5, 3)
+        torch.testing.assert_allclose(split(x, foo=foo), traced(x, foo=foo))
+
     @skipIfNoTorchVision
     def test_subgraph_trivial_resnet(self):
         # Smoke test trivially splitting resnet into 1 partition works
@@ -1495,101 +1518,6 @@ class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
-        # Sorted and one entry on each line to minimize merge conflicts.
-        op_skip = {
-            # See: https://github.com/pytorch/pytorch/issues/64997
-            "as_strided",
-            "block_diag",
-            "broadcast_tensors",
-            "cartesian_prod",
-            "contiguous",
-            "einsum",
-            "expand",
-            "expand_as",
-            "fill_",
-            "T",   # Implemented with a lambda
-            "H",   # Implemented with a lambda
-            "mT",  # Implemented with a lambda
-            "mH",  # Implemented with a lambda
-            "gradient",
-            "histogramdd",
-            "igamma",
-            "igammac",
-            "index_put",
-            "nn.functional.conv2d",
-            "nn.functional.dropout",
-            "nn.functional.dropout2d",
-            "nn.functional.embedding",  # Implemented with a lambda
-            "nn.functional.embedding_bag",  # Implemented with a lambda
-            "nn.functional.rrelu",  # Implemented with a lambda
-            "nn.functional.feature_alpha_dropout",  # Implemented with a lambda
-            "nonzero",
-            "polygamma",
-            "special.polygamma",
-            "repeat",
-            "reshape_as",
-            "resize_",
-            "resize_as_",
-            "special.zeta",
-            "sum_to_size",
-            "to_sparse",
-            "unique",
-            "unique_consecutive",
-            "view",
-            "view_as",
-            "unfold",
-            "where",
-            "zero_",
-            'bfloat16',
-            'bool',
-            'byte',
-            'char',
-            'double',
-            'float',
-            'half',
-            'int',
-            'long',
-            'short',
-            'empty_like',
-            'ones_like',
-            'randn_like',
-            'zeros_like',
-            'full_like',
-            'rand_like',
-            'randint_like',
-            'new_ones',
-            'new_empty',
-            'new_zeros',
-            'new_full',
-            'normal',
-            'multinomial',
-            'bernoulli',
-            "__getitem__",
-            "__radd__",
-            "__rsub__",
-            "__rmul__",
-            "__rdiv__",
-            "__rmod__",
-            "__rpow__",
-            '__rand__',
-            '__ror__',
-            '__rxor__',
-            "__rmatmul__",
-            "atleast_1d",
-            "atleast_2d",
-            "atleast_3d",
-            "svd_lowrank",  # implemented with a lambda
-            "pca_lowrank",  # implemented with a lambda
-            "column_stack",
-        }
-
-        # Unsupported input types
-        if op.name in op_skip:
-            return
-
-        if op.name.startswith('_masked.'):
-            return
-
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)

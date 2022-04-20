@@ -67,6 +67,16 @@ Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
   }
 }
 
+// Here we are trying to populate inplace updated values from the latest view
+// all the way back to the original tensor.
+// For example:
+//     a = torch.diagonal(b)
+//     b.add_(1) # a should be updated as well.
+//
+// Ideally we should all have a *ViewUpdate IR which updates the original tensor/view
+// withe current value. See DiagonalViewUpdate and corresponding LowerDiagonalViewUpdate
+// in ts_node_lowering.cpp. There are some "edge cases" here simply because they can
+// smartly reuse some other ops to undo themselves.
 Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
   // We first bring the source IR value forward, by reshaping and slicing.
   std::vector<Value> tmp_values({ir_value});

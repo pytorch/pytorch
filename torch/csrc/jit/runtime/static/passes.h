@@ -21,9 +21,6 @@ void ReplaceWithMaybeCopy(
     std::shared_ptr<torch::jit::Graph>& graph,
     bool outputs_are_immutable = true);
 
-TORCH_API void EnableStaticRuntimeLayerNorm(
-    std::shared_ptr<torch::jit::Graph>& graph);
-
 TORCH_API void RemoveImmutableInputDictLookups(
     std::shared_ptr<torch::jit::Graph>& graph);
 
@@ -63,6 +60,10 @@ TORCH_API void CreateOwnedRefsForSpecialValues(Graph& graph);
 TORCH_API void ForceNonEmptyOutputs(Graph& graph);
 
 TORCH_API void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph);
+
+TORCH_API void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph);
+
+TORCH_API void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

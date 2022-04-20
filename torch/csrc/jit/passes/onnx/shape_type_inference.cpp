@@ -363,7 +363,13 @@ void ConvertGraphToONNXProto(
     int opset_version) {
   RawDataExportMap export_map;
   bool val_use_external_data_format;
-  std::tie(model_proto, export_map, symbol_map, val_use_external_data_format) =
+  NodeNameMap node_names;
+  std::tie(
+      model_proto,
+      export_map,
+      symbol_map,
+      val_use_external_data_format,
+      node_names) =
       export_onnx(
           graph,
           {},
@@ -408,7 +414,7 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
     return c10::nullopt;
   }
   std::vector<at::Tensor> inputTensorValues;
-  for (auto i = 0; i < n->inputs().size(); i++) {
+  for (auto i : c10::irange(n->inputs().size())) {
     if (TensorTypePtr input_type = n->input(i)->type()->cast<TensorType>()) {
       if (!ConstantValueMap::HasValue(n->input(i)->debugName())) {
         return c10::nullopt;
@@ -425,8 +431,9 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
     return onnx_constant_fold::runTorchBackendForOnnx(
         n, inputTensorValues, opset_version);
   } catch (const std::exception& ex) {
-    TORCH_WARN(
-        "Constant folding in symbolic shape inference fails: ", ex.what());
+    auto ex_str = std::string(ex.what());
+    ex_str = ex_str.substr(0, ex_str.find("\n"));
+    TORCH_WARN("Constant folding in symbolic shape inference fails: ", ex_str);
     return c10::nullopt;
   }
 }
@@ -454,25 +461,24 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   auto it_0 = std::find_if(shape_vector.begin(), shape_vector.end(), is_zero);
   bool shape_has_zero = it_0 != shape_vector.end();
 
-  if (opset_version >= 14 && n->hasAttributeS("allowzero")) {
-    int allowzero = n->i(attr::allowzero);
-    if (allowzero == 1 && shape_has_zero) {
-      // Return here, because the denominator in shape_ratio calculation cannot
-      // be 0.
-      // TODO: Shall we handle the case when shape has -1 here?
-      return shape;
-    }
-  }
-
   int minus_one_pos = -1;
-  for (int i = 0; i < shape_vector.size(); ++i) {
+  for (auto i : c10::irange(shape_vector.size())) {
     if (shape_vector[i].value() == -1) {
       minus_one_pos = i;
       break;
     }
   }
 
-  if (!shape_has_zero && minus_one_pos == -1) {
+  int allowzero = 0;
+  if (opset_version >= 14 && n->hasAttributeS("allowzero")) {
+    allowzero = n->i(attr::allowzero);
+  }
+
+  TORCH_CHECK(
+      !(shape_has_zero && allowzero == 1 && minus_one_pos != -1),
+      "0 and -1 cannot both be present in `Shape` input of `Reshape` node, when `allowzero=1`.");
+
+  if (minus_one_pos == -1 && (!shape_has_zero || allowzero)) {
     return shape;
   }
   std::vector<c10::ShapeSymbol> final_shape;
@@ -689,7 +695,7 @@ void SetShapeValueFromListConstructNode(Node* lc_node) {
       } else if (ConstantValueMap::HasShapeValue(input->debugName())) {
         auto lc_value =
             ConstantValueMap::GetShapeValue(input->debugName()).value();
-        if (lc_value.rank() == 1) {
+        if (lc_value.rank() == 1U) {
           shape_size.emplace_back(lc_value.at(0));
         }
       }
@@ -711,10 +717,10 @@ std::vector<::c10::ShapeSymbol> Broadcast(
   size_t rank_min = std::min(rank_0, rank_1);
   std::vector<::c10::ShapeSymbol> final_shape;
   final_shape.reserve(rank_max);
-  for (auto idx = 0; idx < rank_max; idx++) {
+  for (auto idx : c10::irange(rank_max)) {
     final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
   }
-  for (auto idx = 0; idx < rank_min; idx++) {
+  for (auto idx : c10::irange(rank_min)) {
     const c10::ShapeSymbol& ss_shape_0 = input_shape_value_0[rank_0 - 1 - idx];
     const c10::ShapeSymbol& ss_shape_1 = input_shape_value_1[rank_1 - 1 - idx];
     bool is_static_0 = ss_shape_0.is_static();
@@ -770,11 +776,11 @@ void ProcessShapeForConcatNode(Node* n) {
     }
     std::vector<::c10::ShapeSymbol> final_shape;
     final_shape.reserve(rank);
-    for (auto idx = 0; idx < rank; idx++) {
+    for (auto idx : c10::irange(rank)) {
       if (idx == axis_adjust) {
         auto flag = true;
         int64_t size_total = 0;
-        for (auto input_idx = 0; input_idx < n->inputs().size(); input_idx++) {
+        for (auto input_idx : c10::irange(n->inputs().size())) {
           if (ConstantValueMap::HasShape(n->input(input_idx)->debugName())) {
             auto input_shape =
                 ConstantValueMap::GetShape(n->input(input_idx)->debugName());
@@ -796,7 +802,7 @@ void ProcessShapeForConcatNode(Node* n) {
         }
       } else {
         auto flag = false;
-        for (auto input_idx = 0; input_idx < n->inputs().size(); input_idx++) {
+        for (auto input_idx : c10::irange(n->inputs().size())) {
           if (ConstantValueMap::HasShape(n->input(input_idx)->debugName())) {
             auto input_shape =
                 ConstantValueMap::GetShape(n->input(input_idx)->debugName());
@@ -834,7 +840,7 @@ void ProcessShapeValueForConcatNode(Node* n) {
     } else if (ConstantValueMap::HasShapeValue(input->debugName())) {
       auto concat_value =
           ConstantValueMap::GetShapeValue(input->debugName()).value();
-      if (concat_value.rank() == 1) {
+      if (concat_value.rank() == 1U) {
         shape_size.emplace_back(concat_value.at(0));
       }
     }
@@ -910,7 +916,7 @@ void ProcessReduceNode(Node* n) {
     }
     final_shape.reserve(rank_0);
     std::vector<int64_t> axes_vector = n->is(attr::axes);
-    for (auto idx = 0; idx < axes_vector.size(); idx++) {
+    for (auto idx : c10::irange(axes_vector.size())) {
       if (axes_vector[idx] < 0) {
         axes_vector[idx] += rank_0;
       }
@@ -920,7 +926,7 @@ void ProcessReduceNode(Node* n) {
     if (n->hasAttributeS("keepdims")) {
       keepdims = n->i(attr::keepdims);
     }
-    for (auto idx = 0; idx < rank_0; idx++) {
+    for (auto idx : c10::irange(rank_0)) {
       auto it = std::find(axes_vector.begin(), axes_vector.end(), idx);
       if (it != axes_vector.end()) {
         if (keepdims != 0) {
@@ -1060,7 +1066,7 @@ void ProcessSliceNode(Node* n, int opset_version) {
   if (opset_version >= 10) {
     valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
         ConstantValueMap::HasValue(n->input(2)->debugName());
-    for (const auto input_idx : c10::irange(3, 5)) {
+    for (const auto input_idx : c10::irange(3U, 5U)) {
       if (n->inputs().size() > input_idx) {
         valid = valid &&
             ConstantValueMap::HasValue(n->input(input_idx)->debugName());
@@ -1177,7 +1183,7 @@ void ProcessTimeSeriesNode(Node* n) {
         seq_length, num_directions, batch_size, hidden_size};
     UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
   }
-  for (const auto idx : c10::irange(2, 4)) {
+  for (const auto idx : c10::irange(2U, 4U)) {
     if (n->outputs().size() > idx) {
       std::vector<c10::ShapeSymbol> final_shape = {
           num_directions, batch_size, hidden_size};
@@ -1275,17 +1281,11 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::Gather: {
-      if (ConstantValueMap::HasRank(n->input(0)->debugName()) &&
-          ConstantValueMap::HasRank(n->input(1)->debugName())) {
-        auto rank_0 =
-            ConstantValueMap::GetRank(n->input(0)->debugName()).value();
-        auto rank_1 =
-            ConstantValueMap::GetRank(n->input(1)->debugName()).value();
-        only_rank_available = true;
-        rank = rank_0 + rank_1 - 1;
-      }
       if (ConstantValueMap::HasShapeValue(n->input(0)->debugName()) &&
           ConstantValueMap::HasValue(n->input(1)->debugName())) {
+        // Special case for pattern Shape -> Gather, to propagate shape value.
+        // Gather input 0 is 1d tensor, Gather input 1 is scalar.
+        // Gather output will be scalar.
         auto shape_value =
             ConstantValueMap::GetShapeValue(n->input(0)->debugName()).value();
         auto idx_value =
@@ -1574,7 +1574,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
   // shapes also. ONNX If can have different types on different branches, skip
   // here.
   auto static_input_shape = AllGraphInputsStatic(n->owningGraph());
-  for (auto i = 0; i < n->outputs().size(); i++) {
+  for (auto i : c10::irange(n->outputs().size())) {
     if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
       if (output_type->dim().has_value()) {
         size_t rank = static_cast<size_t>(output_type->dim().value());
@@ -1589,7 +1589,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
   // Update ConstantValueMap on node inputs from onnx shape inference.
   // ListConstruct is handled here (we only consider IntType, not TensorType) ,
   // no need to have a per-op based process.
-  for (auto i = 0; i < n->inputs().size(); i++) {
+  for (auto i : c10::irange(n->inputs().size())) {
     if (TensorTypePtr input_type = n->input(i)->type()->cast<TensorType>()) {
       if (input_type->dim().has_value()) {
         size_t rank = static_cast<size_t>(input_type->dim().value());
@@ -1881,7 +1881,7 @@ std::pair<bool, bool> AreInputsReliableOrStatic(Node* n) {
     non_required_idx =
         non_required_shape_inference_idx_map[n->kind().toDisplayString()];
   }
-  for (auto idx = 0; idx < input_size; idx++) {
+  for (auto idx : c10::irange(input_size)) {
     if (!non_required_idx.empty() &&
         non_required_idx.find(idx) != non_required_idx.end()) {
       continue;
@@ -1905,7 +1905,8 @@ static std::unordered_set<std::string> nodeTypeReliableForTracer = {
     "onnx::Cast",
     "onnx::Constant",
     "onnx::Relu",
-    "com.microsoft::Gelu"};
+    "com.microsoft::Gelu",
+    "aten::ATen"};
 
 void UpdateReliable(
     torch::jit::Value* output,
@@ -2102,7 +2103,7 @@ void ONNXSetDynamicInputShape(
           name_to_sym[name] = ::c10::ShapeSymbol::newSymbol();
         }
         TORCH_CHECK(
-            axis < shape.size(),
+            axis < static_cast<int64_t>(shape.size()),
             "Dynamic shape axis should be no more than the shape dimension for ",
             name);
         shape[axis] = name_to_sym[name];

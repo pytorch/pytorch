@@ -453,6 +453,8 @@ class AllocationInserter : public kir::ExprMutator {
             default_val == nullptr,
             "Reduction should not have a default initialization value for predicate elimination.");
         init = expr->as<ReductionOp>()->init();
+      } else if (expr->isA<MmaOp>()) {
+        init = expr->as<MmaOp>()->init();
       } else if (expr->isA<WelfordOp>()) {
         TORCH_INTERNAL_ASSERT(
             default_val == nullptr,
