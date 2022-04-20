@@ -254,6 +254,7 @@ class NaiveTypePropagator {
       }
       case aten::_batch_norm_impl_index_backward:
       case aten::native_batch_norm_backward: {
+        int grad_input_index = 1;
         int weight_index = -1;
         int mask_index = -1;
         if (node->kind() ==
@@ -485,6 +486,7 @@ class NaiveTypePropagator {
         TORCH_CHECK(
             hasTypeAndDevice(in_type),
             "Type and device propagation has failed, or was not provided enough information.");
+        const auto in_scalar_type = in_type->scalarType();
         const auto in_device = in_type->device();
         const auto cuda_enabled = constant_as<bool>(node->input(1));
         const auto cpu_enabled = constant_as<bool>(node->input(2));
