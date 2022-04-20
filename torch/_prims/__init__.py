@@ -1,4 +1,5 @@
 import torch
+from torch import Tensor
 from torch._C import _add_docstr  # type: ignore[attr-defined]
 
 import torch._prims.utils as utils
@@ -10,8 +11,6 @@ from functools import reduce
 from enum import Enum
 
 # Experimental module containing prototype "primitive" operations.
-
-Tensor = torch.Tensor
 
 __all__ = [
     #
