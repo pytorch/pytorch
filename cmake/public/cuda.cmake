@@ -39,14 +39,23 @@ endif()
 # Enable CUDA language support
 set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
 # Pass clang as host compiler, which according to the docs
-# Must be done before CUDA language is enabled, see  mast be done before
-# see https://cmake.org/cmake/help/v3.15/variable/CMAKE_CUDA_HOST_COMPILER.html
+# Must be done before CUDA language is enabled, see
+# https://cmake.org/cmake/help/v3.15/variable/CMAKE_CUDA_HOST_COMPILER.html
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
   set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}")
 endif()
 enable_language(CUDA)
+include("${CMAKE_CURRENT_LIST_DIR}/cuda_toolkit.cmake")
+if (NOT CUDAToolkit_FOUND)
+    message(FATAL_ERROR "Caffe2: Failed to find CUDAToolkit")
+endif()
 set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+if (NOT CUDA_TOOLKIT_ROOT_DIR STREQUAL CUDAToolkit_LIBRARY_ROOT)
+  message(FATAL_ERROR "Found two conflicting CUDA installs, "
+                      "${CUDA_TOOLKIT_ROOT_DIR} and ${CUDAToolkit_LIBRARY_ROOT}")
+endif()
 
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
