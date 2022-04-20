@@ -19,6 +19,7 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     NestedWrappedModuleWithDelay,
     TransformerWithSharedParams,
+    subtest_name
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -27,7 +28,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
-from torch.distributed.fsdp import CPUOffload
+from torch.distributed.fsdp import CPUOffload, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch, ShardingStrategy
 
 
@@ -57,8 +58,8 @@ test_name_mapping = {
     str(ShardingStrategy.SHARD_GRAD_OP): "shard_grad_op",
 }
 
-def subtest_name(*args):
-    return '_'.join([test_name_mapping[str(s)] if s is not None else "none" for s in args])
+subtest_name = functools.partial(subtest_name, test_name_mapping)
+
 
 class TestParityWithDDP(FSDPTest):
     """
@@ -93,6 +94,32 @@ class TestParityWithDDP(FSDPTest):
                     backward_prefetch=backward_prefetch,
                     sharding_strategy=sharding_strategy,
                 )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("cpu_offload", cpu_offload_config)
+    @parametrize("sharding_strategy", sharding_strategy_config)
+    @parametrize("mixed_precision", [True, False])
+    def test_nested_wrapped_model_single_iteration_mixed_precision(
+        self,
+        cpu_offload,
+        sharding_strategy,
+        mixed_precision
+    ):
+        init_modes = self._get_init_modes_for_test(cpu_offload)
+        mixed_precision = MixedPrecision() if mixed_precision else None
+        for fsdp_init_mode in init_modes:
+            with self.subTest(fsdp_init_mode=fsdp_init_mode):
+                self._test_identical_outputs(
+                    NestedWrappedModule,
+                    # Only run one step for comparison, as usually grad scaler
+                    # is needed to avoid NaN after first step.
+                    num_steps=1,
+                    fsdp_init_mode=fsdp_init_mode,
+                    cpu_offload=cpu_offload,
+                    sharding_strategy=sharding_strategy,
+                    mixed_precision=mixed_precision,
+                )
+
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
@@ -209,10 +236,15 @@ class TestParityWithDDP(FSDPTest):
 
 class TestParamInit(FSDPTest):
     @skip_if_lt_x_gpu(2)
-    def test_param_change_after_init(self):
+    @parametrize("mixed_precision", [True, False])
+    def test_param_change_after_init(self, mixed_precision):
         group = dist.distributed_c10d._get_default_group()
         # Establish reference behavior.
-        model = self._get_wrapped_model(group, cuda_first=False)
+        mixed_precision = MixedPrecision() if mixed_precision else None
+        config = {"mixed_precision": mixed_precision}
+        model = self._get_wrapped_model(
+            group, mixed_precision=mixed_precision, cuda_first=False
+        )
         model.eval()  # no dropout for this test
         input = model.module.get_input(torch.device("cuda"))
         ref_output = model(*input)
@@ -266,10 +298,15 @@ class TestHooks(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("cuda_first", [False, True])
-    def test_register_functions_called(self, cuda_first):
+    @parametrize("mixed_precision", [True, False])
+    def test_register_functions_called(self, cuda_first, mixed_precision):
         """Tests that _register_{pre|post}_backward_hooks called during forward."""
         group = dist.distributed_c10d._get_default_group()
-        model = self._get_wrapped_model(group, cuda_first=cuda_first)
+        mixed_precision = MixedPrecision() if mixed_precision else None
+        config = {"mixed_precision": mixed_precision}
+        model = self._get_wrapped_model(
+            group, mixed_precision=mixed_precision, cuda_first=cuda_first
+        )
         input = model.module.get_input(torch.device("cuda"))
         model._register_post_backward_hooks = mock.MagicMock(return_value=None)
         model._register_pre_backward_hooks = mock.MagicMock(return_value=None)
@@ -282,11 +319,19 @@ class TestHooks(FSDPTest):
 
 class TestNoGrad(FSDPTest):
     @skip_if_lt_x_gpu(2)
-    def test_transformer_no_grad(self):
+    @parametrize("mixed_precision", [True, False])
+    def test_transformer_no_grad(self, mixed_precision):
         group = dist.distributed_c10d._get_default_group()
-        model = self._get_wrapped_model(group, cuda_first=False)
+        mixed_precision = MixedPrecision() if mixed_precision else None
+        config = {"mixed_precision": mixed_precision}
+        model = self._get_wrapped_model(group, config=config, cuda_first=False)
         # Train model for a step
-        self._train_for_several_steps(model, num_steps=1, autocast=False)
+        self._train_for_several_steps(
+            model,
+            num_steps=1,
+            autocast=False,
+            mixed_precision=config["mixed_precision"]
+        )
 
         model.eval()  # no dropout for this test
 
@@ -303,6 +348,8 @@ class TestNoGrad(FSDPTest):
 
 instantiate_parametrized_tests(TestHooks)
 instantiate_parametrized_tests(TestParityWithDDP)
+instantiate_parametrized_tests(TestNoGrad)
+instantiate_parametrized_tests(TestParamInit)
 
 if __name__ == "__main__":
     run_tests()

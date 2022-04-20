@@ -31,8 +31,6 @@ TORCH_CUDA_CU_API TensorView* dropout_backward(
     TensorView* mask,
     Val* scale);
 
-TORCH_CUDA_CU_API Val* softplus(Val* x, Val* beta, Val* threshold);
-
 struct LstmResult {
   TensorView* cell = nullptr;
   TensorView* hidden = nullptr;
@@ -45,10 +43,15 @@ TORCH_CUDA_CU_API LstmResult lstm(
     TensorView* cell_x,
     TensorView* out_x);
 
-TORCH_CUDA_CU_API Val* fast_gelu(Val* x);
-TORCH_CUDA_CU_API Val* fast_gelu_backward(Val* dy, Val* x);
-TORCH_CUDA_CU_API Val* gelu_backward(Val* dy, Val* x);
-TORCH_CUDA_CU_API Val* tanh_backward(Val* dy, Val* tanh_x);
+TORCH_CUDA_CU_API TensorView* softplus(
+    TensorView* x,
+    Val* beta,
+    Val* threshold);
+TORCH_CUDA_CU_API TensorView* gelu(TensorView* x);
+TORCH_CUDA_CU_API TensorView* gelu_backward(TensorView* dy, TensorView* x);
+TORCH_CUDA_CU_API TensorView* tanh_gelu(TensorView* x);
+TORCH_CUDA_CU_API TensorView* tanh_gelu_backward(TensorView* dy, TensorView* x);
+TORCH_CUDA_CU_API TensorView* tanh_backward(TensorView* dy, TensorView* tanh_x);
 
 } // namespace cuda
 } // namespace fuser
