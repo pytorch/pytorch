@@ -439,6 +439,18 @@ class TestMHADeviceType(TestCase):
                 attn_output = torch.nn.functional.linear(attn_output, out_proj_weight, out_proj_bias)
                 attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 
+                if query.is_nested:
+                    print("attn_output")
+                    print(attn_output)
+                    print(attn_output.size())
+                    query_nested_size = torch.ops.aten.nested_size(query)
+                    print("query_nested_size")
+                    print(query_nested_size)
+                    attn_output = torch._nested_from_padded_and_nested_example(attn_output, query)
+                    # res_nested_size = torch.ops.aten.nested_size(res)
+                    # print("res_nested_size")
+                    # print(res_nested_size)
+
                 # optionally average attention weights over heads
                 attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
                 if average_attn_weights:
@@ -446,6 +458,9 @@ class TestMHADeviceType(TestCase):
 
                 if not need_weights:
                     attn_output_weights = None
+
+                if query.is_nested:
+                    return attn_output, attn_output_weights
 
                 return attn_output.transpose(0, 1), attn_output_weights
 

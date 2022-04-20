@@ -30,16 +30,16 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
     TORCH_CHECK(input.dim() == 3 && weight.dim() == 2);
     const auto last_dim = get_consistent_last_dim_of_nested_tensor(*nt_input);
     TORCH_CHECK(
-        last_dim == weight.sizes()[0],
+        last_dim == weight.size(1),
         "shape mismatch for NestedTensor matmul. NestedTensor last_dim: ",
         last_dim,
         " vs. first dim of rhs: ",
-        weight.sizes()[0]);
+        weight.size(1));
     const Tensor& input_buffer = nt_input->get_buffer();
     Tensor result_buffer =
-        at::linear(input_buffer.reshape({-1, weight.sizes()[0]}), weight, bias_opt);
+        at::linear(input_buffer.reshape({-1, weight.size(1)}), weight, bias_opt);
     result_buffer = result_buffer.reshape({-1});
-    int64_t weight_size_1 = weight.sizes()[1];
+    int64_t weight_size_1 = weight.size(0);
     Tensor new_sizes = nt_input->get_nested_size_tensor().clone();
     // Now the last entry in every row of new_sizes should be weight_size_1.
     new_sizes.index_put_({at::indexing::Slice(), -1}, weight_size_1);

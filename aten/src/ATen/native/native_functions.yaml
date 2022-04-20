@@ -4076,6 +4076,10 @@
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_size_int
 
+- func: nested_size(Tensor self) -> Tensor[]
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_nested_size
+
 - func: size.Dimname(Tensor self, Dimname dim) -> int
   variants: function, method
   device_check: NoCheck

@@ -391,5 +391,10 @@ int64_t NestedTensor_size_int(const Tensor& self, int64_t d) {
   return *nt_indices->get_opt_size(d);
 }
 
+std::vector<at::Tensor> NestedTensor_nested_size(const Tensor& self) {
+  const auto* nt_indices = get_nested_tensor_impl(self);
+  return nt_indices->get_nested_size_tensor().unbind();
+}
+
 } // namespace native
 } // namespace at

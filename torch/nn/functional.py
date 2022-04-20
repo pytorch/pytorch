@@ -4897,6 +4897,15 @@ def _in_projection_packed(
     if k is v:
         if q is k:
             # self-attention
+            print("w.size()")
+            print(w.data.size())
+            print("b.size()")
+            print(b.size())
+            if q.is_nested:
+                q_nested_size = torch.ops.aten.nested_size(q)
+                print("q_nested_size")
+                print(q_nested_size)
+                return linear(q, w, b).to_padded_tensor(0).chunk(3, dim=-1)
             return linear(q, w, b).chunk(3, dim=-1)
         else:
             # encoder-decoder attention
