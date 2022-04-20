@@ -2353,12 +2353,13 @@ class TestTEFuser(JitTestCase):
 
         def foo(x):
             with torch.jit.strict_fusion():
-                return x + x + torch.rand([4]) +  3
+                return x + x + torch.rand([4]) + 3
 
         with self.assertRaises(Exception) as error_out:
             foo_s = torch.jit.script(foo)
             foo_s(torch.rand([4]))
             foo_s(torch.rand([4]))
+            print(torch.jit.last_executed_optimized_graph())
         fc = FileCheck().check("Found unfused operators")
         fc.check("aten::rand(int[] size")
         fc.check("torch.rand([4]").run(str(error_out.exception))
@@ -2367,6 +2368,18 @@ class TestTEFuser(JitTestCase):
             foo(torch.rand([4]))
 
         FileCheck().check("Only works in script mode").run(str(warns[0]))
+
+        def test_autodiff(x):
+            with torch.jit.strict_fusion():
+                return x + x + torch.rand([4])
+
+        foo_s = torch.jit.script(test_autodiff)
+        inp = torch.rand([4], requires_grad=True)
+        with self.assertRaises(Exception) as error_out:
+            for _ in range(3):
+                foo_s(inp)
+        f = FileCheck().check("unfused operators").check("aten::rand")
+        f.run(torch.jit.last_executed_optimized_graph())
 
 
 class TestTEFuserStatic(TestTEFuser):

@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -23,39 +24,90 @@ bool isStrictFusion(Value* value) {
 
 bool fusionGuardCheck(Symbol k) {
   return k == Symbol::prim("TensorExprDynamicGuard") || k == prim::TypeCheck ||
-      k == prim::CudaFusionGuard;
+      k == prim::CudaFusionGuard || k == prim::RequiresGradCheck;
+}
+
+std::unordered_set<Node*> collectValuesUsedInGuard(
+    Node* guarding_if,
+    Node* enter_node) {
+  // DFS to collect
+  std::unordered_set<Node*> visited_nodes;
+  std::vector<Node*> queue = {guarding_if};
+
+  while (!queue.empty()) {
+    Node* curr = queue[queue.size() - 1];
+    queue.pop_back();
+    visited_nodes.insert(curr);
+    // these nodes directly test Tensor inputs, and are not part of additional
+    // guards inserted
+    if (fusionGuardCheck(curr->kind())) {
+      continue;
+    }
+    for (Value* v : curr->inputs()) {
+      Node* inp_node = v->node();
+      if (inp_node->isBefore(enter_node) ||
+          inp_node->owningBlock() != enter_node->owningBlock()) {
+        continue;
+      }
+      if (visited_nodes.count(inp_node)) {
+        continue;
+      }
+      queue.push_back(inp_node);
+    }
+  }
+  return visited_nodes;
 }
 
 void checkForUnfusedOps(Node* enter_node) {
   std::vector<Node*> unsupported_nodes;
-  // TODO
+  Node* guarding_if = nullptr;
   for (Node* node = enter_node->next(); node->kind() != prim::Exit;
        node = node->next()) {
     auto k = node->kind();
-    if (fusionGuardCheck(k)) {
-      continue;
-    }
-    // TODO: add support for guards that nvfuser adds
     if (node->kind() == prim::If &&
         fusionGuardCheck(node->input()->node()->kind())) {
+      guarding_if = node;
       continue;
     }
     unsupported_nodes.push_back(node);
   }
-  if (unsupported_nodes.size()) {
+  // NVFuser/autodiff/nnc all insert a number of guards, see
+  // `CudaFusionViewGuard Example Graph`
+  // to check for unfused nodes, look at node's whose outputs
+  // are not depended on by the fusion guard
+  // restrict search for all values after the first
+  // node in the prim::Enter block
+
+  std::unordered_set<Node*> guarding_check_nodes;
+  if (guarding_if) {
+    guarding_check_nodes = collectValuesUsedInGuard(guarding_if, enter_node);
+  }
+  std::vector<Node*> unfused_nodes_not_used_in_guard;
+  for (Node* unfused : unsupported_nodes) {
+    if (!guarding_check_nodes.count(unfused)) {
+      unfused_nodes_not_used_in_guard.push_back(unfused);
+    }
+  }
+  if (unfused_nodes_not_used_in_guard.size()) {
     std::stringstream ss;
     ss << "Found unfused operators: \n";
-    for (Node* unfused : unsupported_nodes) {
-      ss << "\t" << unfused->schema() << "\n";
+    for (Node* unfused : unfused_nodes_not_used_in_guard) {
+      ss << "\t";
+      if (unfused->maybeSchema()) {
+        ss << unfused->schema();
+      } else {
+        unfused->kind().toDisplayString();
+      }
+      ss << "\n";
     }
     // TODO: Context Manager source range lost right now
-    throw ErrorReport(unsupported_nodes[0]->sourceRange()) << ss.str();
+    throw ErrorReport(unfused_nodes_not_used_in_guard[0]->sourceRange())
+        << ss.str();
   }
 }
 
 void CheckStrictFusion(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
-
   Node* n = nullptr;
   while ((n = it.next()) != nullptr) {
     if (n->kind() == prim::Enter && isStrictFusion(n->input())) {

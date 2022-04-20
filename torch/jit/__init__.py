@@ -207,9 +207,11 @@ if not torch._C._jit_init():
 
 class strict_fusion(object):
     """
-    This class errors if fusion does not occur. It does not yet
-    interact with autodiff.
-    # TODO: add to docs after initial review/follow ups
+    This class errors if not all nodes have been fused in
+    inference, or symbolically differentiated in training.
+    Example:
+    with torch.jit.strict_fusion():
+                return x + x + x
     """
 
     def __init__(self):
