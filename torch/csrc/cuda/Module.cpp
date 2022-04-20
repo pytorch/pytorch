@@ -260,8 +260,10 @@ PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
   // std::cout<< optional_name << std::endl;
   // std::cout<< optional_fusion_class << std::endl;
 
-  at::cuda::CompileKernel(op_string, optional_name, optional_fusion_class, tensors);
+  at::Tensor output = at::cuda::CompileKernel(op_string, optional_name, optional_fusion_class, tensors);
 
+
+  return THPVariable_Wrap(output);
 
   // // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   // cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
@@ -269,7 +271,6 @@ PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
   // void* mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
   // return PyLong_FromVoidPtr(mem);
   END_HANDLE_TH_ERRORS
-  Py_RETURN_NONE;
 }
 
 PyObject * THCPModule_cudaCachingAllocator_raw_delete(PyObject *_unused, PyObject *obj){

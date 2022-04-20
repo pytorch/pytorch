@@ -10,7 +10,7 @@
 namespace at {
 namespace cuda {
 
-TORCH_CUDA_CPP_API void CompileKernel(
+TORCH_CUDA_CPP_API at::Tensor CompileKernel(
   const std::string& op_string,
   const std::string& optional_name,
   const std::string& optional_fusion_class,

@@ -2,7 +2,21 @@
 
 #include <ATen/native/TensorIterator.h>
 
-// #include <ATen/native/cuda/JitLoops.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <ATen/code_template.h>
+#include <ATen/native/cuda/jit_utils.h>
+#include <ATen/cuda/llvm_jit_strings.h>
+
+#include <ATen/native/cuda/JitLoops.cuh>
+
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#endif
 
 #include <iostream>
 
@@ -10,7 +24,9 @@ namespace at {
 namespace cuda {
 
 
-void CompileKernel(
+const char name[] = "python_jitted";
+
+at::Tensor CompileKernel(
   const std::string& op_string,
   const std::string& optional_name,
   const std::string& optional_fusion_class,
@@ -25,10 +41,11 @@ void CompileKernel(
   }
 
   // TODO: creating a locally scoped tensor, is this correct?
-  at::Tensor result;
+  // at::Tensor result;
+  Tensor output = at::empty_like(tensors[0]);
 
   TensorIteratorConfig config{};
-  config.add_output(result);
+  config.add_output(output);
   for (const auto& t: tensors){
     config.add_input(t);
   }
@@ -43,17 +60,17 @@ void CompileKernel(
 
   TensorIterator iter = config.build();
 
-  // const char name[] = "python_jitted";
-  // at::native::jitted_gpu_kernel<
-  //       /*name=*/ name,
-  //       /*return_dtype=*/ float,
-  //       /*common_dtype=*/ float,
-  //       /*arity=*/ 2>(iter, op_string);
+
+  at::native::jitted_gpu_kernel<
+        /*name=*/ name,
+        /*return_dtype=*/ float,
+        /*common_dtype=*/ float,
+        /*arity=*/ 2>(iter, op_string);
 
 
+  std::cout<< output.toString() <<std::endl;
 
-
-  return;
+  return std::move(output);
 }
 
 

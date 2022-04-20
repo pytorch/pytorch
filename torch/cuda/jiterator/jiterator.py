@@ -16,13 +16,13 @@ def create_jit_fn(op_string: str, optional_name: str, optional_fusion_class="ele
         def compile(self, *tensors: Tensor, **kwargs):
             print("calling into C++...")
 
-            self.jitted_fn = torch._C._cuda_compile_kernel(
+            output = torch._C._cuda_compile_kernel(
                 self.op_string,
                 self.optional_name,
                 self.optional_fusion_class,
                 tensors)
             # TODO: ignoring kwargs for now
-            return self.jitted_fn
+            return output
 
         def __call__(self, *tensors: Tensor, **kwargs):
 
@@ -35,10 +35,11 @@ def create_jit_fn(op_string: str, optional_name: str, optional_fusion_class="ele
 
             tensor_types = [t.dtype for t in tensors]
 
-            if self.jitted_fn is None:
-                self.jitted_fn = self.compile(*tensors, **kwargs)
+            return self.compile(*tensors, **kwargs)
 
-            return None
+            # if self.jitted_fn is None:
+            #     self.jitted_fn = self.compile(*tensors, **kwargs)
+
             # return self.jitted_fn(*tensors, **expanded_kwargs)
 
     return JittedFunction(op_string, optional_name, optional_fusion_class, **kwargs)
