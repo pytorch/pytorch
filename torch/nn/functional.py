@@ -770,10 +770,7 @@ def _max_pool2d(
         )
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
-    if input.is_quantized and input.is_cuda:
-        return torch.ops.quantized.max_pool2d(input, _pair(kernel_size), _pair(stride), _pair(padding), _pair(dilation), ceil_mode)
-    else:
-        return torch.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    return torch.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
 max_pool2d = boolean_dispatch(
@@ -4291,9 +4288,9 @@ def _pad(input: Tensor, pad: BroadcastingList1[int], mode: str = "constant", val
         See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
         :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
         padding modes works. Constant padding is implemented for arbitrary dimensions.
-        Replicate and reflection padding is implemented for padding the last 3
-        dimensions of 5D input tensor, or the last 2 dimensions of 4D input
-        tensor, or the last dimension of 3D input tensor.
+        Replicate and reflection padding are implemented for padding the last 3
+        dimensions of a 4D or 5D input tensor, the last 2 dimensions of a 3D
+        or 4D input tensor, or the last dimension of a 2D or 3D input tensor.
 
     Note:
         When using the CUDA backend, this operation may induce nondeterministic
@@ -4397,11 +4394,11 @@ if the rows are contiguous.
 If input has shape :math:`N \times M` then the output will have shape
 :math:`\frac{1}{2} N (N - 1)`.
 
-This function is equivalent to `scipy.spatial.distance.pdist(input,
-'minkowski', p=p)` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
-equivalent to `scipy.spatial.distance.pdist(input, 'hamming') * M`.
+This function is equivalent to ``scipy.spatial.distance.pdist(input,
+'minkowski', p=p)`` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
+equivalent to ``scipy.spatial.distance.pdist(input, 'hamming') * M``.
 When :math:`p = \infty`, the closest scipy function is
-`scipy.spatial.distance.pdist(xn, lambda x, y: np.abs(x - y).max())`.
+``scipy.spatial.distance.pdist(xn, lambda x, y: np.abs(x - y).max())``.
 
 Args:
     input: input tensor of shape :math:`N \times M`.

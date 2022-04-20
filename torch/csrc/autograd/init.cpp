@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/record_function.h>
+#include <ATen/core/PythonFallbackKernel.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -70,6 +71,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("NVTX", ProfilerState::NVTX)
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
+
+  using torch::profiler::impl::ActiveProfilerType;
+  py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
+      .value("NONE", ActiveProfilerType::NONE)
+      .value("LEGACY", ActiveProfilerType::LEGACY)
+      .value("KINETO", ActiveProfilerType::KINETO)
+      .value("NVTX", ActiveProfilerType::NVTX);
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
@@ -289,6 +297,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       disableProfilerLegacy,
       py::arg("profiler_disable_options") = ProfilerDisableOptions());
   m.def("_profiler_enabled", profilerEnabled);
+  m.def("_profiler_type", torch::profiler::impl::profilerType);
   m.def("_enable_record_function", [](bool enable) {
     at::enableRecordFunction(enable);
   });
@@ -319,6 +328,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
+
+  py::class_<at::impl::RestorePythonTLSSnapshot>(_C_m, "_RestorePythonTLSSnapshot")
+      .def(py::init<>());
 
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")

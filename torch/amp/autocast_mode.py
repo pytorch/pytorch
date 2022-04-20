@@ -172,6 +172,8 @@ class autocast(object):
             self.fast_dtype = torch.get_autocast_gpu_dtype()
         elif self.device == 'cpu':
             self.fast_dtype = torch.get_autocast_cpu_dtype()
+        elif self.device == 'xpu':
+            self.fast_dtype = torch.xpu.get_autocast_xpu_dtype()  # type: ignore[attr-defined]
         else:
             raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
         self._cache_enabled = torch.is_autocast_cache_enabled()
@@ -188,6 +190,13 @@ class autocast(object):
             if self.fast_dtype not in supported_dtype:
                 error_message = 'In CPU autocast, but the target dtype is not supported. Disabling autocast.\n'
                 error_message += 'CPU Autocast only supports dtype of torch.bfloat16 currently.'
+                warnings.warn(error_message)
+                enabled = False
+        if self.device == 'xpu':
+            supported_dtype = [torch.bfloat16, torch.float16]
+            if self.fast_dtype not in supported_dtype:
+                error_message = 'In XPU autocast, but the target dtype is not supported. Disabling autocast.\n'
+                error_message += 'XPU Autocast only supports dtype of torch.bfloat16 currently.'
                 warnings.warn(error_message)
                 enabled = False
         if self.device == 'cuda':
@@ -207,6 +216,12 @@ class autocast(object):
             torch.set_autocast_cpu_enabled(self._enabled)
             torch.set_autocast_cpu_dtype(self.fast_dtype)  # type: ignore[arg-type]
             torch.autocast_increment_nesting()
+        elif self.device == 'xpu':
+            self.prev = torch.xpu.is_autocast_xpu_enabled()    # type: ignore[attr-defined]
+            self.prev_fastdtype = torch.xpu.get_autocast_xpu_dtype()  # type: ignore[attr-defined]
+            torch.xpu.set_autocast_xpu_enabled(self._enabled)  # type: ignore[attr-defined]
+            torch.xpu.set_autocast_xpu_dtype(self.fast_dtype)  # type: ignore[attr-defined]
+            torch.autocast_increment_nesting()
         else:
             self.prev = torch.is_autocast_enabled()
             self.prev_fastdtype = torch.get_autocast_gpu_dtype()
@@ -225,6 +240,11 @@ class autocast(object):
                 torch.clear_autocast_cache()
             torch.set_autocast_cpu_enabled(self.prev)
             torch.set_autocast_cpu_dtype(self.prev_fastdtype)
+        elif self.device == 'xpu':
+            if torch.autocast_decrement_nesting() == 0:
+                torch.clear_autocast_cache()
+            torch.xpu.set_autocast_xpu_enabled(self.prev)            # type: ignore[attr-defined]
+            torch.xpu.set_autocast_xpu_dtype(self.prev_fastdtype)    # type: ignore[attr-defined]
         else:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
