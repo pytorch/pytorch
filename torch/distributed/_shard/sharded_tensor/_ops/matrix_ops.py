@@ -281,6 +281,9 @@ def sharded_view_check(*args, **kwargs):
 def sharded_view(args, kwargs, pg):
     """
     Handles ``__torch_function__`` dispatch for the sharded_view op.
+    For now we always keep the sharding dim after view. For example, if
+    a sharded tensor with size [16, 5] and sharded by 0. If we now view
+    it as [4, 2, 2, 5], it will still be sharded by dim 0.
 
     Args: same as ``torch.Tensor.view``.
 
