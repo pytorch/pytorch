@@ -1810,7 +1810,7 @@
 - func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   dispatch:
     CompositeExplicitAutograd: embedding
-    NestedTensor: NestedTensor_embedding
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_embedding
 
 - func: embedding_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
 
@@ -2058,6 +2058,13 @@
     CPU, CUDA: expm1_out
     SparseCPU, SparseCUDA: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr_out
+
+- func: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: expand_symint
 
 - func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -3435,14 +3442,14 @@
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
-- func: native_pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
+- func: _native_pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
   dispatch:
     CPU: pixel_shuffle_cpu
     CompositeImplicitAutograd: math_pixel_shuffle
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
 
-- func: native_pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
+- func: _native_pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
   dispatch:
     CPU: pixel_unshuffle_cpu
     CompositeImplicitAutograd: math_pixel_unshuffle
@@ -3743,7 +3750,7 @@
     CPU, CUDA: relu
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: relu_quantized_cpu
-    NestedTensor: NestedTensor_relu
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3752,7 +3759,7 @@
     CPU, CUDA: relu_
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: relu_quantized_cpu_
-    NestedTensor: NestedTensor_relu_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu_
 
 - func: relu6(Tensor self) -> Tensor
   python_module: nn
@@ -3786,7 +3793,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    NestedTensor: NestedTensor_gelu_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_gelu_
 
 - func: gelu(Tensor self, *, str approximate='none') -> Tensor
   structured_delegate: gelu.out
@@ -3795,7 +3802,7 @@
   dispatch:
     MkldnnCPU: mkldnn_gelu
     QuantizedCPU: gelu_quantized_cpu
-    NestedTensor: NestedTensor_gelu
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_gelu
 
 - func: gelu_backward.grad_input(Tensor grad_output, Tensor self, *, str approximate='none', Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -4662,7 +4669,7 @@
 # _nested_from_padded_and_nested_example is available for testing.
 - func: _nested_from_padded_and_nested_example(Tensor padded, Tensor nt_example) -> Tensor
   dispatch:
-    NestedTensor: NestedTensor_from_padded_and_nested_example
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_from_padded_and_nested_example
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
@@ -5386,6 +5393,8 @@
 
 - func: _validate_sparse_csr_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size) -> ()
 
+- func: _validate_sparse_compressed_tensor_args(Tensor crow_indices, Tensor col_indices, Tensor values, int[] size, Layout layout) -> ()
+
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
     SparseCPU, SparseCUDA: new_with_dims_sparse
@@ -5559,7 +5568,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: unbind
-    NestedTensor: NestedTensor_unbind
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_unbind
 
 - func: unbind.Dimname(Tensor(a -> *) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
@@ -5986,10 +5995,15 @@
   dispatch:
     CompositeExplicitAutograd: masked_scatter
 
-- func: _masked_softmax(Tensor self, Tensor mask) -> Tensor
+- func: _masked_softmax(Tensor self, Tensor mask, int? dim=None) -> Tensor
   dispatch:
     CUDA: masked_softmax_cuda
     CPU: masked_softmax_cpu
+
+- func: _masked_softmax_backward(Tensor grad_output, Tensor output, Tensor mask, int? dim=None) -> Tensor
+  dispatch:
+    CUDA: masked_softmax_backward_cuda
+    CPU: masked_softmax_backward_cpu
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
   variants: method
@@ -7850,7 +7864,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA: unfold
+    CPU, CUDA, Meta: unfold
     QuantizedCPU, QuantizedCUDA: unfold
 
 - func: unfold_backward(Tensor grad_in, int[] input_sizes, int dim, int size, int step) -> Tensor
@@ -11436,6 +11450,12 @@
     CompositeExplicitAutograd: expand_copy
   tags: view_copy
 
+- func: expand_copy.SymInt(Tensor self, SymInt[] size, *, bool implicit=False) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: expand_copy_SymInt
+  tags: view_copy
+
 - func: permute_copy(Tensor self, int[] dims) -> Tensor
   variants: function
   dispatch:
@@ -11577,9 +11597,9 @@
 - func: to_padded_tensor(Tensor self, float padding) -> Tensor
   variants: method
   dispatch:
-    NestedTensor: NestedTensor_to_padded_tensor
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_to_padded_tensor
 
 - func: _nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
   variants: method
   dispatch:
-    NestedTensor: NestedTensor_layer_norm
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_layer_norm

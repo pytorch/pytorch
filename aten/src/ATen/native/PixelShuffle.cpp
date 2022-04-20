@@ -55,7 +55,7 @@ Tensor pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
                 "pixel_shuffle expects its input's 'channel' dimension to be divisible by the square of "
                 "upscale_factor, but input.size(-3)=", c, " is not divisible by ", upscale_factor_squared);
 
-    return at::native_pixel_shuffle(self, upscale_factor);
+    return at::_native_pixel_shuffle(self, upscale_factor);
 }
 
 Tensor math_pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
@@ -112,7 +112,7 @@ Tensor pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
               "pixel_unshuffle expects width to be divisible by downscale_factor, but input.size(-1)=", w,
               " is not divisible by ", downscale_factor);
 
-  return at::native_pixel_unshuffle(self, downscale_factor);
+  return at::_native_pixel_unshuffle(self, downscale_factor);
 }
 
 Tensor math_pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {

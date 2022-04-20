@@ -3512,10 +3512,10 @@ Examples::
 """,
 )
 
-native_pixel_shuffle = _add_docstr(
-    torch.native_pixel_shuffle,
+_native_pixel_shuffle = _add_docstr(
+    torch._native_pixel_shuffle,
     r"""
-native_pixel_shuffle(input, upscale_factor) -> Tensor
+_native_pixel_shuffle(input, upscale_factor) -> Tensor
 
 Native kernel level implementation of the `pixel_shuffle`.
 This function might become private in future releases, use with caution.
@@ -3532,16 +3532,16 @@ Args:
 Examples::
 
     >>> input = torch.randn(1, 9, 4, 4)
-    >>> output = torch.nn.functional.native_pixel_shuffle(input, 3)
+    >>> output = torch.nn.functional._native_pixel_shuffle(input, 3)
     >>> print(output.size())
     torch.Size([1, 1, 12, 12])
 """,
 )
 
-native_pixel_unshuffle = _add_docstr(
-    torch.native_pixel_unshuffle,
+_native_pixel_unshuffle = _add_docstr(
+    torch._native_pixel_unshuffle,
     r"""
-native_pixel_unshuffle(input, downscale_factor) -> Tensor
+_native_pixel_unshuffle(input, downscale_factor) -> Tensor
 
 Native kernel level implementation of the `pixel_unshuffle`.
 This function might become private in future releases, use with caution.
@@ -3559,7 +3559,7 @@ Args:
 Examples::
 
     >>> input = torch.randn(1, 1, 12, 12)
-    >>> output = torch.nn.functional.native_pixel_unshuffle(input, 3)
+    >>> output = torch.nn.functional._native_pixel_unshuffle(input, 3)
     >>> print(output.size())
     torch.Size([1, 9, 4, 4])
 """,
