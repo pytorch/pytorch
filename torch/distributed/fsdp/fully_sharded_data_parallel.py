@@ -320,6 +320,13 @@ class FullyShardedDataParallel(nn.Module):
             the near future. It allows users to enable two different backward_prefetch
             algorithms to help backward communication and computation overlapping.
             Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
+        mixed_precision: (Optional[MixedPrecision]): A ``MixedPrecision`` instance
+            describing the mixed precision training config to be used. ``MixedPrecision``
+            supports configuring paramter, buffer, and gradient communication dtype. Note
+            that only floating point data is cast to the reduced precision. This allows
+            users potential memory saving and training speedup while trading off
+            accuracy during model training. If ``None``, no mixed precision is applied.
+            (Default: ``None``)
         ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
             own parameters and child modules' parameters are ignored by this
             instance. None of the modules directly in ``ignored_modules``
