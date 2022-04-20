@@ -253,7 +253,7 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
   VaryingShape<size_t> stride_indices;
   VaryingShape<int64_t> strides;
   VaryingShape<int64_t> sizes;
-  if (!t.is_mkldnn() && !t.is_sparse() && !t.is_sparse_csr()) {
+  if (t.layout() == at::kStrided) {
     sizes = VaryingShape<int64_t>{t.sizes().vec()};
     strides = VaryingShape<int64_t>{t.strides().vec()};
     return TensorType::create(
