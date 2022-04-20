@@ -246,8 +246,8 @@ class _WrappedCall:
         # constituent substrings of the error message
         tb_repr = traceback.format_exc()
         custom_msg = ("Call using an FX-traced Module, "
-                        f"line {err_lineno} of the traced Module's "
-                        "generated forward function:")
+                      f"line {err_lineno} of the traced Module's "
+                      "generated forward function:")
         before_err = "".join(all_src_lines[err_lineno - 2 : err_lineno])
         marker = "~" * err_line_len + "~~~ <--- HERE"
         err_and_after_err = "\n".join(all_src_lines[err_lineno : err_lineno + 2])
@@ -267,7 +267,7 @@ class _WrappedCall:
                 traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore[arg-type]
             if "eval_with_key" in topmost_framesummary.filename:
                 print(_WrappedCall._generate_error_message(topmost_framesummary),
-                        file=sys.stderr)
+                      file=sys.stderr)
                 raise e.with_traceback(None)
             else:
                 raise e
@@ -642,7 +642,7 @@ class {module_name}(torch.nn.Module):
 
         def call_wrapped(self, *args, **kwargs):
             return self._wrapped_call(self, *args, **kwargs)
-        
+
         cls.__call__ = call_wrapped
 
         return python_code
