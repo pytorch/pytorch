@@ -49,6 +49,7 @@ from torch.testing._internal.common_distributed import (
     simple_sparse_reduce_tests,
     skip_if_rocm,
     skip_if_small_worldsize,
+    skip_if_odd_worldsize,
     skip_if_lt_x_gpu,
     nccl_skip_if_lt_x_gpu,
     skip_if_no_gpu,
@@ -4928,6 +4929,7 @@ class DistributedTest:
             return averagers.PeriodicModelAverager(period=4, warmup_steps=10)
 
         @skip_if_lt_x_gpu(2)
+        @skip_if_odd_worldsize
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
