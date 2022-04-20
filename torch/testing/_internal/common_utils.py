@@ -1299,6 +1299,18 @@ meta_exclude_set = {
     torch.special.logit,
     torch.special.logsumexp,
     torch.special.multigammaln,
+    torch.fused_moving_avg_obs_fake_quant,
+    torch.batch_norm,
+    torch.binary_cross_entropy_with_logits,
+    torch.instance_norm,
+    torch.as_tensor,
+    torch.slogdet,
+    torch._dirichlet_grad,
+    torch._sample_dirichlet,
+    torch.binomial,
+    torch.full,
+    torch.poisson,
+    torch._standard_gamma,
     torch.spmm,
     torch.quantize_per_channel,
     torch.sqrt,
@@ -1462,7 +1474,7 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                 return t
             # TODO: zero tensors?
             elif type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
-                if t.is_sparse or t.is_sparse_csr:
+                if t.is_sparse or t.is_sparse_csr or t.device.type == "lazy":
                     hit = True
                     return t.to("meta")
                 elif t.is_complex():
