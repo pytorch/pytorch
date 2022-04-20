@@ -54,7 +54,12 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # This variable was only added in CMake 3.18
 if(NOT CUDAToolkit_LIBRARY_ROOT)
-  set(CUDAToolkit_LIBRARY_ROOT "${CUDAToolkit_ROOT}")
+  set(CUDAToolkit_LIBRARY_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
+endif()
+
+if(NOT CUDA_TOOLKIT_ROOT_DIR STREQUAL CUDAToolkit_LIBRARY_ROOT)
+  message(FATAL_ERROR "Found two conflicting CUDA installs, "
+                      "${CUDA_TOOLKIT_ROOT_DIR} and ${CUDAToolkit_LIBRARY_ROOT}")
 endif()
 
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})

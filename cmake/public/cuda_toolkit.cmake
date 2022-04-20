@@ -879,23 +879,24 @@ if(CUDAToolkit_FOUND)
 
     if (NOT TARGET CUDA::${lib_name} AND CUDA_${lib_name}_LIBRARY)
       add_library(CUDA::${lib_name} UNKNOWN IMPORTED)
-      set_property(TARGET CUDA::${lib_name} PROPERTY
+      set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
           INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
-      set_property(TARGET CUDA::${lib_name} PROPERTY
+      set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
           INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
       if(DEFINED CUDAToolkit_MATH_INCLUDE_DIR)
         string(FIND ${CUDA_${lib_name}_LIBRARY} "math_libs" math_libs)
         if(NOT ${math_libs} EQUAL -1)
-          set_property(TARGET CUDA::${lib_name} PROPERTY
+          set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
               INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_MATH_INCLUDE_DIRS}")
-          set_property(TARGET CUDA::${lib_name} PROPERTY
+          set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
               INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_MATH_INCLUDE_DIRS}")
         endif()
       endif()
       set_property(TARGET CUDA::${lib_name} PROPERTY IMPORTED_LOCATION "${CUDA_${lib_name}_LIBRARY}")
       foreach(dep ${arg_DEPS})
         if(TARGET CUDA::${dep})
-          target_link_libraries(CUDA::${lib_name} INTERFACE CUDA::${dep})
+          set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+              INTERFACE_LINK_LIBRARIES CUDA::${dep})
         endif()
       endforeach()
     endif()
@@ -903,9 +904,9 @@ if(CUDAToolkit_FOUND)
 
   if(NOT TARGET CUDA::toolkit)
     add_library(CUDA::toolkit IMPORTED INTERFACE)
-    set_property(TARGET CUDA::toolkit PROPERTY
+    set_property(TARGET CUDA::toolkit APPEND PROPERTY
         INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
-    set_property(TARGET CUDA::toolkit PROPERTY
+    set_property(TARGET CUDA::toolkit APPEND PROPERTY
         INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
     if(CMAKE_VERSION VERSION_GREATER 3.13)
       target_link_directories(CUDA::toolkit INTERFACE "${CUDAToolkit_LIBRARY_DIR}")
@@ -924,11 +925,13 @@ if(CUDAToolkit_FOUND)
      AND TARGET CUDA::cudart_static)
 
     add_library(CUDA::cudart_static_deps IMPORTED INTERFACE)
-    target_link_libraries(CUDA::cudart_static INTERFACE CUDA::cudart_static_deps)
+    set_property(TARGET CUDA::cudart_static APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES CUDA::cudart_static_deps)
 
     if(UNIX AND (CMAKE_C_COMPILER OR CMAKE_CXX_COMPILER))
       find_package(Threads REQUIRED)
-      target_link_libraries(CUDA::cudart_static_deps INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
+      set_property(TARGET CUDA::cudart_static_deps APPEND PROPERTY
+          INTERFACE_LINK_LIBRARIES Threads::Threads ${CMAKE_DL_LIBS})
     endif()
 
     if(UNIX AND NOT APPLE AND NOT (CMAKE_SYSTEM_NAME STREQUAL "QNX"))
@@ -938,7 +941,8 @@ if(CUDAToolkit_FOUND)
       if(NOT CUDAToolkit_rt_LIBRARY)
         message(WARNING "Could not find librt library, needed by CUDA::cudart_static")
       else()
-        target_link_libraries(CUDA::cudart_static_deps INTERFACE ${CUDAToolkit_rt_LIBRARY})
+        set_property(TARGET CUDA::cudart_static_deps APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES ${CUDAToolkit_rt_LIBRARY})
       endif()
     endif()
   endif()
