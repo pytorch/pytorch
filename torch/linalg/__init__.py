@@ -1435,7 +1435,7 @@ Examples::
 """)
 
 svd = _add_docstr(_linalg.linalg_svd, r"""
-linalg.svd(A, full_matrices=True, *, out=None) -> (Tensor, Tensor, Tensor)
+linalg.svd(A, full_matrices=True, *, driver=None, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition (SVD) of a matrix.
 
@@ -1479,6 +1479,22 @@ Differences with `numpy.linalg.svd`:
   and it doesn't support `compute_uv` argument.
   Please use :func:`torch.linalg.svdvals`, which computes only the singular values,
   instead of `compute_uv=False`.
+
+.. note:: Selection of `driver` (this keyword argument only works on CUDA inputs with cuSOLVER backend):
+
+    - When `driver` is not given or set to `None` (*default*), a heuristic of drivers will be selected based on
+      matrix sizes and batch sizes of the inputs.
+      The default choice should be efficient and precise for most inputs. However, if input matrices
+      have large condition numbers or could be ill-conditioned, it's recommended to choose the `gesvd` driver.
+    - The `gesvd` driver directly calls the cuSOLVER `cusolverDn<t>gesvd` method. This QR-based algorithm is
+      less performant on GPU, but it can converge ill-conditioned matrices and get high precision for those inputs.
+    - The `gesvdj` driver directly calls the cuSOLVER `cusolverDn<t>gesvdj` method. This Jacobi-based algorithm
+      has better performance than `gesvd` on GPU, but it may get less accurate results for ill-conditioned matrices or
+      matrices with very large sizes (be cautious if matrix size > 2048).
+    - The `gesvdjBatched` driver directly calls the cuSOLVER `cusolverDn<t>gesvdjBatched` method. It only works for
+      batched square matrices with size less than or equal to 32.
+    - The `gesvdaBatched` driver directly calls the cuSOLVER `cusolverDn<t>gesvdaStridedBatch` method. This is an
+      approximation method that only works when the input matrices satisfy `m > n` ("tall skinny").
 
 .. note:: When :attr:`full_matrices`\ `= True`, the gradients with respect to `U[..., :, min(m, n):]`
           and `Vh[..., min(m, n):, :]` will be ignored, as those vectors can be arbitrary bases
@@ -1533,6 +1549,10 @@ Args:
                                     `U` and `Vh`. Default: `True`.
 
 Keyword args:
+    driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
+        If `None`, a default heuristic of algorithms will be used.
+        Available options are: `None`, `gesvd`, `gesvdj`, `gesvdjBatched`, and `gesvdaBatched`.
+        Default: `None`.
     out (tuple, optional): output tuple of three tensors. Ignored if `None`.
 
 Returns:
@@ -1569,7 +1589,7 @@ Examples::
 """)
 
 svdvals = _add_docstr(_linalg.linalg_svdvals, r"""
-linalg.svdvals(A, *, out=None) -> Tensor
+linalg.svdvals(A, *, driver=None, out=None) -> Tensor
 
 Computes the singular values of a matrix.
 
@@ -1588,11 +1608,16 @@ The singular values are returned in descending order.
 .. seealso::
 
         :func:`torch.linalg.svd` computes the full singular value decomposition.
+        Also check that documentation for the selection of `driver`.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
+    driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
+        If `None`, a default heuristic of algorithms will be used.
+        Available options are: `None`, `gesvd`, `gesvdj`, `gesvdjBatched`, and `gesvdaBatched`.
+        Default: `None`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Returns:
