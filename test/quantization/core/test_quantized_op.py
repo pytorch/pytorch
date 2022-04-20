@@ -1100,37 +1100,50 @@ class TestQuantizedOps(TestCase):
 
 
     """Tests the correctness of the quantized softmax op."""
-    @given(num_dims=st.integers(2, 4),
-           dims=st.lists(st.integers(2, 5), min_size=5, max_size=5))
-    def test_qsoftmax(self, num_dims, dims):
-        size = dims[:num_dims]
-        torch_dtype = torch.quint8
-        np_dtype = np.uint8
-        dim = num_dims - 1
+    @given(dims=st.lists(st.integers(2, 5), min_size=5, max_size=5))
+    def test_qsoftmax(self, dims):
+        for (num_dims, dim, memory_format) in [
+            (2, 1, torch.contiguous_format),  # 2d softmax over last dim
+            (4, 3, torch.contiguous_format),  # >2 dims, softmax along last dim
+            (5, 2, torch.contiguous_format),  # >2 dims, softmax along not last dim (requires permute)
+            (4, 3, torch.channels_last),      # >2 dims, softmax along last dim, but not contiguous
+            (4, 1, torch.channels_last),      # Channels Last, doesn't require permute
+            (5, 1, torch.channels_last_3d),   # Channels Last 3D, doesn't require permute
+        ]:
+            size = dims[:num_dims]
+            torch_dtype = torch.quint8
+            np_dtype = np.uint8
 
-        scale_X = 1.3
-        zero_point_X = 0
-        X = torch.rand(size=size, dtype=torch.float32) * 8 + zero_point_X
+            scale_X = 1.3
+            zero_point_X = 5
+            X = torch.rand(size=size, dtype=torch.float32) * 8 + zero_point_X
+            X = X.to(memory_format=memory_format)
 
-        scale_Y = 1 / 256
-        zero_point_Y = 0
+            scale_Y = 1 / 256
+            zero_point_Y = 0
 
-        qX = torch.quantize_per_tensor(X,
-                                       scale=scale_X,
-                                       zero_point=zero_point_X,
-                                       dtype=torch_dtype)
+            qX = torch.quantize_per_tensor(X,
+                                           scale=scale_X,
+                                           zero_point=zero_point_X,
+                                           dtype=torch_dtype)
 
 
-        # softmax ground truth
-        Y = torch.softmax(qX.dequantize(), dim=dim).numpy()
-        qY = _quantize(Y, scale_Y, zero_point_Y, dtype=np_dtype)
-        qY_hat = torch.ops.quantized.softmax(qX,
-                                             dim=dim,
-                                             output_scale=scale_Y,
-                                             output_zero_point=zero_point_Y)
+            # softmax ground truth
+            Y = torch.softmax(qX.dequantize(), dim=dim).numpy()
+            qY = _quantize(Y, scale_Y, zero_point_Y, dtype=np_dtype)
+            qY_hat = torch.ops.quantized.softmax(qX,
+                                                 dim=dim,
+                                                 output_scale=scale_Y,
+                                                 output_zero_point=zero_point_Y)
 
-        np.testing.assert_equal(qY, qY_hat.int_repr(),
-                                "Quantized softmax failed.")
+            np.testing.assert_equal(qY, qY_hat.int_repr(),
+                                    "Quantized softmax failed.")
+
+    """Tests the correctness of the quantized softmax op using qnnpack."""
+    @skipIfNoQNNPACK
+    def test_qsoftmax_qnnpack(self):
+        with override_quantized_engine('qnnpack'):
+            self.test_qsoftmax()
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_broadcast(self):
