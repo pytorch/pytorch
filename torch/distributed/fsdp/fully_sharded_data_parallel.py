@@ -267,7 +267,7 @@ class _ExecOrderData():
             longer check thereafter; this tracks the warning status.
     """
     _all_flat_params: List[FlatParameter] = []
-    param_to_unflat_param_names: Dict[FlatParameter, List[str]] = []
+    _param_to_unflat_param_names: Dict[FlatParameter, List[str]] = []
     # Modified in the first iteration:
     is_first_iter: bool = True
     param_order: List[int] = []
@@ -280,35 +280,50 @@ class _ExecOrderData():
             "initialized on an FSDP root module"
         # Save `_all_flat_params` instead of materializing
         # `root_modules.parameters()` each time to avoid the result depending
-        # on the calling context (e.g. some parameters may be rebuilt)
+        # on the calling context (e.g. when some parameters are rebuilt)
         self._all_flat_params = list(root_module.parameters())
-        self.param_to_unflat_param_names = cast(
+        self._param_to_unflat_param_names = cast(
             Dict[FlatParameter, List[str]],
             _get_param_to_unflat_param_names(root_module)
-        )
+        )  # `root_module.parameters()` should only contain `FlatParameter`s
 
-    def get_param_index(self, param: FlatParameter):
-        """Returns a unique parameter index for ``param``. Critically, this
-        index assignment must be the same across ranks."""
-        assert isinstance(param, FlatParameter)
+    def get_param_index(self, param: FlatParameter) -> int:
+        """Returns a unique non-negative parameter index for ``param`` if it is
+        valid or -1 otherwise. Critically, this index assignment must be the
+        same across ranks."""
+        assert isinstance(param, FlatParameter), \
+            f"Expects `param` is a `FlatParameter` but got {type(param)}"
         for i, p in enumerate(self._all_flat_params):
             if p is param:
                 return i
-        raise AssertionError(f"Invalid parameter: {param}")
+        return -1
 
-    def get_param(self, param_index: int,):
-        """Returns the parameter corresponding to ``param_index``."""
+    def get_param(self, param_index: int) -> Optional[FlatParameter]:
+        """Returns the parameter corresponding to ``param_index`` or ``None``
+        if the index is invalid."""
         for i, p in enumerate(self._all_flat_params):
             if i == param_index:
                 return p
-        raise AssertionError(f"Invalid parameter index: {param_index}")
+        return None
+
+    def get_unflat_param_names(self, param_index: int) -> List[str]:
+        """Returns a :class:`list` of unflattened parameter names comprising
+        the flattened parameter with index ``param_index`` or an empty
+        :class:`list` if ``param_index`` is invalid."""
+        param = self.get_param(param_index)
+        if param is None:
+            return []
+        assert param in self._param_to_unflat_param_names, \
+            "Internal data structures out of sync; check `init()`"
+        return self._param_to_unflat_param_names[param]
 
     def reset(self):
-        """Called in :meth:`_wait_for_post_backward` to reset data for the next
-        iteration."""
+        """Called in :meth:`_wait_for_post_backward` or in
+        :meth:`_post_backward_hook` when inside ``no_sync()`` to reset data for
+        the next iteration."""
         self.is_first_iter = False
         self.index = 0
-        # Transition to `WARNED` when `reset()` is called in post-backward
+        # `reset()` marks the end of an iteration, so transition if needed
         if self.warn_status == _ExecOrderWarnStatus.WARNING:
             self.warn_status = _ExecOrderWarnStatus.WARNED
 
@@ -2455,24 +2470,41 @@ class FullyShardedDataParallel(nn.Module):
             if eod.warn_status == _ExecOrderWarnStatus.WARNED:
                 return
             # However, we may issue multiple warnings on the first deviating
-            # iteration to help debugging
-            expected_param_index = eod.param_order[eod.index]
-            if param_index != expected_param_index:
-                expected_param = eod.get_param(expected_param_index)
-                expected_param_names = eod.param_to_unflat_param_names[expected_param]
-                param_names = eod.param_to_unflat_param_names[param]
+            # iteration to help debugging, where either:
+            # 1. This iteration sees more all-gathers than the first iteration
+            msg_prefix = all_gather_seq = None  # non-`None` means we warn
+            if eod.index >= len(eod.param_order):
+                msg_prefix = "Expected no more all-gathers but got an all-gather for "
+                all_gather_seq = eod.param_order + [param_index]
+            else:
+                expected_param_index = eod.param_order[eod.index]
+                # 2. This iteration sees the same number of all-gathers (so
+                # far) but the current parameter to all-gather differs
+                if param_index != expected_param_index:
+                    expected_param_names = eod.get_unflat_param_names(expected_param_index)
+                    assert len(expected_param_names) > 0, \
+                        "The expected parameter to all-gather should always be valid"
+                    msg_prefix = "Expected an all-gather for the FSDP module " \
+                        f"wrapping {expected_param_names} but got an all-gather for "
+                    all_gather_seq = eod.param_order[:eod.index - 1] + [param_index]
+            to_issue_warning = msg_prefix is not None
+            if to_issue_warning:
+                assert all_gather_seq is not None
+                param_names = eod.get_unflat_param_names(param_index)
+                is_added_param = len(param_names) == 0
+                if is_added_param:
+                    msg_suffix = "a newly-added parameter since construction time"
+                else:
+                    msg_suffix = f"the FSDP module wrapping {param_names}"
+                sub_msg = msg_prefix + msg_suffix
                 warnings.warn(
                     "All-gather order differs from that of the first iteration "
                     f"on rank {self.rank} -- collectives are unchecked and may "
-                    "give incorrect results or hang\n"
-                    f"Expected the FSDP module wrapping {expected_param_names} "
-                    "to all-gather but got the FSDP module wrapping "
-                    f"{param_names}\n"
-                    f"First iteration's all-gather sequence: {eod.param_order}\n"
-                    "This iteration's all-gather sequence (so far): "
-                    f"{eod.param_order[:eod.index - 1] + [param_index]}\n"
-                    "where indices follow the root FSDP module's "
-                    "`.parameters()` order\n"
+                    "give incorrect results or hang\n" + sub_msg + "\n" +
+                    f"First iteration's all-gather sequence: {eod.param_order}"
+                    "\nThis iteration's all-gather sequence (so far): "
+                    f"{all_gather_seq}\nwhere indices follow the root FSDP "
+                    "module's `.parameters()` order"
                 )
                 eod.warn_status = _ExecOrderWarnStatus.WARNING
             eod.index += 1
@@ -2486,10 +2518,8 @@ class FullyShardedDataParallel(nn.Module):
                 ((rank, indices[rank]) for rank in range(self.world_size)), 2,
             ):
                 if not torch.equal(i1, i2):
-                    r1_param = eod.get_param(i1)
-                    r1_param_names = eod.param_to_unflat_param_names[r1_param]
-                    r2_param = eod.get_param(i2)
-                    r2_param_names = eod.param_to_unflat_param_names[r2_param]
+                    r1_param_names = eod.get_unflat_param_names(i1)
+                    r2_param_names = eod.get_unflat_param_names(i2)
                     raise RuntimeError(
                         f"All-gather order differs across ranks: rank {r1} is "
                         f"all-gathering the flattened parameter wrapping "
