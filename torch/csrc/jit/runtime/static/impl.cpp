@@ -1197,17 +1197,14 @@ template <typename IValueList>
 c10::IValue BlockRunner::run_impl_record_functions(
     IValueList&& args,
     const KeywordArgs& kwargs) {
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(
-        at::RecordScope::STATIC_RUNTIME_MODEL, pre_sampled);
-    if (guard.isActive()) {
-      if (guard.needsInputs()) {
-        guard.before("forward", &args);
-      } else {
-        guard.before("forward");
-      }
-    }
+  auto step_callbacks =
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
+  if (!step_callbacks.empty()) {
+    at::RecordFunction guard(std::move(step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    guard.needsInputs() ? guard.before("forward", &args)
+                        : guard.before("forward");
+
     return run_impl(std::forward<IValueList>(args), kwargs);
   }
   return run_impl(std::forward<IValueList>(args), kwargs);
@@ -1842,16 +1839,14 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 
 void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(at::RecordScope::STATIC_RUNTIME_OP, pre_sampled);
-    if (guard.isActive()) {
-      if (guard.needsInputs()) {
-        guard.before(get_op_name(), inputs_ivalue_vec());
-      } else {
-        guard.before(get_op_name());
-      }
-    }
+  auto step_callbacks =
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
+  if (!step_callbacks.empty()) {
+    at::RecordFunction guard(std::move(step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    guard.needsInputs() ? guard.before(get_op_name(), inputs_ivalue_vec())
+                        : guard.before(get_op_name());
+
     fn_->run(this);
   } else {
     fn_->run(this);
