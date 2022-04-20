@@ -4084,6 +4084,7 @@
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_size_int
 
 - func: nested_size(Tensor self) -> Tensor[]
+  variants: method
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_nested_size
 
