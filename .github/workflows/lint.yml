@@ -20,6 +20,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          needs-history-and-master: true
 
       - name: Install lintrunner
         run: pip install lintrunner==0.6.*

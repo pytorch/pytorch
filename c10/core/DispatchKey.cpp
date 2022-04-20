@@ -101,6 +101,10 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::NestedTensor:
       return "NestedTensor";
+    case DispatchKey::NestedTensorCPU:
+      return "NestedTensorCPU";
+    case DispatchKey::NestedTensorCUDA:
+      return "NestedTensorCUDA";
 
     case DispatchKey::Python:
       return "Python";
@@ -173,6 +177,9 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::AutocastCPU:
       return "AutocastCPU";
+
+    case DispatchKey::AutocastXPU:
+      return "AutocastXPU";
 
     case DispatchKey::Batched:
       return "Batched";
@@ -272,6 +279,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
+      {"AutocastXPU", c10::DispatchKey::AutocastXPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
@@ -294,6 +302,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"HPU", c10::DispatchKey::HPU},
       {"Lazy", c10::DispatchKey::Lazy},
       {"NestedTensor", c10::DispatchKey::NestedTensor},
+      {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
+      {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
       {"PrivateUse2", c10::DispatchKey::PrivateUse2},
       {"PrivateUse3", c10::DispatchKey::PrivateUse3},
