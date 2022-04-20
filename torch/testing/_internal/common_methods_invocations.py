@@ -14495,7 +14495,22 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
            sample_inputs_func=sample_inputs_conversion,
-           supports_autograd=False,
+           skips=(
+               # autograd tests don't handle operators that change dtype
+               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+               # use of lambda doesn't work with test_normalize_operator_exhaustive
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # RuntimeError: "index_select" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', dtypes=(torch.float, torch.cfloat)),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+           )
            ),
     OpInfo('empty_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
