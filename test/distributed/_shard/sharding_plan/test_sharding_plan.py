@@ -179,7 +179,7 @@ class TestShardingPlan(ShardedTensorTestBase):
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
-    def test_reshard_sharding_plan(self):
+    def test_reshard_to_ddp_sharding_plan(self):
         colwise_sharding_spec = generate_chunk_sharding_specs_for_test(0)[0]
         rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)[0]
 
@@ -232,3 +232,62 @@ class TestShardingPlan(ShardedTensorTestBase):
 
         # verify and make sure local and sharded output matches
         self.assertEqual(local_output, sharded_output)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_sharding_plan_errors(self):
+        rowwise_sharding_spec = generate_chunk_sharding_specs_for_test(1)[0]
+        sharding_plan_wrong_plan = ShardingPlan(
+            plan={
+                "fc1.weight": torch.randn(3, 4),
+            },
+            output_plan={
+                "": rowwise_sharding_spec
+            },
+        )
+
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).cuda(self.rank)
+
+        with self.assertRaisesRegex(
+            TypeError, "Only `ShardingSpec` is supported to shard"
+        ):
+            # shard the module with the provided sharding plan
+            shard_module(megatron_lm, sharding_plan_wrong_plan)
+
+        sharding_plan_wrong_output_plan = ShardingPlan(
+            plan={
+                "fc1.weight": rowwise_sharding_spec,
+            },
+            output_plan={
+                "": torch.randn(3, 4)
+            },
+        )
+
+        with self.assertRaisesRegex(
+            TypeError, "Only `ShardingSpec` is supported as output_plan"
+        ):
+            # shard the module with the provided sharding plan
+            shard_module(megatron_lm, sharding_plan_wrong_output_plan)
+
+        sharding_plan_wrong_module_path = ShardingPlan(
+            plan={
+                "fc3.weight": rowwise_sharding_spec,
+            },
+        )
+        with self.assertRaisesRegex(
+            AttributeError, "has no attribute"
+        ):
+            # shard the module with the provided sharding plan
+            shard_module(megatron_lm, sharding_plan_wrong_module_path)
+
+        sharding_plan_wrong_param_path = ShardingPlan(
+            plan={
+                "fc1.biass": rowwise_sharding_spec,
+            },
+        )
+        with self.assertRaisesRegex(
+            AttributeError, "has no attribute"
+        ):
+            # shard the module with the provided sharding plan
+            shard_module(megatron_lm, sharding_plan_wrong_param_path)

@@ -106,7 +106,7 @@ def shard_parameter(
     """
     # Perform some validation first.
     if not hasattr(module, param_name):
-        raise ValueError(f'module: {module} does not have parameter with name: {param_name}')
+        raise AttributeError(f'{module._get_name()} has no attribute `{param_name}`')
 
     tensor = getattr(module, param_name)
     if not isinstance(tensor, torch.Tensor):
@@ -256,32 +256,33 @@ def shard_module(
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
     """
-    for mod_prefix, mod in module.named_modules():
-        # memo is used to avoid duplicate params between modules, this logic
-        # is mostly copied from the module._named_members(), with adaptions
-        # to handle parameter sharding.
-        memo = set()
-        # check if specified module parameters for sharding
-        param_keys = list(mod._parameters.keys())
-        for k in param_keys:
-            v = mod._parameters[k]
-            name = mod_prefix + ('.' if mod_prefix else '') + k
-            if v is None or v in memo:
-                continue
-            memo.add(v)
-            if name in plan.plan:
-                shard_parameter(
-                    mod,
-                    k,
-                    plan.plan[name],
-                    src_rank=src_rank,
-                    process_group=process_group
-                )
+    # shard the parameter according to the ShardingPlan
+    for name, spec in plan.plan.items():
+        if isinstance(spec, ShardingSpec):
+            # if found a sharding spec, try to shard the parameter
+            module_path, _, param_name = name.rpartition(".")
+            mod = module.get_submodule(module_path)
+            shard_parameter(
+                mod,
+                param_name,
+                plan.plan[name],
+                src_rank=src_rank,
+                process_group=process_group
+            )
+        else:
+            raise TypeError(f"Only `ShardingSpec` is supported to shard '{name}'")
 
-        # reshard output if there's an entry in `reshard_output` for this module
-        if plan.output_plan is not None and mod_prefix in plan.output_plan:
-            _reshard_output(mod, plan.output_plan[mod_prefix])
-        # convert the output back to data parallel by calling `_collect_local_shard`
-        # if it's specified in the plan.
-        if plan.return_local_tensor is not None and mod_prefix in plan.return_local_tensor:
+    # reshard output if there's an entry in `reshard_output` for this module
+    if plan.output_plan is not None:
+        for module_path, output_spec in plan.output_plan.items():
+            if isinstance(output_spec, ShardingSpec):
+                mod = module.get_submodule(module_path)
+                _reshard_output(mod, output_spec)
+            else:
+                raise TypeError(f"Only `ShardingSpec` is supported as output_plan for '{module_path}'")
+    # convert the output back to data parallel by calling `_collect_local_shard`
+    # if it's specified in the plan.
+    if plan.return_local_tensor is not None:
+        for module_path in plan.return_local_tensor:
+            mod = module.get_submodule(module_path)
             _collect_local_shard(mod)
