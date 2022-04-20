@@ -278,9 +278,9 @@ class _ExecOrderData():
     def init(self, root_module: "FullyShardedDataParallel"):
         assert root_module._is_root, "This data structure should only be " \
             "initialized on an FSDP root module"
-        # Save `_all_flat_params` instead of materializing
-        # `root_modules.parameters()` each time to avoid the result depending
-        # on the calling context (e.g. when some parameters are rebuilt)
+        # Save `root_modules.parameters()` to `_all_flat_params` instead of
+        # re-materializing each time to avoid the result depending on the
+        # calling context (e.g. when some parameters have been rebuilt)
         self._all_flat_params = list(root_module.parameters())
         self._param_to_unflat_param_names = cast(
             Dict[FlatParameter, List[str]],
