@@ -898,6 +898,7 @@ class MultiheadAttention(Module):
 
     ``forward()`` will use a special optimized implementation if all of the following
     conditions are met:
+
     - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This restriction will be loosened in the future.)
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
