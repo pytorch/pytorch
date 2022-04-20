@@ -1086,7 +1086,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__format__: lambda self, format_spec: -1,
         Tensor.__reduce_ex__: lambda self, proto: -1,
         Tensor.__reversed__: lambda self: -1,
-        Tensor.__repr__: lambda self: -1,
+        Tensor.__repr__: lambda self, *, tensor_contents=None: -1,
         Tensor.__setitem__: lambda self, k, v: -1,
         Tensor.__setstate__: lambda self, d: -1,
         Tensor.T.__get__: lambda self: -1,
