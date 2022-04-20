@@ -1,11 +1,11 @@
 
 # If using a recent CMake, use system FindCUDAToolkit.cmake
-# if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
+# if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.17)
 #     find_package(CUDAToolkit)
 #     return()
 # endif()
 
-# Otherwise, use a version vendored from a recent CMake
+# Otherwise, use a back-ported version of FindCUDAToolkit.cmake
 
 # Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
 # file Copyright.txt or https://cmake.org/licensing for details.
@@ -793,7 +793,7 @@ endif()
 # Create a separate variable so this directory can be selectively added to math targets.
 if(NOT EXISTS "${CUDAToolkit_INCLUDE_DIR}/cublas_v2.h")
   set(CUDAToolkit_MATH_INCLUDE_DIR "${CUDAToolkit_TARGET_DIR}/../../math_libs/include")
-  cmake_path(NORMAL_PATH CUDAToolkit_MATH_INCLUDE_DIR)
+  get_filename_component(CUDAToolkit_MATH_INCLUDE_DIR "${CUDAToolkit_MATH_INCLUDE_DIR}" ABSOLUTE)
   if(NOT EXISTS "${CUDAToolkit_MATH_INCLUDE_DIR}/cublas_v2.h")
     if(NOT CUDAToolkit_FIND_QUIETLY)
       message(STATUS "Unable to find cublas_v2.h in either \"${CUDAToolkit_INCLUDE_DIR}\" or \"${CUDAToolkit_MATH_INCLUDE_DIR}\"")
@@ -879,11 +879,17 @@ if(CUDAToolkit_FOUND)
 
     if (NOT TARGET CUDA::${lib_name} AND CUDA_${lib_name}_LIBRARY)
       add_library(CUDA::${lib_name} UNKNOWN IMPORTED)
-      target_include_directories(CUDA::${lib_name} SYSTEM INTERFACE "${CUDAToolkit_INCLUDE_DIRS}")
+      set_property(TARGET CUDA::${lib_name} PROPERTY
+          INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
+      set_property(TARGET CUDA::${lib_name} PROPERTY
+          INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
       if(DEFINED CUDAToolkit_MATH_INCLUDE_DIR)
         string(FIND ${CUDA_${lib_name}_LIBRARY} "math_libs" math_libs)
         if(NOT ${math_libs} EQUAL -1)
-          target_include_directories(CUDA::${lib_name} SYSTEM INTERFACE "${CUDAToolkit_MATH_INCLUDE_DIR}")
+          set_property(TARGET CUDA::${lib_name} PROPERTY
+              INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_MATH_INCLUDE_DIRS}")
+          set_property(TARGET CUDA::${lib_name} PROPERTY
+              INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_MATH_INCLUDE_DIRS}")
         endif()
       endif()
       set_property(TARGET CUDA::${lib_name} PROPERTY IMPORTED_LOCATION "${CUDA_${lib_name}_LIBRARY}")
@@ -897,8 +903,13 @@ if(CUDAToolkit_FOUND)
 
   if(NOT TARGET CUDA::toolkit)
     add_library(CUDA::toolkit IMPORTED INTERFACE)
-    target_include_directories(CUDA::toolkit SYSTEM INTERFACE "${CUDAToolkit_INCLUDE_DIRS}")
-    target_link_directories(CUDA::toolkit INTERFACE "${CUDAToolkit_LIBRARY_DIR}")
+    set_property(TARGET CUDA::toolkit PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
+    set_property(TARGET CUDA::toolkit PROPERTY
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_INCLUDE_DIRS}")
+    if(CMAKE_VERSION VERSION_GREATER 3.13)
+      target_link_directories(CUDA::toolkit INTERFACE "${CUDAToolkit_LIBRARY_DIR}")
+    endif()
   endif()
 
   _CUDAToolkit_find_and_add_import_lib(cuda_driver ALT cuda)
