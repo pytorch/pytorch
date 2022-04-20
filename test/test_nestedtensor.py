@@ -377,15 +377,9 @@ class TestMHADeviceType(TestCase):
                 # set up shape vars
                 if query.is_nested:
                     bsz = torch.ops.aten.nested_tensor_size(query, 0)
-                    tgt_len = torch.ops.aten.nested_tensor_size(query, 1)
                     embed_dim = torch.ops.aten.nested_tensor_size(query, 2)
                 else:
                     bsz, tgt_len, embed_dim = query.shape
-
-                if key.is_nested:
-                    src_len = torch.ops.aten.nested_tensor_size(key, 1)
-                else:
-                    _, src_len, _ = key.shape
 
                 # assert embed_dim == embed_dim_to_check, \
                 #     f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
@@ -393,8 +387,15 @@ class TestMHADeviceType(TestCase):
                 assert head_dim * num_heads == embed_dim, f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
                 # assert key.shape == value.shape, f"key shape {key.shape} does not match value shape {value.shape}"
 
-                q, k, v = torch.nn.functional._in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+                if query.is_nested:
+                    assert query is key
+                    assert key is value
+                    q, k, v = torch.nn.functional.linear(query, in_proj_weight, in_proj_bias).to_padded_tensor(0).chunk(3, dim=-1)
+                else:
+                    q, k, v = torch.nn.functional._in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
 
+                tgt_len = q.size(1)
+                src_len = k.size(1)
 
                 attn_mask = None
                 if key_padding_mask is not None:
@@ -440,11 +441,7 @@ class TestMHADeviceType(TestCase):
 
                 if query.is_nested:
                     attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1)).transpose(0, 1).contiguous()
-                    print("attn_output.size()")
-                    print(attn_output.size())
                     query_nested_size = torch.ops.aten.nested_size(query)
-                    print("query_nested_size")
-                    print(query_nested_size)
                     attn_output = torch._nested_from_padded_and_nested_example(attn_output, query)
                     # res_nested_size = torch.ops.aten.nested_size(res)
                     # print("res_nested_size")
