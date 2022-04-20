@@ -1618,6 +1618,20 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
     return _get_overridable_functions()[0]
 
 def resolve_name(f):
+    """Get a human readable string name for a function passed to
+    __torch_function__
+
+    Arguments
+    ---------
+    callable : Callable
+        Function to resolve the name of.
+
+    Returns
+    -------
+    str
+        Name of the function; if eval'ed it should give back the input
+        function.
+    """
     return _get_overridable_functions()[1].get(f)
 
 @functools.lru_cache(None)

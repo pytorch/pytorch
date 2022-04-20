@@ -1291,6 +1291,7 @@ meta_exclude_set = {
     torch.sinc,
     torch.sinh,
     torch.slice_scatter,
+    torch.Tensor.relu,
     torch.solve,
     torch.sort,
     torch.special.i1,
@@ -1404,18 +1405,74 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 
         hit = False
 
+        # Doesn't actually return a storage
+        @functools.cache
+        def meta_storage(s):
+            return torch.empty(s.size(), dtype=s.dtype, device='meta')
+
+        def safe_is_leaf(t):
+            try:
+                return t.is_leaf
+            except RuntimeError:
+                # inference mode can trigger this
+                return False
+
+        @functools.cache
+        def meta_tensor(t):
+            with torch.inference_mode(t.is_inference()):
+                s = meta_storage(t.storage())
+                is_leaf = safe_is_leaf(t) 
+                if is_leaf or not t._is_view():
+                    r = torch.empty(
+                        (0,), dtype=t.dtype, device='meta'
+                    )
+                    torch._C._set_storage_via_tensor(
+                        r, s, t.storage_offset(), t.size(), t.stride()
+                    )
+                    r.requires_grad = t.requires_grad
+                    if not is_leaf and t.requires_grad:
+                        with torch.enable_grad():
+                            r = r.clone()
+                else:
+                    base = torch.empty(
+                        (0,), dtype=t.dtype, device='meta'
+                    )
+                    torch._C._set_storage_via_tensor(
+                        base, s, 0, s.size(), (1,)
+                    )
+                    base.requires_grad = t.requires_grad
+                    with torch.enable_grad():
+                        if t._is_view() and not safe_is_leaf(t._base):
+                            base = base.clone()
+                        r = base.as_strided(t.size(), t.stride(), t.storage_offset())
+                torch._C._set_conj(r, t.is_conj())
+                torch._C._set_neg(r, t.is_neg())
+            return r
+
         def to_meta(t):
             nonlocal hit
-            if isinstance(t, torch.Tensor) and not isinstance(t, torch.nn.parameter.UninitializedBuffer):
-                hit = True
-                # Now, you might think that to('meta') is enough, but it
-                # isn't, because this will destroy stride/view/base
-                # information.  For now, excluding as_strided but more stuff
-                # might need to get axed.
-                if t.is_leaf:
-                    return t.to('meta').requires_grad_(t.requires_grad)
-                else:
-                    return t.to('meta')
+            if isinstance(t, torch.nn.parameter.UninitializedBuffer):
+                return t
+            # TODO: zero tensors?
+            elif type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
+                if t.is_sparse or t.is_sparse_csr:
+                    return t.to("meta")
+                elif t.is_complex():
+                    # TODO: get rid of this, storage stuf should work, just
+                    # need to make storage on complex not complain
+                    return t.to("meta")
+                elif not any([
+                    t.is_mkldnn, t.is_quantized, t.is_nested
+                ]):
+                    hit = True
+                    r = meta_tensor(t)
+                    if type(t) is torch.nn.Parameter:
+                        r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
+                    return r
+                return t
+            elif isinstance(t, torch.Tensor):
+                # It's some subclass; convert it to meta and pray (lol)
+                return t.to("meta")
             else:
                 return t
 
