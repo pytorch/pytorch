@@ -375,13 +375,23 @@ class TestMHADeviceType(TestCase):
                 in_proj_bias = self.qkv.bias
 
                 # set up shape vars
-                bsz, tgt_len, embed_dim = query.shape
-                _, src_len, _ = key.shape
+                if query.is_nested:
+                    bsz = torch.ops.aten.nested_tensor_size(query, 0)
+                    tgt_len = torch.ops.aten.nested_tensor_size(query, 1)
+                    embed_dim = torch.ops.aten.nested_tensor_size(query, 2)
+                else:
+                    bsz, tgt_len, embed_dim = query.shape
+
+                if key.is_nested:
+                    src_len = torch.ops.aten.nested_tensor_size(key, 1)
+                else:
+                    _, src_len, _ = key.shape
+
                 # assert embed_dim == embed_dim_to_check, \
                 #     f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
                 head_dim = embed_dim // num_heads
                 assert head_dim * num_heads == embed_dim, f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
-                assert key.shape == value.shape, f"key shape {key.shape} does not match value shape {value.shape}"
+                # assert key.shape == value.shape, f"key shape {key.shape} does not match value shape {value.shape}"
 
                 q, k, v = torch.nn.functional._in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
 

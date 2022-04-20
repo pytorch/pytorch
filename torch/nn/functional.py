@@ -4890,7 +4890,10 @@ def _in_projection_packed(
         - in output list :math:`[q', k', v']`, each output tensor will have the
             same shape as the corresponding input tensor.
     """
-    E = q.size(-1)
+    if q.is_nested:
+        src_len = torch.ops.aten.nested_tensor_size(q, q.dim() - 1)
+    else:
+        E = q.size(-1)
     if k is v:
         if q is k:
             # self-attention
