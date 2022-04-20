@@ -115,7 +115,7 @@ Tensor bmm_nt(const Tensor& a, const Tensor& b) {
   return c_.view({a.size(0), a.size(1), a.size(2), b.size(2)});
 }
 
-void masked_softmax_dropout(
+Tensor masked_softmax(
     Tensor& attn_scores,
     c10::optional<Tensor> attn_mask,
     const Tensor& query) {
@@ -153,9 +153,9 @@ void masked_softmax_dropout(
     attn_mask = at::expand_inplace(attn_scores, *attn_mask)->contiguous();
   }
   if (attn_mask) {
-    attn_scores = _masked_softmax(attn_scores, *attn_mask);
+    return _masked_softmax(attn_scores, *attn_mask);
   } else {
-    _softmax_out(attn_scores, attn_scores, attn_scores.dim() - 1, false);
+    return _softmax_out(attn_scores, attn_scores, attn_scores.dim() - 1, false);
   }
 }
 
@@ -442,7 +442,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
   // shape: [B, num_head, T, T]
   // TODO: long-term, have a kernel that works with
   // NestedTensor directly if there is no mask passed
-  masked_softmax_dropout(qkt, mask, query);
+  qkt = masked_softmax(qkt, mask, query);
 #ifdef DEBUG_PRINT_EACH_STEP
   std::cerr << "qkt after softmax: " << qkt << std::endl;
 #endif

@@ -2,6 +2,8 @@
 
 #include <c10/macros/Macros.h>
 
+#include <vector>
+
 namespace at {
 namespace native {
 struct NestedTensorImpl;

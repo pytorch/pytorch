@@ -840,9 +840,6 @@ class TestQuantizedOps(TestCase):
         add_relu = torch.ops.quantized.add_relu
         add = torch.ops.quantized.add
 
-        # NB: This is a strange size so that we exercise both the vectorized
-        # implementation (64-element chunks at at time) as well as the scalar
-        # implementation
         A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
         B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
         scale_A = 2.5
@@ -3544,8 +3541,13 @@ class TestQuantizedLinear(TestCase):
                 Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
 
     @given(batch_size=st.integers(1, 4),
-           input_channels=st.integers(16, 32),
-           output_channels=st.integers(4, 8),
+           # in cudnn v. 8.4.0, there is a limitation that input channels
+           # should be a multiple of 4 for int8 tensors. in cudnn v.8.3.3
+           # this should be a multiple of 16
+           input_channels=st.sampled_from([4, 8, 12, 16, 32]),
+           # constraints on output channels appear to be relax, as it seems we can use any positive integer here
+           # except 1. It is not clear why 1 will not work. TODO: check with Yang
+           output_channels=st.integers(2, 36),
            use_bias=st.booleans(),
            use_relu=st.booleans(),
            use_multi_dim_input=st.booleans(),
