@@ -35,8 +35,8 @@ using namespace native;
     if (topKSize.size() > 0) {
       topKSize[dim] = k;
     }
-    set_output(0, topKSize, self.options());
-    set_output(1, topKSize, self.options().dtype(at::kLong));
+    set_output_raw_strided(0, topKSize, {}, self.options());
+    set_output_raw_strided(1, topKSize, {}, self.options().dtype(at::kLong));
   }
 } // namespace meta
 

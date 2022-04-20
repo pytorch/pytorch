@@ -109,7 +109,7 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr)
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
-  set_output(size + 1, options);
+  set_output_raw_strided(0, size + 1, {}, options);
 }
 
 TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
@@ -122,7 +122,7 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
   TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
-  set_output(0, {2, col_indices.numel()}, {}, options, {});
+  set_output_raw_strided(0, {2, col_indices.numel()}, {}, options, {});
 }
 
 } // namespace meta

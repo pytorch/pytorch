@@ -144,7 +144,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
         .memory_format(memory_format);
   }
 
-  set_output(0, sizes, {}, options, maybe_outnames);
+  set_output_raw_strided(0, sizes, {}, options, maybe_outnames);
   // Checks for overlaps between the inputs and the output tensor.
   if (is_out_defined && found_valid_tensor) {
     at::assert_no_internal_overlap(result);

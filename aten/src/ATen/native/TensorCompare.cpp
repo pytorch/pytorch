@@ -38,7 +38,7 @@ TORCH_META_FUNC2(isin, Tensor_Tensor) (
 ) {
   check_for_unsupported_isin_dtype(elements.scalar_type());
   check_for_unsupported_isin_dtype(test_elements.scalar_type());
-  set_output(elements.sizes(), TensorOptions(elements.device()).dtype(ScalarType::Bool));
+  set_output_raw_strided(0, elements.sizes(), {}, TensorOptions(elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC2(isin, Tensor_Scalar) (
@@ -46,7 +46,7 @@ TORCH_META_FUNC2(isin, Tensor_Scalar) (
 ) {
   check_for_unsupported_isin_dtype(elements.scalar_type());
   check_for_unsupported_isin_dtype(test_elements.type());
-  set_output(elements.sizes(), TensorOptions(elements.device()).dtype(ScalarType::Bool));
+  set_output_raw_strided(0, elements.sizes(), {}, TensorOptions(elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC2(isin, Scalar_Tensor) (
@@ -54,7 +54,7 @@ TORCH_META_FUNC2(isin, Scalar_Tensor) (
 ) {
   check_for_unsupported_isin_dtype(elements.type());
   check_for_unsupported_isin_dtype(test_elements.scalar_type());
-  set_output({0}, TensorOptions(test_elements.device()).dtype(ScalarType::Bool));
+  set_output_raw_strided(0, {0}, {}, TensorOptions(test_elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC(isposinf) (const Tensor& self) {

@@ -171,7 +171,7 @@ void meta_func_cum_ops(
     out_dtype = dtype.value_or(is_integral ? ScalarType::Long : self.scalar_type());
   }
 
-  meta.set_output(self.sizes(), self.options().dtype(out_dtype));
+  meta.set_output_raw_strided(0, self.sizes(), {}, self.options().dtype(out_dtype));
   namedinference::propagate_names(result, self);
 }
 
@@ -262,8 +262,8 @@ TORCH_META_FUNC(aminmax)
     }
   }
   const auto options = self.options();
-  this->set_output(0, shape, options);
-  this->set_output(1, shape, options);
+  this->set_output_raw_strided(0, shape, {}, options);
+  this->set_output_raw_strided(1, shape, {}, options);
 }
 
 TORCH_META_FUNC(amax)
