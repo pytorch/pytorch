@@ -26,6 +26,7 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
         }
       ); // lerp_tensor_string
   AT_DISPATCH_COMPLEX_TYPES(dtype, "lerp_cuda", [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
         jitted_gpu_kernel<
           /*name=*/ lerp_tensor_name,
           /*return_dtype=*/ scalar_t,
@@ -34,16 +35,20 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
       });
 #else
   AT_DISPATCH_COMPLEX_TYPES(dtype, "lerp_cuda", [&] {
+      using opmath_t = at::opmath_type<scalar_t>;
       at::native::gpu_kernel(
         iter,
         [] GPU_LAMBDA(
             scalar_t self_val,
             scalar_t end_val,
             scalar_t weight_val) -> scalar_t {
-          return (std:abs(weight_val) < 0.5)
-              ? self_val + weight_val * (end_val - self_val)
-              : end_val -
-                  (end_val - self_val) * (static_cast<scalar_t>(1) - weight_val);
+          opmath_t self_val_f = self_val;
+          opmath_t end_val_f = end_val;
+          opmath_t weight_val_f = weight_val;
+          return (std:abs(weight_val_f) < 0.5)
+              ? self_val_f + weight_val_f * (end_val_f - self_val_f)
+              : end_val_f -
+                  (end_val_f - self_val_f) * (opmath_t{1} - weight_val_f);
         });
       });
 #endif
@@ -96,14 +101,17 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
   });
 #else
   AT_DISPATCH_COMPLEX_TYPES(dtype, "lerp_cuda", [&] {
-      auto weight_val = weight.to<scalar_t>();
+      using opmath_t = at::opmath_type<scalar_t>;
+      auto weight_val = weight.to<opmath_t>();
       gpu_kernel(
         iter,
         [=] GPU_LAMBDA(scalar_t self_val, scalar_t end_val) {
-          return (std::abs(weight_val) < 0.5)
-              ? self_val + weight_val * (end_val - self_val)
-              : end_val -
-                  (end_val - self_val) * (static_cast<scalar_t>(1) - weight_val);
+          opmath_t self_val_f = self_val;
+          opmath_t end_val_f = end_val;
+          return (std::abs(weight_val_f) < 0.5)
+              ? self_val_f + weight_val_f * (end_val_f - self_val_f)
+              : end_val_f -
+                  (end_val_f - self_val_f) * (opmath_t{1} - weight_val_f);
         });
   });
 #endif
