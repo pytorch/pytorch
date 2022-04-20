@@ -143,11 +143,6 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
-std::ostream& operator<<(std::ostream& os, SymInt s) {
-  os << "SymInt(" << s.data() << ")";
-  return os;
-}
-
 AnyTypePtr AnyType::get() {
   static AnyTypePtr value(new AnyType());
   return value;

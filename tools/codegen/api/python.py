@@ -650,6 +650,8 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
             return f"::std::array<bool,{t.size}>"
         elif str(t.elem) == "int":
             return f"IntArrayRef[{size}]" if size is not None else "IntArrayRef"
+        elif str(t.elem) == "SymInt":
+            return f"SymIntArrayRef[{size}]" if size is not None else "SymIntArrayRef"
         elif str(t.elem) == "Tensor":
             return f"TensorList[{size}]" if size is not None else "TensorList"
         elif str(t.elem) == "Scalar":
@@ -1214,6 +1216,9 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return "intlist"
         elif str(t) == "float[]":
             return "doublelist"
+        elif str(t.elem) == 'SymInt':
+            # accept definite size
+            return 'symintlist'
         elif str(t) == "Scalar[]":
             return "scalarlist"
     raise RuntimeError(f"type '{t}' is not supported by PythonArgParser")
