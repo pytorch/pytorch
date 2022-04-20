@@ -1,4 +1,3 @@
-import torch
 import functools
 from typing import Iterator
 from torch._C import (
