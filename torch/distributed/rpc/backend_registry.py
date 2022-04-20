@@ -1,3 +1,4 @@
+__all__ = ["init_backend", "backend_registered", "construct_rpc_backend_options", "register_backend", "BackendType", "BackendValue"]
 
 import collections
 import enum
@@ -5,7 +6,7 @@ from typing import cast, Dict, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
-from torch.distributed.rpc.utils import _group_membership_management, _update_group_membership
+from ._utils import _group_membership_management, _update_group_membership
 
 from . import api
 from . import constants as rpc_constants
