@@ -1178,5 +1178,4 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
   }
   return ctx->dstFuture;
 }
-
 } // namespace c10
