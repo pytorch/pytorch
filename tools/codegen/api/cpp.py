@@ -30,6 +30,7 @@ from tools.codegen.api.types import (
     boolT,
     scalarT,
     tensorListT,
+    iTensorListRefT,
     dimnameListT,
     tensorT,
     voidT,
@@ -201,9 +202,12 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        elem = returntype_type(t.elem, mutable=mutable)
+        elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
-        return VectorCType(elem)
+        if mutable and t.elem == BaseType(BaseTy.Tensor):
+            return BaseCType(iTensorListRefT)
+        else:
+            return VectorCType(elem)
 
     raise AssertionError(f"unrecognized return type {t}")
 

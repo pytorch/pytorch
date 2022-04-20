@@ -11607,6 +11607,210 @@
     CompositeExplicitAutograd: alias_copy
   tags: view_copy
 
+
+- func: _fw_primal_copy.out(Tensor self, int level, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _fw_primal_copy_out
+
+
+- func: _make_dual_copy.out(Tensor primal, Tensor tangent, int level, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _make_dual_copy_out
+
+
+- func: view_as_real_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: view_as_real_copy_out
+
+
+- func: view_as_complex_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: view_as_complex_copy_out
+
+
+- func: _conj_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _conj_copy_out
+
+
+- func: _neg_view_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _neg_view_copy_out
+
+
+- func: as_strided_copy.out(Tensor self, int[] size, int[] stride, int? storage_offset=None, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: as_strided_copy_out
+
+
+- func: _sparse_broadcast_to_copy.out(Tensor self, int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _sparse_broadcast_to_copy_out
+
+
+- func: diagonal_copy.out(Tensor self, int offset=0, int dim1=0, int dim2=1, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: diagonal_copy_out
+
+
+- func: expand_copy.SymInt_out(Tensor self, SymInt[] size, *, bool implicit=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: expand_copy_SymInt_out
+
+
+- func: expand_copy.out(Tensor self, int[] size, *, bool implicit=False, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: expand_copy_out
+
+
+- func: permute_copy.out(Tensor self, int[] dims, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: permute_copy_out
+
+
+- func: _reshape_alias_copy.out(Tensor self, int[] size, int[] stride, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _reshape_alias_copy_out
+
+
+- func: select_copy.int_out(Tensor self, int dim, int index, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: select_copy_int_out
+
+
+- func: detach_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: detach_copy_out
+
+
+- func: slice_copy.Tensor_out(Tensor self, int dim=0, int? start=None, int? end=None, int step=1, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: slice_copy_Tensor_out
+
+
+- func: split_copy.Tensor_out(Tensor self, int split_size, int dim=0, *, Tensor(a!)[] out) -> Tensor(a!)[]
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: split_copy_Tensor_out
+
+
+- func: split_with_sizes_copy.out(Tensor self, int[] split_sizes, int dim=0, *, Tensor(a!)[] out) -> Tensor(a!)[]
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: split_with_sizes_copy_out
+
+
+- func: squeeze_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: squeeze_copy_out
+
+
+- func: squeeze_copy.dim_out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: squeeze_copy_dim_out
+
+
+- func: t_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: t_copy_out
+
+
+- func: transpose_copy.int_out(Tensor self, int dim0, int dim1, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: transpose_copy_int_out
+
+
+- func: unsqueeze_copy.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: unsqueeze_copy_out
+
+
+- func: _indices_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _indices_copy_out
+
+
+- func: _values_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _values_copy_out
+
+
+- func: indices_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: indices_copy_out
+
+
+- func: values_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: values_copy_out
+
+
+- func: crow_indices_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: crow_indices_copy_out
+
+
+- func: col_indices_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: col_indices_copy_out
+
+
+- func: unbind_copy.int_out(Tensor self, int dim=0, *, Tensor(a!)[] out) -> Tensor(a!)[]
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: unbind_copy_int_out
+
+
+- func: view_copy.out(Tensor self, int[] size, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: view_copy_out
+
+
+- func: view_copy.dtype_out(Tensor self, ScalarType dtype, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: view_copy_dtype_out
+
+
+- func: unfold_copy.out(Tensor self, int dimension, int size, int step, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: unfold_copy_out
+
+
+- func: alias_copy.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: alias_copy_out
+
 - func: to_padded_tensor(Tensor self, float padding) -> Tensor
   variants: method
   dispatch:
