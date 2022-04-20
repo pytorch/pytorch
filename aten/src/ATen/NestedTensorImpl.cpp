@@ -9,9 +9,11 @@ namespace at {
 namespace native {
 
 inline std::vector<c10::optional<int64_t>> construct_efficient_size(
-    int64_t out,
     const at::Tensor& sizes) {
   std::vector<c10::optional<int64_t>> result;
+  if (sizes.dim() == 0)
+    return result;
+  int64_t out = sizes.size(0);
   result.push_back(out);
   size_t nested_dim = result.size();
   if (sizes.dim() > 0) {
@@ -42,7 +44,7 @@ NestedTensorImpl::NestedTensorImpl(
           buffer.device()),
       buffer_(std::move(buffer)),
       nested_size_tensor_(std::move(nested_size_tensor)),
-      opt_sizes_(construct_efficient_size(nested_size_tensor_.size(0), nested_size_tensor_))
+      opt_sizes_(construct_efficient_size(nested_size_tensor_))
 {
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
