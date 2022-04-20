@@ -31,8 +31,6 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
 namespace {
 
-constexpr int kBytes = 8;
-
 // RAII helper class to manage NCCL group API and CUDA free mutex.
 // The destructor is allowed to throw since this helper class only
 // manages group and lock lifetimes.
@@ -440,10 +438,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
-    // Use the passed in timeout if provided, otherwise use the default
-    // opTimeout for each WorkNCCL object.
-    std::chrono::milliseconds workTimeout =
-        timeout == kNoTimeout ? opTimeout_ : timeout;
     // Wait for the operation to complete.
     while (!isCompleted()) {
       if (timedOut()) {

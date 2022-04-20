@@ -68,6 +68,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   if (maybe_python_mode_state) {
     at::impl::PythonModeTLS::set_state(nullptr);
     maybe_python_mode_state->pyinterpreter()->dispatch(op, stack, maybe_python_mode_state);
+    at::impl::PythonModeTLS::set_state(maybe_python_mode_state);
     return;
   }
 

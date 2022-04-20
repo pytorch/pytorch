@@ -1,7 +1,7 @@
 import contextlib
 from typing import Iterator
 
-from torch.utils._mode_utils import _enable_mode, ModeInfo
+from torch.utils._mode_utils import _enable_mode, _ModeInfo
 
 # NB: Calling an operator inside __torch_dispatch__ does go through
 # __torch_dispatch__ again. Please use _DisableTorchDispatch inside
@@ -47,5 +47,5 @@ def enable_python_mode(mode, *, replace=None, ignore_preexisting=False) -> Itera
             and overwrite it with the passed mode.
     """
     # hacky because torch_function mode and python_mode don't yet have parity
-    mode_info = ModeInfo(mode_type="python", mode_class=type(None), base_mode_class=type(None), mode_class_name="")
+    mode_info = _ModeInfo(mode_type="python", mode_class=type(None), base_mode_class=type(None), mode_class_name="")
     return _enable_mode(mode, mode_info=mode_info, replace=replace, ignore_preexisting=ignore_preexisting)
