@@ -72,6 +72,12 @@ C10_DEFINE_int64(
 namespace torch {
 namespace jit {
 
+static std::function<void(std::shared_ptr<Graph>)> fun_;
+
+void setPythonCallback(std::function<void(std::shared_ptr<Graph>)> fun) {
+  fun_ = fun;
+}
+
 #if defined(C10_MOBILE)
 static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
@@ -426,6 +432,9 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
       // we will wipe the tensor type information from the IR, so that it's not
       // accidentally used by any other pass.
       RemoveProfileNodesAndSpecializeTypes(graph);
+      if (fun_) {
+        fun_(graph);
+      }
       GRAPH_DEBUG(
           "After RemoveProfileNodesAndSpecializeTypes, before BatchMM\n",
           *graph);

@@ -113,6 +113,8 @@ TORCH_API std::atomic<size_t>& getNumProfiledRuns();
 TORCH_API size_t getBailoutDepth();
 TORCH_API bool IsNewExecutorEnabled();
 
+TORCH_API void setPythonCallback(std::function<void(std::shared_ptr<Graph>)> fun);
+
 struct TORCH_API GraphOptimizerEnabledGuard {
   GraphOptimizerEnabledGuard(bool state)
       : old_state_(getGraphExecutorOptimize()) {

@@ -214,6 +214,15 @@ void initJITBindings(PyObject* module) {
             return ReplaceOldOperatorsWithUpgraders(g);
           })
       .def(
+          "_jit_register_python_callback",
+          [](py::object callable) {
+            std::function<void(std::shared_ptr<Graph>)> cpp_callable = [callable](std::shared_ptr<Graph> g) {
+              py::gil_scoped_acquire acquire;
+              callable(g);
+            };
+            setPythonCallback(cpp_callable); 
+          })
+      .def(
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(g->block()); // overload resolution
