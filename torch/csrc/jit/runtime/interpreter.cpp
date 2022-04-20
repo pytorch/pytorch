@@ -841,12 +841,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
-    bool pre_sampled = false;
-    if (!frame.record_function && at::hasCallbacks() &&
-        at::shouldRunRecordFunction(&pre_sampled)) {
-      auto rec_fn = std::make_unique<at::RecordFunction>(
-          at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
-      if (rec_fn->isActive()) {
+    if (!frame.record_function) {
+      auto step_callbacks =
+          at::getStepCallbacks(at::RecordScope::TORCHSCRIPT_FUNCTION);
+      if (!step_callbacks.empty()) {
+        auto rec_fn =
+            std::make_unique<at::RecordFunction>(std::move(step_callbacks));
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rec_fn->isActive());
         if (rec_fn->needsInputs()) {
           rec_fn->before(
               frame.function->function_name_,
