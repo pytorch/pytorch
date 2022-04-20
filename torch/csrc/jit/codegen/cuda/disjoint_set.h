@@ -289,7 +289,7 @@ class DisjointSetsOfPointers {
     return disjoint_sets_;
   }
 
-  const UniquePtrVector<T*>& getDisjointSetOf(T* entry) const{
+  const UniquePtrVector<T*>& getDisjointSetOf(T* entry) const {
     auto set_it = disjoint_set_maps_.find(entry);
     TORCH_INTERNAL_ASSERT(
         set_it != disjoint_set_maps_.end(),

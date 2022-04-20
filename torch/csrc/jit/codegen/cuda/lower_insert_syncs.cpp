@@ -495,21 +495,18 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       return;
     }
 
-    if (sync_after_.size() > 0 && sync_after_.front().first == expr) {
-      auto sync_bitmap = sync_after_.front().second;
-      sync_after_.pop_front();
+    if (sync_before_.size() > 0 && sync_before_.front().first == expr) {
+      auto sync_bitmap = sync_before_.front().second;
+      sync_before_.pop_front();
       auto last_writes = last_writes_.front();
       last_writes_.pop_front();
       // Found that a sync is needed
-      TORCH_INTERNAL_ASSERT(expr->outputs()[0]->isA<TensorView>());
-      auto out_tv = expr->outputs()[0]->as<TensorView>();
 
       // Find where a sync needs to be inserted
       // This is very similar to how allocations are placed, simply place sync
-      // after the expression instead of placing like allocation where it goes
-      // before.
-      // TODO: This may be a common operation, could be worth making a utility
-      // out of or saving state for tensor view ID -> for loop
+      // before the expression at the common alloc point of producers (really
+      // last_writes because we may have other exprs we're syncing besides the
+      // producers of this one)
       // TODO: Explicitly test the 3 cases below
       Expr* sync_expr = nullptr;
       kir::Allocate* maybe_alloc = nullptr;
@@ -521,64 +518,88 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       } else {
         sync_expr = IrBuilder::create<kir::BlockSync>();
       }
-      if (out_tv->getComputeAtPosition() == 0) {
-        // Sync should be placed at global scope, after its outer most loop if
-        // it has one.
-        Expr* place_after = for_loops_.size() > 0 ? for_loops_[0] : expr;
-        // Find location in exprs_
-        auto place_after_it =
-            std::find(exprs_.begin(), exprs_.end(), place_after);
+
+      // The expressions in last_writes are those we're protecting the read
+      // from. To figure out which loop we need a syncthread in, take the inner
+      // most compute at for loop of all the outputs of the last writes.
+      std::unordered_set<kir::ForLoop*> sync_within;
+
+      for (auto last_write : last_writes) {
+        auto write_out_tv = ir_utils::getTvOutput(last_write);
         TORCH_INTERNAL_ASSERT(
-            place_after_it != exprs_.end(),
-            "Could not figure out where to place synchronization. ",
-            "Tried to place after, ",
-            place_after->toString(),
-            ", but could not find this expression at the global scope.");
-        registerInsertAfter(*(place_after_it), sync_expr, nullptr);
-        if (maybe_alloc != nullptr) {
-          registerInsertAfter(place_after, maybe_alloc, nullptr);
+            write_out_tv != nullptr,
+            "Error in RAW sync insertion, expecting a TV expr, but didn't find one.");
+        if (write_out_tv->getComputeAtPosition() == 0) {
+          continue;
         }
-      } else {
-        // Find the last loop in computeAt of out_tv, this is the loop where we
-        // would place an allocation for out_tv
-        auto local_id = out_tv->axis((int)out_tv->getComputeAtPosition() - 1);
+
+        auto local_id =
+            write_out_tv->axis((int)write_out_tv->getComputeAtPosition() - 1);
 
         auto loops_it = std::find_if(
             for_loops_.begin(),
             for_loops_.end(),
             [&local_id](const auto& loop) {
               return GpuLower::current()->caMap()->areMapped(
-                         loop->iter_domain(),
-                         local_id,
-                         IdMappingMode::PERMISSIVE) ||
-                  loop->iter_domain()->getParallelType() ==
-                  ParallelType::Unroll;
+                  loop->iter_domain(), local_id, IdMappingMode::PERMISSIVE);
             });
 
-        TORCH_INTERNAL_ASSERT(loops_it != for_loops_.end());
+        TORCH_INTERNAL_ASSERT(
+            loops_it != for_loops_.end(),
+            "Could not find loop associated with the alloc position of ",
+            write_out_tv->toString());
+
+        sync_within.emplace(*loops_it);
+      }
+
+      // The for loop the sync needs to be in
+      kir::ForLoop* sync_within_fl = nullptr;
+      for (auto fl : for_loops_) {
+        if (sync_within.count(fl)) {
+          sync_within_fl = fl;
+        }
+      }
+
+      if (sync_within_fl == nullptr) {
+        // Sync should be placed at global scope, after its outer most loop if
+        // it has one.
+        Expr* place_before = for_loops_.size() > 0 ? for_loops_[0] : expr;
+        // Find location in exprs_
+        auto place_before_it =
+            std::find(exprs_.begin(), exprs_.end(), place_before);
+        TORCH_INTERNAL_ASSERT(
+            place_before_it != exprs_.end(),
+            "Could not figure out where to place synchronization. ",
+            "Tried to place after, ",
+            place_before->toString(),
+            ", but could not find this expression at the global scope.");
+        if (maybe_alloc != nullptr) {
+          registerInsertBefore(place_before, maybe_alloc, nullptr);
+        }
+        registerInsertBefore(*(place_before_it), sync_expr, nullptr);
+      } else {
+        auto sync_within_loop_it =
+            std::find(for_loops_.begin(), for_loops_.end(), sync_within_fl);
 
         // block sync must be placed before halo-extended loops
         if (insertBeforeHaloLoop(
-                loops_it, sync_expr, maybe_alloc, last_writes)) {
+                sync_within_loop_it, sync_expr, maybe_alloc, last_writes)) {
           return;
         }
 
-        auto place_in = *loops_it;
-        Expr* place_after = nullptr;
+        auto place_in = *sync_within_loop_it;
+        Expr* place_before = nullptr;
 
-        if (loops_it + 1 == for_loops_.end()) {
-          // Inline allocation, place after expr
-          place_after = expr;
+        if (sync_within_loop_it + 1 == for_loops_.end()) {
+          // Inline, place before expr
+          place_before = expr;
         } else {
-          // Place allocation after the last computeAt axis
-          // TODO: may be more efficient to place after the first non-computeAt
-          // axis
-          place_after = *(loops_it + 1);
+          place_before = *(sync_within_loop_it + 1);
         }
 
-        registerInsertAfter(place_after, sync_expr, &place_in->body());
+        registerInsertBefore(place_before, sync_expr, &place_in->body());
         if (maybe_alloc != nullptr) {
-          registerInsertAfter(place_after, maybe_alloc, &place_in->body());
+          registerInsertBefore(place_before, maybe_alloc, &place_in->body());
         }
       }
     }
@@ -656,8 +677,8 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
               entry.first->as<TensorView>());
           bitmap |= sync_bits;
         }
-        // Temporarily do full grid sync.
-        sync_after_.emplace_back(std::make_pair(prev_tv_expr, bitmap));
+
+        sync_before_.emplace_back(std::make_pair(expr, bitmap));
         last_writes_.push_back(last_gmem_writes);
         gmem.clear();
       }
@@ -671,7 +692,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         bitmap.set(ParallelType::TIDx);
         bitmap.set(ParallelType::TIDy);
         bitmap.set(ParallelType::TIDz);
-        sync_after_.emplace_back(std::make_pair(prev_tv_expr, bitmap));
+        sync_before_.emplace_back(std::make_pair(expr, bitmap));
         last_writes_.push_back(last_smem_writes);
         smem.clear();
       }
@@ -695,18 +716,18 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
     kir::ExprMutator::traverseAndInsert(_exprs);
 
     TORCH_INTERNAL_ASSERT(
-        sync_after_.empty(), "Didn't place all required syncs.");
+        sync_before_.empty(), "Didn't place all required syncs.");
   }
 
  private:
   //! Keep track of expressions that must be followed by syncthreads
-  std::deque<std::pair<Expr*, ParallelTypeBitmap>> sync_after_;
+  std::deque<std::pair<Expr*, ParallelTypeBitmap>> sync_before_;
 
   //! Keep track of write expressions that must be placed before
   //! syncthreads.
   //!
-  //! syncthreads is placed after for each expression of
-  //! sync_after_. However, if it's inside a loop with halo, it must
+  //! syncthreads is placed before for each expression of
+  //! sync_before_. However, if it's inside a loop with halo, it must
   //! be placed before that. last_writes_ keeps track of expressions
   //! modifying the smem buffer each syncthreads is used for so that
   //! it is not placed before those write expressions.

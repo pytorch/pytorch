@@ -22122,6 +22122,147 @@ TEST_F(NVFuserTest, FusionTrivialReductionForwarding4_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {t3, t5}, __LINE__, __FILE__);
 }
 
+// See issue #1598
+TEST_F(NVFuserTest, FusionRAWSyncInsertionPlace1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = set(tv1);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  // Place tv2 on shared memory
+  tv2->split(0, 2);
+  tv2->split(-1, 4);
+  tv2->setMemoryType(MemoryType::Shared);
+  tv2->axis(-2)->parallelize(ParallelType::TIDy);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv3->split(0, 2);
+  tv3->split(-1, 4);
+  // swap tidx and tidy
+  tv3->axis(-2)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDy);
+
+  tv4->split(0, 2);
+  tv4->split(-1, 4);
+  tv4->axis(-2)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDy);
+
+  tv0->computeAt(tv4, 1);
+  tv3->computeAt(tv4, -1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({10, 64}, options);
+  auto t1 = at::randn({10, 64}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// See issue #1598
+TEST_F(NVFuserTest, FusionRAWSyncInsertionPlace2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = set(tv1);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  tv2->split(0, 2);
+  tv2->split(-1, 4);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  tv2->axis(-2)->parallelize(ParallelType::TIDy);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv4->split(0, 2);
+  tv4->split(-1, 4);
+  // Also do unroll for tv3 and tv4
+  tv4->split(-2, 8, false);
+  tv4->axis(-3)->parallelize(ParallelType::Unroll);
+  // swap tidx and tidy
+  tv4->axis(-2)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDy);
+
+  tv0->computeAt(tv4, 1);
+  tv3->computeAt(tv4, -1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({10, 64}, options);
+  auto t1 = at::randn({10, 64}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// See issue #1599
+TEST_F(NVFuserTest, FusionRAWSyncInsertionPlace3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = set(tv1);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  // Use unroll where a RAW-sync tensor is stored
+
+  tv4->split(0, 2);
+  tv4->split(0, 3);
+  tv4->split(-1, 4);
+  tv4->axis(1)->parallelize(ParallelType::Unroll);
+  tv4->axis(-2)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDy);
+
+  tv0->computeAt(tv4, 3);
+  tv3->computeAt(tv4, -1);
+
+  tv2->split(-1, 4);
+  tv2->axis(-2)->parallelize(ParallelType::TIDy);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({50, 64}, options);
+  auto t1 = at::randn({50, 64}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

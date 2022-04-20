@@ -389,9 +389,8 @@ TensorView* rfactorHelper(
 
 namespace {
 
-template<typename T>
-std::vector<T*> uniqueEntries(
-    const std::vector<T*>& tv_deuqe) {
+template <typename T>
+std::vector<T*> uniqueEntries(const std::vector<T*>& tv_deuqe) {
   std::vector<T*> unique_entries;
   std::unordered_set<T*> inserted;
   for (auto tv_entry : tv_deuqe) {
@@ -455,7 +454,8 @@ std::vector<TensorView*> producerTvsOf(TensorView* tv) {
   }
   auto producer_vals =
       ir_utils::filterByType<TensorView>(tv->definition()->inputs());
-  return uniqueEntries<TensorView>({producer_vals.begin(), producer_vals.end()});
+  return uniqueEntries<TensorView>(
+      {producer_vals.begin(), producer_vals.end()});
 }
 
 std::vector<TensorView*> consumerTvsOf(TensorView* tv) {
