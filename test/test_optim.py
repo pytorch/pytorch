@@ -685,30 +685,38 @@ class TestOptim(TestCase):
     def test_adagrad(self):
         for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1
-                )
+                lambda weight, bias, maximize: optimizer(
+                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1, maximize=maximize,
+                ),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1)
+                    lr=1e-1,
+                    maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1),
-                [lambda opt: ReduceLROnPlateau(opt)]
+                    lr=1e-1,
+                    maximize=maximize),
+                [lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1),
+                    lr=1e-1,
+                    maximize=maximize),
                 [lambda opt: ReduceLROnPlateau(opt),
-                 lambda opt: ExponentialLR(opt, gamma=0.99)]
+                 lambda opt: ExponentialLR(opt, gamma=0.99)],
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
                 optimizer(None, lr=1e-2, lr_decay=-0.5)
