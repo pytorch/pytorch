@@ -128,6 +128,12 @@ class CompositeCompliantTensor(torch.Tensor):
             r.elem = elem.detach().clone()
         else:
             r.elem = elem
+
+        # Propagate conjugate bits to the wrapper tensor
+        # Ref: https://github.com/albanD/subclass_zoo/issues/24
+        # Ref: https://github.com/albanD/subclass_zoo/issues/21
+        torch._C._set_conj(r, r.elem.is_conj())
+        torch._C._set_neg(r, r.elem.is_neg())
         return r
 
     def __repr__(self):
