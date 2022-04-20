@@ -325,7 +325,7 @@ Tensor sparse_compressed_tensor_template(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   Layout layout_ = layout.value_or(required_layout);
-  if (required_layout == Layout::Unspecified) {
+  if (required_layout == kUnspecified) {
     // checks that sparse compressed layout is specified
     AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
   } else {
@@ -372,7 +372,7 @@ Tensor sparse_compressed_tensor_template(
     return sparse_compressed_tensor_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size_, dtype, layout, device, pin_memory); \
   }
 
-SPARSE_COMPRESSED_TENSOR(compressed, Layout::Unspecified)
+SPARSE_COMPRESSED_TENSOR(compressed, kUnspecified)
 SPARSE_COMPRESSED_TENSOR(csr, kSparseCsr)
 SPARSE_COMPRESSED_TENSOR(csc, kSparseCsc)
 SPARSE_COMPRESSED_TENSOR(bsr, kSparseBsr)
