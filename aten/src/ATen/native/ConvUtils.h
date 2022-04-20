@@ -104,7 +104,7 @@ struct ConvParams {
   bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight,
-                   const c10::optional<IntArrayRef> bias_sizes_opt) const;
+                   const at::OptionalIntArrayRef bias_sizes_opt) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -139,7 +139,7 @@ enum class ConvBackend {
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<IntArrayRef> bias_sizes_opt,
+    const at::OptionalIntArrayRef bias_sizes_opt,
     const bool need_backward,
     const ConvParams& params);
 

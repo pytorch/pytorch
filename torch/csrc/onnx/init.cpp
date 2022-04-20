@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
+#include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
@@ -154,7 +155,42 @@ void initONNXBindings(PyObject* module) {
           &torch::jit::onnx::ONNXClearScopeRecords)
       .def(
           "_jit_pass_onnx_track_scope_attributes",
-          &torch::jit::onnx::ONNXTrackScopeAttributes);
+          &torch::jit::onnx::ONNXTrackScopeAttributes)
+      .def(
+          "_jit_is_onnx_log_enabled",
+          ::torch::jit::onnx::is_log_enabled,
+          "Returns whether ONNX logging is enabled or disabled.")
+      .def(
+          "_jit_set_onnx_log_enabled",
+          ::torch::jit::onnx::set_log_enabled,
+          "Enables or disables ONNX logging.")
+      .def(
+          "_jit_set_onnx_log_output_stream",
+          [](std::string stream_name = "stdout") -> void {
+            std::shared_ptr<std::ostream> out;
+            if (stream_name == "stdout") {
+              out = std::shared_ptr<std::ostream>(&std::cout, [](std::ostream*){});
+            } else if (stream_name == "stderr") {
+              out = std::shared_ptr<std::ostream>(&std::cerr, [](std::ostream*){});
+            } else {
+              std::cerr << "ERROR: only `stdout` and `stderr`"
+                        << "are supported as `stream_name`" << std::endl;
+            }
+            ::torch::jit::onnx::set_log_output_stream(out);
+          },
+          "Set specific file stream for ONNX logging.")
+      .def(
+          "_jit_onnx_log",
+          [](py::args args) -> void {
+            if (::torch::jit::onnx::is_log_enabled()) {
+              auto& out = ::torch::jit::onnx::_get_log_output_stream();
+              for (auto arg : args) {
+                out << ::c10::str(arg);
+              }
+              out << std::endl;
+            }
+          },
+          "Write `args` to the previously specified ONNX log stream.");
 
   m.def(
       "_check_onnx_proto",

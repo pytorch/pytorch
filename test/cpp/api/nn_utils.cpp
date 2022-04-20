@@ -615,7 +615,7 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
     }
     int64_t offset = 0;
     std::vector<torch::Tensor> tensors_to_be_cat;
-    for (int64_t i = 1; i < sorted_lengths.size() + 1; i++) {
+    for (int64_t i = 1; i < static_cast<int64_t>(sorted_lengths.size() + 1); i++) {
       int64_t l = sorted_lengths.at(i-1);
       tensors_to_be_cat.emplace_back(pad(i * 100 + torch::arange(1., 5 * l + 1).view({l, 1, 5}), max_length));
     }

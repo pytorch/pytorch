@@ -1,7 +1,7 @@
-#include <c10/util/irange.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
-#include <torch/csrc/lazy/core/config.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
@@ -11,6 +11,7 @@
 #include <torch/csrc/lazy/ts_backend/ops/cast.h>
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/ts_backend/ops/scalar.h>
+
 
 namespace torch {
 namespace lazy {
@@ -63,22 +64,24 @@ LazyTensorPtr LazyTensor::Create(std::shared_ptr<Data> data) {
 }
 
 LazyTensor::LazyTensor(const at::Tensor& tensor, const BackendDevice& device)
-    : data_(std::make_shared<Data>(tensor, device)) {}
+    : LazyTensor(std::make_shared<Data>(tensor, device)) {}
 
 LazyTensor::LazyTensor(BackendDataPtr handle)
-    : data_(std::make_shared<Data>(handle, handle->device())) {}
+    : LazyTensor(std::make_shared<Data>(handle, handle->device())) {}
 
 LazyTensor::LazyTensor(Value ir_value, const BackendDevice& device)
-    : data_(std::make_shared<Data>(std::move(ir_value), device)) {
+    : LazyTensor(std::make_shared<Data>(std::move(ir_value), device)) {
   TryLimitGraphSize();
 }
 
 LazyTensor::LazyTensor(
     std::shared_ptr<LazyView> view,
     const BackendDevice& device)
-    : data_(std::make_shared<Data>(std::move(view), device)) {}
+    : LazyTensor(std::make_shared<Data>(std::move(view), device)) {}
 
-LazyTensor::LazyTensor(std::shared_ptr<Data> data) : data_(std::move(data)) {}
+LazyTensor::LazyTensor(std::shared_ptr<Data> data)
+  : data_(std::move(data))
+  , storage_(c10::Storage({}, 0, c10::DataPtr(nullptr, backendDeviceToAtenDevice(data_->device)))) {}
 
 LazyTensor::Data* LazyTensor::data() const {
   TORCH_CHECK(data_ != nullptr, "Trying to access a null cursor");
@@ -105,7 +108,7 @@ MaybeRef<Shape> LazyTensor::shape() const {
   }
   if (data()->ir_value) {
     // TODO(whc) remove shape from LazyTensor API too!
-    return GetShapeFromTsValue(data()->ir_value);
+    return data()->ir_value.shape();
   }
   TORCH_CHECK(data()->tensor_data);
   return Shape(
@@ -200,7 +203,7 @@ void LazyTensor::SetIrValue(Value ir_value) {
 void LazyTensor::SetInPlaceIrValue(Value ir_value) {
   auto tensor_shape = shape();
   if (tensor_shape.Get().scalar_type() !=
-      GetShapeFromTsValue(ir_value).scalar_type()) {
+      ir_value.shape().scalar_type()) {
     ir_value = MakeNode<Cast>(ir_value, tensor_shape.Get().scalar_type());
   }
   SetIrValue(std::move(ir_value));
@@ -296,11 +299,11 @@ std::tuple<Value, bool> LazyTensor::GetViewUpdate(
 std::shared_ptr<LazyView> LazyTensor::UpdateView(
     std::shared_ptr<LazyView> view,
     Value ir_value) const {
-  if (GetShapeFromTsValue(ir_value).sizes() != view->shape().sizes()) {
-    TORCH_CHECK(GetShapeFromTsValue(ir_value).numel() == view->shape().numel());
+  if (ir_value.shape().sizes() != view->shape().sizes()) {
+    TORCH_CHECK(ir_value.shape().numel() == view->shape().numel());
 
     ViewInfo view_info(
-        ViewInfo::Type::kReshape, GetShapeFromTsValue(ir_value), view->shape());
+        ViewInfo::Type::kReshape, ir_value.shape(), view->shape());
     view = view->CreateSubView(view_info.shape, view_info);
   }
   view->Update(std::move(ir_value));
@@ -336,16 +339,18 @@ std::shared_ptr<LazyView> LazyTensor::CreateView(ViewInfo view_info) const {
   std::shared_ptr<Alias> alias = std::make_shared<Alias>(ir_value);
   ViewInfo this_view_info(
       ViewInfo::Type::kNoOp,
-      GetShapeFromTsValue(ir_value),
-      GetShapeFromTsValue(ir_value));
+      ir_value.shape(),
+      ir_value.shape());
   data()->view = std::make_shared<LazyView>(
-      GetShapeFromTsValue(ir_value), alias, std::move(this_view_info));
+      ir_value.shape(), alias, std::move(this_view_info));
   AssignIrValue(Value());
   return std::make_shared<LazyView>(view_info.shape, alias, view_info);
 }
 
 LazyTensorPtr LazyTensor::CreateViewTensor(ViewInfo view_info) const {
-  return Create(CreateView(std::move(view_info)), GetDevice());
+  auto new_tensor = Create(CreateView(std::move(view_info)), GetDevice());
+  new_tensor->storage_ = Storage();
+  return new_tensor;
 }
 
 at::Tensor LazyTensor::ToTensor(bool detached) {
@@ -457,6 +462,18 @@ void LazyTensor::ApplyPendingGraph() {
 int64_t LazyTensor::GetNextTensorId() {
   static std::atomic<int64_t>* id_generator = new std::atomic<int64_t>(1);
   return id_generator->fetch_add(1);
+}
+
+torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors) {
+  std::vector<Value> values;
+  for (const auto& t: tensors) {
+    auto* impl = dynamic_cast<LTCTensorImpl*>(t.unsafeGetTensorImpl());
+    TORCH_INTERNAL_ASSERT(impl,
+      "GetTensorList only supports lists of valid tensors, but optional support could be added");
+    values.push_back(impl->tensor()->GetIrValue());
+  }
+
+  return torch::lazy::Value(torch::lazy::MakeNode<TensorList>(std::move(values)));
 }
 
 LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {

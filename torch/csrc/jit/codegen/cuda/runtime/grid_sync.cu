@@ -18,7 +18,10 @@ __device__ T globalAsVolatile(volatile T& global_val) {
 // [X,Y,Z]_BLOCK. The granularity of this sync are those dimensions. I.E.
 // Marking X and Y but not Z means there should be Z semaphores of size X*Y.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, bool PERSISTENT>
-__device__ void sync(int64_t& semaphore, const uint64_t& segment_size) {
+__device__ void sync(
+    int64_t& semaphore,
+    const uint64_t& segment_size,
+    const bool last_block) {
   // Finish all global memory transactions before synchronizing
   __threadfence();
 
@@ -36,8 +39,6 @@ __device__ void sync(int64_t& semaphore, const uint64_t& segment_size) {
     // Makes the assumption that blocks are in increasing order, this is not
     // guaranteed by CUDA but this is the current behavior, and unlikely to
     // change.
-    bool last_block =
-        index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
     if (last_block) {
       semaphore_increment = FIRST_UINT64_BIT - (segment_size - 1);
     }
@@ -63,4 +64,13 @@ __device__ void sync(int64_t& semaphore, const uint64_t& segment_size) {
   // Sync block to make sure all other threads are waiting on the sync
   block_sync::sync();
 }
+
+template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, bool PERSISTENT>
+__device__ void sync(int64_t& semaphore, const uint64_t& segment_size) {
+  sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT>(
+      semaphore,
+      segment_size,
+      index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim));
+}
+
 } // namespace grid_sync

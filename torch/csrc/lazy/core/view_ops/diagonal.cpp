@@ -15,8 +15,7 @@ Diagonal::Diagonal(
           OpKind(at::aten::diagonal),
           {input},
           [&]() {
-            return MakeDiagonalShape(
-                GetShapeFromTsValue(input), offset, dim1, dim2);
+            return MakeDiagonalShape(input.shape(), offset, dim1, dim2);
           },
           /*num_outputs=*/1,
           MHash(offset, dim1, dim2)),

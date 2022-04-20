@@ -299,7 +299,12 @@ def get_summarized_data(self):
 
 def _str_intern(inp, *, tensor_contents=None):
     is_plain_tensor = type(inp) is torch.Tensor or type(inp) is torch.nn.Parameter
-    prefix = 'tensor(' if is_plain_tensor else f"{type(inp).__name__}("
+    if is_plain_tensor:
+        prefix = 'tensor('
+    elif inp.is_nested:
+        prefix = "nested_tensor("
+    else:
+        prefix = f"{type(inp).__name__}("
     indent = len(prefix)
     suffixes = []
     custom_contents_provided = tensor_contents is not None
@@ -387,6 +392,12 @@ def _str_intern(inp, *, tensor_contents=None):
             suffixes.append('axis=' + str(self.q_per_channel_axis()))
         if not custom_contents_provided:
             tensor_str = _tensor_str(self.dequantize(), indent)
+    elif self.is_nested:
+        if not custom_contents_provided:
+            def indented_str(s, indent):
+                return "\n".join(f"  {line}" for line in s.split("\n"))
+            strs = ",\n".join(indented_str(str(t), indent + 1) for t in torch.ops.aten.unbind.int(self, 0))
+            tensor_str = f"[\n{strs}\n]"
     else:
         if self.is_meta:
             suffixes.append('size=' + str(tuple(self.shape)))

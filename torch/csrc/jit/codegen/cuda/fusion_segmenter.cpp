@@ -1170,12 +1170,22 @@ std::unique_ptr<Fusion> SegmentedFusion::makeFusion(SegmentedGroup* sg) {
     fusion_segment->removeOutput(out);
   }
 
+  std::vector<TensorView*> view_tvs;
   for (auto inp : getAllInputs(sg)) {
-    fusion_segment->addInput(complete_to_segment_map.clone(inp));
+    auto clone_tv = complete_to_segment_map.clone(inp);
+    fusion_segment->addInput(clone_tv);
+    if (inp->isDefinitionType(ExprType::ViewOp)) {
+      TORCH_INTERNAL_ASSERT(clone_tv != nullptr && clone_tv->isA<TensorView>());
+      view_tvs.push_back(clone_tv->as<TensorView>());
+    }
   }
 
   for (auto out : getAllOutputs(sg)) {
     fusion_segment->addOutput(complete_to_segment_map.clone(out));
+  }
+
+  for (auto tv : view_tvs) {
+    tv->convertRfactorToRootDomain();
   }
 
   return fusion_segment;
@@ -2715,8 +2725,8 @@ void SegmentCandidateFinder::findSegments() {
     }
   }
 
-  auto reduction_ops =
-      ir_utils::getReductionOps(segmented_fusion_->completeFusion());
+  auto reduction_ops = ir_utils::getReductionOps(
+      segmented_fusion_->completeFusion(), true /* ignore_trivial */);
   auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
 
   if (options_.run_translate_welford &&
@@ -2798,12 +2808,12 @@ void SegmentCandidateFinder::findSegments() {
 
   if (options_.run_final_merge) {
     // TODO: consider interleaving herrmman merge and bruteforce merge, as
-    // bruteforce merge can introduce
-    //  opportunities for more herrmann merge
+    // bruteforce merge can introduce opportunities for more herrmann merge
     finalMerge();
   }
 
   finalize();
+
   if (isDebugDumpEnabled(DebugDumpOption::FusionSegmentsDrawing)) {
     segmented_fusion_->draw();
   }
@@ -3012,6 +3022,7 @@ void SegmentCandidateFinder::finalize() {
 
   // Finalize each group, fill in the missing inputs, i.e. tensor dims.
   for (auto g : groups()) {
+    g->setHeuristic(deriveHeuristic(g));
     g->finalize();
   }
 }

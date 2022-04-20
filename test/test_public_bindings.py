@@ -1,8 +1,15 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["module: autograd"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests
-
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+import pkgutil
 import torch
+import sys
+from typing import Callable
+import inspect
+import json
+import os
+import unittest
 
 class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
@@ -138,6 +145,7 @@ class TestPublicBindings(TestCase):
             "InterfaceType",
             "IntStorageBase",
             "IntType",
+            "SymIntType",
             "IODescriptor",
             "is_anomaly_enabled",
             "is_autocast_cache_enabled",
@@ -272,6 +280,74 @@ class TestPublicBindings(TestCase):
         msg = f"torch._C had bindings that are not present in the allowlist:\n{difference}"
         self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
 
+    # AttributeError: module 'torch.distributed' has no attribute '_shard'
+    @unittest.skipIf(IS_WINDOWS, "Distributed Attribute Error")
+    def test_correct_module_names(self):
+        '''
+        An API is considered public, if  its  `__module__` starts with `torch.`
+        and there is no name in `__module__` or the object itself that starts with “_”.
+        Each public package should either:
+        - (preferred) Define `__all__` and all callables and classes in there must have their
+         `__module__` start with the current submodule's path. Things not in `__all__` should
+          NOT have their `__module__` start with the current submodule.
+        - (for simple python-only modules) Not define `__all__` and all the elements in `dir(submod)` must have their
+          `__module__` that start with the current submodule.
+        '''
+        failure_list = []
+        with open(os.path.join(os.path.dirname(__file__), 'allowlist_for_publicAPI.json')) as json_file:
+            # no new entries should be added to this allow_dict.
+            # New APIs must follow the public API guidelines.
+            allow_dict = json.load(json_file)
+
+        def test_module(modname):
+            split_strs = modname.split('.')
+            mod = sys.modules.get(modname)
+            for elem in split_strs:
+                if elem.startswith("_"):
+                    return
+
+            def add_to_failure_list_if_not_in_allow_dict(modname, elem, elem_module):
+                if modname in allow_dict and elem in allow_dict[modname]:
+                    return
+                failure_list.append((modname, elem, elem_module))
+
+            # verifies that each public API has the correct module name and naming semantics
+            def looks_public_or_not(elem, modname, mod, is_public=True):
+                obj = getattr(mod, elem)
+                if not (isinstance(obj, Callable) or inspect.isclass(obj)):
+                    return
+                elem_module = getattr(obj, '__module__', None)
+                elem_modname_starts_with_mod = elem_module is not None and \
+                    elem_module.startswith(modname) and '._' not in elem_module
+                # elem's name must NOT begin with an `_` and it's module name
+                # SHOULD start with it's current module since it's a public API
+                looks_public = not elem.startswith('_') and elem_modname_starts_with_mod
+                if is_public != looks_public:
+                    add_to_failure_list_if_not_in_allow_dict(modname, elem, elem_module)
+
+            if hasattr(modname, '__all__'):
+                public_api = mod.__all__
+                all_api = dir(modname)
+                for elem in all_api:
+                    looks_public_or_not(elem, modname, is_public=elem in public_api)
+
+            else:
+                all_api = dir(mod)
+                for elem in all_api:
+                    if not elem.startswith('_'):
+                        looks_public_or_not(elem, modname, mod, is_public=True)
+
+        for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
+            test_module(modname)
+
+        test_module('torch')
+        msg = "Following new APIs ( displayed in the form (module, element, element module) )" \
+              " were added that do not meet our guidelines for public API" \
+              " Please review  https://docs.google.com/document/d/10yx2-4gs0gTMOimVS403MnoAWkqitS8TUHX73PN8EjE/edit?pli=1#" \
+              " for more information:\n" + "\n".join(map(str, failure_list))
+
+        # empty lists are considered false in python
+        self.assertTrue(not failure_list, msg)
 
 if __name__ == '__main__':
     run_tests()
