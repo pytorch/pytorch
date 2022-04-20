@@ -24,7 +24,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
-#include "ATen/core/SymIntArrayRef.h"
+#include <c10/core/SymIntArrayRef.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to

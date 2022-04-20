@@ -2,12 +2,12 @@
 
 #include <algorithm>
 #include <cstdint>
-#include "ATen/core/SymIntArrayRef.h"
-
+#include <c10/core/SymInt.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
-#include <ATen/core/SymInt.h>
+
 
 #define C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE 5
 

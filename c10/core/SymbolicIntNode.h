@@ -3,7 +3,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <vector>
-#include <ATen/core/SymInt.h>
+#include <c10/core/SymInt.h>
 #include <mutex>
 
 namespace c10 {

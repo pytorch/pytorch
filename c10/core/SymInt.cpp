@@ -1,6 +1,6 @@
 
-#include <ATen/core/SymInt.h>
-#include <ATen/core/SymbolicIntNode.h>
+#include <c10/core/SymInt.h>
+#include <c10/core/SymbolicIntNode.h>
 
 namespace c10 {
 

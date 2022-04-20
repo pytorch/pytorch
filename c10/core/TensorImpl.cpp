@@ -6,7 +6,6 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include "ATen/core/SymIntArrayRef.h"
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
