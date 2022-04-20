@@ -1788,11 +1788,11 @@ class TestQuantizedOps(TestCase):
                         self.assertEqual(
                             scale, qX_hat.q_scale(),
                             msg=error_message.format(name + '.scale', scale,
-                                                    qX_hat.q_scale()))
+                                                     qX_hat.q_scale()))
                         self.assertEqual(
                             zero_point, qX_hat.q_zero_point(),
                             msg=error_message.format(name + '.zero_point', scale,
-                                                    qX_hat.q_zero_point()))
+                                                     qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool3d_ndhwc(self):
