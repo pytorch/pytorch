@@ -13,6 +13,21 @@ namespace at {
 
 class Tensor;
 
+inline DimVector contiguous_strides(IntArrayRef sizes) {
+  int64_t dims = sizes.size();
+  if (dims == 0) {
+    return {};
+  }
+
+  DimVector strides(dims);
+  strides[dims - 1] = 1;
+  for (auto i = dims - 2; i >= 0; i--) {
+    strides[i] = strides[i + 1] * sizes[i + 1];
+  }
+
+  return strides;
+}
+
 namespace impl {
 
 // Use this to define the prototype for a meta function.  There are two
@@ -62,13 +77,43 @@ namespace impl {
 //
 // A notable subclass of this interface is TensorIteratorBase.
 struct TORCH_API MetaBase {
-  virtual void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) = 0;
+  virtual void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+    set_output_raw_strided(output_idx, sizes, strides, options, names);
+  }
+
   virtual const Tensor& maybe_get_output(int64_t output_idx) = 0;
   void set_output(IntArrayRef sizes, TensorOptions options) {
     set_output(0, sizes, {}, options, {});
   }
   void set_output(int64_t output_idx, IntArrayRef sizes, TensorOptions options) {
     set_output(output_idx, sizes, {}, options, {});
+  }
+
+  virtual void set_output_strided(
+      int64_t output_idx,
+      IntArrayRef sizes,
+      IntArrayRef strides,
+      TensorOptions options,
+      DimnameList names = {}) {
+    TORCH_INTERNAL_ASSERT(false, "set_output_strided not implemented.");
+  }
+
+  virtual void set_output_raw_strided(
+      int64_t output_idx,
+      IntArrayRef sizes,
+      IntArrayRef strides,
+      TensorOptions options,
+      DimnameList names = {}) {
+    TORCH_INTERNAL_ASSERT(false, "set_output_strided not implemented.");
+  }
+
+  void set_output_contiguous(
+      int64_t output_idx,
+      IntArrayRef sizes,
+      TensorOptions options,
+      DimnameList names = {}) {
+    auto strides = contiguous_strides(sizes);
+    set_output_strided(output_idx, sizes, strides, options, names);
   }
   // Returns a reference to an undefined tensor if there is no presupplied
   // output
