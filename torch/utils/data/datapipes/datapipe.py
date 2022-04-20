@@ -132,6 +132,14 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
             raise Exception("Attempt to override existing reduce_ex_hook")
         IterDataPipe.reduce_ex_hook = hook_fn
 
+    def __repr__(self):
+        # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
+
+    def __str__(self):
+        # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
+
 
 class DFIterDataPipe(IterDataPipe):
     def _is_dfpipe(self):
@@ -214,6 +222,14 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
                 self.__dict__[k] = deserialize_fn(v)
             else:
                 self.__dict__[k] = v
+
+    def __repr__(self):
+        # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
+
+    def __str__(self):
+        # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
 
 
 class DataChunk(list, Generic[T]):
