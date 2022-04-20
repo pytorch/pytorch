@@ -204,20 +204,21 @@ inline Tensor& solve_triangular_out(Tensor& result, const Tensor& input, const T
   return torch::linalg_solve_triangular_out(result, input, other, upper, left, unitriangular);
 }
 
-inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
-  return torch::linalg_svd(input, full_matrices);
+inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices, c10::optional<c10::string_view> driver) {
+  return torch::linalg_svd(input, full_matrices, driver);
 }
 
-inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices) {
-  return torch::linalg_svd_out(U, S, Vh, input, full_matrices);
+inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices,
+    c10::optional<c10::string_view> driver) {
+  return torch::linalg_svd_out(U, S, Vh, input, full_matrices, driver);
 }
 
-inline Tensor svdvals(const Tensor& input) {
-  return torch::linalg_svdvals(input);
+inline Tensor svdvals(const Tensor& input, c10::optional<c10::string_view> driver) {
+  return torch::linalg_svdvals(input, driver);
 }
 
-inline Tensor& svdvals_out(Tensor& result, const Tensor& input) {
-  return torch::linalg_svdvals_out(result, input);
+inline Tensor& svdvals_out(Tensor& result, const Tensor& input, c10::optional<c10::string_view> driver) {
+  return torch::linalg_svdvals_out(result, input, driver);
 }
 
 inline Tensor tensorinv(const Tensor& self, int64_t ind) {
@@ -527,23 +528,23 @@ inline Tensor& solve_triangular_out(Tensor& result, const Tensor& input, const T
 /// Computes the singular values and singular vectors
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svd
-inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
-  return detail::svd(input, full_matrices);
+inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices, c10::optional<c10::string_view> driver) {
+  return detail::svd(input, full_matrices, driver);
 }
 
-inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices) {
-  return detail::svd_out(U, S, Vh, input, full_matrices);
+inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& Vh, const Tensor& input, bool full_matrices, c10::optional<c10::string_view> driver) {
+  return detail::svd_out(U, S, Vh, input, full_matrices, driver);
 }
 
 /// Computes the singular values
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.svdvals
-inline Tensor svdvals(const Tensor& input) {
-  return detail::svdvals(input);
+inline Tensor svdvals(const Tensor& input, c10::optional<c10::string_view> driver) {
+  return detail::svdvals(input, driver);
 }
 
-inline Tensor& svdvals_out(Tensor& result, const Tensor& input) {
-  return detail::svdvals_out(result, input);
+inline Tensor& svdvals_out(Tensor& result, const Tensor& input, c10::optional<c10::string_view> driver) {
+  return detail::svdvals_out(result, input, driver);
 }
 
 /// Computes the inverse of a tensor
