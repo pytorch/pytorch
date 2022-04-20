@@ -2,6 +2,7 @@
 #include <c10d/ProcessGroup.hpp>
 
 #include <c10/util/Logging.h>
+#include <fmt/format.h>
 
 namespace c10d {
 
@@ -49,7 +50,8 @@ std::string opTypeToString(OpType opType) {
   return "UNKNOWN";
 }
 
-bool isP2POp(OpType opType) {
+bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
+  if (batchP2P) return false;
   return opType == OpType::SEND || opType == OpType::RECV ||
       opType == OpType::RECVANYSOURCE;
 }
@@ -179,5 +181,9 @@ ProcessGroup::ProcessGroup(int rank, int size)
 }
 
 ProcessGroup::~ProcessGroup() {}
+
+void ProcessGroup::init() {
+  C10_LOG_API_USAGE_ONCE(fmt::format("c10d.process_group_{}", getBackendName()));
+}
 
 } // namespace c10d

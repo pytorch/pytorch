@@ -23,6 +23,7 @@
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
+#include <ATen/PythonTorchFunctionTLS.h>
 
 #include <set>
 #include <unordered_set>
@@ -69,6 +70,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("NVTX", ProfilerState::NVTX)
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
+
+  using torch::profiler::impl::ActiveProfilerType;
+  py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
+      .value("NONE", ActiveProfilerType::NONE)
+      .value("LEGACY", ActiveProfilerType::LEGACY)
+      .value("KINETO", ActiveProfilerType::KINETO)
+      .value("NVTX", ActiveProfilerType::NVTX);
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
@@ -233,6 +241,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
   m.def("_add_metadata_json", addMetadataJson);  // Only if `USE_KINETO` is set
+  m.def("_kineto_step", profilerStep);  // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
 
   // NOTICE: These record functions are not torch operators and may not show up
@@ -287,6 +296,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       disableProfilerLegacy,
       py::arg("profiler_disable_options") = ProfilerDisableOptions());
   m.def("_profiler_enabled", profilerEnabled);
+  m.def("_profiler_type", torch::profiler::impl::profilerType);
   m.def("_enable_record_function", [](bool enable) {
     at::enableRecordFunction(enable);
   });
@@ -559,6 +569,31 @@ static PyObject * exit_python_mode(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * set_torch_function_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg == Py_None) {
+    at::impl::PythonTorchFunctionTLS::set_mode(nullptr);
+  } else {
+    Py_INCREF(arg);
+    at::impl::PythonTorchFunctionTLS::set_mode(std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * get_torch_function_mode(PyObject* _unused, PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto& mode = at::impl::PythonTorchFunctionTLS::get_mode();
+  if (!mode) {
+    Py_RETURN_NONE;
+  } else {
+    auto* r = mode->ptr(getPyInterpreter());
+    Py_INCREF(r);
+    return r;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -583,6 +618,8 @@ static PyMethodDef methods[] = { // NOLINT
   {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_enter_python_mode", enter_python_mode, METH_O, nullptr},
   {"_exit_python_mode", exit_python_mode, METH_NOARGS, nullptr},
+  {"_set_torch_function_mode", set_torch_function_mode, METH_O, nullptr},
+  {"_get_torch_function_mode", get_torch_function_mode, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

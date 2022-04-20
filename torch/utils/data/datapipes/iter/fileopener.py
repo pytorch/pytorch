@@ -1,7 +1,7 @@
 from io import IOBase
 from typing import Iterable, Tuple, Optional
 
-from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames, deprecation_warning
 
 
@@ -72,5 +72,10 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
             datapipe: Iterable[str],
             mode: str = 'b',
             length: int = -1):
-        deprecation_warning(type(cls).__name__, new_name="FileOpener")
+        deprecation_warning(
+            cls.__name__,
+            deprecation_version="1.12",
+            removal_version="1.14",
+            new_class_name="FileOpener",
+        )
         return FileOpenerIterDataPipe(datapipe=datapipe, mode=mode, length=length)

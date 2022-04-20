@@ -329,6 +329,10 @@ def _is_scalar_list(x):
         element_type in scalar_name_to_pytorch.keys() and \
         (scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys())
 
+def is_caffe2_aten_fallback():
+    return (_operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and
+            torch.onnx._CAFFE2_ATEN_FALLBACK)
+
 def _get_tensor_rank(x):
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -461,6 +465,8 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
         k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
     else:
         k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
+        if _try_get_scalar_type(k) != "Long":
+            k = g.op("Cast", k, to_i=torch.onnx.TensorProtoDataType.INT64)
     if _export_onnx_opset_version <= 10:
         if not largest:
             _unimplemented("TopK", "Ascending is not supported")
@@ -827,16 +833,21 @@ def _index_fill_reshape_helper(g, self, dim, index):
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 
-# When using reshape helper (opset_version >= 14), if reshape has -1,
-# allowzero cannot be set to 1
+# By default, when any value in the 'shape' input is equal to zero
+# the corresponding dimension value is copied from the input tensor dynamically.
+# allowzero=1 indicates that if any value in the 'shape' input is set to zero,
+# the zero value is honored, similar to NumPy.
+# allowzero=1 is only supported for opset version >= 14.
 def _reshape_helper(g, input, shape, allowzero=0):
     shape = _maybe_get_const(shape, "is")
     if not _is_value(shape):
         shape = g.op("Constant", value_t=torch.LongTensor(shape))
     if _export_onnx_opset_version <= 13:
+        if allowzero == 1:
+            raise _onnx_opset_unsupported("Reshape with allowzero=1",
+                                          _export_onnx_opset_version, 14)
         return g.op("Reshape", input, shape)
     else:
-        warnings.warn("allowzero=0 by default. In order to honor zero value in shape use allowzero=1")
         return g.op("Reshape", input, shape, allowzero_i=allowzero)
 
 def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
@@ -963,45 +974,21 @@ def requantize_bias_helper(g, bias, input_scale, weight_scale):
                   to_i=torch.onnx.TensorProtoDataType.INT32)
     return g.op("prim::TupleConstruct", q_bias, bias_scale, bias_zero_point)
 
-# ---------------------------------------------------------------------
-# ONNX operator version
-# ---------------------------------------------------------------------
+def args_have_same_dtype(args):
+    assert args
+    base_dtype = args[0].type().scalarType()
+    has_same_dtype = all(elem.type().scalarType() == base_dtype for elem in args)
+    return has_same_dtype
 
-# READ ME BEFORE EDITING _default_onnx_opset_version:
-#
-# The variable below controls which ONNX operator set version we are
-# targeting. THIS VARIABLE HAS SEMANTIC EFFECT! Say a breaking
-# change occurred in version 8. As long as this variable < 8, you can
-# export models targeting the old behavior. However, if you bump
-# this variable to 8 or later, the breaking change will take into effect:
-# you MUST adjust any symbolic affected by breaking changes. The ONNX
-# spec publishes a *comprehensive* list of BC-breaking changes for every
-# operator revision at:
-#
-#   https://github.com/onnx/onnx/blob/master/docs/Changelog.md
-#
-# Please be sure to go through and check all of our implementations here before
-# increasing this number. This includes symbolic definitions NOT in this
-# file, so grep for "OpName" (with quotes)
-#
-# Besides, opset_version can be specified in the invocation of export()
-# and export_to_pretty_string(), and _export_onnx_opset_version will be set
-# and the symbolic functions should check it to determine the behavior
-# of the exporter.
-
-
-_default_onnx_opset_version = 9
+_default_onnx_opset_version = 13
 _onnx_main_opset = 15
-_onnx_stable_opsets = [7, 8, 9, 10, 11, 12, 13, 14]
+_onnx_stable_opsets = list(range(7, _onnx_main_opset))
 _export_onnx_opset_version = _default_onnx_opset_version
 _constant_folding_opset_versions = list(range(9, _onnx_main_opset + 1))
 
 
 def _set_opset_version(opset_version):
     global _export_onnx_opset_version
-    if opset_version == _default_onnx_opset_version:
-        _export_onnx_opset_version = opset_version
-        return
     if opset_version in _onnx_stable_opsets + [_onnx_main_opset]:
         _export_onnx_opset_version = opset_version
         return

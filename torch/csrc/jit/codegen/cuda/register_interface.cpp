@@ -25,6 +25,7 @@ class RegisterInterface {
     ptr->fn_can_fuse_n = &isFusibleCudaFusionGroup;
     ptr->fn_insert_profile_inodes = &InsertProfileNodes;
     ptr->fn_profile_n = &shouldProfileNode;
+    ptr->fn_skip_n = &skipNodeKind;
   }
 };
 

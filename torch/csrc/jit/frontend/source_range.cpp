@@ -95,7 +95,7 @@ StringCordView StringCordView::substr(size_t start, size_t size) const {
   return StringCordView(std::move(pieces), std::move(ownerships));
 }
 
-bool StringCordView::operator==(const std::string& rhs) {
+bool StringCordView::operator==(const std::string& rhs) const {
   if (size() != rhs.size()) {
     return false;
   }
@@ -104,7 +104,7 @@ bool StringCordView::operator==(const std::string& rhs) {
   return res.first == end() && res.second == rhs.end();
 }
 
-bool StringCordView::operator==(const StringCordView& rhs) {
+bool StringCordView::operator==(const StringCordView& rhs) const {
   if (size() != rhs.size()) {
     return false;
   }
@@ -145,7 +145,7 @@ c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
   return gen_ranges_->findSourceRangeThatGenerated(range);
 }
 
-C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
+void SourceRange::highlight(std::ostream& out) const {
   // Retrieve original SourceRange, if present.
   if (auto orig_source_range = findSourceRangeThatGenerated()) {
     orig_source_range->highlight(out);
@@ -154,7 +154,7 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   print_with_context(out, CONTEXT, true, "");
 }
 
-C10_EXPORT void format_stack_trace(
+void format_stack_trace(
     std::ostream& out,
     const std::vector<StackEntry>& entries) {
   bool has_orig_ranges = false;
@@ -190,7 +190,7 @@ C10_EXPORT void format_stack_trace(
   }
 }
 
-C10_EXPORT void SourceRange::print_with_context(
+void SourceRange::print_with_context(
     std::ostream& out,
     size_t context,
     bool highlight,

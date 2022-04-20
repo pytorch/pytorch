@@ -74,9 +74,13 @@ TEST(BackendDeviceTest, FromAten) {
   auto device = c10::Device(c10::kCPU);
   EXPECT_THROW(atenDeviceToBackendDevice(device), c10::Error);
 
-  // TODO(alanwaketan): Update the following test once we have TorchScript backend upstreamed.
   device = c10::Device(c10::kLazy);
+#ifndef FBCODE_CAFFE2
+  auto backend_device = atenDeviceToBackendDevice(device);
+#else
+  // Lazy Tensor is disabled in FBCODE until addressing non-virtual methods (e.g. sizes) in TensorImpl
   EXPECT_THROW(atenDeviceToBackendDevice(device), c10::Error);
+#endif // FBCODE_CAFFE2
 }
 
 TEST(BackendDeviceTest, ToAten) {

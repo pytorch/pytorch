@@ -1,7 +1,8 @@
 from io import BufferedIOBase
 from typing import Any, Callable, Iterable, Iterator, Sized, Tuple
 
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import deprecation_warning
 from torch.utils.data.datapipes.utils.decoder import (
     Decoder,
@@ -40,7 +41,12 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
         if not handlers:
             handlers = (decoder_basichandlers, decoder_imagehandler('torch'))
         self.decoder = Decoder(*handlers, key_fn=key_fn)
-        deprecation_warning(type(self).__name__)
+        deprecation_warning(
+            type(self).__name__,
+            deprecation_version="1.12",
+            removal_version="1.14",
+            old_functional_name="routed_decode",
+        )
 
     def add_handler(self, *handler: Callable) -> None:
         self.decoder.add_handler(*handler)
