@@ -745,19 +745,19 @@ void svd_cusolver(const Tensor& A,
     } else if (driver.value() == "gesvdjBatched") {
       // gesvdjBatched just works for square matrices
       TORCH_CHECK(gesvdj_batched_requirements,
-        "Cusolver SVD `gesvdjBatched` driver requires the input matrices be non-empty, "
+        "torch.linalg.svd: cuSOLVER `gesvdjBatched` driver requires the input matrices be non-empty, "
         "are square matrices, and have sizes no larger than 32.");
       svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
       convergence_check_needed = true;
-    } else if (driver.value() == "gesvdaBatched") {
-      // gesvdaStridedBatched is preferred for "tall skinny" matrices
+    } else if (driver.value() == "gesvda") {
+      // cuSOLVER: gesvdaStridedBatched is preferred for "tall skinny" matrices
       TORCH_CHECK(batch_size > 0 && m > 0 && n > 0 && m > n,
-        "Cusolver SVD `gesvdaBatched` driver requires the input matrices be non-empty "
+        "torch.linalg.svd: cuSOLVER `gesvda` driver requires the input matrices be non-empty "
         "and number of rows be greater than number of columns (ideally tall and skinny).");
       svd_cusolver_gesvdaStridedBatched(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
       convergence_check_needed = true;
     } else {
-      TORCH_CHECK(false, "Unknown svd driver ", driver.value(), " in svd_cusolver computation.");
+      TORCH_CHECK(false, "torch.linalg.svd: unknown svd driver ", driver.value(), " in svd_cusolver computation. ", check_svd_doc);
     }
   }
 
@@ -767,13 +767,13 @@ void svd_cusolver(const Tensor& A,
     const auto svd_non_converging_batches = _check_gesvdj_convergence(info, k + 1);
 
     if (!svd_non_converging_batches.empty()) {
-      TORCH_WARN("During SVD computation with the selected cusolver driver, ",
-                 _format_non_converging_batches(svd_non_converging_batches),
-                 " failed to converge. ",
-                 (driver.has_value()
-                   ?  "It is recommended to redo this SVD with another driver. "
-                   : "A more accurate method will be used to calculate the SVD as a fallback. "),
-                 check_svd_doc);
+      TORCH_WARN_ONCE("torch.linalg.svd: During SVD computation with the selected cusolver driver, ",
+                      _format_non_converging_batches(svd_non_converging_batches),
+                      " failed to converge. ",
+                      (driver.has_value()
+                        ?  "It is recommended to redo this SVD with another driver. "
+                        : "A more accurate method will be used to compute the SVD as a fallback. "),
+                      check_svd_doc);
 
       // We'll do the fallback if user doesn't specify a driver and the default heuristic doesn't converge well.
       // However, if user manually chooses a driver, should we just do a warning or a hard crash?

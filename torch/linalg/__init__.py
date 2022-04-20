@@ -1493,7 +1493,7 @@ Differences with `numpy.linalg.svd`:
       matrices with very large sizes (be cautious if matrix size > 2048).
     - The `gesvdjBatched` driver directly calls the cuSOLVER `cusolverDn<t>gesvdjBatched` method. It only works for
       batched square matrices with size less than or equal to 32.
-    - The `gesvdaBatched` driver directly calls the cuSOLVER `cusolverDn<t>gesvdaStridedBatch` method. This is an
+    - The `gesvda` driver directly calls the cuSOLVER `cusolverDn<t>gesvdaStridedBatch` method. This is an
       approximation method that only works when the input matrices satisfy `m > n` ("tall skinny").
 
 .. note:: When :attr:`full_matrices`\ `= True`, the gradients with respect to `U[..., :, min(m, n):]`
@@ -1551,7 +1551,7 @@ Args:
 Keyword args:
     driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
         If `None`, a default heuristic of algorithms will be used.
-        Available options are: `None`, `gesvd`, `gesvdj`, `gesvdjBatched`, and `gesvdaBatched`.
+        Available options are: `None`, `gesvd`, `gesvdj`, `gesvdjBatched`, and `gesvda`.
         Default: `None`.
     out (tuple, optional): output tuple of three tensors. Ignored if `None`.
 
