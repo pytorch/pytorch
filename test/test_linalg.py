@@ -2586,17 +2586,22 @@ class TestLinalg(TestCase):
 
         ns = (12, 4, 2, 0)
         batches = ((), (0,), (1,), (2,), (2, 1), (0, 2))
-        drivers = (None, 'gesvd', 'gesvdj')  # for 'gesvda' driver, we need to adjust tolerance and only test for m > n
+        drivers = (None, 'gesvd', 'gesvdj', 'gesvda')
 
         for backend in backends:
             torch.backends.cuda.preferred_linalg_library(backend)
 
             for batch, m, n, driver in product(batches, ns, ns, drivers):
                 if backend == 'cusolver' or driver is None:
-                    # only test below cases and skip the others:
+                    # only test cases below and skip otherwise:
                     # - backend == 'cusolver' (driver can be anything)
+                    #   - cusolver 'gesvda' only works for m > n
                     # - backend != 'cusolver' (driver should only be None)
-                    pass
+
+                    if driver == 'gesvda' and m <= n:
+                        continue
+                    # else:
+                    #     pass  # that is, run the test
                 else:
                     continue
 
