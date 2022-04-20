@@ -67,7 +67,7 @@ TORCH_API void EliminateNoOpSlice(std::shared_ptr<Graph>& graph);
 
 TORCH_API void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph);
 
-TORCH_API void LinearReluFusion(std::shared_ptr<Graph>& graph);
+TORCH_API void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

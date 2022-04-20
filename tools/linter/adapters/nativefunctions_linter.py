@@ -89,8 +89,8 @@ if __name__ == "__main__":
     if contents != new_contents:
         msg = LintMessage(
             path=args.native_functions_yml,
-            line=1,
-            char=1,
+            line=None,
+            char=None,
             code="NATIVEFUNCTIONS",
             severity=LintSeverity.ERROR,
             name="roundtrip inconsistency",

@@ -3200,7 +3200,7 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16ReluFusion) {
   testStaticRuntime(src, {input, weight}, {input_2, weight_2});
 
   auto graph = getGraphFromIR(src);
-  LinearReluFusion(graph);
+  QuantizedLinearReluFusion(graph);
   EXPECT_FALSE(hasNodeWithKind(graph, "quantized::linear_dynamic_fp16"));
   EXPECT_TRUE(hasNodeWithKind(graph, "quantized::linear_relu_dynamic_fp16"));
 }
