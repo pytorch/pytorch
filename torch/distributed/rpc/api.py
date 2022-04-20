@@ -1,3 +1,5 @@
+__all__ = ["shutdown", "get_worker_info", "remote", "rpc_sync", "rpc_async", "RRef", "AllGatherStates", "method_factory", "new_method"]
+
 import collections
 import contextlib
 import functools
@@ -39,7 +41,7 @@ from .internal import (
 
 from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
 
-from .utils import _group_membership_management, _update_group_membership
+from ._utils import _group_membership_management, _update_group_membership
 
 logger = logging.getLogger(__name__)
 
