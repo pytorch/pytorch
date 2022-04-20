@@ -1829,6 +1829,13 @@ struct getTypePtr_<c10::ArrayRef<T>> final {
     return type;
   }
 };
+template <>
+struct getTypePtr_<c10::SymIntArrayRef> final {
+  static const auto& call() {
+    static auto type = ListType::create(getTypePtr_<c10::SymInt>::call());
+    return type;
+  }
+};
 template <class T>
 struct getTypePtr_<c10::List<T>> final {
   static const auto& call() {

@@ -5,7 +5,7 @@
 
 namespace at {
 namespace native {
-static bool cat_should_skip_tensor(const Tensor& t) {
+inline bool cat_should_skip_tensor(const Tensor& t) {
   return t.numel() == 0 && t.dim() == 1;
 }
 
