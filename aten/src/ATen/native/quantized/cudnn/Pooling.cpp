@@ -14,6 +14,9 @@
 #include <ATen/cudnn/Types.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorIterator.h>
+#include "ATen/ops/dequantize.h"
+#include "ATen/ops/quantize_per_tensor.h"
+#include "c10/core/QScheme.h"
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/library.h>
@@ -39,6 +42,23 @@ void check_maxpool2d_params(
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
               "Expected 1d or 2d dilation, got ", dilation.size());
 }
+}
+
+// The current implementation of quantized cuda adaptive average pooling uses the following:
+// dequant -> fp32 adaptive average pooling -> quant. This is the same numerically as
+// quantized adaptive average pooling. This is not the ideal implementation, as we desire to
+// operate on the quantized values directly.
+// However, we are currently blocked on this as we are waiting for cudnn's 8.5.0 release, which is anticipated
+// to support adaptive average pooling. When that support is made available, we will use it directly. TODO
+Tensor adaptive_avg_pool2d_quantized_cuda(
+    const at::Tensor& input,
+    IntArrayRef output_size) {
+    // TODO: limit this to per channel quantized tensors for now, though should be easy to adapt
+    // to per channel quantized tensors
+    TORCH_CHECK(input.qscheme() == at::kPerTensorAffine, "adaptive_avg_pool2d_quantized_cuda oonly supports per channel quantized tensors");
+    auto input_fp32 = at::dequantize(input);
+    auto result_fp32 = at::adaptive_avg_pool2d(input_fp32, output_size);
+    return at::quantize_per_tensor(result_fp32, input.q_scale(), input.q_zero_point(), input.scalar_type());
 }
 
 // Currently we support 4D and 3D input (qx) tensors, the latter of which is supported for

@@ -1778,19 +1778,21 @@ class TestQuantizedOps(TestCase):
                 error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
 
                 for name, op in ops_under_test.items():
-                    qX_hat = op(qX, output_size=output_size)
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(
-                        X_ref, qX_hat.int_repr(), atol=1.0,
-                        rtol=0, msg=error_message.format(name, X_ref, qX_hat))
-                    self.assertEqual(
-                        scale, qX_hat.q_scale(),
-                        msg=error_message.format(name + '.scale', scale,
-                                                 qX_hat.q_scale()))
-                    self.assertEqual(
-                        zero_point, qX_hat.q_zero_point(),
-                        msg=error_message.format(name + '.zero_point', scale,
-                                                 qX_hat.q_zero_point()))
+                    devices = ["cpu", "cuda"] if dim == 2 else ["cpu"]
+                    for device in devices:
+                        qX_hat = op(qX.to(device=device), output_size=output_size)
+                        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                        self.assertEqualIgnoreType(
+                            X_ref, qX_hat.int_repr(), atol=1.0,
+                            rtol=0, msg=error_message.format(name, X_ref, qX_hat))
+                        self.assertEqual(
+                            scale, qX_hat.q_scale(),
+                            msg=error_message.format(name + '.scale', scale,
+                                                    qX_hat.q_scale()))
+                        self.assertEqual(
+                            zero_point, qX_hat.q_zero_point(),
+                            msg=error_message.format(name + '.zero_point', scale,
+                                                    qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool3d_ndhwc(self):

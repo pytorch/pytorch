@@ -9218,6 +9218,7 @@
     CPU: adaptive_avg_pool2d_cpu
     CUDA: adaptive_avg_pool2d_cuda
     QuantizedCPU: adaptive_avg_pool2d_quantized_cpu
+    QuantizedCUDA: adaptive_avg_pool2d_quantized_cuda
 
 - func: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
