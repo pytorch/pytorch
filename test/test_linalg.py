@@ -2603,24 +2603,24 @@ class TestLinalg(TestCase):
                 shape = batch + (m, n)
                 k = min(m, n)
                 A = make_arg(shape)
-                U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+                U, S, Vh = torch.linalg.svd(A, full_matrices=False, driver=driver)
                 self.assertEqual((U @ S.to(A.dtype).diag_embed()) @ Vh, A)
 
-                U_f, S_f, Vh_f = torch.linalg.svd(A, full_matrices=True)
+                U_f, S_f, Vh_f = torch.linalg.svd(A, full_matrices=True, driver=driver)
                 self.assertEqual(S_f, S)
                 self.assertEqual((U_f[..., :k] @ S_f.to(A.dtype).diag_embed()) @ Vh_f[..., :k, :], A)
 
-                S_s = torch.linalg.svdvals(A)
+                S_s = torch.linalg.svdvals(A, driver=driver)
                 self.assertEqual(S_s, S)
 
-                U, S, V = torch.svd(A, some=True)
+                U, S, V = torch.svd(A, some=True, driver=driver)
                 self.assertEqual((U @ S.to(A.dtype).diag_embed()) @ V.mH, A)
 
-                U_f, S_f, V_f = torch.svd(A, some=False)
+                U_f, S_f, V_f = torch.svd(A, some=False, driver=driver)
                 self.assertEqual(S_f, S)
                 self.assertEqual((U_f[..., :k] @ S_f.to(A.dtype).diag_embed()) @ V_f[..., :k].mH, A)
 
-                S_s = torch.svd(A, compute_uv=False).S
+                S_s = torch.svd(A, compute_uv=False, driver=driver).S
                 self.assertEqual(S_s, S)
 
     @skipCUDAIfNoMagmaAndNoCusolver
