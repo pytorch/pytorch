@@ -37,6 +37,7 @@ from torch._utils import _get_device_index
 
 from ..modules import Module
 from ._functions import _get_stream
+from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
 from .scatter_gather import gather, is_namedtuple, scatter_kwargs
 
 
@@ -235,7 +236,6 @@ class _DDPJoinHook(JoinHook):
         processes.
         """
         self.ddp._sync_final_model(is_last_joiner)
-
 
 class DistributedDataParallel(Module, Joinable):
     r"""Implements distributed data parallelism that is based on
@@ -611,6 +611,9 @@ class DistributedDataParallel(Module, Joinable):
         else:
             self.parameters_to_ignore = []
 
+        self._use_replicated_tensor_module = _ddp_with_replicated_tensor_enabled()
+        self._build_replicated_tensor_module()
+
         if check_reduction:
             # This argument is no longer used since the reducer
             # will ensure reduction completes even if some parameters
@@ -660,6 +663,14 @@ class DistributedDataParallel(Module, Joinable):
 
         if static_graph:
             self._set_static_graph()
+
+    def _build_replicated_tensor_module(self):
+        if self._use_replicated_tensor_module:
+            # Create a module with ReplicatedTensor without copying tensors. Avoid
+            # registering '_replicated_tensor_module' as a submodule by directly
+            # adding to self.__dict__.
+            from ._replicated_tensor_ddp_interop import _replicate_module
+            self.__dict__['_replicated_tensor_module'] = _replicate_module(self.module, self.process_group)
 
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
@@ -761,12 +772,14 @@ class DistributedDataParallel(Module, Joinable):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
+        del attrs["_replicated_tensor_module"]
         return attrs
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
+        self._build_replicated_tensor_module()
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
@@ -943,6 +956,15 @@ class DistributedDataParallel(Module, Joinable):
         finally:
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
+    def _run_ddp_forward(self, *inputs, **kwargs):
+        module_to_run = self._replicated_tensor_module if self._use_replicated_tensor_module else self.module
+
+        if self.device_ids:
+            inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
+            return module_to_run(*inputs[0], **kwargs[0])
+        else:
+            return module_to_run(*inputs, **kwargs)
+
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
@@ -978,11 +1000,7 @@ class DistributedDataParallel(Module, Joinable):
                 # Notify joined ranks whether they should sync in backwards pass or not.
                 self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
-            if self.device_ids:
-                inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
-                output = self.module(*inputs[0], **kwargs[0])
-            else:
-                output = self.module(*inputs, **kwargs)
+            output = self._run_ddp_forward(*inputs, **kwargs)
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
@@ -1118,6 +1136,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def train(self, mode=True):
         super(DistributedDataParallel, self).train(mode)
+        if self._use_replicated_tensor_module:
+            self._replicated_tensor_module.train(mode)
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks
