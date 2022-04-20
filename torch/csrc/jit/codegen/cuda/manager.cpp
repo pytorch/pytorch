@@ -292,8 +292,8 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
       // slow. So if the fusion fails, then record the failure and always use
       // the fallback instead
       int32_t kernel_id = fusion_node->i(attr::cache_id);
-      bool force_fallback = 
-        CudaFusionManager::getManager().hasFallbackCode(kernel_id);
+      bool force_fallback =
+          CudaFusionManager::getManager().hasFallbackCode(kernel_id);
       if (force_fallback) {
         take_fallback(stack);
       } else {
