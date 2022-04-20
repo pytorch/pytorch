@@ -24,7 +24,7 @@ all = [
     "bitwise_or",
     "bitwise_right_shift",
     "bitwise_xor",
-    "complex",
+    # "complex",
     # 'copysign', # where
     # 'div', # need to implement all rounding modes first
     "eq",
@@ -64,9 +64,10 @@ all = [
     "true_divide",
     # 'xlogy', # where?, log, mul
     #
-    # Conditional prims
+    # Conditional references
     #
     "where",
+    #
     # Data conversion and movement references
     #
     "copy_to",
@@ -547,7 +548,7 @@ def where(
     """ """
 
     if a is None:
-        raise NotImplemented
+        raise NotImplementedError
 
     # Type checking
     assert isinstance(pred, TensorLike)

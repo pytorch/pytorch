@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import \
      GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like,
      freeze_rng_state)
 import torch.testing._internal.opinfo_helper as opinfo_helper
-import torch._refs as _refs
 
 from distutils.version import LooseVersion
 
@@ -16857,15 +16856,37 @@ op_db: List[OpInfo] = [
 ]
 
 # NOTE [Python References]
+# Python References emulate existing PyTorch operations, but can ultimately
+#   be expressed in terms of "primitive" operations from torch._prims.
+#
+# These references are experimental.
+# See https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-0/577
+#   for additional context.
+#
+# Python Reference OpInfos should be added to the python_ref_db list below.
+#   Tests can opt-into running on these references by including
+#   that list in the Sequence they pass to the @ops decorator.
 
 class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
+    '''
+    An OpInfo for a Python reference to an elementwise binary operation.
+
+    When constructing this OpInfo a pointer to an existing OpInfo must be
+    provided using the torch_opinfo_name kwarg. An OpInfo with the same
+    name as that string (and no variant) will be found to inherit from.
+
+    Instead of just inheriting the existing OpInfo's metadata, this
+    will actually reconstruct the appropriate OpInfo metadata by
+    inheriting the existing OpInfo's initialization arguments. These
+    arguments can be overridden by adding kwargs to the constructor.
+    '''
     def __init__(
-        self,
-        name,  # the stringname of the callable Python reference
-        *,
-        op=None,  # the function variant of the operation, populated as torch.<name> if None
-        torch_opinfo_name,  # the string name of the corresponding torch opinfo
-        **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         # TODO: extract this into a common helper
         self.torch_opinfo_name = torch_opinfo_name
@@ -16906,7 +16927,6 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
 
 
 # Separate registry for experimental Python Reference OpInfos.
-# See https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-0/577
 python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         '_refs.add',

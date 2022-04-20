@@ -1,7 +1,7 @@
 import torch
 
 from numbers import Number
-from typing import Optional, Union, Sequence
+from typing import Union, Sequence
 from functools import reduce
 
 
