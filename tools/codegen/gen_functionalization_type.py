@@ -381,21 +381,7 @@ def emit_inplace_functionalization_body(
         for e in translate(unwrapped_args_ctx, dispatcher_sig.arguments(), method=False)
     ]
 
-    # Note [functionalizating copy_() and not preserving strides]
-    # copy_() can't be functionalized, since there doesn't exist an out-of-place variant.
-    # We could add one, but that would be sub-optimal for functorch: copy() would need to allocate a fresh tensor.
-    # This may seem like a large hack for one optimization, but copy_() is one of the most common inplace operators.
-    # Instead, we can replace `self.copy_(src)` with `src.to(self).expand_as(self)`.
-    # This maintains the exact same semantics, EXCEPT that we don't preserve the strides from `self`.
-    # This seems like a reasonable tradeoff, for a few reasons:
-    # - mutation removal is only used by functorch, and not by Vulkan or XLA. Functorch already doesn't preserve strides.
-    # - There are actually a few other places where the functionalization pass currently doesn't support strides:
-    #   calls to slice/diagonal_scatter don't currently preserve the strides of their inputs (but maybe we should fix this).
-    if str(f.func.name) == "copy_":
-        functional_call_str = """\
-            auto tmp_intermediate = at::_ops::to_other::call(src_, self_, non_blocking, false, c10::nullopt);
-            tmp_output = at::_ops::expand_copy::call(tmp_intermediate, self_.sizes(), false);"""
-    elif functional_op is None:
+    if functional_op is None:
         # We can't functionalize this inplace op, since we don't know what the corresponding functional op is.
         warn_str = f"""Note: the functionalization pass encountered an operator ({str(f.func.name)}) that it could not \
 functionalize, because it couldn't find an out-of-place equivalent of the operator to call. \
@@ -423,7 +409,6 @@ If this causes problems in your program, consider upstreaming the out-of-place o
                 unwrapped_args_ctx, functional_sig.arguments(), method=False
             )
         ]
-        functional_call_str = f"tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});"  # noqa: B950
 
     if f.func.is_out_fn():
         mutable_input_post_processing = "\n".join(
@@ -467,7 +452,7 @@ If this causes problems in your program, consider upstreaming the out-of-place o
         {return_type} tmp_output;
         {{
           at::AutoDispatchSkipFunctionalize guard;
-          {functional_call_str}
+          tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});
         }}
         {mutable_input_post_processing}
         {return_str(f)};
