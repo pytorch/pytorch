@@ -704,6 +704,10 @@
     "Any",
     "Callable"
   ],
+  "torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook": [
+    "defaultdict",
+    "Dict"
+  ],
   "torch.distributed.algorithms.join": [
     "ABC",
     "Any",
