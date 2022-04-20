@@ -739,16 +739,15 @@ void svd_cusolver(const Tensor& A,
     if (driver.value() == "gesvd") {
       svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv);
     } else if (driver.value() == "gesvdj") {
-      // gesvdj has good performance for general matrices, but may hard to converge for certain large size or ill-conditioned matrices.
-      svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
-      convergence_check_needed = true;
-    } else if (driver.value() == "gesvdjBatched") {
-      // gesvdjBatched just works for square matrices
-      TORCH_CHECK(gesvdj_batched_requirements,
-        "torch.linalg.svd: cuSOLVER `gesvdjBatched` driver requires the input matrices be non-empty, "
-        "are square matrices, and have sizes no larger than 32.");
-      svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
-      convergence_check_needed = true;
+      if (gesvdj_batched_requirements) {
+        svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
+        convergence_check_needed = true;
+      } else {
+        // gesvdj driver may be numerically unstable for large sized matrix
+        // Todo: Expose/adjust cusolver options of gesvdj number of iterations and numerical tolerance
+        svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
+        convergence_check_needed = true;
+      }
     } else if (driver.value() == "gesvda") {
       // cuSOLVER: gesvdaStridedBatched is preferred for "tall skinny" matrices
       TORCH_CHECK(batch_size > 0 && m > 0 && n > 0 && m > n,

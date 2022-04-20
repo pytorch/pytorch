@@ -1485,14 +1485,16 @@ Differences with `numpy.linalg.svd`:
     - When `driver` is not given or set to `None` (*default*), a driver will be selected automatically
       based on the shape of the inputs.
       The default choice should be efficient and precise for most inputs. However, if input matrices
-      have large condition numbers or could be ill-conditioned, it's recommended to choose the `gesvd` driver.
+      have large condition numbers or could be ill-conditioned, it's recommended to choose the `gesvd` driver
+      or use higher precision data type (e.g. use double instead of float).
     - The `gesvd` driver directly calls the cuSOLVER `cusolverDn<t>gesvd` method. This QR-based algorithm is
-      less performant on GPU, but it can converge ill-conditioned matrices and get high precision for those inputs.
-    - The `gesvdj` driver directly calls the cuSOLVER `cusolverDn<t>gesvdj` method. This Jacobi-based algorithm
-      has better performance than `gesvd` on GPU, but it may get less accurate results for ill-conditioned matrices or
-      matrices with very large sizes (be cautious if matrix size > 2048).
-    - The `gesvdjBatched` driver directly calls the cuSOLVER `cusolverDn<t>gesvdjBatched` method. It only works for
-      batched square matrices with size less than or equal to 32.
+      less performant on GPU, but it can converge ill-conditioned matrices and get more precise results for those inputs
+      than the other drivers.
+    - The `gesvdj` driver calls the cuSOLVER `cusolverDn<t>gesvdjBatched` method if input batched matrices
+      are square matrices with sizes less than or equal to 32. Otherwise, the `gesvdj` driver calls the cuSOLVER
+      `cusolverDn<t>gesvdj` method. This Jacobi-based algorithm has better performance than `gesvd` on GPU,
+      but it may get less accurate results for ill-conditioned matrices or matrices with very large sizes
+      (be cautious if matrix size > 2048).
     - The `gesvda` driver directly calls the cuSOLVER `cusolverDn<t>gesvdaStridedBatch` method. This is an
       approximation method that only works when the input matrices satisfy `m > n` ("tall skinny").
 
@@ -1551,7 +1553,7 @@ Args:
 Keyword args:
     driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
         If `None`, a default heuristic of algorithms will be used.
-        Available options are: `None`, `gesvd`, `gesvdj`, `gesvdjBatched`, and `gesvda`.
+        Available options are: `None`, `gesvd`, `gesvdj`, and `gesvda`.
         Default: `None`.
     out (tuple, optional): output tuple of three tensors. Ignored if `None`.
 
