@@ -89,6 +89,13 @@ struct TORCH_API MetaBase {
     set_output(output_idx, sizes, {}, options, {});
   }
 
+  // Whenever defining the output properties in the META function of a structured
+  // kernel (what was usually done with `set_output`), use one of these 3 variants,
+  // instead.
+  //
+  // Use this function whenever the kernel requires specific strides for the output.
+  // If `strides` does not match the given output strides, proxy outputs will be
+  // created and passed to the IMPL function.
   virtual void set_output_strided(
       int64_t output_idx,
       IntArrayRef sizes,
@@ -98,6 +105,9 @@ struct TORCH_API MetaBase {
     TORCH_INTERNAL_ASSERT(false, "set_output_strided not implemented.");
   }
 
+  // Use this function whenever the kernel knows how to handle arbitrary strided outputs.
+  // This function has the same behavior as the old `set_output`: it will only
+  // re-stride if the given output was resized.
   virtual void set_output_raw_strided(
       int64_t output_idx,
       IntArrayRef sizes,
@@ -107,6 +117,8 @@ struct TORCH_API MetaBase {
     TORCH_INTERNAL_ASSERT(false, "set_output_strided not implemented.");
   }
 
+  // Use this function if the kernel requires contiguous strides.
+  // Alias for `set_output_strided`, but with contiguous strides.
   void set_output_contiguous(
       int64_t output_idx,
       IntArrayRef sizes,
@@ -115,6 +127,7 @@ struct TORCH_API MetaBase {
     auto strides = contiguous_strides(sizes);
     set_output_strided(output_idx, sizes, strides, options, names);
   }
+
   // Returns a reference to an undefined tensor if there is no presupplied
   // output
   const Tensor& maybe_get_output() { return maybe_get_output(0); }
