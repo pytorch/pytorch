@@ -91,7 +91,6 @@ def gen_maybe_create_proxy_helper(backend_index: BackendIndex) -> List[str]:
     _, empty_strided_impl = gen_empty_impl_names(backend_index)
     return [] if empty_strided_impl is None else [f"""
 c10::optional<Tensor> maybe_create_proxy(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
-  resize_out(out, sizes, strides, options);
   if (out.strides() != strides) {{
     return {empty_strided_impl}(sizes, strides, options);
   }}
@@ -490,6 +489,16 @@ if (C10_UNLIKELY(current_device.has_value())) {
         else:
             maybe_set_guard_line = maybe_set_guard = ''
 
+        if maybe_create_proxy:
+            create_proxy = """
+auto maybe_proxy = maybe_create_proxy(out, sizes, strides, options);
+if (maybe_proxy.has_value()) {
+    proxy_outputs_[output_idx] = c10::ExclusivelyOwned<Tensor>(std::move(maybe_proxy).value());
+}
+"""
+        else:
+            create_proxy = ""
+
         if k is SchemaKind.functional:
             assert self.backend_index.dispatch_key in (
                 DispatchKey.Meta, DispatchKey.CPU, DispatchKey.CUDA,
@@ -499,20 +508,13 @@ outputs_[output_idx] = create_out(sizes, strides, options);"""
         elif k is SchemaKind.inplace:
             return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();
-check_inplace(out, sizes, options);"""
+check_inplace(out, sizes, options);
+{create_proxy}"""
         elif k is SchemaKind.out:
-            if maybe_create_proxy:
-                process_out = """
-auto maybe_proxy = maybe_create_proxy(out, sizes, strides, options);
-if (maybe_proxy.has_value()) {
-    proxy_outputs_[output_idx] = c10::ExclusivelyOwned<Tensor>(std::move(maybe_proxy).value());
-}
-"""
-            else:
-                process_out = "resize_out(out, sizes, strides, options);"
             return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();
-{process_out}"""
+resize_out(out, sizes, strides, options);
+{create_proxy}"""
         else:
             assert_never(k)
 
@@ -541,11 +543,11 @@ const auto& out = outputs_[output_idx].get();
             proxy_field = ""
         elif k is SchemaKind.inplace:
             output_type = "std::reference_wrapper<Tensor>"
-            output_value = "outputs_[output_idx]"
-            proxy_field = ""
+            output_value = "proxy_outputs_[output_idx].has_value() ? **proxy_outputs_[output_idx] : outputs_[output_idx].get()"
+            proxy_field = f"std::array<c10::optional<c10::ExclusivelyOwned<Tensor>>, {len(f.func.returns)}> proxy_outputs_;"
         elif k is SchemaKind.out:
             output_type = "std::reference_wrapper<Tensor>"
-            output_value = f"proxy_outputs_[output_idx].has_value() ? **proxy_outputs_[output_idx] : outputs_[output_idx].get()"
+            output_value = "proxy_outputs_[output_idx].has_value() ? **proxy_outputs_[output_idx] : outputs_[output_idx].get()"
             proxy_field = f"std::array<c10::optional<c10::ExclusivelyOwned<Tensor>>, {len(f.func.returns)}> proxy_outputs_;"
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
