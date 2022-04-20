@@ -234,7 +234,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation in Quantized Add Cudnn");
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
