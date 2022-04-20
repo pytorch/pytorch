@@ -14501,7 +14501,8 @@ op_db: List[OpInfo] = [
                # use of lambda doesn't work with test_normalize_operator_exhaustive
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: "index_select" not implemented for 'ComplexHalf'
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', dtypes=(torch.float, torch.cfloat)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            dtypes=(torch.float, torch.cfloat)),
                # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
