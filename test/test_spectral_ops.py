@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
+     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncInfo, SpectralFuncType)
 
@@ -114,7 +114,6 @@ def _stft_reference(x, hop_length, window):
 class TestFFT(TestCase):
     exact_dtype = True
 
-    @skipCUDAIfRocm
     @onlyNativeDeviceTypes
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.OneD],
          allowed_dtypes=(torch.float, torch.cfloat))
@@ -275,7 +274,6 @@ class TestFFT(TestCase):
             op(x)
 
     # nd-fft tests
-    @skipCUDAIfRocm
     @onlyNativeDeviceTypes
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
