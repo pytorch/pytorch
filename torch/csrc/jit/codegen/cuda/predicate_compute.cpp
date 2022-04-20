@@ -444,6 +444,7 @@ void UnswitchPredicate::predicateOn(Expr* tv_expr) {
 
   auto ref_pred_info = Index::getReferenceRootPredicates(
       out_tv, for_loops_, unrolled_loop_, false);
+  const ReferenceTensor& reference = ref_pred_info.second;
 
   // If RootPredicateInfo has a static predicate that is more
   // restrictive than the current one, replace the current with the

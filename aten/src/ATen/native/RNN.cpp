@@ -1833,7 +1833,7 @@ DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_typ
 
 namespace {
 
-static C10_UNUSED auto ensure_linear_params_registered = register_linear_params();
+static auto ensure_linear_params_registered = register_linear_params();
 
 static auto cell_params_base_registry =
     torch::selective_class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))
