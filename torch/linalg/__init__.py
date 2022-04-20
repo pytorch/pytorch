@@ -1482,8 +1482,8 @@ Differences with `numpy.linalg.svd`:
 
 .. note:: Selection of `driver` (this keyword argument only works on CUDA inputs with cuSOLVER backend):
 
-    - When `driver` is not given or set to `None` (*default*), a heuristic of drivers will be selected based on
-      matrix sizes and batch sizes of the inputs.
+    - When `driver` is not given or set to `None` (*default*), a driver will be selected automatically
+      based on the shape of the inputs.
       The default choice should be efficient and precise for most inputs. However, if input matrices
       have large condition numbers or could be ill-conditioned, it's recommended to choose the `gesvd` driver.
     - The `gesvd` driver directly calls the cuSOLVER `cusolverDn<t>gesvd` method. This QR-based algorithm is
