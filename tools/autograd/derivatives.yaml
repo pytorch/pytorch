@@ -402,7 +402,7 @@
   result: auto_linear
 
 - name: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
-  self: grad.to(self.options(), /*non_blocking*/false, /*copy*/false)
+  self: _to_copy_backward(grad, self.options())
   result: _to_copy(self_t, dtype, layout, device, pin_memory, non_blocking, memory_format)
   # The condition is: if dtype is not nullopt, then isDifferentiableType(*dtype)
   # (If dtype IS nullopt, we rely on the regular check that any input requires grad).
@@ -625,6 +625,15 @@
 
 - name: _fused_moving_avg_obs_fq_helper(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor output, Tensor mask)
   self: fake_quantize_per_tensor_affine_cachemask_backward(grad, mask)
+
+- name: fill.Scalar(Tensor self, Scalar value) -> Tensor
+  self: zeros_like(grad)
+  result: at::fill(self_t, 0)
+
+- name: fill.Tensor(Tensor self, Tensor value) -> Tensor
+  self: zeros_like(grad)
+  value: grad.sum()
+  result: at::fill(self_t, value_t)
 
 - name: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   self: zeros_like(grad)
@@ -1681,6 +1690,10 @@
   self: zeros_like(grad)
   result: auto_linear
 
+- name: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  self: zeros_like(grad)
+  result: auto_linear
+
 - name: sparse_mask(Tensor self, Tensor mask) -> Tensor
   self: grad.to_dense().sparse_mask(mask).to_dense()
   mask: non_differentiable
@@ -1866,6 +1879,10 @@
 
 - name: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _sparse_log_softmax_backward_data(grad, result, dim, self)
+
+- name: _masked_softmax(Tensor self, Tensor mask, int? dim=None) -> Tensor
+  self: _masked_softmax_backward(grad, result, mask, dim)
+  mask: non_differentiable
 
 - name: prelu(Tensor self, Tensor weight) -> Tensor
   self, weight: "grad.defined() ? prelu_backward(grad, self, weight) : std::tuple<Tensor, Tensor>()"

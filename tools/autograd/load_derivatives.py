@@ -9,11 +9,12 @@ import yaml
 
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, ForwardDerivative)
-from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, BaseCType, VectorCType,
+from tools.codegen.api.types import (Binding, NamedCType, BaseCType, VectorCType,
                                      intArrayRefT, tensorOptionsT, typeAndSizeT, longT, boolT,
                                      tensorGeometryT, scalarTypeT, SpecialArgName,
                                      OptionalCType, stringT)
 from tools.codegen.api import cpp
+from tools.codegen.api import dispatcher
 from tools.codegen.gen import parse_native_yaml, get_grouped_by_view_native_functions
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
@@ -91,13 +92,13 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
     return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
 
 @with_native_function
-def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
-    return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
+def dispatcher_arguments(f: NativeFunction) -> Sequence[Binding]:
+    return dispatcher.arguments(f.func)
 
 def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...],
                       available_named_gradients: Sequence[str]) -> Derivative:
     original_formula = formula
-    arguments: List[NamedCType] = [a.nctype.remove_const_ref() for a in cpp_arguments(f)]
+    arguments: List[NamedCType] = [a.nctype.remove_const_ref() for a in dispatcher_arguments(f)]
 
     return_names = tuple(n if n != 'self' else 'result' for n in cpp.return_names(f))
     return_types = tuple(cpp.return_type(r).remove_const_ref() for r in f.func.returns)
@@ -275,6 +276,7 @@ def postprocess_forward_derivatives(
             required_inputs_tangent = tuple(diff_arg_names)
             formula = fw_formula
 
+
         # At this point, the formula is final and is not modified anymore.
 
         # During forward formula, we use the primal instead of the input Tensors.
@@ -379,7 +381,7 @@ def create_differentiability_info(
         non_differentiable_arg_names: List[str] = []
         args_with_derivatives_set: Set[str] = set()
 
-        all_arg_names = [a.name for a in cpp_arguments(f)]
+        all_arg_names = [a.name for a in dispatcher_arguments(f)]
         all_ret_names = [r.name for r in f.func.returns]  # only used for the assert below
         # output_differentiability is captured from the enclosed
         # scope. Don't modify it.
@@ -429,7 +431,7 @@ def create_differentiability_info(
         # Next, let us determine the list of inputs in order.
         # TODO: do we need eagerly calculate and save it here? Can it be derived
         # from NativeFunction and `derivatives` on callsites instead?
-        args_with_derivatives = [a for a in cpp_arguments(f) if a.name in args_with_derivatives_set]
+        args_with_derivatives = [a for a in dispatcher_arguments(f) if a.name in args_with_derivatives_set]
 
         # Postprocess forward derivatives definitions now that we know the differentiable arguments
         forward_derivatives = postprocess_forward_derivatives(f, defn_name, all_arg_names, derivatives,
@@ -477,12 +479,12 @@ def create_differentiability_info(
                            f'Available signatures:\n{avail}')
 
     canonical = canonical_function(functions, defn_name)
-    if 'grad_input_mask' in (a.name for a in cpp_arguments(canonical)):
+    if 'grad_input_mask' in (a.name for a in dispatcher_arguments(canonical)):
         raise RuntimeError(f"Schema for {defn_name} has an argument named grad_input_mask, "
                            "but this name would be shadowed by our codegen. "
                            "Please use a different name in native_functions.yaml.")
 
-    if 'result' in (a.name for a in cpp_arguments(canonical)):
+    if 'result' in (a.name for a in dispatcher_arguments(canonical)):
         raise RuntimeError(f"Schema for {defn_name} has an argument named result, "
                            "but this is only allowed for outputs."
                            "Please use a different name in native_functions.yaml.")
