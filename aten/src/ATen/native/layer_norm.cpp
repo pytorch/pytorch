@@ -186,6 +186,47 @@ Tensor layer_norm(
   return std::get<0>(at::native_layer_norm(input, normalized_shape, weight, bias, eps));
 }
 
+Tensor& layer_norm_out(
+    const Tensor& input,
+    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    double eps,
+    bool /* cudnn_enable, deprecated */,
+    Tensor& output) {
+
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+  auto N = M_N.second;
+  auto X = input.expect_contiguous();
+  auto gamma = weight.expect_contiguous();
+  auto beta = bias.expect_contiguous();
+
+  Tensor mean = at::empty({M}, X->options());
+  Tensor rstd = at::empty({M}, X->options());
+
+  if (!output.is_contiguous()) {
+    Tensor Y = at::native::empty_like(
+      *X,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      at::MemoryFormat::Contiguous);
+    layer_norm_with_mean_rstd_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
+    output.copy_(std::move(Y));
+  } else {
+    layer_norm_with_mean_rstd_out(output, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
+  }
+
+  return output;
+
+}
+
+
 DEFINE_DISPATCH(LayerNormKernel);
 DEFINE_DISPATCH(LayerNormBackwardKernel);
 

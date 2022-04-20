@@ -11716,7 +11716,7 @@ op_db: List[OpInfo] = [
            ref=reference_layer_norm,
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_out=False,
+           supports_out=True,
            supports_forward_ad=True,
            decorators=[
                DecorateInfo(
