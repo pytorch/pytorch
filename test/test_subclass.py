@@ -12,6 +12,11 @@ from torch.testing._internal.common_subclass import subclass_db, DiagTensorBelow
 from torch.testing._internal.logging_tensor import LoggingTensor
 from unittest import expectedFailure
 
+# The current test methodology in this file is to test a variety of real use cases
+# with a set of fully-fledged tensor subclasses. In the future, this may change
+# to more narrowly specify toy subclasses for each of the specific invariants under
+# test, avoiding the need to maintain the set of fully-fledged tensor subclasses.
+
 
 # Decorator for parametrizing tests across the various tensor classes.
 parametrize_tensor_cls = parametrize("tensor_cls", [
