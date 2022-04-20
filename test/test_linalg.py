@@ -2586,7 +2586,7 @@ class TestLinalg(TestCase):
 
         ns = (12, 4, 2, 0)
         batches = ((), (0,), (1,), (2,), (2, 1), (0, 2))
-        drivers = (None, 'gesvd', 'gesvdj') # for 'gesvda' driver, we need to adjust tolerance and only test for m > n
+        drivers = (None, 'gesvd', 'gesvdj')  # for 'gesvda' driver, we need to adjust tolerance and only test for m > n
 
         for backend in backends:
             torch.backends.cuda.preferred_linalg_library(backend)
