@@ -1832,6 +1832,13 @@ struct getTypePtr_<c10::ArrayRef<T>> final {
     return type;
   }
 };
+template <>
+struct getTypePtr_<c10::SymIntArrayRef> final {
+  static const auto& call() {
+    static auto type = ListType::create(getTypePtr_<c10::SymInt>::call());
+    return type;
+  }
+};
 template <class T>
 struct getTypePtr_<c10::List<T>> final {
   static const auto& call() {
@@ -1865,10 +1872,15 @@ struct getTypePtr_<c10::Dict<K, V>> final {
 
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
-  static const auto& call() {
+  static const auto callSingleton() {
     static auto inner_type = getTypePtr_<T>::call();
-    // TODO: debug why making this static causes problems
+    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
     return OptionalType::get(inner_type);
+  }
+  static const auto& call() {
+    static auto type = getTypePtr_<at::optional<T>>::callSingleton();
+    return type;
   }
 };
 

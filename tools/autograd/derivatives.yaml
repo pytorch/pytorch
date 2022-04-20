@@ -230,14 +230,14 @@
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
-  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
-  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
+  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), mat1.layout(), alpha)
+  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), mat2.layout(), alpha)
   result: maybe_multiply(self_t, beta) + maybe_multiply(mat1_t.mm(mat2_p), alpha) + maybe_multiply(mat1_p.mm(mat2_t), alpha)
 
 - name: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
   sparse: _sparse_addmm_sparse_backward(grad, sparse, dense, alpha)
-  dense: mm_mat2_backward(grad, sparse, dense.sizes(), dense.strides(), alpha)
+  dense: mm_mat2_backward(grad, sparse, dense.sizes(), dense.strides(), dense.layout(), alpha)
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
@@ -602,6 +602,10 @@
 
 - name: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
   self: at::sum_to(grad, self.sizes())
+  result: auto_linear
+
+- name: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
+  self: at::sum_to(grad, c10::expectIntArrayRef(self.sym_sizes()))
   result: auto_linear
 
 - name: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
@@ -1065,8 +1069,8 @@
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
-  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), 1)
-  mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
+  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), self.layout(), 1)
+  mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), mat2.layout(), 1)
   result: at::mm(self_t, mat2_p) + at::mm(self_p, mat2_t)
 
 - name: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
