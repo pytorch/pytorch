@@ -26,7 +26,7 @@ import collections
 import functools
 import types
 import warnings
-from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator
+from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator, Tuple
 
 import torch
 from torch._C import (
@@ -181,6 +181,20 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
+        # Doesn't actually take or return tensor arguments
+        torch.nn.init.calculate_gain,
+        # These are deprecated; don't test them
+        torch.nn.init.uniform,
+        torch.nn.init.normal,
+        torch.nn.init.constant,
+        torch.nn.init.eye,
+        torch.nn.init.dirac,
+        torch.nn.init.xavier_uniform,
+        torch.nn.init.xavier_normal,
+        torch.nn.init.kaiming_uniform,
+        torch.nn.init.kaiming_normal,
+        torch.nn.init.orthogonal,
+        torch.nn.init.sparse,
         has_torch_function,
         handle_torch_function,
         torch.set_autocast_enabled,
@@ -818,6 +832,11 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                                                                 distance_function=None, margin=1.0,
                                                                 swap=False, reduction='mean': -1),
         torch.nn.functional.unfold: lambda input, kernel_size, dilation=1, padding=0, stride=1: -1,
+        torch.nn.init.uniform_: lambda tensor, a=0., b=1.: -1,
+        torch.nn.init.constant_: lambda tensor, val: -1,
+        torch.nn.init.normal_: lambda tensor, mean=0., std=1.: -1,
+        torch.nn.init.constant_: lambda tensor, val: -1,
+        torch.nn.init.kaiming_uniform_: lambda tensor, a=0, mode='fan_in', nonlinearity='leaky_relu': -1,
         torch.nonzero: lambda input, as_tuple=False: -1,
         torch.argwhere: lambda input: -1,
         torch.norm: lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1,
@@ -1311,7 +1330,7 @@ def wrap_torch_function(dispatcher: Callable):
         def wrapped(*args, **kwargs):
             relevant_args = dispatcher(*args, **kwargs)
             if has_torch_function(relevant_args):
-                return handle_torch_function(func, relevant_args, *args, **kwargs)
+                return handle_torch_function(wrapped, relevant_args, *args, **kwargs)
 
             return func(*args, **kwargs)
 
@@ -1512,35 +1531,32 @@ has_torch_function_variadic = _add_docstr(
 )
 
 @functools.lru_cache(None)
-def get_overridable_functions() -> Dict[Any, List[Callable]]:
-    """List functions that are overridable via __torch_function__
-
-    Returns
-    -------
-    Dict[Any, List[Callable]]
-        A dictionary that maps namespaces that contain overridable functions
-        to functions in that namespace that can be overridden.
-    """
+def _get_overridable_functions() -> Tuple[Dict[Any, List[Callable]], Dict[Callable, str]]:
     overridable_funcs = collections.defaultdict(list)
+    index = {}
     tested_namespaces = [
-        (torch, torch.__all__ + dir(torch._C._VariableFunctions)),
-        (torch.functional, torch.functional.__all__),
-        (torch.nn.functional, dir(torch.nn.functional)),
-        (torch.Tensor, dir(torch.Tensor)),
-        (torch.linalg, dir(torch.linalg)),
-        (torch.fft, dir(torch.fft)),
-        (torch.special, dir(torch.special)),
+        ("torch", torch, torch.__all__ + dir(torch._C._VariableFunctions)),
+        ("torch.functional", torch.functional, torch.functional.__all__),
+        ("torch.nn.functional", torch.nn.functional, dir(torch.nn.functional)),
+        ("torch.nn.init", torch.nn.init, dir(torch.nn.init)),
+        ("torch.Tensor", torch.Tensor, dir(torch.Tensor)),
+        ("torch.linalg", torch.linalg, dir(torch.linalg)),
+        ("torch.fft", torch.fft, dir(torch.fft)),
+        ("torch.special", torch.special, dir(torch.special)),
     ]
-    for namespace, ns_funcs in tested_namespaces:
+    for namespace_str, namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:
+            ignore = False
             # ignore private functions or functions that are deleted in torch.__init__
             if namespace is not torch.Tensor:
-                if func_name.startswith('_'):
+                if func_name.startswith('__'):
                     continue
+                elif func_name.startswith('_'):
+                    ignore = True
                 elif func_name.endswith('_'):
-                    continue
+                    ignore = True
                 elif not func_name[0].islower():
-                    continue
+                    ignore = True
                 elif func_name == 'unique_dim':
                     continue
             else:
@@ -1560,6 +1576,10 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
                 continue
 
             if not callable(func) and hasattr(func, "__get__"):
+                index[func.__get__] = f"{namespace_str}.{func_name}.__get__"
+                index[func.__set__] = f"{namespace_str}.{func_name}.__set__"
+                if ignore:
+                    continue
                 if func.__get__ in get_ignored_functions():
                     msg = ("{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                            "but still has an explicit override")
@@ -1572,6 +1592,11 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
             if not callable(func):
                 continue
 
+            index[func] = f"{namespace_str}.{func_name}"
+
+            if ignore:
+                continue
+
             # cannot be overriden by __torch_function__
             if func in get_ignored_functions():
                 msg = ("{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
@@ -1579,7 +1604,21 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
                 assert func not in get_testing_overrides(), msg.format(namespace, func.__name__)
                 continue
             overridable_funcs[namespace].append(func)
-    return overridable_funcs
+    return overridable_funcs, index
+
+def get_overridable_functions() -> Dict[Any, List[Callable]]:
+    """List functions that are overridable via __torch_function__
+
+    Returns
+    -------
+    Dict[Any, List[Callable]]
+        A dictionary that maps namespaces that contain overridable functions
+        to functions in that namespace that can be overridden.
+    """
+    return _get_overridable_functions()[0]
+
+def resolve_name(f):
+    return _get_overridable_functions()[1].get(f)
 
 @functools.lru_cache(None)
 def _get_tensor_methods() -> Set[Callable]:
