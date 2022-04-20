@@ -429,8 +429,7 @@ Here are a few key attributes for quantized Tensor:
   * torch.per_tensor_affine would have quantization parameters of
 
     * scale (float)
-    * zero_point (int)
-      
+    * zero_point (int)      
   * torch.per_tensor_affine would have quantization parameters of
 
     * per_channel_scales (list of float)
@@ -448,12 +447,10 @@ The input and output of a model are floating point Tensors, but activations in t
   * torch.quantize_per_tensor_dynamic(x, dtype, reduce_range)
   * to(torch.float16)
 
-
 * Dequantize (quantized -> float)
 
   * quantized_tensor.dequantize() - calling dequantize on a torch.float16 Tensor will convert the Tensor back to torch.float
   * torch.dequantize(x)
-
 
 Quantized Operators/Modules
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -473,7 +470,6 @@ Observer and FakeQuantize
 
   * collect tensor statistics like min value and max value of the Tensor passing through the observer
   * and calculate quantization parameters based on the collected tensor statistics
-
 * FakeQuantize are PyTorch Modules used to:
 
   * simulate quantization (performing quantize/dequantize) for a Tensor in the network
@@ -489,7 +485,6 @@ QConfig
     * dtype
     * qscheme
     * quant_min/quant_max: can be used to simulate lower precision Tensors
-
   * Currently supports configuration for activation and weight
   * We insert input/weight/output observer based on the qconfig that is configured for a given operator or module
 
@@ -499,11 +494,9 @@ In general, the flow is the following
 * prepare
 
   * insert Observer/FakeQuantize modules based on user specified qconfig
-
 * calibrate/train (depending on post training quantization or quantization aware training)
 
-  * allow Observers to collect statistics or FakeQuantize modules to learn the quantization parameters
-    
+  * allow Observers to collect statistics or FakeQuantize modules to learn the quantization parameters    
 * convert
 
   * convert a calibrated/trained model to a quantized model
