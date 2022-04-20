@@ -736,7 +736,7 @@ constexpr BackendComponent toBackendComponent(DispatchKey k) {
         static_cast<uint8_t>(k) -
         static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
   } else if (
-      k >= DispatchKey::StartOfAutocast &&
+      k >= DispatchKey::StartOfAutocastBackends &&
       k <= DispatchKey::EndOfAutocastBackends) {
     return static_cast<BackendComponent>(
         static_cast<uint8_t>(k) -
