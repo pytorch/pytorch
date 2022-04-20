@@ -359,10 +359,9 @@ def _get_tensor_dim_size(x, dim):
 
 def _unimplemented(op, msg):
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
-    if (_operator_export_type != torch.onnx.OperatorExportTypes.ONNX and
-            torch.onnx._CAFFE2_ATEN_FALLBACK):
+    if torch.onnx._CAFFE2_ATEN_FALLBACK:
         warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
-    else:
+    elif _operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
         _onnx_unsupported(f"{op}, {msg}")
 
 
