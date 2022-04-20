@@ -348,6 +348,9 @@ def _simplify_obj_name(obj) -> str:
             return str(obj.__class__.__qualname__)
         except Exception as _:
             return default_str
+    elif isinstance(obj, (list, tuple)):
+        inner = ', '.join([_simplify_obj_name(ele) for ele in obj])
+        return f"[{inner}]" if isinstance(obj, list) else f"({inner})"
     elif inspect.isfunction(obj):
         return obj.__name__
     else:
