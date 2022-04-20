@@ -89,6 +89,7 @@ struct TORCH_API MetaBase {
     set_output(output_idx, sizes, {}, options, {});
   }
 
+  // See: https://github.com/pytorch/pytorch/issues/69813
   // Whenever defining the output properties in the META function of a structured
   // kernel (what was usually done with `set_output`), use one of these 3 variants,
   // instead.
