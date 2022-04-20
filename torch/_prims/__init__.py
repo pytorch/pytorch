@@ -158,11 +158,11 @@ def _make_prim(
 
 
 def _elementwise_meta(*args):
-    '''
+    """
     Meta function for elementwise operations.
 
     Stride logic is currently incorrect.
-    '''
+    """
 
     assert len(args) > 0
 
@@ -192,7 +192,9 @@ def _elementwise_meta(*args):
     # TODO: fix strides
     if tensor is not None:
         if 0 in tensor.stride() and tensor.numel() > 0:
-            return TensorMeta(tensor, strides=utils.make_contiguous_strides_for(tensor.shape))
+            return TensorMeta(
+                tensor, strides=utils.make_contiguous_strides_for(tensor.shape)
+            )
         else:
             return TensorMeta(tensor)
 
@@ -609,6 +611,7 @@ broadcast_in_dim = _make_prim(
     doc=_broadcast_in_dim_doc,
 )
 
+
 def _collapse_view_meta(a: TensorLike, start: int, end: int) -> TensorLike:
     assert isinstance(a, TensorLike)
 
@@ -805,8 +808,10 @@ def _concatenate_meta(tensors: Sequence, dim: int) -> TensorLike:
         tensors[0], shape=new_shape, strides=make_contiguous_strides_for(new_shape)
     )
 
+
 def _concatenate_aten(tensors: Sequence, dim: int) -> Tensor:
     return torch.cat(tensors, dim)
+
 
 _concatenate_doc = """
   Concatenates tensors along the specified dimension.
@@ -821,6 +826,7 @@ concatenate = _make_prim(
     doc=_concatenate_doc,
 )
 
+
 def _reshape_meta(a: TensorLike, shape: Sequence):
     assert isinstance(a, TensorLike)
     utils.validate_shape(shape)
@@ -830,9 +836,11 @@ def _reshape_meta(a: TensorLike, shape: Sequence):
     numel = reduce(lambda acc, x: acc * x, shape)
     assert a.numel() == numel
 
+
 def _reshape_aten(a: Tensor, shape: Sequence) -> Tensor:
 
     return a.clone().reshape(shape).contiguous()
+
 
 _reshape_doc = """
   Creates a contiguous tensor with the specified shape
@@ -848,6 +856,7 @@ reshape = _make_prim(
 #
 # Conditional prims
 #
+
 
 def _select_meta(pred: TensorLike, a: TensorLike, b: TensorLike) -> TensorLike:
     utils.check_same_device(pred, a, b, allow_scalars=True)
