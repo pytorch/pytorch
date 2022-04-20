@@ -31,6 +31,10 @@
   constexpr bool use_cusolver_syevj_batched_ = false;
 #endif
 
+// From cuSOLVER doc: Jacobi method has quadratic convergence, so the accuracy is not proportional to number of sweeps.
+//   To guarantee certain accuracy, the user should configure tolerance only.
+// The current pytorch implementation sets gesvdj tolerance to epsilon of a C++ data type to target the best possible precision.
+constexpr int cusolver_gesvdj_max_sweeps = 400;
 
 namespace at {
 namespace native {
