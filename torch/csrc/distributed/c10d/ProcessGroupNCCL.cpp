@@ -1221,8 +1221,8 @@ void check_gpu_single_tensor(const at::Tensor& tensor) {
   if (!tensor.is_cuda() || tensor.is_sparse()) {
     TORCH_CHECK(false, "Tensors must be CUDA and dense");
   }
-  if (!tensor.is_contiguous()) {
-    TORCH_CHECK(false, "Tensors must be contiguous");
+  if (!tensor.is_non_overlapping_and_dense()) {
+    TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
   }
 }
 
