@@ -20,8 +20,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    skipIfRocm
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -620,7 +619,6 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
-    @skipIfRocm
     def test_adadelta(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 4e-3
@@ -687,30 +685,38 @@ class TestOptim(TestCase):
     def test_adagrad(self):
         for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-1)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1
-                )
+                lambda weight, bias, maximize: optimizer(
+                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1, maximize=maximize,
+                ),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1)
+                    lr=1e-1,
+                    maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1),
-                [lambda opt: ReduceLROnPlateau(opt)]
+                    lr=1e-1,
+                    maximize=maximize),
+                [lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-1),
+                    lr=1e-1,
+                    maximize=maximize),
                 [lambda opt: ReduceLROnPlateau(opt),
-                 lambda opt: ExponentialLR(opt, gamma=0.99)]
+                 lambda opt: ExponentialLR(opt, gamma=0.99)],
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
                 optimizer(None, lr=1e-2, lr_decay=-0.5)
