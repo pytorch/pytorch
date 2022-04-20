@@ -660,8 +660,9 @@ void spmm_wrapper(
 
 // Cusparse CSR SPMM, starting from cuda 11.6 update 1 (cusparse 11.7.2), has some functionality issue when sparse matrix A is being broadcasted,
 //   by setting both strides to 0 in cusparseCsrSetStridedBatch call.
+// This will be fixed in a future cuda release.
 // We are using a temporary workaround here to do the batched SPMM on every single matrix separately.
-#if CUSPARSE_VERSION < 11702
+#if CUSPARSE_VERSION < 11702 || CUSPARSE_VERSION >= 11704
   return spmm(mat1, mat2, beta, alpha, result);
 #else
   if (mat1.dim() == 2) {
