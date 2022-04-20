@@ -204,7 +204,7 @@ def _validate_embedding_bag_param(args, kwargs):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) > 2:
         raise ValueError("Input more than 2 dims not supported")
-    weight_size = cast(torch.Size, weight.size())
+    weight_size = weight.size()
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if int(torch.min(input).item()) < 0:
