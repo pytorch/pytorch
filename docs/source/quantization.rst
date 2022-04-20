@@ -411,22 +411,28 @@ additional quantization error.
 
 Here are a few key attributes for quantized Tensor:
 * QScheme (torch.qscheme): a enum that specifies the way we quantize the Tensor
+
   * torch.per_tensor_affine
   * torch.per_tensor_symmetric
   * torch.per_channel_affine
   * torch.per_channel_symmetric
 
 * dtype (torch.dtype): data type of the quantized Tensor
+
   * torch.quint8
   * torch.qint8
   * torch.qint32
   * torch.float16
 
 * quantization parameters (varies based on QScheme): parameters for the chosen way of quantization
+
   * torch.per_tensor_affine would have quantization parameters of
+
     * scale (float)
     * zero_point (int)
+      
   * torch.per_tensor_affine would have quantization parameters of
+
     * per_channel_scales (list of float)
     * per_channel_zero_points (list of int)
     * axis (int)
@@ -436,6 +442,7 @@ Quantize and Dequantize
 The input and output of a model are floating point Tensors, but activations in the quantized model are quantized, so we need operators to convert between floating point and quantized Tensors.
 
 * Quantize (float -> quantized)
+
   * torch.quantize_per_tensor(x, scale, zero_point, dtype)
   * torch.quantize_per_channel(x, scales, zero_points, axis, dtype)
   * torch.quantize_per_tensor_dynamic(x, dtype, reduce_range)
@@ -443,6 +450,7 @@ The input and output of a model are floating point Tensors, but activations in t
 
 
 * Dequantize (quantized -> float)
+
   * quantized_tensor.dequantize() - calling dequantize on a torch.float16 Tensor will convert the Tensor back to torch.float
   * torch.dequantize(x)
 
@@ -462,21 +470,26 @@ Quantization Flow
 Observer and FakeQuantize
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 * Observer are PyTorch Modules used to:
+
   * collect tensor statistics like min value and max value of the Tensor passing through the observer
   * and calculate quantization parameters based on the collected tensor statistics
 
 * FakeQuantize are PyTorch Modules used to:
+
   * simulate quantization (performing quantize/dequantize) for a Tensor in the network
   * it can calculate quantization parameters based on the collected statistics from observer, or it can learn the quantization parameters as well
 
 QConfig
 ~~~~~~~~~~~
 * QConfig is a namedtuple of Observer or FakeQuantize Module class that can are configurable with qscheme, dtype etc. it is used to configure how an operator should be observed
+
   * Quantization configuration for an operator/module
+
     * different types of Observer/FakeQuantize
     * dtype
     * qscheme
     * quant_min/quant_max: can be used to simulate lower precision Tensors
+
   * Currently supports configuration for activation and weight
   * We insert input/weight/output observer based on the qconfig that is configured for a given operator or module
 
@@ -484,10 +497,15 @@ General Quantization Flow
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 In general, the flow is the following
 * prepare
+
   * insert Observer/FakeQuantize modules based on user specified qconfig
+
 * calibrate/train (depending on post training quantization or quantization aware training)
+
   * allow Observers to collect statistics or FakeQuantize modules to learn the quantization parameters
+    
 * convert
+
   * convert a calibrated/trained model to a quantized model
 
 There are different modes of quantization, they can be classified in two ways:
@@ -506,7 +524,7 @@ We can mix different ways of quantizing operators in the same quantization flow.
 Quantization Support Matrix
 --------------------------------------
 Quantization Mode Support
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 +-----------------------------+------------------------------------------------------+----------------+----------------+------------+-----------------+
 |                             |Quantization                                          |Dataset         | Works Best For | Accuracy   |      Notes      |
 |                             |Mode                                                  |Requirement     |                |            |                 |
@@ -546,7 +564,7 @@ for a more comprehensive overview of the tradeoffs between these quantization
 types.
 
 Quantization Flow Support
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 PyTorch provides two modes of quantization: Eager Mode Quantization and FX Graph Mode Quantization.
 
 Eager Mode Quantization is a beta feature. User needs to do fusion and specify where quantization and dequantization happens manually, also it only supports modules and not functionals.
@@ -600,7 +618,7 @@ The following table compares the differences between Eager Mode Quantization and
 +-----------------+-------------------+-------------------+
 
 Backend/Hardware Support
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 +-----------------+---------------+------------+------------+------------+
 |Hardware         |Kernel Library |Eager Mode  |FX Graph    |Quantization|
 |                 |               |Quantization|Mode        |Mode Support|
@@ -627,7 +645,7 @@ Today, PyTorch supports the following backends for running quantized operators e
 
 
 Note for native CPU backends
-==================================
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We expose both `fbgemm` and `qnnpack` with the same native pytorch quantized operators, so we need additional flag to distinguish between them. The corresponding implementation of `fbgemm` and `qnnpack` is chosen automatically based on the PyTorch build mode, though users have the option to override this by setting `torch.backends.quantization.engine` to `fbgemm` or `qnnpack`.
 
 When preparing a quantized model, it is necessary to ensure that qconfig
@@ -656,7 +674,7 @@ Default settings for qnnpack::
     torch.backends.quantized.engine = 'qnnpack'
 
 Operator Support
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^
 
 Operator coverage varies between dynamic and static quantization and is captured in the table below.
 Note that for FX Graph Mode Quantization, the corresponding functionals are also supported.
