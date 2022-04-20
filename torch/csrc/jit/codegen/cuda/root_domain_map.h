@@ -92,6 +92,8 @@ class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
     return consumer_tv_;
   }
 
+  std::string toString() const;
+
  protected:
   std::unordered_map<IterDomain*, IterDomain*> map(
       const TensorDomain* producer,
@@ -109,8 +111,6 @@ class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
   const TensorView* producer_tv_ = nullptr;
   const TensorView* consumer_tv_ = nullptr;
 };
-
-TORCH_CUDA_CU_API std::string toString(const PairwiseRootDomainMap& root_map);
 
 //! Represents an iteration domain of a TensorDomain. Only used for
 //! root domain mapping.
@@ -143,13 +143,13 @@ class DomainKey {
         concreteId() == other.concreteId();
   }
 
+  std::string toString() const;
+
  private:
   const TensorDomain* td_ = nullptr;
   const IterDomain* id_ = nullptr;
   const IterDomain* concrete_id_ = nullptr;
 };
-
-std::string toString(const DomainKey& key);
 
 struct DomainKeyHash {
   std::size_t operator()(const DomainKey& key) const {
@@ -213,7 +213,6 @@ class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
 //! matter view is used or not.
 class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   friend class ComputeAtRootDomainMapBuilder;
-  friend TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap&);
 
  public:
   //! Builds a mapping table by analyzing the current
@@ -323,9 +322,11 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
       const std::unordered_set<IterDomain*>& root_dims_to_map,
       bool producer_to_consumer) const override;
 
+  std::string toString() const;
+
  private:
   //! Disjoint set of all mapped <TD, ID> keys to determine axes equivalency
-  DisjointSet<DomainKey, DomainKeyHash> eq_set_;
+  DisjointSets<DomainKey, DomainKeyHash> eq_set_;
 
   //! All IterDomains in the mapping that are a broadcast ID
   DomainKeyMap<std::unordered_set<const IterDomain*>> bcast_map_;
@@ -338,12 +339,10 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   std::unordered_set<IterDomain*> window_axes_;
 };
 
-TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap& root_map);
-
-//! Create a DisjointSet of root IterDomains by traversing the
+//! Create a DisjointSets of root IterDomains by traversing the
 //! current fusion entirely. IterDomains that can be mapped each
 //! other with computeAt are grouped into the same subset in the
-//! DisjointSet.
+//! DisjointSets.
 class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
     : private BackwardVisitor {
  public:

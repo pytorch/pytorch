@@ -144,10 +144,9 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::
   return dom_map;
 }
 
-std::string toString(const PairwiseRootDomainMap& root_map) {
+std::string PairwiseRootDomainMap::toString() const {
   std::stringstream ss;
-  ss << "{producer: " << root_map.producer()
-     << ", consumer: " << root_map.consumer() << "}";
+  ss << "{producer: " << producer() << ", consumer: " << consumer() << "}";
   return ss.str();
 }
 
@@ -167,23 +166,23 @@ auto ensureMapping(
 
 } // namespace
 
-std::string toString(const DomainKey& key) {
+std::string DomainKey::toString() const {
   std::stringstream ss;
   ss << "{";
-  if (key.td()) {
-    ss << key.td() << " (root: " << key.td()->getRootDomain()
-       << ", maybe rfactor: " << key.td()->getMaybeRFactorDomain() << ")";
+  if (td()) {
+    ss << td() << " (root: " << td()->getRootDomain()
+       << ", maybe rfactor: " << td()->getMaybeRFactorDomain() << ")";
   } else {
     ss << "null";
   }
   ss << ", ";
-  if (key.id()) {
-    ss << key.id();
+  if (id()) {
+    ss << id();
   } else {
     ss << "null";
   }
-  if (key.concreteId()) {
-    ss << " (" << key.concreteId() << ")";
+  if (concreteId()) {
+    ss << " (" << concreteId() << ")";
   }
   ss << "}";
   return ss.str();
@@ -452,7 +451,7 @@ bool ComputeAtRootDomainMap::canMap(
 bool ComputeAtRootDomainMap::canMap(
     const DomainKey& key_a,
     const DomainKey& key_b) const {
-  return key_a == key_b || eq_set_.areEquivalent(key_a, key_b);
+  return key_a == key_b || eq_set_.permissiveAreMapped(key_a, key_b);
 }
 
 void ComputeAtRootDomainMap::setAlias(
@@ -469,10 +468,11 @@ void ComputeAtRootDomainMap::setAlias(
   }
   bcast_map_ = tmp_bcast_map;
 
-  for (const auto& key : eq_set_.getAllElements()) {
+  auto all_elements = eq_set_.getAllElements();
+  for (const auto& key : all_elements.vector()) {
     if (key.td() == td) {
       DomainKey alias_key(td_alias, key.id(), key.concreteId());
-      eq_set_.join(key, alias_key);
+      eq_set_.mapEntries(key, alias_key);
     }
   }
 
@@ -491,7 +491,7 @@ std::vector<DomainKey> ComputeAtRootDomainMap::getConcretizedKeys(
     const IterDomain* id) const {
   DomainKey key(td, id);
   auto it = bcast_map_.find(key);
-  TORCH_INTERNAL_ASSERT(it != bcast_map_.end(), "Not found: ", toString(key));
+  TORCH_INTERNAL_ASSERT(it != bcast_map_.end(), "Not found: ", key.toString());
   std::vector<DomainKey> domains;
   std::transform(
       it->second.begin(),
@@ -507,7 +507,7 @@ std::unordered_set<const IterDomain*>& ComputeAtRootDomainMap::
     getConcretizedDomains(const TensorDomain* td, const IterDomain* id) {
   DomainKey key(td, id);
   auto it = bcast_map_.find(key);
-  TORCH_INTERNAL_ASSERT(it != bcast_map_.end(), "Not found: ", toString(key));
+  TORCH_INTERNAL_ASSERT(it != bcast_map_.end(), "Not found: ", key.toString());
   return it->second;
 }
 
@@ -576,7 +576,7 @@ std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
         ". Consumer root: ",
         consumer_root,
         ". Mapping: ",
-        toString(*this));
+        this->toString());
   }
   return id_map;
 }
@@ -606,10 +606,8 @@ std::unordered_set<IterDomain*> ComputeAtRootDomainMap::getMappableDims(
   return mappable_ids;
 }
 
-std::string toString(const ComputeAtRootDomainMap& root_map) {
-  std::stringstream ss;
-  root_map.eq_set_.print(ss);
-  return ss.str();
+std::string ComputeAtRootDomainMap::toString() const {
+  return eq_set_.toString();
 }
 
 ComputeAtRootDomainMapBuilder::ComputeAtRootDomainMapBuilder(
@@ -625,9 +623,9 @@ ComputeAtRootDomainMapBuilder::ComputeAtRootDomainMapBuilder(
     std::stringstream ss;
     ss << "pending map:\n";
     for (auto& kv : pending_map_) {
-      ss << "\t" << toString(kv.first) << "\n";
+      ss << "\t" << kv.first.toString() << "\n";
       for (auto& dk : kv.second) {
-        ss << "\t\t" << toString(dk) << "\n";
+        ss << "\t\t" << dk.toString() << "\n";
       }
     }
     std::cerr << ss.str();
@@ -673,7 +671,7 @@ void ComputeAtRootDomainMapBuilder::addToPendingList(
 void ComputeAtRootDomainMapBuilder::setMapped(
     const DomainKey& producer,
     const DomainKey& consumer) {
-  root_map_.eq_set_.join(producer, consumer);
+  root_map_.eq_set_.mapEntries(producer, consumer);
 }
 
 void ComputeAtRootDomainMapBuilder::setInvalid(
@@ -760,7 +758,7 @@ void ComputeAtRootDomainMapBuilder::setMaybeMapped(
     TORCH_INTERNAL_ASSERT(
         !consumer_id->isBroadcast(),
         "No concrete domain found for a broadcast domain: ",
-        toString(consumer_key));
+        consumer_key.toString());
     auto producer_concrete_key = producer_key;
     if (producer_id->isBroadcast()) {
       const auto concrete_id = consumer_id;

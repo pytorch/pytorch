@@ -56,31 +56,31 @@ class TORCH_CUDA_CU_API IterDomainGraph {
  public:
   IterDomainGraph(Fusion* fusion);
 
-  const DisjointSetsOfPointers<IterDomain>& permissiveNodes() const {
+  const DisjointSets<IterDomain*>& permissiveNodes() const {
     return permissive_nodes_;
   }
-  const DisjointSetsOfPointers<IterDomain>& exactNodes() const {
+  const DisjointSets<IterDomain*>& exactNodes() const {
     return exact_nodes_;
   }
-  const DisjointSetsOfPointers<IterDomain>& loopNodes() const {
+  const DisjointSets<IterDomain*>& loopNodes() const {
     return loop_nodes_;
   }
 
   // Consumers and producers is not symmetric like the other sets
-  const std::unordered_map<IterDomain*, UniquePtrVector<IterDomain>>& consumers()
-      const {
+  const std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>&
+  consumers() const {
     return consumers_;
   }
-  const std::unordered_map<IterDomain*, UniquePtrVector<IterDomain>>& producers()
-      const {
+  const std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>&
+  producers() const {
     return producers_;
   }
 
-  const DisjointSetsOfPointers<IterDomain>& siblings() const {
+  const DisjointSets<IterDomain*>& siblings() const {
     return sibling_sets_;
   }
 
-  const UniquePtrVector<IterDomain>& allIds() const {
+  const VectorOfUniqueEntries<IterDomain*>& allIds() const {
     return all_ids_;
   }
 
@@ -93,17 +93,19 @@ class TORCH_CUDA_CU_API IterDomainGraph {
 
   void initializeId(IterDomain* id, bool is_view_rfactor_id, bool is_leaf_id);
 
-  DisjointSetsOfPointers<IterDomain> permissive_nodes_;
-  DisjointSetsOfPointers<IterDomain> exact_nodes_;
-  DisjointSetsOfPointers<IterDomain> loop_nodes_;
+  DisjointSets<IterDomain*> permissive_nodes_;
+  DisjointSets<IterDomain*> exact_nodes_;
+  DisjointSets<IterDomain*> loop_nodes_;
 
   // Consumers and producers is not symmetric like the other sets
-  std::unordered_map<IterDomain*, UniquePtrVector<IterDomain>> consumers_;
-  std::unordered_map<IterDomain*, UniquePtrVector<IterDomain>> producers_;
+  std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>
+      consumers_;
+  std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>
+      producers_;
 
-  DisjointSetsOfPointers<IterDomain> sibling_sets_;
+  DisjointSets<IterDomain*> sibling_sets_;
 
-  UniquePtrVector<IterDomain> all_ids_;
+  VectorOfUniqueEntries<IterDomain*> all_ids_;
 
   std::unordered_set<IterDomain*> view_rfactor_ids_;
 };
@@ -156,7 +158,7 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   void buildConcreteIds();
 
   // Produce the disjoint set containing provided id with mapping mode.
-  const std::shared_ptr<UniquePtrVector<IterDomain>>& disjointSetOf(
+  const std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>& disjointSetOf(
       IterDomain* id,
       IdMappingMode mode) const;
 
@@ -165,10 +167,13 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   TrivialReductionInfo trivial_reduction_info_;
 
   // Prevent needing to recompute concrete_id's in compute at map.
-  // UniquePtrVector is unique across mapping modes, so don't need to use
-  // mapping mode directly in this cache. const UniquePtrVector<IterDomain>& is
-  // what's returned by ComputeAtMap::disjointSetOf which can be used directly.
-  std::unordered_map<std::shared_ptr<UniquePtrVector<IterDomain>>, IterDomain*>
+  // VectorOfUniqueEntries is unique across mapping modes, so don't need to use
+  // mapping mode directly in this cache. const
+  // VectorOfUniqueEntries<IterDomain*>& is what's returned by
+  // ComputeAtMap::disjointSetOf which can be used directly.
+  std::unordered_map<
+      std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>,
+      IterDomain*>
       concrete_id_cache_;
 };
 

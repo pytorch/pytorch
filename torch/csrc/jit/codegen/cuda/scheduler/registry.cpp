@@ -366,27 +366,27 @@ bool isConnectedFusionGraph(Fusion* fusion) {
   }
 
   // A set of connected components on the fusion graph
-  DisjointSet<Val*> component_sets;
+  DisjointSets<Val*> component_sets;
 
   // Iterate through all used exprs
   for (auto expr : fusion->exprs()) {
     TORCH_INTERNAL_ASSERT(
         !expr->inputs().empty(), "unknown expr with zero input");
 
-    // Each expr joins all its inputs and
+    // Each expr maps all its inputs and
     //  outputs to the same component
     auto input0 = expr->inputs()[0];
     for (auto input : expr->inputs()) {
-      component_sets.join(input0, input);
+      component_sets.mapEntries(input0, input);
     }
     for (auto output : expr->outputs()) {
-      component_sets.join(input0, output);
+      component_sets.mapEntries(input0, output);
     }
   }
 
-  // Join aliased outputs
+  // Map aliased outputs
   for (auto alias_it : fusion->ioAlias()) {
-    component_sets.join(alias_it.first, alias_it.second);
+    component_sets.mapEntries(alias_it.first, alias_it.second);
   }
 
   // Check connected-ness:
@@ -395,7 +395,7 @@ bool isConnectedFusionGraph(Fusion* fusion) {
   // equivalent/connected to the first output.
   auto output0 = fusion->outputs()[0];
   for (auto output : fusion->outputs()) {
-    if (!component_sets.areEquivalent(output0, output)) {
+    if (!component_sets.strictAreMapped(output0, output)) {
       return false;
     }
   }

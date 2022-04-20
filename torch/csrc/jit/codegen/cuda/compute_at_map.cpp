@@ -279,7 +279,7 @@ IterDomain* ComputeAtMap::computeConcreteId(
     return disjoint_set_shared_ptr->vector().front();
   }
 
-  UniquePtrVector<IterDomain> maybe_concrete_ids;
+  VectorOfUniqueEntries<IterDomain*> maybe_concrete_ids;
   for (auto id : disjoint_set_shared_ptr->vector()) {
     bool id_output = true;
     for (auto consumer_id : id_graph_.consumers().at(id).vector()) {
@@ -451,9 +451,8 @@ std::vector<IterDomain*> ComputeAtMap::getViewRfactorDomainsOfIdGroup(
   return rfactor_ids;
 }
 
-const std::shared_ptr<UniquePtrVector<IterDomain>>& ComputeAtMap::disjointSetOf(
-    IterDomain* id,
-    IdMappingMode mode) const {
+const std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>& ComputeAtMap::
+    disjointSetOf(IterDomain* id, IdMappingMode mode) const {
   switch (mode) {
     case IdMappingMode::PERMISSIVE:
       return id_graph_.permissiveNodes().disjointSetMap().at(id);

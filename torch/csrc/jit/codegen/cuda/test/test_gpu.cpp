@@ -11305,7 +11305,7 @@ TEST_F(NVFuserTest, FusionGroupGuardRelaxedCheck_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionDisjointSet_CUDA) {
-  DisjointSet<int> set;
+  DisjointSets<int> set;
 
   const std::set<int> group_x({0, 1, 2});
   const std::set<int> group_y({3, 4, 5});
@@ -11319,69 +11319,69 @@ TEST_F(NVFuserTest, FusionDisjointSet_CUDA) {
   // Initially, nothing should be considered equivalent
   for (auto i : group_all) {
     for (auto j : group_all) {
-      TORCH_CHECK(!set.areEquivalent(i, j));
+      TORCH_CHECK(!set.permissiveAreMapped(i, j));
     }
   }
 
   // Sets values in group_x are equivalent
   for (auto i : group_x) {
     for (auto j : group_x) {
-      set.join(i, j);
-      TORCH_CHECK(set.contains(i));
-      TORCH_CHECK(set.contains(j));
+      set.mapEntries(i, j);
+      TORCH_CHECK(set.mappingExists(i));
+      TORCH_CHECK(set.mappingExists(j));
     }
   }
 
   // All values in group_x shoudl be equivalent with each other
   for (auto i : group_x) {
     for (auto j : group_x) {
-      TORCH_CHECK(set.areEquivalent(i, j));
+      TORCH_CHECK(set.permissiveAreMapped(i, j));
     }
   }
   // But nothing else should be equivalent
   for (auto i : group_all) {
     for (auto j : group_y) {
-      TORCH_CHECK(!set.areEquivalent(i, j));
+      TORCH_CHECK(!set.permissiveAreMapped(i, j));
     }
     for (auto j : group_z) {
-      TORCH_CHECK(!set.areEquivalent(i, j));
+      TORCH_CHECK(!set.permissiveAreMapped(i, j));
     }
   }
 
   // Sets values in group_y are equivalent
   for (auto i : group_y) {
     for (auto j : group_y) {
-      set.join(i, j);
-      TORCH_CHECK(set.contains(i));
-      TORCH_CHECK(set.contains(j));
+      set.mapEntries(i, j);
+      TORCH_CHECK(set.mappingExists(i));
+      TORCH_CHECK(set.mappingExists(j));
     }
   }
 
   // group_x should be still equivalent
   for (auto i : group_x) {
     for (auto j : group_x) {
-      TORCH_CHECK(set.areEquivalent(i, j));
+      TORCH_CHECK(set.permissiveAreMapped(i, j));
     }
   }
   // group_y should be now equivalent
   for (auto i : group_y) {
     for (auto j : group_y) {
-      TORCH_CHECK(set.areEquivalent(i, j));
+      TORCH_CHECK(set.permissiveAreMapped(i, j));
     }
   }
   // But group_z should not be equivalent with anything yet
   for (auto i : group_all) {
     for (auto j : group_z) {
-      TORCH_CHECK(!set.areEquivalent(i, j));
+      TORCH_CHECK(!set.permissiveAreMapped(i, j));
     }
   }
 
   // Sets values in group_z are equivalent
   for (auto i : group_z) {
     for (auto j : group_z) {
-      set.join(i, j);
-      TORCH_CHECK(set.contains(i));
-      TORCH_CHECK(set.contains(j));
+      set.mapEntries(i, j);
+      TORCH_CHECK(set.mappingExists(i));
+      TORCH_CHECK(set.mappingExists(j));
     }
   }
 
@@ -11392,27 +11392,26 @@ TEST_F(NVFuserTest, FusionDisjointSet_CUDA) {
       for (auto i : groups[gi]) {
         for (auto j : groups[gj]) {
           TORCH_CHECK(
-              (gi == gj && set.areEquivalent(i, j)) ||
-              (gi != gj && !set.areEquivalent(i, j)));
+              (gi == gj && set.permissiveAreMapped(i, j)) ||
+              (gi != gj && !set.permissiveAreMapped(i, j)));
         }
       }
     }
   }
 
-  auto all_elements = set.getAllElements();
+  std::vector<int> all_elements = set.getAllElements().vector();
   std::sort(all_elements.begin(), all_elements.end());
   std::vector<int> group_all_vec(group_all.begin(), group_all.end());
   std::sort(group_all_vec.begin(), group_all_vec.end());
   TORCH_CHECK(all_elements == group_all_vec);
 
   set.clear();
-  all_elements = set.getAllElements();
-  TORCH_CHECK(all_elements.size() == 0);
+  TORCH_CHECK(set.getAllElements().vector().size() == 0);
 
   // All cleared. Nothing should be considered equivalent.
   for (auto i : group_all) {
     for (auto j : group_all) {
-      TORCH_CHECK(!set.areEquivalent(i, j));
+      TORCH_CHECK(!set.permissiveAreMapped(i, j));
     }
   }
 }
