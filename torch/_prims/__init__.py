@@ -142,8 +142,9 @@ def _make_prim(
         if has_torch_function(args):
             return handle_torch_function(_prim, args, *args, **kwargs)
 
-        # ezyang: for some reason, always run the meta function,
-        # even if the result is thrown out?
+        # always run the meta function because aten implementation will
+        # typically accept more inputs (e.g., it will do promotion and
+        # broadcasting) which we want to reject
         meta(*args, **kwargs)
         return impl_aten(*args, **kwargs)
 
