@@ -138,7 +138,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "noarch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "crossref", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
   linux-bionic-cuda11_3-py3_7-clang9-build:
