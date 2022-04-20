@@ -12,6 +12,7 @@
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
+#include <ATen/WrapDimUtils.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -122,7 +123,7 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
   TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
-  set_output(0, {2, col_indices.numel()}, {}, options, {});
+  set_output(0, {2, col_indices.numel()}, {}, options);
 }
 
 } // namespace meta

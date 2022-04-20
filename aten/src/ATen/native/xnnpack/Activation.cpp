@@ -64,8 +64,7 @@ Tensor hardswish(const Tensor& input) {
   Tensor output = mobile::empty_with_tail_padding(
     padded_input.sizes(),
     padded_input.options().dtype(),
-    input.suggest_memory_format(),
-    padded_input.names());
+    input.suggest_memory_format());
 
   hardswish_impl(padded_input, output);
   return output.contiguous(input.suggest_memory_format());
@@ -83,8 +82,7 @@ Tensor& hardswish_(Tensor& input) {
     Tensor output = mobile::empty_with_tail_padding(
       padded_input.sizes(),
       padded_input.options().dtype(),
-      input.suggest_memory_format(),
-      padded_input.names());
+      input.suggest_memory_format());
     hardswish_impl(padded_input, output);
     return input.copy_(output);
   }

@@ -162,7 +162,6 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/Dimname.h>
 #include <ATen/core/Generator.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/core/TensorBase.h>

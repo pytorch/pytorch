@@ -5,7 +5,6 @@
 #include <ATen/core/List.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NamedTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -21,7 +20,6 @@ namespace at {
 namespace native {
 
 static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
-  NoNamesGuard guard;
 
   TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
               "masked_select: expected BoolTensor or ByteTensor for mask");
@@ -47,13 +45,11 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
 }
 
 Tensor masked_select_cuda(const Tensor & self, const Tensor & mask) {
-  namedinference::compute_broadcast_outnames(self, mask);
   Tensor result = at::empty({0}, self.options());
   return masked_select_out_cuda_impl(result, self, mask);
 }
 
 Tensor & masked_select_out_cuda(const Tensor & self, const Tensor & mask, Tensor & result) {
-  namedinference::compute_broadcast_outnames(self, mask);
   return masked_select_out_cuda_impl(result, self, mask);
 }
 

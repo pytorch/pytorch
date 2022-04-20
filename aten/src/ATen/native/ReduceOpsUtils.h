@@ -183,7 +183,6 @@ static TensorIterator make_reduction(
   auto mask = make_dim_mask(dim, ndim);
   resize_reduction_result(result, self, mask, keepdim, out_dtype);
   auto viewed_result = review_reduce_result(result, ndim, mask, keepdim);
-  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
   if (self.scalar_type() == in_dtype) {
     return TensorIterator::reduce_op(viewed_result, self);
   }
@@ -225,9 +224,6 @@ static TensorIterator make_reduction(
 
   resize_reduction_result(result2, self, mask, keepdim, dtype2);
   auto viewed_result2 = review_reduce_result(result2, ndim, mask, keepdim);
-
-  namedinference::propagate_names_for_reduction(result1, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(result2, self, dim, keepdim);
 
   // special case for type promotion in mixed precision, improves computational
   // efficiency.
@@ -324,8 +320,6 @@ static void resize_reduction(
   maybe_wrap_dims(dims_, self.dim());
   auto shape = get_reduction_shape(self, dims_, keepdim);
   meta.set_output(shape, self.options().dtype(out_dtype));
-  namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(), self, dims_, keepdim);
 }
 
 static void resize_reduction_with_indices(
@@ -339,10 +333,6 @@ static void resize_reduction_with_indices(
   auto shape = get_reduction_shape(self, dims_, keepdim);
   meta.set_output(0, shape, self.options().dtype(out_dtype));
   meta.set_output(1, shape, self.options().dtype(kLong));
-  namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(0), self, dims_, keepdim);
-  namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(1), self, dims_, keepdim);
 }
 
 static TensorIterator make_reduction(

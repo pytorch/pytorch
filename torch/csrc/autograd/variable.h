@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/forward_grad.h>
 
 #include <ATen/core/Tensor.h>
-#include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 
 #include <memory>

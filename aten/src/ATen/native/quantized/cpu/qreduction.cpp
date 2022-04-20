@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
@@ -114,25 +113,6 @@ Tensor mean_quantized_cpu(
   Tensor result;
   mean_out_quantized_cpu(self, dim, keepdim, dtype, result);
   return result;
-}
-
-Tensor mean_quantized_cpu(
-    const Tensor& self,
-    DimnameList dim,
-    bool keepdim,
-    optional<ScalarType> dtype) {
-  return mean_quantized_cpu(
-      self, dimnames_to_positions(self, dim), keepdim, dtype);
-}
-
-Tensor& mean_out_quantized_cpu(
-    Tensor& result,
-    const Tensor& self,
-    DimnameList dim,
-    bool keepdim,
-    c10::optional<ScalarType> opt_dtype) {
-  return mean_out_quantized_cpu(
-      self, dimnames_to_positions(self, dim), keepdim, opt_dtype, result);
 }
 
 } // namespace native

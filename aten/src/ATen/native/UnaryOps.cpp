@@ -11,7 +11,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/ComplexHelper.h>
 
 #include <algorithm>
@@ -412,7 +411,6 @@ Tensor real(const Tensor& self) {
 Tensor _neg_view(const Tensor& self) {
   Tensor self_ = self.alias();
   self_._set_neg(!self.is_neg());
-  namedinference::propagate_names(self_, self);
   return self_;
 }
 
@@ -480,7 +478,6 @@ Tensor resolve_conj(const Tensor& self) {
 Tensor _conj(const Tensor& self) {
   Tensor self_ = self.alias();
   self_._set_conj(!self.is_conj());
-  namedinference::propagate_names(self_, self);
   return self_;
 }
 

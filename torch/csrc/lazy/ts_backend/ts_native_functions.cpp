@@ -1,6 +1,7 @@
 #include <ATen/Operators.h>
 #include <ATen/Functions.h>
 #include <ATen/MetaFunctions.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
 #include <torch/csrc/lazy/core/helpers.h>

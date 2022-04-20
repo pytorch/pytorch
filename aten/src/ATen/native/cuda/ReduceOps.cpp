@@ -10,7 +10,6 @@
 #include <ATen/Context.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/TensorIterator.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

@@ -3,7 +3,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -301,7 +300,6 @@ IntArrayRef dilation,
 bool ceil_mode,
 const Tensor& output,
 const Tensor& indices) {
-  NoNamesGuard guard;
 
   TensorArg output_arg{ output, "output", 1 };
   TensorArg indices_arg{ indices, "indices", 2 };
@@ -425,7 +423,6 @@ IntArrayRef dilation,
 bool ceil_mode,
 const Tensor& indices,
 const Tensor& gradInput) {
-  NoNamesGuard guard;
 
   TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
   TensorArg gradOutput_arg{ gradOutput_, "gradOutput_", 2 };

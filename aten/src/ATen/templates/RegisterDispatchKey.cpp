@@ -26,7 +26,6 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/Dispatch.h>

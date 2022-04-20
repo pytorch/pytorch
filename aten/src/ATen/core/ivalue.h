@@ -834,13 +834,6 @@ public:
     return static_cast<at::QScheme>(toInt());
   }
 
-  // Dimname
-  IValue(at::Dimname dimname) : IValue(dimname.symbol().toQualString()) {}
-
-  at::Dimname toDimname() const {
-    return at::Dimname::fromSymbol(Symbol::fromQualString(toStringRef()));
-  }
-
   // Generator
   IValue(at::Generator g) : tag(Tag::Generator), is_intrusive_ptr(g.defined()) {
     // Note: the undefined generator is not refcounted, so while it

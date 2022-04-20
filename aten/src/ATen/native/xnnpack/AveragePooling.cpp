@@ -34,8 +34,7 @@ Tensor global_average_pool(
         1,
       },
       input_padded_contig_nhwc.options().dtype(),
-      MemoryFormat::ChannelsLast,
-      input_padded_contig_nhwc.names());
+      MemoryFormat::ChannelsLast);
 
   xnn_operator_t global_average_pooling_op{};
   const xnn_status create_status = xnn_create_global_average_pooling_nwc_f32(

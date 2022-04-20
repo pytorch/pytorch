@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
@@ -19,7 +18,6 @@ Tensor max_pool1d_impl(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  NoNamesGuard guard;
 
   TORCH_CHECK(
       self.dim() == 2 || self.dim() == 3,
@@ -81,9 +79,6 @@ Tensor max_pool1d_impl(
   if (self.dim() == 2) {
     output.squeeze_(0);
   }
-
-  guard.reset();
-  namedinference::propagate_names(output, self);
 
   return output;
 }

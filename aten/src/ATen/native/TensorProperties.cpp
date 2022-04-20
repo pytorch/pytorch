@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorProperties.h>
-#include <ATen/NamedTensorUtils.h>
 #include <torch/library.h>
 
 #include <ATen/Config.h>
@@ -19,16 +18,6 @@ int64_t size(const Tensor& self, int64_t dim) {
 
 int64_t stride(const Tensor& self, int64_t dim) {
   return self.stride(dim);
-}
-
-int64_t size(const Tensor& self, Dimname dim) {
-  size_t pos_dim = dimname_to_position(self, dim);
-  return self.sizes()[pos_dim];
-}
-
-int64_t stride(const Tensor& self, Dimname dim) {
-  size_t pos_dim = dimname_to_position(self, dim);
-  return self.strides()[pos_dim];
 }
 
 bool cudnn_is_acceptable(const TensorBase& self) {

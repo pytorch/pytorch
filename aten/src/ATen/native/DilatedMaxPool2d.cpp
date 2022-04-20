@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
 
 
@@ -66,15 +65,14 @@ bool ceil_mode) {
     outputHeight, outputWidth, memory_format);
 
   /* resize output and indices */
-  DimnameList maybe_names = input.has_names() ? input.names() : DimnameList{};
   if (input.ndimension() == 3) {
-    set_output(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
+    set_output(0, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format));
     /* indices will contain the locations for each output point */
-    set_output(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong), maybe_names);
+    set_output(1, {nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong));
   } else {
-    set_output(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format), maybe_names);
+    set_output(0, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format));
     /* indices will contain the locations for each output point */
-    set_output(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong), maybe_names);
+    set_output(1, {nbatch, nInputPlane, outputHeight, outputWidth}, {}, input.options().memory_format(memory_format).dtype(kLong));
   }
 }
 
@@ -144,8 +142,7 @@ const Tensor& indices) {
     outputHeight_for_shape_check, outputWidth_for_shape_check,
     memory_format);
 
-  set_output(0, input.sizes(), {}, input.options().memory_format(memory_format),
-             input.has_names() ? input.names() : DimnameList{});
+  set_output(0, input.sizes(), {}, input.options().memory_format(memory_format));
 }
 } // namespace meta
 
@@ -160,7 +157,6 @@ IntArrayRef dilation,
 bool ceil_mode,
 const Tensor& output,
 const Tensor& indices) {
-  NoNamesGuard guard;
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
@@ -193,8 +189,6 @@ IntArrayRef dilation,
 bool ceil_mode,
 const Tensor& indices,
 const Tensor& gradInput) {
-  NoNamesGuard guard;
-
   gradInput.zero_();
   max_pool2d_backward_kernel(
       kCPU, const_cast<Tensor&>(gradInput),

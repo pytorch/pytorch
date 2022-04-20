@@ -101,10 +101,9 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   static PythonArgParser parser({
     "size(int64_t dim)",
     "size()",
-    "size(Dimname dim)",
   });
   auto& self_ = THPVariable_Unpack(self);
-  ParsedArgs<3> parsed_args;
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(self, args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
@@ -122,12 +121,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
     // torch.Size and tuple in python.
     return THPSize_New(self_);
   }
-  else if (r.idx == 2) {
-    if (jit::tracer::isTracing()) {
-      TORCH_INTERNAL_ASSERT(false, "NYI: Named tensors w/ JIT");
-    }
-    return wrap(self_.size(r.dimname(0)));
-  }
+
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -138,10 +132,9 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   static PythonArgParser parser({
     "stride(int64_t dim)",
     "stride()",
-    "stride(Dimname dim)",
   });
   auto& self_ = THPVariable_Unpack(self);
-  ParsedArgs<3> parsed_args;
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(self, args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
@@ -157,9 +150,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     // torch.Size and tuple in python
     return THPUtils_packInt64Array(strides.size(), strides.data());
   }
-  else if (r.idx == 2) {
-    return wrap(self_.stride(r.dimname(0)));
-  }
+
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -173,17 +164,6 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
   }
   auto& self = THPVariable_Unpack(self_);
   return wrap(self.get_device());
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPVariable_has_names(PyObject* self_, PyObject* args)
-{
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self_)) {
-    return handle_torch_function(self_, "has_names", args);
-  }
-  auto& self = THPVariable_Unpack(self_);
-  return wrap(self.has_names());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1234,7 +1214,6 @@ PyMethodDef variable_methods[] = {
   {"ipu", castPyCFunctionWithKeywords(THPVariable_ipu), METH_VARARGS | METH_KEYWORDS, NULL},
   {"data_ptr", THPVariable_data_ptr, METH_NOARGS, NULL},
   {"dim", THPVariable_dim, METH_NOARGS, NULL},
-  {"has_names", THPVariable_has_names, METH_NOARGS, NULL},
   {"double", castPyCFunctionWithKeywords(THPVariable_double), METH_VARARGS | METH_KEYWORDS, NULL},
   {"cdouble", castPyCFunctionWithKeywords(THPVariable_cdouble), METH_VARARGS | METH_KEYWORDS, NULL},
   {"element_size", THPVariable_element_size, METH_NOARGS, NULL},

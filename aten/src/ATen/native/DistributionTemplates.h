@@ -5,7 +5,6 @@
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/Optional.h>
@@ -323,7 +322,6 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Ge
 
 template<template<typename> class bernoulli_tensor_kernel, typename RNG>
 Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
-  NoNamesGuard guard;
   at::assert_no_internal_overlap(self);
   bernoulli_tensor_kernel<RNG>()(self, p_, gen);
   return self;
@@ -344,7 +342,6 @@ Tensor& bernoulli_out_impl(Tensor& result, const Tensor& self, c10::optional<Gen
   // TODO: Fix resize_as_. See pytorch/pytorch#11665.
   result.resize_(self.sizes());
   bernoulli_impl_<bernoulli_tensor_kernel, RNG>(result, self, gen);
-  namedinference::propagate_names(result, self);
   return result;
 }
 

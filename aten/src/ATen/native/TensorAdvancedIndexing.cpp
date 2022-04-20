@@ -1096,7 +1096,6 @@ Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t
 }
 
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
-  at::NoNamesGuard guard;
 
   TORCH_CHECK_INDEX(
     index.scalar_type() == ScalarType::Long,
@@ -1376,7 +1375,6 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
 }
 
 static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const Scalar& value) {
-  NoNamesGuard guard;
   if (mask.dtype() == ScalarType::Byte) {
     TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
@@ -1403,53 +1401,37 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const S
 }
 
 Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, const Scalar& value) {
-  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
-
   masked_fill_impl_cpu(self, mask, value);
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
 Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, const Tensor & value) {
-  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", value.dim(), " dimension(s).");
 
   masked_fill_impl_cpu(self, mask, value.item());
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, const Scalar& source) {
   Tensor result;
-  auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
-  {
-    NoNamesGuard guard;
-    c10::MaybeOwned<Tensor> _mask, _self;
-    std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = _self->clone(at::MemoryFormat::Contiguous);
-    result.masked_fill_(mask, source);
-  }
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  c10::MaybeOwned<Tensor> _mask, _self;
+  std::tie(_mask, _self) = expand_outplace(mask, self);
+  result = _self->clone(at::MemoryFormat::Contiguous);
+  result.masked_fill_(mask, source);
   return result;
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & source) {
   Tensor result;
-  auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
-  {
-    NoNamesGuard guard;
-    c10::MaybeOwned<Tensor> _mask, _self;
-    std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = _self->clone(at::MemoryFormat::Contiguous);
-    result.masked_fill_(mask, source);
-  }
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  c10::MaybeOwned<Tensor> _mask, _self;
+  std::tie(_mask, _self) = expand_outplace(mask, self);
+  result = _self->clone(at::MemoryFormat::Contiguous);
+  result.masked_fill_(mask, source);
   return result;
 }
 
 static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
-  NoNamesGuard guard;
 
   TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
               "masked_select: expected BoolTensor or ByteTensor for mask");
@@ -1527,7 +1509,6 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
 }
 
 Tensor & masked_select_out_cpu(const Tensor & self, const Tensor & mask, Tensor & result) {
-  namedinference::compute_broadcast_outnames(self, mask);
   return masked_select_out_impl_cpu(result, self, mask);
 }
 

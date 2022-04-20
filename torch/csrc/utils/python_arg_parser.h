@@ -53,7 +53,6 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/python_dimname.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -80,7 +79,7 @@ namespace torch {
 enum class ParameterType {
   TENSOR, SCALAR, INT64, SYM_INT, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST
+  QSCHEME, FLOAT_LIST, SCALAR_LIST
 };
 
 struct FunctionParameter;
@@ -190,9 +189,6 @@ struct PythonArgs {
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
-  inline at::Dimname dimname(int i);
-  inline std::vector<at::Dimname> dimnamelist(int i);
-  inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
   inline at::MemoryFormat memoryformat(int i);
   inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
@@ -535,41 +531,6 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return device(i);
-}
-
-inline at::Dimname PythonArgs::dimname(int i) {
-  TORCH_INTERNAL_ASSERT(args[i] != nullptr);
-  return THPDimname_parse(args[i]);
-}
-
-inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
-  auto tuple = PyTuple_Check(arg);
-  // NOLINTNEXTLINE(bugprone-branch-clone)
-  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<at::Dimname> res;
-  res.reserve(size);
-  for(const auto idx : c10::irange(size)) {
-    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
-    res.push_back(THPDimname_parse(obj));
-  }
-  return res;
-}
-
-inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
-  if (!args[i]) return c10::nullopt;
-  return parseDimnameList(args[i]);
-}
-
-inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
-  TORCH_INTERNAL_ASSERT(args[i]);
-  PyObject* arg = args[i];
-  auto size = signature.params[i].size;
-  TORCH_INTERNAL_ASSERT(size == 0 || size == 1);
-  if (size == 1 && THPUtils_checkDimname(arg)) {
-    return { THPDimname_parse(arg) };
-  }
-  return parseDimnameList(arg);
 }
 
 inline at::MemoryFormat PythonArgs::memoryformat(int i) {

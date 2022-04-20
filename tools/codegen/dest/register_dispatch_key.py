@@ -429,17 +429,14 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
 
     def gen_class_set_output(self, k: SchemaKind, parent_class: str, generate_super: bool) -> str:
         if generate_super:
-            set_output_super = f"{parent_class}::set_output(output_idx, sizes, strides, options, names);"
+            set_output_super = f"{parent_class}::set_output(output_idx, sizes, strides, options);"
         else:
             set_output_super = ""
         maybe_star = "*" if k is SchemaKind.functional else ""
         return f"""
 void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
-                TensorOptions options, DimnameList names) override {{
+                TensorOptions options) override {{
 {textwrap.indent(self.gen_class_set_output_body(k), "    ")}
-    if (!names.empty()) {{
-      namedinference::propagate_names({maybe_star}outputs_[output_idx], names);
-    }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
 {textwrap.indent(set_output_super, "    ")}

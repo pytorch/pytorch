@@ -882,7 +882,6 @@ def sort_overloads(
 
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
         return (str(t1) == 'Scalar' and str(t2) == 'Tensor' or
-                'Dimname' in str(t1) and 'Dimname' not in str(t2) or
                 # In the discussion https://github.com/pytorch/pytorch/issues/54555 it has been
                 # discussed why it is important to prioritize int/int? over int[]
                 str(t1) == 'int[]' and (str(t2) == 'int' or str(t2) == 'int?') or

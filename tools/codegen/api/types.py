@@ -54,8 +54,6 @@ tensorT = BaseCppType('at', 'Tensor')
 optionalTensorRefT = BaseCppType('at', 'OptionalTensorRef')
 tensorListT = BaseCppType('at', 'TensorList')
 iTensorListRefT = BaseCppType('at', 'ITensorListRef')
-dimnameT = BaseCppType('at', 'Dimname')
-dimnameListT = BaseCppType('at', 'DimnameList')
 layoutT = BaseCppType('at', 'Layout')
 deviceT = BaseCppType('at', 'Device')
 scalarT = BaseCppType('at', 'Scalar')
@@ -100,7 +98,6 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.Generator: generatorT,
     BaseTy.ScalarType: scalarTypeT,
     BaseTy.Tensor: tensorT,
-    BaseTy.Dimname: dimnameT,
     BaseTy.Layout: layoutT,
     BaseTy.Device: deviceT,
     BaseTy.Scalar: scalarT,

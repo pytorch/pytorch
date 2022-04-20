@@ -1,6 +1,5 @@
 #include <ATen/native/TensorTransformations.h>
 
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 #include <ATen/native/xnnpack/Engine.h>
@@ -18,9 +17,7 @@ Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
   output.resize_(self.sizes(), memory_format);
   auto input = self.contiguous(memory_format);
   channel_shuffle_kernel(kCPU, output, input, groups);
-  return namedinference::propagate_names_if_nonempty(
-      output,
-      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
+  return output;
 }
 
 Tensor channel_shuffle(const Tensor& self, int64_t groups) {
@@ -42,10 +39,7 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
   }
 #endif
 
-  auto output = at::native_channel_shuffle(self, groups);
-  return namedinference::propagate_names_if_nonempty(
-      output,
-      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
+  return at::native_channel_shuffle(self, groups);
 }
 
 Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
@@ -70,9 +64,7 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
       input_reshaped.permute({0 /* b */, 2 /* oc */, 1 /* groups */, 3})
       .contiguous()
       .reshape(self.sizes());
-  return namedinference::propagate_names_if_nonempty(
-      output_tensor,
-      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
+  return output_tensor;
 }
 
 DEFINE_DISPATCH(channel_shuffle_kernel);

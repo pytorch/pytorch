@@ -54,12 +54,10 @@ class Unflatten(Module):
     r"""
     Unflattens a tensor dim expanding it to a desired shape. For use with :class:`~nn.Sequential`.
 
-    * :attr:`dim` specifies the dimension of the input tensor to be unflattened, and it can
-      be either `int` or `str` when `Tensor` or `NamedTensor` is used, respectively.
+    * :attr:`dim` specifies the dimension of the input tensor to be unflattened
 
     * :attr:`unflattened_size` is the new shape of the unflattened dimension of the tensor and it can be
-      a `tuple` of ints or a `list` of ints or `torch.Size` for `Tensor` input;  a `NamedShape`
-      (tuple of `(name, size)` tuples) for `NamedTensor` input.
+      a `tuple` of ints or a `list` of ints or `torch.Size`
 
     Shape:
         - Input: :math:`(*, S_{\text{dim}}, *)`, where :math:`S_{\text{dim}}` is the size at
@@ -69,7 +67,7 @@ class Unflatten(Module):
 
     Args:
         dim (Union[int, str]): Dimension to be unflattened
-        unflattened_size (Union[torch.Size, Tuple, List, NamedShape]): New shape of the unflattened dimension
+        unflattened_size (Union[torch.Size, Tuple, List]): New shape of the unflattened dimension
 
     Examples:
         >>> input = torch.randn(2, 50)
@@ -89,20 +87,13 @@ class Unflatten(Module):
         >>> output = m(input)
         >>> output.size()
         torch.Size([2, 2, 5, 5])
-        >>> # With namedshape (tuple of tuples)
-        >>> input = torch.randn(2, 50, names=('N', 'features'))
-        >>> unflatten = nn.Unflatten('features', (('C', 2), ('H', 5), ('W', 5)))
-        >>> output = unflatten(input)
-        >>> output.size()
-        torch.Size([2, 2, 5, 5])
     """
-    NamedShape = Tuple[Tuple[str, int]]
 
     __constants__ = ['dim', 'unflattened_size']
     dim: Union[int, str]
-    unflattened_size: Union[_size, NamedShape]
+    unflattened_size: _size
 
-    def __init__(self, dim: Union[int, str], unflattened_size: Union[_size, NamedShape]) -> None:
+    def __init__(self, dim: Union[int, str], unflattened_size: _size) -> None:
         super(Unflatten, self).__init__()
 
         if isinstance(dim, int):

@@ -575,14 +575,6 @@ inline IValue createGenericDict(
   return IValue(std::move(elems));
 }
 
-template <class T>
-inline void guardAgainstNamedTensor(const T& var) {
-  TORCH_CHECK(
-      !var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
-      "workaround please drop names via `tensor = tensor.rename(None)`.");
-}
-
 // Defined in pybind_utils.cpp to break a circular dependency with
 // python_ivalue.h
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N);
@@ -693,7 +685,6 @@ inline py::object toPyObject(IValue ivalue) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
-    guardAgainstNamedTensor<at::Tensor>(tensor);
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isStorage()) {
     return py::cast(ivalue.toStorage());

@@ -554,9 +554,6 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
       src_impl->sizes_customization_policy_;
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
-  if (src_impl->named_tensor_meta_ != nullptr) {
-    dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
-  }
 }
 
 void TensorImpl::copy_tensor_metadata(

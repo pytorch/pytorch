@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/Sorting.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/Context.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/MemoryOverlap.h>
@@ -81,7 +80,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   // If there are duplicate elements of a median value, the procedure for choosing which
   // of the duplicates to use for the indices output is nondeterministic.
   at::globalContext().alertNotDeterministic("median CUDA with indices output");
-  NoNamesGuard guard;
 
   dim = at::maybe_wrap_dim(dim, self.dim());
   Tensor in = self.dim() > 0 ? self.contiguous() : self.unsqueeze(0);
@@ -121,16 +119,10 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     launch_median_kernel(vals, inds, in, dim, ignore_nan);
   }
 
-  guard.reset();
-  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
-
   return std::forward_as_tuple(values, indices);
 }
 
 Tensor median_impl(const Tensor& self, bool ignore_nan) {
-  NoNamesGuard guard;
-
   int64_t size = self.numel();
   // Return nan for empty tensors
   if (size <= 0) {
@@ -166,12 +158,9 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
   // of the duplicates to use for the indices output is nondeterministic.
   at::globalContext().alertNotDeterministic("kthvalue CUDA");
   auto result = [&]() {
-    NoNamesGuard guard;
     // `kthvalue_out_impl_cuda` expects contiguous in input `self`.
     return kthvalue_out_impl_cuda(values, indices, self.contiguous(), k, dim, keepdim);
   }();
-  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
   return result;
 }
 

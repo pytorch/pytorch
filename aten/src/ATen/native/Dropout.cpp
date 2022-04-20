@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NamedTensorUtils.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -115,15 +114,10 @@ Tensor native_dropout_backward_cpu(const Tensor& grad, const Tensor& mask, doubl
 }
 
 Tensor dropout(const Tensor& input, double p, bool train) {
-  auto result = [&]() {
-    NoNamesGuard guard;
-    if (train && is_fused_kernel_acceptable(input, p)) {
-      return std::get<0>(at::native_dropout(input, p, train));
-    }
-    return _dropout<false>(input, p, train);
-  }();
-  namedinference::propagate_names(result, input);
-  return result;
+  if (train && is_fused_kernel_acceptable(input, p)) {
+    return std::get<0>(at::native_dropout(input, p, train));
+  }
+  return _dropout<false>(input, p, train);
 }
 
 Tensor& dropout_(Tensor& input, double p, bool train) {

@@ -4,7 +4,7 @@ from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
 
 from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      ConstRefCType, OptionalCType, NamedCType,
-                                     tensorT, scalarT, intArrayRefT, dimnameListT,
+                                     tensorT, scalarT, intArrayRefT,
                                      optionalTensorRefT, optionalScalarRefT,
                                      optionalIntArrayRefT, iTensorListRefT)
 
@@ -50,8 +50,6 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
         # https://github.com/pytorch/pytorch/pull/51485
         elif str(t.elem) == 'int':
             return NamedCType(binds, BaseCType(intArrayRefT))
-        elif str(t.elem) == 'Dimname':
-            return NamedCType(binds, BaseCType(dimnameListT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, ArrayRefCType(elem.type))
     else:

@@ -10,7 +10,6 @@
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
@@ -243,18 +242,13 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
-  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
-  {
-    NoNamesGuard guard;
-    if (self._is_zerotensor()) {
-     TORCH_CHECK(false, "ZeroTensors are immutable. Please materialize the tensor using `.clone()`, if you want a mutable zero tensor.");
-    }
-    if (src._is_zerotensor()) {
-      return self.zero_();
-    }
-    copy_impl(self, src, non_blocking);
+  if (self._is_zerotensor()) {
+    TORCH_CHECK(false, "ZeroTensors are immutable. Please materialize the tensor using `.clone()`, if you want a mutable zero tensor.");
   }
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  if (src._is_zerotensor()) {
+    return self.zero_();
+  }
+  copy_impl(self, src, non_blocking);
   return self;
 }
 

@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Distance.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
@@ -119,41 +118,29 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.size(-1) == x2.size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.size(-1), " X2: ", x2.size(-1));
-  auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
-  auto result = [&]() {
-    NoNamesGuard guard;
-    int64_t r1 = x1.size(-2);
-    int64_t r2 = x2.size(-2);
-    // Special case for empty input: always call the version with explicit autograd to ensure the graph is properly connected
-    if (x1.numel() == 0 || x2.numel() == 0) {
-        return at::_cdist_forward(x1, x2, p, compute_mode);
-    }
-    int64_t mode = compute_mode.value_or(0);
-    // Note [cdist relies on cdist_impl redispatching]
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    // This is for pytorch to figure the backward pass itself
-    // when p=2.  Keep this condition in sync with the See Note reference
-    if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
-        return cdist_impl(x1, x2, p, compute_mode);
-    } else {
-        return at::_cdist_forward(x1, x2, p, compute_mode);
-    }
-  }();
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-  return result;
+  int64_t r1 = x1.size(-2);
+  int64_t r2 = x2.size(-2);
+  // Special case for empty input: always call the version with explicit autograd to ensure the graph is properly connected
+  if (x1.numel() == 0 || x2.numel() == 0) {
+      return at::_cdist_forward(x1, x2, p, compute_mode);
+  }
+  int64_t mode = compute_mode.value_or(0);
+  // Note [cdist relies on cdist_impl redispatching]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // This is for pytorch to figure the backward pass itself
+  // when p=2.  Keep this condition in sync with the See Note reference
+  if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
+      return cdist_impl(x1, x2, p, compute_mode);
+  } else {
+      return at::_cdist_forward(x1, x2, p, compute_mode);
+  }
 }
 
 Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.size(-1) == x2.size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.size(-1), " X2: ", x2.size(-1));
-  auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
-  auto result = [&]() {
-    NoNamesGuard guard;
-    return cdist_impl(x1, x2, p, compute_mode);
-  }();
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-  return result;
+  return cdist_impl(x1, x2, p, compute_mode);
 }
 
 Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2, const double p, const Tensor& _cdist) {

@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUFunctions.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/Config.h>
 
@@ -15,8 +14,7 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
 
   TORCH_CHECK(mat.size(1) == vec.size(0) && (mat.size(0) == self.numel() || self.numel() == 1),
      "size mismatch, got ", self.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
-  auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
-  set_output(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
+  set_output(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options());
 }
 }
 
@@ -61,8 +59,6 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
       at::native::copy_(const_cast<Tensor&>(result), *self_);
     }
     if (result.numel() != 0) {
-
-      NoNamesGuard guard;
       if (use_mkldnn_bf16_matmul(mat, vec, /*result=*/Tensor())){
         mkldnn_matmul(mat, vec, result, beta_.to<float>(), alpha_.to<float>());
         return;
@@ -151,7 +147,6 @@ Tensor dot(const Tensor &self, const Tensor &other){
     }
   }
 
-  at::NoNamesGuard guard;
   dot_check(self, other);
 
   if (self._is_zerotensor() || other._is_zerotensor()) {
@@ -188,7 +183,6 @@ Tensor vdot(const Tensor &self, const Tensor &other){
     return (at::native::dot(self, other.conj())).conj();
   }
 
-  at::NoNamesGuard guard;
   // For complex dtypes.
   dot_check(self, other);
 

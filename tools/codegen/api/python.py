@@ -571,7 +571,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
                         BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
                         BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
-                        BaseTy.Dimname, BaseTy.Stream, BaseTy.ConstQuantizerPtr, BaseTy.SymInt]:
+                        BaseTy.Stream, BaseTy.ConstQuantizerPtr, BaseTy.SymInt]:
             # These python schema type names line up with their function schema names
             return t.name.name
 
@@ -602,8 +602,6 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
                 return 'c10::List<c10::optional<Tensor>>'
             else:
                 return 'const c10::List<c10::optional<Tensor>> &'
-        elif str(t.elem) == 'Dimname':
-            return f'DimnameList[{size}]' if size is not None else 'DimnameList'
         elem = argument_type_str(t.elem, simple_type=simple_type)
         return f'ArrayRef<{elem}>'
 
@@ -774,8 +772,6 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = 'Union[_device, str, None]'
         elif t.name == BaseTy.MemoryFormat:
             ret = 'memory_format'
-        elif t.name == BaseTy.Dimname:
-            ret = 'Union[str, ellipsis, None]'
         elif t.name in [BaseTy.Tensor, BaseTy.Generator,
                         BaseTy.Storage, BaseTy.Stream]:
             # These python schema type names line up with their function schema names
@@ -816,8 +812,6 @@ def return_type_str_pyi(t: Type) -> str:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Device:
             return '_device'
-        elif t.name == BaseTy.Dimname:
-            ret = 'Optional[str]'
         else:
             return argument_type_str_pyi(t)
 
@@ -1027,7 +1021,7 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
 
     if isinstance(t, BaseType):
         if t.name in [BaseTy.Tensor, BaseTy.Stream, BaseTy.Storage,
-                      BaseTy.Scalar, BaseTy.Dimname]:
+                      BaseTy.Scalar]:
             # These unpack methods line up with their schema names
             return t.name.name.lower()
         elif t.name == BaseTy.ScalarType:
@@ -1072,8 +1066,6 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
                 return 'intlistOptional'
             elif str(t.elem) == 'float[]':
                 return 'doublelistOptional'
-            elif str(t.elem) == 'Dimname[]':
-                return 'toDimnameListOptional'
 
     elif isinstance(t, ListType):
         if str(t.elem) == 'Tensor':
@@ -1084,9 +1076,6 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
                 return 'tensorlist'
         elif str(t.elem) == 'Tensor?':
             return 'list_of_optional_tensors'
-        elif str(t.elem) == 'Dimname':
-            # accept definite size
-            return 'dimnamelist'
         elif str(t.elem) == 'int':
             # accept definite size
             return 'intlist'
@@ -1160,17 +1149,6 @@ def dispatch_lambda_exprs(
             ])
             for i, out_arg in enumerate(a.outputs):
                 lambda_args_exprs[out_arg.name] = f'out[{i}]'
-        elif str(a.type) == 'Dimname[]?':
-            # [old codegen]
-            # TODO: make this part of something more general, or get rid of it.
-            # optional<ArrayRef<T>> are special. The PythonArgParser returns an
-            # optional<vector<T>>, which cannot be implicitly converted to
-            # optional<ArrayRef<T>>. One needs to unwrap the optional and rewrap.
-            inits.extend([
-                f'auto __{name} = {arg_parser_expr};',
-                f'c10::optional<DimnameList> {name} = __{name} ? c10::make_optional(DimnameList(__{name}.value())) : c10::nullopt;',
-            ])
-            lambda_args_exprs[name] = name
         else:
             # default case - directly using PythonArgParser output expr
             lambda_args_exprs[name] = arg_parser_expr

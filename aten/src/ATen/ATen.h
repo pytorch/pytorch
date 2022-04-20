@@ -13,7 +13,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Formatting.h>
 #include <ATen/Functions.h>
-#include <ATen/NamedTensor.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>

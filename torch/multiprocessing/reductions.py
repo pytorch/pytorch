@@ -1,6 +1,5 @@
 import torch
 import torch.utils.hooks
-from torch._namedtensor_internals import check_serializing_named_tensor
 import os
 import threading
 import multiprocessing
@@ -147,7 +146,6 @@ def reduce_tensor(tensor):
                            "If you just want to transfer the data, call detach() on the tensor "
                            "before serializing (e.g., putting it on the queue).")
 
-    check_serializing_named_tensor(tensor)
     torch.utils.hooks.warn_if_has_hooks(tensor)
 
     # Note [CUDA IPC and the caching allocator]

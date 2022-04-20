@@ -210,18 +210,6 @@ enum class PyInterpreterStatus {
 
 } // namespace impl
 
-struct C10_API NamedTensorMetaInterface {
-  virtual ~NamedTensorMetaInterface(){};
-  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
-    TORCH_INTERNAL_ASSERT(
-        false, "Not implemented: NamedTensorMetaInterface::clone");
-  };
-  virtual int64_t slow_dim() const {
-    TORCH_INTERNAL_ASSERT(
-        false, "Not implemented: NamedTensorMetaInterface::slow_dim");
-  };
-};
-
 // NOTE [ Version Counter Sharing ]
 //
 // Every Tensor has a version counter. Version counters are incremented whenever
@@ -1340,28 +1328,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   c10::AutogradMetaInterface* autograd_meta() const;
 
-  /**
-   * Set the pointer to named tensor metadata.
-   */
-  void set_named_tensor_meta(
-      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
-    TORCH_WARN_ONCE(
-        "Named tensors and all their associated APIs are an experimental feature ",
-        "and subject to change. Please do not use them for anything important ",
-        "until they are released as stable.");
-#ifdef DEBUG
-    if (named_tensor_meta) {
-      TORCH_INTERNAL_ASSERT(named_tensor_meta->slow_dim() == dim());
-    }
-#endif
-    named_tensor_meta_ = std::move(named_tensor_meta);
-    if (named_tensor_meta_ == nullptr) {
-      key_set_ = key_set_.remove(DispatchKey::Named);
-    } else {
-      key_set_ = key_set_.add(DispatchKey::Named);
-    }
-  }
-
   void set_python_dispatch(bool k) {
     if (k) {
       key_set_ = key_set_.add(c10::python_ks);
@@ -1372,21 +1338,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_python_dispatch() const {
     return key_set_.has_all(c10::python_ks);
-  }
-
-  /**
-   * Return the pointer to named tensor metadata.
-   */
-  const c10::NamedTensorMetaInterface* named_tensor_meta() const {
-    return named_tensor_meta_.get();
-  }
-
-  c10::NamedTensorMetaInterface* named_tensor_meta() {
-    return named_tensor_meta_.get();
-  }
-
-  bool has_named_tensor_meta() const {
-    return named_tensor_meta_ != nullptr;
   }
 
   // NOTE [ TensorImpl Shallow-Copying ]
@@ -2368,8 +2319,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
  protected:
-  std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
-
   c10::VariableVersion version_counter_;
 
   // This field contains the interpreter tag for this object.  See
@@ -2527,9 +2476,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
   // not anymore!)
-  //
-  // INVARIANT: named_tensor_meta_ != nullptr  <==>
-  // key_set_.has(DispatchKey::Named)
   DispatchKeySet key_set_;
 
  private:
@@ -2577,7 +2523,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
-//    named tensor metadata pointer
 //    version counter pointer
 //    Python interpreter pointer
 //    PyObject pointer
@@ -2657,7 +2602,6 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
   enum class FieldNameEnum {
     storage_,
     autograd_meta_,
-    named_tensor_meta_,
     version_counter_,
     pyobj_interpreter_,
     pyobj_,
@@ -2714,7 +2658,6 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     // clang-format off
     are_equal<sizeof(storage_),            4,  FieldNameEnum::storage_>();
     are_equal<sizeof(autograd_meta_),      4,  FieldNameEnum::autograd_meta_>();
-    are_equal<sizeof(named_tensor_meta_),  4,  FieldNameEnum::named_tensor_meta_>();
     are_equal<sizeof(version_counter_),    4,  FieldNameEnum::version_counter_>();
     are_equal<sizeof(pyobj_interpreter_),  4,  FieldNameEnum::pyobj_interpreter_>();
     are_equal<sizeof(pyobj_),              4,  FieldNameEnum::pyobj_>();
@@ -2740,7 +2683,6 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     // figured out how to detect those via macro preprocessors yet, so we use <=
     // comparisons for the relevant fields.
     is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
-    is_le<sizeof(named_tensor_meta_),     16,  FieldNameEnum::named_tensor_meta_>();
     are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
     are_equal<sizeof(pyobj_interpreter_),  8,  FieldNameEnum::pyobj_interpreter_>();
     are_equal<sizeof(pyobj_),              8,  FieldNameEnum::pyobj_>();

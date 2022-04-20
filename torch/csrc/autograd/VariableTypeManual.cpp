@@ -239,7 +239,6 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
     at::AutoDispatchBelowAutograd guard;
     return at::redispatch::detach(ks & c10::after_autograd_keyset, self_);
   })();
-  namedinference::propagate_names(result, self);
 
   // Detach the forward grads by not setting anything on the result
 

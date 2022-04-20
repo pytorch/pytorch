@@ -2,7 +2,6 @@
 
 #include <ATen/DimVector.h>
 #include <c10/core/TensorOptions.h>
-#include <ATen/core/Dimname.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wdeprecated-copy-dtor")
@@ -62,13 +61,13 @@ namespace impl {
 //
 // A notable subclass of this interface is TensorIteratorBase.
 struct TORCH_API MetaBase {
-  virtual void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) = 0;
+  virtual void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options) = 0;
   virtual const Tensor& maybe_get_output(int64_t output_idx) = 0;
   void set_output(IntArrayRef sizes, TensorOptions options) {
-    set_output(0, sizes, {}, options, {});
+    set_output(0, sizes, {}, options);
   }
   void set_output(int64_t output_idx, IntArrayRef sizes, TensorOptions options) {
-    set_output(output_idx, sizes, {}, options, {});
+    set_output(output_idx, sizes, {}, options);
   }
   // Returns a reference to an undefined tensor if there is no presupplied
   // output

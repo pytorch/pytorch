@@ -16,7 +16,6 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/DistributionTemplates.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/cpu/Loops.h>
 
 #include <type_traits>

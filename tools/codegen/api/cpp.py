@@ -5,7 +5,7 @@ from tools.codegen.model import (Argument, Arguments, BaseTy, BaseType,
 from tools.codegen.api.types import (ArgName, BaseCType, Binding, ConstRefCType, NamedCType, CType,
                                      MutRefCType, ArrayCType, ListCType, VectorCType, ArrayRefCType,
                                      OptionalCType, TupleCType, SpecialArgName, boolT, scalarT,
-                                     tensorListT, dimnameListT, tensorT, voidT, longT,
+                                     tensorListT, tensorT, voidT, longT,
                                      BaseTypeToCppMapping, intArrayRefT, optionalIntArrayRefT,
                                      tensorOptionsT)
 from tools.codegen import local
@@ -108,8 +108,6 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName, remove_non_owni
             return NamedCType(binds, BaseCType(tensorListT))
         elif str(t.elem) == 'Scalar':
             return NamedCType(binds, ArrayRefCType(BaseCType(scalarT)))
-        elif str(t.elem) == 'Dimname':
-            return NamedCType(binds, BaseCType(dimnameListT))
         elif str(t.elem) == 'Tensor?':
             return NamedCType(binds, ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)

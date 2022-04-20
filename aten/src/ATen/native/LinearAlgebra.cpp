@@ -2,7 +2,6 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/CPUBlas.h>
@@ -37,8 +36,7 @@ namespace meta {
       mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (", \
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
  \
-  auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options());
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -54,9 +52,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
   TORCH_CHECK(
       self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
       self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
-
-  auto names = at::namedinference::compute_matmul_outnames(self, mat2);
-  set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options());
 }
 
 template <typename Meta>
@@ -85,7 +81,6 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
   TORCH_CHECK(result_sizes == output_size,
               "Expected an output tensor with shape [", output_size, "] but got shape ", result_sizes);
 
-  std::vector<Dimname> outnames = {};
   if (!is_bmm) {
     if (self_baddbmm.has_value()) {
       const auto& self = self_baddbmm.value();
@@ -94,16 +89,8 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
       const auto self_sizes = self.sizes();
       TORCH_CHECK(self_sizes == output_size,
                   "Expected an input tensor shape with shape ", output_size, " but got shape: ", self_sizes);
-      outnames = namedinference::compute_baddbmm_outnames(result, batch1, batch2, self);
     }
-  } else {
-    outnames = namedinference::compute_bmm_outnames(result, batch1, batch2);
   }
-
-  namedinference::propagate_names_if_nonempty(
-    result,
-    outnames
-  );
 }
 
 TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
@@ -1285,12 +1272,7 @@ static void addbmm_impl_(
 
 Tensor& addbmm_out(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
   auto b_self = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
-  {
-    at::NoNamesGuard guard;
-    addbmm_impl_(result, *b_self, batch1, batch2, beta, alpha);
-  }
-  auto names = at::namedinference::propagate_names_for_addmm(batch1, batch2, self);
-  at::namedinference::propagate_names_if_nonempty(result, names);
+  addbmm_impl_(result, *b_self, batch1, batch2, beta, alpha);
   return result;
 }
 
@@ -1305,30 +1287,21 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
 
 TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor &result) {
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
-  {
-    at::NoNamesGuard guard;
-    addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
-  }
+  addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
 }
 
 TORCH_IMPL_FUNC(addmm_activation_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor &result) {
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
-  {
-    at::NoNamesGuard guard;
-    addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
-    if (use_gelu) {
-      at::gelu_(const_cast<Tensor&>(result));
-    } else {
-      at::relu_(const_cast<Tensor&>(result));
-    }
+  addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
+  if (use_gelu) {
+    at::gelu_(const_cast<Tensor&>(result));
+  } else {
+    at::relu_(const_cast<Tensor&>(result));
   }
 }
 
 TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tensor & result) {
-  {
-    at::NoNamesGuard guard;
-    addmm_impl_cpu_(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
-  }
+  addmm_impl_cpu_(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -1561,13 +1534,10 @@ TORCH_IMPL_FUNC(baddbmm_out_cpu)
 
 TORCH_IMPL_FUNC(bmm_out_cpu)
 (const Tensor & batch1, const Tensor & batch2, const Tensor & result) {
-    {
-    NoNamesGuard guard;
-    bool result_is_conj = result.is_conj();
-    conjugate_mutable_input_if_needed(result, result_is_conj);
-    bmm_out_or_baddbmm_(result, batch1.resolve_conj(), batch2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
-    conjugate_mutable_input_if_needed(result, result_is_conj);
-    }
+  bool result_is_conj = result.is_conj();
+  conjugate_mutable_input_if_needed(result, result_is_conj);
+  bmm_out_or_baddbmm_(result, batch1.resolve_conj(), batch2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
+  conjugate_mutable_input_if_needed(result, result_is_conj);
 }
 
 Tensor& dot_out(const Tensor& self, const Tensor& other, Tensor& result) {
@@ -1651,7 +1621,6 @@ Tensor matmul(
     c10::optional<Tensor> out_opt,
     const Tensor& tensor1,
     const Tensor& tensor2) {
-  NoNamesGuard guard;
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
   auto has_out = out_opt.has_value();
@@ -1764,16 +1733,12 @@ Tensor matmul(
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
 Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
-  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 

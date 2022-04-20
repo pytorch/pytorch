@@ -6,7 +6,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
-#include <ATen/NamedTensorUtils.h>
 
 #include <c10/core/TensorOptions.h>
 #include <c10/macros/Macros.h>
@@ -398,16 +397,13 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
 
 Tensor softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
-    NoNamesGuard guard;
     return at::_softmax(input_, dim_, false);
   }();
-  namedinference::propagate_names(result, input_);
   return result;
 }
 
 Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
   auto result = [&]() {
-    NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_softmax(input_, dim_, true);
     } else {
@@ -415,7 +411,6 @@ Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarTyp
         return at::_softmax(converted, dim_, false);
     }
   }();
-  namedinference::propagate_names(result, input_);
   return result;
 }
 
@@ -426,16 +421,13 @@ Tensor special_softmax(const Tensor& input_, const int64_t dim_, c10::optional<S
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
-    NoNamesGuard guard;
     return at::_log_softmax(input_, dim_, false);
   }();
-  namedinference::propagate_names(result, input_);
   return result;
 }
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
   auto result = [&]() {
-    NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_log_softmax(input_, dim_, true);
     } else {
@@ -443,7 +435,6 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<Scala
         return at::_log_softmax(converted, dim_, false);
     }
   }();
-  namedinference::propagate_names(result, input_);
   return result;
 }
 
@@ -458,14 +449,6 @@ DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 DEFINE_DISPATCH(softmax_kernel);
 DEFINE_DISPATCH(log_softmax_kernel);
-
-Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
-  return at::softmax(self, dimname_to_position(self, dim), dtype);
-}
-
-Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
-  return at::log_softmax(self, dimname_to_position(self, dim), dtype);
-}
 
 Tensor masked_softmax_cpu(const Tensor& input, const Tensor& mask) {
   Tensor output = at::empty_like(input, input.options());

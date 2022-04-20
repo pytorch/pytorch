@@ -587,28 +587,6 @@ TEST_F(ModulesTest, Unflatten) {
   auto output = unflatten->forward(torch::tensor({1, 2, 3, 4}));
   auto expected = torch::tensor({{1, 2}, {3, 4}});
   ASSERT_TRUE(torch::equal(output, expected));
-
-  // Named tensor
-  auto make_dimnames = [](std::vector<std::string> names) {
-    std::vector<torch::Dimname> dimnames;
-    // NOLINTNEXTLINE(performance-for-range-copy)
-    for (auto name : names) {
-      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
-      dimnames.push_back(
-          torch::Dimname::fromSymbol(torch::Symbol::dimname(name)));
-    }
-    return dimnames;
-  };
-
-  unflatten = Unflatten(UnflattenOptions(
-      "B",
-      {std::pair<std::string, int64_t>{"B1", 2},
-       std::pair<std::string, int64_t>{"B2", 2}}));
-  output = unflatten->forward(
-      torch::tensor({{1, 2, 3, 4}}).refine_names(make_dimnames({"A", "B"})));
-  expected = torch::tensor({{{1, 2}, {3, 4}}})
-                 .refine_names(make_dimnames({"A", "B1", "B2"}));
-  ASSERT_TRUE(torch::equal(output, expected));
 }
 
 TEST_F(ModulesTest, AdaptiveMaxPool1d) {

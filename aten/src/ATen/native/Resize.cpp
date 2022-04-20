@@ -109,7 +109,6 @@ const Tensor& resize_as_(
     }
     self.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
-  namedinference::propagate_names(result, the_template);
   return result;
 }
 
@@ -117,9 +116,6 @@ const Tensor& resize_(
     const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
-  if (self.has_names()) {
-    return resize_named_tensor_(self, size, optional_memory_format);
-  }
   auto* self_ = self.unsafeGetTensorImpl();
   // NOLINTNEXTLINE(bugprone-argument-comment)
   resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);

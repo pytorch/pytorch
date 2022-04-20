@@ -30,7 +30,6 @@
 #include <ATen/core/CheckMemoryFormat.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <ATen/core/SymInt.h>
 #include <ATen/core/TensorBase.h>
@@ -129,6 +128,7 @@ class TORCH_API Tensor: public TensorBase {
     }
   }
 
+  // TODO: refactor this because named tensors have been removed
   // Aliased by Dimname overloads, so need explicit using
   using TensorBase::size;
   using TensorBase::stride;

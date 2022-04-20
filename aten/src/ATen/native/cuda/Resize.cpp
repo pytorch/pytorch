@@ -50,9 +50,6 @@ const Tensor& resize_cuda_(
     const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
-  if (self.has_names()) {
-    return resize_named_tensor_(self, size, optional_memory_format);
-  }
   auto* self_ = self.unsafeGetTensorImpl();
   resize_impl_cuda_(self_, size, /*strides=*/c10::nullopt);
   if (optional_memory_format.has_value()) {

@@ -44,8 +44,6 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"std::string", ParameterType::STRING},
   {"c10::string_view", ParameterType::STRING},
   {"SymInt", ParameterType::SYM_INT},
-  {"Dimname", ParameterType::DIMNAME},
-  {"DimnameList", ParameterType::DIMNAME_LIST},
   {"ScalarList", ParameterType::SCALAR_LIST},
 };
 
@@ -606,14 +604,6 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       }
       return false;
     }
-    case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
-    case ParameterType::DIMNAME_LIST: {
-      if (THPUtils_checkDimnameList(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
-      return size == 1 && THPUtils_checkDimname(obj);
-    }
     case ParameterType::TENSOR_LIST: {
       return is_tensor_list_and_append_overloaded(obj, &overloaded_args, argnum, true /* throw_error */);
     }
@@ -663,8 +653,6 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::QSCHEME: return "torch.qscheme";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
-    case ParameterType::DIMNAME: return "name";
-    case ParameterType::DIMNAME_LIST: return "tuple of names";
     case ParameterType::SCALAR_LIST: return "tuple of Scalars";
     default: throw std::runtime_error("unknown parameter type");
   }

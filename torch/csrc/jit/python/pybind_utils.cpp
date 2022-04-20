@@ -31,7 +31,6 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return autograd::Variable();
       }
       auto var = py::cast<autograd::Variable>(obj);
-      guardAgainstNamedTensor<autograd::Variable>(var);
       return var;
     }
     case TypeKind::StorageType:
