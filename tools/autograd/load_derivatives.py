@@ -12,7 +12,7 @@ from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
 from tools.codegen.api.types import (Binding, NamedCType, BaseCType, VectorCType,
                                      intArrayRefT, tensorOptionsT, typeAndSizeT, longT, boolT,
                                      tensorGeometryT, scalarTypeT, SpecialArgName,
-                                     OptionalCType, stringT)
+                                     OptionalCType, stringT, layoutT)
 from tools.codegen.api import cpp
 from tools.codegen.api import dispatcher
 from tools.codegen.gen import parse_native_yaml, get_grouped_by_view_native_functions
@@ -605,6 +605,11 @@ def saved_variables(
             'suffix': '_strides',
             'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
             'expr': stride_expr,
+        }),
+        # replace self.layout() with self_layout
+        (r'{}.layout\(\)', {
+            'suffix': '_layout',
+            'nctype': lambda name: NamedCType(name, BaseCType(layoutT)),
         }),
         # replace self.is_conj() with self_conjugate
         (r'{}.is_conj\(\)', {
