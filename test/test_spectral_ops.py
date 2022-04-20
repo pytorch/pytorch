@@ -327,8 +327,13 @@ class TestFFT(TestCase):
     @dtypes(torch.int8, torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_fft_type_promotion(self, device, dtype):
-        if dtype in (torch.half, torch.complex32) and torch.device(device).type == 'cpu':
+        device_type = torch.device(device).type
+        if dtype in (torch.half, torch.complex32) and device_type == 'cpu':
             raise unittest.SkipTest("half and complex32 not supported on CPU")
+        elif dtype in (torch.half, torch.complex32) and device_type == 'cuda' and TEST_WITH_ROCM:
+            raise unittest.SkipTest("half and complex32 not supported on ROCM")
+        elif dtype in (torch.half, torch.complex32) and device_type == 'cuda' and not SM53OrLater:
+            raise unittest.SkipTest("half and complex32 is only supported on CUDA device with SM>53")
 
         if dtype.is_complex or dtype.is_floating_point:
             t = torch.randn(64, device=device, dtype=dtype)
