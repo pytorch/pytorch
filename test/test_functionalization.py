@@ -447,7 +447,7 @@ $3 = torch._ops.aten.add.Tensor($2, $0)""")
 $0 = input('input')
 $1 = torch._ops.aten.add.Tensor($0, $0)
 $2 = torch._ops.aten.diagonal_copy.default($1)
-$3 = torch._ops.aten.zero.default($2)""")
+$3 = torch._ops.aten.zeros_like.default($2)""")
 
     def test_nested_functions_propagate_updates(self):
         def g(x):
