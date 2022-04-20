@@ -836,6 +836,8 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, GraphFunction& m) {
     return module_dict->keys_;
   } else if (iterableModuleKind == IterableModuleKind::LIST) {
     return module_dict->modules_;
+  } else if (iterableModuleKind == IterableModuleKind::PARAMLIST) {
+    return module_dict->modules_;
   } else {
     TORCH_INTERNAL_ASSERT(false);
   }
