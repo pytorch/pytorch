@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
@@ -10,6 +11,7 @@
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/llvm_jit_strings.h>
+#include <ATen/native/cuda/reduction_template.cuh>
 
 #include <sstream>
 #include <fstream>
@@ -82,7 +84,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(void, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                             \
 
-  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(_)       \
   _(uint8_t, Byte)                                                 \
   _(int8_t, Char)                                                  \
   _(int16_t, Short)                                                \
@@ -91,6 +93,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::Half, Half)                                                \
   _(float, Float)                                                  \
   _(double, Double)                                                \
+  _(std::complex<at::Half>, ComplexHalf)                           \
   _(std::complex<float>, ComplexFloat)                             \
   _(std::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
@@ -118,11 +121,17 @@ const std::string jit_common_types = R"ESCAPE(
   Array() = default;
   Array(const Array&) = default;
   Array& operator=(const Array&) = default;
+  __device__ Array(T x) {
+    for (int i = 0; i < size; i++) {
+      data[i] = x;
+    }
+  }
   };
 
   ${half_string}
   ${bfloat16_string}
   ${complex_body_string}
+  ${complex_half_body_string}
   ${complex_math_string}
 
 
@@ -249,6 +258,29 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
     }
   };
 
+  template <>
+  struct static_cast_with_inter_type<std::complex<at::Half>, at::BFloat16> {
+    static inline std::complex<at::Half> apply(at::BFloat16 src) {
+      return static_cast<std::complex<at::Half>>(float{src});
+    }
+  };
+
+  template <>
+  struct static_cast_with_inter_type<std::complex<at::Half>, at::Half> {
+    static inline std::complex<at::Half> apply(at::Half src) {
+      return static_cast<std::complex<at::Half>>(float{src});
+    }
+  };
+
+  template <>
+  struct static_cast_with_inter_type<
+      std::complex<at::Half>,
+      std::complex<double>> {
+    static inline std::complex<at::Half> apply(std::complex<double> src) {
+      return static_cast<std::complex<at::Half>>(static_cast<std::complex<float>>(src));
+    }
+  };
+
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
   #define FETCH_AND_CAST_CASE(type, scalartype) \
     case ScalarType::scalartype:                \
@@ -256,7 +288,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
-        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(FETCH_AND_CAST_CASE)
         default:
           ERROR_UNSUPPORTED_CAST
     }
@@ -271,7 +303,7 @@ const std::string dynamic_cast_support_literal = R"ESCAPE(
   template<typename src_t>
   __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(CAST_AND_STORE_CASE)
       default:;
   }
   ERROR_UNSUPPORTED_CAST
@@ -322,10 +354,7 @@ const std::string no_dynamic_cast_support_literal = R"ESCAPE(
 
 )ESCAPE";
 
-const std::string jit_code_template = R"ESCAPE(
-
-  ${dynamic_casting_string}
-
+const std::string offset_calc_template = R"ESCAPE(
   template <typename T>
   struct DivMod {
   T div;
@@ -408,6 +437,14 @@ const std::string jit_code_template = R"ESCAPE(
     // NOTE: this approach will not support nInputs == 0
     ${index_type} strides_[25][NARGS];
   };
+
+
+)ESCAPE";
+
+const std::string jit_code_template = R"ESCAPE(
+
+  ${dynamic_casting_string}
+
 
   ${functor}
 
@@ -709,7 +746,10 @@ std::string generate_code(
     functor_args << "arg0[j], scalar_val";
   }
   env.s("args", functor_args.str());
-  if (f_inputs_type == "at::Half" || result_type == "at::Half" || dynamic_casting) {
+  if (f_inputs_type == "at::Half" || result_type == "at::Half" ||
+      f_inputs_type == "std::complex<at::Half>" ||
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
+    // complex<Half> depends on complex<T> and Half dtypes.
     env.s("half_string", jiterator_half_support_literal);
   } else {
     env.s("half_string", "");
@@ -722,7 +762,9 @@ std::string generate_code(
   // the definition of complex math functions is only needed when the compute type is complex
   // but the definition of std::complex is needed for dynamic casting even if the compute type is not complex
   if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
-      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>") {
+      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>" ||
+      f_inputs_type == "std::complex<at::Half>" || result_type == "std::complex<at::Half>") {
+    // complex<Half> depends on complex<T> and Half dtypes.
     env.s("traits_string", get_traits_string());
     env.s("complex_body_string", get_complex_body_string());
     env.s("complex_math_string", get_complex_math_string());
@@ -734,6 +776,15 @@ std::string generate_code(
     env.s("traits_string", "");
     env.s("complex_body_string", "");
     env.s("complex_math_string", "");
+  }
+  if (f_inputs_type == "std::complex<at::Half>" ||
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
+    // dynamic_casting requires the definition of all types
+    // include complex<at::Half>
+    // Look at the definition of `StoreWithCast` and `LoadWithCast`.
+    env.s("complex_half_body_string", get_complex_half_body_string());
+  } else {
+    env.s("complex_half_body_string", "");
   }
 
   if (!vectorized) {
@@ -769,7 +820,7 @@ std::string generate_code(
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
 
-    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_code_template);
+    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + offset_calc_template + jit_code_template);
     const auto code = cuda_template.format(env);
     return code;
   }
@@ -808,6 +859,132 @@ std::string generate_code(
   return code;
 }
 
+// Creates directories recursively
+bool _r_mkdir(const std::string& dir) {
+  // Check if current dir exists
+  const char* p_dir = dir.c_str();
+  const bool dir_exists = (access(p_dir, F_OK) == 0);
+  if (dir_exists) {
+    return true;
+  }
+
+  // Try to create current directory
+#ifdef _WIN32
+  int ret = _mkdir(dir.c_str());
+#else
+  int ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+#endif
+  // Success
+  if (ret == 0) {
+    return true;
+  }
+
+  // Find folder separator and check if we are at the top
+  auto  pos = dir.find_last_of("/\\");
+  if (pos == std::string::npos) {
+    return false;
+  }
+
+  // Try to create parent directory
+  if (!(_r_mkdir(dir.substr(0, pos)))) {
+    return false;
+  }
+
+  // Try to create complete path again
+#ifdef _WIN32
+  ret = _mkdir(dir.c_str());
+#else
+  ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+#endif
+  return ret == 0;
+}
+
+// Creates directories recursively assuming that base exists
+bool r_mkdir_with_base(std::string& base, std::string& dir){
+  const char* p_base = base.c_str();
+  const bool base_exists = (access(p_base, F_OK) == 0);
+  if (!base_exists) {
+    return false;
+  }
+
+  // remove trailing '/' or '\\'
+  if ((base[base.size()-1]=='/') || base[base.size()-1]=='\\') {
+    base.pop_back();
+  }
+  if ((dir[dir.size()-1]=='/') || dir[dir.size()-1]=='\\') {
+    dir.pop_back();
+  }
+
+  return _r_mkdir(base+dir);
+
+}
+
+std::string load_code_template(const std::string& path) {
+  std::ifstream ifs{path};
+  std::string s{
+    std::istreambuf_iterator<char>(ifs),
+    std::istreambuf_iterator<char>()};
+  return s;
+}
+
+std::string generate_reduction_code(
+    int nOutputs,
+    const std::string& func,
+    const std::string& name,
+    const int vt0,
+    const std::string& f_inputs_type,
+    const std::string& reduction_accum_type,
+    const std::string& result_type,
+    bool contiguous,
+    bool vectorized,
+    int vec_size,
+    int max_threads_codegen) {
+      at::jit::TemplateEnv env;
+      env.s("index_type", "unsigned int");
+      env.s("scalar_type", f_inputs_type);
+      env.s("result_type", result_type);
+      env.s("reduction_accum_type", reduction_accum_type);
+      env.s("vt0", std::to_string(vt0));
+      env.s("name", name);
+      env.s("max_threads_lb", std::to_string(max_threads_codegen));
+      // reductions don't support dynamic casting, so the only way to get nonstandard types
+      // is through input
+      if (f_inputs_type == "at::Half") {
+        env.s("half_string", jiterator_half_support_literal);
+      } else {
+        env.s("half_string", "");
+      }
+      if (f_inputs_type == "at::BFloat16") {
+        env.s("bfloat16_string", jiterator_bfloat16_support_literal);
+      } else {
+        env.s("bfloat16_string", "");
+      }
+      if (f_inputs_type == "std::complex<float>" ||
+          f_inputs_type == "std::complex<double>" ) {
+        env.s("traits_string", get_traits_string());
+        env.s("complex_body_string", get_complex_body_string());
+        env.s("complex_math_string", get_complex_math_string());
+        env.s("complex", std::to_string(1));
+      } else {
+        env.s("traits_string", "");
+        env.s("complex_body_string", "");
+        env.s("complex_math_string", "");
+        env.s("complex", std::to_string(0));
+      }
+      if (f_inputs_type == "std::complex<at::Half>") {
+        TORCH_CHECK(
+            false, "complex<Half> reduction not supported by JITERATOR");
+      } else {
+        env.s("complex_half_body_string", "");
+      }
+      env.s("cmath_string", get_cmath_string());
+      env.s("functor", func);
+      env.s("output_vec_size", std::to_string(vec_size));
+      static auto cuda_template = at::jit::CodeTemplate(
+        jit_common_types + offset_calc_template + get_reduction_template());
+      const auto code = cuda_template.format(env);
+      return code;
+}
 
 // Acquires (possibly creating) the kernel cache directory
 c10::optional<std::string> get_cache_dir() {
@@ -822,6 +999,8 @@ c10::optional<std::string> get_cache_dir() {
   // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then TEMP (Windows) or XDG_CACHE_HOME (Linux), then HOME environment variables
   std::string cache_dir;
   char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
+  // Create kernel_cache_dir if needed as we do not want to create the base directory passed by the user
+  std::string kernels_cache_dir = "";
   if (ptkcp != nullptr) {
     cache_dir = std::string(ptkcp);
   } else {
@@ -832,7 +1011,8 @@ c10::optional<std::string> get_cache_dir() {
     ptkcp = std::getenv("XDG_CACHE_HOME");
 #endif
     if (ptkcp != nullptr) {
-      cache_dir = std::string(ptkcp) + "/torch/kernels";
+      kernels_cache_dir = "/torch/kernels";
+      cache_dir = std::string(ptkcp) + kernels_cache_dir;
     } else {
       // Falls back to HOME/.cache
       ptkcp = std::getenv("HOME");
@@ -841,7 +1021,8 @@ c10::optional<std::string> get_cache_dir() {
                         " This disables kernel caching.");
         return {};
       } else {
-        cache_dir = std::string(ptkcp) + "/.cache/torch/kernels";
+        kernels_cache_dir = "/.cache/torch/kernels";
+        cache_dir = std::string(ptkcp) + kernels_cache_dir;
       }
     }
   }
@@ -850,11 +1031,8 @@ c10::optional<std::string> get_cache_dir() {
   const char* p_cache_dir = cache_dir.c_str();
   const bool cache_dir_exists = (access(p_cache_dir, F_OK) == 0);
   if (!cache_dir_exists) {
-#ifdef _WIN32
-    if (_mkdir(p_cache_dir) != 0) {
-#else
-    if (mkdir(p_cache_dir, S_IRWXU | S_IRWXG | S_IRWXO) != 0) {
-#endif
+    std::string s_ptkcp = std::string(ptkcp);
+    if (!r_mkdir_with_base(s_ptkcp, kernels_cache_dir)) {
       TORCH_WARN_ONCE("Specified kernel cache directory could not be created! This disables kernel caching.",
                       " Specified directory is ", cache_dir, ".",
                       " This warning will appear only once per process.");
@@ -886,9 +1064,7 @@ c10::optional<std::string> get_cache_dir() {
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name) {
-
   initializeCudaContext();
-
   // Acquires CUDA and nvrtc versions and whether we're compiling to ptx or SASS
   const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int cuda_major = 0, cuda_minor = 0, nvrtc_major = 0, nvrtc_minor = 0;
@@ -983,7 +1159,7 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
     cu << log.data();
-    throw std::runtime_error(cu.str() + code);
+    throw std::runtime_error(code + cu.str());
   }
 
   size_t ptx_size = 0;
@@ -1049,24 +1225,26 @@ NvrtcFunction jit_pwise_function(
 void launch_jitted_pwise_function(
     NvrtcFunction function,
     void* args[],
-    const int nBlocks,
-    const int kBlockSize) {
+    const dim3 nBlocks,
+    const dim3 kBlockSize,
+    const int smem) {
   initializeCudaContext();
   const auto& nvrtc = at::globalContext().getNVRTC();
   // Launches kernel on current stream
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_CUDA_DRIVER_CHECK(nvrtc.cuLaunchKernel(
     function.function,
-    nBlocks,
-    1,
-    1,
-    kBlockSize,
-    1,
-    1,
-    0,
+    nBlocks.x,
+    nBlocks.y,
+    nBlocks.z,
+    kBlockSize.x,
+    kBlockSize.y,
+    kBlockSize.z,
+    smem,
     stream,
     args,
     nullptr));
 }
+
 
 }}} // at::cuda::jit

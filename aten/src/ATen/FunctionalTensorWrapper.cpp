@@ -176,6 +176,9 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
   value_ = other;
+  // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
+  // We need to propagate that metadata mutation to the wrapper (new size).
+  set_sizes_and_strides(value_.sizes(), value_.strides());
 }
 
 
@@ -183,8 +186,10 @@ void FunctionalTensorWrapper::sync_() {
   if (is_up_to_date()) {
     return;
   }
-  apply_updates();
-  regenerate_from_base();
+  auto any_updates = apply_updates();
+  if (any_updates) {
+    regenerate_from_base();
+  }
 }
 
 void FunctionalTensorWrapper::regenerate_from_base() {
@@ -201,10 +206,10 @@ void FunctionalTensorWrapper::regenerate_from_base() {
   generation_ = storage_impl->generation();
 }
 
-void FunctionalTensorWrapper::apply_updates() {
+bool FunctionalTensorWrapper::apply_updates() {
   // Apply all updates on alias_
   auto storage_impl = functional_storage_impl();
-  storage_impl->apply_updates();
+  return storage_impl->apply_updates();
 }
 
 const char* FunctionalTensorWrapper::tensorimpl_type_name() const {
@@ -222,8 +227,22 @@ Tensor to_functional_tensor(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isFunctionalTensor(tensor));
   return at::detail::make_tensor<FunctionalTensorWrapper>(tensor);
 }
+c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) {
+  if (tensor.has_value()) {
+    return c10::make_optional<Tensor>(to_functional_tensor(*tensor));
+  }
+  return c10::nullopt;
+}
 c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list) {
   c10::List<Tensor> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto i : c10::irange(t_list.size())) {
+    outputs.push_back(to_functional_tensor(t_list[i]));
+  }
+  return outputs;
+}
+c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
+  c10::List<c10::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(to_functional_tensor(t_list[i]));
@@ -322,6 +341,57 @@ void sync(const c10::List<c10::optional<Tensor>> t_list) {
   }
 }
 
+bool isFunctionalTensor(const at::Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
+}
+
+bool isFunctionalTensor(const c10::optional<Tensor>& t) {
+  if (t.has_value()) {
+    return isFunctionalTensor(*t);
+  } else {
+    return false;
+  }
+}
+
+bool isFunctionalTensor(const c10::List<Tensor>& t_list) {
+  if (t_list.size() == 0) return false;
+  bool any_functional = isFunctionalTensor(t_list[0]);
+  for (const auto i : c10::irange(1, t_list.size())) {
+    auto curr_functional = isFunctionalTensor(t_list[i]);
+    TORCH_INTERNAL_ASSERT(
+         curr_functional == any_functional,
+        "Functionalization encountered a list of tensors where some are functional",
+        "and some are not, which is not currently unsupported.");
+  }
+  return any_functional;
+}
+
+bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
+  if (t_list.size() == 0) return false;
+  bool any_functional = isFunctionalTensor(t_list[0]);
+  for (const auto i : c10::irange(1, t_list.size())) {
+    auto curr_functional = isFunctionalTensor(t_list[i]);
+    TORCH_INTERNAL_ASSERT(
+         curr_functional == any_functional,
+        "Functionalization encountered a list of tensors where some are functional",
+        "and some are not, which is not currently unsupported.");
+  }
+  return any_functional;
+}
+
+bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list) {
+  if (t_list.size() == 0) return false;
+  bool any_functional = isFunctionalTensor(t_list[0]);
+  for (const auto i : c10::irange(1, t_list.size())) {
+    auto curr_functional = isFunctionalTensor(t_list[i]);
+    TORCH_INTERNAL_ASSERT(
+         curr_functional == any_functional,
+        "Functionalization encountered a list of tensors where some are functional",
+        "and some are not, which is not currently unsupported.");
+  }
+  return any_functional;
+}
+
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(view_to_wrap));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(base));
@@ -373,6 +443,14 @@ void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector
   }
 }
 
+thread_local bool _functionalizationReapplyViews;
+
+bool getFunctionalizationReapplyViewsTLS() {
+  return _functionalizationReapplyViews;
+}
+void setFunctionalizationReapplyViewsTLS(bool reapply_views) {
+  _functionalizationReapplyViews = reapply_views;
+}
 
 } // namespace impl
 } // namespace functionalization
