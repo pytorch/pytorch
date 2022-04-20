@@ -377,6 +377,12 @@ namespace impl {
       return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(v);
     }
   };
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<c10::SymIntArrayRef, AllowDeprecatedTypes> final {
+    static std::vector<c10::SymInt> call(IValue& v) {
+      return ivalue_to_arg<std::vector<c10::SymInt>, AllowDeprecatedTypes>::call(v);
+    }
+  };
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
     // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that
