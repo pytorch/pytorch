@@ -451,7 +451,7 @@ class GitHubPR:
             return self._authors
         authors: List[Tuple[str, str]] = []
 
-        def add_authors(info):
+        def add_authors(info: Dict[str, Any]) -> None:
             for node in info["commits_with_authors"]["nodes"]:
                 author_node = node["commit"]["author"]
                 user_node = author_node["user"]
