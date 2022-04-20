@@ -3814,8 +3814,6 @@ class TestFunctionalTracing(JitTestCase):
         "pdist": BUILT_IN_FUNC,
         "pixel_shuffle": BUILT_IN_FUNC,
         "pixel_unshuffle": BUILT_IN_FUNC,
-        "native_pixel_shuffle": BUILT_IN_FUNC,
-        "native_pixel_unshuffle": BUILT_IN_FUNC,
         "prelu": BUILT_IN_FUNC,
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
