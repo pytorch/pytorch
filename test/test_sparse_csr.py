@@ -52,6 +52,12 @@ _sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
 binary_functions_with_dense_output = ['mm', 'mv', ]
 binary_ops_with_dense_output = list(filter(lambda op: op.name in binary_functions_with_dense_output, op_db))
 
+UNARY_EWISE_CSR_ALLOW_AUTOGRAD = [
+    'abs',
+    'conj_physical',
+    'neg',
+]
+
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
 def _test_addmm_addmv(
@@ -219,6 +225,10 @@ class TestSparseCompressed(TestCase):
 
 class TestSparseCSR(TestCase):
     # TODO: move generic test methods to TestSparseCompressed
+
+    def test_csr_double_to_sparse_csr(self):
+        a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
+        a.to_sparse_csr().to_sparse_csr()
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_constructor(self, device, dtype):
@@ -909,7 +919,6 @@ class TestSparseCSR(TestCase):
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @skipCPUIfNoMklSparse
-    @skipCUDAIfRocm
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_triangular_solve(self, device, dtype, index_dtype, block_size):
@@ -1642,9 +1651,11 @@ class TestSparseCSR(TestCase):
             self.assertIs(actual, sample.input)
             self.assertEqual(actual, expect)
 
-    @unittest.expectedFailure
     @ops(sparse_csr_unary_ufuncs, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble])
     def test_autograd_sparse_csr_unary(self, device, dtype, op):
+        if op.name not in UNARY_EWISE_CSR_ALLOW_AUTOGRAD:
+            self.skipTest(f"Skipped! Unary op {op.name} not supported with CSR input and autograd")
+
         samples = list(op.sample_inputs(device, dtype))
 
         # Fail early to prevent silent success with this test
@@ -1657,18 +1668,23 @@ class TestSparseCSR(TestCase):
 
             def fn(input):
                 output = op.gradcheck_wrapper(op.get_op(), input, *sample.args, **sample.kwargs)
-                output = output.to_dense()
                 if sample.output_process_fn_grad is not None:
                     return sample.output_process_fn_grad(output)
                 return output
 
-            # NotImplementedError inside gradcheck when computing numerical Jacobian
-            self.assertTrue(torch.autograd.gradcheck(fn, (sparse_input,), fast_mode=False, check_sparse_nnz=True))
-
-            # RuntimeError: Unsupported input layout: SparseCsr
+            # Compute sparse result
             output = fn(sparse_input)
-            output.backward(torch.ones_like(output))
-            assert torch.is_tensor(sparse_input.grad)
+            covector = torch.randn_like(output)
+            output.backward(covector)
+            self.assertTrue(torch.is_tensor(sparse_input.grad))
+            self.assertTrue(sparse_input.grad.is_sparse_csr)
+
+            # Compute dense result and compare with sparse result
+            dense_input = sparse_input.detach().to_dense().requires_grad_(True)
+            dense_output = fn(dense_input)
+            dense_covector = covector.to_dense()
+            dense_output.backward(dense_covector)
+            self.assertEqual(sparse_input.grad, dense_input.grad)
 
     @dtypes(torch.float64)
     def test_autograd_dense_output_addmm(self, device, dtype):
@@ -1685,6 +1701,7 @@ class TestSparseCSR(TestCase):
             # TODO: Remove detach once we have autograd support for CSR input
             a = sample.args[0].to_sparse_csr().detach()
 
+            # This path tests the autograd path wrt dense inputs
             for addmm in [torch.addmm, torch.sparse.addmm]:
 
                 def fn(c, b):
@@ -1699,6 +1716,36 @@ class TestSparseCSR(TestCase):
                 c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
                 b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
                 self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
+
+            # Now test the autograd path wrt sparse inputs
+            # TODO: torch.sparse.addmm backward is not implemented for CSR
+            for reverse in [True, False]:
+                c, b = sample.input, sample.args[1]
+                if reverse and a.shape != b.shape:
+                    continue
+
+                def fn(a):
+                    inputs = (c, b, a) if reverse else (c, a, b)
+                    output = torch.addmm(*inputs, **sample.kwargs)
+                    if sample.output_process_fn_grad is not None:
+                        return sample.output_process_fn_grad(output)
+                    return output
+
+                # gradcheck doesn't work for sparse CSR yet, compare against dense path
+                # Compute sparse result
+                a.requires_grad_(True)
+                output = fn(a)
+                covector = torch.randn_like(output)
+                output.backward(covector)
+                self.assertTrue(torch.is_tensor(a.grad))
+                self.assertTrue(a.grad.layout == torch.strided)
+
+                # Compute dense result and compare with sparse result
+                dense_a = a.detach().to_dense().requires_grad_(True)
+                dense_output = fn(dense_a)
+                dense_covector = covector.to_dense()
+                dense_output.backward(dense_covector)
+                self.assertEqual(a.grad, dense_a.grad)
 
     @skipCUDAIfRocm
     @skipCPUIfNoMklSparse
@@ -1779,10 +1826,8 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a.sum(), a.values().sum())
             if dtype in floating_types():
                 a.requires_grad_(True)
-                with self.assertRaisesRegex(RuntimeError,
-                                            ("Function SumBackward0 returned an invalid gradient at " +
-                                             "index 0 - expected layout SparseCsr but got Strided")):
-                    a.sum().backward()
+                a.sum().backward()
+                self.assertEqual(a.grad, torch.ones(shape, dtype=dtype, device=device))
         for shape, index_dtype in itertools.product(
                 [(10, 5), (10, 10)],
                 [torch.int32, torch.int64]):
