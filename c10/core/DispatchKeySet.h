@@ -294,7 +294,10 @@ class DispatchKeySet final {
                              DispatchKey::Dense,
                              DispatchKey::Quantized,
                              DispatchKey::Sparse,
+                             DispatchKey::SparseCsr,
+                             DispatchKey::NestedTensor,
                              DispatchKey::AutogradFunctionality,
+                             DispatchKey::AutocastFunctionality,
                          })
               .repr_) == 0));
     return static_cast<bool>((repr_ & ks.repr_) != 0);

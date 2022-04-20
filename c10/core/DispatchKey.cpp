@@ -222,8 +222,12 @@ const char* toString(DispatchKey t) {
       return "Quantized";
     case DispatchKey::Sparse:
       return "Sparse";
+    case DispatchKey::SparseCsr:
+      return "SparseCsr";
     case DispatchKey::AutogradFunctionality:
       return "AutogradFunctionality";
+    case DispatchKey::AutocastFunctionality:
+      return "AutocastFunctionality";
 
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
