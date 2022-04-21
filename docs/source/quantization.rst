@@ -155,7 +155,7 @@ This is the simplest to apply form of quantization where the weights are
 quantized ahead of time but the activations are dynamically quantized
 during inference. This is used for situations where the model execution time
 is dominated by loading weights from memory rather than computing the matrix
-multiplications. This is true for for LSTM and Transformer type models with
+multiplications. This is true for LSTM and Transformer type models with
 small batch size.
 
 Diagram::
@@ -910,7 +910,7 @@ Numerical Debugging (prototype)
 .. py:module:: torch.ao.ns.fx
 .. py:module:: torch.ao.quantization
 .. py:module:: torch.ao.quantization.fx
-.. py:module:: torch.ao.quantization.fx.backend_config
+.. py:module:: torch.ao.quantization.backend_config
 .. py:module:: torch.ao.sparsity
 .. py:module:: torch.ao.sparsity.experimental
 .. py:module:: torch.ao.sparsity.experimental.pruner

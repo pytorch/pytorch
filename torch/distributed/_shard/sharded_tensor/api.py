@@ -25,13 +25,13 @@ from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
 from .reshard import reshuffle_local_shard, reshard_local_shard
 from .utils import (
-    get_current_process_group,
     _flatten_tensor_size,
     _parse_and_validate_remote_device,
     _validate_output_tensor_for_gather,
     build_metadata_from_local_shards,
     build_global_metadata
 )
+from torch.overrides import handle_torch_function
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -846,6 +846,30 @@ class ShardedTensor(object):
     def __repr__(self):
         return f'ShardedTensor({self._metadata})'
 
+    def __add__(self, other):
+        return handle_torch_function(torch.Tensor.__add__, (self, other), self, other)
+
+    def __radd__(self, other):
+        return handle_torch_function(torch.Tensor.__radd__, (self, other), self, other)
+
+    def __sub__(self, other):
+        return handle_torch_function(torch.Tensor.__sub__, (self, other), self, other)
+
+    def __rsub__(self, other):
+        return handle_torch_function(torch.Tensor.__rsub__, (self, other), self, other)
+
+    def __mul__(self, other):
+        return handle_torch_function(torch.Tensor.__mul__, (self, other), self, other)
+
+    def __rmul__(self, other):
+        return handle_torch_function(torch.Tensor.__rmul__, (self, other), self, other)
+
+    def __truediv__(self, other):
+        return handle_torch_function(torch.Tensor.__div__, (self, other), self, other)
+
+    def __rtruediv__(self, other):
+        return handle_torch_function(torch.Tensor.__rdiv__, (self, other), self, other)
+
     @dataclass
     class ProcessGroupState:
         """
@@ -876,7 +900,8 @@ class ShardedTensor(object):
         self._local_shards, self._metadata, pg_state, self._sharding_spec, self._init_rrefs = state
 
         # Setup process group
-        self._process_group = get_current_process_group()
+        from torch.distributed._shard.api import _get_current_process_group
+        self._process_group = _get_current_process_group()
 
         # Validate process group.
         local_rank = distributed_c10d.get_rank(self._process_group)

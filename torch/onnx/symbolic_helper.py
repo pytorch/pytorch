@@ -329,6 +329,10 @@ def _is_scalar_list(x):
         element_type in scalar_name_to_pytorch.keys() and \
         (scalar_name_to_pytorch[element_type] in cast_pytorch_to_onnx.keys())
 
+def is_caffe2_aten_fallback():
+    return (_operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and
+            torch.onnx._CAFFE2_ATEN_FALLBACK)
+
 def _get_tensor_rank(x):
     if not _is_tensor(x) or x.type() is None:
         return None
@@ -354,7 +358,11 @@ def _get_tensor_dim_size(x, dim):
     return None
 
 def _unimplemented(op, msg):
-    warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+    # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
+    if torch.onnx._CAFFE2_ATEN_FALLBACK:
+        warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+    elif _operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+        _onnx_unsupported(f"{op}, {msg}")
 
 
 def _onnx_unsupported(op_name):
