@@ -8,7 +8,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     skipMeta,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestMHADeviceType(TestCase):
     @torch.inference_mode()
@@ -293,3 +293,6 @@ class TestMHADeviceType(TestCase):
 
 
 instantiate_device_type_tests(TestMHADeviceType, globals())
+
+if __name__ == "__main__":
+    run_tests()
