@@ -1140,7 +1140,9 @@ def get_custom_build_selector(
 
     if op_registration_allowlist is not None:
         selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
-            op_registration_allowlist, True, False,
+            op_registration_allowlist,
+            True,
+            False,
         )
     elif op_selection_yaml_path is not None:
         selector = SelectiveBuilder.from_yaml_path(op_selection_yaml_path)
@@ -1982,7 +1984,9 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
 
     core_fm.write(
         "ATenOpList.cpp",
-        lambda: {"aten_ops": list(mapMaybe(compute_aten_op, native_functions)),},
+        lambda: {
+            "aten_ops": list(mapMaybe(compute_aten_op, native_functions)),
+        },
     )
 
     # We need to easily map from [inplace_op_name] -> [functional_op] for the functionalization pass,
@@ -2041,7 +2045,9 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                 else to_functional_op.get(g.func.name, None),
             ),
             "func_registrations": gen_functionalization_registration(
-                selector, g, backend_indices[DispatchKey.CompositeImplicitAutograd],
+                selector,
+                g,
+                backend_indices[DispatchKey.CompositeImplicitAutograd],
             ),
         }
 
@@ -2211,7 +2217,8 @@ def main() -> None:
     options = parser.parse_args()
 
     selector = get_custom_build_selector(
-        options.op_registration_whitelist, options.op_selection_yaml_path,
+        options.op_registration_whitelist,
+        options.op_selection_yaml_path,
     )
 
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
