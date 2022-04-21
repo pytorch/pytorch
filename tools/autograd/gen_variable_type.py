@@ -170,6 +170,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "triu",
     "chunk",
     "zero_",
+    "zeros_like",
     "eq_",
     "ne_",
     "add",

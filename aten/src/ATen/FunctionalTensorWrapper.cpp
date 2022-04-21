@@ -22,20 +22,12 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   shallow_copy_from(value_.getIntrusivePtr());
   storage_ = functional_storage;
   storage_access_should_throw_ = false;
-  // The final keyset should include whatever backend keys were on the inner tensor,
-  // because we need that to properly set e.g. autocast / autograd keys
-  // (for LTC/XLA, autocast / autograd will run *directly* on the FunctionalTensorWrapper).
-  // However, we don't want to copy over *all* of the keys.
-  // FuncTorch keys are the main example of this. If you run grad(functionalize(f)),
-  // we don't want the lower transform (grad)'s keys to propagate to the outer wrapper.
-  key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize)
-    | c10::DispatchKeySet(c10::highestPriorityBackendTypeId(value_.key_set()));
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
   : c10::TensorImpl(
       c10::Storage(c10::make_intrusive<functionalization::FunctionalStorageImpl>(value)),
-      c10::DispatchKeySet(DispatchKey::Functionalize),
+      c10::DispatchKeySet(DispatchKey::Functionalize) | value.key_set(),
       value.dtype()
     ),
     value_(value)
