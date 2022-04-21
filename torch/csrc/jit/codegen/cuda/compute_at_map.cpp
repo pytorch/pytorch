@@ -20,6 +20,13 @@ bool idIsAComputeAtLeafDomain(IterDomain* id, TensorView* tv) {
   return std::find(begin, end, id) != end;
 }
 
+// Is the provided IterDomain an Leaf of provided TensorView
+bool idIsALeafDomain(IterDomain* id, TensorView* tv) {
+  auto begin = tv->domain()->domain().begin();
+  auto end = tv->domain()->domain().end();
+  return std::find(begin, end, id) != end;
+}
+
 } // namespace
 
 IterDomainGraph::IterDomainGraph(Fusion* fusion) {
@@ -120,7 +127,7 @@ void IterDomainGraph::build(Fusion* fusion) {
           // Map the id's together
           permissive_nodes_.mapEntries(f_id, c_id);
           exact_nodes_.mapEntries(f_id, c_id);
-          if (idIsAComputeAtLeafDomain(f_id, first_output_tv)) {
+          if (idIsALeafDomain(f_id, first_output_tv)) {
             loop_nodes_.mapEntries(f_id, c_id);
           }
           sibling_sets_.mapEntries(f_id, c_id);

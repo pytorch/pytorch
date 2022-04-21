@@ -22262,6 +22262,63 @@ TEST_F(NVFuserTest, FusionRAWSyncInsertionPlace3_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionPropagateParallelTypesToSiblings_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tvs = Welford(tv0, {0});
+  auto tv_avg = tvs.avg;
+  fusion.addOutput(tv_avg);
+
+  tv_avg->split(0, 128);
+  TransformPropagator::from(tv_avg);
+
+  tv_avg->axis(0)->parallelize(ParallelType::BIDx);
+  tv_avg->axis(1)->parallelize(ParallelType::TIDx);
+
+  // Make sure the parallelization of tv_avg is propagated to the var
+  // and count tensors.
+  GpuLower gpulw(&fusion);
+  for (const auto expr : gpulw.kernel()->exprs()) {
+    auto wop = dynamic_cast<WelfordOp*>(expr);
+    if (wop == nullptr) {
+      continue;
+    }
+    auto ref = wop->outAvg()->as<TensorView>();
+    for (auto sibling : ir_utils::filterByType<TensorView>(wop->outputs())) {
+      if (ref == sibling) {
+        continue;
+      }
+      TORCH_CHECK(
+          ref->nDims() == sibling->nDims(),
+          "Invalid sibling: ",
+          sibling->toString());
+      for (const auto i : c10::irange(ref->nDims())) {
+        TORCH_CHECK(
+            ref->axis(i)->getParallelType() ==
+                sibling->axis(i)->getParallelType(),
+            "Mismatched parallel types between siblings. ",
+            ref->toString(),
+            ", ",
+            sibling->toString());
+      }
+    }
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({9999}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  testValidate(fe.kernel(), outputs, {t0}, {t0.mean({0})}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

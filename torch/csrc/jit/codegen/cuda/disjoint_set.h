@@ -118,7 +118,7 @@ class DisjointSets {
         set_it != disjoint_set_maps_.end(),
         "Could not find entry for ",
         entry->toString());
-    return *set_it.second;
+    return *(set_it->second);
   }
 
   // Initializes a new set for provided entry

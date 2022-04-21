@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
@@ -21,23 +22,80 @@ namespace cuda {
 
 namespace {
 
-//! A parallel type validation pass to make sure all the outputs of
-//!   welford ops are parallelized the same way. Will infer and modify serial
-//!   parallel types if other output/s are parallelized, so that
-//!   user wouldn't have to specify the same parallelization
-//!   3 times. Will throw if conflicts are detected, i.e.
-//!   TIDx vs BIDx etc.
-class ValidateParallelType : public IterVisitor {
+//! Validate multiple output tensors of the same expression, i.e.,
+//! siblings, have valid domains and parallel types. Since siblings
+//! are placed in the same loop nest, they must be parallelized the
+//! same way. Will infer and modify serial parallel types if other
+//! output/s are parallelized, so that user wouldn't have to specify
+//! the same parallelization 3 times. Will throw if conflicts are
+//! detected, i.e. TIDx vs BIDx etc.
+class ValidateSiblings : public IterVisitor {
  public:
   static void validate(Fusion* fusion) {
-    ValidateParallelType VPT;
-    VPT.traverse(fusion);
+    ValidateSiblings validator;
+    validator.traverse(fusion);
   }
 
  private:
   using IterVisitor::handle;
+
+  void handle(Expr* expr) final {
+    if (!ir_utils::isTvOp(expr) || expr->outputs().size() < 2) {
+      IterVisitor::handle(expr);
+      return;
+    }
+
+    auto ref_output = expr->outputs().at(0)->as<TensorView>();
+    auto ref_ndims = ref_output->nDims();
+    const auto& ref_root = ref_output->getRootDomain();
+    std::unordered_map<IterDomain*, IterDomain*> id_map;
+
+    for (const auto sibling :
+         ir_utils::filterByType<TensorView>(expr->outputs())) {
+      if (ref_output == sibling) {
+        continue;
+      }
+
+      TORCH_INTERNAL_ASSERT(
+          sibling->nDims() == ref_ndims,
+          "Mismatched dimensionality detected. Expr: ",
+          expr->toString(),
+          "Ref output: ",
+          ref_output->toString(),
+          ". Sibling: ",
+          sibling->toString());
+
+      for (const auto i : c10::irange(ref_ndims)) {
+        validateParallelTypes(ref_output->axis(i), sibling->axis(i));
+      }
+
+      for (const auto i : c10::irange(ref_root.size())) {
+        id_map[ref_root[i]] = sibling->getRootDomain().at(i);
+      }
+
+      BestEffortReplay replay(
+          sibling->domain()->domain(), ref_output->domain()->domain(), id_map);
+      for (const auto i : c10::irange(ref_ndims)) {
+        auto it = replay.getReplay().find(ref_output->axis(i));
+        TORCH_INTERNAL_ASSERT(
+            it != replay.getReplay().end(),
+            "Matching sibling ID not found. Expr: ",
+            expr->toString(),
+            "Ref ID: ",
+            ref_output->axis(i)->toString());
+        auto sibling_id = it->second;
+        TORCH_INTERNAL_ASSERT(
+            sibling->axis(i) == sibling_id,
+            "Invalid matching sinbling ID detected. Expr: ",
+            expr->toString(),
+            "Sibling ID: ",
+            sibling_id->toString());
+      }
+    }
+  }
+
   // Parallelize id1 and id0 consistently if one is serial and the other isn't
-  void convertIterDomain(IterDomain* id0, IterDomain* id1) {
+  void validateParallelTypes(IterDomain* id0, IterDomain* id1) {
     const auto ptype0 = id0->getParallelType();
     const auto ptype1 = id1->getParallelType();
 
@@ -63,20 +121,6 @@ class ValidateParallelType : public IterVisitor {
       if (ptype1 == ParallelType::Serial) {
         id1->parallelize(ptype0);
       }
-    }
-  }
-
-  void handle(WelfordOp* wop) override {
-    auto out_avg = wop->outAvg()->as<TensorView>();
-    auto out_var = wop->outVar()->as<TensorView>();
-    auto out_n = wop->outN()->as<TensorView>();
-    TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_var->nDims());
-    TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_n->nDims());
-    for (const auto i : c10::irange(out_avg->nDims())) {
-      // TODO: can be cleaner.
-      convertIterDomain(out_avg->axis(i), out_var->axis(i));
-      convertIterDomain(out_avg->axis(i), out_n->axis(i));
-      convertIterDomain(out_n->axis(i), out_var->axis(i));
     }
   }
 };
@@ -152,7 +196,7 @@ void validateIr(Fusion* fusion) {
   }
 
   // Validate Parallelization
-  ValidateParallelType::validate(fusion);
+  ValidateSiblings::validate(fusion);
 
   validateIterDomainUsage(fusion);
 }
