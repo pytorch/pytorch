@@ -1,3 +1,6 @@
+[init_config]
+last_hash = "7d8b366223b22aaab788b0a7efec064dfef38b24"
+
 [[linter]]
 code = 'FLAKE8'
 include_patterns = ['**/*.py']
@@ -271,6 +274,8 @@ exclude_patterns=[
     '**/*.ipynb',
     '**/*.ptl',
     'tools/clang_format_hash/**',
+    'test/cpp/jit/upgrader_models/*.ptl',
+    'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
 command = [
     'python3',
@@ -286,6 +291,8 @@ exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
     'third_party/**',
+    'test/cpp/jit/upgrader_models/*.ptl',
+    'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
 command = [
     'python3',
@@ -311,6 +318,8 @@ exclude_patterns = [
     'third_party/**',
     '**/.gitattributes',
     '**/.gitmodules',
+    'test/cpp/jit/upgrader_models/*.ptl',
+    'test/cpp/jit/upgrader_models/*.ptl.ff',
 ]
 command = [
     'python3',
@@ -515,4 +524,20 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     '--output-dir=.lintbin',
     '--output-name=actionlint',
+]
+
+[[linter]]
+code = 'TESTOWNERS'
+include_patterns = [
+    'test/**/test_*.py',
+    'test/**/*_test.py',
+]
+exclude_patterns = [
+    'test/run_test.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/testowners_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]

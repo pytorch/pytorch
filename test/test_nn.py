@@ -9264,13 +9264,15 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_PReLU_backward_requires_grad_false(self):
-        m = nn.PReLU().to('cuda')
-        x = torch.randn(2, 3, 4, 5, requires_grad=False, device='cuda')
-        y = m(x)
-        y.mean().backward()
-        self.assertEqual(x.grad, None)
+        devices = ['cpu']
+        devices += ['cuda'] if TEST_CUDA else []
+        for d in devices:
+            m = nn.PReLU().to(d)
+            x = torch.randn(2, 3, 4, 5, device=d, requires_grad=False)
+            y = m(x)
+            y.mean().backward()
+            self.assertEqual(x.grad, None)
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
@@ -10143,7 +10145,6 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(NotImplementedError, "affine_grid only supports 4D and 5D sizes"):
             F.affine_grid(theta, torch.Size([1, 1, 2, 2, 2, 2]), align_corners=False)
 
-    @skipIfRocm
     def test_grid_sample(self):
         # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
         # so we test both cases.
@@ -16403,29 +16404,84 @@ class TestNNDeviceType(NNTestCase):
     def test_masked_softmax(self, device):
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for (B, num_heads, L) in sizes:
-            input = torch.randn((B, num_heads, L, L))
-            mask = torch.randint(0, 2, (B, L))
+            for dim in [0, 3]:
+                input = torch.randn((B, num_heads, L, L))
+                mask = torch.randint(0, 2, (B, L))
+                mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+                if (self.device_type == "cuda"):
+                    input = input.cuda()
+                    mask = mask.cuda()
+                native_res = torch._masked_softmax(input, mask, dim)
+                mask = ~mask
+
+                def slow_masked_softmax(input, mask):
+                    exp = torch.exp(input)
+                    exp = exp * mask
+                    s = exp.sum(dim=dim, keepdim=True).expand(exp.size())
+                    return exp / s
+
+                pt_res = slow_masked_softmax(input, mask)
+                pt_res = torch.nan_to_num(pt_res)
+
+                mask_not = mask.logical_not()
+                # In result, should only fill the entirely masked out rows since those are non-deterministic (*may* be 0)
+                # Converts rows with all True's to False
+                mask_out = mask_not.all(dim, keepdim=True).expand(mask_not.shape)
+                self.assertEqual(
+                    pt_res.masked_fill(mask_out, 0),
+                    native_res.masked_fill(mask_out, 0),
+                    exact_dtype=True
+                )
+
+    def _test_masked_softmax_helper(self, input, dim, mask):
+        input_ref = input.detach().clone().requires_grad_()
+        result = torch._masked_softmax(input, mask, dim)
+
+        expected = torch._softmax(input_ref.masked_fill(mask, float('-inf')), dim, False)
+        grad = torch.randn_like(expected).to(dtype=expected.dtype)
+
+        result.backward(grad)
+        expected.backward(grad)
+
+        # Make sure the optional argument works as well
+        if dim == input.dim() - 1:
+            input_ref_default = input.detach().clone().requires_grad_()
+            result_default = torch._masked_softmax(input_ref_default, mask)
+            result_default.backward(grad)
+            self.assertEqual(result, result_default)
+            self.assertEqual(input.grad, input_ref_default.grad)
+
+        # In result, should only fill the entirely masked out rows since those are non-deterministic (*may* be 0)
+        # Converts rows with all True's to False
+        mask_out = mask.all(dim, keepdim=True).expand(mask.shape)
+        self.assertEqual(result.masked_fill(mask_out, 0), expected.masked_fill(mask_out, 0))
+
+        self.assertEqual(input.grad, torch.nan_to_num(input_ref.grad))
+        self.assertEqual(input.grad, input.grad.masked_fill(mask, 0.0))
+
+    def test_masked_softmax_grad(self, device):
+        shapes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+        for shape in shapes:
+            dims = [0, len(shape) - 1] if len(shape) > 0 else [0]
+            for dim in dims:
+                input = torch.randn(shape, requires_grad=True)
+                mask = torch.randint(0, 2, shape).bool()
+                if (self.device_type == "cuda"):
+                    input = input.cuda().detach().requires_grad_()
+                    mask = mask.cuda()
+                self._test_masked_softmax_helper(input, dim, mask)
+
+    # In this test, the forward pass is expected to produce nan's because when dim=0, we only have unspecified values
+    def test_masked_softmax_forward_with_nans(self, device):
+        dim = 0
+        shapes = [(4, 5), (50, 100), (1500, 1200)]
+        for (x, y) in shapes:
+            input = torch.randn((x, y), requires_grad=True)
+            mask = torch.tensor([i % 2 for i in range(y)]).expand((x, y)).bool()
             if (self.device_type == "cuda"):
-                input = input.cuda()
+                input = input.cuda().detach().requires_grad_()
                 mask = mask.cuda()
-            mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
-            native_res = torch._masked_softmax(input, mask)
-            mask = ~mask
-            mask = mask.float()
-
-            pt_res = self._slow_masked_softmax(input, mask)
-            self.assertEqual(pt_res, native_res, exact_dtype=True)
-
-    def test_masked_softmax_all_masked(self, device):
-        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
-        for (B, num_heads, L) in sizes:
-            input = torch.randn((B, num_heads, L, L), device=device)
-            mask = torch.ones_like(input, device=device, dtype=torch.bool)
-            native_res = torch._masked_softmax(input, mask)
-            mask = ~mask
-            mask = mask.float()
-            pt_res = self._slow_masked_softmax(input, mask)
-            self.assertEqual(pt_res, native_res, exact_dtype=True)
+            self._test_masked_softmax_helper(input, dim, mask)
 
     @onlyCUDA
     def test_masked_softmax_transformer_layout(self, device):
@@ -16433,12 +16489,13 @@ class TestNNDeviceType(NNTestCase):
         num_heads = 16
         L = 42
         input = torch.randn((B, num_heads, L, L))
+        dim = input.dim() - 1
         mask = torch.randint(0, 2, (B, L))
         if (self.device_type == "cuda"):
             input = input.cuda()
             mask = mask.cuda()
         mask = mask.bool()
-        native_res = torch._masked_softmax(input, mask)
+        native_res = torch._masked_softmax(input, mask, dim)
         mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L)
         mask = ~mask
         mask = mask.float()
@@ -16446,8 +16503,6 @@ class TestNNDeviceType(NNTestCase):
         pt_res = self._slow_masked_softmax(input, mask)
         self.assertEqual(pt_res, native_res, exact_dtype=True)
 
-    # Test fails on Vg20
-    @skipCUDAIfRocm
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
     def test_softmax_results(self, device, dtype):
@@ -17231,8 +17286,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
-    # Test fails on Vg20
-    @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(torch.half, torch.float)
     def test_softmax(self, device, dtype):
