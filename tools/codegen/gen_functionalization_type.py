@@ -122,13 +122,14 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
         isinstance(a, Argument) and a.type.is_tensor_like()
     )
 
+
 # We need to wrap / unwrap various arguments from the op in the functionalization kernels.
 # Some op schemas include non-owning types though (like TensorList),
 # and when we unwrap them we expect to get out an owning type!.
 # We also return a lambda that tells you how to conver the non-owning type argument into the owning type.
 def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
-        return VectorCType(BaseCType(tensorT)), lambda x: f'{x}.vec()'
+        return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
     # There are technically other non-owning types out there (like IntArrayRef),
     # but functionalization only actually cares about the ones involving tensors.
     return t, lambda x: x
@@ -153,7 +154,9 @@ def unwrap_tensor_args(
             maybe_sync_input = (
                 "" if is_view_op else f"at::functionalization::impl::sync({arg.name});"
             )
-            unwrapped_type, conversion_fn = get_owning_type(arg.nctype.remove_const_ref().type)
+            unwrapped_type, conversion_fn = get_owning_type(
+                arg.nctype.remove_const_ref().type
+            )
             unwrapped_tensor_args.append(
                 f"""
       {unwrapped_type.cpp_type()} {unwrapped_name};

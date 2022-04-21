@@ -189,7 +189,9 @@ def construct_instruction(instruction_list_from_yaml: List[Any]) -> str:
     for instruction in instruction_list_from_yaml:
         instruction_list_part.append(
             ONE_INSTRUCTION.substitute(
-                operator_name=instruction[0], X=instruction[1], N=instruction[2],
+                operator_name=instruction[0],
+                X=instruction[1],
+                N=instruction[2],
             )
         )
     return INSTRUCTION_LIST.substitute(
@@ -314,8 +316,8 @@ def get_upgrader_bytecode_function_to_index_map(
 
 def write_cpp(cpp_path: str, upgrader_dict: List[Dict[str, Any]]) -> None:
     body_parts = []
-    upgrader_bytecode_function_to_index_map = get_upgrader_bytecode_function_to_index_map(
-        upgrader_dict
+    upgrader_bytecode_function_to_index_map = (
+        get_upgrader_bytecode_function_to_index_map(upgrader_dict)
     )
     version_map_src = construct_version_maps(upgrader_bytecode_function_to_index_map)
     all_upgrader_src_string = []

@@ -3,10 +3,8 @@ import unittest
 
 from tools.linter.translate_annotations import parse_annotation, parse_diff, translate
 
-flake8_regex \
-    = r'^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)'
-clang_tidy_regex \
-    = r'^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]'
+flake8_regex = r"^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorCode>\w+\d+) (?P<errorDesc>.*)"
+clang_tidy_regex = r"^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]"
 
 # in the below example patch, note that the filenames differ, so the
 # translation should reflect that as well as the line numbers
@@ -14,7 +12,7 @@ clang_tidy_regex \
 # $ git clone -b 1.0.2 https://github.com/cscorley/whatthepatch.git
 # $ cd whatthepatch/tests/casefiles
 # $ git diff --no-index --unified=0 lao tzu
-lao_tzu_diff = '''
+lao_tzu_diff = """
 diff --git a/lao b/tzu
 index 635ef2c..5af88a8 100644
 --- a/lao
@@ -30,9 +28,9 @@ index 635ef2c..5af88a8 100644
 +They both may be called deep and profound.
 +Deeper and more profound,
 +The door of all subtleties!
-'''.lstrip()
+""".lstrip()
 
-sparser_diff = '''
+sparser_diff = """
 diff --git a/foo.txt b/bar.txt
 index 27a6dad..6fae323 100644
 --- a/foo.txt
@@ -46,9 +44,9 @@ index 27a6dad..6fae323 100644
 @@ -10,2 +8,0 @@ more lines
 -even more
 -even more
-'''.lstrip()
+""".lstrip()
 
-new_file_diff = '''
+new_file_diff = """
 diff --git a/torch/csrc/jit/tensorexpr/operators/conv2d.h b/torch/csrc/jit/tensorexpr/operators/conv2d.h
 new file mode 100644
 index 0000000000..a81eeae346
@@ -74,10 +72,10 @@ index 0000000000..a81eeae346
 +} // namespace tensorexpr
 +} // namespace jit
 +} // namespace torch
-'''.lstrip()
+""".lstrip()
 
 # fun fact, this example fools VS Code's diff syntax highlighter
-haskell_diff = '''
+haskell_diff = """
 diff --git a/hello.hs b/hello.hs
 index ffb8d4ad14..0872ac9db6 100644
 --- a/hello.hs
@@ -85,7 +83,7 @@ index ffb8d4ad14..0872ac9db6 100644
 @@ -1 +1 @@
 --- a/hello/world/example
 +main = putStrLn "Hello, world!"
-'''.lstrip()
+""".lstrip()
 
 
 class TestTranslateAnnotations(unittest.TestCase):
@@ -95,25 +93,25 @@ class TestTranslateAnnotations(unittest.TestCase):
         self.assertEqual(
             parse_diff(lao_tzu_diff),
             {
-                'old_filename': 'lao',
-                'hunks': [
+                "old_filename": "lao",
+                "hunks": [
                     {
-                        'old_start': 1,
-                        'old_count': 2,
-                        'new_start': 0,
-                        'new_count': 0,
+                        "old_start": 1,
+                        "old_count": 2,
+                        "new_start": 0,
+                        "new_count": 0,
                     },
                     {
-                        'old_start': 4,
-                        'old_count': 1,
-                        'new_start': 2,
-                        'new_count': 2,
+                        "old_start": 4,
+                        "old_count": 1,
+                        "new_start": 2,
+                        "new_count": 2,
                     },
                     {
-                        'old_start': 11,
-                        'old_count': 0,
-                        'new_start': 11,
-                        'new_count': 3,
+                        "old_start": 11,
+                        "old_count": 0,
+                        "new_start": 11,
+                        "new_count": 3,
                     },
                 ],
             },
@@ -123,13 +121,13 @@ class TestTranslateAnnotations(unittest.TestCase):
         self.assertEqual(
             parse_diff(new_file_diff),
             {
-                'old_filename': None,
-                'hunks': [
+                "old_filename": None,
+                "hunks": [
                     {
-                        'old_start': 0,
-                        'old_count': 0,
-                        'new_start': 1,
-                        'new_count': 19,
+                        "old_start": 0,
+                        "old_count": 0,
+                        "new_start": 1,
+                        "new_count": 19,
                     },
                 ],
             },
@@ -139,13 +137,13 @@ class TestTranslateAnnotations(unittest.TestCase):
         self.assertEqual(
             parse_diff(haskell_diff),
             {
-                'old_filename': 'hello.hs',
-                'hunks': [
+                "old_filename": "hello.hs",
+                "hunks": [
                     {
-                        'old_start': 1,
-                        'old_count': 1,
-                        'new_start': 1,
-                        'new_count': 1,
+                        "old_start": 1,
+                        "old_count": 1,
+                        "new_start": 1,
+                        "new_count": 1,
                     },
                 ],
             },
@@ -197,7 +195,7 @@ class TestTranslateAnnotations(unittest.TestCase):
         self.assertEqual(translate(diff, 15), 13)
 
     def test_translate_empty(self) -> None:
-        diff = parse_diff('--- a/foo')
+        diff = parse_diff("--- a/foo")
 
         # again, we start numbering at 1
         self.assertEqual(translate(diff, -1), None)
@@ -252,29 +250,29 @@ class TestTranslateAnnotations(unittest.TestCase):
     def test_parse_annotation_flake8(self) -> None:
         regex = re.compile(flake8_regex)
         self.assertEqual(
-            parse_annotation(regex, 'README.md:1:3: R100 make a better title'),
+            parse_annotation(regex, "README.md:1:3: R100 make a better title"),
             {
-                'filename': 'README.md',
-                'lineNumber': 1,
-                'columnNumber': 3,
-                'errorCode': 'R100',
-                'errorDesc': 'make a better title',
+                "filename": "README.md",
+                "lineNumber": 1,
+                "columnNumber": 3,
+                "errorCode": "R100",
+                "errorDesc": "make a better title",
             },
         )
 
     def test_parse_annotation_clang_tidy(self) -> None:
         regex = re.compile(clang_tidy_regex)
         self.assertEqual(
-            parse_annotation(regex, 'README.md:2:1: improve description [R200]'),
+            parse_annotation(regex, "README.md:2:1: improve description [R200]"),
             {
-                'filename': 'README.md',
-                'lineNumber': 2,
-                'columnNumber': 1,
-                'errorCode': 'R200',
-                'errorDesc': 'improve description',
+                "filename": "README.md",
+                "lineNumber": 2,
+                "columnNumber": 1,
+                "errorCode": "R200",
+                "errorDesc": "improve description",
             },
         )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
