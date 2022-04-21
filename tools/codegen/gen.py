@@ -326,42 +326,12 @@ def generate_static_dispatch(
             name=last_disp_arg.name,
             default=last_disp_arg.default,
             argument=last_disp_arg,
-            )
+        )
         dp_sig_args.append(mem_format_arg)
     else:
         dp_sig_args = sig.arguments()
 
     exprs = translate(dp_sig_args, target_sig.arguments(), method=method)
-    exprs_str = ', '.join(a.expr for a in exprs)
-    if f.structured_delegate is not None:
-        # TODO: for ops with structured_delegate it should check the dispatch table of
-        # the out variant instead. For now, these structured ops all have CPU/CUDA kernels
-        # so we always dispatch to the `backend`, but this could be wrong when we
-        # migrate math/default_backend ops to use structured delegate.
-        if backend_index.has_kernel(f) or backend_index.dispatch_key in STRUCTURED_DISPATCH_KEYS:
-            return f'return at::{backend_index.dispatch_key.lower()}::{name}({exprs_str});'
-        else:
-            return f'TORCH_CHECK(false, "Static dispatch does not support {name} for {backend_index.dispatch_key}.");'
-
-    if backend_index.has_kernel(f):
-        return f'return at::{backend_index.dispatch_key.lower()}::{name}({exprs_str});'
-    elif f.has_composite_explicit_autograd_kernel:
-        return f'return at::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs_str});'
-    elif f.has_composite_implicit_autograd_kernel:
-        return f'return at::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs_str});'
-
-
-def generate_static_dispatch(
-    f: NativeFunction,
-    cpp_sig: CppSignature, *,
-    method: bool,
-    backend_index: Optional[BackendIndex]
-) -> str:
-    if backend_index is None or f.manual_kernel_registration:
-        return ""
-    target_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False).signature
-    name = target_sig.name()
-    exprs = translate(cpp_sig.arguments(), target_sig.arguments(), method=method)
     exprs_str = ', '.join(a.expr for a in exprs)
     if f.structured_delegate is not None:
         # TODO: for ops with structured_delegate it should check the dispatch table of
@@ -502,9 +472,9 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
     return op.{dispatcher_call}({dispatcher_exprs_str});"""
 
                 if not is_redispatching_fn and len(self.static_dispatch_backend_indices) > 0:
-                        # call() should go through static dispatch
-                        fn_body = static_dispatch(f, sig, method=False,
-                                                  backend_indices=self.static_dispatch_backend_indices)
+                    # call() should go through static dispatch
+                    fn_body = static_dispatch(f, sig, method=False,
+                                              backend_indices=self.static_dispatch_backend_indices)
                 defns += f"""
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
@@ -1321,8 +1291,10 @@ def gen_aggregated_headers(
         lambda: {
             "MethodOperators_includes": [],
             "MethodOperators_declarations": list(
-                mapMaybe(ComputeOperators(Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx),
-                method_native_functions)
+                mapMaybe(
+                    ComputeOperators(Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx),
+                    method_native_functions
+                )
             ),
         },
     )
@@ -2007,7 +1979,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
             'operator_headers': [f'#include <ATen/ops/{fn.root_name}.h>'],
             'definitions': [ComputeOperators(Target.DEFINITION,
                                              static_dispatch_backend_indices=static_dispatch_idx)(fn)]},
-        base_env= {
+        base_env={
             'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
         },
         num_shards=5,
