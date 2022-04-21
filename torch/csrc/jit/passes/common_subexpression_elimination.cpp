@@ -101,7 +101,7 @@ struct CommonSubexpressionEliminator {
             NodeAndContextNode nacn(
                 n,
                 prim_enter_stack_.size() == 0 ? nullptr
-                                             : prim_enter_stack_.back());
+                                              : prim_enter_stack_.back());
             auto existing = subexprs.find(nacn);
             if (existing != subexprs.end()) {
               return (*existing).node();
