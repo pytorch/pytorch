@@ -2937,13 +2937,11 @@ def forward(self, inpt_1) -> torch.Tensor:
 
 def forward(self, x_1) -> torch.Tensor:
     view = torch.ops.aten.view(x_1, [4, 2])
-    detach = torch.ops.aten.detach(view);  view = None
     _tensor_constant0 = self._tensor_constant0
-    add = torch.ops.aten.add(detach, _tensor_constant0);  detach = _tensor_constant0 = None
+    add = torch.ops.aten.add(view, _tensor_constant0);  view = _tensor_constant0 = None
     view_1 = torch.ops.aten.view(add, [4, 2]);  add = None
-    detach_1 = torch.ops.aten.detach(view_1);  view_1 = None
-    copy_ = torch.ops.aten.copy_(x_1, detach_1);  x_1 = None
-    return detach_1
+    copy_ = torch.ops.aten.copy_(x_1, view_1);  x_1 = None
+    return view_1
     """)
 
 
