@@ -31,6 +31,7 @@
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
+  using namespace torch::profiler::impl;
   auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch._tensor"));
   if (!tensor_module)
     return nullptr;
@@ -83,13 +84,56 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("CPU", ActivityType::CPU)
       .value("CUDA", ActivityType::CUDA);
 
+  py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
+      .def(py::init<
+          std::vector<std::string> /* profiler_metrics */,
+          bool  /* profiler_measure_per_kernel */
+          >(),
+          "An experimental config for Kineto features. Please note that"
+          "backward compatibility is not guaranteed.\n"
+          "    profiler_metrics : a list of CUPTI profiler metrics used\n"
+          "       to measure GPU performance events.\n"
+          "       If this list contains values Kineto runs in CUPTI profiler mode\n"
+          "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
+          "       or for the entire measurement duration.",
+          py::arg("profiler_metrics") = std::vector<std::string>(),
+          py::arg("profiler_measure_per_kernel") = false)
+    .def(py::pickle(
+        [](const ExperimentalConfig &p) { // __getstate__
+            py::list py_metrics;
+            for (const auto& metric : p.profiler_metrics) {
+              py::bytes mbytes(metric);
+              py_metrics.append(mbytes);
+            }
+            /* Return a tuple that fully encodes the state of the config */
+            return py::make_tuple(
+                py_metrics, p.profiler_measure_per_kernel);
+        },
+        [](py::tuple t) { // __setstate__
+            if (t.size() != 2) {
+                throw std::runtime_error("Expected 2 values in state");
+            }
+
+            py::list py_metrics = t[0].cast<py::list>();
+            std::vector<std::string> metrics{py_metrics.size()};
+
+            for (const auto& py_metric : py_metrics) {
+              metrics.push_back(py::str(py_metric));
+            }
+
+            return ExperimentalConfig(std::move(metrics), t[1].cast<bool>());
+        }
+    ));
+
+
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(py::init<ProfilerState,
           bool, /* record_input_shapes */
           bool, /* profile_memory */
           bool, /* with_stack */
           bool, /* with_flops */
-          bool  /* with_modules */
+          bool, /* with_modules */
+          ExperimentalConfig /* experimental_config */
           >());
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
