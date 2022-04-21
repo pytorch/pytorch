@@ -65,7 +65,6 @@ void cpu_pixel_shuffle_channels_last(
   int64_t height = input.size(2);
   int64_t width = input.size(3);
   int64_t sub_channels = channels / (upscale_factor * upscale_factor);
-  int64_t numel = input.numel();
   int64_t S = upscale_factor;
 
   // input tensor shape of [n, h, w, c, s1, s2]
@@ -85,11 +84,11 @@ void cpu_pixel_shuffle_channels_last(
         // step 1: transpose each channel lane
         //   from: [c, s1*s2]
         //   to:   [s1*s2, c]
-        utils::transpose(sub_channels, S * S, input_ptr, S * S, buffer.get(), sub_channels);
+        utils::transpose(sub_channels, S * S, input_ptr, S * S, buffer_ptr, sub_channels);
 
         // step 2: copy from temp buffer to output
         for (const auto s1 : c10::irange(S)) {
-          scalar_t* x_ptr = buffer.get() + s1 * S * sub_channels;
+          scalar_t* x_ptr = buffer_ptr + s1 * S * sub_channels;
           scalar_t* y_ptr = output_data + i * width * channels + s1 * width * S * sub_channels + w * S * sub_channels;
 
           int64_t size = S * sub_channels;
