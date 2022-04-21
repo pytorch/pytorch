@@ -3097,16 +3097,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.embedding', ''),
         xfail('randn_like'),
         xfail('allclose'),
-        xfail('bfloat16', 'channels_last'),
-        xfail('byte', 'channels_last'),
-        xfail('char', 'channels_last'),
-        xfail('double', 'channels_last'),
-        xfail('float', 'channels_last'),
-        xfail('half', 'channels_last'),
-        xfail('int', 'channels_last'),
-        xfail('long', 'channels_last'),
-        xfail('short', 'channels_last'),
-        xfail('bool', 'channels_last'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('rand_like'),
         xfail('randint_like'),
@@ -3126,6 +3116,18 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout2d', ''),
         xfail('normal', 'number_mean'),
         xfail('svd_lowrank', ''),
+
+        # required rank 4 tensor to use channels_last format
+        xfail('bfloat16'),
+        xfail('bool'),
+        xfail('byte'),
+        xfail('char'),
+        xfail('double'),
+        xfail('float'),
+        xfail('half'),
+        xfail('int'),
+        xfail('long'),
+        xfail('short'),
     }
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -3220,18 +3222,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('fft.ihfftn'),
         xfail('allclose'),
         xfail('argwhere'),
-        xfail('bfloat16', 'channels_last'),
-        xfail('byte', 'channels_last'),
-        xfail('char', 'channels_last'),
-        xfail('double', 'channels_last'),
-        xfail('float', 'channels_last'),
-        xfail('half', 'channels_last'),
-        xfail('int', 'channels_last'),
-        xfail('bool', 'channels_last'),
         xfail('linalg.cross'),
-        xfail('long', 'channels_last'),
         xfail('searchsorted'),
-        xfail('short', 'channels_last'),
         xfail('unique_consecutive'),
         xfail('unique'),
         xfail('nn.functional.ctc_loss'),
@@ -3268,6 +3260,10 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu_factor_ex', ''),
         xfail('diagflat', ''),
         xfail('special.log_ndtr'),
+
+        # aten::expand_copy hit the vmap fallback which is currently disabled
+        xfail('block_diag'),
+        xfail('diag_embed'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         def test():
