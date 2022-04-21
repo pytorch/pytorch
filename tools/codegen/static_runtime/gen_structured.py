@@ -1,15 +1,25 @@
 import tools.codegen.api.cpp as cpp
 from tools.codegen.context import native_function_manager
-from tools.codegen.model import (Argument, BaseTy, FunctionSchema, OptionalType,
-                                 SelfArgument,
-                                 BaseType, NativeFunctionsGroup, TensorOptionsArguments, Type)
+from tools.codegen.model import (
+    Argument,
+    BaseTy,
+    FunctionSchema,
+    OptionalType,
+    SelfArgument,
+    BaseType,
+    NativeFunctionsGroup,
+    TensorOptionsArguments,
+    Type,
+)
 from tools.codegen.static_runtime import config
 
 import math
 from typing import List, Optional, Sequence, Tuple, Union
 
 
-def has_alias(arguments: Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]) -> bool:
+def has_alias(
+    arguments: Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]
+) -> bool:
     for arg in arguments:
         annotation = getattr(arg, "annotation", None)
         if not annotation:
@@ -18,6 +28,7 @@ def has_alias(arguments: Sequence[Union[Argument, SelfArgument, TensorOptionsArg
         if alias_set:
             return True
     return False
+
 
 def is_supported(g: NativeFunctionsGroup) -> bool:
     if not g.structured:
@@ -40,7 +51,10 @@ def is_supported(g: NativeFunctionsGroup) -> bool:
             return False
     return True
 
-def ivalue_type_conversion_method(arg_type: Union[BaseType, OptionalType, Type]) -> Optional[Tuple[bool, str]]:
+
+def ivalue_type_conversion_method(
+    arg_type: Union[BaseType, OptionalType, Type]
+) -> Optional[Tuple[bool, str]]:
     """
     Return the method call expression of `c10::ivalue' to convert its contained value to
     the expected value of `arg_type` type. For example, for `arg_type` == BaseTy.Tensor,
@@ -52,8 +66,15 @@ def ivalue_type_conversion_method(arg_type: Union[BaseType, OptionalType, Type])
         BaseTy.int: ((False, "toInt()"), (False, "toOptional<int64_t>()")),
         BaseTy.bool: ((False, "toBool()"), (False, "toOptional<bool>()")),
         BaseTy.Scalar: ((False, "toScalar()"), (False, "toOptional<at::Scalar>()")),
-        BaseTy.ScalarType: ((False, "toScalarType()"), (False, "toOptional<at::ScalarType>()")),
-        BaseTy.str: ((False, "toStringView()"), (False, "toOptional<c10::string_view>()"))}
+        BaseTy.ScalarType: (
+            (False, "toScalarType()"),
+            (False, "toOptional<at::ScalarType>()"),
+        ),
+        BaseTy.str: (
+            (False, "toStringView()"),
+            (False, "toOptional<c10::string_view>()"),
+        ),
+    }
 
     base_ty_object = None
     if isinstance(arg_type, BaseType):
@@ -71,16 +92,38 @@ def ivalue_type_conversion_method(arg_type: Union[BaseType, OptionalType, Type])
         return methods[0]
     return methods[1]
 
-should_use_int_tensor_ops_ = frozenset(("bitwise_not", "bitwise_and", "bitwise_or", "bitwise_xor", "gcd",
-                                        "lcm", "scatter", "gather", "_convert_indices_from_coo_to_csr",
-                                        "_convert_indices_from_csr_to_coo"))
+
+should_use_int_tensor_ops_ = frozenset(
+    (
+        "bitwise_not",
+        "bitwise_and",
+        "bitwise_or",
+        "bitwise_xor",
+        "gcd",
+        "lcm",
+        "scatter",
+        "gather",
+        "_convert_indices_from_coo_to_csr",
+        "_convert_indices_from_csr_to_coo",
+    )
+)
+
 
 def should_use_int_tensor(op_name: str) -> bool:
     return op_name in should_use_int_tensor_ops_
 
-test_tensor_dim_ops_1_ = frozenset(("addmv", "index_add", "_convert_indices_from_coo_to_csr",
-                                    "_convert_indices_from_csr_to_coo", "nll_loss_backward"))
+
+test_tensor_dim_ops_1_ = frozenset(
+    (
+        "addmv",
+        "index_add",
+        "_convert_indices_from_coo_to_csr",
+        "_convert_indices_from_csr_to_coo",
+        "nll_loss_backward",
+    )
+)
 test_tensor_dim_ops_2_ = frozenset(("addmm", "mm"))
+
 
 def test_tensor_dim(op_name: str) -> int:
     if op_name in test_tensor_dim_ops_1_:
@@ -89,7 +132,10 @@ def test_tensor_dim(op_name: str) -> int:
         return 2
     return 3
 
-def test_value_expression(arg_type: Union[BaseType, OptionalType, Type], index: int, op_name: str) -> str:
+
+def test_value_expression(
+    arg_type: Union[BaseType, OptionalType, Type], index: int, op_name: str
+) -> str:
     num_tensors = 16 if index == 0 else 64
     num_dim = test_tensor_dim(op_name)
     size_per_dim = math.ceil(num_tensors / float(num_dim))
@@ -106,17 +152,21 @@ def test_value_expression(arg_type: Union[BaseType, OptionalType, Type], index: 
         BaseTy.bool: "false",
         BaseTy.Scalar: "2",
         BaseTy.ScalarType: "at::ScalarType::Float",
-        BaseTy.str: "\"floor\""}
+        BaseTy.str: '"floor"',
+    }
 
     base_ty_object = None
     if isinstance(arg_type, BaseType):
         base_ty_object = arg_type.name
     else:
-        assert isinstance(arg_type, OptionalType) and isinstance(arg_type.elem, BaseType)
+        assert isinstance(arg_type, OptionalType) and isinstance(
+            arg_type.elem, BaseType
+        )
         base_ty_object = arg_type.elem.name
     assert base_ty_object in value_expressions, "not expected type"
     value_expression = value_expressions[base_ty_object]
     return value_expression
+
 
 def generate_test_value_definitions(g: NativeFunctionsGroup, index: int) -> str:
     schema = g.functional.func
@@ -129,20 +179,30 @@ def generate_test_value_definitions(g: NativeFunctionsGroup, index: int) -> str:
     config.override_test_values(arg_map, schema_name, index)
     arg_populations = []
     for arg_name, arg_value in arg_map.items():
-        arg_populations.append(f'auto {arg_name}{index} = {arg_value}')
+        arg_populations.append(f"auto {arg_name}{index} = {arg_value}")
     return ";\n    ".join(arg_populations) + ";"
+
 
 def generate_test_value_names(g: NativeFunctionsGroup, index: int) -> str:
     schema = g.functional.func
     assert not schema.is_out_fn()
     return ",".join(f"{arg.name}{index}" for arg in schema.schema_order_arguments())
 
-generate_test_ir_arguments_base_ty_to_type_str_ = {
-    BaseTy.Tensor: 'Tensor', BaseTy.int: 'int', BaseTy.float: 'float',
-    BaseTy.str: 'str', BaseTy.Scalar: 'int', BaseTy.ScalarType: 'int',
-    BaseTy.bool: 'bool'}
 
-def generate_test_ir_arguments(g: NativeFunctionsGroup) -> List[Tuple[str, Optional[str]]]:
+generate_test_ir_arguments_base_ty_to_type_str_ = {
+    BaseTy.Tensor: "Tensor",
+    BaseTy.int: "int",
+    BaseTy.float: "float",
+    BaseTy.str: "str",
+    BaseTy.Scalar: "int",
+    BaseTy.ScalarType: "int",
+    BaseTy.bool: "bool",
+}
+
+
+def generate_test_ir_arguments(
+    g: NativeFunctionsGroup,
+) -> List[Tuple[str, Optional[str]]]:
     def ir_argument(arg: Argument) -> Tuple[str, Optional[str]]:
         t = arg.type
         add_optional = False
@@ -154,12 +214,13 @@ def generate_test_ir_arguments(g: NativeFunctionsGroup) -> List[Tuple[str, Optio
         if t.name in generate_test_ir_arguments_base_ty_to_type_str_:
             type_str = generate_test_ir_arguments_base_ty_to_type_str_[t.name]
         if type_str and add_optional:
-            type_str = f'{type_str}?'
+            type_str = f"{type_str}?"
         return ("%" + arg.name, type_str)
 
     schema = g.functional.func
     assert not schema.is_out_fn()
     return [ir_argument(arg) for arg in schema.schema_order_arguments()]
+
 
 def generate_arg_extraction(g: NativeFunctionsGroup) -> str:
     schema = g.functional.func
@@ -170,14 +231,18 @@ def generate_arg_extraction(g: NativeFunctionsGroup) -> str:
         assert maybe_method
         is_reference, type_conversion_method = maybe_method
         reference = "&" if is_reference else ""
-        arg_populations.append(f'const auto{reference} {arg.name} = p_node->Input({i}).{type_conversion_method}')
+        arg_populations.append(
+            f"const auto{reference} {arg.name} = p_node->Input({i}).{type_conversion_method}"
+        )
     return ";\n    ".join(arg_populations) + ";"
+
 
 def generate_non_out_variant_call(g: NativeFunctionsGroup) -> str:
     schema = g.functional.func
     assert not schema.is_out_fn()
     arg_names = (arg.name for arg in schema.schema_order_arguments())
     return f'at::cpu::{cpp.name(schema)}({",".join(arg_names)})'
+
 
 def generate_out_variant_call(g: NativeFunctionsGroup) -> str:
     schema = g.out.func
@@ -191,7 +256,7 @@ def generate_out_variant_call(g: NativeFunctionsGroup) -> str:
             arg_names.append(arg.name)
     cpp_func_name = cpp.name(schema)
     cpp_arg_names = ",".join(arg_names)
-    return f'at::cpu::{cpp_func_name}({cpp_arg_names})'
+    return f"at::cpu::{cpp_func_name}({cpp_arg_names})"
 
 
 def should_check_resize(schema: FunctionSchema) -> bool:
@@ -276,12 +341,18 @@ class GenOutVariantDispatcherTestCase:
         assert type_variant_op_name.startswith(op_name)
 
         arg_types = generate_test_ir_arguments(g)
-        arg_declarations = ", ".join((arg_name if arg_type is None
-                                      else f"{arg_name}: {arg_type}"
-                                      for arg_name, arg_type in arg_types))
+        arg_declarations = ", ".join(
+            (
+                arg_name if arg_type is None else f"{arg_name}: {arg_type}"
+                for arg_name, arg_type in arg_types
+            )
+        )
         arg_names = ", ".join((arg_name for arg_name, _ in arg_types))
-        assert (len(functional.func.returns) == 1 and isinstance(functional.func.returns[0].type, BaseType) and
-                functional.func.returns[0].type.name is BaseTy.Tensor)
+        assert (
+            len(functional.func.returns) == 1
+            and isinstance(functional.func.returns[0].type, BaseType)
+            and functional.func.returns[0].type.name is BaseTy.Tensor
+        )
         test_value_definitions = generate_test_value_definitions(g, 0)
         test_value_names = generate_test_value_names(g, 0)
         test_value_definitions2 = generate_test_value_definitions(g, 1)
