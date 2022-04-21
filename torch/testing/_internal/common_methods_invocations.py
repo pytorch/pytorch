@@ -12256,7 +12256,8 @@ op_db: List[OpInfo] = [
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # 76046
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+                            dtypes=(torch.float16,)),
            )),
     OpInfo('nn.functional.bilinear',
            aten_name='bilinear',
@@ -12591,7 +12592,8 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.complex64, torch.complex128), device_type='cpu',
                          active_if=(IS_MACOS or IS_WINDOWS)),
             # 76046
-            DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+                         dtypes=(torch.float16,)),
         ),
     ),
     OpInfo(
@@ -13692,7 +13694,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_lerp,
            skips=(
                # 76046
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+                            dtypes=(torch.float16,)),
            ),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -16409,7 +16412,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
                          dtypes=(torch.float16,)),
         ),
         decorators=[
@@ -16562,7 +16565,8 @@ op_db: List[OpInfo] = [
             # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
             # 76046
-            DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
+            DecorateInfo(unittest.skkp('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+                         dtypes=(torch.float16,)),
         ),
     ),
     OpInfo(
