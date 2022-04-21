@@ -3171,14 +3171,17 @@ std::tuple<Tensor, Tensor> linalg_qr_jvp(
   // and define syminv(X) = triu(X) - 0.5 * diag(X) the inverse of sym : Triu(k) -> Her(k) to give
   // dR = syminv(sym(Q^H dA R^{-1}))R
   //
-  // Case m <= n
+  // Case m < n
   // Put dR as a function of dQ
   // dR = Q^H dA - Q^H dQ R
   // Let X_1 be the main m x m submatrix of a matrix X \in C^{m x n}
   // Q^H A_1 R_1^{-1} = Q^H dQ + dR_1 R_1^{-1}
   // Define trilIm(X) = X.tril(-1) + i * Im diag(X)
   // trilIm(Q^H dQ) = trilIm(Q^H A_1 R_1^{-1})
-  // and define trilIminv(X) = X - X^H - 0.5*i*Im diag(X). This is the inverse of trilIm : Skew_C(m) -> Tril(m, imaginary diag)
+  // and define trilIminv(X) = X - X^H - 0.5*i*Im diag(X). This is the inverse of
+  // trilIm : Skew_C(m) -> Tril(m, imaginary diag)
+  // Note that it is just the inverse when the inputs are skew-Hermitian, not necessarily
+  // when the inputs are arbitrary matrices. We then get
   // dQ = Q trilImInv(trilIm(Q^H A_1 R_1^{-1}))
   at::NoTF32Guard disable_tf32;
 
@@ -3186,11 +3189,12 @@ std::tuple<Tensor, Tensor> linalg_qr_jvp(
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
 
+  TORCH_CHECK(compute_q, "The derivative of linalg.qr depends on Q, which is not computed when "
+                         "mode='r'. Please use linalg.qr(A, mode='reduced') if you are "
+                         "going to differentiate through linalg.qr.");
   auto m = dA.size(-2);
   auto n = dA.size(-1);
 
-  TORCH_CHECK(compute_q, "The derivative of linalg.qr is not implemented when mode='r'. "
-                         "Please use torch.linalg.qr(A, mode='reduced')");
   TORCH_CHECK(reduced || m <= n, "The QR decomposition is not differentiable when "
                                  "mode='complete' and nrows > ncols.");
   if (m >= n) {
@@ -3264,24 +3268,26 @@ Tensor linalg_qr_backward(const Tensor& gQ, const Tensor& gR,
   //
   // Using this, we get that
   // gA = QgR + pi*(Q trilImInv*(Q^H gQ - gR R^H)R_1^{-H})
-
-  if (!gQ.defined() && !gR.defined()) {
-    return {};
-  }
-
   at::NoTF32Guard disable_tf32;
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
 
+  TORCH_CHECK(compute_q, "The derivative of linalg.qr depends on Q, which is not computed when "
+                         "mode='r'. Please use linalg.qr(A, mode='reduced') if you are "
+                         "going to differentiate through linalg.qr.");
+
   auto m = Q.size(-2);
   auto n = R.size(-1);
 
-  TORCH_CHECK(compute_q, "The derivative of linalg.qr is not implemented when mode='r'. "
-                         "Please use torch.linalg.qr(A, mode='reduced')");
   TORCH_CHECK(reduced || m <= n, "The QR decomposition is not differentiable when "
                                  "mode='complete' and nrows > ncols.");
+
+  if (!gQ.defined() && !gR.defined()) {
+    return {};
+  }
+
   Tensor gA;
   if (gQ.defined()) {
     if (gR.defined()) {
