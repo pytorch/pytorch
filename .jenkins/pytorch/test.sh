@@ -48,7 +48,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
-  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
+  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -62,10 +62,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *noarch* ]]; then
-  export PYTORCH_TEST_SKIP_NOARCH=0
-else
-  export PYTORCH_TEST_SKIP_NOARCH=1
+if [[ "$BUILD_ENVIRONMENT" == *crossref* ]]; then
+  export PYTORCH_TEST_WITH_CROSSREF=1
 fi
 
 if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
@@ -450,6 +448,8 @@ test_xla() {
 # nightly version.
 test_forward_backward_compatibility() {
   set -x
+  # create a dummy ts model at this version
+  python test/create_dummy_torchscript_model.py /tmp/model_new.pt
   pushd test/forward_backward_compatibility
   python -m venv venv
   # shellcheck disable=SC1091
@@ -457,10 +457,21 @@ test_forward_backward_compatibility() {
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
+  # FC: verify newmodel can be load with old code.
+  if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
+      echo "FC check failed: new model cannot be load in old code"
+      return 1
+  fi
+  python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
   rm -r venv
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
+  # BC: verify old model can be load with new code
+  if ! python ../load_torchscript_model.py /tmp/model_old.pt; then
+      echo "BC check failed: old model cannot be load in new code"
+      return 1
+  fi
   popd
   set +x
   assert_git_not_dirty

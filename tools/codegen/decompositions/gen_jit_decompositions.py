@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from torch.jit._decompositions import decomposition_table
+
 # from tools.codegen.code_template import CodeTemplate
 
 DECOMP_HEADER = r"""
@@ -23,7 +24,6 @@ namespace jit {
 
 const std::string decomp_funcs =
 R"("""
-
 
 
 DECOMP_CENTER = r"""
@@ -52,8 +52,12 @@ DECOMP_END = r"""
 
 DECOMPOSITION_UTIL_FILE_NAME = "decomposition_registry_util.cpp"
 
+
 def gen_serialized_decompisitions() -> str:
-    return "\n".join([scripted_func.code for scripted_func in decomposition_table.values()])
+    return "\n".join(
+        [scripted_func.code for scripted_func in decomposition_table.values()]
+    )
+
 
 def gen_decomposition_mappings() -> str:
     decomposition_mappings = []
@@ -63,16 +67,22 @@ def gen_decomposition_mappings() -> str:
         )
     return "\n".join(decomposition_mappings)
 
+
 def write_decomposition_util_file(path: str) -> None:
     decomposition_str = gen_serialized_decompisitions()
     decomposition_mappings = gen_decomposition_mappings()
-    file_components = [DECOMP_HEADER, decomposition_str, DECOMP_CENTER, decomposition_mappings, DECOMP_END]
+    file_components = [
+        DECOMP_HEADER,
+        decomposition_str,
+        DECOMP_CENTER,
+        decomposition_mappings,
+        DECOMP_END,
+    ]
     print("writing file to : ", path + "/" + DECOMPOSITION_UTIL_FILE_NAME)
-    with open(
-        os.path.join(path, DECOMPOSITION_UTIL_FILE_NAME), "wb"
-    ) as out_file:
+    with open(os.path.join(path, DECOMPOSITION_UTIL_FILE_NAME), "wb") as out_file:
         final_output = "".join(file_components)
         out_file.write(final_output.encode("utf-8"))
+
 
 def main() -> None:
     pytorch_dir = Path(__file__).resolve().parents[3]
@@ -80,5 +90,5 @@ def main() -> None:
     write_decomposition_util_file(str(upgrader_path))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
