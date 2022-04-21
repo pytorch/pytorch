@@ -80,6 +80,8 @@ ALLOW_LIST = [
     ("aten::linalg_svdvals_out", datetime.date(2022, 3, 31)),
     ("aten::linalg_svd", datetime.date(2022, 3, 31)),
     ("aten::linalg_svd_out", datetime.date(2022, 3, 31)),
+    ("aten::linalg_qr_out", datetime.date(2022, 5, 31)),
+    ("aten::linalg_qr", datetime.date(2022, 5, 31)),
     ("aten::_max_pool1d_cpu_forward", datetime.date(2022, 2, 8)),
     ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
