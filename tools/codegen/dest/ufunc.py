@@ -220,10 +220,14 @@ class BinaryScalarSpecializationConfig:
 
 BinaryScalarSpecializationConfigs = [
     BinaryScalarSpecializationConfig(
-        scalar_idx=0, ctor_tensor="self", ufunc_key=UfuncKey.CUDAFunctorOnOther,
+        scalar_idx=0,
+        ctor_tensor="self",
+        ufunc_key=UfuncKey.CUDAFunctorOnOther,
     ),
     BinaryScalarSpecializationConfig(
-        scalar_idx=1, ctor_tensor="other", ufunc_key=UfuncKey.CUDAFunctorOnSelf,
+        scalar_idx=1,
+        ctor_tensor="other",
+        ufunc_key=UfuncKey.CUDAFunctorOnSelf,
     ),
 ]
 
@@ -443,7 +447,9 @@ def compute_ufunc_cpu_dtype_body(
         assert a.type == BaseType(BaseTy.Tensor)
         scalar_bindings.append(
             Binding(
-                name=a.name, nctype=NamedCType(a.name, BaseCType(scalar_t)), argument=a,
+                name=a.name,
+                nctype=NamedCType(a.name, BaseCType(scalar_t)),
+                argument=a,
             )
         )
         if vec_loop is not None:
