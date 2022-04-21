@@ -429,7 +429,7 @@ Here are a few key attributes for quantized Tensor:
   * torch.per_tensor_affine would have quantization parameters of
 
     * scale (float)
-    * zero_point (int)      
+    * zero_point (int)
   * torch.per_tensor_affine would have quantization parameters of
 
     * per_channel_scales (list of float)
@@ -496,7 +496,7 @@ In general, the flow is the following
   * insert Observer/FakeQuantize modules based on user specified qconfig
 * calibrate/train (depending on post training quantization or quantization aware training)
 
-  * allow Observers to collect statistics or FakeQuantize modules to learn the quantization parameters    
+  * allow Observers to collect statistics or FakeQuantize modules to learn the quantization parameters
 * convert
 
   * convert a calibrated/trained model to a quantized model
