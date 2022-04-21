@@ -328,7 +328,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     // one uint64_t variable as key.
     std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
         tidSeq2activity;
-    uint64_t fwd_bwd_link_id = 1;
 
     for (const auto idx : c10::irange(cpu_trace->activities.size())) {
       auto& kineto_event = kineto_events_[idx];
@@ -603,7 +602,6 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             if (!state_ptr) {
               return nullptr;
             }
-            const auto& config = state_ptr->config();
             auto corr_id = next_correlation_id();
             torch::profiler::impl::kineto::pushCorrelationId(corr_id);
             return state_ptr->record_queue_.getSubqueue()->begin_op(fn, corr_id);
@@ -679,7 +677,7 @@ void prepareProfiler(
           config.state == ProfilerState::KINETO_GPU_FALLBACK,
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!at::hasCUDA(), activities);
+      /*cpuOnly=*/!at::hasCUDA(), activities, config.experimental_config);
 }
 
 void enableProfilerWithEventPostProcess(
