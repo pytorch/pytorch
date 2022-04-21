@@ -510,7 +510,7 @@ class TestFSDPStateDict(FSDPTest):
                     self.assertEqual(p1, p2)
 
     @skip_if_lt_x_gpu(2)
-    def test_state_dict_with_ignored_modules(self, state_dict_rank0_and_offload):
+    def test_state_dict_with_ignored_modules(self):
         # Initialize an FSDP-wrapped model with an ignored module
         model = Model(wrap_fsdp=True).cuda()
         ignored_modules = [model.outer]
