@@ -467,8 +467,10 @@ class TestBinaryUfuncs(TestCase):
             if op.supports_out:
                 # All these output types can be cast to any or complex type
                 out = torch.empty_like(lhs_c64, dtype=torch.complex64)
+
                 self.assertEqual(op(lhs_c64, rhs_c128, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_c64, rhs_c128), out, exact_dtype=False)
+                result = op(lhs_c64, rhs_c128)
+                self.assertEqual(result, out.to(result.dtype))
 
                 if not op.always_returns_bool:
                     # complex outs can't be cast to float types
@@ -2819,6 +2821,23 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(actual, actual_out)
                 expected = start + weight * (end - start)
                 self.assertEqual(expected, actual)
+
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    def test_lerp_lowp(self, device, dtype):
+        ref_dtype = torch.float
+        xvals = (0., -30000.)
+        yvals = (0.1, -20000.)
+        xs = [torch.full((4,), xval, device=device, dtype=dtype) for xval in xvals]
+        ys = [torch.full((4,), yval, device=device, dtype=dtype) for yval in yvals]
+        weights = [70000, torch.full((4,), 8, device=device, dtype=dtype)]
+        for x, y, w in zip(xs, ys, weights):
+            xref = x.float()
+            yref = y.float()
+            wref = w.float() if isinstance(w, torch.Tensor) else w
+            actual = torch.lerp(x, y, w)
+            expected = torch.lerp(xref, yref, wref).to(dtype)
+            self.assertEqual(actual, expected, atol=0., rtol=0.)
 
     def _test_logaddexp(self, device, dtype, base2):
         if base2:
