@@ -691,4 +691,4 @@ class TestModuleContainers(JitTestCase):
                     r = r + p + i
                 return r
 
-        self.checkModule(MyModule(), (torch.zeros(1)))
+        self.checkModule(MyModule(), (torch.zeros(1),))
