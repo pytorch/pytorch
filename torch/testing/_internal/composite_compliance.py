@@ -449,10 +449,13 @@ def check_backward_formula(op, args, kwargs):
 def check_forward_formula(op, args, kwargs):
     assert op.supports_forward_ad
 
+    # Permutations of arg and kwargs in CCT.
     for choice in generate_subclass_choices_args_kwargs(args, kwargs):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
 
         def maybe_tangent(t):
+            # Generate `tangent` tensor
+            # if given object is a Tensor
             if isinstance(t, torch.Tensor):
                 return torch.empty_like(t)
             elif is_tensorlist(t):
@@ -464,6 +467,7 @@ def check_forward_formula(op, args, kwargs):
         flat_tangent_kwargs = tuple(maybe_tangent(arg) for arg in flat_kwargs)
         tangent_kwargs = tree_unflatten(flat_tangent_kwargs, spec)
 
+        # Permutations tangent arg and tangent kwargs in CCT.
         for tang_choice in generate_subclass_choices_args_kwargs(tangent_args, tangent_kwargs):
             new_tang_args, new_tang_kwargs, \
                 which_tang_args_are_wrapped, which_tang_kwargs_are_wrapped = tang_choice
