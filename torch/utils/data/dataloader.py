@@ -25,7 +25,6 @@ import torch.utils.data.graph_settings
 
 __all__ = [
     "DataLoader",
-    "_DatasetKind",
     "get_worker_info",
     "default_collate",
     "default_convert",
