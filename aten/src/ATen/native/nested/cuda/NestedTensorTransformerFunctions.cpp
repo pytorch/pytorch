@@ -197,6 +197,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
     Tensor nt_sizes = nt_input->get_nested_size_tensor();
     Tensor offsets = batch_offsets_from_efficient_size(nt_sizes);
     auto new_size = NestedTensor_get_max_size(*nt_input);
+    new_size.insert(new_size.begin(), nt_sizes.size(0));
     Tensor output = at::empty(IntArrayRef(new_size), nt_buffer.options());
 
     int64_t input_dim = nt_sizes.size(1);
