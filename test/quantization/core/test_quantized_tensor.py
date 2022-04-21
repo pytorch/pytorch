@@ -354,25 +354,32 @@ class TestQuantizedTensor(TestCase):
         # item
         scale = 1.0
         zero_point = 2
-        r = torch.ones(1, dtype=torch.float)
-        for dtype in [torch.qint8, torch.quint8, torch.qint32]:
-            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
-            self.assertEqual(qr.item(), 1)
-            self.assertEqual(qr[0].item(), 1)
-            # assignment
-            self.assertTrue(qr[0].is_quantized)
-            qr[0] = 11.3  # float assignment
-            self.assertEqual(qr.item(), 11)
-            x = torch.ones(1, dtype=torch.float) * 15.3
-            # Copying from a float Tensor
-            qr[:] = x
-            self.assertEqual(qr.item(), 15)
+        for device in ["cpu", "cuda"]:
+            r = torch.ones(1, dtype=torch.float).to(device=device)
+            for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+                qr = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
+                self.assertEqual(qr.item(), 1)
+                self.assertEqual(qr[0].item(), 1)
+                # assignment
+                self.assertTrue(qr[0].is_quantized)
+                qr[0] = torch.Tensor([11.3]).to(device=device)  # float assignment
+                self.assertEqual(qr.item(), 11)
+                x = torch.ones(1, dtype=torch.float).to(device=device) * 15.3
+                # Copying from a float Tensor
+                qr[:] = x
+                self.assertEqual(qr.item(), 15)
 
-            dtype_msg = str(dtype) + ", "
-            self.assertEqual(' '.join(str(qr).split()),
-                             "tensor([15.], size=(1,), dtype=" + dtype_msg +
-                             "quantization_scheme=torch.per_tensor_affine, " +
-                             "scale=1.0, zero_point=2)")
+                dtype_msg = str(dtype) + ", "
+                if device is "cuda":
+                    self.assertEqual(' '.join(str(qr).split()),
+                                     "tensor([15.], device='" + str(qr.device) + "', size=(1,), dtype=" + dtype_msg +
+                                     "quantization_scheme=torch.per_tensor_affine, " +
+                                     "scale=1.0, zero_point=2)")
+                else:
+                    self.assertEqual(' '.join(str(qr).split()),
+                                     "tensor([15.], size=(1,), dtype=" + dtype_msg +
+                                     "quantization_scheme=torch.per_tensor_affine, " +
+                                     "scale=1.0, zero_point=2)")
 
     def test_qtensor_quant_dequant(self):
         scale = 0.02
