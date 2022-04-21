@@ -39,7 +39,7 @@ from tools.codegen.api.types import (
     intArrayRefT,
     optionalIntArrayRefT,
     tensorOptionsT,
-    symIntArrayRefT
+    symIntArrayRefT,
 )
 from tools.codegen import local
 from tools.codegen.utils import assert_never
@@ -156,7 +156,7 @@ def argumenttype_type(
             return NamedCType(binds, BaseCType(tensorListT))
         elif str(t.elem) == "Scalar":
             return NamedCType(binds, ArrayRefCType(BaseCType(scalarT)))
-        elif str(t.elem) == 'SymInt':
+        elif str(t.elem) == "SymInt":
             return NamedCType(binds, BaseCType(symIntArrayRefT))
         elif str(t.elem) == "Dimname":
             return NamedCType(binds, BaseCType(dimnameListT))

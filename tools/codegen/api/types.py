@@ -340,7 +340,10 @@ class Binding:
 
     def rename(self, name: str) -> "Binding":
         return Binding(
-            name=name, nctype=self.nctype, argument=self.argument, default=self.default,
+            name=name,
+            nctype=self.nctype,
+            argument=self.argument,
+            default=self.default,
         )
 
     @property
@@ -349,7 +352,10 @@ class Binding:
 
     def no_default(self) -> "Binding":
         return Binding(
-            name=self.name, nctype=self.nctype, default=None, argument=self.argument,
+            name=self.name,
+            nctype=self.nctype,
+            default=None,
+            argument=self.argument,
         )
 
     def decl(self, *, func_ptr_cast: bool = False) -> str:
@@ -518,7 +524,9 @@ class CppSignatureGroup:
             cpp_no_default_args=f.cpp_no_default_args,
         )
         return CppSignatureGroup(
-            func=func, signature=signature, faithful_signature=faithful_signature,
+            func=func,
+            signature=signature,
+            faithful_signature=faithful_signature,
         )
 
 

@@ -226,9 +226,11 @@ class PythonArgument:
 
         # add default
         if self.default is not None:
-            default = {"nullptr": "None", "c10::nullopt": "None", "{}": "None",}.get(
-                self.default, self.default
-            )
+            default = {
+                "nullptr": "None",
+                "c10::nullopt": "None",
+                "{}": "None",
+            }.get(self.default, self.default)
             return f"{type_str} {name}={default}"
         else:
             return f"{type_str} {name}"
@@ -1020,9 +1022,13 @@ def dispatch_lambda_args(
             # TODO: avoid this special handling?
             ensure_temp_safe = len(out_args) <= 1 or not is_out_arg
             if ensure_temp_safe:
-                type_str = {"at::Tensor &": "at::Tensor",}.get(type_str, type_str)
+                type_str = {
+                    "at::Tensor &": "at::Tensor",
+                }.get(type_str, type_str)
         return DispatchLambdaArgument(
-            name=cpp_arg.name, type_str=type_str, is_out_arg=is_out_arg,
+            name=cpp_arg.name,
+            type_str=type_str,
+            is_out_arg=is_out_arg,
         )
 
     return tuple(map(dispatch_lambda_arg, cpp_args))
@@ -1099,7 +1105,9 @@ def cpp_dispatch_target(f: NativeFunction) -> str:
 
 
 def cpp_dispatch_exprs(
-    f: NativeFunction, *, python_signature: Optional[PythonSignature] = None,
+    f: NativeFunction,
+    *,
+    python_signature: Optional[PythonSignature] = None,
 ) -> Tuple[str, ...]:
     cpp_args: Sequence[Binding] = _cpp_signature(f, method=False).arguments()
 
@@ -1216,9 +1224,9 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return "intlist"
         elif str(t) == "float[]":
             return "doublelist"
-        elif str(t.elem) == 'SymInt':
+        elif str(t.elem) == "SymInt":
             # accept definite size
-            return 'symintlist'
+            return "symintlist"
         elif str(t) == "Scalar[]":
             return "scalarlist"
     raise RuntimeError(f"type '{t}' is not supported by PythonArgParser")
@@ -1235,7 +1243,10 @@ def arg_parser_output_expr(
     expr = f"_r.{unpack_method}({arg_index}{default})"
 
     return PythonArgParserOutputExpr(
-        name=a.name, expr=expr, index=arg_index, argument=a,
+        name=a.name,
+        expr=expr,
+        index=arg_index,
+        argument=a,
     )
 
 
@@ -1281,7 +1292,9 @@ def dispatch_lambda_exprs(
         if has_toptions and name == "self":
             # TODO: why this needs to be special case?
             inits.extend(
-                [f"auto self = {arg_parser_expr};",]
+                [
+                    f"auto self = {arg_parser_expr};",
+                ]
             )
             lambda_args_exprs[name] = name
         elif (
@@ -1290,7 +1303,9 @@ def dispatch_lambda_exprs(
             and f.func.is_out_fn()
         ):
             inits.extend(
-                [f"auto out = {arg_parser_expr};",]
+                [
+                    f"auto out = {arg_parser_expr};",
+                ]
             )
             for i, out_arg in enumerate(a.outputs):
                 lambda_args_exprs[out_arg.name] = f"out[{i}]"
@@ -1379,5 +1394,6 @@ check_out_type_matches({arg_parser_outputs['out'].expr}, {arg_parser_outputs['dt
             )
 
     return DispatchLambdaArgumentExprs(
-        exprs=tuple(map(lambda a: lambda_args_exprs[a.name], lambda_args)), inits=inits,
+        exprs=tuple(map(lambda a: lambda_args_exprs[a.name], lambda_args)),
+        inits=inits,
     )

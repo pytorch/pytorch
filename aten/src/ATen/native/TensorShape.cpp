@@ -2896,27 +2896,23 @@ at::Tensor& slice_copy_Tensor_out(const at::Tensor & self, int64_t dim, c10::opt
 }
 
 
-at::ITensorListRef split_copy_Tensor_out(const at::Tensor & self, int64_t split_size, int64_t dim, at::TensorList  out) {
+void split_copy_Tensor_out(const at::Tensor & self, int64_t split_size, int64_t dim, at::TensorList  out) {
   auto tmp = self.split(split_size, dim);
 
   TORCH_CHECK(out.size() == tmp.size(), "split_copy_Tensor_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
   for (const auto i : c10::irange(out.size())) {
     out[i].copy_(tmp[i]);
   }
-
-  return out;
 }
 
 
-at::ITensorListRef split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_sizes, int64_t dim, at::TensorList  out) {
+void split_with_sizes_copy_out(const at::Tensor & self, at::IntArrayRef split_sizes, int64_t dim, at::TensorList  out) {
   auto tmp = self.split_with_sizes(split_sizes, dim);
 
   TORCH_CHECK(out.size() == tmp.size(), "split_with_sizes_copy_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
   for (const auto i : c10::irange(out.size())) {
     out[i].copy_(tmp[i]);
   }
-
-  return out;
 }
 
 
@@ -2997,15 +2993,13 @@ at::Tensor& col_indices_copy_out(const at::Tensor & self, at::Tensor & out) {
 }
 
 
-at::ITensorListRef unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  out) {
+void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  out) {
   auto tmp = self.unbind(dim);
 
   TORCH_CHECK(out.size() == tmp.size(), "unbind_copy_int_out() expected an out= argument of size ", tmp.size(), ", got size ", out.size());
   for (const auto i : c10::irange(out.size())) {
     out[i].copy_(tmp[i]);
   }
-
-  return out;
 }
 
 

@@ -9,7 +9,6 @@ from tools.codegen.api.types import (
     BaseCType,
     VectorCType,
     tensorListT,
-    iTensorListRefT,
     tensorT,
 )
 from tools.codegen.api.translate import translate
@@ -100,7 +99,9 @@ def modifies_arguments(f: NativeFunction) -> bool:
 # This function constructs the return statement for the kernels that contain mutations
 # It mostly just needs to special case multi-output returns to wrap the result in a tuple
 def return_str(f: NativeFunction) -> str:
-    if len(f.func.arguments.out) != 0:
+    # Need to check both # outs and # returns. Why?
+    # out= ops with a mutable Tensor(a!)[] argument are expected to have a void return type.
+    if len(f.func.arguments.out) != 0 and len(f.func.returns) != 0:
         if len(f.func.arguments.out) > 1:
             return_names = ", ".join(a.name for a in f.func.arguments.out)
             return f"return {DispatcherSignature.from_schema(f.func).returns_type().cpp_type()}({return_names});"
@@ -123,15 +124,14 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
         isinstance(a, Argument) and a.type.is_tensor_like()
     )
 
+
 # We need to wrap / unwrap various arguments from the op in the functionalization kernels.
 # Some op schemas include non-owning types though (like TensorList),
 # and when we unwrap them we expect to get out an owning type!.
 # We also return a lambda that tells you how to conver the non-owning type argument into the owning type.
 def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
-        return VectorCType(BaseCType(tensorT)), lambda x: f'{x}.vec()'
-    if t == BaseCType(iTensorListRefT):
-        return VectorCType(BaseCType(tensorT)), lambda x: f'std::vector{x}.begin(), {x}.end()'
+        return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
     # There are technically other non-owning types out there (like IntArrayRef),
     # but functionalization only actually cares about the ones involving tensors.
     return t, lambda x: x
@@ -156,7 +156,9 @@ def unwrap_tensor_args(
             maybe_sync_input = (
                 "" if is_view_op else f"at::functionalization::impl::sync({arg.name});"
             )
-            unwrapped_type, conversion_fn = get_owning_type(arg.nctype.remove_const_ref().type)
+            unwrapped_type, conversion_fn = get_owning_type(
+                arg.nctype.remove_const_ref().type
+            )
             unwrapped_tensor_args.append(
                 f"""
       {unwrapped_type.cpp_type()} {unwrapped_name};
