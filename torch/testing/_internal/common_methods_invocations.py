@@ -11635,8 +11635,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv1d',
            aliases=('conv1d',),
            aten_name='conv1d',
-           dtypes=floating_and_complex_types_and(torch.int64),
-           dtypesIfCPU=floating_and_complex_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv1d,
@@ -11661,8 +11660,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
            aten_name='conv2d',
-           dtypes=floating_and_complex_types_and(torch.int64),
-           dtypesIfCPU=floating_and_complex_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
@@ -14488,6 +14486,31 @@ op_db: List[OpInfo] = [
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
+    OpInfo('chalf',
+           op=lambda x, *args, **kwargs: x.chalf(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           skips=(
+               # autograd tests don't handle operators that change dtype
+               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+               # use of lambda doesn't work with test_normalize_operator_exhaustive
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # RuntimeError: "index_select" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            dtypes=(torch.float, torch.cfloat)),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               # TypeError: 'int' object is not iterable
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+           )
+           ),
     OpInfo('empty_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
