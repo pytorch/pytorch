@@ -449,47 +449,47 @@ def check_backward_formula(op, args, kwargs):
 def check_forward_formula(op, args, kwargs):
     assert op.supports_forward_ad
 
-    with no_alias_result():
-        for choice in generate_subclass_choices_args_kwargs(args, kwargs):
-            new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
+    for choice in generate_subclass_choices_args_kwargs(args, kwargs):
+        new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
 
-            def maybe_tangent(t):
-                if isinstance(t, torch.Tensor):
-                    return torch.empty_like(t)
-                elif is_tensorlist(t):
-                    return list(torch.empty_like(e) for e in t)
-                return None
+        def maybe_tangent(t):
+            if isinstance(t, torch.Tensor):
+                return torch.empty_like(t)
+            elif is_tensorlist(t):
+                return list(torch.empty_like(e) for e in t)
+            return None
 
-            tangent_args = tuple(maybe_tangent(arg) for arg in args)
-            flat_kwargs, spec = tree_flatten(kwargs)
-            flat_tangent_kwargs = tuple(maybe_tangent(arg) for arg in flat_kwargs)
-            tangent_kwargs = tree_unflatten(flat_tangent_kwargs, spec)
+        tangent_args = tuple(maybe_tangent(arg) for arg in args)
+        flat_kwargs, spec = tree_flatten(kwargs)
+        flat_tangent_kwargs = tuple(maybe_tangent(arg) for arg in flat_kwargs)
+        tangent_kwargs = tree_unflatten(flat_tangent_kwargs, spec)
 
-            for tang_choice in generate_subclass_choices_args_kwargs(tangent_args, tangent_kwargs):
-                new_tang_args, new_tang_kwargs, \
-                    which_tang_args_are_wrapped, which_tang_kwargs_are_wrapped = tang_choice
+        for tang_choice in generate_subclass_choices_args_kwargs(tangent_args, tangent_kwargs):
+            new_tang_args, new_tang_kwargs, \
+                which_tang_args_are_wrapped, which_tang_kwargs_are_wrapped = tang_choice
 
-                with fwAD.dual_level():
-                    def maybe_make_dual(dual):
-                        t, tangent = dual
-                        if isinstance(t, torch.Tensor):
-                            return fwAD.make_dual(t, tangent)
-                        elif is_tensorlist(t):
-                            return tuple(fwAD.make_dual(pri, tang) for pri, tang in zip(t, tangent))
-                        return t
+            with fwAD.dual_level():
+                def maybe_make_dual(dual):
+                    t, tangent = dual
+                    if isinstance(t, torch.Tensor):
+                        return fwAD.make_dual(t, tangent)
+                    elif is_tensorlist(t):
+                        return tuple(fwAD.make_dual(pri, tang) for pri, tang in zip(t, tangent))
+                    return t
 
-                    op_args = tuple(map(maybe_make_dual, zip(new_args, new_tang_args)))
-                    op_kwargs = {k: maybe_make_dual((v, new_tang_kwargs[k])) for k, v in new_kwargs.items()}
+                op_args = tuple(map(maybe_make_dual, zip(new_args, new_tang_args)))
+                op_kwargs = {k: maybe_make_dual((v, new_tang_kwargs[k])) for k, v in new_kwargs.items()}
 
-                    try:
+                try:
+                    with no_alias_result():
                         with disable_no_dispatch():
                             op.gradcheck_wrapper(op.get_op(), *op_args, **op_kwargs)
-                    # see NOTE: [What errors are Composite Compiance trying to catch?]
-                    except RuntimeError as err:
-                        raise_composite_compliance_error(
-                            err,
-                            f"- wrapped_args: {which_args_are_wrapped}\n"
-                            f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
-                            f"- wrapped_tangent_args: {which_tang_args_are_wrapped}\n"
-                            f"- wrapped_tangent_kwargs: {which_tang_kwargs_are_wrapped}\n"
-                        )
+                # see NOTE: [What errors are Composite Compiance trying to catch?]
+                except RuntimeError as err:
+                    raise_composite_compliance_error(
+                        err,
+                        f"- wrapped_args: {which_args_are_wrapped}\n"
+                        f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
+                        f"- wrapped_tangent_args: {which_tang_args_are_wrapped}\n"
+                        f"- wrapped_tangent_kwargs: {which_tang_kwargs_are_wrapped}\n"
+                    )
