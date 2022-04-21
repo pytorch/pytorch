@@ -6,6 +6,7 @@ from typing import List
 
 import torch
 import torch.distributed._shard.sharding_spec as shard_spec
+from torch.distributed._shard.partial_tensor import _PartialTensor
 
 from .api import (
     _register_sharded_op,
@@ -15,7 +16,6 @@ from .api import (
     TensorProperties,
 )
 from .metadata import ShardMetadata  # noqa: F401
-from .partial_tensor import _PartialTensor
 
 
 def empty(sharding_spec: shard_spec.ShardingSpec,

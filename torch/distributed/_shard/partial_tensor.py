@@ -2,11 +2,10 @@ import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
 from torch.distributed import distributed_c10d
+from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed.nn.functional import (
     reduce_scatter,
 )
-
-from .api import ShardedTensor
 
 
 class _PartialTensor(object):
@@ -127,25 +126,49 @@ class _PartialTensor(object):
             raise NotImplementedError("Only real partial tensor supported for reshard.")
         sharding_dim = int(resharding_spec.dim)  # type: ignore[attr-defined]
         chunk_mode_res = self.local_shard.size(sharding_dim) % self.process_group.size()
+        local_shard = self.local_shard
         # Add padding when the size is not divisible by the world size.
         if chunk_mode_res != 0:
-            padding = [0] * (len(self.local_shard.size()) * 2)
+            padding = [0] * (self.local_shard.dim() * 2)
             padding[-1] = self.process_group.size() - chunk_mode_res
-            self.local_shard = torch.nn.functional.pad(
+            local_shard = torch.nn.functional.pad(
                 self.local_shard,
                 tuple(padding),
                 "constant",
                 0,
             )
+        current_rank = dist.get_rank(self.process_group)  # type: ignore[attr-defined]
+        rank_idx = None
+        rearrange_local_shards = False
+        indices = [0] * self.process_group.size()
+        for idx, placement in enumerate(resharding_spec.placements):  # type: ignore[attr-defined]
+            if placement.rank() == current_rank:  # type: ignore[index]
+                rank_idx = idx  # type: ignore[attr-defined]
+            if placement.rank() != idx:
+                rearrange_local_shards = True
+            indices[placement.rank()] = idx
 
-        local_shards = self.local_shard.chunk(
-            self.process_group.size(), dim=sharding_dim
-        )
+        local_shards = local_shard.chunk(self.process_group.size(), dim=sharding_dim)
+        if rearrange_local_shards:
+            # Need to re-arrange original shard_dim of output_tensor_list.
+            local_shards = [local_shards[idx] for idx in indices]  # type: ignore[call-overload]
         local_result = reduce_scatter(
             torch.empty_like(local_shards[0]), list(local_shards), op=self.reduce_op
         )
 
         sharded_tensor_size = self.local_shard.size()
+        # Remove padding when the size is not divisible by the world size.
+        if chunk_mode_res != 0:
+            uneven_local_shards = self.local_shard.chunk(
+                self.process_group.size(), dim=sharding_dim
+            )
+            expected_size = uneven_local_shards[rank_idx].size()
+            if local_result.size() != expected_size:
+                local_result = local_result.narrow(
+                    sharding_dim,
+                    0,
+                    expected_size[sharding_dim],
+                )
         return ShardedTensor._init_from_local_tensor(
             local_result,
             resharding_spec,

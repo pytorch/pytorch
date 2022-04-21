@@ -7,9 +7,9 @@ from torch.distributed.nn.functional import (
     all_gather,
     all_to_all_single,
 )
+from torch.distributed._shard.partial_tensor import _PartialTensor
 from torch.distributed._shard.sharded_tensor import (
     sharded_op_impl,
-    _PartialTensor,
     ShardedTensor,
 )
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
@@ -203,12 +203,9 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     local_bias = _BiasTensorNarrow.apply(
         world_size, start_pos, chunk_size, weight, pg, bias
     )
-    results = [None] * world_size
-    indices = {}
-    for idx, placement in enumerate(weight._sharding_spec.placements):
-        indices[placement.rank()] = idx
+    results = []
     for i, inp in enumerate(gathered_inputs):
-        results[indices[i]] = inp.matmul(local_shard_t) + local_bias
+        results.append(inp.matmul(local_shard_t) + local_bias)
     # When the local result only has one dimension, we need to make sure
     # it does not shard by dim 0. So reshard can work properly.
     if results[0].dim() == 1:  # type: ignore[attr-defined]
@@ -328,19 +325,16 @@ def _handle_row_wise_sharding_sharded_tensor(
     """
     results = []
     local_shard = input.local_shards()[0].tensor
-    indices = [0] * world_size
-    reaggrance_partial = False
-    for idx, placement in enumerate(input._sharding_spec.placements):
-        indices[placement.rank()] = idx
-        if idx != placement.rank():
-            reaggrance_partial = True
+    if input.sharding_spec().dim not in (-1, len(input.size()) - 1):
+        raise NotImplementedError(
+            "The case when the input does not come from col-wise sharded "
+            "linear is not supported for row-wise sharded linear."
+        )
 
     for tensor in torch.tensor_split(local_shard, world_size):
         results.append(
             tensor.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias)
         )
-    if reaggrance_partial:
-        results = [results[idx] for idx in indices]
 
     # Return the partial local result.
     return _PartialTensor(torch.cat(results), pg)

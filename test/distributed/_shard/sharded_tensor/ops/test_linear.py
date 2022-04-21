@@ -68,6 +68,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         inp = torch.rand(*input_size).cuda(self.rank)
         reshard_spec = copy.deepcopy(spec)
         reshard_spec.dim = 0
+        reshard_spec.placements.sort(key=lambda placement: placement.rank())
         sharded_linear = _collect_local_shard(
             _reshard_output(sharded_linear, reshard_spec)
         )
