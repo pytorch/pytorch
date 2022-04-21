@@ -1,5 +1,6 @@
 #pragma once
 #include <c10/util/Flags.h>
+#include <c10/macros/Export.h>
 
 C10_DECLARE_bool(torch_lazy_ir_debug);
 C10_DECLARE_bool(torch_lazy_handle_special_scalars);
@@ -14,3 +15,8 @@ C10_DECLARE_int(torch_lazy_trim_graph_check_frequency);
 C10_DECLARE_int(torch_lazy_trim_graph_size);
 
 C10_DECLARE_string(torch_lazy_metrics_percentiles);
+
+namespace torch {
+namespace lazy {
+TORCH_API std::string& getLTCForceFallback();
+} }

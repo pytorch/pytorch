@@ -1,6 +1,7 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 
+// Enables caching on for dynamic shapes (aka disable hash on shapes)
 C10_DEFINE_bool(ltc_enable_dynamic_shapes, false, "Whether dynamic shape is enabled");
 
 namespace torch {

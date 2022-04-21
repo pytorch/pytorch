@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
+import os
+import re
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from typing import cast, Any, Dict, Iterator, List, Optional, Tuple, Union
-import os
-import re
 
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")
@@ -194,7 +195,7 @@ class GitRepo:
                     frc = self.get_commit(from_values.pop())
                     toc = self.get_commit(to_values.pop())
                     # FRC branch might have PR number added to the title
-                    if not frc.title != toc.title or frc.author_date != toc.author_date:
+                    if frc.title != toc.title or frc.author_date != toc.author_date:
                         # HACK: Same commit were merged, reverted and landed again
                         # which creates a tracking problem
                         if (
@@ -209,6 +210,13 @@ class GitRepo:
                 from_commits.remove(commit)
             for commit in to_values:
                 to_commits.remove(commit)
+        # Another HACK: Patch-id is not stable for commits with binary files
+        # I.e. cherry-picking those from one branch into another will change patchid
+        if "pytorch/pytorch" in self.remote_url():
+            for excluded_commit in ["8e09e20c1dafcdbdb45c2d1574da68a32e54a3a5"]:
+                if excluded_commit in from_commits:
+                    from_commits.remove(excluded_commit)
+
         return (from_commits, to_commits)
 
     def cherry_pick_commits(self, from_branch: str, to_branch: str) -> None:
@@ -258,6 +266,12 @@ class GitRepo:
 
     def amend_commit_message(self, msg: str) -> None:
         self._run_git("commit", "--amend", "-m", msg)
+
+
+def clone_repo(username: str, password: str, org: str, project: str) -> GitRepo:
+    path = tempfile.mkdtemp()
+    _check_output(['git', 'clone', f'https://{username}:{password}@github.com/{org}/{project}', path]).strip()
+    return GitRepo(path=path)
 
 
 class PeekableIterator(Iterator[str]):
