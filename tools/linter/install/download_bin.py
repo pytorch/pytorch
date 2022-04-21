@@ -14,7 +14,9 @@ HOST_PLATFORM = platform.system()
 
 # PyTorch directory root
 result = subprocess.run(
-    ["git", "rev-parse", "--show-toplevel"], stdout=subprocess.PIPE, check=True,
+    ["git", "rev-parse", "--show-toplevel"],
+    stdout=subprocess.PIPE,
+    check=True,
 )
 PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
 
@@ -96,11 +98,16 @@ def download(
         try:
             os.mkdir(output_dir)
         except OSError as e:
-            print(f"Unable to create directory for {name} binary: {output_dir}", file=sys.stderr)
+            print(
+                f"Unable to create directory for {name} binary: {output_dir}",
+                file=sys.stderr,
+            )
             return False
         finally:
             if verbose:
-                print(f"Created directory {output_dir} for {name} binary", file=sys.stderr)
+                print(
+                    f"Created directory {output_dir} for {name} binary", file=sys.stderr
+                )
 
         # If the directory didn't exist, neither did the binary, so download it.
         ok = download_bin(name, output_dir, platform_to_url)
@@ -116,7 +123,10 @@ def download(
                 return False
         else:
             if verbose:
-                print(f"Found pre-existing {name} binary, skipping download", file=sys.stderr)
+                print(
+                    f"Found pre-existing {name} binary, skipping download",
+                    file=sys.stderr,
+                )
 
     # Now that the binary is where it should be, hash it.
     actual_bin_hash = compute_file_sha256(output_path)
@@ -143,7 +153,10 @@ def download(
 
         if reference_bin_hash != actual_bin_hash:
             print("The downloaded binary is not what was expected!", file=sys.stderr)
-            print(f"Downloaded hash: {repr(actual_bin_hash)} vs expected {reference_bin_hash}", file=sys.stderr)
+            print(
+                f"Downloaded hash: {repr(actual_bin_hash)} vs expected {reference_bin_hash}",
+                file=sys.stderr,
+            )
 
             # Err on the side of caution and try to delete the downloaded binary.
             try:
@@ -151,7 +164,10 @@ def download(
                 print("The binary has been deleted just to be safe", file=sys.stderr)
             except OSError as e:
                 print(f"Failed to delete binary: {e}", file=sys.stderr)
-                print("Delete this binary as soon as possible and do not execute it!", file=sys.stderr)
+                print(
+                    "Delete this binary as soon as possible and do not execute it!",
+                    file=sys.stderr,
+                )
 
             return False
         else:
