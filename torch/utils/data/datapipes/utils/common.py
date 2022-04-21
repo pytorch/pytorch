@@ -7,8 +7,16 @@ from typing import Iterable, List, Tuple, Union, Optional
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
+__all__ = [
+    "StreamWrapper",
+    "get_file_binaries_from_pathnames",
+    "get_file_pathnames_from_root",
+    "match_masks",
+    "validate_pathname_binary_tuple",
+]
 
-def check_lambda_fn(fn):
+
+def _check_lambda_fn(fn):
     # Partial object has no attribute '__name__', but can be pickled
     if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
         warnings.warn(
@@ -96,7 +104,7 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
         )
 
 
-def deprecation_warning(
+def _deprecation_warning(
     old_class_name: str,
     *,
     deprecation_version: str,
