@@ -2320,20 +2320,17 @@ Differences with `numpy.linalg.qr`:
   When :attr:`mode`\ `= 'r'`, the `Q` tensor is an empty tensor.
   This behavior may change in a future PyTorch release.
 
-.. note:: The elements in the diagonal of `R` are not necessarily positive.
+.. note:: The only :attr:`mode` that is differentiable is :attr:`mode`\ `= 'reduced'`.
 
-.. note:: :attr:`mode`\ `= 'r'` does not support backpropagation. Use :attr:`mode`\ `= 'reduced'` instead.
+.. warning:: The elements in the diagonal of `R` are not necessarily positive.
+             As such, the returned QR decomposition is only unique up to the sign of the diagonal of `R`.
+             Therefore, different platforms, like NumPy, or inputs on different devices,
+             may produce different valid decompositions.
 
-.. warning:: The QR decomposition is only unique up to the sign of the diagonal of `R` when the
-             first `k = min(m, n)` columns of :attr:`A` are linearly independent.
-             If this is not the case, different platforms, like NumPy,
-             or inputs on different devices, may produce different valid decompositions.
-
-.. warning:: Gradient computations are only supported if the first `k = min(m, n)` columns
+.. warning:: The QR decomposition is only well-defined if the first `k = min(m, n)` columns
              of every matrix in :attr:`A` are linearly independent.
-             If this condition is not met, no error will be thrown, but the gradient produced
-             will be incorrect.
-             This is because the QR decomposition is not differentiable at these points.
+             If this condition is not met, no error will be thrown, but the QR produced
+             may be incorrect and its autodiff may fail or produce incorrect results.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
