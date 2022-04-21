@@ -369,9 +369,9 @@ class ProfilingMode(Enum):
 
 def cppProfilingFlagsToProfilingMode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     torch._C._jit_set_profiling_executor(old_prof_exec_state)
-    torch._C._jit_set_profiling_mode(old_prof_mode_state)
+    torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
     if old_prof_exec_state:
         if old_prof_mode_state:
@@ -385,23 +385,23 @@ def cppProfilingFlagsToProfilingMode():
 def enable_profiling_mode_for_profiling_tests():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-        old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+        old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     try:
         yield
     finally:
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             torch._C._jit_set_profiling_executor(old_prof_exec_state)
-            torch._C._jit_set_profiling_mode(old_prof_mode_state)
+            torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
 @contextmanager
 def enable_profiling_mode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     try:
         yield
     finally:
         torch._C._jit_set_profiling_executor(old_prof_exec_state)
-        torch._C._jit_set_profiling_mode(old_prof_mode_state)
+        torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
 @contextmanager
 def num_profiled_runs(num_runs):
@@ -766,7 +766,7 @@ TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa')
 
-BUILD_WITH_CAFFE2 = _check_module_exists("caffe2.python.caffe2_pybind11_state")
+BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
@@ -789,10 +789,29 @@ TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 # it felt a little awkward.
 TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 
-# Disables noarch tests; all but one CI configuration disables these.  We don't
-# disable them for local runs because you still want to run them
-# (unlike slow tests!)
-TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
+# Enables crossref tests, in addition to standard tests which
+# are being run.  crossref tests work by installing a torch
+# function mode that runs extra compute alongside the regular
+# computation that happens with the test.  After both computations
+# are done, we cross-reference them (thus the name) to check for
+# correction, before throwing out the extra compute and proceeding
+# as we had before.  By default, we don't run these tests.
+TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
+
+def skipIfCrossRef(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_CROSSREF:
+            raise unittest.SkipTest("test doesn't currently with crossref")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+class CrossRefMode(torch.overrides.TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        r = func(*args, **kwargs)
+        return r
 
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
@@ -1023,7 +1042,6 @@ def skipIfNoLapack(fn):
             fn(*args, **kwargs)
     return wrapper
 
-
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
 
@@ -1045,6 +1063,17 @@ def skipIfNotRegistered(op_name, message):
         skipper = unittest.skip("Cannot import `caffe2.python.core`")
     return skipper
 
+def _decide_skip_caffe2(expect_caffe2, reason):
+    def skip_dec(func):
+        def wrapper(self):
+            if torch.onnx._CAFFE2_ATEN_FALLBACK != expect_caffe2:
+                raise unittest.SkipTest(reason)
+            return func(self)
+        return wrapper
+    return skip_dec
+
+skipIfCaffe2 = _decide_skip_caffe2(False, "Not compatible with Caffe2")
+skipIfNoCaffe2 = _decide_skip_caffe2(True, "Caffe2 is not available")
 
 def skipIfNoSciPy(fn):
     @wraps(fn)
@@ -1086,20 +1115,6 @@ def slowTest(fn):
         else:
             fn(*args, **kwargs)
     wrapper.__dict__['slow_test'] = True
-    return wrapper
-
-
-# noarch tests are tests that should be only run on one CI configuration,
-# because they don't exercise any interesting platform specific code
-# and so if run once, indicate the test should pass everywhere.
-# See https://github.com/pytorch/pytorch/issues/53743
-def noarchTest(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_SKIP_NOARCH:
-            raise unittest.SkipTest("test is noarch: we are skipping noarch tests due to TEST_SKIP_NOARCH")
-        else:
-            fn(*args, **kwargs)
     return wrapper
 
 
@@ -1841,8 +1856,11 @@ class TestCase(expecttest.TestCase):
 
 
     def run(self, result=None):
-        num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
-        self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
+        with contextlib.ExitStack() as stack:
+            if TEST_WITH_CROSSREF:
+                stack.enter_context(torch.overrides.push_torch_function_mode(CrossRefMode))
+            num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+            self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
 
     def setUp(self):
         check_if_enable(self)
@@ -1999,9 +2017,11 @@ class TestCase(expecttest.TestCase):
         return crow_indices.to(device=device)
 
     def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+        from operator import mul
+        from functools import reduce
         sparse_dim = 2
-        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
-        assert len(size) == sparse_dim
+        assert all(size[d] > 0 for d in range(len(size))) or nnz == 0, 'invalid arguments'
+        assert len(size) >= sparse_dim
 
         def random_sparse_csr(n_rows, n_cols, nnz):
             crow_indices = self._make_crow_indices(n_rows, n_cols, nnz, device=device, dtype=index_dtype)
@@ -2015,7 +2035,15 @@ class TestCase(expecttest.TestCase):
             values = make_tensor([nnz], device=device, dtype=dtype, low=low, high=high)
             return values, crow_indices, col_indices
 
-        values, crow_indices, col_indices = random_sparse_csr(size[0], size[1], nnz)
+        batch_shape = size[:-2]
+        n_batch = reduce(mul, batch_shape, 1)
+
+        sparse_tensors = [random_sparse_csr(size[-2], size[-1], nnz) for _ in range(n_batch)]
+        sparse_tensors_it = map(list, zip(*sparse_tensors))
+        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+        crow_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+        col_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+
         return torch.sparse_csr_tensor(crow_indices,
                                        col_indices,
                                        values, size=size, dtype=dtype, device=device)
@@ -2048,7 +2076,10 @@ class TestCase(expecttest.TestCase):
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
-        return t.coalesce().to_dense()
+        # coalesce is only implemented for COO
+        if t.layout == torch.sparse_coo:
+            t = t.coalesce()
+        return t.to_dense()
 
     # Compares a torch function with a reference function for a given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
@@ -2920,7 +2951,7 @@ def gradcheck(fn, inputs, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -2940,7 +2971,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():

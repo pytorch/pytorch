@@ -569,15 +569,6 @@ SparseTensor sparse_csr_to_sparse(const Tensor& self) {
 
 // NB: Dropped the resizeNd variants
 
-Tensor sparse_to_dense(
-    const SparseTensor& self,
-    c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(
-      !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
-  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
-  return dst.add_(self);
-}
-
 SparseTensor& copy_sparse_wrapper_(
     Tensor& self,
     const Tensor& src,

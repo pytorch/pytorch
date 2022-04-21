@@ -38,12 +38,12 @@ jobs:
           no-sudo: true
 
       - name: Setup Windows
-        uses: pytorch/pytorch/.github/actions/setup-win@master
+        uses: ./.github/actions/setup-win
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/pytorch/.github/actions/setup-ssh@master
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -79,7 +79,7 @@ jobs:
 
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
-        uses: seemethere/upload-artifact-s3@v3
+        uses: seemethere/upload-artifact-s3@v4
         with:
           retention-days: 14
           if-no-files-found: error
@@ -87,7 +87,7 @@ jobs:
           path: C:\${{ github.run_id }}\build-results
 
       - name: Teardown Windows
-        uses: pytorch/pytorch/.github/actions/teardown-win@master
+        uses: ./.github/actions/teardown-win
         if: always()
         timeout-minutes: 120
         with:

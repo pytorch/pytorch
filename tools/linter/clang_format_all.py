@@ -21,9 +21,11 @@ from .clang_format_utils import get_and_check_clang_format, CLANG_FORMAT_PATH
 # If you edit this, please edit the allowlist in clang_format_ci.sh as well.
 CLANG_FORMAT_ALLOWLIST = [
     "c10/",
+    "ios/",
     "torch/csrc/jit/",
+    "torch/csrc/deploy/",
     "test/cpp/jit/",
-    "test/cpp/tensorexpr/"
+    "test/cpp/tensorexpr/",
 ]
 
 CLANG_FORMAT_BLOCK_LIST = {
@@ -32,8 +34,7 @@ CLANG_FORMAT_BLOCK_LIST = {
 
 
 # Only files with names matching this regex will be formatted.
-CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
-
+CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp|m|mm)$")
 
 
 def get_allowlisted_files() -> Set[str]:
@@ -83,7 +84,9 @@ async def file_clang_formatted_correctly(
     cmd = "{} -style=file {}".format(CLANG_FORMAT_PATH, filename)
 
     async with semaphore:
-        proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE)
+        proc = await asyncio.create_subprocess_shell(
+            cmd, stdout=asyncio.subprocess.PIPE
+        )
         # Read back the formatted file.
         stdout, _ = await proc.communicate()
 
@@ -125,7 +128,12 @@ async def run_clang_format(
 
     # Format files in parallel.
     if diff:
-        for f in asyncio.as_completed([file_clang_formatted_correctly(f, semaphore, verbose) for f in get_allowlisted_files()]):
+        for f in asyncio.as_completed(
+            [
+                file_clang_formatted_correctly(f, semaphore, verbose)
+                for f in get_allowlisted_files()
+            ]
+        ):
             ok &= await f
 
         if ok:
@@ -133,9 +141,15 @@ async def run_clang_format(
         else:
             print("Some files not formatted correctly")
     else:
-        await asyncio.gather(*[run_clang_format_on_file(f, semaphore, verbose) for f in get_allowlisted_files()])
+        await asyncio.gather(
+            *[
+                run_clang_format_on_file(f, semaphore, verbose)
+                for f in get_allowlisted_files()
+            ]
+        )
 
     return ok
+
 
 def parse_args(args: List[str]) -> argparse.Namespace:
     """
@@ -152,8 +166,12 @@ def parse_args(args: List[str]) -> argparse.Namespace:
         help="Determine whether running clang-format would produce changes",
     )
     parser.add_argument("--verbose", "-v", action="store_true", default=False)
-    parser.add_argument("--max-processes", type=int, default=50,
-                        help="Maximum number of subprocesses to create to format files in parallel")
+    parser.add_argument(
+        "--max-processes",
+        type=int,
+        default=50,
+        help="Maximum number of subprocesses to create to format files in parallel",
+    )
     return parser.parse_args(args)
 
 
@@ -165,7 +183,9 @@ def main(args: List[str]) -> bool:
     # Invoke clang-format on all files in the directories in the allowlist.
     if ok:
         loop = asyncio.get_event_loop()
-        ok = loop.run_until_complete(run_clang_format(options.max_processes, options.diff, options.verbose))
+        ok = loop.run_until_complete(
+            run_clang_format(options.max_processes, options.diff, options.verbose)
+        )
 
     # We have to invert because False -> 0, which is the code to be returned if everything is okay.
     return not ok

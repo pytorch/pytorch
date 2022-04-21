@@ -16,14 +16,14 @@ concurrency:
 jobs:
   docs-build:
     name: docs build
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-py3.7-gcc5.4
       docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
 
   docs-push:
     name: docs push
-    uses: pytorch/pytorch/.github/workflows/_docs.yml@master
+    uses: ./.github/workflows/_docs.yml
     needs: docs-build
     with:
       build-environment: linux-xenial-py3.7-gcc5.4

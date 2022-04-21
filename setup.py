@@ -1051,6 +1051,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/profiler/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/torch/csrc/tensor/*.h',
+                'include/torch/csrc/lazy/backend/*.h',
                 'include/torch/csrc/lazy/core/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',

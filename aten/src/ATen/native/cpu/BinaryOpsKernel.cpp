@@ -625,8 +625,33 @@ void fmin_kernel(TensorIteratorBase& iter) {
 }
 
 void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
+  if (iter.dtype() == kBFloat16) {
+    const float beta_val(beta);
+    const Vectorized<float> beta_val_vec(beta_val);
+    const Vectorized<float> point_five_vec(static_cast<float>(0.5));
+    cpu_kernel_vec(
+        iter,
+        [&beta_val](BFloat16 a, BFloat16 b) -> BFloat16 {
+          auto z = std::abs(float(a) - float(b));
+          return z < beta_val
+              ? static_cast<float>(0.5) * z * z / beta_val
+              : z - static_cast<float>(0.5) * beta_val;
+        },
+        [&beta_val_vec, &point_five_vec](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
+          Vectorized<float> a0, a1, b0, b1;
+          std::tie(a0, a1) = convert_bfloat16_float(a);
+          std::tie(b0, b1) = convert_bfloat16_float(b);
+          auto z = (a0 - b0).abs();
+          a0 =  Vectorized<float>::blendv(
+              point_five_vec * z * z / beta_val_vec, z - point_five_vec * beta_val_vec, z >= beta_val_vec);
+          z = (a1 - b1).abs();
+          a1 =  Vectorized<float>::blendv(
+              point_five_vec * z * z / beta_val_vec, z - point_five_vec * beta_val_vec, z >= beta_val_vec);
+          return convert_float_bfloat16(a0, a1);
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
         using Vec = Vectorized<scalar_t>;
         const scalar_t beta_val(beta);
         const Vec beta_val_vec(beta_val);
@@ -645,6 +670,7 @@ void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
                   point_five_vec * z * z / beta_val_vec, z - point_five_vec * beta_val_vec, z >= beta_val_vec);
             });
       });
+  }
 }
 
 void huber_kernel(TensorIterator& iter, double delta) {

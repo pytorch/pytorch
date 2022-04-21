@@ -25,16 +25,6 @@ COMMON_COPTS = [
     "-DUSE_CUDNN",
 ])
 
-# TODO: refactor this into its own library (but how to make
-# a binary based off of a module in a library?)
-py_binary(
-    name = "gen",
-    srcs = ["tools/setup_helpers/gen.py"],
-    deps = [
-        ":tools_codegen"
-    ],
-)
-
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
 
 generated_cpu_cpp = [
@@ -46,6 +36,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterFunctionalization_3.cpp",
     # "aten/src/ATen/RegisterFunctionalizationEverything.cpp",
     "aten/src/ATen/RegisterMkldnnCPU.cpp",
+    "aten/src/ATen/RegisterNestedTensorCPU.cpp",
     "aten/src/ATen/RegisterQuantizedCPU.cpp",
     "aten/src/ATen/RegisterSparseCPU.cpp",
     "aten/src/ATen/RegisterSparseCsrCPU.cpp",
@@ -60,6 +51,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeViewCopyKernels.cpp",
     "aten/src/ATen/FunctionalInverses.h",
     "aten/src/ATen/Functions.h",
     "aten/src/ATen/Functions.cpp",
@@ -86,6 +78,7 @@ generated_cuda_cpp = [
     "aten/src/ATen/CUDAFunctions.h",
     "aten/src/ATen/CUDAFunctions_inl.h",
     "aten/src/ATen/RegisterCUDA.cpp",
+    "aten/src/ATen/RegisterNestedTensorCUDA.cpp",
     "aten/src/ATen/RegisterQuantizedCUDA.cpp",
     "aten/src/ATen/RegisterSparseCUDA.cpp",
     "aten/src/ATen/RegisterSparseCsrCUDA.cpp",
@@ -102,37 +95,7 @@ generate_aten(
         aten_ufunc_generated_cuda_sources("aten/src/ATen/{}") +
         ["aten/src/ATen/Declarations.yaml"]
     ),
-    generator=":gen",
-)
-
-py_library(
-    name = "tools_codegen",
-    srcs = glob(["tools/codegen/**/*.py"]),
-)
-
-py_library(
-    name = "tools_autograd",
-    srcs = glob(["tools/autograd/*.py"]),
-    data = glob([
-        "tools/autograd/*.yaml",
-        "tools/autograd/templates/*",
-    ]),
-    deps = [":tools_codegen"],
-)
-
-py_library(
-    name = "tools_jit",
-    srcs = glob(["tools/jit/*.py"]),
-    data = glob(["tools/jit/templates/*"]),
-)
-
-py_binary(
-    name = "generate_code",
-    srcs = ["tools/setup_helpers/generate_code.py"],
-    deps = [
-        ":tools_autograd",
-        ":tools_jit",
-    ],
+    generator = "//tools/codegen:gen",
 )
 
 libtorch_cpp_generated_sources = [
@@ -194,8 +157,8 @@ genrule(
         "aten/src/ATen/templates/LazyIr.h",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src --gen_lazy_ts_backend",
-    tools = [":generate_code"],
+    cmd = "$(location //tools/setup_helpers:generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --gen_lazy_ts_backend",
+    tools = ["//tools/setup_helpers:generate_code"],
 )
 
 filegroup(
@@ -309,6 +272,7 @@ filegroup(
             "aten/src/ATen/native/cuda/linalg/*.cpp",
             "aten/src/ATen/native/cudnn/*.cpp",
             "aten/src/ATen/native/miopen/*.cpp",
+            "aten/src/ATen/native/nested/cuda/*.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
             "aten/src/THC/*.cpp",
         ],
@@ -321,6 +285,7 @@ filegroup(
         "aten/src/ATen/cuda/*.cu",
         "aten/src/ATen/cuda/detail/*.cu",
         "aten/src/ATen/native/cuda/*.cu",
+        "aten/src/ATen/native/nested/cuda/*.cu",
         "aten/src/ATen/native/quantized/cuda/*.cu",
         "aten/src/ATen/native/sparse/cuda/*.cu",
     ]) + aten_ufunc_generated_cuda_sources("aten/src/ATen/{}"),
@@ -1380,7 +1345,7 @@ cc_library(
 py_binary(
     name = "gen_op",
     srcs = ["caffe2/contrib/aten/gen_op.py"],
-    deps = [":tools_codegen"],
+    deps = ["//tools/codegen"],
 )
 
 genrule(
@@ -1648,17 +1613,12 @@ cc_library(
 )
 
 # torch
-py_binary(
-    name = "gen_version_header",
-    srcs = ["tools/setup_helpers/gen_version_header.py"],
-)
-
 genrule(
     name = "version_h",
     srcs = ["torch/csrc/api/include/torch/version.h.in", "version.txt"],
     outs = ["torch/csrc/api/include/torch/version.h"],
-    cmd = "$(location :gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
-    tools = [':gen_version_header'],
+    cmd = "$(location //tools/setup_helpers:gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
+    tools = ['//tools/setup_helpers:gen_version_header'],
 )
 
 py_binary(
