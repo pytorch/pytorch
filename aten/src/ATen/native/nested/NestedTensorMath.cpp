@@ -359,16 +359,5 @@ Tensor NestedTensor_embedding(
       result_buffer.reshape({-1}), std::move(new_sizes));
 }
 
-int64_t NestedTensor_size_int(const Tensor& self, int64_t d) {
-  const auto* nt_indices = get_nested_tensor_impl(self);
-  TORCH_CHECK(nt_indices->get_opt_size(d), "Irregular dimension ", d, " does not have a size.");
-  return *nt_indices->get_opt_size(d);
-}
-
-std::vector<at::Tensor> NestedTensor_nested_size(const Tensor& self) {
-  const auto* nt_indices = get_nested_tensor_impl(self);
-  return nt_indices->get_nested_size_tensor().unbind();
-}
-
 } // namespace native
 } // namespace at

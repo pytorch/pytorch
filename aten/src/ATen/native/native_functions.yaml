@@ -2598,9 +2598,6 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
-  dispatch:
-    CompositeImplicitAutograd: linear
-    NestedTensorCPU, NestedTensorCUDA: linear
 
 - func: linear.out(Tensor input, Tensor weight, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4078,15 +4075,6 @@
   device_check: NoCheck
   device_guard: False
   manual_cpp_binding: True
-
-- func: nested_tensor_size(Tensor self, int dim) -> int
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_size_int
-
-- func: nested_size(Tensor self) -> Tensor[]
-  variants: method
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_nested_size
 
 - func: size.Dimname(Tensor self, Dimname dim) -> int
   variants: function, method
