@@ -44,13 +44,14 @@ static int64_t ScalarTypeToONNXType(const c10::ScalarType& st) {
 // There is no operator-wise special case handling needed.
 static const std::unordered_set<NodeKind> standardOps = {
     onnx::Add,
-    onnx::Sub,
-    onnx::Mul,
+    onnx::Concat,
     onnx::Div,
     onnx::Gemm,
-    onnx::Pow,
+    onnx::Min,
     onnx::Mod,
-    onnx::Concat,
+    onnx::Mul,
+    onnx::Pow,
+    onnx::Sub,
 };
 
 // For these operators, all inputs share the same scalar type.

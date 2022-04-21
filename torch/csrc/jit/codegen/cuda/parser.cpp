@@ -1369,8 +1369,6 @@ class IrParser {
         REGISTER_PARSE_RULE(
             ptr_op,
             {
-              auto fusion = FusionGuard::getCurFusion();
-
               // TODO: handle channels last
               MemoryFormat format;
               std::list<Val*> list_val;
@@ -2455,12 +2453,8 @@ class IrParser {
             TORCH_INTERNAL_ASSERT(false, "not implemented yet");
           },
           [](const Node* node) -> bool {
-            // We only profile `linear` layer with bias.
-            if (node->input(2)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              return false;
-            }
-            return true;
+            // We only profile `linear` layer but not fusing it.
+            return false;
           });
     }
 
@@ -2625,14 +2619,14 @@ class IrParser {
                   "aten::amax/amin cannot be fused with dynamic keepdim");
 
               TensorView* out = nullptr;
-              if (node->kind() ==
-                  c10::Symbol::fromQualString("aten::amax")) {
+              if (node->kind() == c10::Symbol::fromQualString("aten::amax")) {
                 out = max(self->as<TensorView>(), dims, keepdim.value());
-              } else if (node->kind() ==
-                  c10::Symbol::fromQualString("aten::amin")) {
+              } else if (
+                  node->kind() == c10::Symbol::fromQualString("aten::amin")) {
                 out = min(self->as<TensorView>(), dims, keepdim.value());
               } else {
-                TORCH_INTERNAL_ASSERT(false, "unrecognized operation in aten::amax/amin");
+                TORCH_INTERNAL_ASSERT(
+                    false, "unrecognized operation in aten::amax/amin");
               }
               value_map.emplace(node->output()->unique(), out);
             },
