@@ -33,6 +33,9 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
     return nested_size_tensor_;
   }
   c10::optional<int64_t> get_opt_size(int64_t i) const {
+    if (opt_sizes_[i] == -1) {
+      return c10::nullopt;
+    }
     return opt_sizes_[i];
   }
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
@@ -66,7 +69,8 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
 
   at::Tensor buffer_;
   const at::Tensor nested_size_tensor_;
-  std::vector<c10::optional<int64_t>> opt_sizes_;
+  // NOTE: -1 here means the size is missing
+  std::vector<int64_t> opt_sizes_;
 };
 
 inline NestedTensorImpl* get_nested_tensor_impl_or_null(const at::Tensor& tensor) {

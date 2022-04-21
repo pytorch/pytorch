@@ -130,13 +130,14 @@ Tensor _collapse_two_dims_3(Tensor input, int64_t dim1, int64_t dim2) {
 
 Tensor batch_offsets_from_efficient_size(Tensor ef_sizes) {
   int64_t* nt_sizes_ptr = ef_sizes.data_ptr<int64_t>();
-  Tensor offsets = at::empty({1 + ef_sizes.size(0)}, at::kLong);
+  int64_t ef_sizes_size_0 = ef_sizes.sizes()[0];
+  Tensor offsets = at::empty({1 + ef_sizes_size_0}, at::kLong);
   int64_t* offsets_ptr = offsets.data_ptr<int64_t>();
   offsets_ptr[0] = 0;
   int64_t ef_sizes_size_1 = ef_sizes.size(1);
-  for (int64_t i = 0; i < ef_sizes.size(0); i++) {
+  for (const auto i : c10::irange(ef_sizes_size_0)) {
     int64_t prod = 1;
-    for (int64_t j = 0; j < ef_sizes_size_1; j++) {
+    for (const auto j : c10::irange(ef_sizes_size_1)) {
       prod = prod * nt_sizes_ptr[i * ef_sizes_size_1 + j];
     }
     offsets_ptr[i + 1] = offsets_ptr[i] + prod;
@@ -145,15 +146,16 @@ Tensor batch_offsets_from_efficient_size(Tensor ef_sizes) {
 }
 
 Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
-  if ((t.dim() >= 2 && t.dim() <= 4)) {
-    auto orig_nt_dim = t.dim();
+  int64_t t_dim = t.dim();
+  if ((t_dim >= 2 && t_dim <= 4)) {
+    auto orig_nt_dim = t_dim;
     auto* nt_input = get_nested_tensor_impl(t);
     TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
     const auto& nt_buffer = nt_input->get_buffer();
     const auto nt_input_opt_size_2 = nt_input->get_opt_size(2);
 
     Tensor nt = t;
-    if (t.dim() == 3 && nt_input_opt_size_2) {
+    if (t_dim == 3 && nt_input_opt_size_2) {
       nt = _collapse_two_dims_3(nt, 1, 2);
     }
 
@@ -166,15 +168,12 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
 
     int64_t input_dim = nt_sizes.size(1);
     int64_t batch_size = nt_sizes.size(0);
+    //TODO: Remove need for cat here
     at::Tensor metadata = at::cat({offsets, nt_sizes.reshape(-1)});
     metadata = metadata.to(at::Device(kCUDA), at::kInt, true, true);
 
-    std::vector<int64_t> split_sizes;
-    split_sizes.push_back(offsets.numel());
-    split_sizes.push_back(nt_sizes.numel());
-
     std::vector<Tensor> split =
-        at::split_with_sizes(metadata, IntArrayRef(split_sizes), 0);
+        at::split_with_sizes(metadata, {offsets.numel(), nt_sizes.numel()}, 0);
 
     offsets = split[0];
     nt_sizes = split[1];
