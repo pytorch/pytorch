@@ -3083,12 +3083,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
   // E_{ij} = L_j - L_i if i != j
   //          1         otherwise
 
-  // Note: The Hermitian case is a simplification of this formula using that V^{-1} = V^H and that L is real
-  if (is_hermitian) {
-    TORCH_CHECK(at::allclose(dA, dA.mH(), /*rtol=*/1e-2, /*atol=*/1e-2),
-                "linalg_eig_jvp: The tangent part of the matrix A should also be ", (dA.is_complex() ? "Hermitian" : "symmetric."));
-  }
-
+  // Precondition: if is_hermitian == true, then dA is Hermitian
   const auto to_complex = [](const Tensor& A){ return A.to(c10::toComplexType(A.scalar_type())); };
 
   const auto dP = is_hermitian ? at::matmul(at::matmul(V.mH(), dA), V)
