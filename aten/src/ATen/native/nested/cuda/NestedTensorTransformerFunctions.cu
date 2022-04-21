@@ -368,9 +368,9 @@ void add_padding_kernelLauncher(
     const int* input_sizes,
     int input_dim,
     std::vector<int64_t> output_sizes,
-    const int batch_size,
-    const cudaStream_t stream)
+    const int batch_size)
 {
+  at::cuda::CUDAStream stream = at::cuda::getDefaultCUDAStream();
   dim3 grid;
   grid.x = batch_size;
   grid.y = 16;
@@ -420,8 +420,7 @@ template void add_padding_kernelLauncher<float>(
     const int* input_sizes,
     int input_dim,
     std::vector<int64_t> output_sizes,
-    const int batch_size,
-    const cudaStream_t stream);
+    const int batch_size);
 
 template void add_padding_kernelLauncher<c10::Half>(
     c10::Half* input,
@@ -431,8 +430,7 @@ template void add_padding_kernelLauncher<c10::Half>(
     const int* input_sizes,
     int input_dim,
     std::vector<int64_t> output_sizes,
-    const int batch_size,
-    const cudaStream_t stream);
+    const int batch_size);
 
 } // namespace native
 } // namespace at

@@ -94,5 +94,30 @@ inline bool nested_tensor_impl_is_contiguous(
   return memory_format == MemoryFormat::Contiguous;
 }
 
+inline std::vector<int64_t> NestedTensor_get_max_size_from_size_tensor(const Tensor& sizes) {
+  if (sizes.dim() == 0) {
+    return {};
+  }
+  const auto sizes_ptr = sizes.data_ptr<int64_t>();
+  const auto sizes_size_0 = sizes.sizes()[0];
+  const auto sizes_size_1 = sizes.sizes()[1];
+  TORCH_INTERNAL_ASSERT(sizes_size_1 > 0);
+  std::vector<int64_t> results(sizes_size_1, 0);
+  for (const auto ii : c10::irange(sizes_size_0)) {
+    for (const auto jj : c10::irange(sizes_size_1)) {
+      auto val = sizes_ptr[ii * sizes_size_1 + jj];
+      if (results[jj] < val) {
+        results[jj] = val;
+      }
+    }
+  }
+  return results;
+}
+
+inline std::vector<int64_t> NestedTensor_get_max_size(const NestedTensorImpl& nt) {
+  const auto& sizes = nt.get_nested_size_tensor();
+  return NestedTensor_get_max_size_from_size_tensor(sizes);
+}
+
 } // namespace native
 } // namespace at

@@ -81,7 +81,6 @@ void add_padding_kernelLauncher(
     const int* input_sizes,
     int input_dim,
     std::vector<int64_t> output_sizes,
-    const int batch_size,
-    const cudaStream_t stream);
+    const int batch_size);
 } // namespace native
 } // namespace at
