@@ -108,7 +108,7 @@ parameters for activations. Post Training Static Quantization is typically used 
 both memory bandwidth and compute savings are important with CNNs being a
 typical use case.
 
-We may need to modify the model before applying post training static quantization. Please see preparation_.
+We may need to modify the model before applying post training static quantization. Please see `Model Preparation for Eager Mode Static Quantization`_.
 
 Diagram::
 
@@ -494,9 +494,11 @@ In general, the flow is the following
 * prepare
 
   * insert Observer/FakeQuantize modules based on user specified qconfig
+
 * calibrate/train (depending on post training quantization or quantization aware training)
 
   * allow Observers to collect statistics or FakeQuantize modules to learn the quantization parameters
+
 * convert
 
   * convert a calibrated/trained model to a quantized model
@@ -522,7 +524,7 @@ Quantization Mode Support
 |                             |Quantization                                          |Dataset         | Works Best For | Accuracy   |      Notes      |
 |                             |Mode                                                  |Requirement     |                |            |                 |
 +-----------------------------+---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-| Post Training Quantization  |Dyanmic/Weight Only Quantization |activation          |None            |LSTM, MLP,      |good        |Easy to use,     |
+|Post Training Quantization   |Dyanmic/Weight Only Quantization |activation          |None            |LSTM, MLP,      |good        |Easy to use,     |
 |                             |                                 |dynamically         |                |Embedding,      |            |close to static  |
 |                             |                                 |quantized (fp16,    |                |Transformer     |            |quantization when|
 |                             |                                 |int8) or not        |                |                |            |performance is   |
@@ -542,13 +544,14 @@ Quantization Mode Support
 |                             |                                 |weight are fake     |dataset         |                |            |for now          |
 |                             |                                 |quantized           |                |                |            |                 |
 |                             +---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-|                             |Static Quantization              |activatio nand      |fine-tuning     |CNN, MLP,       |best        | Typically used  |
-|                             |                                 |weight are fake     |dataset         |Embedding       |            |   when static   |
-|                             |                                 |quantized           |                |                |            |  quantization   |
-|                             |                                 |                    |                |                |            |  leads to bad   |
-|                             |                                 |                    |                |                |            |  accuracy, and  |
+|                             |Static Quantization              |activatio nand      |fine-tuning     |CNN, MLP,       |best        |Typically used   |
+|                             |                                 |weight are fake     |dataset         |Embedding       |            |when static      |
+|                             |                                 |quantized           |                |                |            |quantization     |
+|                             |                                 |                    |                |                |            |leads to bad     |
+|                             |                                 |                    |                |                |            |accuracy, and    |
 |                             |                                 |                    |                |                |            |used to close the|
-| Quantization Aware Training |                                 |                    |                |                |            |  accuracy gap   |
+|                             |                                 |                    |                |                |            |accuracy gap     |
+|Quantization Aware Training  |                                 |                    |                |                |            |                 |
 +-----------------------------+---------------------------------+--------------------+----------------+----------------+------------+-----------------+
 
 Please see our `Introduction to Quantization on Pytorch
@@ -630,10 +633,9 @@ Backend/Hardware Support
 +-----------------+---------------+------------+------------+------------+
 
 Today, PyTorch supports the following backends for running quantized operators efficiently:
-* x86 CPUs with AVX2 support or higher (without AVX2 some operations have
-  inefficient implementations), via `fbgemm` (`<https://github.com/pytorch/FBGEMM>`_).
-* ARM CPUs (typically found in mobile/embedded devices), via
-  `qnnpack` (`<https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native/quantized/cpu/qnnpack>`_).
+
+* x86 CPUs with AVX2 support or higher (without AVX2 some operations have inefficient implementations), via `fbgemm` (`<https://github.com/pytorch/FBGEMM>`_).
+* ARM CPUs (typically found in mobile/embedded devices), via `qnnpack` (`<https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native/quantized/cpu/qnnpack>`_).
 * (early prototype) support for NVidia GPU via `TensorRT` (`<https://developer.nvidia.com/tensorrt>`_) through `fx2trt`
 
 
