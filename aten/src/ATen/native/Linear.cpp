@@ -7,13 +7,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
 
-#include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/NestedTensorImpl.h>
-#include <ATen/native/nested/NestedTensorMath.h>
-
 #include <array>
 #include <cctype>
 #include <cstddef>
