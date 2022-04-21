@@ -398,6 +398,8 @@ class TestOperators(TestCase):
         # Some kind of issue with unsymmetric tangent type
         # Runtime Error: The tangent part of the matrix A should also be symmetric.
         xfail('linalg.eigh'),
+
+        skip('bernoulli'),  # cuda set seed randomness issues
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
@@ -573,9 +575,6 @@ class TestOperators(TestCase):
         skip('normal', 'number_mean'),  # randomness
 
         # All of the following are bugs and need to be fixed
-        xfail('bfloat16', 'channels_last'),
-        xfail('float', 'channels_last'),
-        xfail('half', 'channels_last'),
         xfail('eig'),
         xfail('view_as_complex'),
         xfail('fft.ihfft'),
@@ -610,7 +609,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
-        xfail('double', 'channels_last'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('fft.rfft2'),
         skip('qr'),  # Nondetermistic
@@ -624,6 +622,12 @@ class TestOperators(TestCase):
         xfail('lu_solve'),
         xfail('index_copy'),
         xfail('linalg.lu_factor', ''),
+
+        # required rank 4 tensor to use channels_last format
+        xfail('bfloat16'),
+        xfail('double'),
+        xfail('float'),
+        xfail('half'),
     })
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -681,12 +685,6 @@ class TestOperators(TestCase):
         xfail('std_mean'),
         xfail('linalg.eigvalsh'),
 
-        # functorch doesn't support channels_last
-        # PyTorch core's vmap doesn't have a batching rule for `double`, if it
-        # did it would also not support channels last, so I'm including this
-        # xfail "above the line".
-        xfail('double', 'channels_last'),
-
         # RuntimeError: expand: the number of sizes provided (1) must be greater or
         # equal to the number of dimensions in the tensor (2)
         xfail('nanquantile'),
@@ -718,6 +716,8 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'without_train'),
         skip('svd_lowrank', ''),
         xfail('stft'),  # something weird is happening with shapes
+
+        xfail('double'),  # required rank 4 tensor to use channels_last format
     })
     def test_vmapjvp(self, device, dtype, op):
         if is_inplace(op, op.get_op()):
@@ -773,7 +773,6 @@ class TestOperators(TestCase):
         xfail('linalg.cholesky'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('std_mean'),
-        xfail('double', 'channels_last'),
         xfail('block_diag'),
         xfail('scatter'),
         xfail('matrix_exp'),
@@ -794,6 +793,8 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'with_train'),
 
         xfail('stft'),  # transpose_ fallback
+
+        xfail('double'),  # required rank 4 tensor to use channels_last format
     }
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
@@ -869,6 +870,14 @@ class TestOperators(TestCase):
         xfail('fft.ihfftn'),  # conj_physical fallback
         xfail('istft'),  # col2im fallback
         xfail('polar'),  # complex fallback
+
+        # aten::expand_copy hit the vmap fallback which is currently disabled
+        xfail('diag_embed'),
+        xfail('linalg.cond'),
+        xfail('linalg.svd'),
+        xfail('linalg.svdvals'),
+        xfail('norm', 'nuc'),
+        xfail('svd'),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -961,7 +970,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfftn'),
         xfail('fft.rfft2'),
         xfail('cross'),
-        xfail('double', 'channels_last'),
         xfail('linalg.cross'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.huber_loss'),
@@ -985,6 +993,12 @@ class TestOperators(TestCase):
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('svd_lowrank', ''),
         xfail('linalg.lu_factor_ex', ''),
+        xfail('combinations'),  # aten::masked_select_backward hit the vmap fallback which is currently disabled
+
+        # aten::expand_copy hit the vmap fallback which is currently disabled
+        xfail('diag_embed'),
+        xfail('linalg.svd'),
+        xfail('svd'),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1030,7 +1044,6 @@ class TestOperators(TestCase):
         xfail('matrix_exp'),
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('double', 'channels_last'),
         xfail('masked_select'),
         skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
@@ -1043,10 +1056,11 @@ class TestOperators(TestCase):
         xfail('pca_lowrank', ''),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
-        xfail('bfloat16', 'channels_last'),
-        xfail('float', 'channels_last'),
-        xfail('half', 'channels_last'),
-
+        # something weird happening with channels_last
+        xfail('bfloat16'),
+        xfail('double'),
+        xfail('float'),
+        xfail('half'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1271,6 +1285,10 @@ class TestDecompositionOpInfo(TestCase):
         # Some weird matmul stuff with int64 matmuls
         # inplace op
         skip('resize_'),
+        # Weird conj errors
+        xfail('fft.hfft2', dtypes=(torch.float32, torch.float64)),
+        xfail('fft.hfft', dtypes=(torch.float32, torch.float64)),
+        xfail('fft.hfftn', dtypes=(torch.float32, torch.float64)),
     })
     def test_decomposition(self, device, dtype, op):
         # dtype is too confusing of a name for how we're using it
