@@ -122,7 +122,6 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Autogenerate code")
     parser.add_argument("--native-functions-path")
-    parser.add_argument("--install_dir")
     parser.add_argument(
         "--gen-dir",
         type=pathlib.Path,
