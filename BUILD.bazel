@@ -1663,7 +1663,12 @@ cc_library(
     hdrs = glob([
         "**/*.h",
         "**/*.cuh",
-    ]) + GENERATED_AUTOGRAD_CPP,
+    ]) + [
+        # We need the filegroup here because the raw list causes Bazel
+        # to see duplicate files. It knows how to deduplicate with the
+        # filegroup.
+        ":cpp_generated_code"
+    ],
     includes = [
         "torch/csrc/api/include",
         "torch/csrc/distributed",
