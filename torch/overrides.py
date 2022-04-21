@@ -1199,6 +1199,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.geometric_: lambda self, p, *, generator=None: -1,
         Tensor.get_device: lambda self: -1,
         Tensor.half: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.chalf: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.has_names: lambda self: -1,
         Tensor.indices: lambda self: -1,
         Tensor.int: lambda self, memory_format=torch.preserve_format: -1,
