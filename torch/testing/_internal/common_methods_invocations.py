@@ -15433,7 +15433,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         'log_softmax',
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
-        supports_out=False,
+        supports_out=True,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_softmax_variant,
