@@ -3,6 +3,13 @@ load("@rules_cuda//cuda:defs.bzl", "requires_cuda_enabled")
 load("//c10/macros:cmake_configure_file.bzl", "cmake_configure_file")
 load("//tools/config:defs.bzl", "if_cuda")
 
+def _filter_excluded_targets(macro):
+    """Decorate macro to filter out targets that have "-bazel" in tags."""
+    def _filterable_macro(**kwds):
+        if "-bazel" not in kwds.get("tags", []):
+            macro(**kwds)
+    return _filterable_macro
+
 def _py_library(name, **kwds):
     deps = [dep for dep in kwds.pop("deps", []) if dep != None]
     native.py_library(name = name, deps = deps, **kwds)
@@ -19,7 +26,7 @@ rules = struct(
     cc_test = cc_test,
     cmake_configure_file = cmake_configure_file,
     filegroup = native.filegroup,
-    genrule = native.genrule,
+    genrule = _filter_excluded_targets(native.genrule),
     glob = native.glob,
     if_cuda = if_cuda,
     py_binary = native.py_binary,
