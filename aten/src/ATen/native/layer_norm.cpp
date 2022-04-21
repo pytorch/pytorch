@@ -1,11 +1,14 @@
+#include <ATen/native/Resize.h>
 #include <ATen/native/layer_norm.h>
 
-#include <ATen/AccumulateType.h>
 #include <ATen/ATen.h>
-#include <ATen/Config.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/CPUApplyUtils.h>
+#include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
@@ -188,14 +191,17 @@ Tensor layer_norm(
 
 Tensor& layer_norm_out(
     const Tensor& input,
-    IntArrayRef normalized_shape, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef normalized_shape,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */,
     Tensor& output) {
-
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
@@ -208,28 +214,30 @@ Tensor& layer_norm_out(
   Tensor mean = at::empty({M}, X->options());
   Tensor rstd = at::empty({M}, X->options());
 
-  TORCH_CHECK(input.dtype() == output.dtype());
+  TORCH_CHECK(canCast(
+      typeMetaToScalarType(input.dtype()),
+      typeMetaToScalarType(output.dtype())));
 
   if (!output.is_contiguous()) {
     Tensor Y = at::native::empty_like(
-      *X,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      at::MemoryFormat::Contiguous);
-    layer_norm_with_mean_rstd_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
-    output.resize_(Y.sizes());
+        *X,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        at::MemoryFormat::Contiguous);
+    layer_norm_with_mean_rstd_out(
+        Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
+    resize_output(output, Y.sizes());
     output.copy_(std::move(Y));
   } else {
-    output.resize_(input.sizes());
-    layer_norm_with_mean_rstd_out(output, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
+    resize_output(output, input.sizes());
+    layer_norm_with_mean_rstd_out(
+        output, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   }
 
   return output;
-
 }
-
 
 DEFINE_DISPATCH(LayerNormKernel);
 DEFINE_DISPATCH(LayerNormBackwardKernel);
