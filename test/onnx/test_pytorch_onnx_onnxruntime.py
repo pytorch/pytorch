@@ -408,7 +408,6 @@ class _TestONNXRuntime:
         assert op.name == operator
         assert attrs.get("operator") == operator
         assert attrs.get("overload_name", "") == overload_name
-        return True
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
     def test_embedding_model_with_external_data(self):
