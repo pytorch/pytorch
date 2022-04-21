@@ -103,7 +103,7 @@ void validateBlock(
             "\n\nDefined at:\n" + getNodeStackTraceString(node))
       }
     } else {
-#ifdef PYTORCH_ONNX_CAFFE2_BUNDLE
+#ifdef BUILD_CAFFE2
       // Assuming this is a Caffe2 change as it only modifies an aten op
       // for operator_export_type == ONNX_ATEN_FALLBACK, which is a common
       // pattern for Caffe2-specific scenarios.
