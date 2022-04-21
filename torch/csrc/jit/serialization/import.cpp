@@ -19,10 +19,8 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
-#if defined(ENABLE_FLATBUFFER)
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
-#endif
 
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
@@ -300,12 +298,7 @@ Module import_ir_module(
   auto format = getFileFormat(in);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-#if defined(ENABLE_FLATBUFFER)
       return load_jit_module_from_stream(in, extra_files, device);
-#else
-      TORCH_CHECK(
-          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
-#endif
     }
     case FileFormat::ZipFileFormat: {
       auto reader = torch::make_unique<PyTorchStreamReader>(&in);
@@ -351,12 +344,7 @@ Module import_ir_module(
   auto format = getFileFormat(filename);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-#if defined(ENABLE_FLATBUFFER)
       return load_jit_module_from_file(filename, extra_files, device);
-#else
-      TORCH_CHECK(
-          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
-#endif
     }
     case FileFormat::ZipFileFormat: {
       auto reader = torch::make_unique<PyTorchStreamReader>(filename);
@@ -400,12 +388,7 @@ Module load(
   auto format = getFileFormat(in);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-#if defined(ENABLE_FLATBUFFER)
       return load_jit_module_from_stream(in, extra_files, device);
-#else
-      TORCH_CHECK(
-          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
-#endif
     }
     case FileFormat::ZipFileFormat: {
       std::unique_ptr<IStreamAdapter> rai =
@@ -431,12 +414,7 @@ Module load(
   auto format = getFileFormat(filename);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-#if defined(ENABLE_FLATBUFFER)
       return load_jit_module_from_file(filename, extra_files, device);
-#else
-      TORCH_CHECK(
-          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
-#endif
 
       case FileFormat::ZipFileFormat: {
         std::unique_ptr<FileAdapter> rai =

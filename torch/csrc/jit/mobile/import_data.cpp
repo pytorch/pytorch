@@ -15,9 +15,7 @@
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
 
-#if defined(ENABLE_FLATBUFFER)
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
-#endif // defined(ENABLE_FLATBUFFER)
 
 #include <exception>
 #include <fstream>
@@ -248,18 +246,13 @@ std::map<std::string, at::Tensor> _load_parameters(
   std::map<std::string, at::Tensor> map;
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-#if defined(ENABLE_FLATBUFFER)
       std::shared_ptr<char> data;
       size_t size = 0;
       std::tie(data, size) = get_stream_content(in);
       mobile::Module module =
           parse_and_initialize_mobile_module(std::move(data), size, device);
       map = mobile_module_to_parameter_map(module);
-#else // !defined(ENABLE_FLATBUFFER)
-      TORCH_CHECK(
-          false,
-          "Flatbuffer input file but the build hasn't enabled flatbuffer");
-#endif // !defined(ENABLE_FLATBUFFER)
+
       break;
     }
 
@@ -286,14 +279,9 @@ std::map<std::string, at::Tensor> _load_parameters(
   std::map<std::string, at::Tensor> map;
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-#if defined(ENABLE_FLATBUFFER)
       mobile::Module module = load_mobile_module_from_file(filename, device);
       map = mobile_module_to_parameter_map(module);
-#else // !defined(ENABLE_FLATBUFFER)
-      TORCH_CHECK(
-          false,
-          "Flatbuffer input file but the build hasn't enabled flatbuffer");
-#endif // !defined(ENABLE_FLATBUFFER)
+
       break;
     }
 

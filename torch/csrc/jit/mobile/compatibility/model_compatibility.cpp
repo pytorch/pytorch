@@ -4,9 +4,8 @@
 #include <torch/csrc/jit/api/compilation_unit.h> // removed after using simple type_resolver/obj_loader
 #include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
 #include <torch/csrc/jit/mobile/file_format.h>
-#if defined(ENABLE_FLATBUFFER)
+
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
-#endif
 #include <torch/csrc/jit/mobile/import.h> // removed after using simple type_resolver/obj_loader
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -78,14 +77,8 @@ uint64_t _get_model_bytecode_version(std::istream& in) {
   auto format = getFileFormat(in);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-#if !defined(ENABLE_FLATBUFFER)
-      TORCH_CHECK(
-          false,
-          "Flatbuffer input file but the build hasn't enabled flatbuffer");
-#else
       std::cout << __FILE__ << " flatbuffer file" << std::endl;
       return get_bytecode_version(in);
-#endif
     }
     case FileFormat::ZipFileFormat: {
       std::unique_ptr<IStreamAdapter> rai =
@@ -104,13 +97,7 @@ uint64_t _get_model_bytecode_version(const std::string& filename) {
   auto format = getFileFormat(filename);
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-#if !defined(ENABLE_FLATBUFFER)
-      TORCH_CHECK(
-          false,
-          "Flatbuffer input file but the build hasn't enabled flatbuffer");
-#else
       return get_bytecode_version(filename);
-#endif
     }
     case FileFormat::ZipFileFormat: {
       std::unique_ptr<FileAdapter> rai =

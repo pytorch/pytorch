@@ -718,15 +718,11 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   torch::jit::Module module_freeze = freeze(module);
 
   std::stringstream input_model_stream;
-#if defined(ENABLE_FLATBUFFER)
   module_freeze._save_for_mobile(
       input_model_stream,
       /*extra_files=*/{},
       /*save_mobile_debug_info=*/false,
       /*use_flatbuffer=*/true);
-#else
-  module_freeze._save_for_mobile(input_model_stream);
-#endif
   std::vector<IValue> input_data =
       std::vector<IValue>({torch::ones({1, 1, 28, 28})});
   std::vector<IValue> expect_result_list;
@@ -749,11 +745,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       input_model_stream,
       input_data,
       expect_result_list,
-#if defined(ENABLE_FLATBUFFER)
       caffe2::serialize::kMaxSupportedBytecodeVersion /* 0x09 */
-#else
-      caffe2::serialize::kProducedBytecodeVersion /* 0x08 */
-#endif
   );
 }
 #endif // !defined(FB_XPLAT_BUILD)

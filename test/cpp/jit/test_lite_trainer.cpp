@@ -172,7 +172,6 @@ TEST(MobileTest, SaveParametersDefaultsToZip) {
   EXPECT_EQ(ss_data.str()[3], '\x04');
 }
 
-#if defined(ENABLE_FLATBUFFER)
 TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
   // Save some empty parameters using flatbuffer.
   std::map<std::string, at::Tensor> empty_parameters;
@@ -188,7 +187,7 @@ TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
   EXPECT_EQ(ss_data.str()[6], 'M');
   EXPECT_EQ(ss_data.str()[7], 'F');
 }
-#else // !defined(ENABLE_FLATBUFFER)
+
 TEST(MobileTest, SaveParametersThrowsWithoutFlatbufferSupport) {
   // Some empty parameters to try saving.
   std::map<std::string, at::Tensor> empty_parameters;
@@ -211,9 +210,7 @@ TEST(MobileTest, SaveParametersThrowsWithoutFlatbufferSupport) {
     FAIL() << "Unexpected exception type";
   }
 }
-#endif // !defined(ENABLE_FLATBUFFER)
 
-#if defined(ENABLE_FLATBUFFER)
 TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
   // Create some simple parameters to save.
   std::map<std::string, at::Tensor> input_params;
@@ -244,7 +241,7 @@ TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
         output_params["three_by_ones"].item<int>(), three_by_ones.item<int>());
   }
 }
-#else // !defined(ENABLE_FLATBUFFER)
+
 TEST(MobileTest, LoadParametersFailsWithoutFlatbufferSupport) {
   // Create some data that looks like a flatbuffer header.
   std::stringstream data;
@@ -270,7 +267,6 @@ TEST(MobileTest, LoadParametersFailsWithoutFlatbufferSupport) {
     FAIL() << "Unexpected exception type";
   }
 }
-#endif // !defined(ENABLE_FLATBUFFER)
 
 TEST(MobileTest, LoadParametersUnexpectedFormatShouldThrow) {
   // Manually create some data that doesn't look like a ZIP or Flatbuffer file.
