@@ -58,9 +58,6 @@ class AllocationInserter : public kir::ExprMutator {
   // Fills info.buffer, info.alloc_pos, info.init_for_loop,
   // info.init_place_before, info.alloc_for_loop, info.alloc_place_before
   void fillAllocationInformation(AllocationInformation& info, Expr* expr) {
-    size_t alloc_pos = 0;
-    kir::ForLoop* init_for_loop = nullptr;
-    size_t fl_idx_next = 0;
     auto loop_alloc_info =
         loop_utils::getAllocInformation(info.buffer, for_loops_);
 
