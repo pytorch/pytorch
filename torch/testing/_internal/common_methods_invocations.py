@@ -16565,7 +16565,7 @@ op_db: List[OpInfo] = [
             # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
             # 76046
-            DecorateInfo(unittest.skkp('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
                          dtypes=(torch.float16,)),
         ),
     ),
