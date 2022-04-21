@@ -34,6 +34,7 @@ except ImportError as e:
     ) from e
 
 
+@skipIfCrossRef
 class TestCppExtensionAOT(common.TestCase):
     """Tests ahead-of-time cpp extensions
 
@@ -122,6 +123,7 @@ class TestCppExtensionAOT(common.TestCase):
         self.assertFalse(has_value)
 
 
+@skipIfCrossRef
 class TestORTTensor(common.TestCase):
     def test_unregistered(self):
         a = torch.arange(0, 10, device='cpu')
@@ -172,6 +174,7 @@ class TestORTTensor(common.TestCase):
         self.assertEqual(grad[0].shape, input.shape)
 
 
+@skipIfCrossRef
 class TestRNGExtension(common.TestCase):
 
     def setUp(self):
@@ -207,6 +210,7 @@ class TestRNGExtension(common.TestCase):
         self.assertEqual(rng_extension.getInstanceCount(), 0)
 
 
+@skipIfCrossRef
 @unittest.skipIf(not TEST_CUDA, "CUDA not found")
 class TestTorchLibrary(common.TestCase):
 

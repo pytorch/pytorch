@@ -170,7 +170,7 @@ test_python_shard() {
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --continue-through-error --verbose
   assert_git_not_dirty
 }
 

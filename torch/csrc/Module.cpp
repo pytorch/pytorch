@@ -11,6 +11,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/LinalgBackend.h>
 #include <ATen/Parallel.h>
+#include <ATen/BatchedTensorImpl.h>
 #include <ATen/Utils.h>
 #include <ATen/VmapMode.h>
 #include <ATen/dlpack.h>
@@ -1070,6 +1071,9 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_set_storage_via_tensor", [](const at::Tensor & x, const at::Tensor & y, int64_t storage_offset, at::IntArrayRef size, at::IntArrayRef stride) {
     TORCH_CHECK(y.is_contiguous());
     x.set_(y.storage(), storage_offset, size, stride);
+  });
+  py_module.def("_is_batched", [](const at::Tensor & x) {
+    return at::isBatchedTensor(x);
   });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
