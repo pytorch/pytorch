@@ -4,7 +4,7 @@ import torch.nn.qat as nnqat
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 
-from ...fuser_method_mappings import reverse_sequential_wrapper2
+from ..fuser_method_mappings import reverse_sequential_wrapper2
 
 def get_tensorrt_backend_config_dict():
     """ Get the backend config dictionary for tensorrt backend
@@ -218,3 +218,7 @@ def get_tensorrt_backend_config_dict():
             identity_config,
         ]
     }
+
+__all__ = [
+    "get_tensorrt_backend_config_dict",
+]
