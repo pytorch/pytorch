@@ -1023,6 +1023,7 @@ void svd_kernel(const Tensor& A,
                 const Tensor& S,
                 const Tensor& Vh,
                 const Tensor& infos) {
+  TORCH_INTERNAL_ASSERT(!driver.has_value(), "svd_kernel: driver shouldn't have a value here. ");
   // Need to copy A as column major, as its contents will be destroyed in the LAPACK call.
   // FIXME It'd be more efficient, rather than cloning A, to copy it into `U` or `Vh` (depending on m > n
   // or m < n) and call jobz='O'
