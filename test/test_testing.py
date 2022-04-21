@@ -410,7 +410,7 @@ if __name__ == '__main__':
             dynamic_dtypes = opinfo_helper.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
             dynamic_dispatch = opinfo_helper.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
-                dtypes = op.dtypesIfCPU
+                dtypes = op.dtypes
             else:  # device_type ='cuda'
                 dtypes = op.dtypesIfCUDA
 
@@ -1466,7 +1466,7 @@ class TestTestParametrizationDeviceType(TestCase):
         device_cls = locals()['TestParametrized{}'.format(device.upper())]
         expected_test_names = []
         for op in op_db:
-            for dtype in op.default_test_dtypes(device):
+            for dtype in op.supported_dtypes(torch.device(device).type):
                 for flag_part in ('flag_disabled', 'flag_enabled'):
                     expected_name = '{}.test_op_parametrized_{}_{}_{}_{}'.format(
                         device_cls.__name__, op.formatted_name, flag_part, device, dtype_name(dtype))
