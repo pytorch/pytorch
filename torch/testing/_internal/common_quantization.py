@@ -295,6 +295,14 @@ def skipIfNoQNNPACK(fn):
             fn(*args, **kwargs)
     return wrapper
 
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.onnx._CAFFE2_ATEN_FALLBACK:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 try:
     import torchvision  # noqa: F401
     HAS_TORCHVISION = True
@@ -1817,7 +1825,7 @@ class ModelForFusion(nn.Module):
         x = self.sub1(x)
         x = self.dequant(x)
         x = self.sub2(x)
-        x = x.view(-1, 36).contiguous()
+        x = x.reshape(-1, 36).contiguous()
         x = self.fc(x)
         y = self.conv2(y)
         y = self.relu2(y)
