@@ -59,7 +59,7 @@ def git(args: List[str]) -> List[str]:
     return [line.strip() for line in lines]
 
 
-def find_changed_files(ref_branch : str = "origin/master") -> List[str]:
+def find_changed_files(ref_branch: str = "origin/master") -> List[str]:
     untracked = []
 
     for line in git(["status", "--porcelain"]):
@@ -334,7 +334,7 @@ class YamlStep(Check):
         return await shell_cmd(script, env=env)
 
 
-def changed_files(ref_branch : str = "origin/master") -> Optional[List[str]]:
+def changed_files(ref_branch: str = "origin/master") -> Optional[List[str]]:
     changed_files: Optional[List[str]] = None
     try:
         changed_files = sorted(find_changed_files(ref_branch))
@@ -381,9 +381,11 @@ def main() -> None:
         "--no-quiet", help="output commands", action="store_true", default=False
     )
     parser.add_argument("--step", action="append", help="steps to run (in order)")
-    parser.add_argument("--ref_branch",
-                        default="origin/master",
-                        help="remote/branch used during comparison for --changed-only (default=origin/master")
+    parser.add_argument(
+        "--ref_branch",
+        default="origin/master",
+        help="remote/branch used during comparison for --changed-only (default=origin/master",
+    )
     args = parser.parse_args()
 
     quiet = not args.no_quiet

@@ -155,7 +155,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2col, followed by gemm.
-    for (const auto image_id : c10::irange(N)) {
+    for (C10_UNUSED const auto image_id : c10::irange(N)) {
       for (const auto group_id : c10::irange(group_)) {
         DeformableIm2col(
             Xdata + group_id * input_offset,
@@ -342,7 +342,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     math::Set<T, Context>(dX->numel(), 0, dXdata, &context_);
   }
 
-  for (const auto image_id : c10::irange(N)) {
+  for (C10_UNUSED const auto image_id : c10::irange(N)) {
     for (const auto group_id : c10::irange(group_)) {
       math::Gemm<T, Context>(
           CblasTrans,
