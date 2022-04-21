@@ -192,7 +192,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
       }
       return output;
     }
-    if (nt_buffer.dtype() == at::kHalf) {
+    if (nt_buffer.dtype() == at::kFloat) {
       add_padding_kernelLauncher(
           nt_buffer.data_ptr<float>(),
           output.data_ptr<float>(),

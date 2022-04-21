@@ -256,11 +256,12 @@ class TestNestedTensorDeviceType(TestCase):
         for i, inp in enumerate(inputs):
             self.assertEqual(emb(inp), ys[i])
 
-    def test_to_padded_tensor_simple(self, device):
-        t = torch.randn(4, 4, 4, device=device)
+    @dtypes(torch.float, torch.float16)
+    def test_to_padded_tensor_simple(self, device, dtype):
+        t = torch.randn(4, 4, 4, device=device, dtype=dtype)
         ts = list(torch.unbind(t))
         ts[0] = ts[0][:-1]
-        nt = torch.nested_tensor(ts, device=device)
+        nt = torch.nested_tensor(ts, device=device, dtype=dtype)
         for padding_value in (0, 1):
             padded = nt.to_padded_tensor(padding_value)
 
@@ -272,6 +273,7 @@ class TestNestedTensorDeviceType(TestCase):
 
             self.assertEqual(padded, correct_output)
             self.assertEqual(padded.device, torch.device(device))
+            self.assertEqual(padded.dtype, dtype)
 
     def test_to_padded_tensor_unrelated_shapes(self, device):
         ts = [
