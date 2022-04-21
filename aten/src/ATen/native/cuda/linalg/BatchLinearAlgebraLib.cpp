@@ -596,6 +596,7 @@ inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, cons
   int n = cuda_int_cast(A.size(-1), "n");
   int k = std::min(m, n);
   int batchsize = cuda_int_cast(batchCount(A), "batch size");
+  TORCH_INTERNAL_ASSERT(m > n, "torch.linalg.svd: gesvda requires matrix have m > n");
 
   int lda = A.stride(-1);
   int ldu = compute_uv ? U.stride(-1) : m;
@@ -718,7 +719,7 @@ void svd_cusolver(const Tensor& A,
   const auto n = A.size(-1);
   const auto k = std::min(m, n);
 
-  const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
+  static const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
 
   const bool gesvdj_batched_requirements = (m <= 32 && n <= 32 && batch_size > 1 && (full_matrices || m == n));
   bool convergence_check_needed = false;
@@ -730,7 +731,6 @@ void svd_cusolver(const Tensor& A,
       convergence_check_needed = true;
     } else {
       // gesvdj driver may be numerically unstable for large sized matrix
-      // Todo: Expose/adjust cusolver options of gesvdj number of iterations and numerical tolerance
       svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
       convergence_check_needed = true;
     }
@@ -744,15 +744,14 @@ void svd_cusolver(const Tensor& A,
         convergence_check_needed = true;
       } else {
         // gesvdj driver may be numerically unstable for large sized matrix
-        // Todo: Expose/adjust cusolver options of gesvdj number of iterations and numerical tolerance
         svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
         convergence_check_needed = true;
       }
     } else if (driver.value() == "gesvda") {
       // cuSOLVER: gesvdaStridedBatched is preferred for "tall skinny" matrices
-      TORCH_CHECK(batch_size > 0 && m > 0 && n > 0 && m > n,
-        "torch.linalg.svd: cuSOLVER `gesvda` driver requires the input matrices be non-empty "
-        "and number of rows be greater than number of columns (ideally tall and skinny).");
+      TORCH_CHECK(m > n,
+        "torch.linalg.svd: cuSOLVER `gesvda` driver requires that the number of rows be greater than "
+        "the number of columns in the input matrices (ideally tall and skinny).");
       svd_cusolver_gesvdaStridedBatched(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
       convergence_check_needed = true;
     } else {

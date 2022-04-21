@@ -1618,7 +1618,8 @@ Args:
 Keyword args:
     driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
         If `None`, a default heuristic of algorithms will be used.
-        Available options are: `None`, `gesvd`, `gesvdj`, `gesvdjBatched`, and `gesvdaBatched`.
+        Available options are: `None`, `gesvd`, `gesvdj`, and `gesvda`.
+        Check :func:`torch.linalg.svd` for details.
         Default: `None`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
