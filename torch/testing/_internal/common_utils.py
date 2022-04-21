@@ -992,6 +992,7 @@ meta_exclude_set = {
     torch.Tensor.max,
     torch.Tensor.median,
     torch.Tensor.min,
+    torch.Tensor.mm,  # sparse
     torch.Tensor.mode,
     torch.Tensor.msort,
     torch.Tensor.mul_,
@@ -1048,6 +1049,7 @@ meta_exclude_set = {
     torch.Tensor.slogdet,
     torch.Tensor.solve,
     torch.Tensor.sort,
+    torch.Tensor.sparse_mask,
     torch.Tensor.sqrt_,
     torch.Tensor.square_,
     torch.Tensor.squeeze_,
@@ -1083,19 +1085,50 @@ meta_exclude_set = {
     torch._assert_async,
     torch._compute_linear_combination,
     torch._dirichlet_grad,
+    torch._foreach_abs,
+    torch._foreach_acos,
     torch._foreach_add,
     torch._foreach_add_,
+    torch._foreach_addcdiv,
     torch._foreach_addcdiv_,
     torch._foreach_addcmul,
     torch._foreach_addcmul_,
+    torch._foreach_asin,
+    torch._foreach_atan,
+    torch._foreach_ceil,
+    torch._foreach_cos,
+    torch._foreach_cosh,
     torch._foreach_div,
     torch._foreach_div_,
+    torch._foreach_erf,
+    torch._foreach_erfc,
+    torch._foreach_exp,
+    torch._foreach_expm1,
+    torch._foreach_floor,
+    torch._foreach_frac,
+    torch._foreach_log,
+    torch._foreach_log10,
+    torch._foreach_log1p,
+    torch._foreach_log2,
     torch._foreach_maximum,
+    torch._foreach_minimum,
     torch._foreach_mul,
     torch._foreach_mul_,
     torch._foreach_neg,
+    torch._foreach_neg_,
+    torch._foreach_norm,
+    torch._foreach_reciprocal,
+    torch._foreach_round,
+    torch._foreach_sigmoid,
+    torch._foreach_sin,
+    torch._foreach_sinh,
     torch._foreach_sqrt,
     torch._foreach_sqrt_,
+    torch._foreach_sub,
+    torch._foreach_sub_,
+    torch._foreach_tan,
+    torch._foreach_tanh,
+    torch._foreach_trunc,
     torch._foreach_zero_,
     torch._make_per_tensor_quantized_tensor,
     torch._masked_softmax,
@@ -1109,7 +1142,7 @@ meta_exclude_set = {
     torch.absolute,
     torch.acos,
     torch.acosh,
-    torch.add,  # this one is weird, it should work...
+    torch.add,
     torch.addbmm,
     torch.addcdiv,
     torch.addcmul,
@@ -1547,8 +1580,6 @@ meta_exclude_set = {
     torch.view_as_complex,
     torch.view_as_real,
     torch.vstack,
-    torch.Tensor.mm,  # sparse
-    torch.Tensor.sparse_mask,
     torch.where,
     torch.xlogy,
     torch.zeros_like,
@@ -1723,11 +1754,21 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                 return t
             # TODO: zero tensors?
             elif type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
-                if any([t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized, t.is_nested]):
-                    miss += 1
+                if any([
+                    t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
+                    t.is_nested, torch._is_functional_tensor(t),
+                ]):
                     # TODO: sparse should support meta
+                    # NB technically to('meta') does work but our logging
+                    # instrumentation will see the meta conversions and the
+                    # tests all break so we just exclude this.  In any case
+                    # the to conversion isn't really right anyhow.
+                    miss += 1
                     return t
-                elif any([t.device.type in ("lazy", "meta"), t.is_complex(), torch._C._is_batched(t)]):
+                elif any([
+                    t.device.type in ("lazy", "meta"), t.is_complex(),
+                    torch._C._is_batched(t),
+                ]):
                     # TODO: this stuff should support storage
                     # (well, maybe not batched)
                     hit += 1
@@ -1746,7 +1787,10 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                 # non-Tensor types don't count as hit or miss
                 return t
 
-        do_meta = func not in meta_exclude_set and not torch.jit.is_tracing()
+        do_meta = (
+            func not in meta_exclude_set and not torch.jit.is_tracing() and
+            not isinstance(func, torch.ScriptMethod)
+        )
 
         if do_meta:
             try:
