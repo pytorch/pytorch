@@ -230,6 +230,48 @@ class StateDictType(Enum):
     LOCAL_STATE_DICT = auto()
     SHARDED_STATE_DICT = auto()
 
+@dataclass
+class StateDictConfig:
+    """
+    ``StateDictConfig`` is the base class for all state_dict configuration classes.
+    Users should instantiate a child version (i.e. ``FullStateDictConfig``) in
+    order to configure settings for the particular type of ``state_dict``
+    implementation FSDP will use.
+    """
+    pass
+
+@dataclass
+class FullStateDictConfig(StateDictConfig):
+    """
+    ``FullStateDictConfig`` is a config class meant to be used with
+    ``StateDictType.FULL_STATE_DICT``. Currently, it accepts two parameters,
+    ``offload_to_cpu`` and ``rank0_only`` which can be configured to offload
+    the full ``state_dict`` to CPU and to materialize the ``state_dict`` on
+    rank 0 only. When used, it is recommended to enable both of these flags
+    together to optimize memory savings when taking checkpoints. Note that
+    this config class is meant for user via the :func:`state_dict_type`
+    context manager as follows:
+        >>> cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        >>> with fsdp.state_dict_type(fsdp, StateDictType.FULL_STATE_DICT, cfg):
+        >>>     state = fsdp.state_dict()
+        >>>     # state will be empty on non rank 0 and contain CPU tensors on rank 0.
+    """
+    offload_to_cpu: bool = False
+    rank0_only: bool = False
+
+@dataclass
+class LocalStateDictConfig(StateDictConfig):
+    pass
+
+@dataclass
+class ShardedStateDictConfig(StateDictConfig):
+    pass
+
+_state_dict_type_to_config = {
+    StateDictType.FULL_STATE_DICT: FullStateDictConfig,
+    StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
+    StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
+}
 
 class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
@@ -448,6 +490,7 @@ class FullyShardedDataParallel(nn.Module):
         self._require_backward_grad_sync: bool = True
 
         self._state_dict_type = StateDictType.FULL_STATE_DICT
+        self._state_dict_config = FullStateDictConfig()
 
         # FSDP currently provides three different state_dicts. The actual
         # state_dict that will be saved/loaded is decided by
@@ -1124,7 +1167,11 @@ class FullyShardedDataParallel(nn.Module):
 
     @staticmethod
     @contextlib.contextmanager
-    def state_dict_type(module: nn.Module, state_dict_type: StateDictType) -> Generator:
+    def state_dict_type(
+        module: nn.Module,
+        state_dict_type: StateDictType,
+        state_dict_config: Optional[StateDictConfig] = None
+    ) -> Generator:
         """
         A context manager to set the ``state_dict_type`` of all the descendant
         FSDP modules of the target module. The target module does not have to
@@ -1153,20 +1200,39 @@ class FullyShardedDataParallel(nn.Module):
             state_dict_type (StateDictType): the desired state_dict_type to set.
         """
         prev_state_dict_type = None
+        prev_state_dict_config = None
+        # Use default config a state_dict config is not set.
+        if state_dict_config is None:
+            state_dict_config = _state_dict_type_to_config[state_dict_type]()
         for module in FullyShardedDataParallel.fsdp_modules(module):
             if prev_state_dict_type is None:
                 prev_state_dict_type = module._state_dict_type
+            if prev_state_dict_config is None:
+                prev_state_dict_config = module._state_dict_config
             if prev_state_dict_type != module._state_dict_type:
                 raise RuntimeError(
                     "All FSDP module should the same state_dict_type."
                 )
+            if type(prev_state_dict_config) != type(module._state_dict_config):
+                raise RuntimeError(
+                    "All FSDP modules should have the same type of state_dict_config."
+                )
+
+            expected_state_dict_config_type = _state_dict_type_to_config[state_dict_type]
+            if expected_state_dict_config_type != type(state_dict_config):
+                raise RuntimeError(
+                    f"Expected state_dict_config of type {expected_state_dict_config_type} but got {type(state_dict_config)}"
+                )
             module._state_dict_type = state_dict_type
+            module._state_dict_config = state_dict_config
         try:
             yield
         finally:
             assert prev_state_dict_type is not None  # Avoid mypy warning
+            assert prev_state_dict_config is not None  # Avoid mypy warning
             for module in FullyShardedDataParallel.fsdp_modules(module):
                 module._state_dict_type = prev_state_dict_type
+                module._state_dict_config = prev_state_dict_config
 
     def _full_post_state_dict_hook(
         self,
@@ -1180,6 +1246,10 @@ class FullyShardedDataParallel(nn.Module):
         "_fsdp_wrapped_module" prefix.
         """
         self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
+        # state_dict would be blank if rank0_only was enabled.
+        if not state_dict:
+            return state_dict
+
         ignored_param_names = set(self._ignored_param_to_param_name.values())
         for key in state_dict:
             # Do not need to clone ignored parameters since they are not
@@ -1293,7 +1363,8 @@ class FullyShardedDataParallel(nn.Module):
         >>> torch.cuda.set_device(device_id)
         >>> my_module = nn.Linear(...)
         >>> sharded_module = FSDP(my_module)
-        >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT):
+        >>> full_state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT, full_state_dict_config):
         >>>     full_dict = sharded_module.state_dict()
         >>> full_dict.keys()
         >>> odict_keys(['weight', 'bias'])
@@ -1313,8 +1384,17 @@ class FullyShardedDataParallel(nn.Module):
 
         self._lazy_init()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
+            # Get config args
+            full_state_dict_config = (
+                self._state_dict_config if self._state_dict_config is not None
+                else FullStateDictConfig()
+            )
+            rank0_only = full_state_dict_config.rank0_only
+            offload_to_cpu = full_state_dict_config.offload_to_cpu
             summon_ctx = (
-                self._summon_full_params(recurse=False, writeback=False)
+                self._summon_full_params(
+                    recurse=False, writeback=False, offload_to_cpu=offload_to_cpu, rank0_only=rank0_only
+                )
                 if self.training_state != TrainingState_.SUMMON_FULL_PARAMS else
                 contextlib.suppress()
             )
@@ -1332,7 +1412,10 @@ class FullyShardedDataParallel(nn.Module):
                 state_dict = super().state_dict(*args, **kwargs)
 
             # TODO: support offload to CPU in post state dict hook.
-            return state_dict
+            if not rank0_only or self.rank == 0:
+                return state_dict
+            else:
+                return {}
 
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             assert getattr(self.module, FLAT_PARAM, None) is not None
@@ -1471,7 +1554,9 @@ class FullyShardedDataParallel(nn.Module):
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             return super().load_state_dict(state_dict, *args)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
+            raise NotImplementedError(
+                "Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518."
+            )
         else:
             raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
 
