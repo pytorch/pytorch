@@ -61,6 +61,8 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     functions: Dict[str, Callable] = {}
     reduce_ex_hook: Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
+    str_hook: Optional[Callable] = None
+    repr_hook: Optional[Callable] = None
 
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
@@ -133,10 +135,14 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         IterDataPipe.reduce_ex_hook = hook_fn
 
     def __repr__(self):
+        if self.repr_hook is not None:
+            return self.repr_hook(self)
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
     def __str__(self):
+        if self.str_hook is not None:
+            return self.str_hook(self)
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
@@ -179,6 +185,8 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
     """
     functions: Dict[str, Callable] = {}
+    str_hook: Optional[Callable] = None
+    repr_hook: Optional[Callable] = None
 
     def __getattr__(self, attribute_name):
         if attribute_name in MapDataPipe.functions:
@@ -224,11 +232,15 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
                 self.__dict__[k] = v
 
     def __repr__(self):
-        # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        if self.repr_hook is not None:
+            return self.repr_hook(self)
+        # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
     def __str__(self):
-        # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        if self.str_hook is not None:
+            return self.str_hook(self)
+        # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
 
