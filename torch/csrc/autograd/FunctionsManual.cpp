@@ -1233,13 +1233,12 @@ Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
   // \pi(X) = X.tril() - 0.5*diag(X)
   // so
   // dL = L\pi(L^{-1}dA(L^{-H}))
-  TORCH_CHECK(at::allclose(dA, dA.mH(), /*rtol=*/1e-2, /*atol=*/1e-2),
-              "cholesky_jvp: The tangent part of the matrix A should also be ",
-              (dA.is_complex() ? "Hermitian" : "symmetric."));
+
+  // Precondition: dA is symmetric/Hermitian
   auto L_ = upper ? L.mH() : L;
   auto dL = at::linalg_solve_triangular(L_, dA, /*upper=*/false, /*left=*/true);
   dL = at::linalg_solve_triangular(L_.mH(), dL, /*upper=*/true, /*left=*/false);
-  dL = dL.tril() - 0.5 * dL.diagonal(0, -2, -1).diag_embed();
+  dL = dL.tril() - dL.diagonal(0, -2, -1).mul(0.5).diag_embed();
   dL = L_.matmul(dL);
   return upper ? dL.mH() : dL;
 }

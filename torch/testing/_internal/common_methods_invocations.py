@@ -10367,9 +10367,6 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
            dtypes=floating_and_complex_types(),
-           # allclose does not support forward AD
-           # https://github.com/pytorch/functorch/issues/275
-           check_batched_forward_grad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
@@ -10382,9 +10379,6 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.cholesky_ex',
            aten_name='linalg_cholesky_ex',
            dtypes=floating_and_complex_types(),
-           # allclose does not support forward AD
-           # https://github.com/pytorch/functorch/issues/275
-           check_batched_forward_grad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,

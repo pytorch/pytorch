@@ -83,7 +83,7 @@ the **Cholesky decomposition** of a complex Hermitian or real symmetric positive
 
     A = LL^{\text{H}}\mathrlap{\qquad L \in \mathbb{K}^{n \times n}}
 
-where :math:`L` is a lower triangular matrix with real diagonal (even in the complex case) and
+where :math:`L` is a lower triangular matrix with real positive diagonal (even in the complex case) and
 :math:`L^{\text{H}}` is the conjugate transpose when :math:`L` is complex, and the transpose when :math:`L` is real-valued.
 
 Supports input of float, double, cfloat and cdouble dtypes.
