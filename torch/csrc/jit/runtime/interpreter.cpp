@@ -797,10 +797,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         python_class_name = jit_exception->getPythonClassName();
       }
       handleError(
-          e,
-          (bool)jit_exception,
-          not_implemented_error,
-          python_class_name);
+          e, (bool)jit_exception, not_implemented_error, python_class_name);
       return false;
     }
   }
