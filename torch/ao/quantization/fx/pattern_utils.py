@@ -3,7 +3,7 @@ from typing import Dict, Any, Tuple, List, Optional
 from torch.fx.graph import (
     Node,
 )
-from .quantization_types import Pattern
+from torch.ao.quantization.quantization_types import Pattern
 from ..qconfig import QConfigAny
 from ..fake_quantize import FixedQParamsFakeQuantize
 # from .quantization_patterns import BinaryOpQuantizeHandler
