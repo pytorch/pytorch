@@ -77,9 +77,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
   // TODO: when and if cudnn enables padding in their operators, we can remove padding on our end;
   // currently, limit padding support to groups=1 (ungrouped conv)
   // TODO: implement this for groups > 1
-  TORCH_CHECK(groups == 1, "Quantized cudnn conv2d is currenty lmited to groups = 1; received groups =", groups);
   auto num_output_channels = weight.size(0);
   if (weight.size(0) % 4 != 0 || weight.size(1) % 4 != 0) {
+    TORCH_CHECK(groups == 1, "Quantized cudnn conv2d is currenty lmited to groups = 1; received groups =", groups);
     int8_t nslices2pad_out = (4 - weight.size(0) % 4) % 4; // number of slices we need to pad/add for output channels
     int8_t nslices2pad_in = (4 - weight.size(1) % 4) % 4; // number of slices we need to pad/add for input channels
     weight = at::pad(weight, {0, 0, 0, 0, 0, nslices2pad_in, 0, nslices2pad_out}, "constant", 0);
