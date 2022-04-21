@@ -24,10 +24,11 @@ def no_alias_result():
     finally:
         alias_result = True
 
-# enable dispatch in
-# CCT __torch_dispatch__
+# enable dispatch before calling the func in
+# CCT's __torch_dispatch__ implementation
 # NOTE: This overrides the no_dispatch
-# while calling the operator with CCT.
+# while calling the func in __torch_dispatch__.
+# Refer: https://github.com/pytorch/pytorch/issues/75652
 dispatch = False
 @contextlib.contextmanager
 def disable_no_dispatch():
