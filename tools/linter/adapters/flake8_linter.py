@@ -245,14 +245,13 @@ def get_issue_documentation_url(code: str) -> str:
 
 def check_files(
     filenames: List[str],
-    binary: str,
     flake8_plugins_path: Optional[str],
     severities: Dict[str, LintSeverity],
     retries: int,
 ) -> List[LintMessage]:
     try:
         proc = run_command(
-            [binary, "--exit-zero"] + filenames,
+            [sys.executable, "-mflake8", "--exit-zero"] + filenames,
             extra_env={"FLAKE8_PLUGINS_PATH": flake8_plugins_path}
             if flake8_plugins_path
             else None,
@@ -314,11 +313,6 @@ def main() -> None:
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
-        "--binary",
-        required=True,
-        help="flake8 binary path",
-    )
-    parser.add_argument(
         "--flake8-plugins-path",
         help="FLAKE8_PLUGINS_PATH env value",
     )
@@ -368,7 +362,9 @@ def main() -> None:
             assert len(parts) == 2, f"invalid severity `{severity}`"
             severities[parts[0]] = LintSeverity(parts[1])
 
-    lint_messages = check_files(args.filenames, args.binary, flake8_plugins_path, severities, args.retries)
+    lint_messages = check_files(
+        args.filenames, flake8_plugins_path, severities, args.retries
+    )
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 
