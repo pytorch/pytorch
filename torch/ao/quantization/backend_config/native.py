@@ -2,19 +2,19 @@ from collections import namedtuple
 from typing import List, Dict, Any
 import operator
 import torch
-from .observation_type import ObservationType
+from torch.ao.quantization.backend_config.observation_type import ObservationType
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
-from ...observer import (
+from ..observer import (
     default_affine_fixed_qparams_observer,
     default_symmetric_fixed_qparams_observer,
 )
-from ...fake_quantize import FixedQParamsFakeQuantize
-from ...fuser_method_mappings import (
+from ..fake_quantize import FixedQParamsFakeQuantize
+from ..fuser_method_mappings import (
     reverse_sequential_wrapper2,
     reverse2,
     reverse3,
@@ -500,6 +500,7 @@ def _get_fixed_qparams_op_configs():
             (torch.tanh, default_symmetric_fixed_qparams_observer),
             ("tanh", default_symmetric_fixed_qparams_observer),
             ("tanh_", default_symmetric_fixed_qparams_observer),
+            (torch.nn.Softmax, default_affine_fixed_qparams_observer),
     ]:
         fixed_qparams_op_configs.append({
             "pattern": fixed_qparam_op,
@@ -711,3 +712,7 @@ def get_native_backend_config_dict():
             *_get_embedding_op_configs(),
         ],
     }
+
+__all__ = [
+    "get_native_backend_config_dict",
+]
