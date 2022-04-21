@@ -24,21 +24,13 @@ Tensor& quantized_copy_from_float_(Tensor& self, const Tensor& src) {
       self.sizes().equals(src.sizes()),
       "Quantized copy only works with Tensors with the same shape");
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "Copy", [&]() {
-    if (self.qscheme() == kPerChannelAffine) {
+    if (self.qscheme() == kPerChannelAffine || self.qscheme() == kPerChannelAffineFloatQParams
+        || self.qscheme() == kPerChannelSymmetric) {
       quantize_tensor_per_channel_affine(src, self, self.q_per_channel_scales(),
                                          self.q_per_channel_zero_points(),
                                          self.q_per_channel_axis());
     } else {
-      if (self.is_cuda()) {
-        quantize_tensor_per_tensor_affine_stub(self.device().type(), src, self, self.q_scale(), self.q_zero_point());
-      } else {
-        float* src_data = src.data_ptr<float>();
-        scalar_t* self_data = self.data_ptr<scalar_t>();
-        for (const auto i : c10::irange(self.numel())) {
-          self_data[i] = quantize_val<scalar_t>(
-              self.q_scale(), self.q_zero_point(), src_data[i]);
-        }
-      }
+      quantize_tensor_per_tensor_affine(src, self, self.q_scale(), self.q_zero_point());
     }
   });
   return self;
