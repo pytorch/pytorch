@@ -115,7 +115,6 @@ std::string get_named_tuple_str_or_default(
     // For the simple types (Tensor, Tensor), the mobile type parse can parse
     // it and compilation unit won't have it's definition.
     if (!compilation_unit.get_named_tuple(type_ptr->str())) {
-
       return default_type_str;
     }
     auto named_tuple_ptr = compilation_unit.get_named_tuple(type_ptr->str());
