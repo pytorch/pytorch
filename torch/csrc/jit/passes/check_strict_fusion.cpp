@@ -115,9 +115,8 @@ void CheckStrictFusion(std::shared_ptr<Graph>& graph) {
     }
   }
 
-  // TODO: compose/warn with auto diff ?
   // TODO: remove context manager after checks
-  // TODO: what to do about control flow not taken (will always fail right now)
+  // TODO: improve control flow not taken, right now always errors
 }
 
 } // namespace jit
