@@ -1224,9 +1224,9 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return "intlist"
         elif str(t) == "float[]":
             return "doublelist"
-        elif str(t.elem) == 'SymInt':
+        elif str(t.elem) == "SymInt":
             # accept definite size
-            return 'symintlist'
+            return "symintlist"
         elif str(t) == "Scalar[]":
             return "scalarlist"
     raise RuntimeError(f"type '{t}' is not supported by PythonArgParser")
