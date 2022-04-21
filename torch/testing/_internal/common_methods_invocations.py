@@ -11275,7 +11275,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            supports_forward_ad=True,
-           supports_out=False),
+           supports_out=True),
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
            variant_test_name="with_dtype",
