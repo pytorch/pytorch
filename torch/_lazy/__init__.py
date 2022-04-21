@@ -75,7 +75,7 @@ def lazy_comm_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Futu
     torch.distributed.all_reduce(cuda_buffer)
     buffer.copy_(cuda_buffer)
 
-    fut = torch.futures.Future()
+    fut = torch.futures.Future()  # type: ignore[var-annotated]
     fut.set_result(buffer)
 
     return fut
@@ -99,7 +99,7 @@ class LazyProcessGroup(dist.ProcessGroup):
     """
     def __init__(self, store: dist.Store, rank: int, size: int, timeout: timedelta):
         assert os.environ.get('LTC_TS_CUDA', False)
-        dist.ProcessGroup.__init__(self, rank, size)
+        dist.ProcessGroup.__init__(self, rank, size)  # type: ignore[call-arg]
         self.nccl_pg = dist.ProcessGroupNCCL(store, rank, size, timeout)
 
     def getBackendName(self):

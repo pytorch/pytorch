@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import copy
 import os
 import sys
@@ -7,7 +9,6 @@ import torch._lazy.ts_backend
 import torch.distributed as dist
 import torch.nn as nn
 import torch.optim as optim
-import torch.multiprocessing as mp
 
 from datetime import timedelta
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
@@ -18,6 +19,10 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
+if not torch.cuda.is_available() or not dist.is_nccl_available():
+    print("CUDA/NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 if TEST_WITH_DEV_DBG_ASAN:
