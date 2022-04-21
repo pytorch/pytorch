@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
+     onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
 
 # TODO: remove this
 SIZE = 100
@@ -376,7 +376,6 @@ class TestSortAndSelect(TestCase):
         # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
-    @skipCUDAIfRocm
     def test_unique_dim(self, device):
         self.assertFalse(hasattr(torch, 'unique_dim'))
 
@@ -432,7 +431,7 @@ class TestSortAndSelect(TestCase):
                                                 device=device)
             expected_inverse_dim2 = torch.tensor([0, 1])
             expected_counts_dim2 = torch.tensor([1, 1])
-            expected_unique_empty = torch.tensor([], dtype=dtype, device=device)
+            expected_unique_empty = torch.empty(5, 0, dtype=dtype, device=device)
             expected_inverse_empty = torch.tensor([], dtype=torch.long, device=device)
             expected_counts_empty = torch.tensor([], dtype=torch.long, device=device)
             if dtype in floating_types_and(torch.float16, torch.bfloat16):
