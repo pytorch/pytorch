@@ -561,7 +561,11 @@ void TensorPipeAgent::pipeRead(
       return;
     }
 
-    std::vector<c10::Stream> streams = getStreamsFromPoolForDevices(devices_);
+    std::vector<c10::Stream> streams;
+    {
+      GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+      streams = getStreamsFromPoolForDevices(devices_);
+    }
     tensorpipe::Allocation tpAllocation;
     TensorpipeReadBuffers tpBuffers;
     std::tie(tpAllocation, tpBuffers) =
@@ -641,24 +645,26 @@ void TensorPipeAgent::sendCompletedResponseMessage(
 
     for (const auto& tensor : responseMessage->tensors()) {
       const auto device = tensor.device();
-      if (!device.is_cpu() &&
-          std::find(devices_.begin(), devices_.end(), device) ==
-              devices_.end()) {
-        std::ostringstream oss;
-        std::copy(
-            devices_.begin(),
-            devices_.end(),
-            std::ostream_iterator<c10::Device>(oss, ", "));
-        responseMessage = createExceptionResponse(
-            c10::str(
-                "RPC detected that a user-function output tensor on device ",
-                device,
-                ". This device is not one of the input tensor devices: ",
-                oss.str(),
-                "which is not yet supported. Please file a feature request "
-                "issue in PyTorch GitHub repo."),
-            messageId);
-        break;
+      if (!device.is_cpu()) {
+        GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+        if (std::find(devices_.begin(), devices_.end(), device) ==
+            devices_.end()) {
+          std::ostringstream oss;
+          std::copy(
+              devices_.begin(),
+              devices_.end(),
+              std::ostream_iterator<c10::Device>(oss, ", "));
+          responseMessage = createExceptionResponse(
+              c10::str(
+                  "RPC detected that a user-function output tensor on device ",
+                  device,
+                  ". This device is not one of the input tensor devices: ",
+                  oss.str(),
+                  "which is not yet supported. Please file a feature request "
+                  "issue in PyTorch GitHub repo."),
+              messageId);
+          break;
+        }
       }
     }
 
@@ -821,7 +827,12 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
   }
   ClientPipe& clientPipe = it->second;
 
-  auto futureResponseMessage = std::make_shared<AtomicJitFuture>(devices_);
+  std::shared_ptr<torch::distributed::rpc::TensorPipeAgent::AtomicJitFuture>
+      futureResponseMessage;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    futureResponseMessage = std::make_shared<AtomicJitFuture>(devices_);
+  }
   uint64_t messageId = nextMessageID_++;
   requestMessage->setId(messageId);
 
@@ -881,7 +892,11 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending request #"
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
-  std::vector<c10::Stream> streams = getStreamsFromPoolForDevices(devices_);
+  std::vector<c10::Stream> streams;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    streams = getStreamsFromPoolForDevices(devices_);
+  }
   makeStreamsWaitOnOthers(
       streams,
       getCurrentStreamsForDevices(
@@ -1133,14 +1148,22 @@ void TensorPipeAgent::shutdownImpl() {
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(
     const std::string& workerName) const {
-  const auto& it = workerNameToInfo_.find(workerName);
+  std::unordered_map<std::string, WorkerInfo>::const_iterator it;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    it = workerNameToInfo_.find(workerName);
+  }
   TORCH_CHECK(
       it != workerNameToInfo_.end(), "Unknown destination worker ", workerName);
   return it->second;
 }
 
 const WorkerInfo& TensorPipeAgent::getWorkerInfo(worker_id_t workerId) const {
-  const auto& it = workerIdToInfo_.find(workerId);
+  std::unordered_map<worker_id_t, WorkerInfo>::const_iterator it;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    it = workerIdToInfo_.find(workerId);
+  }
   TORCH_CHECK(
       it != workerIdToInfo_.end(), "Unknown destination worker ", workerId);
   return it->second;
@@ -1156,12 +1179,53 @@ std::vector<WorkerInfo> TensorPipeAgent::getWorkerInfos() const {
 
 const std::string& TensorPipeAgent::findWorkerURL(
     const WorkerInfo& worker) const {
-  const auto it = workerNameToURL_.find(worker.name_);
+  std::unordered_map<std::string, std::string>::const_iterator it;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    it = workerNameToURL_.find(worker.name_);
+  }
   TORCH_CHECK(
       it != workerNameToURL_.end(), "Unknown worker name: ", worker.name_);
   return it->second;
 }
 
+void TensorPipeAgent::updateGroupMembership(
+    const WorkerInfo& workerInfo,
+    const std::vector<c10::Device> devices,
+    const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+    bool isJoin = true) {
+  std::string name = workerInfo.name_;
+  worker_id_t id = workerInfo.id_;
+  // Rank with workerInfo is joining the group, update internal mappings
+  if (isJoin) {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    workerIdToInfo_.emplace(id, workerInfo);
+    workerNameToInfo_.emplace(name, workerInfo);
+
+    // TODO: we should get nodeAddrStr in the joining process, then pass in as
+    // an argument rather than getting from store each time
+    auto nodeAddrData = nameToAddressStore_.get(name);
+    auto nodeAddrStr =
+        std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
+    workerNameToURL_.insert({name, nodeAddrStr});
+
+    for (const auto& it : reverseDeviceMaps) {
+      if (reverseDeviceMaps_.find(it.first) == reverseDeviceMaps_.end()) {
+        reverseDeviceMaps_[it.first] = it.second;
+      }
+    }
+    // TODO: clean up mutex for devices_ usage
+    // Add devices that have not been added yet
+    for (const auto& it : devices) {
+      if (std::find(devices_.begin(), devices_.end(), it) == devices_.end()) {
+        devices_.push_back(it);
+      }
+    }
+  }
+  // TODO: Rank with workerInfo is leaving, update internal mappings
+  else {
+  }
+}
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
@@ -1289,8 +1353,11 @@ void TensorPipeAgent::markFutureWithError(
 std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
     const std::string& remoteName,
     const Message& message) const {
-  const auto& deviceMaps =
-      message.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
+  std::unordered_map<std::string, DeviceMap> deviceMaps;
+  {
+    GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
+    deviceMaps = message.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
+  }
 
   const auto errStr = c10::str(
       "TensorPipe RPC backend only supports CPU tensors by default, please "
@@ -1324,7 +1391,12 @@ DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dst) const {
   return it->second;
 }
 
+TensorPipeRpcBackendOptions TensorPipeAgent::getBackendOptions() const {
+  return opts_;
+}
+
 const std::vector<c10::Device>& TensorPipeAgent::getDevices() const {
+  GroupMembershipLockGuard guard(groupMembershipMutex_, isStaticGroup_);
   return devices_;
 }
 
