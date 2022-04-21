@@ -619,7 +619,7 @@ std::vector<SSArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
   for (size_t node_index = 0; node_index < n->inputs().size(); ++node_index) {
     auto type = n->input(node_index)->type();
 
-    if (auto tt = type->castRaw<TensorType>()) {
+    if (type->castRaw<TensorType>()) {
       input_shapes.push_back(tensorShapeArg(n->input(node_index)));
       continue;
     }
