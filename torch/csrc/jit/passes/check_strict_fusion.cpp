@@ -60,16 +60,26 @@ std::unordered_set<Node*> collectValuesUsedInGuard(
 
 void checkForUnfusedOps(Node* enter_node) {
   std::vector<Node*> unsupported_nodes;
-  Node* guarding_if = nullptr;
+  std::vector<Node*> guarding_ifs; // if multiple, we will throw
   for (Node* node = enter_node->next(); node->kind() != prim::Exit;
        node = node->next()) {
     if (node->kind() == prim::If &&
         fusionGuardCheck(node->input()->node()->kind())) {
-      guarding_if = node;
+      guarding_ifs.push_back(node);
       continue;
     }
     unsupported_nodes.push_back(node);
   }
+
+  if (guarding_ifs.size() > 1) {
+    std::stringstream ss;
+    ss << "Found multiple fusions: \n";
+    for (Node* n : guarding_ifs) {
+      ss << *n << "\n";
+    }
+    throw ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str();
+  }
+
   // NVFuser/autodiff/nnc all insert a number of guards, see
   // `CudaFusionViewGuard Example Graph`
   // to check for unfused nodes, look at node's whose outputs
@@ -78,8 +88,9 @@ void checkForUnfusedOps(Node* enter_node) {
   // node in the prim::Enter block
 
   std::unordered_set<Node*> guarding_check_nodes;
-  if (guarding_if) {
-    guarding_check_nodes = collectValuesUsedInGuard(guarding_if, enter_node);
+  if (guarding_ifs.size() == 1) {
+    guarding_check_nodes =
+        collectValuesUsedInGuard(guarding_ifs[0], enter_node);
   }
   std::vector<Node*> unfused_nodes_not_used_in_guard;
   for (Node* unfused : unsupported_nodes) {
@@ -99,9 +110,8 @@ void checkForUnfusedOps(Node* enter_node) {
       }
       ss << "\n";
     }
-    // TODO: Context Manager source range lost right now
-    throw ErrorReport(unfused_nodes_not_used_in_guard[0]->sourceRange())
-        << ss.str();
+    auto range = enter_node->input()->node()->sourceRange();
+    throw ErrorReport(enter_node->input()->node()->sourceRange()) << ss.str();
   }
 }
 

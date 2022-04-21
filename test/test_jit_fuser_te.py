@@ -2371,7 +2371,7 @@ class TestTEFuser(JitTestCase):
 
         def test_autodiff(x):
             with torch.jit.strict_fusion():
-                return x + x + torch.rand([4])
+                return torch.rand([4]) + x + x + x
 
         foo_s = torch.jit.script(test_autodiff)
         inp = torch.rand([4], requires_grad=True)
@@ -2379,8 +2379,20 @@ class TestTEFuser(JitTestCase):
             for _ in range(3):
                 foo_s(inp)
         f = FileCheck().check("unfused operators").check("aten::rand")
-        f.run(torch.jit.last_executed_optimized_graph())
+        f.run(str(error_out.exception))
 
+        def test_separate_fusions(x, y):
+            with torch.jit.strict_fusion():
+                return x + x + x, y + y + y
+
+        inp = torch.rand([4], requires_grad=True)
+        with self.assertRaises(Exception) as error_out:
+            for _ in range(3):
+                foo_s = torch.jit.script(test_separate_fusions)
+                foo_s(inp, inp)
+
+        f = FileCheck().check("Found multiple fusions")
+        f.run(str(error_out.exception))
 
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False

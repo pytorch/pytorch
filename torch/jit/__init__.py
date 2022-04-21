@@ -212,6 +212,7 @@ class strict_fusion(object):
 
     Example (Freezing a module with Conv->Batchnorm)
     .. code-block:: python
+
         import torch
         with torch.jit.strict_fusion():
             return x + x + x
@@ -226,5 +227,5 @@ class strict_fusion(object):
     def __enter__(self):
         pass
 
-    def __exit__(self, type: Any, value: Any, tb: Any) -> bool:
-        return True
+    def __exit__(self, type: Any, value: Any, tb: Any) -> None:
+        pass
