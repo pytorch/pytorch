@@ -439,7 +439,6 @@ class TestFSDPStateDict(FSDPTest):
                 pass
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("state_dict_rank0_and_offload", [True, False])
     def test_state_dict_with_ignored_modules(self, state_dict_rank0_and_offload):
         # Initialize an FSDP-wrapped model with an ignored module
         model = Model(wrap_fsdp=True).cuda()
@@ -448,31 +447,18 @@ class TestFSDPStateDict(FSDPTest):
             model.outer.bias: "outer.bias", model.outer.weight: "outer.weight",
         }
         fsdp_model = FSDP(model, ignored_modules=ignored_modules)
-        sd_mgr = self._get_full_state_dict_mgr(
-            fsdp_model, state_dict_rank0_and_offload
-        )
-        with sd_mgr:
+        with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
             sd = fsdp_model.state_dict()
 
-        self._validate_state_dict_contents(
-            sd, state_dict_rank0_and_offload, ignored_param_to_param_name.values()
-        )
         with FSDP.summon_full_params(fsdp_model):
             fsdp_params = deepcopy(list(fsdp_model.parameters()))
         # Check that the ignored parameters are not cloned
 
-        if self.rank == 0 or not state_dict_rank0_and_offload:
-            for param, param_name in ignored_param_to_param_name.items():
-                self.assertTrue(param_name in sd)
-                self.assertEqual(param.data_ptr(), sd[param_name].data_ptr())
+        for param, param_name in ignored_param_to_param_name.items():
+            self.assertTrue(param_name in sd)
+            self.assertEqual(param.data_ptr(), sd[param_name].data_ptr())
         # Check that the state dict can be loaded into a non-wrapped version of
         # the model
-        if state_dict_rank0_and_offload:
-            # Broadcast and move the state_dict back to GPU
-            sd = self._broadcast_state_dict(sd)
-            for key in sd.keys():
-                sd[key] = sd[key].cuda()
-
         nonwrapped_model = Model(wrap_fsdp=False).cuda()
         for param in nonwrapped_model.parameters():
             with torch.no_grad():
