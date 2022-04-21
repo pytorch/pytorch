@@ -76,28 +76,87 @@ const char* toString(DispatchKey t) {
       return "QuantizedCPU";
     case DispatchKey::QuantizedCUDA:
       return "QuantizedCUDA";
+    case DispatchKey::QuantizedHIP:
+      return "QuantizedHIP";
+    case DispatchKey::QuantizedVE:
+      return "QuantizedVE";
     case DispatchKey::QuantizedXPU:
       return "QuantizedXPU";
+    case DispatchKey::QuantizedIPU:
+      return "QuantizedIPU";
+    case DispatchKey::QuantizedXLA:
+      return "QuantizedXLA";
+    case DispatchKey::QuantizedLazy:
+      return "QuantizedLazy";
+    case DispatchKey::QuantizedMLC:
+      return "QuantizedMLC";
+    case DispatchKey::QuantizedHPU:
+      return "QuantizedHPU";
+    case DispatchKey::QuantizedPrivateUse1:
+      return "QuantizedPrivateUse1";
+    case DispatchKey::QuantizedPrivateUse2:
+      return "QuantizedPrivateUse2";
+    case DispatchKey::QuantizedPrivateUse3:
+      return "QuantizedPrivateUse3";
 
     case DispatchKey::CustomRNGKeyId:
       return "CustomRNGKeyId";
-
     case DispatchKey::MkldnnCPU:
       return "MkldnnCPU";
+
     case DispatchKey::SparseCPU:
       return "SparseCPU";
     case DispatchKey::SparseCUDA:
       return "SparseCUDA";
-    case DispatchKey::SparseCsrCPU:
-      return "SparseCsrCPU";
-    case DispatchKey::SparseCsrCUDA:
-      return "SparseCsrCUDA";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
     case DispatchKey::SparseVE:
       return "SparseVE";
     case DispatchKey::SparseXPU:
       return "SparseXPU";
+    case DispatchKey::SparseIPU:
+      return "SparseIPU";
+    case DispatchKey::SparseXLA:
+      return "SparseXLA";
+    case DispatchKey::SparseLazy:
+      return "SparseLazy";
+    case DispatchKey::SparseMLC:
+      return "SparseMLC";
+    case DispatchKey::SparseHPU:
+      return "SparseHPU";
+    case DispatchKey::SparsePrivateUse1:
+      return "SparsePrivateUse1";
+    case DispatchKey::SparsePrivateUse2:
+      return "SparsePrivateUse2";
+    case DispatchKey::SparsePrivateUse3:
+      return "SparsePrivateUse3";
+
+    case DispatchKey::SparseCsrCPU:
+      return "SparseCsrCPU";
+    case DispatchKey::SparseCsrCUDA:
+      return "SparseCsrCUDA";
+    case DispatchKey::SparseCsrHIP:
+      return "SparseCsrHIP";
+    case DispatchKey::SparseCsrVE:
+      return "SparseCsrVE";
+    case DispatchKey::SparseCsrXPU:
+      return "SparseCsrXPU";
+    case DispatchKey::SparseCsrIPU:
+      return "SparseCsrIPU";
+    case DispatchKey::SparseCsrXLA:
+      return "SparseCsrXLA";
+    case DispatchKey::SparseCsrLazy:
+      return "SparseCsrLazy";
+    case DispatchKey::SparseCsrMLC:
+      return "SparseCsrMLC";
+    case DispatchKey::SparseCsrHPU:
+      return "SparseCsrHPU";
+    case DispatchKey::SparseCsrPrivateUse1:
+      return "SparseCsrPrivateUse1";
+    case DispatchKey::SparseCsrPrivateUse2:
+      return "SparseCsrPrivateUse2";
+    case DispatchKey::SparseCsrPrivateUse3:
+      return "SparseCsrPrivateUse3";
 
     case DispatchKey::NestedTensor:
       return "NestedTensor";
@@ -105,6 +164,28 @@ const char* toString(DispatchKey t) {
       return "NestedTensorCPU";
     case DispatchKey::NestedTensorCUDA:
       return "NestedTensorCUDA";
+    case DispatchKey::NestedTensorHIP:
+      return "NestedTensorHIP";
+    case DispatchKey::NestedTensorVE:
+      return "NestedTensorVE";
+    case DispatchKey::NestedTensorXPU:
+      return "NestedTensorXPU";
+    case DispatchKey::NestedTensorIPU:
+      return "NestedTensorIPU";
+    case DispatchKey::NestedTensorXLA:
+      return "NestedTensorXLA";
+    case DispatchKey::NestedTensorLazy:
+      return "NestedTensorLazy";
+    case DispatchKey::NestedTensorMLC:
+      return "NestedTensorMLC";
+    case DispatchKey::NestedTensorHPU:
+      return "NestedTensorHPU";
+    case DispatchKey::NestedTensorPrivateUse1:
+      return "NestedTensorPrivateUse1";
+    case DispatchKey::NestedTensorPrivateUse2:
+      return "NestedTensorPrivateUse2";
+    case DispatchKey::NestedTensorPrivateUse3:
+      return "NestedTensorPrivateUse3";
 
     case DispatchKey::Python:
       return "Python";
@@ -138,6 +219,8 @@ const char* toString(DispatchKey t) {
       return "AutogradXPU";
     case DispatchKey::AutogradCUDA:
       return "AutogradCUDA";
+    case DispatchKey::AutogradHIP:
+      return "AutogradHIP";
     case DispatchKey::AutogradXLA:
       return "AutogradXLA";
     case DispatchKey::AutogradLazy:
@@ -146,6 +229,8 @@ const char* toString(DispatchKey t) {
       return "AutogradMLC";
     case DispatchKey::AutogradHPU:
       return "AutogradHPU";
+    case DispatchKey::AutogradVE:
+      return "AutogradVE";
     case DispatchKey::AutogradPrivateUse1:
       return "AutogradPrivateUse1";
     case DispatchKey::AutogradPrivateUse2:
@@ -156,6 +241,33 @@ const char* toString(DispatchKey t) {
       return "AutogradOther";
     case DispatchKey::AutogradNestedTensor:
       return "AutogradNestedTensor";
+
+    case DispatchKey::AutocastCPU:
+      return "AutocastCPU";
+    case DispatchKey::AutocastIPU:
+      return "AutocastIPU";
+    case DispatchKey::AutocastXPU:
+      return "AutocastXPU";
+    case DispatchKey::AutocastCUDA:
+      return "AutocastCUDA";
+    case DispatchKey::AutocastHIP:
+      return "AutocastHIP";
+    case DispatchKey::AutocastXLA:
+      return "AutocastXLA";
+    case DispatchKey::AutocastLazy:
+      return "AutocastLazy";
+    case DispatchKey::AutocastMLC:
+      return "AutocastMLC";
+    case DispatchKey::AutocastHPU:
+      return "AutocastHPU";
+    case DispatchKey::AutocastVE:
+      return "AutocastVE";
+    case DispatchKey::AutocastPrivateUse1:
+      return "AutocastPrivateUse1";
+    case DispatchKey::AutocastPrivateUse2:
+      return "AutocastPrivateUse2";
+    case DispatchKey::AutocastPrivateUse3:
+      return "AutocastPrivateUse3";
 
     case DispatchKey::ZeroTensor:
       return "ZeroTensor";
@@ -169,17 +281,6 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Tracer:
       return "Tracer";
-
-    // Note: AutocastCUDA and Autocast are the same, currently.
-    // See comments in DispatchKey.h
-    case DispatchKey::Autocast:
-      return "Autocast";
-
-    case DispatchKey::AutocastCPU:
-      return "AutocastCPU";
-
-    case DispatchKey::AutocastXPU:
-      return "AutocastXPU";
 
     case DispatchKey::Batched:
       return "Batched";

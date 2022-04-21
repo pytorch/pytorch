@@ -723,15 +723,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
     constexpr auto cpu_bits_ks = DispatchKeySet(BackendComponent::CPUBit) |
-        DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::MkldnnCPU});
+        DispatchKeySet(DispatchKey::MkldnnCPU);
     return key_set_.has_any(cpu_bits_ks);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto cuda_bits_ks = DispatchKeySet(BackendComponent::CUDABit) |
-        DispatchKeySet(DispatchKey::SparseCsrCUDA);
+    constexpr auto cuda_bits_ks = DispatchKeySet(BackendComponent::CUDABit);
     return key_set_.has_any(cuda_bits_ks);
   }
 

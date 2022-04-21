@@ -630,11 +630,8 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradOther,
 });
 
-constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
-    DispatchKey::AutocastCPU,
-    DispatchKey::AutocastCUDA,
-    DispatchKey::AutocastXPU,
-});
+constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet(
+    DispatchKey::AutocastFunctionality);
 
 // See Note [TLS Initialization]
 constexpr DispatchKeySet default_included_set = DispatchKeySet({
@@ -642,11 +639,8 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
     DispatchKey::ADInplaceOrView,
 });
 
-constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
-    DispatchKey::AutocastCPU,
-    DispatchKey::AutocastCUDA,
-    DispatchKey::AutocastXPU,
-});
+constexpr DispatchKeySet default_excluded_set = DispatchKeySet(
+    DispatchKey::AutocastFunctionality);
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
     autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
@@ -658,8 +652,7 @@ constexpr DispatchKeySet python_ks = DispatchKeySet({
 
 constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
 
-constexpr DispatchKeySet sparse_csr_ks =
-    DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::SparseCsrCUDA});
+constexpr DispatchKeySet sparse_csr_ks = DispatchKeySet(DispatchKey::SparseCsr);
 
 constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
 
@@ -675,13 +668,12 @@ constexpr DispatchKeySet autogradother_backends =
          DispatchKey::ORT,
          DispatchKey::Vulkan,
          DispatchKey::Metal,
-         DispatchKey::SparseCsrCPU,
-         DispatchKey::SparseCsrCUDA,
          DispatchKey::CustomRNGKeyId,
          DispatchKey::MkldnnCPU,
          DispatchKey::Meta,
          // Sparse and Quantized backends also live here.
          DispatchKey::Sparse,
+         DispatchKey::SparseCsr,
          DispatchKey::Quantized})
     // Including the backend bits because this keyset is used during op
     // registration, which requires looping over all runtime autogradother

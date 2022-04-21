@@ -98,6 +98,11 @@ enum class BackendComponent : uint8_t {
 // See Note [DispatchKeySet Internal Representation] for more details.
 //
 // NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
+//
+// NOTE 2: If you add a new "per-backend functionality key,
+// there are several functions that you have to update!
+// Look for all of the code snippets marked with
+// "[Note: Per-Backend Functionality Dispatch Keys]"
 enum class DispatchKey : uint16_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -412,18 +417,18 @@ enum class DispatchKey : uint16_t {
   StartOfQuantizedBackends,
   QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
-  _QuantizedHIP,
-  _QuantizedXLA,
-  _QuantizedMLC,
-  _QuantizedIPU,
+  QuantizedHIP,
+  QuantizedXLA,
+  QuantizedMLC,
+  QuantizedIPU,
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
-  _QuantizedHPU,
-  _QuantizedVE,
-  _QuantizedLazy,
-  _QuantizedPrivateUse1,
-  _QuantizedPrivateUse2,
-  _QuantizedPrivateUse3,
-  EndOfQuantizedBackends = _QuantizedPrivateUse3,
+  QuantizedHPU,
+  QuantizedVE,
+  QuantizedLazy,
+  QuantizedPrivateUse1,
+  QuantizedPrivateUse2,
+  QuantizedPrivateUse3,
+  EndOfQuantizedBackends = QuantizedPrivateUse3,
 
   // ~~~~~~~~~~~~~~ "Sparse" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~ //
   // keys starting with an _ are not currently used,
@@ -435,17 +440,17 @@ enum class DispatchKey : uint16_t {
   SparseCUDA, // registered at build/aten/src/ATen/RegisterSparseCUDA.cpp
   SparseHIP, // TODO: I think this is not actually used, due to Note
   // [Masquerading as CUDA]
-  _SparseXLA,
-  _SparseMLC,
-  _SparseIPU,
+  SparseXLA,
+  SparseMLC,
+  SparseIPU,
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
-  _SparseHPU,
+  SparseHPU,
   SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
-  _SparseLazy,
-  _SparsePrivateUse1,
-  _SparsePrivateUse2,
-  _SparsePrivateUse3,
-  EndOfSparseBackends = _SparsePrivateUse3,
+  SparseLazy,
+  SparsePrivateUse1,
+  SparsePrivateUse2,
+  SparsePrivateUse3,
+  EndOfSparseBackends = SparsePrivateUse3,
 
   // ~~~~~~~~~~~~~~ "SparseCsr" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~ //
   // keys starting with an _ are not currently used,
@@ -455,18 +460,18 @@ enum class DispatchKey : uint16_t {
   StartOfSparseCsrBackends,
   SparseCsrCPU,
   SparseCsrCUDA,
-  _SparseCsrHIP,
-  _SparseCsrXLA,
-  _SparseCsrMLC,
-  _SparseCsrIPU,
-  _SparseCsrXPU,
-  _SparseCsrHPU,
-  _SparseCsrVE,
-  _SparseCsrLazy,
-  _SparseCsrPrivateUse1,
-  _SparseCsrPrivateUse2,
-  _SparseCsrPrivateUse3,
-  EndOfSparseCsrBackends = _SparseCsrPrivateUse3,
+  SparseCsrHIP,
+  SparseCsrXLA,
+  SparseCsrMLC,
+  SparseCsrIPU,
+  SparseCsrXPU,
+  SparseCsrHPU,
+  SparseCsrVE,
+  SparseCsrLazy,
+  SparseCsrPrivateUse1,
+  SparseCsrPrivateUse2,
+  SparseCsrPrivateUse3,
+  EndOfSparseCsrBackends = SparseCsrPrivateUse3,
 
   // ~~~~~~~~~~~~~~ "NestedTensor" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~
   // //
@@ -479,18 +484,18 @@ enum class DispatchKey : uint16_t {
   NestedTensorCPU,
   // registered at build/aten/src/ATen/RegisterNestedTensorCUDA.cpp
   NestedTensorCUDA,
-  _NestedTensorHIP,
-  _NestedTensorXLA,
-  _NestedTensorMLC,
-  _NestedTensorIPU,
-  _NestedTensorXPU,
-  _NestedTensorHPU,
-  _NestedTensorVE,
-  _NestedTensorLazy,
-  _NestedTensorPrivateUse1,
-  _NestedTensorPrivateUse2,
-  _NestedTensorPrivateUse3,
-  EndOfNestedTensorBackends = _NestedTensorPrivateUse3,
+  NestedTensorHIP,
+  NestedTensorXLA,
+  NestedTensorMLC,
+  NestedTensorIPU,
+  NestedTensorXPU,
+  NestedTensorHPU,
+  NestedTensorVE,
+  NestedTensorLazy,
+  NestedTensorPrivateUse1,
+  NestedTensorPrivateUse2,
+  NestedTensorPrivateUse3,
+  EndOfNestedTensorBackends = NestedTensorPrivateUse3,
 
   // ~~~~~~~~~~~~~~ "Autograd" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~ //
   // keys starting with an _ are not currently used,
@@ -500,13 +505,13 @@ enum class DispatchKey : uint16_t {
   StartOfAutogradBackends,
   AutogradCPU,
   AutogradCUDA,
-  _AutogradHIP,
+  AutogradHIP,
   AutogradXLA,
   AutogradMLC,
   AutogradIPU,
   AutogradXPU,
   AutogradHPU,
-  _AutogradVE,
+  AutogradVE,
   AutogradLazy,
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
@@ -525,20 +530,20 @@ enum class DispatchKey : uint16_t {
   // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
   // it probably should get its own Autocast key
   AutocastCUDA,
-  _AutocastHIP,
-  _AutocastXLA,
-  _AutocastMLC,
-  _AutocastIPU,
+  AutocastHIP,
+  AutocastXLA,
+  AutocastMLC,
+  AutocastIPU,
   AutocastXPU,
-  _AutocastHPU,
-  _AutocastVE,
-  _AutocastLazy,
+  AutocastHPU,
+  AutocastVE,
+  AutocastLazy,
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
-  _AutocastPrivateUse1,
-  _AutocastPrivateUse2,
-  _AutocastPrivateUse3,
-  EndOfAutocastBackends = _AutocastPrivateUse3,
+  AutocastPrivateUse1,
+  AutocastPrivateUse2,
+  AutocastPrivateUse3,
+  EndOfAutocastBackends = AutocastPrivateUse3,
   // If we add a new per-backend functionality key that has higher priority
   // than Autocast, then this key should be updated.
   EndOfRuntimeBackendKeys = EndOfAutocastBackends,
@@ -695,6 +700,7 @@ C10_API c10::DispatchKey parseDispatchKey(const std::string& k);
 // torch::dispatch(torch::kCPU, ...) is also valid.
 constexpr DispatchKey kAutograd = DispatchKey::Autograd;
 
+// See [Note: Per-Backend Functionality Dispatch Keys]
 // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
 // This function relies on the invariant that the dispatch keys between
 // StartOfDenseBackends and EndOfRuntimeBackendKeys are ordered by backend
@@ -746,6 +752,7 @@ constexpr BackendComponent toBackendComponent(DispatchKey k) {
   }
 }
 
+// See [Note: Per-Backend Functionality Dispatch Keys]
 constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
   if (k <= DispatchKey::EndOfFunctionalityKeys) {
     return k;
@@ -773,6 +780,7 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
 // This function relies on the invariant that the dispatch keys between
 // StartOfDenseBackends and EndOfRuntimeBackendKeys are ordered by backend
 // in the same order as `BackendComponent`.
+// See [Note: Per-Backend Functionality Dispatch Keys]
 constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
     DispatchKey functionality_k,
     BackendComponent backend_k) {
