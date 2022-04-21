@@ -10,6 +10,7 @@
 #endif
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
+#include <ATen/native/nested/NestedTensorMath.h>
 
 namespace at {
 namespace native {
@@ -143,28 +144,6 @@ Tensor batch_offsets_from_efficient_size(Tensor ef_sizes) {
   return offsets;
 }
 
-Tensor pad_tensor_to_shape(
-    const Tensor& t,
-    IntArrayRef goal_shape,
-    double value = 0) {
-  std::vector<int64_t> padd;
-  auto tup = t.sizes();
-  TORCH_CHECK(
-      t.dim() == (int64_t)(goal_shape.size()),
-      "dimension ",
-      t.dim(),
-      " doesn't match length ",
-      goal_shape.size(),
-      " of goal shape.");
-  for (int64_t i = tup.size() - 1; i >= 0; i--) {
-    padd.push_back(0);
-    padd.push_back(goal_shape[i] - tup[i]);
-  }
-  Tensor new_tensor = at::constant_pad_nd(t, IntArrayRef(padd), value);
-  new_tensor = new_tensor.reshape(goal_shape);
-  return new_tensor;
-}
-
 int64_t num_bytes(IntArrayRef sizes) {
   // 0-dim Tensors have torch.Size of .size() 0, but carry 1 memory.
   // Empty 1-dim Tensors (torch.tensor([])) have torch.Size of .size() 1,
@@ -246,60 +225,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
       return output;
     }
   }
-  // TODO port CUDA path in pytorch/nestedtensor to_padded_tensor!
-  // TODO: skipped optimization for case of all 1x1 tensors
-  auto& nt = *get_nested_tensor_impl(t);
-  auto max_size = NestedTensor_get_max_size(nt);
-  auto sizes = nt.get_nested_size_tensor();
-
-  if (sizes.numel() == 0 || sizes.dim() == 0) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(nt.get_buffer().numel() == 0);
-    return nt.get_buffer();
-  }
-
-  // TODO: doesn't handle empty/scalar entries because we don't need
-  // it for transformers; see to_padded_tensor in
-  // pytorch/nestedtensor's masking.cpp.
-
-  const auto sizes_num_rows = sizes.sizes()[0];
-  const auto sizes_num_columns = sizes.sizes()[1];
-  const auto sizes_data_start = sizes.data_ptr<int64_t>();
-  const auto sizes_data_end = sizes_data_start + sizes.numel();
-  std::vector<int64_t> split_sizes;
-  split_sizes.reserve(sizes_num_rows);
-  for (auto sizes_data = sizes_data_start; sizes_data != sizes_data_end;
-       sizes_data += sizes_num_columns) {
-    split_sizes.push_back(
-        num_bytes(IntArrayRef(sizes_data, sizes_num_columns)));
-  }
-  std::vector<int64_t> nonzero_split_sizes;
-  for (const auto split_size : split_sizes) {
-    if (split_size > 0) {
-      nonzero_split_sizes.push_back(split_size);
-    }
-  }
-  const auto buffer = nt.get_buffer();
-  std::vector<Tensor> buffers_;
-  if (!nonzero_split_sizes.empty()) {
-    buffers_ = at::split_with_sizes(buffer, nonzero_split_sizes, 0);
-  }
-
-  std::vector<Tensor> buffers;
-  buffers.reserve(split_sizes.size());
-  int64_t next_buffer = 0;
-  auto sizes_ptr = sizes_data_start;
-  for (const auto split_size : split_sizes) {
-    Tensor to_pad;
-    IntArrayRef tensor_sizes(sizes_ptr, sizes_num_columns);
-    if (split_size > 0) {
-      to_pad = buffers_[next_buffer++].reshape(tensor_sizes);
-    } else {
-      to_pad = at::empty(tensor_sizes, buffer.options());
-    }
-    buffers.push_back(pad_tensor_to_shape(to_pad, max_size, padding));
-    sizes_ptr += sizes_num_columns;
-  }
-  return at::stack(buffers);
+  return NestedTensor_to_padded_tensor_generic(t, padding);
 }
 } // namespace native
 } // namespace at

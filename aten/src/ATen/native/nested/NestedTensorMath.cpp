@@ -49,6 +49,7 @@ int64_t num_bytes(IntArrayRef sizes) {
   }
   return result;
 }
+} // namespace
 
 Tensor pad_tensor_to_shape(
     const Tensor& t,
@@ -71,7 +72,6 @@ Tensor pad_tensor_to_shape(
   new_tensor = new_tensor.reshape(goal_shape);
   return new_tensor;
 }
-} // namespace
 
 at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
   TORCH_CHECK(buffer.is_contiguous(), "Given buffer must be contiguous.");
@@ -275,7 +275,7 @@ Tensor nested_from_padded_generic(
       std::move(new_buffer), sizes);
 }
 
-Tensor NestedTensor_to_padded_tensor_cpu(const Tensor& t, double padding) {
+Tensor NestedTensor_to_padded_tensor_generic(const Tensor& t, double padding) {
   // TODO port CUDA path in pytorch/nestedtensor to_padded_tensor!
   // TODO: skipped optimization for case of all 1x1 tensors
   auto& nt = *get_nested_tensor_impl(t);
