@@ -35,7 +35,7 @@ def define_targets(rules):
             ":native_functions.yaml",
         ],
         tools = ["//tools/setup_helpers:generate_code"],
-        outs = GENERATED_AUTOGRAD_CPP + _GENERATED_AUTOGRAD_PYTHON_CPP + GENERATED_AUTOGRAD_H + GENERATED_LAZY_H + GENERATED_TESTING_PY,
+        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
         cmd = "$(location //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
@@ -122,4 +122,4 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
     "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
     "torch/csrc/lazy/generated/RegisterLazy.cpp",
-] + _GENERATED_AUTOGRAD_CPP_HEADERS + _GENERATED_LAZY_H
+] + _GENERATED_AUTOGRAD_CPP_HEADERS + GENERATED_LAZY_H
