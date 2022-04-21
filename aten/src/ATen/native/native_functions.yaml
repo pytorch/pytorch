@@ -358,9 +358,6 @@
     SparseCPU, SparseCUDA: sgn_sparse_out
     SparseCsrCPU, SparseCsrCUDA: sgn_sparse_csr_out
 
-- func: chalf(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
-  variants: method
-
 - func: real(Tensor(a) self) -> Tensor(a)
   device_check: NoCheck   # TensorIterator
   variants: function

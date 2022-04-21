@@ -28,10 +28,7 @@ base_ctors_dict = {
 base_ctors = types.SimpleNamespace(**base_ctors_dict)
 
 def wrap_with_logging_tensor(ctor):
-    def wrapper(*args, **kwargs):
-        requires_grad = kwargs.pop("requires_grad", False)
-        return LoggingTensor(ctor(*args, **kwargs), requires_grad=requires_grad)
-    return wrapper
+    return lambda *args, **kwargs: LoggingTensor(ctor(*args, **kwargs))
 
 logging_tensor_ctors_dict = {k: wrap_with_logging_tensor(ctor) for (k, ctor) in base_ctors_dict.items()}
 logging_tensor_ctors = types.SimpleNamespace(**logging_tensor_ctors_dict)
@@ -256,7 +253,7 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res[0], v)
         self._assert_same_struct(res[1], inputs)
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_vjp_create_graph(self, ctors):
         def reducer(x):
             return x.sum(dim=1)
@@ -434,7 +431,7 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res[0], ctors.zeros(4))
         self._assert_same_struct(res[1], res[0])
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_jvp_create_graph(self, ctors):
         def reducer(x):
             return x.sum(dim=1)
@@ -534,8 +531,7 @@ class TestAutogradFunctional(TestCase):
     def test_hessian_vectorize_raises_no_warnings(self, ctors):
         return self._test_vectorize_raises_no_warnings(autogradF.hessian, ctors)
 
-    @parametrize("vectorize", [True, False])
-    @base_and_logging_tensor
+    @FIXME_xfail_vectorized_logging_tensor
     def test_jacobian_err_check(self, vectorize, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3)
@@ -662,7 +658,7 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res, ctors.zeros(4))
 
     @parametrize("vectorize", [True, False])
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_jacobian_create_graph(self, vectorize, ctors):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
@@ -708,7 +704,7 @@ class TestAutogradFunctional(TestCase):
             result_forward_mode = autogradF.jacobian(f, inputs, strategy="forward-mode", vectorize=True)
             self.assertEqual(result_forward_mode, expected)
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_jacobian_vectorize_correctness_simple(self, ctors):
         def f(x):
             return 3 * x ** 2
@@ -716,7 +712,7 @@ class TestAutogradFunctional(TestCase):
         x = ctors.randn(2, 3, 5)
         self._check_jacobian_vectorize_correctness(f, x)
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_jacobian_vectorize_correctness_multi_input(self, ctors):
         def f(x, y):
             return (x.cos() * x) @ y.sin()
@@ -725,7 +721,7 @@ class TestAutogradFunctional(TestCase):
         y = ctors.randn(3, 5)
         self._check_jacobian_vectorize_correctness(f, (x, y))
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_jacobian_vectorize_correctness_multi_input_multi_output(self, ctors):
         def f(x, y):
             return (x * x) @ y, x @ (x.sum(1) * y), y.sum()
@@ -734,7 +730,7 @@ class TestAutogradFunctional(TestCase):
         y = ctors.randn(3, 5)
         self._check_jacobian_vectorize_correctness(f, (x, y))
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_jacobian_vectorize_correctness_unrelated_outputs(self, ctors):
         def f(x, y):
             return x, y, x, y
@@ -743,7 +739,7 @@ class TestAutogradFunctional(TestCase):
         y = ctors.randn(3)
         self._check_jacobian_vectorize_correctness(f, (x, y))
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_jacobian_vectorize_correctness_zero_dim(self, ctors):
         # zero-dim output
         def f(x, y):
@@ -769,7 +765,7 @@ class TestAutogradFunctional(TestCase):
         self._check_jacobian_vectorize_correctness(h, (x, y))
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_jacobian_vectorize_correctness_different_devices(self, ctors):
         def f(x, y):
             return x * y, (x * y).cuda()
@@ -797,7 +793,7 @@ class TestAutogradFunctional(TestCase):
         result_forward_mode = autogradF.hessian(f, inputs, outer_jacobian_strategy="forward-mode", vectorize=True)
         self.assertEqual(result_forward_mode, expected)
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_hessian_vectorize_correctness_simple(self, ctors):
         def f(x):
             return (3 * x ** 2).sum()
@@ -805,7 +801,7 @@ class TestAutogradFunctional(TestCase):
         x = ctors.randn(2, 3, 5)
         self._check_hessian_vectorize_correctness(f, x)
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_hessian_vectorize_correctness_multi_input(self, ctors):
         def f(x, y, z):
             return ((x.relu() * x) @ y.sin() @ z).sum()
@@ -815,7 +811,7 @@ class TestAutogradFunctional(TestCase):
         z = ctors.randn(5, 5)
         self._check_hessian_vectorize_correctness(f, (x, y, z))
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_hessian_vectorize_correctness_unrelated_outputs(self, ctors):
         # output unrelated to one input
         def f(x, y):
@@ -833,8 +829,7 @@ class TestAutogradFunctional(TestCase):
         y = ctors.randn(3)
         self._check_hessian_vectorize_correctness(f, (x, y))
 
-    @parametrize("vectorize", [True, False])
-    @base_and_logging_tensor
+    @FIXME_xfail_vectorized_logging_tensor
     def test_hessian_err_check(self, vectorize, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
@@ -977,7 +972,7 @@ class TestAutogradFunctional(TestCase):
         self._assert_interleaved_struct(res, inputs, inputs)
 
     @parametrize("vectorize", [True, False])
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_hessian_create_graph(self, vectorize, ctors):
         def pow_reducer(x):
             return x.pow(3).sum()
@@ -1158,7 +1153,7 @@ class TestAutogradFunctional(TestCase):
         res = autogradF.vhp(bad_reducer, inputs, v)
         self._assert_same_struct(res[1], inputs)
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_vhp_create_graph(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
@@ -1341,7 +1336,7 @@ class TestAutogradFunctional(TestCase):
         res = autogradF.hvp(bad_reducer, inputs, v)
         self._assert_same_struct(res[1], inputs)
 
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_hvp_create_graph(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()

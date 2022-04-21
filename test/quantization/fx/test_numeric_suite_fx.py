@@ -1608,10 +1608,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 self.assertTrue(
                     (base_op in FUNS_IO_TYPE_FP32_OR_INT8) or
                     (base_op in MODS_IO_TYPE_FP32_OR_INT8) or
-                    (base_op in METHS_IO_TYPE_FP32_OR_INT8) or
-                    # Softmax has a different signature for the quantized
-                    # version, so it does not fit into the cases above.
-                    (base_op is torch.nn.Softmax),
+                    (base_op in METHS_IO_TYPE_FP32_OR_INT8),
                     f"missing IO type handling for {base_op}")
             elif qhandler_cls == qp.EmbeddingQuantizeHandler:
                 # embedding shadowing is not implemented, for now

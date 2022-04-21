@@ -113,49 +113,49 @@ std::string get_named_tuple_str_or_default(
     std::string default_type_str) {
   if (type_ptr->kind() == TypeKind::TupleType) {
     // For the simple types (Tensor, Tensor), the mobile type parse can parse
-    // it and compilation unit won't have it's definition.
-    if (!compilation_unit.get_named_tuple(type_ptr->str())) {
-      return default_type_str;
-    }
-    auto named_tuple_ptr = compilation_unit.get_named_tuple(type_ptr->str());
-    if (named_tuple_ptr != nullptr) {
-      std::string named_tuple_str = type_ptr->str();
-      named_tuple_str.append("[NamedTuple, [");
-      std::vector<IValue> name_type_pairs;
+    // it and compilation unit won't have it's definition. The default type
+    // string will be returned instead.
+    if (compilation_unit.get_named_tuple(type_ptr->str())) {
+      auto named_tuple_ptr = compilation_unit.get_named_tuple(type_ptr->str());
+      if (named_tuple_ptr != nullptr) {
+        std::string named_tuple_str = type_ptr->str();
+        named_tuple_str.append("[NamedTuple, [");
+        std::vector<IValue> name_type_pairs;
 
-      // Get the field name and field type for the NamedTuple
-      for (auto it = named_tuple_ptr->schema()->arguments().begin();
-           it != named_tuple_ptr->schema()->arguments().end();
-           it++) {
-        const std::string named_tuple_name = it->name();
-        const c10::TypePtr& named_tuple_type = it->type();
-        // When it->type() is Tensor type, in Python, if it's inferred type,
-        // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
-        // it's not inferred type, str() return "Tensor[]" and repr_str()
-        // return "Tensor". In cpp, repr_str() will always return "Tensor"
-        // regardless inferred type. When exporing custom type in bytecode,
-        // "Tensor" is the preferred way to deserialize Tensor type
-        std::string named_tuple_type_str = it->is_inferred_type()
-            ? named_tuple_type->str()
-            : named_tuple_type->repr_str();
-        // The type can also be NamedTuple. Will parse it recursively and get
-        // it's string representation.
-        named_tuple_type_str = get_named_tuple_str_or_default(
-            compilation_unit, named_tuple_type, named_tuple_type->repr_str());
-        name_type_pairs.emplace_back(
-            c10::ivalue::Tuple::create({it->name(), named_tuple_type_str}));
+        // Get the field name and field type for the NamedTuple
+        for (auto it = named_tuple_ptr->schema()->arguments().begin();
+             it != named_tuple_ptr->schema()->arguments().end();
+             it++) {
+          const std::string named_tuple_name = it->name();
+          const c10::TypePtr& named_tuple_type = it->type();
+          // When it->type() is Tensor type, in Python, if it's inferred type,
+          // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
+          // it's not inferred type, str() return "Tensor[]" and repr_str()
+          // return "Tensor". In cpp, repr_str() will always return "Tensor"
+          // regardless inferred type. When exporing custom type in bytecode,
+          // "Tensor" is the preferred way to deserialize Tensor type
+          std::string named_tuple_type_str = it->is_inferred_type()
+              ? named_tuple_type->str()
+              : named_tuple_type->repr_str();
+          // The type can also be NamedTuple. Will parse it recursively and get
+          // it's string representation.
+          named_tuple_type_str = get_named_tuple_str_or_default(
+              compilation_unit, named_tuple_type, named_tuple_type->repr_str());
+          name_type_pairs.emplace_back(
+              c10::ivalue::Tuple::create({it->name(), named_tuple_type_str}));
 
-        named_tuple_str.append("[")
-            .append(named_tuple_name)
-            .append(", ")
-            .append(named_tuple_type_str)
-            .append("]");
-        if (it != named_tuple_ptr->schema()->arguments().end() - 1) {
-          named_tuple_str.append(",");
+          named_tuple_str.append("[")
+              .append(named_tuple_name)
+              .append(", ")
+              .append(named_tuple_type_str)
+              .append("]");
+          if (it != named_tuple_ptr->schema()->arguments().end() - 1) {
+            named_tuple_str.append(",");
+          }
         }
+        named_tuple_str.append("]]");
+        return named_tuple_str;
       }
-      named_tuple_str.append("]]");
-      return named_tuple_str;
     }
   }
   return default_type_str;

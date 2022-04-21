@@ -8,7 +8,6 @@ from torch.autograd import (
     kineto_available, _ProfilerResult, _disable_profiler, _enable_profiler,
     _prepare_profiler, _supported_activities, _kineto_step,
 )
-from torch._C._autograd import _ExperimentalConfig
 import torch
 import torch.cuda
 from torch.futures import Future
@@ -84,10 +83,6 @@ class profile(object):
         use_cpu (bool, optional): profile CPU events; setting to ``False`` requires
             ``use_kineto=True`` and can be used to lower the overhead for GPU-only profiling.
 
-        experimental_config (_ExperimentalConfig) : A set of experimental options
-            used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
-
-
     .. warning:
         Enabling memory profiling or source attribution incurs additional profiler
         overhead
@@ -132,8 +127,7 @@ class profile(object):
             with_stack=False,
             with_modules=False,
             use_kineto=False,
-            use_cpu=True,
-            experimental_config=None):
+            use_cpu=True):
         self.enabled: bool = enabled
         if not self.enabled:
             return
@@ -147,9 +141,6 @@ class profile(object):
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.use_cpu = use_cpu
-        if experimental_config is None:
-            experimental_config = _ExperimentalConfig()
-        self.experimental_config = experimental_config
         self.kineto_results: Optional[_ProfilerResult] = None
 
         if not self.use_cpu:
@@ -184,8 +175,7 @@ class profile(object):
             self.profile_memory,
             self.with_stack,
             self.with_flops,
-            self.with_modules,
-            self.experimental_config)
+            self.with_modules)
 
     def __enter__(self):
         if not self.enabled:
@@ -586,8 +576,7 @@ class emit_nvtx(object):
                 False,
                 False,
                 False,
-                False,
-                _ExperimentalConfig()),
+                False),
             set()
         )
         return self

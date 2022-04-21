@@ -21,8 +21,8 @@ Data type                               dtype                                   
 64-bit floating point                   ``torch.float64`` or ``torch.double``       :class:`torch.DoubleTensor`   :class:`torch.cuda.DoubleTensor`
 16-bit floating point [1]_              ``torch.float16`` or ``torch.half``         :class:`torch.HalfTensor`     :class:`torch.cuda.HalfTensor`
 16-bit floating point [2]_              ``torch.bfloat16``                          :class:`torch.BFloat16Tensor` :class:`torch.cuda.BFloat16Tensor`
-32-bit complex                          ``torch.complex32`` or ``torch.chalf``
-64-bit complex                          ``torch.complex64`` or ``torch.cfloat``
+32-bit complex                          ``torch.complex32``
+64-bit complex                          ``torch.complex64``
 128-bit complex                         ``torch.complex128`` or ``torch.cdouble``
 8-bit integer (unsigned)                ``torch.uint8``                             :class:`torch.ByteTensor`     :class:`torch.cuda.ByteTensor`
 8-bit integer (signed)                  ``torch.int8``                              :class:`torch.CharTensor`     :class:`torch.cuda.CharTensor`
@@ -315,9 +315,6 @@ Tensor class reference
     Tensor.cumprod_
     Tensor.cumsum
     Tensor.cumsum_
-    Tensor.chalf
-    Tensor.cfloat
-    Tensor.cdouble
     Tensor.data_ptr
     Tensor.deg2rad
     Tensor.dequantize

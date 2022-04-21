@@ -500,7 +500,6 @@ def _get_fixed_qparams_op_configs():
             (torch.tanh, default_symmetric_fixed_qparams_observer),
             ("tanh", default_symmetric_fixed_qparams_observer),
             ("tanh_", default_symmetric_fixed_qparams_observer),
-            (torch.nn.Softmax, default_affine_fixed_qparams_observer),
     ]:
         fixed_qparams_op_configs.append({
             "pattern": fixed_qparam_op,

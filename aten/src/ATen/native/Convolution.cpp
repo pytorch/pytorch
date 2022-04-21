@@ -629,25 +629,6 @@ static void check_input_same_type_as_parameters(
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
 }
 
-static void check_input_same_type_as_parameters(
-    const Tensor& input,
-    const Tensor& weight,
-    const Tensor& bias,
-    const ConvBackend backend) {
-  if (backend == ConvBackend::Mkldnn) {
-    TORCH_CHECK(input.options().type_equal(weight.options())
-        || (input.is_mkldnn() && weight.device().is_cpu() && weight.scalar_type() == kFloat),
-        "Input type (", input.toString(), ") and weight type (", weight.toString(),
-        ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor");
-    TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options()))
-        || (input.is_mkldnn() && bias.device().is_cpu() && bias.scalar_type() == kFloat),
-        "Input type (", input.toString(), ") and bias type (", bias.toString(),
-        ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor");
-  } else {
-    check_input_same_type_as_parameters(input, weight, bias);
-  }
-}
-
 static auto view4d(const at::Tensor& tensor) -> at::Tensor {
   TORCH_CHECK(tensor.ndimension() == 3,
            "expected 3D tensor, got tensor with ", tensor.ndimension(),
@@ -1206,35 +1187,18 @@ static inline std::vector<int64_t> calc_output_size(
 
 static inline at::MemoryFormat determine_backend_memory_format(
     const Tensor& input,
-    const Tensor& weight,
-    const ConvBackend backend) {
+    const Tensor& weight) {
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
   auto k = weight.ndimension();
 #if !defined(C10_MOBILE)
   // See Note [Mobile check segfaults]
-  switch(backend) {
-    case ConvBackend::Cudnn:
-    case ConvBackend::CudnnTranspose:
-      if (detail::getCUDAHooks().compiledWithCuDNN()) {
-        backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
-      }
-      break;
-    case ConvBackend::Miopen:
-    case ConvBackend::MiopenDepthwise:
-    case ConvBackend::MiopenTranspose:
-      if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
-        TORCH_INTERNAL_ASSERT((k == 4 || k == 5),
-            "Expected 4D or 5D input for miopen memory format selection in determine_backend_memory_format()");
-        backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
-      }
-      break;
-    case ConvBackend::Mkldnn:
-      if (mkldnn_conv_use_channels_last(input, weight)) {
-        backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
-      }
-      break;
-    default:
-      backend_memory_format = at::MemoryFormat::Contiguous;
+  if (detail::getCUDAHooks().compiledWithCuDNN()) {
+    backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
+  }
+  if (detail::getCUDAHooks().compiledWithMIOpen() && miopen_conv_use_channels_last(input, weight)) {
+    TORCH_INTERNAL_ASSERT((k == 4 || k == 5),
+        "Expected 4D or 5D input for miopen memory format selection in determine_backend_memory_format()");
+    backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
   }
 #endif
   return backend_memory_format;
@@ -1287,7 +1251,7 @@ at::Tensor _convolution(
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
   ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, need_backward, params);
-  at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
+  at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight);
 
   // Call the backend.
   Tensor output;
@@ -1348,11 +1312,18 @@ at::Tensor _convolution(
       break;
     case ConvBackend::Mkldnn:
 #if AT_MKLDNN_ENABLED()
-      check_input_same_type_as_parameters(input, weight, bias, backend);
+      TORCH_CHECK(input.options().type_equal(weight.options())
+          || (input.is_mkldnn() && weight.device().is_cpu() && weight.scalar_type() == kFloat),
+          "Input type (", input.toString(), ") and weight type (", weight.toString(),
+          ") should be the same or input should be a MKLDNN tensor and weight is a dense tensor");
+      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options()))
+          || (input.is_mkldnn() && bias.device().is_cpu() && bias.scalar_type() == kFloat),
+          "Input type (", input.toString(), ") and bias type (", bias.toString(),
+          ") should be the same or input should be a MKLDNN tensor and bias is a dense tensor");
       if (!input.is_mkldnn()) {
         // need to ensure contiguous for non-mkldnn tensors
-        input = input.contiguous(backend_memory_format);
-        weight = weight.contiguous(backend_memory_format);
+        input = input.contiguous();
+        weight = weight.contiguous();
         bias = bias.defined() ? bias.contiguous() : bias;
       }
       output = at::mkldnn_convolution(
@@ -1755,7 +1726,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 
   // Select appropriate backend to use.
   ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, /*need_backward=*/ true, params);
-  at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
+  at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight);
 
   // Call the backend.
   Tensor backend_grad_input, backend_grad_weight, backend_grad_bias;
@@ -1863,8 +1834,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       TORCH_CHECK(!weight.is_mkldnn(),
           "The MKLDNN backend does not support weight as an MKLDNN tensor during training");
       if (!input.is_mkldnn()) {
-        input = input.contiguous(backend_memory_format);
-        weight = weight.contiguous(backend_memory_format);
+        input = input.contiguous();
+        weight = weight.contiguous();
       }
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         mkldnn_convolution_backward_stub(input.device().type(), input, grad_output, weight, params.padding,
