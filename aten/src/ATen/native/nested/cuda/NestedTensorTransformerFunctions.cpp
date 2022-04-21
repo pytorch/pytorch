@@ -113,7 +113,6 @@ Tensor _collapse_two_dims_3(Tensor input, int64_t dim1, int64_t dim2) {
   auto* nt_input = get_nested_tensor_impl(input);
   TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
   Tensor nt_sizes = nt_input->get_nested_size_tensor();
-  const auto& input_buffer = nt_input->get_buffer();
 
   Tensor sizes_dim1 = at::native::narrow(nt_sizes, 1, 0, 1);
   Tensor sizes_dim2 = at::native::narrow(nt_sizes, 1, 1, 1);
@@ -134,7 +133,7 @@ Tensor batch_offsets_from_efficient_size(Tensor ef_sizes) {
   Tensor offsets = at::empty({1 + ef_sizes_size_0}, at::kLong);
   int64_t* offsets_ptr = offsets.data_ptr<int64_t>();
   offsets_ptr[0] = 0;
-  int64_t ef_sizes_size_1 = ef_sizes.size(1);
+  int64_t ef_sizes_size_1 = ef_sizes.sizes()[1];
   for (const auto i : c10::irange(ef_sizes_size_0)) {
     int64_t prod = 1;
     for (const auto j : c10::irange(ef_sizes_size_1)) {
@@ -163,11 +162,11 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
     Tensor nt_sizes = nt_input->get_nested_size_tensor();
     Tensor offsets = batch_offsets_from_efficient_size(nt_sizes);
     auto new_size = NestedTensor_get_max_size(*nt_input);
-    new_size.insert(new_size.begin(), nt_sizes.size(0));
+    new_size.insert(new_size.begin(), nt_sizes.sizes()[0]);
     Tensor output = at::empty(IntArrayRef(new_size), nt_buffer.options());
 
-    int64_t input_dim = nt_sizes.size(1);
-    int64_t batch_size = nt_sizes.size(0);
+    int64_t input_dim = nt_sizes.sizes()[1];
+    int64_t batch_size = nt_sizes.sizes()[0];
     //TODO: Remove need for cat here
     at::Tensor metadata = at::cat({offsets, nt_sizes.reshape(-1)});
     metadata = metadata.to(at::Device(kCUDA), at::kInt, true, true);
@@ -189,7 +188,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
           new_size,
           batch_size);
       if (orig_nt_dim == 3 && nt_input_opt_size_2) {
-        output = output.reshape({output.size(0), -1, *nt_input_opt_size_2});
+        output = output.reshape({output.sizes()[0], -1, *nt_input_opt_size_2});
       }
       return output;
     }
@@ -204,7 +203,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
           new_size,
           batch_size);
       if (orig_nt_dim == 3 && nt_input_opt_size_2) {
-        output = output.reshape({output.size(0), -1, *nt_input_opt_size_2});
+        output = output.reshape({output.sizes()[0], -1, *nt_input_opt_size_2});
       }
       return output;
     }
