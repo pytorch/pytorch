@@ -140,7 +140,7 @@ std::string get_named_tuple_str_or_default(
           // The type can also be NamedTuple. Will parse it recursively and get
           // it's string representation.
           named_tuple_type_str = get_named_tuple_str_or_default(
-              compilation_unit, named_tuple_type, named_tuple_type->repr_str());
+              compilation_unit, named_tuple_type, named_tuple_type_str);
           name_type_pairs.emplace_back(
               c10::ivalue::Tuple::create({it->name(), named_tuple_type_str}));
 
