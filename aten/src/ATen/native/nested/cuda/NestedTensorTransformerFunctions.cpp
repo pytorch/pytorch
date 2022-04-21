@@ -144,21 +144,6 @@ Tensor batch_offsets_from_efficient_size(Tensor ef_sizes) {
   return offsets;
 }
 
-int64_t num_bytes(IntArrayRef sizes) {
-  // 0-dim Tensors have torch.Size of .size() 0, but carry 1 memory.
-  // Empty 1-dim Tensors (torch.tensor([])) have torch.Size of .size() 1,
-  // but carry 0 memory.
-  int64_t result = 1;
-  int64_t stride = 1;
-  for (int ii = sizes.size() - 1; ii >= 0; --ii) {
-    result += (sizes[ii] - 1) * stride;
-    // TODO: accept strides as input when we support them instead of
-    // assuming contiguous.
-    stride *= sizes[ii];
-  }
-  return result;
-}
-
 Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
   if ((t.dim() >= 2 && t.dim() <= 4)) {
     auto orig_nt_dim = t.dim();
