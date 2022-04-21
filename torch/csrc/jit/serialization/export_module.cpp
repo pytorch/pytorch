@@ -112,12 +112,12 @@ std::string get_named_tuple_str_or_default(
     const TypePtr& type_ptr,
     std::string default_type_str) {
   if (type_ptr->kind() == TypeKind::TupleType) {
-    TORCH_CHECK(
-        compilation_unit.get_named_tuple(type_ptr->str()),
-        "Can't find definition for the qualified name: ",
-        type_ptr->str(),
-        "(TypeKind::TupleType)  in compilation unit.",
-        "Please report a bug to PyTorch.");
+    // For the simple types (Tensor, Tensor), the mobile type parse can parse
+    // it and compilation unit won't have it's definition.
+    if (!compilation_unit.get_named_tuple(type_ptr->str())) {
+
+      return default_type_str;
+    }
     auto named_tuple_ptr = compilation_unit.get_named_tuple(type_ptr->str());
     if (named_tuple_ptr != nullptr) {
       std::string named_tuple_str = type_ptr->str();
