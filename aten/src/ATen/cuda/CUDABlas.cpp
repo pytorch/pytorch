@@ -634,7 +634,8 @@ void gemm_and_bias(
     int64_t mat2_ld,
     const Dtype* bias,
     Dtype* result_ptr,
-    int64_t result_ld) {
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation) {
   using opmath_t = at::opmath_type<Dtype>;
   opmath_t beta_val = 0; // bias is added in epilogue
 
@@ -670,6 +671,13 @@ void gemm_and_bias(
       &transb,
       sizeof(transb)));
   cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
+  if (activation == GEMMAndBiasActivationEpilogue::RELU) {
+    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
+  } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
+#if CUDA_VERSION >= 11040
+    epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+#endif
+  }
   TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
       computeDesc.descriptor(),
       CUBLASLT_MATMUL_DESC_EPILOGUE,
@@ -752,7 +760,8 @@ template void gemm_and_bias(
     int64_t mat2_ld,
     const double* bias,
     double* result_ptr,
-    int64_t result_ld);
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
 
 template void gemm_and_bias(
     bool transpose_mat1,
@@ -767,7 +776,8 @@ template void gemm_and_bias(
     int64_t mat2_ld,
     const float* bias,
     float* result_ptr,
-    int64_t result_ld);
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
 
 template void gemm_and_bias(
     bool transpose_mat1,
@@ -782,7 +792,8 @@ template void gemm_and_bias(
     int64_t mat2_ld,
     const at::Half* bias,
     at::Half* result_ptr,
-    int64_t result_ld);
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
 
 template void gemm_and_bias(
     bool transpose_mat1,
@@ -797,7 +808,8 @@ template void gemm_and_bias(
     int64_t mat2_ld,
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
-    int64_t result_ld);
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
 #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
 
 template <>
