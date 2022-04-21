@@ -8867,7 +8867,7 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
-                    dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+                    dtypes=all_types_and_complex_and(torch.chalf, torch.float16, torch.bfloat16, torch.bool),
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,

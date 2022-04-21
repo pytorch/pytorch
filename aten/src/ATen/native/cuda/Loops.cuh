@@ -110,7 +110,7 @@ struct AUnaryFunctor {
   using traits = function_traits<func_t>;
   using opmath_arg1_t = typename traits::template arg<0>::type;
   __device__ return_t operator()(arg2_t b) const {
-    return f(a, b);
+    return static_cast<return_t>(f(a, b));
   }
   // NB: scalar is stored in higher precision!
   AUnaryFunctor(func_t f_, opmath_arg1_t a_): f(f_), a(a_) {}
@@ -124,7 +124,7 @@ struct BUnaryFunctor {
   using traits = function_traits<func_t>;
   using opmath_arg2_t = typename traits::template arg<1>::type;
   __device__ return_t operator()(arg1_t a) const {
-    return f(a, b);
+    return static_cast<return_t>(f(a, b));
   }
   // NB: scalar is stored in higher precision!
   BUnaryFunctor(func_t f_, opmath_arg2_t b_): f(f_), b(b_) {}
@@ -138,7 +138,7 @@ struct BUnaryFunctor {
 template <typename arg1_t, typename arg2_t, typename return_t, typename func_t>
 struct BinaryFunctor {
   __device__ return_t operator()(arg1_t a, arg2_t b) const {
-    return f(a, b);
+    return static_cast<return_t>(f(a, b));
   }
   BinaryFunctor(func_t f_): f(f_) {}
   private:
