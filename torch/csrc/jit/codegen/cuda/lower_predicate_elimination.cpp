@@ -345,7 +345,6 @@ class PredicateChcker: public IterVisitor {
   // See FusionPredicateElimination3 and FusionPredicateElimination4
   // for concrete examples.
   void handle(ReductionOp* rop) final {
-    std::cerr << "Hitting rop: " << rop->toString();
     auto input = rop->inputs()[0]->as<TensorView>();
     auto input_def = input->definition();
     // When input_def is null, input must be an input to the fusion,
