@@ -341,12 +341,17 @@ def _simplify_obj_name(obj) -> str:
     """
     Simplify the display strings of objects for the purpose of rendering within DataPipe error messages.
     """
-    if inspect.isfunction(obj):
+    default_str = str(obj)
+    # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+    if isinstance(type(obj), _DataPipeMeta):  # Only applies to DataPipes
+        try:
+            return str(obj.__class__.__qualname__)
+        except Exception as _:
+            return default_str
+    elif inspect.isfunction(obj):
         return obj.__name__
-    try:
-        return str(obj.__class__.__qualname__)
-    except Exception as _:
-        return str(obj)
+    else:
+        return default_str
 
 
 def _generate_input_args_string(obj):
@@ -362,6 +367,7 @@ def _generate_input_args_string(obj):
         if name in input_param_names:
             result.append((name, _simplify_obj_name(obj)))
     return ', '.join([f'{name}={value}' for name, value in result])
+
 
 def _generate_iterdatapipe_msg(datapipe):
     return f"{datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
@@ -387,10 +393,8 @@ def _set_datapipe_valid_iterator_id(datapipe):
     """
     if datapipe._valid_iterator_id is None:
         datapipe._valid_iterator_id = 0
-        # print(f"Valid iterator id has been set to {datapipe._valid_iterator_id}.")  # TODO: Remove after debugging
     else:
         datapipe._valid_iterator_id += 1
-        # print(f"Valid iterator id has been updated to {datapipe._valid_iterator_id}.")  # TODO: Remove after debugging
     return datapipe._valid_iterator_id
 
 
@@ -444,32 +448,30 @@ def hook_iterator(namespace, profile_name):
                         response = gen.send(request)
             except StopIteration as e:
                 return e.value
+            except Exception as e:
+                # TODO: Simplify the traceback message to skip over `response = gen.send(None)`
+                #       Part of https://github.com/pytorch/data/issues/284
+                datapipe = args[0]
+                msg = "thrown by __iter__ of"
+                full_msg = f"{msg} {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
+                if len(e.args) >= 1 and msg not in e.args[0]:
+                    e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
+                raise
 
         namespace['__iter__'] = wrap_generator
     else:
         # IterDataPipe is an iterator with both ``__iter__`` and ``__next__``
+        # And ``__iter__`` returns `self`
         if '__next__' in namespace:
             next_func = namespace['__next__']
 
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
-                datapipe = args[0]
                 with context():
-                    # TODO: This doesn't work when __iter__ simply return `self`
-                    # if datapipe.singleton_mode:  # TODO: Check if iterator is still valid here
-                    #     print(f"Checking with the ID as: {iterator_id}")
-                    #     _check_iterator_valid(datapipe, iterator_id)
+                    # If `__iter__` returns `self`, then the object can always have only one iterator at a time
+                    # by default, such that no additional logic is needed.
                     return next_func(*args, **kwargs)
 
-            @functools.wraps(func)
-            def wrap_iter(*args, **kwargs):
-                # TODO: This doesn't work when __iter__ simply return `self`
-                # datapipe = args[0]
-                # nonlocal iterator_id
-                # iterator_id = _set_datapipe_valid_iterator_id(datapipe)
-                return func(*args, **kwargs)
-
-            namespace['__iter__'] = wrap_iter
             namespace['__next__'] = wrap_next
         # ``__iter__`` of IterDataPipe returns an iterator other than `self` (or simply doesn't have ``__next__``)
         else:
@@ -482,6 +484,7 @@ def hook_iterator(namespace, profile_name):
                 return IteratorDecorator(iter_ret, datapipe, iterator_id)
 
             namespace['__iter__'] = wrap_iter
+
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # Add function for datapipe instance to reinforce the type
@@ -521,6 +524,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
             if not issubtype(data_type, sub_cls.type.param):
                 raise TypeError("Expected return type of '__iter__' as a subtype of {}, but found {}"
                                 " for {}".format(sub_cls.type, _type_repr(data_type), sub_cls.__name__))
+
 
 def reinforce_type(self, expected_type):
     r"""

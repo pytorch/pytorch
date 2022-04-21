@@ -65,5 +65,5 @@ jobs:
 
       - name: Build Buck target
         run: |
-          touch .buckconfig
+          echo -e "[buildfile]\n  name = BUILD.buck\n" > .buckconfig
           buck build --keep-going //third_party:
