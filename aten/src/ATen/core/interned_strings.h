@@ -64,6 +64,8 @@ namespace c10 {
   _(prim, PadPacked) /* onnx */      \
   _(prim, Placeholder) /* debug */   \
   _(prim, Print)                     \
+  _(prim, EmptyListLiteral)          \
+  _(prim, LegacyTypedConstructor)    \
   _(prim, PythonOp)                  \
   _(prim, IgnoredPythonOp)           \
   _(prim, Reverse)                   \
@@ -107,7 +109,6 @@ namespace c10 {
   _(aten, Complex)                   \
   _(aten, str)                       \
   _(aten, Delete)                    \
-  _(aten, gelu_)                     \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, layout)                    \
@@ -246,7 +247,7 @@ namespace c10 {
   _(onnx, Less)                      \
   _(onnx, LessOrEqual)               \
   _(onnx, Not)                       \
-  _(onnx, ATen)                      \
+  _(aten, ATen)                      \
   _(onnx, Split)                     \
   _(onnx, ConstantOfShape)           \
   _(onnx, Cast)                      \
@@ -315,7 +316,8 @@ namespace c10 {
   _(attr, new_axis)                  \
   _(attr, warn_id)                   \
   _(attr, allowzero)                 \
-  _(attr, seen_none)
+  _(attr, seen_none)                 \
+  _(attr, overload_name)
 
 enum class _keys : unique_t {
     #define DEFINE_KEY(ns, s) ns##_##s,
