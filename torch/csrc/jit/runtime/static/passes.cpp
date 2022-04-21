@@ -417,7 +417,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::select_tensor(Tensor(a) a, Tensor(b) b, bool use_b) -> Tensor(a|b)",
       c10::AliasAnalysisKind::FROM_SCHEMA));
-  m.def(torch::schema("static_runtime::create_owned_ref(...) -> ..."));
+  m.def(torch::schema(
+      "static_runtime::create_owned_ref(...) -> ...",
+      c10::AliasAnalysisKind::CONSERVATIVE));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {

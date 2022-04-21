@@ -358,6 +358,9 @@
     SparseCPU, SparseCUDA: sgn_sparse_out
     SparseCsrCPU, SparseCsrCUDA: sgn_sparse_csr_out
 
+- func: chalf(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+  variants: method
+
 - func: real(Tensor(a) self) -> Tensor(a)
   device_check: NoCheck   # TensorIterator
   variants: function
@@ -2058,6 +2061,13 @@
     CPU, CUDA: expm1_out
     SparseCPU, SparseCUDA: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr_out
+
+- func: expand.SymInt(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: expand_symint
 
 - func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -11437,6 +11447,12 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: expand_copy
+  tags: view_copy
+
+- func: expand_copy.SymInt(Tensor self, SymInt[] size, *, bool implicit=False) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: expand_copy_SymInt
   tags: view_copy
 
 - func: permute_copy(Tensor self, int[] dims) -> Tensor
