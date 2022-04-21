@@ -14,6 +14,7 @@ class TestPythonRegistration(TestCase):
     def test_override_cpu_sum(self) -> None:
         # Example 1
         run = [False]
+
         def my_sum(*args, **kwargs):
             run[0] = True
             return args[0]

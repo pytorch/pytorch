@@ -79,7 +79,7 @@ public:
 
     // Pre-scan for arguments that match defaults
     int64_t default_suffix_len = 0;
-    for (int64_t idx = arguments.size() - 1; idx >= 0; idx--) {
+    for (auto idx = arguments.size() - 1; idx >= 0; idx--) {
       const auto& arg = schema.arguments()[idx];
       if (!arg.default_value().has_value()) {
         break;
@@ -98,7 +98,7 @@ public:
     // just gets passed positionally
     py::dict kwargs;
 
-    for (int64_t idx = 0; idx < arguments.size() - default_suffix_len; idx++) {
+    for (auto idx = 0; idx < arguments.size() - default_suffix_len; idx++) {
       PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
     }
 
