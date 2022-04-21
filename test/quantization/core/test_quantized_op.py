@@ -4462,16 +4462,12 @@ class TestQuantizedConv(TestCase):
                 Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False, input_dtype=X_qdtype, output_dtype=X_qdtype)
 
     @given(batch_size=st.integers(1, 3),
-           # only multiples of 16 are supported right now, might be fixed in
-           # next release of cudnn
-           # input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           input_channels_per_group=st.sampled_from([16, 32]),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           input_channels_per_group=st.integers(1, 32),
            height=st.integers(10, 16),
            width=st.integers(7, 14),
-           # only multiples of 16 are supported right now, might be fixed in
-           # next release of cudnn
-           # output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           output_channels_per_group=st.sampled_from([16, 32]),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           output_channels_per_group=st.integers(1, 32),
            # groups=st.integers(1, 3),
            groups=st.integers(1, 1),
            kernel_h=st.integers(1, 7),

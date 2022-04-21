@@ -347,6 +347,11 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
     apply_impl_helper<kReluFused>(
         quantized_output, act.to(c10::MemoryFormat::ChannelsLast), output_scale);
   }
+
+  // need to return sliced tensor if output_channels was padded
+  if (output_channels_ != orig_weight_.size(0)) {
+    return quantized_output.slice(1, 0, output_channels_);
+  }
   return quantized_output;
 }
 

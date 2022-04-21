@@ -87,7 +87,8 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
       torch::List<int64_t> dilation,
       int64_t groups,
       bool transpose,
-      c10::QScheme q_scheme)
+      c10::QScheme q_scheme,
+      int64_t output_channels)
       : orig_weight_(std::move(orig_weight)),
         bias_(std::move(bias)),
         stride_(std::move(stride)),
@@ -96,7 +97,8 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
         dilation_(std::move(dilation)),
         groups_(groups),
         transpose_(transpose),
-        q_scheme_(q_scheme) {}
+        q_scheme_(q_scheme),
+        output_channels_(output_channels) {} // output channels needs to be stored when we have to pad this dimension
 
   at::Tensor apply(
       const at::Tensor& input,
@@ -168,6 +170,7 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
   int64_t groups_;
   bool transpose_;
   c10::QScheme q_scheme_;
+  int64_t output_channels_;
 
   template <bool ReluFused>
   at::Tensor apply_impl(
