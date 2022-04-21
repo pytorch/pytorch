@@ -7869,22 +7869,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(cdouble.dtype, torch.complex128)
         self.assertEqual(cdouble.real, x.double())
         self.assertEqual(cdouble.imag, torch.zeros_like(cdouble.imag))
-        chalf = x.chalf()
-        self.assertEqual(chalf.dtype, torch.complex32)
-        self.assertEqual(chalf.real, x.half())
-        self.assertEqual(chalf.imag, torch.zeros_like(chalf.imag))
-
-    def test_type_alias(self):
-        type_alias_map = {torch.float64: torch.double,
-                          torch.float32: torch.float,
-                          torch.int32: torch.int,
-                          torch.int64: torch.long,
-                          torch.int16: torch.short,
-                          torch.float16: torch.half,
-                          torch.complex32: torch.chalf,
-                          torch.complex64: torch.cfloat}
-        for dtype, alias in type_alias_map.items():
-            self.assertIs(alias, dtype)
 
     # FIXME: Describe this test
     def test_doc_template(self) -> None:

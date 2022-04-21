@@ -55,10 +55,7 @@ class profile(object):
             self.profile_memory,
             self.with_stack,
             self.with_flops,
-            self.with_modules,
-            # avoid exposing _ExperimentalConfig this in legacy public API
-            torch._C._autograd._ExperimentalConfig(),
-        )
+            self.with_modules)
 
     def __enter__(self):
         if not self.enabled:

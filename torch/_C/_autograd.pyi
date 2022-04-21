@@ -35,14 +35,6 @@ class DeviceType(Enum):
     Metal = ...
     ...
 
-class _ExperimentalConfig:
-    def __init__(
-        self,
-        profiler_metrics: List[str] = ...,
-        profiler_measure_per_kernel: bool = ...,
-    ) -> None: ...
-    ...
-
 class ProfilerConfig:
     def __init__(
         self,
@@ -51,8 +43,7 @@ class ProfilerConfig:
         profile_memory: bool,
         with_stack: bool,
         with_flops: bool,
-        with_modules: bool,
-        experimental_config: _ExperimentalConfig,
+        with_modules: bool
     ) -> None: ...
     ...
 

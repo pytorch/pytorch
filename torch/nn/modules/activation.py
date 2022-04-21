@@ -174,10 +174,13 @@ class Hardtanh(Module):
 
     .. math::
         \text{HardTanh}(x) = \begin{cases}
-            \text{max\_val} & \text{ if } x > \text{ max\_val } \\
-            \text{min\_val} & \text{ if } x < \text{ min\_val } \\
+            1 & \text{ if } x > 1 \\
+            -1 & \text{ if } x < -1 \\
             x & \text{ otherwise } \\
         \end{cases}
+
+    The range of the linear region :math:`[-1, 1]` can be adjusted using
+    :attr:`min_val` and :attr:`max_val`.
 
     Args:
         min_val: minimum value of the linear region range. Default: -1

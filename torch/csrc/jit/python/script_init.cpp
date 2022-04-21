@@ -2085,13 +2085,8 @@ void initJitScriptBindings(PyObject* module) {
              const ConcreteModuleTypeBuilder& other) {
             return self.equals(other);
           })
-      .def(
-          "set_module_list",
-          [](ConcreteModuleTypeBuilder& self) {
-            self.setIterableModuleKind(IterableModuleKind::LIST);
-          })
-      .def("set_parameter_list", [](ConcreteModuleTypeBuilder& self) {
-        self.setIterableModuleKind(IterableModuleKind::PARAMLIST);
+      .def("set_module_list", [](ConcreteModuleTypeBuilder& self) {
+        self.setIterableModuleKind(IterableModuleKind::LIST);
       });
 
   py::class_<ConcreteModuleType, std::shared_ptr<ConcreteModuleType>>(

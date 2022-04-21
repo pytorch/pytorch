@@ -398,11 +398,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             torch.matmul,
             toq.matmul,
         ]),
-        # Softmax
-        set([
-            nn.Softmax,
-            nnq.Softmax,
-        ]),
     ]
 
     base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]] = {}
@@ -571,7 +566,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.ReLU6,
         nn.SiLU,
         nn.Mish,
-        nn.Softmax,
         nni.BNReLU2d,
         nni.BNReLU3d,
         nni.ConvReLU1d,
@@ -619,7 +613,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Embedding,
         nnq.EmbeddingBag,
         nnq.Dropout,
-        nnq.Softmax,
         nniq.BNReLU2d,
         nniq.BNReLU3d,
         nniq.ConvReLU1d,
