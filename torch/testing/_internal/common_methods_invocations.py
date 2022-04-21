@@ -568,8 +568,9 @@ class OpInfo(object):
 
     # An optional reference function that accepts ndarrays (AKA "NumPy arrays").
     # If given, the op will be compared with its reference on each of its sample inputs.
-    # the following metadata describes the operator, its variants, and its aliases, if any
     ref: Callable = None
+
+    # the following metadata describes the operator, its variants, and its aliases, if any
 
     # iterable of aliases, e.g. ("absolute",) for torch.abs
     aliases: Iterable = None
@@ -626,7 +627,6 @@ class OpInfo(object):
 
     # the following dtypesIf... options override the dtypes value on their respective device types
 
-
     # dtypes this function is expected to work with on CUDA
     dtypesIfCUDA: _dispatch_dtypes = None
 
@@ -642,20 +642,12 @@ class OpInfo(object):
     # backward dtypes this function is expected to work with on ROCM
     backward_dtypesIfROCM: _dispatch_dtypes = None
 
-    # dtypes to test with by default. Tests are instantiated with
-    # these dtypes for the op unless otherwise specified.
-    # This is helpful in reducing the test matrix.
-    default_test_dtypes: _dispatch_dtypes = None
-
     # the following metadata describes the operators out= support
 
     # whether the op supports the out kwarg
     # defaults to True, if the op does not allow the out kwarg or
     # supports it incorrectly then test_out in test_ops.py should fail
     supports_out: bool = True
-
-    # whether op allows safe casting when writing to out arguments
-    safe_casts_outputs: bool = False
 
     # the following metadata relates to autograd support
     # whether the operation supports backward mode AD
@@ -745,6 +737,7 @@ class OpInfo(object):
     supports_sparse_csr: bool = False
 
     # the following metadata relates to complex support and is checked in test_ops.py
+
     test_conjugated_samples: bool = True
 
     test_neg_view: bool = True
@@ -753,6 +746,7 @@ class OpInfo(object):
     assert_jit_shape_analysis: bool = False
 
     # the following metadata relates to ExpandedWeights support and is checked in test_expanded_weights.py
+
     supports_expanded_weight: bool = False
 
     def __post_init__(self):
