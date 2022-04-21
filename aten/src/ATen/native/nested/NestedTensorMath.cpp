@@ -301,7 +301,7 @@ Tensor nested_from_padded_generic(
       std::move(new_buffer), sizes);
 }
 
-Tensor NestedTensor_to_padded_tensor(const Tensor& t, double padding) {
+Tensor NestedTensor_to_padded_tensor_cpu(const Tensor& t, double padding) {
   // TODO port CUDA path in pytorch/nestedtensor to_padded_tensor!
   // TODO: skipped optimization for case of all 1x1 tensors
   auto& nt = *get_nested_tensor_impl(t);

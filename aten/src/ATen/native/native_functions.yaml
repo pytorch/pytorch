@@ -11599,7 +11599,8 @@
 - func: to_padded_tensor(Tensor self, float padding) -> Tensor
   variants: method
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_to_padded_tensor
+    NestedTensorCPU: NestedTensor_to_padded_tensor_cpu
+    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
 
 - func: _nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
   variants: method
