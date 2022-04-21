@@ -370,7 +370,7 @@ class TestQuantizedTensor(TestCase):
                 self.assertEqual(qr.item(), 15)
 
                 dtype_msg = str(dtype) + ", "
-                if device is "cuda":
+                if device == "cuda":
                     self.assertEqual(' '.join(str(qr).split()),
                                      "tensor([15.], device='" + str(qr.device) + "', size=(1,), dtype=" + dtype_msg +
                                      "quantization_scheme=torch.per_tensor_affine, " +
