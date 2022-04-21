@@ -62,7 +62,7 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
       const int64_t num_bounds_per_group,
       const int64_t num_group) {
     const T* start = bounds;
-    for (const auto i : c10::irange(num_group)) {
+    for (C10_UNUSED const auto i : c10::irange(num_group)) {
       if (!std::is_sorted(start, start + num_bounds_per_group)) {
         return false;
       }
