@@ -323,7 +323,7 @@ def translate_args_disp_to_cpp(
             name=last_disp_arg.name,
             default=last_disp_arg.default,
             argument=last_disp_arg,
-            )
+        )
         dp_sig_args.append(mem_format_arg)
     else:
         dp_sig_args = sig.arguments()
@@ -506,8 +506,8 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
     return op.{dispatcher_call}({dispatcher_exprs_str});"""
 
                 if not is_redispatching_fn and len(self.static_dispatch_backend_indices) > 0:
-                        # call() should go through static dispatch
-                        fn_body = static_dispatch(f, sig, backend_indices=self.static_dispatch_backend_indices)
+                    # call() should go through static dispatch
+                    fn_body = static_dispatch(f, sig, backend_indices=self.static_dispatch_backend_indices)
                 defns += f"""
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
@@ -1324,8 +1324,10 @@ def gen_aggregated_headers(
         lambda: {
             "MethodOperators_includes": [],
             "MethodOperators_declarations": list(
-                mapMaybe(ComputeOperators(Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx),
-                method_native_functions)
+                mapMaybe(
+                    ComputeOperators(Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx),
+                    method_native_functions
+                )
             ),
         },
     )
@@ -2010,7 +2012,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
             'operator_headers': [f'#include <ATen/ops/{fn.root_name}.h>'],
             'definitions': [ComputeOperators(Target.DEFINITION,
                                              static_dispatch_backend_indices=static_dispatch_idx)(fn)]},
-        base_env= {
+        base_env={
             'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
         },
         num_shards=5,
