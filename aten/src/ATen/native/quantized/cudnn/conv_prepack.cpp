@@ -72,6 +72,17 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
     // bias_contig = bias->contiguous();
   }
 
+  // cudnn v8.4.0 expects conv2d's weight tensor's input channels to be a multiple of 4. if it is not
+  // we need to explicitly pad it to a multiple of 4 ourselves as cudnn does not currently support padding.
+  // TODO: when and if cudnn enables padding in their operators, we can remove padding on our end;
+  // currently, limit padding support to groups=1 (ungrouped conv)
+  // TODO: implement this for groups > 1; should be straightforward since we're only padding a single dimension
+  TORCH_CHECK(groups == 1, "Quantized cudnn conv2d is currenty lmited to groups = 1; received groups =", groups);
+  if (weight.size(1) % 4 != 0) {
+    int8_t num_slices = 4 - weight.size(1) % 4; // number of slices we need to pad
+    weight = at::pad(weight, {0, 0, 0, 0, 0, num_slices, 0, 0}, "constant", 0);
+  }
+
   auto ret_ptr = c10::make_intrusive<PackedConvWeightCudnn<kSpatialDim>>(
           weight.to(c10::MemoryFormat::ChannelsLast), // TODO: this assumes 2D I think. make it more general?
           bias,

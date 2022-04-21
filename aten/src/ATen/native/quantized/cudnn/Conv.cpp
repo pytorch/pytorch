@@ -319,7 +319,6 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
     double output_scale,
     int64_t output_zero_point) {
   const int N = act.size(0);
-  const int D = kSpatialDim == 3 ? act.size(2) : 1;
   const int H = act.size(kSpatialDim);
   const int W = act.size(kSpatialDim + 1);
   const int M = orig_weight_.size(0); // output channels
@@ -332,10 +331,21 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
       output_scale,
       output_zero_point,
       at::MemoryFormat::ChannelsLast);
-  // requantization
-  // out_int8 = act_int8 * weight_int8 * act_scale * w_scale / output_scale
-  apply_impl_helper<kReluFused>(
-      quantized_output, act, output_scale);
+
+  // cudnn v8.4.0 expects conv2d's activation tensor's input channels to be a multiple of 4. if it is not
+  // we need to explicitly pad it to a multiple of 4 ourselves as cudnn does not currently support padding.
+  // TODO: when and if cudnn enables padding in their operators, we can remove padding on our end;
+  // currently, limit padding support to groups=1 (ungrouped conv)
+  // TODO: implement this for groups > 1; should be straightforward since we're only padding a single dimension
+  TORCH_CHECK(groups_ == 1, "Quantized cudnn conv2d is currenty lmited to groups = 1; received groups =", groups_);
+  if (act.size(1) % 4 != 0) {
+    int8_t num_slices = 4 - act.size(1) % 4; // number of slices we need to pad
+    apply_impl_helper<kReluFused>(
+        quantized_output, at::pad(act, {0, 0, 0, 0, 0, num_slices, 0, 0}, "constant", 0), output_scale);
+  } else {
+    apply_impl_helper<kReluFused>(
+        quantized_output, act, output_scale);
+  }
   return quantized_output;
 }
 
