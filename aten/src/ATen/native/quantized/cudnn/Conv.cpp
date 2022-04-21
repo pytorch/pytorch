@@ -340,11 +340,12 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
   TORCH_CHECK(groups_ == 1, "Quantized cudnn conv2d is currenty lmited to groups = 1; received groups =", groups_);
   if (act.size(1) % 4 != 0) {
     int8_t num_slices = 4 - act.size(1) % 4; // number of slices we need to pad
+    auto act_padded = at::pad(act, {0, 0, 0, 0, 0, num_slices, 0, 0}, "constant", 0);
     apply_impl_helper<kReluFused>(
-        quantized_output, at::pad(act, {0, 0, 0, 0, 0, num_slices, 0, 0}, "constant", 0), output_scale);
+        quantized_output, act_padded.to(c10::MemoryFormat::ChannelsLast), output_scale);
   } else {
     apply_impl_helper<kReluFused>(
-        quantized_output, act, output_scale);
+        quantized_output, act.to(c10::MemoryFormat::ChannelsLast), output_scale);
   }
   return quantized_output;
 }
@@ -387,7 +388,6 @@ class QConvInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-    act = act.to(c10::MemoryFormat::ChannelsLast);
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
     if (kReluFused) {
       return packed_weight->apply_relu(act, output_scale, output_zero_point);
