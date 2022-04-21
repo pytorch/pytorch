@@ -665,7 +665,7 @@ void spmm_wrapper(
 #if CUSPARSE_VERSION < 11702 || CUSPARSE_VERSION >= 11704
   return spmm(mat1, mat2, beta, alpha, result);
 #else
-  if (mat1.dim() == 2) {
+  if (mat1.dim() == 2 || mat1.is_floating_point()) {
     return spmm(mat1, mat2, beta, alpha, result);
   } else {
     auto sparse_dim = mat1.dim();
