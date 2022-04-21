@@ -355,6 +355,7 @@ static void unfolded2d_copy_channels_last(
     data_index_init(start, y, output_height, x, output_width);
 
     for (const auto k : c10::irange(start, end)) {
+      (void)k; // Suppress unused variable warning
       scalar_t* dst = finput_data + y * output_width * kH * kW * n_input_plane + x * kH * kW * n_input_plane;
       scalar_t* src = input_data;
 
