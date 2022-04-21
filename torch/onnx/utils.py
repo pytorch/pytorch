@@ -1175,9 +1175,6 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
-        # TODO: Should RuntimeError be used for unsupported operators?
-        #       It might get mix with other exception unrelated to unsupported ONNX ops
-
         if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
         elif operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and not is_caffe2_aten_fallback():

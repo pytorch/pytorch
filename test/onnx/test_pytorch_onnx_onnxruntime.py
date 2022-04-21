@@ -11,6 +11,8 @@ import itertools
 import copy
 import os
 import random
+from contextlib import contextmanager
+from unittest.mock import patch
 
 import model_defs.word_language_model as word_language_model
 import onnx
@@ -38,9 +40,11 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHe
 from collections import OrderedDict
 
 from torch.nn.utils.rnn import PackedSequence
-from torch.onnx import CheckerError, register_custom_op_symbolic, unregister_custom_op_symbolic
+from torch.onnx import CheckerError, register_custom_op_symbolic, unregister_custom_op_symbolic, symbolic_registry
 from torch.onnx.symbolic_helper import _unimplemented
 from torch.onnx.utils import unpack_quantized_tensor
+from torch.testing._internal.common_utils import skipIfCaffe2
+from torch.onnx.symbolic_helper import _onnx_unsupported
 
 
 _ORT_PROVIDERS = ["CPUExecutionProvider"]
@@ -82,7 +86,7 @@ def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True
                     keep_initializers_as_inputs=True, dynamic_axes=None,
                     input_names=None, output_names=None,
                     fixed_batch_size=False, training=None,
-                    verbose=False):
+                    verbose=False, operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
     f = io.BytesIO()
     input_copy = copy.deepcopy(input)
     torch.onnx._export(model, input_copy, f,
@@ -92,7 +96,7 @@ def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True
                        dynamic_axes=dynamic_axes,
                        input_names=input_names, output_names=output_names,
                        fixed_batch_size=fixed_batch_size, training=training,
-                       verbose=verbose)
+                       verbose=verbose, operator_export_type=operator_export_type)
 
     # compute onnxruntime output prediction
     so = onnxruntime.SessionOptions()
@@ -116,6 +120,13 @@ def unpack_to_numpy(value):
     value_final = [to_numpy(v) for v in value_unpacked]
     return value_final
 
+@contextmanager
+def custom_op(opname, symbolic_fn, opset_version):
+    try:
+        register_custom_op_symbolic(opname, symbolic_fn, opset_version)
+        yield
+    finally:
+        unregister_custom_op_symbolic(opname, opset_version)
 
 def run_ort(ort_sess, input):
     input = unpack_to_numpy(flatten_tuples(input))
@@ -142,7 +153,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    output_names=None, fixed_batch_size=False,
                    dict_check=True, training=None,
                    remained_onnx_input_idx=None, flatten=True,
-                   verbose=False):
+                   verbose=False, operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
     if training is not None and training == torch.onnx.TrainingMode.TRAINING:
         model.train()
     elif training is None or training == torch.onnx.TrainingMode.EVAL:
@@ -177,7 +188,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                    dynamic_axes=dynamic_axes, input_names=input_names,
                                    output_names=output_names, fixed_batch_size=fixed_batch_size, training=training,
-                                   verbose=verbose)
+                                   verbose=verbose, operator_export_type=operator_export_type)
         # compute onnxruntime output prediction
         if remained_onnx_input_idx is not None:
             input_onnx = []
@@ -314,7 +325,8 @@ class _TestONNXRuntime:
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False, dict_check=True,
-                 training=None, remained_onnx_input_idx=None, verbose=False):
+                 training=None, remained_onnx_input_idx=None, verbose=False,
+                 operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
         def _run_test(m, remained_onnx_input_idx, flatten=True):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
@@ -323,7 +335,7 @@ class _TestONNXRuntime:
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size, dict_check=dict_check,
                                   training=training, remained_onnx_input_idx=remained_onnx_input_idx,
-                                  flatten=flatten, verbose=verbose)
+                                  flatten=flatten, verbose=verbose, operator_export_type=operator_export_type)
 
         if isinstance(remained_onnx_input_idx, dict):
             scripting_remained_onnx_input_idx = remained_onnx_input_idx['scripting']
@@ -385,6 +397,19 @@ class _TestONNXRuntime:
                 ort_outs = run_ort(ort_sess, input_copy)
                 ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
+    def assert_is_aten_op(self, onnx_model, operator, overload_name=""):
+        all_aten_nodes = [p for p in onnx_model.graph.node if p.name == "ATen" and p.domain == "org.pytorch.aten"]
+        if not all_aten_nodes:
+            return False
+
+        for op in all_aten_nodes:
+            attrs = {attr.name: attr for attr in op.attribute}
+            if attrs.get("operator") == operator:
+                break
+        assert op.name == operator
+        assert attrs.get("operator") == operator
+        assert attrs.get("overload_name", "") == overload_name
+        return True
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
     def test_embedding_model_with_external_data(self):
@@ -10800,6 +10825,45 @@ class _TestONNXRuntime:
         self.run_test(Module(False), x, rtol=1e-3, atol=1e-6)
         self.run_test(Module(True), x, rtol=1e-3, atol=1e-6)
 
+    @skipIfCaffe2
+    def test_clip_aten_fallback_due_exception(self):
+        x = torch.randn(3, 4, requires_grad=True)
+
+        def bad_clamp(g, self, min, max):
+            return _onnx_unsupported("Bad boy!")
+
+        class MyClip(torch.nn.Module):
+            def forward(self, x):
+                return torch.clamp(x, min=-0.5, max=0.5)
+
+        f = io.BytesIO()
+        with custom_op("aten::clamp", bad_clamp, self.opset_version):
+            torch.onnx.export(MyClip(), x, f,
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        onnx_model = onnx.load_from_string(f.getvalue())
+        self.assert_is_aten_op(onnx_model, "clamp", "Tensor")
+
+    @skipIfCaffe2
+    def test_clip_aten_fallback_explicit_request(self):
+        class MyClip(torch.nn.Module):
+            def forward(self, x):
+                return torch.clamp(x, min=-0.5, max=0.5)
+
+        def break_is_registered_op_api(opname, domain, version):
+            fake_missing_symbolics = ('clamp',)
+            if opname in fake_missing_symbolics:
+                return False
+            return (domain, version) in symbolic_registry._registry \
+                and opname in symbolic_registry._registry[(domain, version)]
+
+        f = io.BytesIO()
+        with patch("torch.onnx.symbolic_registry.is_registered_op", side_effect=break_is_registered_op_api):
+            # Force missing symbolic for well-known op
+            x = torch.randn(3, 4, requires_grad=True)
+            torch.onnx.export(MyClip(), x, f,
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        onnx_model = onnx.load_from_string(f.getvalue())
+        self.assert_is_aten_op(onnx_model, "clamp", "Tensor")
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,

@@ -7,8 +7,7 @@ import torch
 import torch.onnx
 from torch.onnx.symbolic_helper import (parse_args,
                                         _get_tensor_dim_size,
-                                        _get_tensor_sizes,
-                                        _onnx_unsupported)
+                                        _get_tensor_sizes)
 from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
 from torch.autograd import Variable, Function
 from torch.nn import Module, functional
@@ -354,46 +353,6 @@ class TestOperators(TestCase):
     def test_clip(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.clamp(x, min=-0.5, max=0.5), x)
-
-    @skipIfCaffe2
-    def test_clip_aten_fallback_due_exception(self):
-        _onnx_opset_version = 9
-        x = torch.randn(3, 4, requires_grad=True)
-
-        def bad_clamp(g, self, min, max):
-            return _onnx_unsupported("Bad boy!")
-
-        register_custom_op_symbolic('::clamp', bad_clamp, _onnx_opset_version)
-        try:
-            self.assertONNX(lambda x: torch.clamp(x, min=-0.5, max=0.5),
-                            x,
-                            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
-                            opset_version=_onnx_opset_version)
-        finally:
-            unregister_custom_op_symbolic('::clamp', _onnx_opset_version)
-
-    @skipIfCaffe2
-    def test_clip_aten_fallback_explicit_request(self):
-        from torch.onnx import symbolic_registry
-
-        def is_registered_op_tampered(opname, domain, version):
-            fake_missing_symbolics = ('clamp')
-            if opname in fake_missing_symbolics:
-                return False
-            return (domain, version) in symbolic_registry._registry \
-                and opname in symbolic_registry._registry[(domain, version)]
-
-        try:
-            # Monkey patch to force missing symbolic for well-known op
-            original_is_registered_op = symbolic_registry.is_registered_op
-            symbolic_registry.is_registered_op = is_registered_op_tampered
-
-            x = torch.randn(3, 4, requires_grad=True)
-            self.assertONNX(lambda x: torch.clamp(x, min=-0.5, max=0.5),
-                            x,
-                            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        finally:
-            symbolic_registry.is_registered_op = original_is_registered_op
 
     def test_clip_min(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
