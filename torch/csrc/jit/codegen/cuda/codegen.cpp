@@ -378,8 +378,22 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (def != nullptr && !has_alloc) {
       code_ << "(" << gen(def) << ")";
     } else if (d->isConst()) {
-      const int digits = std::numeric_limits<Double::ScalarType>::max_digits10;
-      code_ << std::setprecision(digits) << *d->value();
+      auto val = *d->value();
+      // note: default inf/nan doesn't work and should be replaced with macros
+      // `NAN`, `POS_INFINITY` and `NEG_INFINITY` instead.
+      if (std::isinf(val)) {
+        if (val > 0) {
+          code_ << "POS_INFINITY";
+        } else {
+          code_ << "NEG_INFINITY";
+        }
+      } else if (std::isnan(val)) {
+        code_ << "NAN";
+      } else {
+        const int digits =
+            std::numeric_limits<Double::ScalarType>::max_digits10;
+        code_ << std::setprecision(digits) << val;
+      }
     } else {
       code_ << varName(d);
     }
@@ -924,14 +938,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     indent() << genMmaOp(mma, true) << "(reinterpret_cast<Array<"
              << mma->out()->getDataType().value() << ","
-             << getOutputRegisterSize(mma->options().macro) << ","
-             << getOutputRegisterSize(mma->options().macro) << ">*>"
+             << getOutputRegisterSize(options.macro) << ","
+             << getOutputRegisterSize(options.macro) << ">*>"
              << "(&" << gen(uop->out()) << "));\n";
   }
 
   void handle(const MmaOp* mma) final {
     auto options = mma->options();
-    auto in_a = mma->inA()->as<kir::TensorIndex>();
     auto out = mma->out()->as<kir::TensorIndex>();
     indent() << genMmaOp(mma) << "(\n";
     indent() << kTab << "reinterpret_cast<Array<"
@@ -953,7 +966,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const BroadcastOp* stmt) final {
     TORCH_INTERNAL_ASSERT(stmt->out()->isA<kir::TensorIndex>());
-    const auto tensor_index = stmt->out()->as<kir::TensorIndex>();
 
     const ParallelTypeBitmap parallel_types =
         kernel_->summary().broadcast_parallel_types.at(stmt);
@@ -1299,7 +1311,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     TORCH_INTERNAL_ASSERT(rop->isFused());
 
     const auto out = rop->out()->as<kir::TensorIndex>();
-    const auto domain = out->view()->domain();
 
     const auto data_type = rop->out()->dtype();
     const auto op_type = rop->getReductionOpType();
@@ -1369,11 +1380,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     TORCH_INTERNAL_ASSERT(
         parallel_types.hasBID(),
         "GridBroadcast needs to be used with a broadcast op that is parallelized with the BID parallel types");
-
-    const auto out = bop->out()->as<kir::TensorIndex>();
-    const auto domain = out->view()->domain();
-
-    const auto data_type = bop->out()->dtype();
 
     TORCH_INTERNAL_ASSERT(
         grop->broadcast_buffer()->buffer()->isA<TensorView>());
@@ -1485,7 +1491,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     TORCH_INTERNAL_ASSERT(wop->isFused());
 
     const auto out = wop->out()->as<kir::TensorIndex>();
-    const auto domain = out->view()->domain();
 
     const auto data_type = wop->outAvg()->dtype();
     const auto index_type = wop->outN()->dtype();

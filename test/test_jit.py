@@ -17,6 +17,7 @@ from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
 from jit.test_models import TestModels  # noqa: F401
 from jit.test_modules import TestModules  # noqa: F401
+from jit.test_autodiff import TestAutodiffJit  # noqa: F401
 from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # noqa: F401
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
@@ -26,7 +27,6 @@ from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
 from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: F401
 from jit.test_op_decompositions import TestOpDecompositions  # noqa: F401
-from jit.test_if_hoisting import TestIfHoisting  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
@@ -100,18 +100,19 @@ from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
     freeze_rng_state, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
+    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
+    skipIfCrossRef
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     RUN_CUDA
-from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
-    EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
-    get_nn_module_name_from_kwargs, get_nn_mod_test_name, script_method_template
+from torch.testing._internal.jit_metaprogramming_utils import (
+    get_script_args,
+    create_input, unpack_variables,
+    additional_module_tests, EXCLUDE_SCRIPT_MODULES,
+    get_nn_module_name_from_kwargs, get_nn_mod_test_name, script_method_template)
 
 from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
-from torch.testing._internal.common_methods_invocations import (
-    create_input, unpack_variables)
 
 # For testing truediv in python 2
 from torch.testing._internal.test_module.future_div import div_int_future, div_float_future
@@ -4406,6 +4407,7 @@ def foo(xyz):
         fc.run(scripted.foo.graph)
         fc.run(str(scripted.foo.graph))
 
+    @skipIfCrossRef
     def test_file_line_trace(self):
         def foobar(xyz):
             return torch.neg(xyz)
@@ -8261,6 +8263,44 @@ dedent """
           return (%1)
         """
         FileCheck().run(graph_str, parse_ir(graph_str))
+
+    def test_parse_tensor_constants(self):
+        def foo():
+            return torch.zeros([4, 4])
+
+        foo_s = torch.jit.script(foo)
+        torch._C._jit_pass_constant_propagation(foo_s.graph)
+
+        g = str(foo_s.graph)
+        g_parsed = parse_ir(g, parse_tensor_constants=True)
+        self.assertEqual(str(canonical(g_parsed)), str(canonical(foo_s.graph)))
+        func = torch._C._create_function_from_graph("forward", g_parsed)
+
+        out_parsed = func()
+        out_func = foo()
+        # not checking data, just dtype, size etc
+        out_parsed[:] = 0
+        out_func[:] = 0
+        self.assertEqual(out_func, out_parsed)
+
+        with self.assertRaises(RuntimeError):
+            parse_ir(g, parse_tensor_constants=False)
+
+    def test_parse_nested_names(self):
+        g_str = """
+    graph(%x.1 : Tensor):
+        %3 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        %hi.submod.value.5 : Tensor = aten::add(%x.1, %2, %3)
+        return (%hi.submod.value.5)
+        """
+        g = parse_ir(g_str)
+        round_trip_g = parse_ir(str(g))
+        self.assertEqual(canonical(g), canonical(round_trip_g))
+
+        func1 = torch._C._create_function_from_graph("forward", g)
+        func2 = torch._C._create_function_from_graph("forward", round_trip_g)
+        self.assertEqual(func1(torch.ones([2])), func2(torch.ones([2])))
 
     def test_is_after_use(self):
         def sorted_input_use(g):
@@ -16193,59 +16233,6 @@ L = 20
 M = 10
 S = 5
 
-
-def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), skipTestIf=(),
-                           output_process_fn=lambda x: x, kwargs=None):
-    test_name = 'test_nn_' + name
-
-    if variant_name != '':
-        test_name = test_name + '_' + variant_name
-
-    no_grad = variant_name == 'inplace'
-
-    @suppress_warnings
-    def do_test(self, name=name, args=args, test_name=test_name, check_ad=check_ad):
-        torch.manual_seed(2)
-
-        self_variable = create_input((self_size,))[0][0]
-
-        # need to record this because methods can change the size (e.g. unsqueeze)
-        args_variable, kwargs_variable = create_input(args, call_kwargs=kwargs)
-
-        self_tensor = deepcopy(self_variable.data)
-        args_tensor = deepcopy(unpack_variables(args_variable))
-
-        if not no_grad:
-            output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
-
-        def fn(*inputs, **kwargs):
-            return getattr(F, name)(*inputs, **kwargs)
-
-        f_args_variable = (self_variable,) + args_variable
-        f_args_tensor = (self_tensor,) + args_tensor
-        should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
-
-        if test_name not in EXCLUDE_SCRIPT:
-            def run_test():
-                # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
-                #      so that we don't regress on autodiff support.
-                with disable_autodiff_subgraph_inlining():
-                    script_fn = create_script_fn(self, name, 'nn_functional')
-                    check_against_reference(self, script_fn, fn, output_process_fn,
-                                            f_args_variable, kwargs_variable, no_grad=no_grad)
-                    # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
-                    if (doAutodiffCheck(test_name)):
-                        self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
-
-            if test_name in EXCLUDE_PYTHON_PRINT:
-                with torch._jit_internal._disable_emit_hooks():
-                    run_test()
-            else:
-                run_test()
-
-    post_add_test(test_name, skipTestIf, do_test, TestJitGeneratedFunctional)
-
-
 def add_nn_module_test(*args, **kwargs):
     no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
 
@@ -16395,10 +16382,6 @@ class TestProducerVersion(TestCase):
     def test_version(self):
         # issue gh-32561
         self.assertTrue(torch.__version__.startswith(torch.onnx.producer_version))
-
-
-for test in nn_functional_tests:
-    add_nn_functional_test(*test)
 
 for test in module_tests + new_module_tests + additional_module_tests:
     add_nn_module_test(**test)

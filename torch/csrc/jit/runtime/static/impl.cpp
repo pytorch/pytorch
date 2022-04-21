@@ -92,7 +92,6 @@ bool isUnsupportedOp(Node* node) {
 bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
   // check for sub-blocks
   bool can_support = true;
-  bool has_blocks = false;
   for (auto* node : graph->block()->nodes()) {
     const auto kind = node->kind();
     if (kind == prim::Constant) {
@@ -218,6 +217,11 @@ bool mayContainAlias(
   return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
 }
 
+bool escapesScope(const AliasDb& db, const Value* a) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.escapesScope({const_cast<Value*>(a)});
+}
+
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts,
@@ -299,7 +303,7 @@ void ValueGroup::init(const Block& block, const AliasDb& db) {
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, v, external_aliases_)) {
+      if (escapesScope(db, v) || mayContainAlias(db, v, external_aliases_)) {
         external_aliases_.insert(v);
       }
     }
@@ -314,13 +318,6 @@ void ValueGroup::init(const Block& block, const AliasDb& db) {
       continue;
     }
     for (const auto* v : node->outputs()) {
-      // Add values that can aliase input/constant values. Note some output
-      // aliases may end up in this category via collection objects (e.g.,
-      // Tuple).
-      if (mayContainAlias(db, v, external_aliases_)) {
-        external_aliases_.insert(v);
-        continue;
-      }
       if (mayContainAlias(db, v, output_aliases_)) {
         output_aliases_.insert(v);
       }
@@ -809,7 +806,7 @@ c10::IValue StaticModule::operator()(
 
 BlockRunner::BlockRunner(
     const StaticModule& sm,
-    std::vector<IValue>& values,
+    IValue* values,
     Block* block,
     bool is_root_block)
     : static_module_(sm),
@@ -823,9 +820,8 @@ BlockRunner::BlockRunner(
           is_root_block_ && sm.opts().manage_output_tensors),
       values_(values) {
   nodes_.reserve(block_info_.nodes().size());
-  IValue* values_data = values_.data();
   for (auto& pre_pnode : block_info_.nodes()) {
-    nodes_.emplace_back(pre_pnode, values_data);
+    nodes_.emplace_back(pre_pnode, values_);
   }
 
   for (auto index : block_info_.block_output_indices()) {
@@ -844,7 +840,7 @@ BlockRunner::BlockRunner(
     block_runners->reserve(num_blocks);
 
     for (auto* b : blocks) {
-      block_runners->emplace_back(sm, values, b);
+      block_runners->emplace_back(sm, values_, b);
     }
     pnode.set_block_runners(std::move(block_runners));
   }
@@ -940,7 +936,7 @@ void BlockRunner::set_inputs(
 
 void BlockRunner::create_memory_planner() {
   if (!planner_) {
-    planner_ = std::make_unique<MemoryPlanner>(
+    planner_ = std::make_unique<StandardMemoryPlanner>(
         this,
         block_info_,
         static_module_.opts().enable_out_variant,
@@ -1199,17 +1195,14 @@ template <typename IValueList>
 c10::IValue BlockRunner::run_impl_record_functions(
     IValueList&& args,
     const KeywordArgs& kwargs) {
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(
-        at::RecordScope::STATIC_RUNTIME_MODEL, pre_sampled);
-    if (guard.isActive()) {
-      if (guard.needsInputs()) {
-        guard.before("forward", &args);
-      } else {
-        guard.before("forward");
-      }
-    }
+  auto step_callbacks =
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
+  if (!step_callbacks.empty()) {
+    at::RecordFunction guard(std::move(step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    guard.needsInputs() ? guard.before("forward", &args)
+                        : guard.before("forward");
+
     return run_impl(std::forward<IValueList>(args), kwargs);
   }
   return run_impl(std::forward<IValueList>(args), kwargs);
@@ -1717,7 +1710,9 @@ bool BlockRunner::checkOutputTensorMemoryLeaks() {
     for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
-      if (!isManagedOutputTensorValue(val)) {
+      if (!isManagedOutputTensorValue(val) || !ival->isTensor()) {
+        // ival can not be a tensor if it's being managed by ops like
+        // to_maybe_copy_out; see ReplaceWithMaybeCopy for details.
         continue;
       }
       const auto& t = ival->toTensor();
@@ -1842,16 +1837,14 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 
 void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(at::RecordScope::STATIC_RUNTIME_OP, pre_sampled);
-    if (guard.isActive()) {
-      if (guard.needsInputs()) {
-        guard.before(get_op_name(), inputs_ivalue_vec());
-      } else {
-        guard.before(get_op_name());
-      }
-    }
+  auto step_callbacks =
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
+  if (!step_callbacks.empty()) {
+    at::RecordFunction guard(std::move(step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    guard.needsInputs() ? guard.before(get_op_name(), inputs_ivalue_vec())
+                        : guard.before(get_op_name());
+
     fn_->run(this);
   } else {
     fn_->run(this);
@@ -2003,11 +1996,11 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
   }
 }
 
-StaticRuntime::StaticRuntime(const StaticModule& sm) {
-  values_.resize(sm.value_buffer_size());
-  std::copy(sm.constants().begin(), sm.constants().end(), values_.begin());
+StaticRuntime::StaticRuntime(const StaticModule& sm)
+    : values_(sm.value_buffer_size()) {
+  std::copy(sm.constants().begin(), sm.constants().end(), values_.data());
   block_ = std::make_unique<BlockRunner>(
-      sm, values_, sm.root_block(), /*is_root_block*/ true);
+      sm, values_.data(), sm.root_block(), /*is_root_block*/ true);
   ;
 }
 
