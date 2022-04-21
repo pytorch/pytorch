@@ -127,17 +127,6 @@ Tensor _collapse_two_dims_3(Tensor input, int64_t dim1, int64_t dim2) {
   return result;
 }
 
-std::vector<int64_t> padded_size_from_efficient_size(EfficientSizeNode ef_size) {
-  Tensor nt_sizes = ef_size.sizes();
-  auto max_size = get_max_size_from_efficient_size(ef_size);
-  std::vector<int64_t> new_size;
-  new_size.push_back(nt_sizes.size(0));
-  for (int64_t i = 0; i < max_size.size(); i++) {
-    new_size.push_back(max_size[i]);
-  }
-  return new_size;
-}
-
 Tensor batch_offsets_from_efficient_size(Tensor ef_sizes) {
   int64_t* nt_sizes_ptr = ef_sizes.data_ptr<int64_t>();
   Tensor offsets = torch::empty({1 + ef_sizes.size(0)}, torch::kInt64);
@@ -152,16 +141,6 @@ Tensor batch_offsets_from_efficient_size(Tensor ef_sizes) {
     offsets_ptr[i + 1] = offsets_ptr[i] + prod;
   }
   return offsets;
-}
-
-std::vector<int64_t> padded_size_from_efficient_size(Tensor nt_sizes) {
-  auto max_size = get_max_size_from_efficient_size(ef_size);
-  std::vector<int64_t> new_size;
-  new_size.push_back(nt_sizes.size(0));
-  for (int64_t i = 0; i < max_size.size(); i++) {
-    new_size.push_back(max_size[i]);
-  }
-  return new_size;
 }
 
 Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
@@ -179,7 +158,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
     nt_input = get_nested_tensor_impl(nt);
     Tensor nt_sizes = nt_input->get_nested_size_tensor();
     Tensor offsets = batch_offsets_from_efficient_size(nt_sizes);
-    std::vector<int64_t> new_size = padded_size_from_efficient_size(nt_sizes);
+    auto new_size = NestedTensor_get_max_size(nt);
     at::cuda::CUDAStream defaultStream = at::cuda::getDefaultCUDAStream();
     Tensor output = at::empty(IntArrayRef(new_size), nt_buffer.options());
 
