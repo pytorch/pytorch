@@ -399,8 +399,7 @@ class _TestONNXRuntime:
 
     def assert_is_aten_op(self, onnx_model, operator, overload_name=""):
         all_aten_nodes = [p for p in onnx_model.graph.node if p.name == "ATen" and p.domain == "org.pytorch.aten"]
-        if not all_aten_nodes:
-            return False
+        assert all_aten_nodes
 
         for op in all_aten_nodes:
             attrs = {attr.name: attr for attr in op.attribute}
