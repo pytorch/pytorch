@@ -842,7 +842,11 @@ class NativeFunctionsGroup:
         if out is None:
             return None
 
-        return NativeFunctionsGroup(functional=functional, inplace=inplace, out=out,)
+        return NativeFunctionsGroup(
+            functional=functional,
+            inplace=inplace,
+            out=out,
+        )
 
 
 def is_foreach_op(name: str) -> bool:
@@ -1116,9 +1120,9 @@ class FunctionSchema:
                 "Did you forget to mark an out argument as keyword-only?"
             )
         if self.arguments.out:
-            assert len(self.arguments.out) == len(
-                self.returns
-            ), "Must return as many arguments as there are out arguments"
+            assert (
+                len(self.arguments.out) == len(self.returns) or len(self.returns) == 0
+            ), "Must return as many arguments as there are out arguments, or no return at all"
         if self.name.name.inplace:
             # TODO: fixme
             if not is_foreach_op(str(self.name)):
@@ -1196,7 +1200,11 @@ class FunctionSchema:
         """
 
         def strip_ret_annotation(r: Return) -> Return:
-            return Return(name=None, type=r.type, annotation=None,)
+            return Return(
+                name=None,
+                type=r.type,
+                annotation=None,
+            )
 
         base_name = self.name.name.base
         if strip_view_copy_name and base_name.endswith("_copy"):
@@ -1466,7 +1474,12 @@ class Argument:
             type_s = type_and_annot
             annotation = None
         type = Type.parse(type_s)
-        r = Argument(name=name, type=type, default=default, annotation=annotation,)
+        r = Argument(
+            name=name,
+            type=type,
+            default=default,
+            annotation=annotation,
+        )
         assert str(r) == arg, f"{str(r)} != {arg}"
         return r
 
@@ -1517,7 +1530,11 @@ class Return:
             type_s = type_and_annot
             annotation = None
         type = Type.parse(type_s)
-        r = Return(name=name, type=type, annotation=annotation,)
+        r = Return(
+            name=name,
+            type=type,
+            annotation=annotation,
+        )
         assert str(r) == arg, f"{str(r)} != {arg}"
         return r
 
