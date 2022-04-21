@@ -97,9 +97,9 @@ the output has the same batch dimensions.
 .. seealso::
 
         :func:`torch.linalg.cholesky_ex` for a version of this operation that
-        skips the error checking and its synchronization and instead returns the debug
-        information. This makes the operation faster if one knows that the decomposition
-        is going to succeed (e.g. if the input is SPD by construction).
+        skips the (slow) error checking by default and instead returns the debug
+        information. This makes it a faster way to check if a matrix is
+        positive-definite.
 
         :func:`torch.linalg.eigh` for a different decomposition of a Hermitian matrix.
         The eigenvalue decomposition gives more information about the matrix but it
