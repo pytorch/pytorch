@@ -173,8 +173,7 @@ mobile::Code compileGraphToMobileCode(
       }
       mobile_code.operator_input_sizes_.emplace_back(num_args.value_or(-1));
       mobile_code.op_names_.emplace_back(opname);
-      auto func = mobile::makeOperatorFunction(
-          opname, num_args, compilation_options.model_version);
+      auto func = mobile::makeOperatorFunction(opname, num_args);
       TORCH_INTERNAL_ASSERT(
           func.has_value(),
           "Operator with name: ",
