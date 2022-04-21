@@ -61,9 +61,31 @@ from .wrap import _recursive_wrap
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
 
+_TORCHDISTX_AVAIL = True
+try:
+    from torchdistx import fake, deferred_init
+except ImportError:
+    _TORCHDISTX_AVAIL = False
+
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
+
+
+def _default_meta_device_init_fn(module):
+    """
+    Default initializer for modules initialized on the meta device.
+    """
+    # TODO: move module to device_ids here once device_id is available.
+    module.to_empty(device=torch.cuda.current_device())
+    try:
+        with torch.no_grad():
+            module.reset_parameters()
+    except BaseException as e:
+        warnings.warn(
+                f"Unable to call reset_parameters() for module on meta device with error {str(e)}. Please ensure your module implements a ``reset_parameters`` function."
+        )
+        raise e
 
 
 class ShardingStrategy(Enum):
@@ -467,8 +489,19 @@ class FullyShardedDataParallel(nn.Module):
         param_init_fn: (Optional[Callable[[nn.Module], None]]):
             A ``Callable[torch.nn.Module] -> None`` that
             specifies how modules that are currently on the meta device should be initialized
-            onto a actual device. Note that if this argument is passed in, it is assumed that
-            the corresponding module is currently on the meta device.
+            onto an actual device. Note that as of v1.12, we detect modules on the meta
+            device via ``is_meta`` check and apply a default initialization that calls
+            ``reset_parameters`` method on the passed in ``nn.Module`` if ``param_init_fn``
+            is not specified, otherwise we run ``param_init_fn`` to initialize the passed
+            in ``nn.Module``. In particular, this means that if ``is_meta=True`` for any
+            module parameters for modules that will be wrapped with FSDP and ``param_init_fn``
+            is not speciifed, we assume your module properly implements a ``reset_paramters()``
+            and will throw errors if not. Note that additionally, we offer support for modules
+            initialized with torchdistx's (https://github.com/pytorch/torchdistx)
+            ``deferred_init`` API. In this case, deferred modules would be initialized
+            by a default initialization function that calls torchdistx's
+            ``materialize_module``, or the passed in ``param_init_fn``, if it is not
+            ``None``.
             The same ``Callable`` is applied to initialize all meta modules. Note that this
             initialization function is applied before doing any FSDP sharding
             logic.
@@ -480,6 +513,10 @@ class FullyShardedDataParallel(nn.Module):
                 >>>     # responsible for initializing a module, such as with reset_parameters
                 >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=default_auto_wrap_policy)
                 >>> print(next(fsdp_model.parameters()).device) # current CUDA device
+                >>> # With torchdistx
+                >>> module = deferred_init.deferred_init(MyModule, device="cuda")
+                >>> # Will initialize via deferred_init.materialize_module().
+                >>> fsdp_model = FSDP(module, auto_wrap_policy=default_auto_wrap_policy)
     """
 
     def __init__(
@@ -542,17 +579,36 @@ class FullyShardedDataParallel(nn.Module):
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
 
-        # We assume that the module is initialized on the meta device
-        # if the user has specified param_init_fn. TODO: investigate
-        # a way to more robustly determine if the module is on the meta
-        # device or not.
-        is_meta_module = param_init_fn is not None
-        if is_meta_module:
-            # Initialize parameters according to the user lambda.
-            assert callable(param_init_fn), (
-                f"Expected {param_init_fn} to be callable, but got {type(param_init_fn)}"
+        is_meta_module = any(p.is_meta for p in module.parameters())
+        is_torchdistx_deferred_init = (
+            _TORCHDISTX_AVAIL and not is_meta_module
+            and any(fake.is_fake(p) for p in module.parameters())
             )
-            param_init_fn(module)
+
+        if is_meta_module:
+            if param_init_fn is not None:
+                # Call user-specified initialization function.
+                assert callable(param_init_fn), (
+                    f"Expected {param_init_fn} to be callable, but got {type(param_init_fn)}"
+                )
+                param_init_fn(module)
+                else:
+                # Call default initialization function that is dependent on
+                # reset_parameters.
+                _default_meta_device_init_fn(module)
+        elif is_torchdistx_deferred_init:
+            assert _TORCHDISTX_AVAIL, "Got torchdistx initialized module but torchdistx lib is not available."
+            if param_init_fn is not None:
+                # Call user-specified initialization function.
+                assert callable(param_init_fn), (
+                    f"Expected {param_init_fn} to be callable, but got {type(param_init_fn)}"
+                )
+                param_init_fn(module)
+            else:
+                # Call default torchdistx initialization function. Omit re-initialization of FSDP submodules
+                # which is unnecessary.
+                check_fn = lambda k: not isinstance(k, FullyShardedDataParallel)
+                deferred_init.materialize_module(module, check_fn=check_fn)
 
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
