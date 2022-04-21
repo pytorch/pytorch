@@ -63,7 +63,6 @@ void checkForUnfusedOps(Node* enter_node) {
   Node* guarding_if = nullptr;
   for (Node* node = enter_node->next(); node->kind() != prim::Exit;
        node = node->next()) {
-    auto k = node->kind();
     if (node->kind() == prim::If &&
         fusionGuardCheck(node->input()->node()->kind())) {
       guarding_if = node;
