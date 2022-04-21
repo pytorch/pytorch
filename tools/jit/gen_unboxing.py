@@ -56,7 +56,9 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
             arg_connector = ", "
             # function call and push back to stack
             prefix = "self_base." if sig.method else "at::"
-            translated_args = translate(binding_list, sig.arguments(), method=sig.method)
+            translated_args = translate(
+                binding_list, sig.arguments(), method=sig.method
+            )
             args_str = f"{arg_connector.join(e.expr for e in translated_args)}"
             if len(f.func.returns) == 0:
                 ret_str = ""
@@ -89,9 +91,7 @@ class ComputeCodegenUnboxedKernels:
         if not self.selector.is_root_operator(f"aten::{f.func.name}"):
             return ""
         # We unconditionally generate function wrappers,
-        sig_group = CppSignatureGroup.from_native_function(
-            f, method=False
-        )
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
 
         sig = sig_group.most_faithful_signature()
 
@@ -105,11 +105,13 @@ class ComputeCodegenUnboxedKernels:
         for arg in args:
             if not arg.default:
                 arg_cpp = "c10::IValue(c10::nullopt)"
-            elif arg.default.startswith('{'):
+            elif arg.default.startswith("{"):
                 arg_cpp = f"c10::IntArrayRef({arg.default})"
             else:
                 arg_cpp = f"c10::IValue({arg.default})"
-            args_code.append(f"""c10::Argument("{arg.name}", nullptr, c10::nullopt, {arg_cpp})""")
+            args_code.append(
+                f"""c10::Argument("{arg.name}", nullptr, c10::nullopt, {arg_cpp})"""
+            )
 
         returns = f.func.returns
         returns_code = []
@@ -136,10 +138,10 @@ OperatorGenerator(
 
 
 def gen_unboxing(
-        *,
-        native_functions: Sequence[NativeFunction],
-        cpu_fm: FileManager,
-        selector: SelectiveBuilder,
+    *,
+    native_functions: Sequence[NativeFunction],
+    cpu_fm: FileManager,
+    selector: SelectiveBuilder,
 ) -> None:
     def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
         return fn.root_name
@@ -158,7 +160,10 @@ def gen_unboxing(
         "UnboxingFunctions.h",
         lambda: {
             "declarations": list(
-                mapMaybe(ComputeUnboxingFunctions(Target.DECLARATION, selector), native_functions)
+                mapMaybe(
+                    ComputeUnboxingFunctions(Target.DECLARATION, selector),
+                    native_functions,
+                )
             ),
         },
     )
@@ -166,7 +171,9 @@ def gen_unboxing(
         "RegisterCodegenUnboxedKernels.cpp",
         native_functions,
         key_fn=key_func,
-        env_callable=lambda fn: {"unboxed_ops": [ComputeCodegenUnboxedKernels(selector)(fn)]},
+        env_callable=lambda fn: {
+            "unboxed_ops": [ComputeCodegenUnboxedKernels(selector)(fn)]
+        },
         num_shards=10,
         sharded_keys={"unboxed_ops"},
     )
@@ -184,19 +191,23 @@ def main() -> None:
         "-d", "--install_dir", help="output directory", default="build/aten/src/ATen"
     )
     parser.add_argument(
-        '-o',
-        '--output-dependencies',
-        help='output a list of dependencies into the given file and exit')
+        "-o",
+        "--output-dependencies",
+        help="output a list of dependencies into the given file and exit",
+    )
     parser.add_argument(
-        '--dry-run', action='store_true',
-        help='run without writing any files (still updates outputs)')
+        "--dry-run",
+        action="store_true",
+        help="run without writing any files (still updates outputs)",
+    )
     parser.add_argument(
-        '--op_selection_yaml_path',
-        help='Provide a path to the operator selection (for custom build) YAML '
-             'that contains the information about the set of selected operators '
-             'and their categories (training, ...). Each operator is either a '
-             'full operator name with overload or just a bare operator name. '
-             'The operator names also contain the namespace prefix (e.g. aten::)')
+        "--op_selection_yaml_path",
+        help="Provide a path to the operator selection (for custom build) YAML "
+        "that contains the information about the set of selected operators "
+        "and their categories (training, ...). Each operator is either a "
+        "full operator name with overload or just a bare operator name. "
+        "The operator names also contain the namespace prefix (e.g. aten::)",
+    )
 
     options = parser.parse_args()
 
