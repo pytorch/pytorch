@@ -1,10 +1,9 @@
 import torch
 import torch.distributed as dist
 
-from torch.overrides import get_default_nowrap_functions
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed import distributed_c10d
-
+from torch.overrides import get_default_nowrap_functions
 
 class ReplicatedTensor(torch.Tensor):
     """
@@ -33,13 +32,21 @@ class ReplicatedTensor(torch.Tensor):
     def __new__(cls, data=None, process_group=None):
         if data is None:
             data = torch.empty(0)
-        r = torch.Tensor._make_subclass(cls, data)      # type: ignore[arg-type]
+        r = torch.Tensor._make_subclass(cls, data, data.requires_grad)      # type: ignore[arg-type]
         r.process_group = (     # type: ignore[attr-defined]
             process_group
             if process_group is not None
             else distributed_c10d._get_default_group()
         )
         return r
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.process_group)
+            memo[id(self)] = result
+            return result
 
     def __repr__(self):
         return f"ReplicatedTensor({super(ReplicatedTensor, self).__repr__()})"
@@ -98,7 +105,7 @@ class ReplicatedTensor(torch.Tensor):
                 # if all operands are ReplicatedTensors and does not get dispatched to ShardedTensor
                 # __torch_function__, result is a torch.Tensor, then we convert and return a
                 # ReplicatedTensor according to our inter-op rule
-                rs = rs.as_subclass(cls)        # type: ignore[arg-type]
+                rs = rs.as_subclass(ReplicatedTensor)        # type: ignore[arg-type]
                 # propagate the process_group field to result
                 rs.process_group = replicated_pg        # type: ignore[attr-defined]
 
@@ -131,3 +138,13 @@ class ReplicatedTensor(torch.Tensor):
                     f"ReplicatedTensor have different values on rank {current_rank} and {rank}")
 
         return True
+
+    def __setstate__(self, state):
+        with torch._C.DisableTorchFunction():
+            self.data = state
+            self.requires_grad = state.requires_grad
+            from torch.distributed._shard.api import _get_current_process_group
+            self.process_group = _get_current_process_group()
+
+    def __getstate__(self):
+        return self.data
