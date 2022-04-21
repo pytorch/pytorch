@@ -52,6 +52,11 @@ namespace cuda {
 
 namespace {
 
+// TODO remove this (75983):
+//   we don't need this any more. I think we can use revertAliasCopyOps.
+//   Similar refactor should be done infallback graph used by fusion guard.
+//   implementation of xxxx_copy ops should be removed.
+//
 // Mark string attribute in alias-copy nodes to enable its implementation
 // in the fallback path.
 void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
@@ -131,7 +136,7 @@ class CudaFusionManager {
 
   bool hasFallbackCode(int32_t kernel_id) {
     std::lock_guard<std::mutex> guard(mutex_);
-    return graph_cache_.count(kernel_id);
+    return fallback_cache_.count(kernel_id);
   }
 
   Code* getFallbackCode(int32_t kernel_id, const Node* fusion_node) {
