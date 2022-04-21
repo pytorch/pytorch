@@ -18,6 +18,7 @@
 #endif
 
 #include <ATen/core/SymInt.h>
+#include <ATen/core/SymIntArrayRef.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/QScheme.h>
@@ -25,8 +26,6 @@
 #include <vector>
 
 ${Operators_includes}
-
-${static_dispatch_extra_headers}
 
 // Extension writers: do you write wrapper functions? Are you frustrated with
 // resolving overloads of operators? Are you frustrated with dealing with
