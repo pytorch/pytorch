@@ -442,6 +442,7 @@ def _build_multidim_tensor(dim, dim_size, value=None, dtype=torch.float):
         tensor.view(-1).copy_(torch.arange(dim, dim_size ** dim + dim))
     else:
         tensor.fill_(value)
+    return tensor
 
 
 def _create_autograd_profiler():
