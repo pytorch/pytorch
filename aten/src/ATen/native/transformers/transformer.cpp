@@ -32,7 +32,7 @@ Tensor linear_for_ffn(
   return result.view({mat1.sizes()[0], mat1.sizes()[1], -1});
 }
 
-Tensor ffn_cpu(
+Tensor ffn(
     const Tensor& input,
     const Tensor& w1,
     const Tensor& b1,
@@ -106,7 +106,7 @@ Tensor transformer_encoder_layer_forward(
   }
 
   auto pre_ffn_res = x;
-  x = ffn_cpu(
+  x = ffn(
       x,
       ffn_weight_1,
       ffn_bias_1,
