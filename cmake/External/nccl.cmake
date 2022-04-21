@@ -32,7 +32,7 @@ if(NOT __NCCL_INCLUDED)
         "CCACHE_DISABLE=1"
         "SCCACHE_DISABLE=1"
         $<IF:$<STREQUAL:"${CMAKE_GENERATOR}","Unix Makefiles">,$(MAKE),make>
-        $<$<NOT:$<STREQUAL:"${CMAKE_GENERATOR}","Unix Makefiles">>:-j${MAX_JOBS}>
+        $<IF:$<STREQUAL:"${CMAKE_GENERATOR}","Unix Makefiles">,all,-j${MAX_JOBS}>
         "CXX=${CMAKE_CXX_COMPILER}"
         "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
         "NVCC=${CUDA_NVCC_EXECUTABLE}"
