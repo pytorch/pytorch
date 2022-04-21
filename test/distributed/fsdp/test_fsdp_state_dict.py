@@ -177,11 +177,11 @@ class TestFSDPStateDict(FSDPTest):
 
             # Verify parameters are the same in the new model.
             if state_dict_rank0_and_offload:
-                # State dict is on CPU and rank 0 only, move it to CUDA
-                # + broadcast on all ranks.
+                # Broadcast the state dict and move it back to GPU in
+                # preparation for loading.
+                fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
                 for key in fsdp_state_dict.keys():
                     fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
-                fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
 
             model_new.load_state_dict(fsdp_state_dict)
             with FullyShardedDataParallel.summon_full_params(model_new):
@@ -235,11 +235,11 @@ class TestFSDPStateDict(FSDPTest):
 
         # Load state_dict into zeroed model
         if state_dict_rank0_and_offload:
-            # State dict is on CPU and rank 0 only, move it to CUDA
-            # + broadcast on all ranks.
+            # Broadcast the state dict and move it back to GPU in
+            # preparation for loading.
+            state_dict = self._broadcast_state_dict(state_dict)
             for key in state_dict.keys():
                 state_dict[key] = state_dict[key].cuda()
-            state_dict = self._broadcast_state_dict(state_dict)
 
         model.load_state_dict(state_dict)
         loaded_params = _get_full_detached_param(model)
@@ -355,11 +355,10 @@ class TestFSDPStateDict(FSDPTest):
         # Load fsdp's full state dict into the local and verify params are as
         # expected.
         if state_dict_rank0_and_offload:
-            # State dict is on CPU and rank 0 only, move it to CUDA
-            # + broadcast on all ranks.
+            # Broadcast + CUDA state_dict
+            fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
             for key in fsdp_state_dict.keys():
                 fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
-            fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
 
         blank_local_model.load_state_dict(fsdp_state_dict)
         local_params = list(blank_local_model.parameters())
@@ -469,11 +468,10 @@ class TestFSDPStateDict(FSDPTest):
         # Check that the state dict can be loaded into a non-wrapped version of
         # the model
         if state_dict_rank0_and_offload:
-            # State dict is on CPU and rank 0 only, move it to CUDA
-            # + broadcast on all ranks.
+            # Broadcast and move the state_dict back to GPU
+            sd = self._broadcast_state_dict(sd)
             for key in sd.keys():
                 sd[key] = sd[key].cuda()
-            sd = self._broadcast_state_dict(sd)
 
         nonwrapped_model = Model(wrap_fsdp=False).cuda()
         for param in nonwrapped_model.parameters():
