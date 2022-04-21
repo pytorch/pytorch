@@ -832,7 +832,7 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the cudnn add and add_relu op
     (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    @unittest.skip("Local only - currently the test_qadd_relu_cudnn op is bulid "
                    "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
                    "after it is built by default")
     def test_qadd_relu_cudnn(self):
@@ -840,11 +840,43 @@ class TestQuantizedOps(TestCase):
         add_relu = torch.ops.quantized.add_relu
         add = torch.ops.quantized.add
 
-        # NB: This is a strange size so that we exercise both the vectorized
-        # implementation (64-element chunks at at time) as well as the scalar
-        # implementation
         A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
         B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+        scale_A = 2.5
+        scale_B = 6.3
+        scale_C = 12.9
+        zero_point = 0
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
+                                       dtype=dtype)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
+                                       dtype=dtype)
+        # Add ground truth
+        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
+        qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
+        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized addition failed.")
+
+        # Add + ReLU ground truth
+        Crelu = C.copy()
+        Crelu[C < 0] = 0
+        qCrelu = _quantize(Crelu, scale_C, zero_point, dtype=np_dtype[dtype])
+        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                "Quantized addition with ReLU failed.")
+
+    """Tests the correctness of the cudnn add and add_relu op for nhwc format"""
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skip("Local only - currently the test_qadd_relu_cudnn_nhwc op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
+    def test_qadd_relu_cudnn_nhwc(self):
+        dtype = torch.qint8
+        add_relu = torch.ops.quantized.add_relu
+        add = torch.ops.quantized.add
+
+        A = torch.rand(16, 8, 4, 12).to(device="cuda")
+        B = torch.rand(16, 8, 4, 12).to(device="cuda")
         scale_A = 2.5
         scale_B = 6.3
         scale_C = 12.9
@@ -1101,6 +1133,53 @@ class TestQuantizedOps(TestCase):
                                        scale_C,
                                        zero_point_C)
 
+
+    """Tests the correctness of the quantized softmax op."""
+    @given(dims=st.lists(st.integers(2, 5), min_size=5, max_size=5))
+    def test_qsoftmax(self, dims):
+        for (num_dims, dim, memory_format) in [
+            (2, 1, torch.contiguous_format),  # 2d softmax over last dim
+            (4, 3, torch.contiguous_format),  # >2 dims, softmax along last dim
+            (5, 2, torch.contiguous_format),  # >2 dims, softmax along not last dim (requires permute)
+            (4, 3, torch.channels_last),      # >2 dims, softmax along last dim, but not contiguous
+            (4, 1, torch.channels_last),      # Channels Last, doesn't require permute
+            (5, 1, torch.channels_last_3d),   # Channels Last 3D, doesn't require permute
+        ]:
+            size = dims[:num_dims]
+            torch_dtype = torch.quint8
+            np_dtype = np.uint8
+
+            scale_X = 1.3
+            zero_point_X = 5
+            X = torch.rand(size=size, dtype=torch.float32) * 8 + zero_point_X
+            X = X.to(memory_format=memory_format)
+
+            scale_Y = 1 / 256
+            zero_point_Y = 0
+
+            qX = torch.quantize_per_tensor(X,
+                                           scale=scale_X,
+                                           zero_point=zero_point_X,
+                                           dtype=torch_dtype)
+
+
+            # softmax ground truth
+            Y = torch.softmax(qX.dequantize(), dim=dim).numpy()
+            qY = _quantize(Y, scale_Y, zero_point_Y, dtype=np_dtype)
+            qY_hat = torch.ops.quantized.softmax(qX,
+                                                 dim=dim,
+                                                 output_scale=scale_Y,
+                                                 output_zero_point=zero_point_Y)
+
+            np.testing.assert_equal(qY, qY_hat.int_repr(),
+                                    "Quantized softmax failed.")
+
+    """Tests the correctness of the quantized softmax op using qnnpack."""
+    @skipIfNoQNNPACK
+    def test_qsoftmax_qnnpack(self):
+        with override_quantized_engine('qnnpack'):
+            self.test_qsoftmax()
+
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_broadcast(self):
         mul_relu = torch.ops.quantized.mul_relu
@@ -1226,6 +1305,52 @@ class TestQuantizedOps(TestCase):
             ceil_mode=ceil_mode)
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="ops.quantized.max_pool1d results are off")
+
+    # TODO: merge this test with test_max_pool2d when USE_EXPERIMENTAL_CUDNN_V8_API flag is enabled in CI
+    """Tests 2D cudnn max pool operation on quantized tensors."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
+                                              min_side=1, max_side=10),
+                       # cudnn's support for quantized pooling is limited to
+                       # int8 currently
+                       qparams=hu.qparams(dtypes=[torch.qint8])),
+           kernel=st.sampled_from((3, 5, 7)),
+           stride=st.sampled_from((None, 1, 2)),
+           # currently there is no support for dilation for cudnn
+           # pooling
+           dilation=st.integers(1, 1),
+           padding=st.integers(0, 2),
+           ceil_mode=st.booleans())
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
+    def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode):
+        X, (scale, zero_point, torch_type) = X
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
+        assume(oW > 0)
+
+        a = torch.from_numpy(X).to(device="cuda")
+        a_pool = torch.nn.functional.max_pool2d(a, kernel_size=kernel,
+                                                stride=stride,
+                                                padding=padding, dilation=dilation,
+                                                ceil_mode=ceil_mode)
+        a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
+                                          zero_point=zero_point, dtype=torch_type)
+        a_ref = a_ref.dequantize()
+        qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # Test the ops.quantized separately, because None is not treated.
+        a_hat = torch.ops.quantized.max_pool2d(
+            qa, kernel_size=_pair(kernel),
+            stride=_pair(kernel if stride is None else stride),
+            padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
+        self.assertEqual(a_ref, a_hat.dequantize(),
+                         msg="ops.quantized.max_pool2d results are off")
 
     """Tests 2D max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
@@ -2133,7 +2258,7 @@ class TestQuantizedOps(TestCase):
                     torch_type, Y_scale, Y_zero_point, channels_last, \
                     affine = test_case
                 num_channels = num_groups * channels_per_group
-                # minimum rank for for channels_last
+                # minimum rank for channels_last
                 shapes = (batches, num_channels, elements_per_channel, 1)
 
                 # In the FP kernel, sums and sums of squares are calculated in floating point.
@@ -3464,27 +3589,26 @@ class TestQuantizedLinear(TestCase):
                 Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
 
     @given(batch_size=st.integers(1, 4),
-           input_channels=st.integers(16, 32),
-           output_channels=st.integers(4, 8),
-           use_bias=st.sampled_from([False]),
-           use_relu=st.sampled_from([False]),
+           # in cudnn v. 8.4.0, there is a limitation that input channels
+           # should be a multiple of 4 for int8 tensors. in cudnn v.8.3.3
+           # this should be a multiple of 16
+           input_channels=st.sampled_from([4, 8, 12, 16, 32]),
+           # constraints on output channels appear to be relax, as it seems we can use any positive integer here
+           # except 1. It is not clear why 1 will not work. TODO: check with Yang
+           output_channels=st.integers(2, 36),
+           use_bias=st.booleans(),
+           use_relu=st.booleans(),
            use_multi_dim_input=st.booleans(),
            use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    @unittest.skip("Local only - currently the qlinear_cudnn op is bulid "
                    "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
                    "after it is built by default")
     # TODO: check with yang regarding CUDNN flags
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
                            use_relu, use_multi_dim_input, use_channelwise):
         qlinear_prepack = torch.ops.quantized.linear_prepack
-        batch_size = 1
-        input_channels = 10
-        output_channels = 20
-        use_bias = False
-        use_relu = False
-        use_channelwise = False
         if use_relu:
             qlinear_op = torch.ops.quantized.linear_relu
         else:
