@@ -380,12 +380,9 @@ class TestONNXOpset(TestCase):
                 return torch.nn.functional.grid_sample(x, grid, mode, padding_mode, align_corners)
 
         for mode, padding_mode, align_corners in itertools.product(
-            # ("bilinear", "nearest", "bicubic"),
-            ("bilinear",),
-            # ("zeros", "border", "reflection"),
-            ("zeros",),
-            # (True, False),
-            (True,),
+            ("bilinear", "nearest", "bicubic"),
+            ("zeros", "border", "reflection"),
+            (True, False),
         ):
 
             args = (
