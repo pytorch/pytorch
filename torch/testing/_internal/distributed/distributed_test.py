@@ -425,18 +425,23 @@ def _lock():
 
 
 def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
-    if value is None:
-        value = size
     if device_id is None:
-        return torch.empty(size, size, size, dtype=dtype).fill_(value)
+        tensor = torch.empty(size, size, size, dtype=dtype)
     else:
-        return torch.empty(size, size, size, dtype=dtype).fill_(value).cuda(device_id)
+        tensor = torch.empty(size, size, size, dtype=dtype).cuda(device_id)
+    if value is None:
+        tensor.view(-1).copy_(torch.arange(size, size ** 3 + size))
+    else:
+        tensor.fill_(value)
+    return tensor
 
 
 def _build_multidim_tensor(dim, dim_size, value=None, dtype=torch.float):
+    tensor = torch.empty(size=[dim_size for _ in range(dim)], dtype=dtype)
     if value is None:
-        value = dim
-    return torch.empty(size=[dim_size for _ in range(dim)], dtype=dtype).fill_(value)
+        tensor.view(-1).copy_(torch.arange(dim, dim_size ** dim + dim))
+    else:
+        tensor.fill_(value)
 
 
 def _create_autograd_profiler():
@@ -1884,7 +1889,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(
             BACKEND != "gloo" and BACKEND != "nccl",
-            "Only Gloo and Nccl backend supports CUDA allReduce",
+            "Only Gloo and Nccl backend supports CUDA broadcast",
         )
         @skip_if_no_gpu
         def test_broadcast_cuda(self):
