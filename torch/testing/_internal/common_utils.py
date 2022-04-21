@@ -1549,6 +1549,8 @@ meta_exclude_set = {
     torch.view_as_complex,
     torch.view_as_real,
     torch.vstack,
+    torch.Tensor.mm,  # sparse
+    torch.Tensor.sparse_mask,
     torch.where,
     torch.xlogy,
     torch.zeros_like,
@@ -1627,8 +1629,6 @@ meta_exclude_set = {
     torch.Tensor.index_add,
     # TODO: we're incapable of cloning the history, so this won't work
     torch.autograd.grad,
-    # TODO: sparse
-    torch.sparse_coo_tensor,
     # TODO: these need to get fixed
     torch._pack_padded_sequence,
     torch._pad_packed_sequence,
@@ -1645,6 +1645,14 @@ meta_exclude_set = {
     torch.zeros,
     torch.arange,
     torch.vander,
+    # TODO: sparse add to overrides
+    torch.sparse_coo_tensor,
+    # weirdo bindings torch._C._nn add to overrides
+    torch._C._nn.binary_cross_entropy,
+    torch._C._nn.adaptive_avg_pool2d,
+    torch._C._nn._test_optional_filled_intlist,
+    torch._C._nn._test_optional_floatlist,
+    torch._C._nn._test_optional_intlist,
 }
 
 skipped = set()
