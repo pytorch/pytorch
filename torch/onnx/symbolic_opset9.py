@@ -435,7 +435,7 @@ prod = _reduce_with_dtype("ReduceProd", "prod", allow_multi_dim_support=False)
 
 @parse_args("v", "i", "none")
 def cumsum(g, input, dim, dtype):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         if dtype.node().kind() != "prim::Constant":
             return _unimplemented(name, "dtype")
         return g.at("cumsum", input, dim_i=dim)
@@ -444,7 +444,7 @@ def cumsum(g, input, dim, dtype):
 
 
 def _sample_dirichlet(g, self, generator):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         if not sym_help._is_none(generator):
             return _unimplemented("_sample_dirichlet",
                                   "We are not able to export generator")
@@ -454,7 +454,7 @@ def _sample_dirichlet(g, self, generator):
 
 
 def _standard_gamma(g, self, generator):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         if not sym_help._is_none(generator):
             return _unimplemented("_standard_gamma",
                                   "We are not able to export generator")
@@ -524,7 +524,7 @@ def embedding_bag(g,
                   padding_idx):
     if not sym_help._is_none(per_sample_weights):
         return sym_help._onnx_unsupported("embedding_bag  with per_sample_weights")
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("embedding_bag",
                     embedding_matrix,
                     indices,
@@ -564,7 +564,7 @@ def transpose(g, self, dim0, dim1):
     else:
         # if we don't have dim information we cannot
         # output a permute so use ATen instead
-        if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        if sym_help.is_caffe2_aten_fallback():
             return g.at("transpose", self, overload_name="int", dim0_i=dim0, dim1_i=dim1)
         else:
             raise RuntimeError("Unsupported: ONNX export of transpose for tensor "
@@ -1037,10 +1037,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         if mod != [0] * len(mod):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
-            if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-                return _unimplemented(name, "output size that are not factor of input size")
-            else:
-                return sym_help._onnx_unsupported(name + ", since output size is not factor of input size")
+            return _unimplemented(name, "output size that are not factor of input size")
         k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
@@ -1502,7 +1499,7 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
 
 @parse_args("v", "is", "v", "v", "f", "i")
 def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("layer_norm", input, weight, bias, normalized_shape_i=normalized_shape,
                     eps_f=eps, cudnn_enable_i=cudnn_enable)
 
@@ -1572,7 +1569,7 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
 
 @parse_args("v", "i", "i", "i")
 def unfold(g, input, dimension, size, step):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("unfold", input, dimension_i=dimension, size_i=size, step_i=step)
     sizes = sym_help._get_tensor_sizes(input)
     try:
@@ -1620,7 +1617,7 @@ def index_put(g, self, indices_list_value, values, accumulate):
         indices_list = sym_help._unpack_list(indices_list_value)
     else:
         indices_list = [indices_list_value]
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         args = [self] + indices_list + [values, accumulate]
         return g.at("index_put", *args)
 
@@ -1637,7 +1634,7 @@ def index_put(g, self, indices_list_value, values, accumulate):
 
 def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, "i")
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("index_fill", self, index, value, overload_name="int_Scalar", dim_i=dim_value)
 
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
@@ -1650,7 +1647,7 @@ def index_fill(g, self, dim, index, value):
 
 def index_copy(g, self, dim, index, source):
     dim_value = sym_help._parse_arg(dim, "i")
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("index_copy", self, index, source, dim_i=dim_value)
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
@@ -1694,7 +1691,7 @@ def type_as(g, self, other):
     if other_dtype is not None:
         return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[other_dtype])
     else:
-        if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        if sym_help.is_caffe2_aten_fallback():
             # We don't know the type of other, bail by emitting ATen
             return g.at("type_as", self, other)
         else:
@@ -1705,7 +1702,7 @@ def type_as(g, self, other):
 
 @parse_args("v", "v", "i", "f")
 def cosine_similarity(g, x1, x2, dim, eps):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("cosine_similarity", x1, x2, dim_i=dim, eps_f=eps)
     cross = sym_help._reducesum_helper(g, mul(g, x1, x2),
                                        axes_i=[dim], keepdims_i=0)
@@ -1899,7 +1896,7 @@ def norm(g, self, p, dim, keepdim):
 
 @parse_args("v", "v", "v", "i")
 def conv_tbc(g, input, weight, bias, pad):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("conv_tbc", input, weight, bias, pad_i=pad)
     else:
         # input must have 3 dimensions, see:
@@ -1915,7 +1912,7 @@ def conv_tbc(g, input, weight, bias, pad):
 
 @parse_args("v", "i", "i")
 def _unique(g, input, sorted, return_inverse):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("_unique", input, sorted_i=sorted,
                     return_inverse_i=return_inverse, outputs=2)
     else:
@@ -1924,7 +1921,7 @@ def _unique(g, input, sorted, return_inverse):
 
 @parse_args("v", "i", "i", "i")
 def _unique2(g, input, sorted, return_inverse, return_counts):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("_unique2", input, sorted_i=sorted,
                     return_inverse_i=return_inverse, return_counts_i=return_counts,
                     outputs=3)
@@ -2998,7 +2995,7 @@ def logsumexp(g, input, dim, keepdim):
 
 
 def arange(g, *args):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("arange", *args)
 
     def _get_arange_dtype(dtype):
@@ -3064,7 +3061,7 @@ def masked_fill(g, self, mask, value):
 
 
 def index(g, self, index):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("index", self, index, overload_name="Tensor")
 
     if sym_help._is_packed_list(index):
@@ -3343,7 +3340,7 @@ def gelu(g, self, approximate):
 
 @parse_args("v", "i", "v", "v", "f", "i")
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("group_norm", input, weight, bias, num_groups_i=num_groups,
                     eps_f=eps, cudnn_enabled_i=cudnn_enabled)
 
@@ -3401,7 +3398,7 @@ def _weight_norm(g, weight_v, weight_g, dim):
         norm_v = norm(g, weight_v, 2, axes, 1)
         div = g.op("Div", weight_v, norm_v)
         return g.op("Mul", div, weight_g)
-    elif sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    elif sym_help.is_caffe2_aten_fallback():
         return g.at("_weight_norm", weight_v, weight_g, dim_i=dim)
     else:
         raise RuntimeError("Unsupported: ONNX export of _weight_norm for tensor "
