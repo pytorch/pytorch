@@ -41,7 +41,7 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
     DeviceType device_type) {
   switch (device_type) {
     case DeviceType::CUDA:
-      return DispatchKey::Autocast;
+      return DispatchKey::AutocastCUDA;
     case DeviceType::CPU:
       return DispatchKey::AutocastCPU;
     case DeviceType::XPU:

@@ -13,27 +13,27 @@ namespace at {
 namespace autocast {
 
 bool is_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastFunctionality);
 }
 
 void set_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCUDA, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastFunctionality, !new_enabled);
 }
 
 bool is_cpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCPU);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastFunctionality);
 }
 
 void set_cpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCPU, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastFunctionality, !new_enabled);
 }
 
 bool is_xpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXPU);
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastFunctionality);
 }
 
 void set_xpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXPU, !new_enabled);
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastFunctionality, !new_enabled);
 }
 
 namespace {
@@ -207,7 +207,7 @@ struct WrapFunction_<CastPolicy::fp32, device_type, Redispatch, F, Ret, guts::ty
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, DeviceType::CUDA, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::AutocastFunctionality);
     if (firstarg_is_eligible(args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
     } else {
@@ -222,7 +222,7 @@ struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, DeviceType::CUDA, Redispatc
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_append_dtype, DeviceType::CUDA, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::AutocastFunctionality);
     at::ScalarType out_type = type_from_firstarg(at::kFloat, args...);
     return (*F)(args..., out_type);
   }
