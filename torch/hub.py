@@ -10,9 +10,12 @@ import torch
 import warnings
 import zipfile
 from pathlib import Path
+from typing import Callable, Dict, Optional, Union
 from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
+
+import torch.nn as nn
 
 try:
     from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
@@ -645,7 +648,14 @@ def _legacy_zip_load(filename, model_dir, map_location):
     return torch.load(extracted_file, map_location=map_location)
 
 
-def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True, check_hash=False, file_name=None):
+def load_state_dict_from_url(
+    url: str,
+    model_dir: Optional[str] = None,
+    map_location: Optional[Union[Callable[[str], str], Dict[str, str]]] = None,
+    progress: bool = True,
+    check_hash: bool = False,
+    file_name: Optional[str] = None
+) -> nn.Module:
     r"""Loads the Torch serialized object at the given URL.
 
     If downloaded file is a zip file, it will be automatically
