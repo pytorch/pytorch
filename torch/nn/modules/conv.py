@@ -773,7 +773,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 1
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size,
+            input, output_size, self.stride, self.padding, self.kernel_size,  # type: ignore[arg-type]
             num_spatial_dims, self.dilation)  # type: ignore[arg-type]
         return F.conv_transpose1d(
             input, self.weight, self.bias, self.stride, self.padding,
@@ -925,7 +925,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 2
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size,
+            input, output_size, self.stride, self.padding, self.kernel_size,  # type: ignore[arg-type]
             num_spatial_dims, self.dilation)  # type: ignore[arg-type]
 
         return F.conv_transpose2d(
@@ -1075,7 +1075,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 3
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size,
+            input, output_size, self.stride, self.padding, self.kernel_size,  # type: ignore[arg-type]
             num_spatial_dims, self.dilation)  # type: ignore[arg-type]
 
         return F.conv_transpose3d(
