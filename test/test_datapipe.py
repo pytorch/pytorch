@@ -2195,15 +2195,12 @@ class TestSingleIteratorDataPipe(TestCase):
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(it1)
 
-
     def test_single_iter_for_class_with_next_and_self(self):
         r"""
-        Testing for the case where IterDataPipe's __iter__ isn't a generator and there is a __next__ method
+        Testing for the case where IterDataPipe's `__iter__` returns `self` and there is a `__next__` method
         """
-        # TODO: This case cannot be handled since __iter__ simply returns a reference to self
         class _CustomIterDP(IterDataPipe):
             def __init__(self, iterable):
-                print("_CustomIterDP's __init__ is called")
                 self.iterable = iter(iterable)
 
             def __iter__(self):
@@ -2212,32 +2209,15 @@ class TestSingleIteratorDataPipe(TestCase):
             def __next__(self):
                 return next(self.iterable)
 
-        # print()
-        # print(f"\nSingleton Mode: {_CustomIterDP.singleton_mode}")
-        # source_dp = _CustomIterDP(range(10))
-        # it1 = iter(source_dp)
-        # print(f"{next(it1) = }")
-        # it2 = iter(source_dp)
-        # print(f"{next(it2) = }")
-        # print("This shouldn't cause an error:")
-        # print(f"{next(it1) = }")
-        #
-        # IterDataPipe.set_singleton_mode(True)
-        # print(f"\n\n\nSingleton Mode: {_CustomIterDP.singleton_mode}")
-        # source_dp = _CustomIterDP(range(10))
-        # it1 = iter(source_dp)
-        # # print(f"{it1._valid_iterator_id = }")
-        # # print(type(it1))
-        # print()
-        # print(f"{next(it1) = }\n")
-        # it2 = iter(source_dp)
-        # # print(f"{it2._valid_iterator_id = }")
-        # print()
-        # print(f"{next(it2) = }")
-        # print()
-        # print("This should cause an error:")
-        # # print(f"{it1._valid_iterator_id = }")
-        # print(f"{next(it1) = }")
+        # Functional Test: Check that every `__iter__` call returns the same object
+        source_dp = _CustomIterDP(range(10))
+        it1 = iter(source_dp)
+        it2 = iter(source_dp)
+        self.assertEqual(it1, it2)
+        self.assertEqual(0, next(it1))
+        self.assertEqual(1, next(it2))
+        self.assertEqual(2, next(it1))
+        self.assertEqual(range(3,10), list(it1))
 
     def test_single_iter_for_class_without_next(self):
         r"""

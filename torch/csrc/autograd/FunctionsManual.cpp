@@ -886,39 +886,35 @@ at::IntArrayRef strides_or_error(const Tensor & input, c10::string_view const & 
       "Please either use a strided tensor or set requires_grad=False for '",
       input_name, "'");
     if (input.is_mkldnn()) return IntArrayRef({});
+    if (input.is_sparse_csr()) return IntArrayRef({});
     return input.strides();
   } else {
     return IntArrayRef({});
   }
 }
 
-Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, const Scalar & alpha) {
-  // if input was column-major, return grad as column-order for efficiency
-  if (mat1_strides[0] == 1 && mat1_strides[1] == mat1_sizes[0]) {
-    return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha.conj());
-  } else {
-    return maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
+Tensor mm_mat1_backward(const Tensor& grad, const Tensor& mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, c10::Layout mat1_layout, const Scalar& alpha) {
+  if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided && mat1_layout == c10::kStrided) {
+    // if input was column-major, return grad as column-order for efficiency
+    if (mat1_strides[0] == 1 && mat1_strides[1] == mat1_sizes[0]) {
+      return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha.conj());
+    }
   }
+
+  // General fallback, should work for any layout
+  return maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
 }
 
-Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef sizes, IntArrayRef strides, const Scalar & alpha) {
-  // if input was column-major, return grad as column-order for efficiency
-  if (strides[0] == 1 && strides[1] == sizes[0]) {
-    if (mat1.is_sparse()) {
-      // Since mm(dense, sparse) doesn't exist,
-      // pass a transposed output matrix to the underlying "addmm"
-      // function directly.
-      int64_t out_rows = mat1.size(1);
-      int64_t out_cols = grad.size(1);
-      Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
-      Tensor r = at::empty({out_cols, out_rows}, grad.options()).t();
-      at::addmm_out(r, t, mat1.t(), grad, alpha, 1);
-      return r;
+Tensor mm_mat2_backward(const Tensor& grad, const Tensor& mat1, IntArrayRef mat2_sizes, IntArrayRef mat2_strides, c10::Layout mat2_layout, const Scalar& alpha) {
+  if (grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided && mat2_layout == c10::kStrided) {
+    // if input was column-major, return grad as column-order for efficiency
+    if (mat2_strides[0] == 1 && mat2_strides[1] == mat2_sizes[0]) {
+      return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha.conj());
     }
-    return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha.conj());
-  } else {
-    return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
   }
+
+  // General fallback, should work for any layout
+  return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
 }
 
 Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {
@@ -5055,7 +5051,6 @@ Tensor group_norm_jvp(
 Tensor group_norm_mean_jvp(
     const Tensor& input_t, const Tensor& mean_p, int64_t groups) {
   int64_t N = input_t.size(0);
-  int64_t C = input_t.size(1);
   std::array<int64_t, 3> view_shape = {1, N * groups, N ? -1 : 1};
   auto input_t_reshaped = input_t.view(view_shape);
   return input_t_reshaped.mean({2}, false).view_as(mean_p);
@@ -5066,7 +5061,6 @@ Tensor group_norm_invstd_jvp(
     const Tensor& mean_p, const Tensor& invstd_p,
     int64_t groups) {
   int64_t N = input_p.size(0);
-  int64_t C = input_p.size(1);
 
   std::vector<int64_t> view_shape = {1, N * groups, N ? -1 : 1};
 
@@ -5398,6 +5392,16 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
 
 }
 
+Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_options) {
+  // Handle R->C copies without raising a warning
+  const auto self_type = self_options.dtype().toScalarType();
+  auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grad_);
+  if (!c10::isComplexType(self_type) && grad->is_complex()) {
+    grad = c10::MaybeOwned<at::Tensor>::owned(at::real(grad_));
+  }
+
+  return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
+}
 
 } // namespace details
 } // namespace generated
