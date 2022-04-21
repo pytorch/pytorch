@@ -430,7 +430,7 @@ Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarTyp
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_softmax(input_, dim_, true);
     } else {
-        Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
+        const Tensor& converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
         return at::_softmax(converted, dim_, false);
     }
   }();
