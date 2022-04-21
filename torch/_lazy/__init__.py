@@ -112,7 +112,7 @@ class LazyProcessGroup(dist.ProcessGroup):
             for tensor_list in output_tensor_lists
         ]
         cuda_input_tensor_list = [tensor.to(torch.device('cuda', tensor.device.index)) for tensor in input_tensor_list]
-        if opts == None:
+        if opts is None:
             work = self.nccl_pg.allgather(cuda_output_tensor_lists, cuda_input_tensor_list)
         else:
             work = self.nccl_pg.allgather(cuda_output_tensor_lists, cuda_input_tensor_list, opts)

@@ -57,7 +57,7 @@ def step(model, input, labels, device, loss_fn, optimizer):
     loss = loss_fn(output, labels)
     loss.backward()
     optimizer.step()
-    # FIXME(alanwaketan): Investigate why we prodcue different
+    # FIXME(alanwaketan): Investigate why we produce different
     # results if mark_step.
     # if device.type == "lazy":
     #     torch._lazy.mark_step(str(device))
