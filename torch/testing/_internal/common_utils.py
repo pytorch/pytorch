@@ -1038,7 +1038,6 @@ meta_exclude_set = {
     torch.Tensor.scatter_,
     torch.Tensor.scatter_add_,
     torch.Tensor.scatter_reduce_,
-    torch.Tensor.sgn_,
     torch.Tensor.share_memory_,
     torch.Tensor.short,
     torch.Tensor.sigmoid_,
@@ -1489,7 +1488,6 @@ meta_exclude_set = {
     torch.scatter_reduce,
     torch.searchsorted,
     torch.select_scatter,
-    torch.sgn,
     torch.sigmoid,
     torch.sign,
     torch.signbit,
@@ -1671,7 +1669,8 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
-        hit = False
+        hit = 0
+        miss = 0
 
         # Doesn't actually return a storage
         @functools.lru_cache(None)
@@ -1718,31 +1717,33 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
             return r
 
         def to_meta(t):
-            nonlocal hit
+            nonlocal hit, miss
             if isinstance(t, torch.nn.parameter.UninitializedBuffer):
+                miss += 1
                 return t
             # TODO: zero tensors?
             elif type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
-                if t.is_sparse_csr or t.is_sparse:
+                if any([t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized, t.is_nested]):
+                    miss += 1
                     # TODO: sparse should support meta
                     return t
-                elif t.device.type == "lazy" or t.is_complex() or torch._C._is_batched(t):
+                elif any([t.device.type in ("lazy", "meta"), t.is_complex(), torch._C._is_batched(t)]):
                     # TODO: this stuff should support storage
                     # (well, maybe not batched)
-                    hit = True
+                    hit += 1
                     return t.to("meta")
-                elif not any([t.is_mkldnn, t.is_quantized, t.is_nested]):
-                    hit = True
+                else:
+                    hit += 1
                     r = meta_tensor(t)
                     if type(t) is torch.nn.Parameter:
                         r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
                     return r
-                return t
             elif isinstance(t, torch.Tensor):
                 # It's some subclass; convert it to meta and pray (lol)
-                hit = True
+                hit += 1
                 return t.to("meta")
             else:
+                # non-Tensor types don't count as hit or miss
                 return t
 
         do_meta = func not in meta_exclude_set and not torch.jit.is_tracing()
@@ -1756,13 +1757,14 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                     f"failed to convert args to meta; "
                     f"originally (*{args}, **{kwargs})") from e
 
-        do_meta = do_meta and hit
-
         r = func(*args, **kwargs)
 
         # TODO: also handle cases where func raise an exception
 
-        if do_meta:
+        # For now, only attempt if we managed to convert all tensor types
+        # (if any of them failed, we're in a mixed device situation and
+        # this isn't well supported)
+        if do_meta and hit > 0 and miss == 0:
             try:
                 # suppress warnings
                 with warnings.catch_warnings():
