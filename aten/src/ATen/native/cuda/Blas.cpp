@@ -13,6 +13,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
@@ -21,8 +22,10 @@
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/gelu.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
+#include <ATen/ops/relu.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/vdot_native.h>
 #endif
@@ -113,7 +116,29 @@ c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bo
 
 namespace {
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+enum class Activation {
+  None,
+  RELU,
+  GELU,
+};
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
+  switch (a) {
+    case Activation::None:
+      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
+    case Activation::RELU:
+      return cuda::blas::GEMMAndBiasActivationEpilogue::RELU;
+    case Activation::GELU:
+      return cuda::blas::GEMMAndBiasActivationEpilogue::GELU;
+    default:
+      TORCH_CHECK(false);
+      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
+  }
+}
+#endif
+
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -231,7 +256,19 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               mat2_ld,
               self.data_ptr<scalar_t>(),
               result_->data_ptr<scalar_t>(),
-              result_ld);
+              result_ld,
+#if 0
+              activation_to_gemm_and_blas_arg(activation)
+#else
+              // GELU is not supported (and does not compile!) prior
+              // to CUDA 11.4.  Have observed accuracy issues with
+              // GELU epilogue in 11.4; disabling the GELU epilogue
+              // path until we confirm which version it's working in.
+              activation != Activation::GELU
+              ? activation_to_gemm_and_blas_arg(activation)
+              : cuda::blas::GEMMAndBiasActivationEpilogue::None
+#endif
+          );
         });
   } else
 #endif
@@ -263,7 +300,26 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               result_ptr,
               result_ld);
         });
+    switch (activation) {
+      case Activation::RELU:
+        at::relu_(const_cast<Tensor&>(*result_));
+        break;
+      case Activation::GELU:
+        at::gelu_(const_cast<Tensor&>(*result_));
+        break;
+      default: break;
+    }
   }
+
+// Preprocessor gate here needs to match the inverse of the check
+// gating activation_to_gemm_and_blas_arg above; here we are manually
+// performing a post-GELU because we weren't able to use the GELU
+// epilogue above.
+#if !0
+  if (useLtInterface && activation == Activation::GELU) {
+    at::gelu_(const_cast<Tensor&>(*result_));
+  }
+#endif
 
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
@@ -346,6 +402,10 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 
 TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
   addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha);
+}
+
+TORCH_IMPL_FUNC(addmm_activation_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor& result) {
+  addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha, use_gelu ? Activation::GELU : Activation::RELU);
 }
 
 TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tensor& result) {

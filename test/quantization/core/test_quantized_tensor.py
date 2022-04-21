@@ -140,6 +140,56 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
     return Xq, loss
 
 class TestQuantizedTensor(TestCase):
+    def test_per_tensor_qtensor_to_memory_format(self):
+        n = np.random.randint(1, 10)
+        c = np.random.randint(2, 10)
+        h = np.random.randint(2, 10)
+        w = np.random.randint(2, 10)
+        x = torch.rand(n, c, h, w)
+        scale = np.random.uniform(0.1, 1.0)
+        zero_point = np.random.randint(0.0, 10)
+        qints = [torch.qint8, torch.quint8, torch.qint32]
+        dtype = qints[np.random.randint(0, len(qints))]
+        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=dtype)
+        x_nhwc = x.to(memory_format=torch.channels_last)
+        qx_nhwc_using_to = qx.to(memory_format=torch.channels_last)
+        qx_nhwc_using_contiguous = qx.contiguous(memory_format=torch.channels_last)
+        self.assertEqual(qx_nhwc_using_to.stride(), qx_nhwc_using_contiguous.stride())
+        self.assertEqual(qx_nhwc_using_to.stride(), x_nhwc.stride())
+
+        # When the last two dimensions of a 4D tensor are both size 1 or if c == 1, we have a degenerate case
+        # see https://pytorch.org/tutorials/intermediate/memory_format_tutorial.html
+        # In this case, the output of torch.Tensor.to and torch.Tensor.contiguous should not be the same
+        x = torch.rand(10, 2, 1, 1)
+        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=dtype)
+        qx_nhwc_using_to = qx.to(memory_format=torch.channels_last)
+        qx_nhwc_using_contiguous = qx.contiguous(memory_format=torch.channels_last)
+        self.assertNotEqual(qx_nhwc_using_to.stride(), qx_nhwc_using_contiguous.stride())
+
+        x = torch.rand(10, 1, 2, 2)
+        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=dtype)
+        qx_nhwc_using_to = qx.to(memory_format=torch.channels_last)
+        qx_nhwc_using_contiguous = qx.contiguous(memory_format=torch.channels_last)
+        self.assertNotEqual(qx_nhwc_using_to.stride(), qx_nhwc_using_contiguous.stride())
+
+    def test_per_channel_qtensor_to_memory_format(self):
+        n = np.random.randint(1, 10)
+        c = np.random.randint(2, 10)
+        h = np.random.randint(2, 10)
+        w = np.random.randint(2, 10)
+        x = torch.rand(n, c, h, w)
+        x_nhwc = x.to(memory_format=torch.channels_last)
+        scale = np.random.uniform(0.1, 1.0)
+        zero_point = np.random.randint(0.0, 10)
+        qints = [torch.qint8, torch.quint8, torch.qint32]
+        dtype = qints[np.random.randint(0, len(qints))]
+        for axis in range(x.ndim):
+            scales = torch.rand(x.size(axis)) + 0.00001
+            zero_points = torch.randint(low=0, high=10, size=(x.size(axis), ))
+            qx = torch.quantize_per_channel(x, scales=scales, zero_points=zero_points, dtype=dtype, axis=axis)
+            qx_nhwc_using_to = qx.to(memory_format=torch.channels_last)
+            self.assertEqual(qx_nhwc_using_to.stride(), x_nhwc.stride())
+
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_cuda(self):
         self._test_qtensor(torch.device('cuda'))

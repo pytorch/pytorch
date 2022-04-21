@@ -8681,6 +8681,27 @@ TEST_F(LazyOpsTest, TestDiagonal) {
   }
 }
 
+TEST_F(LazyOpsTest, TestDiagonalUpdate) {
+  int size = 5;
+  // Test all diagonals and out of bounds (must be no-op).
+  for (int diagonal = -size; diagonal <= size; ++diagonal) {
+    auto input = torch::rand({size, size},
+        torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+    auto input_clone = input.clone();
+    auto output = torch::diagonal(input, diagonal);
+    output.add_(1);
+
+    ForEachDevice([&](const torch::Device& device) {
+      torch::Tensor lazy_input = CopyToDevice(input_clone, device);
+      torch::Tensor lazy_output = torch::diagonal(lazy_input, diagonal);
+      lazy_output.add_(1);
+
+      AllClose(output, lazy_output);
+      AllClose(input, lazy_input);
+    });
+  }
+}
+
 TEST_F(LazyOpsTest, TestDiagonalNonSquare) {
   int size = 5;
   torch::Tensor input =
@@ -10698,6 +10719,26 @@ TEST_F(LazyOpsTest, TestLerpScalarOut) {
   });
   ExpectCounterNotChanged("aten::.*", GetIgnoredCounters());
   ExpectCounterChanged("lazy::lerp", GetIgnoredCounters());
+}
+
+TEST_F(LazyOpsTest, IsAliasOf) {
+  auto a = torch::empty(4, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+  auto b = torch::empty(4, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
+
+  ForEachDevice([&](const torch::Device& device) {
+    auto lazy_a = CopyToDevice(a, device);
+    auto lazy_b = CopyToDevice(b, device);
+    EXPECT_EQ(!a.is_alias_of(b), !lazy_a.is_alias_of(lazy_b));
+
+    auto c = a.view({2, 2});
+    auto lazy_c = lazy_a.view({2, 2});
+    EXPECT_EQ(a.is_alias_of(c), lazy_a.is_alias_of(lazy_c));
+
+    auto d = c.view({1, 4});
+    auto lazy_d = lazy_c.view({1, 4});
+    EXPECT_EQ(d.is_alias_of(c), lazy_d.is_alias_of(lazy_c));
+    EXPECT_EQ(d.is_alias_of(a), lazy_d.is_alias_of(lazy_a));
+  });
 }
 
 #endif // FBCODE_CAFFE2
