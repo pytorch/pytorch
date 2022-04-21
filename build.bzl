@@ -40,12 +40,6 @@ def define_targets(rules):
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--gen_lazy_ts_backend",
-        tags = [
-            # Filter this target out for Bazel until we are ready to
-            # use it. When we refactor this for fbcode it will start
-            # to conflict with the Bazel code generator.
-            "-bazel",
-        ],
     )
 
     rules.genrule(
