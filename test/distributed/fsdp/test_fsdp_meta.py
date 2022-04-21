@@ -6,7 +6,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.flatten_params_wrapper import FlattenParamsWrapper
 from torch.distributed.fsdp.wrap import always_wrap_policy as always_wrap
 from torch.distributed.fsdp.wrap import wrap, enable_wrap
 from torch.testing._internal.common_fsdp import (
@@ -25,7 +24,7 @@ from torch.testing._internal.common_distributed import (
 
 _TORCHDISTX_AVAIL = True
 try:
-    from torchdistx import fake, deferred_init
+    from torchdistx import deferred_init
 except ImportError:
     _TORCHDISTX_AVAIL = False
 
@@ -103,7 +102,10 @@ def _init_with_torchdistx(module):
     using ``materialize_module``.
     """
     assert _TORCHDISTX_AVAIL
-    check_fn = lambda k: not isinstance(k, FSDP)
+
+    def check_fn(k):
+        return not isinstance(k, FSDP)
+
     deferred_init.materialize_module(module, check_fn=check_fn)
 
 class TestFSDPWithMetaDevice(FSDPTest):
@@ -119,7 +121,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
         with fsdp1.summon_full_params(fsdp1):
             with fsdp2.summon_full_params(fsdp2):
                 for p1, p2 in zip(fsdp1.parameters(), fsdp2.parameters()):
-                    if self.rank ==0: self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
+                    self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
 
     def _test_simple_model_with_meta_device(self, meta_module_fn, init_fn=None):
         # Create model on meta device and wrap with FSDP.
@@ -175,24 +177,36 @@ class TestFSDPWithMetaDevice(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_simple_model_with_meta_device_reset_params(self):
-        meta_module_fn = lambda: MyModel(device="meta")
+        def meta_module_fn():
+            return MyModel(device="meta")
         self._test_simple_model_with_meta_device(
             meta_module_fn, _init_with_reset_params
         )
 
     @skip_if_lt_x_gpu(2)
     def test_simple_model_with_meta_device_default_init(self):
-        meta_module_fn = lambda: MyModel(device="meta")
+        def meta_module_fn():
+            return MyModel(device="meta")
         self._test_simple_model_with_meta_device(meta_module_fn)
 
     @skip_if_lt_x_gpu(2)
+    @sandcastle_skip_if(
+        not _TORCHDISTX_AVAIL, "Test requires torchdistx: https://github.com/pytorch/torchdistx"
+    )
     def test_simple_model_with_torchdistx_default_init(self):
-        meta_module_fn = lambda: deferred_init.deferred_init(MyModel, device="cuda")
+        def meta_module_fn():
+            return deferred_init.deferred_init(MyModel, device="cuda")
+
         self._test_simple_model_with_meta_device(meta_module_fn)
 
     @skip_if_lt_x_gpu(2)
+    @sandcastle_skip_if(
+        not _TORCHDISTX_AVAIL, "Test requires torchdistx: https://github.com/pytorch/torchdistx"
+    )
     def test_simple_model_with_torchdistx_init_fn(self):
-        meta_module_fn = lambda: deferred_init.deferred_init(MyModel, device="cuda")
+        def meta_module_fn():
+            return deferred_init.deferred_init(MyModel, device="cuda")
+
         self._test_simple_model_with_meta_device(meta_module_fn, init_fn=_init_with_torchdistx)
 
     def _test_nested_model_with_meta_device(self, auto_wrap, meta_module_fn, init_fn=None):
@@ -251,7 +265,8 @@ class TestFSDPWithMetaDevice(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("auto_wrap", [True, False])
     def test_nested_model_with_meta_device_reset_params(self, auto_wrap):
-        meta_module_fn = lambda: NestedModel(device="meta")
+        def meta_module_fn():
+            return NestedModel(device="meta")
 
         self._test_nested_model_with_meta_device(
             auto_wrap=auto_wrap, meta_module_fn=meta_module_fn, init_fn=_init_with_reset_params
@@ -260,23 +275,35 @@ class TestFSDPWithMetaDevice(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("auto_wrap", [True, False])
     def test_nested_model_with_meta_device_default_init(self, auto_wrap):
-        meta_module_fn = lambda: NestedModel(device="meta")
+        def meta_module_fn():
+            return NestedModel(device="meta")
+
         self._test_nested_model_with_meta_device(
             auto_wrap=auto_wrap, meta_module_fn=meta_module_fn,
         )
 
     @skip_if_lt_x_gpu(2)
+    @sandcastle_skip_if(
+        not _TORCHDISTX_AVAIL, "Test requires torchdistx: https://github.com/pytorch/torchdistx"
+    )
     @parametrize("auto_wrap", [True, False])
     def test_nested_model_with_torchdistx_default_init(self, auto_wrap):
-        meta_module_fn = lambda: deferred_init.deferred_init(NestedModel, device="cuda")
+        def meta_module_fn():
+            return deferred_init.deferred_init(NestedModel, device="cuda")
+
         self._test_nested_model_with_meta_device(
             auto_wrap=auto_wrap, meta_module_fn=meta_module_fn
         )
 
     @skip_if_lt_x_gpu(2)
+    @sandcastle_skip_if(
+        not _TORCHDISTX_AVAIL, "Test requires torchdistx: https://github.com/pytorch/torchdistx"
+    )
     @parametrize("auto_wrap", [True, False])
     def test_nested_model_with_torchdistx_init_fn(self, auto_wrap):
-        meta_module_fn = lambda: deferred_init.deferred_init(NestedModel, device="cuda")
+        def meta_module_fn():
+            return deferred_init.deferred_init(NestedModel, device="cuda")
+
         self._test_nested_model_with_meta_device(
             auto_wrap=auto_wrap, meta_module_fn=meta_module_fn, init_fn=_init_with_torchdistx,
         )
