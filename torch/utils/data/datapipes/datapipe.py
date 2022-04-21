@@ -59,7 +59,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         [2, 4, 6, 8, 10]
     """
     functions: Dict[str, Callable] = {}
-    reduce_ex_hook : Optional[Callable] = None
+    reduce_ex_hook: Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
 
     def __getattr__(self, attribute_name):

@@ -344,7 +344,7 @@ def _simplify_obj_name(obj) -> str:
     if inspect.isfunction(obj):
         return obj.__name__
     else:
-        return str(obj)
+        return repr(obj)
 
 
 def _generate_input_args_string(obj):
