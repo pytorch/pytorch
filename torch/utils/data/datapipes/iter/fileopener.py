@@ -1,6 +1,7 @@
 from io import IOBase
 from typing import Iterable, Tuple, Optional
 
+from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames, _deprecation_warning
 
@@ -10,6 +11,7 @@ __all__ = [
 ]
 
 
+@functional_datapipe('open_files')
 class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     r"""
     Given pathnames, opens files and yield pathname and file stream in a tuple.
