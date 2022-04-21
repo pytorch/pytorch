@@ -72,7 +72,7 @@ GENERATED_AUTOGRAD_H = [
     "torch/csrc/autograd/generated/Functions.h",
     "torch/csrc/autograd/generated/VariableType.h",
     "torch/csrc/autograd/generated/variable_factories.h",
-] + GENERATED_AUTOGRAD_PYTHON_H
+] + _GENERATED_AUTOGRAD_PYTHON_H
 
 GENERATED_TESTING_PY = [
     "torch/testing/_internal/generated/annotated_fn_args.py",
