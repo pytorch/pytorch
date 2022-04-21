@@ -22,22 +22,6 @@ class IrUtilNode : public Node {
     operands_as_outputs_.emplace_back(v.node.get(), v.index);
     operands_.push_back(std::move(v.node));
   }
-
-  const std::vector<Output>& operands() const override {
-    return operands_as_outputs_;
-  }
-
-  const Output& operand(size_t i) const override {
-    return operands_as_outputs_.at(i);
-  }
-
-  const Shape& shape(size_t i) const override { return shape_; }
-  c10::ArrayRef<Shape> shapes() const override { return {shape_}; }
-
- private:
-  std::vector<NodePtr> operands_;
-  std::vector<Output> operands_as_outputs_;
-  Shape shape_;
 };
 
 /*  a

@@ -630,6 +630,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
+    DispatchKey::AutocastXPU,
 });
 
 // See Note [TLS Initialization]
@@ -641,6 +642,7 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
+    DispatchKey::AutocastXPU,
 });
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
@@ -717,6 +719,7 @@ constexpr DispatchKeySet backend_bitset_mask =
 constexpr auto inplace_or_view_ks =
     DispatchKeySet(DispatchKey::ADInplaceOrView);
 constexpr auto autograd_cpu_ks = DispatchKeySet(DispatchKey::AutogradCPU);
+constexpr auto autograd_ipu_ks = DispatchKeySet(DispatchKey::AutogradIPU);
 constexpr auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
 constexpr auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
 constexpr auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
@@ -730,6 +733,17 @@ constexpr auto autograd_privateuse2_ks =
 constexpr auto autograd_privateuse3_ks =
     DispatchKeySet(DispatchKey::AutogradPrivateUse3);
 constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
+
+// This keyset has:
+// (1) the functionality bits corresponding to backends (dense, sparse,
+// quantized) (2) all of the backend bits set
+constexpr DispatchKeySet backend_functionality_keys =
+    DispatchKeySet({
+        DispatchKey::Dense,
+        DispatchKey::Quantized,
+        DispatchKey::Sparse,
+    }) |
+    DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
 struct OpTableOffsetAndMask {
   uint16_t offset;
@@ -766,6 +780,8 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
   switch (t) {
     case BackendComponent::CPUBit:
       return inplace_or_view_ks | autograd_cpu_ks;
+    case BackendComponent::IPUBit:
+      return inplace_or_view_ks | autograd_ipu_ks;
     case BackendComponent::XPUBit:
       return inplace_or_view_ks | autograd_xpu_ks;
     case BackendComponent::CUDABit:
@@ -792,16 +808,26 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
 // Returns a DispatchKeySet of autocast related keys mapped to backend.
 inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastCPU);
+  constexpr auto autocast_xpu_ks = DispatchKeySet(DispatchKey::AutocastXPU);
   constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
   switch (t) {
     case BackendComponent::CPUBit:
       return autocast_cpu_ks;
+    case BackendComponent::XPUBit:
+      return autocast_xpu_ks;
     case BackendComponent::CUDABit:
     case BackendComponent::XLABit:
       return autocast_cuda_ks;
     default:
       return DispatchKeySet();
   }
+}
+
+// returns the "backend" DispatchKey of highest priority in the set.
+// This is basically like highestBackendKey(), except that we have some
+// "functionality" bits that correspond to backends (Sparse, Quantized)
+inline DispatchKey highestPriorityBackendTypeId(DispatchKeySet ks) {
+  return (ks & backend_functionality_keys).highestPriorityTypeId();
 }
 
 // This API exists because we have a use case for checking
@@ -821,7 +847,8 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // here.  At the moment, autograd keys and ADInplaceOrView key need this
   // treatment;
   return (s - autograd_dispatch_keyset_with_ADInplaceOrView -
-          autocast_dispatch_keyset)
+          autocast_dispatch_keyset -
+          DispatchKeySet({DispatchKey::PythonTLSSnapshot, DispatchKey::Python}))
       .highestPriorityTypeId();
 }
 

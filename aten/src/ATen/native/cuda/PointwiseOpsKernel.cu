@@ -83,7 +83,7 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       });
     #endif
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, dtype, "addcmul_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, dtype, "addcdiv_cuda", [&]() {
       // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
       // and do math in fp32 for better accuracy.
       using accscalar_t = at::acc_type<scalar_t, true>;

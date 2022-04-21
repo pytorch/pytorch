@@ -2008,6 +2008,49 @@ class TestGraph(TestCase):
                                   dp2: {dp2.main_datapipe: {dp2.main_datapipe.main_datapipe: {}}}}}
         self.assertEqual(expected, graph)
 
+    def test_traverse_mapdatapipe(self):
+        source_dp = dp.map.SequenceWrapper(range(10))
+        map_dp = source_dp.map(partial(_fake_add, 1))
+        graph = torch.utils.data.graph.traverse(map_dp)
+        expected: Dict[Any, Any] = {map_dp: {source_dp: {}}}
+        self.assertEqual(expected, graph)
+
+    def test_traverse_mixdatapipe(self):
+        source_map_dp = dp.map.SequenceWrapper(range(10))
+        iter_dp = dp.iter.IterableWrapper(source_map_dp)
+        graph = torch.utils.data.graph.traverse(iter_dp)
+        expected: Dict[Any, Any] = {iter_dp: {source_map_dp: {}}}
+        self.assertEqual(expected, graph)
+
+
+class TestCircularSerialization(TestCase):
+
+    class CustomIterDataPipe(IterDataPipe):
+        def add_one(self, x):
+            return x + 1
+
+        def classify(self, x):
+            return 0
+
+        def __init__(self):
+            self._dp = dp.iter.IterableWrapper([1, 2, 4]).map(self.add_one).demux(2, self.classify)[0]
+
+        def __iter__(self):
+            yield from self._dp
+
+    def test_circular_reference(self):
+        self.assertEqual(
+            list(TestCircularSerialization.CustomIterDataPipe()),
+            list(pickle.loads(pickle.dumps(TestCircularSerialization.CustomIterDataPipe())))
+        )
+        _ = traverse(TestCircularSerialization.CustomIterDataPipe(), only_datapipe=True)
+        _ = traverse(TestCircularSerialization.CustomIterDataPipe(), only_datapipe=False)
+
+    # TODO: Ensure this works with `dill` installed
+    # @skipIfNoDill
+    # def test_circular_serialization_with_dill(self):
+    #     assert list(self._CustomIterDataPipe()) == list(dill.loads(dill.dumps(self._CustomIterDataPipe())))
+
 
 class TestSharding(TestCase):
 

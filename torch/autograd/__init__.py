@@ -10,14 +10,14 @@ import torch
 import warnings
 
 from torch.types import _TensorOrTensors
-from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, cast
 
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
-from ..overrides import has_torch_function, handle_torch_function
+from ..overrides import has_torch_function, handle_torch_function, is_tensor_like
 from . import functional
 from . import forward_ad
 from . import graph
@@ -235,20 +235,21 @@ def grad(
             to show any performance warnings and file an issue on github if warnings exist
             for your use case. Defaults to ``False``.
     """
-    outputs = (outputs,) if isinstance(outputs, torch.Tensor) else tuple(outputs)
-    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
-    overridable_args = outputs + inputs
+    t_outputs = cast(Tuple[torch.Tensor, ...], (outputs,) if is_tensor_like(outputs) else tuple(outputs))
+    t_inputs = cast(Tuple[torch.Tensor, ...], (inputs,) if is_tensor_like(inputs) else tuple(inputs))
+    overridable_args = t_outputs + t_inputs
     if has_torch_function(overridable_args):
         return handle_torch_function(
             grad,
             overridable_args,
-            outputs,
-            inputs,
+            t_outputs,
+            t_inputs,
             grad_outputs=grad_outputs,
             retain_graph=retain_graph,
             create_graph=create_graph,
             only_inputs=only_inputs,
             allow_unused=allow_unused,
+            is_grads_batched=is_grads_batched,
         )
 
     if not only_inputs:
@@ -256,8 +257,8 @@ def grad(
                       "(defaults to True). To accumulate gradient for other "
                       "parts of the graph, please use torch.autograd.backward.")
 
-    grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(outputs))
-    grad_outputs_ = _make_grads(outputs, grad_outputs_, is_grads_batched=is_grads_batched)
+    grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(t_outputs))
+    grad_outputs_ = _make_grads(t_outputs, grad_outputs_, is_grads_batched=is_grads_batched)
 
     if retain_graph is None:
         retain_graph = create_graph
@@ -268,12 +269,12 @@ def grad(
     if is_grads_batched:
         def vjp(gO):
             return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
-                outputs, gO, retain_graph, create_graph, inputs,
+                t_outputs, gO, retain_graph, create_graph, t_inputs,
                 allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
-        return _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs)
+        return _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs_)
     else:
         return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
-            outputs, grad_outputs_, retain_graph, create_graph, inputs,
+            t_outputs, grad_outputs_, retain_graph, create_graph, t_inputs,
             allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
 
 
