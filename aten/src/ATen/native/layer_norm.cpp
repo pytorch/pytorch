@@ -208,6 +208,8 @@ Tensor& layer_norm_out(
   Tensor mean = at::empty({M}, X->options());
   Tensor rstd = at::empty({M}, X->options());
 
+  TORCH_CHECK(input.dtype() == output.dtype());
+
   if (!output.is_contiguous()) {
     Tensor Y = at::native::empty_like(
       *X,
@@ -217,8 +219,10 @@ Tensor& layer_norm_out(
       c10::nullopt /* pin_memory */,
       at::MemoryFormat::Contiguous);
     layer_norm_with_mean_rstd_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
+    output.resize_(Y.sizes());
     output.copy_(std::move(Y));
   } else {
+    output.resize_(input.sizes());
     layer_norm_with_mean_rstd_out(output, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   }
 
