@@ -2582,8 +2582,8 @@ at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
     TORCH_CHECK(false, "ProcessGroupGloo::send takes a single tensor");
   }
   auto& tensor = tensors[0];
-  if (!tensor.is_contiguous()) {
-    TORCH_CHECK(false, "input tensor has to be contiguous");
+  if (!tensor.is_non_overlapping_and_dense()) {
+    TORCH_CHECK(false, "input tensor has to be non-overlapping and dense");
   }
   if (tensor.is_sparse()) {
     TORCH_CHECK(false, "input tensor has to be dense");

@@ -1435,14 +1435,22 @@ class DistributedTest:
                         for dst in range(0, world_size):
                             if dst == rank:
                                 continue
-                            dist.send(tensor, dst)
+                            contiguous = (src + dst) % 2 == 0
+                            if contiguous:
+                                dist.send(tensor, dst)
+                            else:
+                                dist.send(tensor.transpose(0, 1), dst)
                     else:
                         # Recv mode
                         expected_tensor = _build_tensor(src + 1)
                         output_tensor = _build_tensor(
                             src + 1, value=-1, device_id=device_id
                         )
-                        dist.recv(output_tensor, src)
+                        contiguous = (src + rank) % 2 == 0
+                        if contiguous:
+                            dist.recv(output_tensor, src)
+                        else:
+                            dist.recv(output_tensor.transpose(0, 1), src)
                         self.assertEqual(output_tensor, expected_tensor)
 
                 self._barrier()
@@ -1505,13 +1513,21 @@ class DistributedTest:
                         for dst in range(0, dist.get_world_size()):
                             if dst == rank:
                                 continue
-                            dist.send(tensor, dst)
+                            contiguous = (src + dst) % 2 == 0
+                            if contiguous:
+                                dist.send(tensor, dst)
+                            else:
+                                dist.send(tensor.transpose(0, 1), dst)
                     else:
                         # Recv mode
                         recv_size = src + 1
                         expected_tensor = _build_tensor(recv_size)
                         output_tensor = _build_tensor(recv_size, value=-1)
-                        dist.recv(output_tensor, src)
+                        contiguous = (src + rank) % 2 == 0
+                        if contiguous:
+                            dist.recv(output_tensor, src)
+                        else:
+                            dist.recv(output_tensor.transpose(0, 1), src)
                         self.assertEqual(output_tensor, expected_tensor)
 
             if profiler_ctx is not None:
@@ -1674,12 +1690,20 @@ class DistributedTest:
                         for src in range(0, world_size):
                             if src == rank:
                                 continue
+                            contiguous = (src + dst) % 2 == 0
                             output_tensor = _build_tensor(send_recv_size, value=-1)
-                            dist.recv(output_tensor, src, tag=src)
+                            if contiguous:
+                                dist.recv(output_tensor, src, tag=src)
+                            else:
+                                dist.recv(output_tensor.transpose(0, 1), src, tag=src)
                             self.assertTrue(output_tensor.eq(src).all())
                     else:
                         # Send mode
-                        dist.send(tensor, dst, tag=rank)
+                        contiguous = (rank + dst) % 2 == 0
+                        if contiguous:
+                            dist.send(tensor, dst, tag=rank)
+                        else:
+                            dist.send(tensor.transpose(0, 1), dst, tag=rank)
 
             if profiler_ctx is not None:
                 backend = dist.get_backend()
@@ -1832,10 +1856,13 @@ class DistributedTest:
                 if requires_cuda and not cuda:
                     continue
                 for src in group:
+                    contiguous = src % 2 == 0
                     expected_tensor = _build_tensor(src + 1, value, dtype)
                     if cuda:
                         expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     if rank == src:
+                        if not contiguous:
+                            expected_tensor = expected_tensor.transpose(0, 1)
                         if with_options:
                             opts = dist.BroadcastOptions()
                             opts.rootTensor = 0
@@ -1860,6 +1887,8 @@ class DistributedTest:
                         tensor = _build_tensor(src + 1, -1, dtype)
                         if cuda:
                             tensor = tensor.cuda(rank_to_GPU[rank][0])
+                        if not contiguous:
+                            tensor = tensor.transpose(0, 1)
                         if with_options:
                             opts = dist.BroadcastOptions()
                             opts.rootTensor = 0
@@ -1948,11 +1977,14 @@ class DistributedTest:
             rank_to_GPU=None,
         ):
             for src in group:
+                contiguous = src % 2 == 0
                 tensor = _build_tensor(src + 1).fill_(
                     master_value if rank == src else worker_value
                 )
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
+                if not contiguous:
+                    tensor = tensor.transpose(0, 1)
                 self.call_dist_op(
                     ":reduce",
                     False,
@@ -2315,11 +2347,14 @@ class DistributedTest:
             async_op=False,
         ):
             for src in group:
+                contiguous = src % 2 == 0
                 curr_value = master_value if rank == src else worker_value
 
                 tensor = _build_tensor(src + 1, dtype=dtype).fill_(curr_value)
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
+                if not contiguous:
+                    tensor = tensor.transpose(0, 1)
                 if tensor.dtype == torch.complex64:
                     tensor_shapes = [torch.view_as_real(tensor).shape]
                 else:
@@ -2334,6 +2369,7 @@ class DistributedTest:
                     async_op=async_op,
                     tensor_shapes=tensor_shapes,
                 )
+                self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
                 # Currently, only Gloo backend has profiling tested with CUDA enabled.
                 # Only run cuda profiling test for one rank to speed up since
                 # running with different src_rank does not affect the correctness.
@@ -2840,6 +2876,7 @@ class DistributedTest:
             self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
         ):
             for dest in group:
+                contiguous = dest % 2 == 0
                 tensor = _build_tensor(dest + 1, -1, dtype=dtype)
                 expected_tensor = _build_tensor(dest + 1, rank, dtype=dtype)
                 tensors = (
@@ -2850,6 +2887,9 @@ class DistributedTest:
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
+                if not contiguous:
+                    tensor = tensor.transpose(0, 1)
+                    tensors = [t.transpose(0, 1) for t in tensors]
                 if dtype == torch.complex64:
                     tensor_shapes = [torch.view_as_real(t).shape for t in tensors]
                 else:
@@ -2897,7 +2937,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank)
 
-        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA gather")
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA scatter")
         @skip_if_no_gpu
         def test_scatter_cuda(self):
             group, group_id, rank = self._init_global_test()
@@ -2909,7 +2949,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank, dtype=torch.cfloat)
 
-        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA gather")
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA scatter")
         @skip_if_no_gpu
         def test_scatter_cuda_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -2930,6 +2970,7 @@ class DistributedTest:
         # GATHER
         def _test_gather_helper(self, group, group_id, rank, cuda=False, rank_to_GPU=None):
             for dest in group:
+                contiguous = dest % 2 == 0
                 tensor = _build_tensor(dest + 1, rank)
                 tensors = (
                     [_build_tensor(dest + 1, -1) for i in group] if rank == dest else []
@@ -2937,6 +2978,9 @@ class DistributedTest:
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
+                if not contiguous:
+                    tensor = tensor.transpose(0, 1)
+                    tensors = [t.transpose(0, 1) for t in tensors]
                 self.call_dist_op(
                     ":gather",
                     False,
@@ -3006,12 +3050,16 @@ class DistributedTest:
             self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
         ):
             for dest in group:
+                contiguous = dest % 2 == 0
                 tensor = _build_tensor(dest + 1, rank, dtype=dtype)
                 tensors = [_build_tensor(dest + 1, -1, dtype=dtype) for i in group]
                 allgather = dist.all_gather
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
+                if not contiguous:
+                    tensor = tensor.transpose(0, 1)
+                    tensors = [t.transpose(0, 1) for t in tensors]
                 if tensors[0].dtype == torch.complex64:
                     tensor_shapes = [torch.view_as_real(tensors[0]).shape]
                 else:
@@ -3215,7 +3263,7 @@ class DistributedTest:
 
         # AllToAll
         def _test_all_to_all_single_equal_split_helper(
-            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float, contiguous=True
         ):
             if group_id is not None:
                 size = len(group)
@@ -3228,6 +3276,9 @@ class DistributedTest:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
+                if not contiguous:
+                    in_tensor = in_tensor.transpose(0, 1)
+                    out_tensor = out_tensor.transpose(0, 1)
                 if dtype == torch.complex64:
                     tensor_shapes = [torch.view_as_real(in_tensor).shape]
                 else:
@@ -3245,7 +3296,7 @@ class DistributedTest:
             self._barrier()
 
         def _test_all_to_all_single_unequal_split_helper(
-            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float, contiguous=True
         ):
             if group_id is not None:
                 size = len(group)
@@ -3260,6 +3311,9 @@ class DistributedTest:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
+                if not contiguous:
+                    in_tensor = in_tensor.transpose(0, 1)
+                    out_tensor = out_tensor.transpose(0, 1)
                 dist.all_to_all_single(
                     out_tensor, in_tensor, out_splits, in_splits, group=group_id
                 )
@@ -3274,6 +3328,7 @@ class DistributedTest:
             cuda=False,
             rank_to_GPU=None,
             dtype=torch.float,
+            contiguous=True
         ):
             if group_id is not None:
                 size = len(group)
@@ -3294,6 +3349,9 @@ class DistributedTest:
                         t.cuda(rank_to_GPU[rank][0]) for t in expected_tensors
                     ]
                     out_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in out_tensors]
+                if not contiguous:
+                    in_tensors = [t.transpose(0, 1) for t in in_tensors]
+                    out_tensors = [t.transpose(0, 1) for t in out_tensors]
                 dist.all_to_all(out_tensors, in_tensors, group=group_id)
                 for t1, t2 in zip(out_tensors, expected_tensors):
                     self.assertEqual(t1, t2)
@@ -3302,7 +3360,8 @@ class DistributedTest:
         @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
         def test_all_to_all_single_equal_split(self):
             group, group_id, rank = self._init_global_test()
-            self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
+            self._test_all_to_all_single_equal_split_helper(group, group_id, rank, contiguous=True)
+            self._test_all_to_all_single_equal_split_helper(group, group_id, rank, contiguous=False)
 
         @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single")
         @skip_if_no_gpu
@@ -3315,13 +3374,25 @@ class DistributedTest:
                 rank,
                 True,
                 rank_to_GPU,
+                contiguous=True
+            )
+            self._test_all_to_all_single_equal_split_helper(
+                group,
+                group_id,
+                rank,
+                True,
+                rank_to_GPU,
+                contiguous=False
             )
 
         @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
         def test_all_to_all_single_equal_split_complex(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_to_all_single_equal_split_helper(
-                group, group_id, rank, dtype=torch.cfloat
+                group, group_id, rank, dtype=torch.cfloat, contiguous=True
+            )
+            self._test_all_to_all_single_equal_split_helper(
+                group, group_id, rank, dtype=torch.cfloat, contiguous=False
             )
 
         @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single")
@@ -3330,13 +3401,17 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             self._test_all_to_all_single_equal_split_helper(
-                group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat
+                group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat, contiguous=True
+            )
+            self._test_all_to_all_single_equal_split_helper(
+                group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat, contiguous=False
             )
 
         @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
         def test_all_to_all_single_unequal_split(self):
             group, group_id, rank = self._init_global_test()
-            self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+            self._test_all_to_all_single_unequal_split_helper(group, group_id, rank, contiguous=True)
+            self._test_all_to_all_single_unequal_split_helper(group, group_id, rank, contiguous=False)
 
         @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single")
         @skip_if_no_gpu
@@ -3349,13 +3424,25 @@ class DistributedTest:
                 rank,
                 True,
                 rank_to_GPU,
+                contiguous=True
+            )
+            self._test_all_to_all_single_unequal_split_helper(
+                group,
+                group_id,
+                rank,
+                True,
+                rank_to_GPU,
+                contiguous=False
             )
 
         @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
         def test_all_to_all_single_unequal_split_complex(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_to_all_single_unequal_split_helper(
-                group, group_id, rank, dtype=torch.cfloat
+                group, group_id, rank, dtype=torch.cfloat, contiguous=True
+            )
+            self._test_all_to_all_single_unequal_split_helper(
+                group, group_id, rank, dtype=torch.cfloat, contiguous=False
             )
 
         @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single")
@@ -3370,24 +3457,37 @@ class DistributedTest:
                 True,
                 rank_to_GPU,
                 dtype=torch.cfloat,
+                contiguous=True
+            )
+            self._test_all_to_all_single_unequal_split_helper(
+                group,
+                group_id,
+                rank,
+                True,
+                rank_to_GPU,
+                dtype=torch.cfloat,
+                contiguous=False
             )
 
         @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports all_to_all")
         def test_all_to_all(self):
             group, group_id, rank = self._init_global_test()
-            self._test_all_to_all_helper(group, group_id, rank)
+            self._test_all_to_all_helper(group, group_id, rank, contiguous=True)
+            self._test_all_to_all_helper(group, group_id, rank, contiguous=False)
 
         @sandcastle_skip_if(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
         @skip_if_rocm
         def test_all_to_all_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            self._test_all_to_all_helper(group, group_id, rank, True, rank_to_GPU)
+            self._test_all_to_all_helper(group, group_id, rank, True, rank_to_GPU, contiguous=True)
+            self._test_all_to_all_helper(group, group_id, rank, True, rank_to_GPU, contiguous=False)
 
         @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports all_to_all")
         def test_all_to_all_complex(self):
             group, group_id, rank = self._init_global_test()
-            self._test_all_to_all_helper(group, group_id, rank, dtype=torch.cfloat)
+            self._test_all_to_all_helper(group, group_id, rank, dtype=torch.cfloat, contiguous=True)
+            self._test_all_to_all_helper(group, group_id, rank, dtype=torch.cfloat, contiguous=False)
 
         @sandcastle_skip_if(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
         @skip_if_rocm
@@ -3395,7 +3495,10 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             self._test_all_to_all_helper(
-                group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat
+                group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat, contiguous=True
+            )
+            self._test_all_to_all_helper(
+                group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat, contiguous=False
             )
 
         @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")

@@ -63,8 +63,8 @@ bool cudaAwareMpiCheck() {
 
 // Checking the input tensor's validity
 void checkSingleTensorHelper(const at::Tensor& tensor) {
-  if (!tensor.is_contiguous()) {
-    TORCH_CHECK(false, "input tensor has to be contiguous");
+  if (!tensor.is_non_overlapping_and_dense()) {
+    TORCH_CHECK(false, "input tensor has to be non-overlapping and dense");
   }
   if (tensor.is_sparse()) {
     TORCH_CHECK(false, "input tensor has to be dense");
