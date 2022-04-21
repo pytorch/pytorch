@@ -23,7 +23,12 @@ F = TypeVar(
     Union[NativeFunction, NativeFunctionsViewGroup],
 )
 
-F2 = TypeVar("F2", NativeFunction, Optional[NativeFunction], bool,)
+F2 = TypeVar(
+    "F2",
+    NativeFunction,
+    Optional[NativeFunction],
+    bool,
+)
 
 
 @contextlib.contextmanager

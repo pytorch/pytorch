@@ -117,7 +117,8 @@ class SelectiveBuildOperator:
 
 
 def merge_debug_info(
-    lhs: Optional[Tuple[str, ...]], rhs: Optional[Tuple[str, ...]],
+    lhs: Optional[Tuple[str, ...]],
+    rhs: Optional[Tuple[str, ...]],
 ) -> Optional[Tuple[str, ...]]:
     # Ensure that when merging, each entry shows up just once.
     if lhs is None and rhs is None:
@@ -132,7 +133,8 @@ def combine_operators(
     if str(lhs.name) != str(rhs.name):
         raise Exception(
             "Expected both arguments to have the same name, but got '{}' and '{}' instead".format(
-                str(lhs.name), str(rhs.name),
+                str(lhs.name),
+                str(rhs.name),
             )
         )
 
@@ -152,7 +154,8 @@ def combine_operators(
 
 
 def merge_operator_dicts(
-    lhs: Dict[str, SelectiveBuildOperator], rhs: Dict[str, SelectiveBuildOperator],
+    lhs: Dict[str, SelectiveBuildOperator],
+    rhs: Dict[str, SelectiveBuildOperator],
 ) -> Dict[str, SelectiveBuildOperator]:
     operators: Dict[str, SelectiveBuildOperator] = {}
     for (op_name, op) in list(lhs.items()) + list(rhs.items()):

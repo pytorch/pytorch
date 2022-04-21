@@ -926,6 +926,15 @@ class TestViewOps(TestCase):
         self.assertEqual(a_view_copy, a_view)
         self.assertEqual(a.grad, a_ref.grad)
 
+    def test_view_copy_out(self, device):
+        a = torch.randn(2, 2, device=device)
+        out = torch.empty(2, device=device)
+
+        torch.diagonal_copy(a, out=out)
+        expected = torch.diagonal_copy(a)
+
+        self.assertEqual(expected, out)
+
 class TestOldViewOps(TestCase):
     def test_ravel(self, device):
 

@@ -144,7 +144,10 @@ class SelectiveBuilder:
                 "include_all_overloads": True,
             }
         return SelectiveBuilder.from_yaml_dict(
-            {"operators": operators, "include_all_non_op_selectives": True,}
+            {
+                "operators": operators,
+                "include_all_non_op_selectives": True,
+            }
         )
 
     def is_operator_selected(self, name: str) -> bool:
@@ -239,7 +242,8 @@ class SelectiveBuilder:
 
 
 def merge_kernel_metadata(
-    lhs: Dict[str, List[str]], rhs: Dict[str, List[str]],
+    lhs: Dict[str, List[str]],
+    rhs: Dict[str, List[str]],
 ) -> Dict[str, List[str]]:
     kernel_metadata: Dict[str, List[str]] = {}
     for (tag_name, dtypes) in list(lhs.items()) + list(rhs.items()):
