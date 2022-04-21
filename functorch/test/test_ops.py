@@ -164,9 +164,6 @@ def ref_jvp(f, primals, tangents):
 def get_sample_cotangents(f, sample):
     fn, primals = normalize_op_input_output(f, sample)
     output = fn(*primals)
-    if isinstance(output, tuple):
-        # TODO: Remove the following hack for torch.return_types
-        output = tuple(output)
     return tree_map(torch.randn_like, output)
 
 
