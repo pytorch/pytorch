@@ -193,7 +193,7 @@ make_fx_failures = {
     xfail('allclose'),
     xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
-    xfail('nn.functional.fractional_max_pool3d', device_type='cpu'),
+    xfail('nn.functional.max_pool1d', device_type='cpu'),  # precision problems?
     xfail('randn_like'),  # randomness
     xfail('rand_like'),  # randomness
     xfail('randint_like'),  # randomness
@@ -222,10 +222,6 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
         for sample_input in sample_inputs_itr:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            t = f(args, kwargs)
-            # just since pytrees with torch.return_types doesn't work
-            if isinstance(t, tuple):
-                self.skipTest("output is a tuple that pytree doesn't work with")
 
             new_f = make_fx(f)(args, kwargs)
             for arg in args:
