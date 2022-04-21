@@ -144,10 +144,11 @@ class PredicateAnalyzer : public OptOutDispatch {
   bool needs_predicate_ = false;
 };
 
-class PredicateChcker: public IterVisitor {
+class PredicateChcker : public IterVisitor {
  public:
-  static bool needsPredicate(Expr* expr,
-                             const std::unordered_set<const Expr*>& non_predicated_exprs) {
+  static bool needsPredicate(
+      Expr* expr,
+      const std::unordered_set<const Expr*>& non_predicated_exprs) {
     if (!ir_utils::isTvOp(expr)) {
       return false;
     }
@@ -158,15 +159,14 @@ class PredicateChcker: public IterVisitor {
   }
 
  private:
-  PredicateChcker(const std::unordered_set<const Expr*>& non_predicated_exprs):
-      non_predicated_exprs_(non_predicated_exprs) {}
+  PredicateChcker(const std::unordered_set<const Expr*>& non_predicated_exprs)
+      : non_predicated_exprs_(non_predicated_exprs) {}
 
   using IterVisitor::handle;
 
   void handle(Expr* expr) final {
     needs_predicate_ = predicateIntDiv(expr) ||
-        predicateMisalignedVectorize(expr) ||
-        predicateShift(expr) ||
+        predicateMisalignedVectorize(expr) || predicateShift(expr) ||
         predicateProducerConsumerPair(expr) ||
         predicateNonDivisibleRootDomains(expr) ||
         predicateNonDivisibleSplit(expr);
@@ -200,7 +200,7 @@ class PredicateChcker: public IterVisitor {
   // relaxed.
   bool predicateMisalignedVectorize(Expr* expr) const {
     std::vector<const std::vector<Val*>*> inputs_and_outputs = {
-      &(expr->inputs()), &(expr->outputs())};
+        &(expr->inputs()), &(expr->outputs())};
     for (const auto& inputs_or_outputs : inputs_and_outputs) {
       for (auto tv : ir_utils::filterByType<TensorView>(*inputs_or_outputs)) {
         if (std::any_of(
@@ -223,9 +223,9 @@ class PredicateChcker: public IterVisitor {
     auto input_tvs = ir_utils::filterByType<TensorView>(expr->inputs());
     return halo_info.needsShiftPredicate(expr) ||
         std::any_of(input_tvs.begin(), input_tvs.end(), [&](auto input_tv) {
-          return input_tv->definition() != nullptr &&
-              halo_info.needsShiftPredicate(input_tv->definition());
-        });
+             return input_tv->definition() != nullptr &&
+                 halo_info.needsShiftPredicate(input_tv->definition());
+           });
   }
 
   // Predicates the expression if any producer-consumer pair of the
@@ -375,13 +375,12 @@ class PredicateChcker: public IterVisitor {
     if (auto input_def_rop = dynamic_cast<ReductionOp*>(input_def)) {
       if (rop->getReductionOpType() != input_def_rop->getReductionOpType() &&
           non_predicated_exprs_.find(input_def) !=
-          non_predicated_exprs_.end()) {
+              non_predicated_exprs_.end()) {
         needs_predicate_ = true;
         return;
       }
     } else if (
-        non_predicated_exprs_.find(input_def) !=
-        non_predicated_exprs_.end()) {
+        non_predicated_exprs_.find(input_def) != non_predicated_exprs_.end()) {
       needs_predicate_ = true;
       return;
     }
@@ -430,7 +429,7 @@ class PredicateChcker: public IterVisitor {
       // the input is also produced by another welford.
       if (!input_def->isA<WelfordOp>() &&
           non_predicated_exprs_.find(input_def) !=
-          non_predicated_exprs_.end()) {
+              non_predicated_exprs_.end()) {
         needs_predicate_ = true;
       }
     }
