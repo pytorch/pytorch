@@ -196,8 +196,7 @@ class CompositeCompliantTensor(torch.Tensor):
                     'Please try to avoid this in-place operation.')
 
         with enable_reentrant_dispatch():
-            # with contextlib.nullcontext() if dispatch else no_dispatch():
-            with no_dispatch():
+            with contextlib.nullcontext() if dispatch else no_dispatch():
                 unwrapped_args = tree_map(unwrap, args)
                 unwrapped_kwargs = tree_map(unwrap, kwargs)
                 unwrapped_rs = func(*unwrapped_args, **unwrapped_kwargs)
@@ -307,31 +306,6 @@ def generate_subclass_choices_args_kwargs(args, kwargs):
         which_kwargs_are_wrapped = tree_unflatten(debug_metadata[len(args):], spec)
         yield new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped
 
-def generate_subclass_choices_with_filter(flat_args, flat_filter_args):
-    subclass_options = [[False, True] if is_wrapped else [False] for is_wrapped in flat_filter_args]
-
-    for which_args_are_wrapped in itertools.product(*subclass_options):
-        result = [maybe_map(wrap, should_wrap_arg, arg)
-                  for should_wrap_arg, arg in zip(which_args_are_wrapped, flat_args)]
-        yield result, which_args_are_wrapped
-
-# For an operation f(*args, **kwargs), each Tensor argument may either be
-# a regular Tensor or a Tensor Subclass. We decide if a Tensor could be a
-# subclass or not based on the corresponding filter value.
-def generate_subclass_choices_args_kwargs_with_filter(args, kwargs, filter_args, filter_kwargs):
-    flat_kwargs, spec = tree_flatten(kwargs)
-    flat_args_kwargs = list(args) + list(flat_kwargs)
-
-    assert len(filter_args) == len(args)
-    flat_filter_kwargs, filter_spec = tree_flatten(filter_kwargs)
-    assert spec == filter_spec
-    flat_filter_args_kwargs = list(filter_args) + list(flat_filter_kwargs)
-    for choice, debug_metadata in generate_subclass_choices_with_filter(flat_args_kwargs, flat_filter_args_kwargs):
-        new_args = choice[:len(args)]
-        new_kwargs = tree_unflatten(choice[len(args):], spec)
-        which_args_are_wrapped = debug_metadata[:len(args)]
-        which_kwargs_are_wrapped = tree_unflatten(debug_metadata[len(args):], spec)
-        yield new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped
 
 def raise_composite_compliance_error(err, additional_info=''):
     raise RuntimeError(
@@ -515,6 +489,6 @@ def check_forward_formula(op, args, kwargs):
                             err,
                             f"- wrapped_args: {which_args_are_wrapped}\n"
                             f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
-                            f"- wrapped_tangent_args: {which_tang_args_are_wrapped}"
-                            f"- wrapped_tangent_kwargs: {which_tang_kwargs_are_wrapped}"
+                            f"- wrapped_tangent_args: {which_tang_args_are_wrapped}\n"
+                            f"- wrapped_tangent_kwargs: {which_tang_kwargs_are_wrapped}\n"
                         )
