@@ -151,25 +151,22 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     // probably operate with names.
     at::NoNamesGuard no_names_guard;
 
-    bool pre_sampled = false;
-    if (at::shouldRunRecordFunction(&pre_sampled)) {
-      // Using RecordFunction to trigger observers in the backward pass
-      at::RecordFunction guard(at::RecordScope::BACKWARD_FUNCTION, pre_sampled);
-      if (guard.isActive()) {
-        // Using sequence number and thread id to correlate with
-        // the forward pass function
-        guard.setForwardThreadId(thread_id_);
-        if (guard.needsInputs()) {
-          std::vector<c10::IValue> inputs_vec(inputs.begin(), inputs.end());
-          guard.before(
-            name(),
-            c10::ArrayRef<const c10::IValue>(inputs_vec.data(), inputs_vec.size()),
-            sequence_nr());
-        } else {
-          guard.before(name(), sequence_nr());
-        }
+    auto step_callbacks = at::getStepCallbacks(at::RecordScope::BACKWARD_FUNCTION);
+    if (!step_callbacks.empty()) {
+      at::RecordFunction guard(std::move(step_callbacks));
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+      // Using sequence number and thread id to correlate with
+      // the forward pass function
+      guard.setForwardThreadId(thread_id_);
+      if (guard.needsInputs()) {
+        std::vector<c10::IValue> inputs_vec(inputs.begin(), inputs.end());
+        guard.before(
+          name(),
+          c10::ArrayRef<const c10::IValue>(inputs_vec.data(), inputs_vec.size()),
+          sequence_nr());
+      } else {
+        guard.before(name(), sequence_nr());
       }
-      // keeping stack guard object alive during the call
       return apply(std::move(inputs));
     } else {
       return apply(std::move(inputs));
