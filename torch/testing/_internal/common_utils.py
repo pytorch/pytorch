@@ -70,6 +70,7 @@ import functools
 from .composite_compliance import no_dispatch
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.nn import ModuleList, ModuleDict, Sequential, ParameterList, ParameterDict
+import torch.nn.utils._expanded_weights.expanded_weights_impl
 from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
 from torch.utils._pytree import tree_map
 
@@ -809,792 +810,533 @@ def skipIfCrossRef(fn):
     return wrapper
 
 meta_exclude_set = {
-    # These happen so frequently, it's worth not continually running
-    # them
-    torch.Tensor.__bool__,
-    torch.Tensor.__deepcopy__,
-    torch.Tensor.__format__,
-    torch.Tensor.__getitem__,
-    torch.Tensor.__repr__,
-    torch.Tensor.__rsub__,
-    torch.Tensor.__setitem__,
-    torch.Tensor.add,
-    torch.Tensor.add_,
-    torch.Tensor.clone,
-    torch.Tensor.copy_,
-    torch.Tensor.cpu,
-    torch.Tensor.detach,
-    torch.Tensor.div,
-    torch.Tensor.gt,
-    torch.Tensor.is_complex,
-    torch.Tensor.is_floating_point,
-    torch.Tensor.item,
-    torch.Tensor.lt,
-    torch.Tensor.mul,
-    torch.Tensor.numel,
-    torch.Tensor.numpy,
-    torch.Tensor.requires_grad_,
-    torch.Tensor.reshape,
-    torch.Tensor.size,
-    torch.Tensor.sub,
-    torch.Tensor.sum,
-    torch.Tensor.to,
-    torch.Tensor.tolist,
-    torch.Tensor.unbind,
-    torch.rand,
-    # These need to get implemented and are excluded for now
-    torch.Tensor.__complex__,
-    torch.Tensor.__contains__,
-    torch.Tensor.__float__,
-    torch.Tensor.__getitem__,
-    torch.Tensor.__index__,
-    torch.Tensor.__lshift__,
-    torch.Tensor.__reversed__,
-    torch.Tensor.__rmatmul__,
-    torch.Tensor.__rmod__,
-    torch.Tensor.__rpow__,
-    torch.Tensor.__rshift__,
-    torch.Tensor.__rtruediv__,
-    torch.Tensor.abs,
-    torch.Tensor.abs_,
-    torch.Tensor.absolute,
-    torch.Tensor.absolute_,
-    torch.Tensor.acos_,
-    torch.Tensor.acosh_,
-    torch.Tensor.addbmm,
-    torch.Tensor.addbmm_,
-    torch.Tensor.addcdiv_,
-    torch.Tensor.addcmul,
-    torch.Tensor.addcmul_,
-    torch.Tensor.addmm_,
-    torch.Tensor.addmv_,
-    torch.Tensor.addr_,
-    torch.Tensor.allclose,
-    torch.Tensor.angle,
-    torch.Tensor.argsort,
-    torch.Tensor.argwhere,
-    torch.Tensor.asin_,
-    torch.Tensor.asinh_,
-    torch.Tensor.atan2_,
-    torch.Tensor.atan_,
-    torch.Tensor.atanh_,
-    torch.Tensor.backward,
-    torch.Tensor.baddbmm_,
-    torch.Tensor.bfloat16,
-    torch.Tensor.bincount,
-    torch.Tensor.bitwise_left_shift_,
-    torch.Tensor.bitwise_right_shift_,
-    torch.Tensor.bool,
-    torch.Tensor.byte,
-    torch.Tensor.ceil_,
-    torch.Tensor.char,
-    torch.Tensor.cholesky,
-    torch.Tensor.cholesky_inverse,
-    torch.Tensor.cholesky_solve,
-    torch.Tensor.clamp,
-    torch.Tensor.clamp_,
-    torch.Tensor.clamp_max,
-    torch.Tensor.clamp_max_,
-    torch.Tensor.clamp_min,
-    torch.Tensor.clamp_min_,
-    torch.Tensor.clip,
-    torch.Tensor.clip_,
-    torch.Tensor.conj_physical,
-    torch.Tensor.copysign_,
-    torch.Tensor.corrcoef,
-    torch.Tensor.cos_,
-    torch.Tensor.cosh_,
-    torch.Tensor.count_nonzero,
-    torch.Tensor.cov,
-    torch.Tensor.cummax,
-    torch.Tensor.cummin,
-    torch.Tensor.cumprod_,
-    torch.Tensor.cumsum_,
-    torch.Tensor.deg2rad_,
-    torch.Tensor.det,
-    torch.Tensor.diag,
-    torch.Tensor.diagflat,
-    torch.Tensor.digamma_,
-    torch.Tensor.div_,
-    torch.Tensor.dot,
-    torch.Tensor.double,
-    torch.Tensor.eig,
-    torch.Tensor.equal,
-    torch.Tensor.erf_,
-    torch.Tensor.erfc_,
-    torch.Tensor.erfinv_,
-    torch.Tensor.exp2_,
-    torch.Tensor.exp_,
-    torch.Tensor.expm1_,
-    torch.Tensor.fill_,
-    torch.Tensor.flip,
-    torch.Tensor.fliplr,
-    torch.Tensor.flipud,
-    torch.Tensor.float,
-    torch.Tensor.float_power_,
-    torch.Tensor.floor_,
-    torch.Tensor.floor_divide,
-    torch.Tensor.floor_divide_,
-    torch.Tensor.fmod_,
-    torch.Tensor.frac_,
-    torch.Tensor.frexp,
-    torch.Tensor.geqrf,
-    torch.Tensor.half,
-    torch.Tensor.heaviside_,
-    torch.Tensor.histc,
-    torch.Tensor.histogram,
-    torch.Tensor.hypot_,
-    torch.Tensor.i0_,
-    torch.Tensor.igamma_,
-    torch.Tensor.igammac_,
-    torch.Tensor.imag.__get__,
-    torch.Tensor.index_copy_,
-    torch.Tensor.index_fill_,
-    torch.Tensor.index_put_,
-    torch.Tensor.index_select,
-    torch.Tensor.int,
-    torch.Tensor.inverse,
-    torch.Tensor.is_nonzero,
-    torch.Tensor.is_set_to,
-    torch.Tensor.isclose,
-    torch.Tensor.isfinite,
-    torch.Tensor.isinf,
-    torch.Tensor.isnan,
-    torch.Tensor.isreal,
-    torch.Tensor.istft,
-    torch.Tensor.kthvalue,
-    torch.Tensor.lerp_,
-    torch.Tensor.lgamma_,
-    torch.Tensor.log10_,
-    torch.Tensor.log1p_,
-    torch.Tensor.log2_,
-    torch.Tensor.log_,
-    torch.Tensor.logcumsumexp,
-    torch.Tensor.logdet,
-    torch.Tensor.logical_and,
-    torch.Tensor.logical_and_,
-    torch.Tensor.logical_not,
-    torch.Tensor.logical_or,
-    torch.Tensor.logical_or_,
-    torch.Tensor.logical_xor,
-    torch.Tensor.logical_xor_,
-    torch.Tensor.logit,
-    torch.Tensor.logit_,
-    torch.Tensor.logsumexp,
-    torch.Tensor.long,
-    torch.Tensor.lu_solve,
-    torch.Tensor.masked_fill_,
-    torch.Tensor.masked_scatter_,
-    torch.Tensor.masked_select,
-    torch.Tensor.matmul,
-    torch.Tensor.matrix_exp,
-    torch.Tensor.matrix_power,
-    torch.Tensor.max,
-    torch.Tensor.median,
-    torch.Tensor.min,
-    torch.Tensor.mm,  # sparse
-    torch.Tensor.mode,
-    torch.Tensor.msort,
-    torch.Tensor.mul_,
-    torch.Tensor.multinomial,
-    torch.Tensor.mvlgamma,
-    torch.Tensor.mvlgamma_,
-    torch.Tensor.nan_to_num,
-    torch.Tensor.nan_to_num_,
-    torch.Tensor.nanmean,
-    torch.Tensor.nanmedian,
-    torch.Tensor.nanquantile,
-    torch.Tensor.nansum,
-    torch.Tensor.narrow,
-    torch.Tensor.neg_,
-    torch.Tensor.new_full,
-    torch.Tensor.new_ones,
-    torch.Tensor.new_zeros,
-    torch.Tensor.nextafter_,
-    torch.Tensor.nonzero,
-    torch.Tensor.norm,
-    torch.Tensor.normal_,
-    torch.Tensor.orgqr,
-    torch.Tensor.ormqr,
-    torch.Tensor.pinverse,
-    torch.Tensor.polygamma_,
-    torch.Tensor.pow_,
-    torch.Tensor.prod,
-    torch.Tensor.put_,
-    torch.Tensor.qr,
-    torch.Tensor.quantile,
-    torch.Tensor.rad2deg_,
-    torch.Tensor.real.__get__,
-    torch.Tensor.reciprocal_,
-    torch.Tensor.relu,
-    torch.Tensor.remainder_,
-    torch.Tensor.renorm_,
-    torch.Tensor.repeat,
-    torch.Tensor.repeat_interleave,
-    torch.Tensor.resize_as_,
-    torch.Tensor.roll,
-    torch.Tensor.rot90,
-    torch.Tensor.round_,
-    torch.Tensor.rsqrt_,
-    torch.Tensor.scatter_,
-    torch.Tensor.scatter_add_,
-    torch.Tensor.scatter_reduce_,
-    torch.Tensor.share_memory_,
-    torch.Tensor.short,
-    torch.Tensor.sigmoid_,
-    torch.Tensor.sign_,
-    torch.Tensor.sin_,
-    torch.Tensor.sinc_,
-    torch.Tensor.sinh_,
-    torch.Tensor.slogdet,
-    torch.Tensor.solve,
-    torch.Tensor.sort,
-    torch.Tensor.sparse_mask,
-    torch.Tensor.sqrt_,
-    torch.Tensor.square_,
-    torch.Tensor.squeeze_,
-    torch.Tensor.std,
-    torch.Tensor.stft,
-    torch.Tensor.sub_,
-    torch.Tensor.sum_to_size,
-    torch.Tensor.symeig,
-    torch.Tensor.take,
-    torch.Tensor.tan_,
-    torch.Tensor.tanh_,
-    torch.Tensor.to_mkldnn,
-    torch.Tensor.to_sparse,
-    torch.Tensor.to_sparse_csr,
-    torch.Tensor.topk,
-    torch.Tensor.trace,
-    torch.Tensor.tril_,
-    torch.Tensor.triu_,
-    torch.Tensor.true_divide_,
-    torch.Tensor.trunc_,
-    torch.Tensor.unfold,
-    torch.Tensor.unique,
-    torch.Tensor.unique_consecutive,
-    torch.Tensor.unsqueeze,
-    torch.Tensor.var,
-    torch.Tensor.vdot,
-    torch.Tensor.where,
-    torch.Tensor.xlogy_,
-    torch.Tensor.zero_,
-    torch._VF.unique_dim,
-    torch._add_relu,
-    torch._aminmax,
-    torch._assert_async,
-    torch._compute_linear_combination,
-    torch._dirichlet_grad,
-    torch._foreach_abs,
-    torch._foreach_acos,
-    torch._foreach_add,
-    torch._foreach_add_,
-    torch._foreach_addcdiv,
-    torch._foreach_addcdiv_,
-    torch._foreach_addcmul,
-    torch._foreach_addcmul_,
-    torch._foreach_asin,
-    torch._foreach_atan,
-    torch._foreach_ceil,
-    torch._foreach_cos,
-    torch._foreach_cosh,
-    torch._foreach_div,
-    torch._foreach_div_,
-    torch._foreach_erf,
-    torch._foreach_erfc,
-    torch._foreach_exp,
-    torch._foreach_expm1,
-    torch._foreach_floor,
-    torch._foreach_frac,
-    torch._foreach_log,
-    torch._foreach_log10,
-    torch._foreach_log1p,
-    torch._foreach_log2,
-    torch._foreach_maximum,
-    torch._foreach_minimum,
-    torch._foreach_mul,
-    torch._foreach_mul_,
-    torch._foreach_neg,
-    torch._foreach_neg_,
-    torch._foreach_norm,
-    torch._foreach_reciprocal,
-    torch._foreach_round,
-    torch._foreach_sigmoid,
-    torch._foreach_sin,
-    torch._foreach_sinh,
-    torch._foreach_sqrt,
-    torch._foreach_sqrt_,
-    torch._foreach_sub,
-    torch._foreach_sub_,
-    torch._foreach_tan,
-    torch._foreach_tanh,
-    torch._foreach_trunc,
-    torch._foreach_zero_,
-    torch._make_per_tensor_quantized_tensor,
-    torch._masked_softmax,
-    torch._sample_dirichlet,
-    torch._sparse_coo_tensor_unsafe,
-    torch._sparse_csr_tensor_unsafe,
-    torch._standard_gamma,
-    torch._unique,
-    torch._unique2,
-    torch.abs,
-    torch.absolute,
-    torch.acos,
-    torch.acosh,
-    torch.add,
-    torch.addbmm,
-    torch.addcdiv,
-    torch.addcmul,
-    torch.addmm,
-    torch.addmv,
-    torch.addr,
-    torch.all,
-    torch.allclose,
-    torch.amax,
-    torch.amin,
-    torch.aminmax,
-    torch.angle,
-    torch.any,
-    torch.argmax,
-    torch.argmin,
-    torch.argsort,
-    torch.argwhere,
-    torch.as_tensor,
-    torch.asin,
-    torch.asinh,
-    torch.atan,
-    torch.atan2,
-    torch.atanh,
-    torch.baddbmm,
-    torch.batch_norm,
-    torch.bernoulli,
-    torch.binary_cross_entropy_with_logits,
-    torch.bincount,
-    torch.binomial,
-    torch.bitwise_left_shift,
-    torch.bitwise_right_shift,
-    torch.bmm,
-    torch.bucketize,
-    torch.cat,
-    torch.ceil,
-    torch.cholesky,
-    torch.cholesky_inverse,
-    torch.cholesky_solve,
-    torch.clamp,
-    torch.clip,
-    torch.column_stack,
-    torch.combinations,
-    torch.complex,
-    torch.conj_physical,
-    torch.copysign,
-    torch.corrcoef,
-    torch.cos,
-    torch.cosh,
-    torch.count_nonzero,
-    torch.cov,
-    torch.cross,
-    torch.cummax,
-    torch.cummin,
-    torch.cumprod,
-    torch.cumsum,
-    torch.cumulative_trapezoid,
-    torch.deg2rad,
-    torch.det,
-    torch.diag,
-    torch.diag_embed,
-    torch.diagflat,
-    torch.diagonal_scatter,
-    torch.diff,
-    torch.digamma,
-    torch.dist,
-    torch.div,
-    torch.divide,
-    torch.dot,
-    torch.dstack,
-    torch.eig,
-    torch.eq,
-    torch.equal,
-    torch.erf,
-    torch.erfc,
-    torch.erfinv,
-    torch.exp,
-    torch.exp2,
-    torch.expm1,
-    torch.eye,
-    torch.fft.fft,
-    torch.fft.fft2,
-    torch.fft.fftn,
-    torch.fft.fftshift,
-    torch.fft.hfft,
-    torch.fft.hfft2,
-    torch.fft.hfftn,
-    torch.fft.ifft,
-    torch.fft.ifft2,
-    torch.fft.ifftn,
-    torch.fft.ifftshift,
-    torch.fft.ihfft,
-    torch.fft.ihfft2,
-    torch.fft.ihfftn,
-    torch.fft.irfft,
-    torch.fft.irfft2,
-    torch.fft.irfftn,
-    torch.fft.rfft,
-    torch.fft.rfft2,
-    torch.fft.rfftn,
-    torch.fill_,
-    torch.flip,
-    torch.fliplr,
-    torch.flipud,
-    torch.float_power,
-    torch.floor,
-    torch.floor_divide,
-    torch.fmax,
-    torch.fmin,
-    torch.fmod,
-    torch.frac,
-    torch.frexp,
-    torch.full,
-    torch.functional.cartesian_prod,
-    torch.functional.cdist,
-    torch.functional.einsum,
-    torch.functional.istft,
-    torch.functional.lu,
-    torch.functional.norm,
-    torch.functional.pca_lowrank,
-    torch.functional.stft,
-    torch.functional.svd_lowrank,
-    torch.functional.tensordot,
-    torch.functional.unique,
-    torch.functional.unique_consecutive,
-    torch.fused_moving_avg_obs_fake_quant,
-    torch.gather,
-    torch.ge,
-    torch.geqrf,
-    torch.gradient,
-    torch.group_norm,
-    torch.gt,
-    torch.heaviside,
-    torch.histc,
-    torch.histogram,
-    torch.histogramdd,
-    torch.hstack,
-    torch.hypot,
-    torch.i0,
-    torch.igamma,
-    torch.igammac,
-    torch.imag,
-    torch.index_copy,
-    torch.index_fill,
-    torch.index_put,
-    torch.index_select,
-    torch.inner,
-    torch.instance_norm,
-    torch.inverse,
-    torch.isfinite,
-    torch.isin,
-    torch.isinf,
-    torch.isnan,
-    torch.isneginf,
-    torch.isposinf,
-    torch.isreal,
-    torch.kron,
-    torch.kthvalue,
-    torch.layer_norm,
-    torch.ldexp,
-    torch.le,
-    torch.lerp,
-    torch.lgamma,
-    torch.linalg.cholesky,
-    torch.linalg.cholesky_ex,
-    torch.linalg.cond,
-    torch.linalg.cross,
-    torch.linalg.det,
-    torch.linalg.eig,
-    torch.linalg.eigh,
-    torch.linalg.eigvals,
-    torch.linalg.eigvalsh,
-    torch.linalg.householder_product,
-    torch.linalg.inv,
-    torch.linalg.inv_ex,
-    torch.linalg.lstsq,
-    torch.linalg.lu_factor,
-    torch.linalg.lu_factor_ex,
-    torch.linalg.matmul,
-    torch.linalg.matrix_exp,
-    torch.linalg.matrix_norm,
-    torch.linalg.matrix_power,
-    torch.linalg.matrix_rank,
-    torch.linalg.multi_dot,
-    torch.linalg.norm,
-    torch.linalg.pinv,
-    torch.linalg.qr,
-    torch.linalg.slogdet,
-    torch.linalg.solve,
-    torch.linalg.solve_triangular,
-    torch.linalg.svd,
-    torch.linalg.svdvals,
-    torch.linalg.tensorinv,
-    torch.linalg.tensorsolve,
-    torch.linalg.vector_norm,
-    torch.log,
-    torch.log10,
-    torch.log1p,
-    torch.log2,
-    torch.log_softmax,
-    torch.logaddexp,
-    torch.logaddexp2,
-    torch.logcumsumexp,
-    torch.logdet,
-    torch.logical_and,
-    torch.logical_not,
-    torch.logical_or,
-    torch.logical_xor,
-    torch.logit,
-    torch.logsumexp,
-    torch.lstsq,
-    torch.lt,
-    torch.lu_solve,
-    torch.lu_unpack,
-    torch.masked_fill,
-    torch.masked_scatter,
-    torch.masked_select,
-    torch.matmul,
-    torch.matrix_exp,
-    torch.matrix_power,
-    torch.matrix_rank,
-    torch.max,
-    torch.maximum,
-    torch.mean,
-    torch.median,
-    torch.min,
-    torch.minimum,
-    torch.mode,
-    torch.msort,
-    torch.mul,
-    torch.multinomial,
-    torch.mv,
-    torch.mvlgamma,
-    torch.nan_to_num,
-    torch.nanmean,
-    torch.nanmedian,
-    torch.nanquantile,
-    torch.nansum,
-    torch.ne,
-    torch.neg,
-    torch.nextafter,
-    torch.nn.functional.adaptive_avg_pool1d,
-    torch.nn.functional.adaptive_avg_pool2d,
-    torch.nn.functional.adaptive_avg_pool3d,
-    torch.nn.functional.adaptive_max_pool1d,
-    torch.nn.functional.adaptive_max_pool1d_with_indices,
-    torch.nn.functional.adaptive_max_pool2d,
-    torch.nn.functional.adaptive_max_pool2d_with_indices,
-    torch.nn.functional.adaptive_max_pool3d,
-    torch.nn.functional.adaptive_max_pool3d_with_indices,
-    torch.nn.functional.avg_pool1d,
-    torch.nn.functional.avg_pool2d,
-    torch.nn.functional.avg_pool3d,
-    torch.nn.functional.batch_norm,
-    torch.nn.functional.bilinear,
-    torch.nn.functional.binary_cross_entropy,
-    torch.nn.functional.binary_cross_entropy_with_logits,
-    torch.nn.functional.celu,
-    torch.nn.functional.channel_shuffle,
+    # START BLACKLIST
+    torch.Tensor.__lshift__,  # MISSING aten::__lshift__.Scalar
+    torch.Tensor.__lshift__,  # MISSING aten::__lshift__.Tensor
+    torch.Tensor.__reversed__,  # MISSING aten::flip
+    torch.Tensor.__rmatmul__,  # MISSING aten::dot
+    torch.Tensor.__rshift__,  # MISSING aten::__rshift__.Scalar
+    torch.Tensor.__rshift__,  # MISSING aten::__rshift__.Tensor
+    torch.Tensor.abs,  # MISSING aten::abs.out
+    torch.Tensor.abs_,  # MISSING aten::abs.out
+    torch.Tensor.absolute,  # MISSING aten::abs.out
+    torch.Tensor.absolute_,  # MISSING aten::abs.out
+    torch.Tensor.addbmm,  # MISSING aten::addbmm
+    torch.Tensor.addcmul,  # MISSING aten::_local_scalar_dense
+    torch.Tensor.angle,  # MISSING aten::angle
+    torch.Tensor.argsort,  # MISSING aten::sort
+    torch.Tensor.bincount,  # MISSING aten::bincount
+    torch.Tensor.cholesky,  # MISSING aten::cholesky
+    torch.Tensor.cholesky_inverse,  # MISSING aten::cholesky_inverse
+    torch.Tensor.cholesky_solve,  # MISSING aten::_cholesky_solve_helper
+    torch.Tensor.clamp,  # MISSING aten::clamp.Tensor
+    torch.Tensor.clamp_,  # MISSING aten::clamp.Tensor_out
+    torch.Tensor.clamp_max,  # MISSING aten::clamp_max.out
+    torch.Tensor.clamp_min,  # MISSING aten::clamp_min.out
+    torch.Tensor.clamp_min_,  # MISSING aten::clamp_min.out
+    torch.Tensor.clip,  # MISSING aten::clamp.Tensor
+    torch.Tensor.clip_,  # MISSING aten::clamp.Tensor_out
+    torch.Tensor.conj_physical,  # MISSING aten::conj_physical.out
+    torch.Tensor.corrcoef,  # MISSING aten::_local_scalar_dense
+    torch.Tensor.count_nonzero,  # MISSING aten::count_nonzero.dim_IntList
+    torch.Tensor.cov,  # MISSING aten::_local_scalar_dense
+    torch.Tensor.cummax,  # MISSING aten::_cummax_helper
+    torch.Tensor.cummin,  # MISSING aten::_cummin_helper
+    torch.Tensor.cumprod_,  # MISSING aten::logical_and.out
+    torch.Tensor.dequantize,  # MISSING aten::dequantize.self
+    torch.Tensor.det,  # MISSING aten::_det_lu_based_helper
+    torch.Tensor.diag,  # MISSING aten::diag.out
+    torch.Tensor.diagflat,  # MISSING aten::diag.out
+    torch.Tensor.dot,  # MISSING aten::dot
+    torch.Tensor.eig,  # MISSING aten::abs.out
+    torch.Tensor.equal,  # MISSING aten::equal
+    torch.Tensor.flip,  # MISSING aten::flip
+    torch.Tensor.fliplr,  # MISSING aten::flip
+    torch.Tensor.flipud,  # MISSING aten::flip
+    torch.Tensor.floor_divide,  # MISSING aten::floor_divide
+    torch.Tensor.frexp,  # MISSING aten::frexp.Tensor_out
+    torch.Tensor.geqrf,  # MISSING aten::geqrf
+    torch.Tensor.histc,  # MISSING aten::histc
+    torch.Tensor.histogram,  # MISSING aten::histogram.bin_ct
+    torch.Tensor.index_select,  # MISSING aten::index_select
+    torch.Tensor.inverse,  # MISSING aten::_local_scalar_dense
+    torch.Tensor.is_set_to,  # MISSING aten::is_set_to
+    torch.Tensor.isclose,  # MISSING aten::abs.out
+    torch.Tensor.isfinite,  # MISSING aten::abs.out
+    torch.Tensor.isinf,  # MISSING aten::abs.out
+    torch.Tensor.isnan,  # MISSING aten::isnan
+    torch.Tensor.istft,  # MISSING aten::view_as_complex
+    torch.Tensor.kthvalue,  # MISSING aten::kthvalue.values
+    torch.Tensor.logcumsumexp,  # MISSING aten::_logcumsumexp
+    torch.Tensor.logdet,  # MISSING aten::abs.out
+    torch.Tensor.logical_and,  # MISSING aten::logical_and.out
+    torch.Tensor.logical_and_,  # MISSING aten::logical_and.out
+    torch.Tensor.logical_not,  # MISSING aten::logical_not.out
+    torch.Tensor.logical_or,  # MISSING aten::logical_or.out
+    torch.Tensor.logical_or_,  # MISSING aten::logical_or.out
+    torch.Tensor.logical_xor,  # MISSING aten::logical_xor.out
+    torch.Tensor.logical_xor_,  # MISSING aten::logical_xor.out
+    torch.Tensor.logit,  # MISSING aten::logit
+    torch.Tensor.logsumexp,  # MISSING aten::abs.out
+    torch.Tensor.lstsq,  # MISSING aten::lstsq
+    torch.Tensor.lu_solve,  # MISSING aten::lu_solve
+    torch.Tensor.masked_select,  # MISSING aten::masked_select
+    torch.Tensor.matmul,  # MISSING aten::dot
+    torch.Tensor.matrix_exp,  # MISSING aten::linalg_matrix_exp
+    torch.Tensor.matrix_power,  # MISSING aten::eye.m_out
+    torch.Tensor.max,  # MISSING aten::max
+    torch.Tensor.median,  # MISSING aten::median
+    torch.Tensor.median,  # MISSING aten::median.dim_values
+    torch.Tensor.min,  # MISSING aten::min
+    torch.Tensor.mode,  # MISSING aten::mode
+    torch.Tensor.msort,  # MISSING aten::sort
+    torch.Tensor.multinomial,  # MISSING aten::multinomial
+    torch.Tensor.mvlgamma,  # MISSING aten::_local_scalar_dense
+    torch.Tensor.mvlgamma_,  # MISSING aten::_local_scalar_dense
+    torch.Tensor.nan_to_num,  # MISSING aten::nan_to_num.out
+    torch.Tensor.nan_to_num_,  # MISSING aten::nan_to_num.out
+    torch.Tensor.nanmean,  # MISSING aten::logical_not.out
+    torch.Tensor.nanmedian,  # MISSING aten::nanmedian
+    torch.Tensor.nanmedian,  # MISSING aten::nanmedian.dim_values
+    torch.Tensor.nanquantile,  # MISSING aten::sort
+    torch.Tensor.nansum,  # MISSING aten::nansum
+    torch.Tensor.narrow,  # MISSING aten::_local_scalar_dense
+    torch.Tensor.nonzero,  # MISSING aten::nonzero
+    torch.Tensor.orgqr,  # MISSING aten::linalg_householder_product
+    torch.Tensor.ormqr,  # MISSING aten::ormqr
+    torch.Tensor.pinverse,  # MISSING aten::where.self
+    torch.Tensor.prod,  # MISSING aten::prod
+    torch.Tensor.qr,  # MISSING aten::_linalg_qr_helper
+    torch.Tensor.quantile,  # MISSING aten::sort
+    torch.Tensor.relu,  # MISSING aten::relu
+    torch.Tensor.renorm_,  # MISSING aten::_local_scalar_dense
+    torch.Tensor.repeat_interleave,  # MISSING aten::repeat_interleave.Tensor
+    torch.Tensor.roll,  # MISSING aten::roll
+    torch.Tensor.rot90,  # MISSING aten::flip
+    torch.Tensor.slogdet,  # MISSING aten::linalg_slogdet
+    torch.Tensor.solve,  # MISSING aten::_solve_helper
+    torch.Tensor.sort,  # MISSING aten::sort
+    torch.Tensor.std,  # MISSING aten::std.correction
+    torch.Tensor.stft,  # MISSING aten::_fft_r2c
+    torch.Tensor.symeig,  # MISSING aten::_symeig_helper
+    torch.Tensor.take,  # MISSING aten::take
+    torch.Tensor.to_mkldnn,  # MISSING aten::to_mkldnn
+    torch.Tensor.to_sparse,  # MISSING aten::to_sparse
+    torch.Tensor.to_sparse_csr,  # MISSING aten::to_sparse_csr
+    torch.Tensor.topk,  # MISSING aten::_local_scalar_dense
+    torch.Tensor.trace,  # MISSING aten::trace
+    torch.Tensor.unique,  # MISSING aten::_unique2
+    torch.Tensor.unique_consecutive,  # MISSING aten::unique_consecutive
+    torch.Tensor.unsqueeze,  # MISSING aten::_local_scalar_dense
+    torch.Tensor.var,  # MISSING aten::var.correction
+    torch.Tensor.vdot,  # MISSING aten::vdot
+    torch.Tensor.where,  # MISSING aten::where.self
+    torch._add_relu,  # MISSING aten::_add_relu.Tensor
+    torch._aminmax,  # MISSING aten::_aminmax
+    torch._assert_async,  # MISSING aten::_assert_async
+    torch._choose_qparams_per_tensor,  # MISSING aten::min
+    torch._compute_linear_combination,  # MISSING aten::_compute_linear_combination
+    torch._det_lu_based_helper,  # MISSING aten::_det_lu_based_helper
+    torch._dirichlet_grad,  # MISSING aten::_dirichlet_grad
+    torch._fake_quantize_learnable_per_channel_affine,  # MISSING aten::_fake_quantize_learnable_per_channel_affine
+    torch._fake_quantize_learnable_per_tensor_affine,  # MISSING aten::_fake_quantize_learnable_per_tensor_affine
+    torch._fake_quantize_per_tensor_affine_cachemask_tensor_qparams,  # MISSING aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams  # noqa: E501
+    torch._foreach_abs,  # MISSING aten::_foreach_abs
+    torch._foreach_abs_,  # MISSING aten::_foreach_abs_
+    torch._foreach_acos,  # MISSING aten::_foreach_acos
+    torch._foreach_acos_,  # MISSING aten::_foreach_acos_
+    torch._foreach_add,  # MISSING aten::_foreach_add.Scalar
+    torch._foreach_add_,  # MISSING aten::_foreach_add_.Scalar
+    torch._foreach_addcdiv,  # MISSING aten::_foreach_addcdiv.Scalar
+    torch._foreach_addcdiv_,  # MISSING aten::_foreach_addcdiv_.Scalar
+    torch._foreach_addcmul,  # MISSING aten::_foreach_addcmul.Scalar
+    torch._foreach_addcmul_,  # MISSING aten::_foreach_addcmul_.Scalar
+    torch._foreach_asin,  # MISSING aten::_foreach_asin
+    torch._foreach_asin_,  # MISSING aten::_foreach_asin_
+    torch._foreach_atan,  # MISSING aten::_foreach_atan
+    torch._foreach_atan_,  # MISSING aten::_foreach_atan_
+    torch._foreach_ceil,  # MISSING aten::_foreach_ceil
+    torch._foreach_ceil_,  # MISSING aten::_foreach_ceil_
+    torch._foreach_cos,  # MISSING aten::_foreach_cos
+    torch._foreach_cos_,  # MISSING aten::_foreach_cos_
+    torch._foreach_cosh,  # MISSING aten::_foreach_cosh
+    torch._foreach_cosh_,  # MISSING aten::_foreach_cosh_
+    torch._foreach_div,  # MISSING aten::_foreach_div.Scalar
+    torch._foreach_div_,  # MISSING aten::_foreach_div_.ScalarList
+    torch._foreach_erf,  # MISSING aten::_foreach_erf
+    torch._foreach_erf_,  # MISSING aten::_foreach_erf_
+    torch._foreach_erfc,  # MISSING aten::_foreach_erfc
+    torch._foreach_erfc_,  # MISSING aten::_foreach_erfc_
+    torch._foreach_exp,  # MISSING aten::_foreach_exp
+    torch._foreach_exp_,  # MISSING aten::_foreach_exp_
+    torch._foreach_expm1,  # MISSING aten::_foreach_expm1
+    torch._foreach_expm1_,  # MISSING aten::_foreach_expm1_
+    torch._foreach_floor,  # MISSING aten::_foreach_floor
+    torch._foreach_floor_,  # MISSING aten::_foreach_floor_
+    torch._foreach_frac,  # MISSING aten::_foreach_frac
+    torch._foreach_frac_,  # MISSING aten::_foreach_frac_
+    torch._foreach_log,  # MISSING aten::_foreach_log
+    torch._foreach_log10,  # MISSING aten::_foreach_log10
+    torch._foreach_log10_,  # MISSING aten::_foreach_log10_
+    torch._foreach_log1p,  # MISSING aten::_foreach_log1p
+    torch._foreach_log1p_,  # MISSING aten::_foreach_log1p_
+    torch._foreach_log2,  # MISSING aten::_foreach_log2
+    torch._foreach_log2_,  # MISSING aten::_foreach_log2_
+    torch._foreach_log_,  # MISSING aten::_foreach_log_
+    torch._foreach_maximum,  # MISSING aten::_foreach_maximum.List
+    torch._foreach_minimum,  # MISSING aten::_foreach_minimum.List
+    torch._foreach_mul,  # MISSING aten::_foreach_mul.Scalar
+    torch._foreach_mul_,  # MISSING aten::_foreach_mul_.ScalarList
+    torch._foreach_neg,  # MISSING aten::_foreach_neg
+    torch._foreach_neg_,  # MISSING aten::_foreach_neg_
+    torch._foreach_norm,  # MISSING aten::_foreach_norm.Scalar
+    torch._foreach_reciprocal,  # MISSING aten::_foreach_reciprocal
+    torch._foreach_reciprocal_,  # MISSING aten::_foreach_reciprocal_
+    torch._foreach_round,  # MISSING aten::_foreach_round
+    torch._foreach_round_,  # MISSING aten::_foreach_round_
+    torch._foreach_sigmoid,  # MISSING aten::_foreach_sigmoid
+    torch._foreach_sigmoid_,  # MISSING aten::_foreach_sigmoid_
+    torch._foreach_sin,  # MISSING aten::_foreach_sin
+    torch._foreach_sin_,  # MISSING aten::_foreach_sin_
+    torch._foreach_sinh,  # MISSING aten::_foreach_sinh
+    torch._foreach_sinh_,  # MISSING aten::_foreach_sinh_
+    torch._foreach_sqrt,  # MISSING aten::_foreach_sqrt
+    torch._foreach_sqrt_,  # MISSING aten::_foreach_sqrt_
+    torch._foreach_sub,  # MISSING aten::_foreach_sub.Scalar
+    torch._foreach_sub_,  # MISSING aten::_foreach_sub_.ScalarList
+    torch._foreach_tan,  # MISSING aten::_foreach_tan
+    torch._foreach_tan_,  # MISSING aten::_foreach_tan_
+    torch._foreach_tanh,  # MISSING aten::_foreach_tanh
+    torch._foreach_tanh_,  # MISSING aten::_foreach_tanh_
+    torch._foreach_trunc,  # MISSING aten::_foreach_trunc
+    torch._foreach_trunc_,  # MISSING aten::_foreach_trunc_
+    torch._foreach_zero_,  # MISSING aten::_foreach_zero_
+    torch._fused_moving_avg_obs_fq_helper,  # MISSING aten::_fused_moving_avg_obs_fq_helper
+    torch._make_per_tensor_quantized_tensor,  # MISSING aten::_make_per_tensor_quantized_tensor
+    torch._masked_softmax,  # MISSING aten::_masked_softmax
+    torch._sample_dirichlet,  # MISSING aten::_sample_dirichlet
+    torch._standard_gamma,  # MISSING aten::_standard_gamma
+    torch._unique,  # MISSING aten::_unique
+    torch._unique2,  # MISSING aten::_unique2
+    torch.abs,  # MISSING aten::abs.out
+    torch.absolute,  # MISSING aten::abs.out
+    torch.add,  # MISSING aten::_local_scalar_dense
+    torch.addbmm,  # MISSING aten::addbmm
+    torch.angle,  # MISSING aten::angle
+    torch.argsort,  # MISSING aten::sort
+    torch.batch_norm,  # MISSING aten::native_batch_norm
+    torch.bernoulli,  # MISSING aten::bernoulli.out
+    torch.bincount,  # MISSING aten::bincount
+    torch.binomial,  # MISSING aten::binomial
+    torch.bucketize,  # MISSING aten::bucketize.Tensor
+    torch.cat,  # MISSING aten::_local_scalar_dense
+    torch.cholesky,  # MISSING aten::cholesky
+    torch.cholesky_inverse,  # MISSING aten::cholesky_inverse
+    torch.cholesky_solve,  # MISSING aten::_cholesky_solve_helper
+    torch.clamp,  # MISSING aten::clamp.Tensor
+    torch.clip,  # MISSING aten::clamp.Tensor
+    torch.combinations,  # MISSING aten::masked_select
+    torch.complex,  # MISSING aten::complex.out
+    torch.conj_physical,  # MISSING aten::conj_physical.out
+    torch.corrcoef,  # MISSING aten::_local_scalar_dense
+    torch.count_nonzero,  # MISSING aten::count_nonzero.dim_IntList
+    torch.cov,  # MISSING aten::_local_scalar_dense
+    torch.cummax,  # MISSING aten::_cummax_helper
+    torch.cummin,  # MISSING aten::_cummin_helper
+    torch.cumprod,  # MISSING aten::logical_and.out
+    torch.cumsum,  # MISSING aten::_local_scalar_dense
+    torch.det,  # MISSING aten::_det_lu_based_helper
+    torch.diag,  # MISSING aten::diag.out
+    torch.diagflat,  # MISSING aten::diag.out
+    torch.diff,  # MISSING aten::logical_xor.out
+    torch.dot,  # MISSING aten::dot
+    torch.eig,  # MISSING aten::abs.out
+    torch.embedding,  # MISSING aten::index_select
+    torch.equal,  # MISSING aten::equal
+    torch.eye,  # MISSING aten::eye.m_out
+    torch.fake_quantize_per_channel_affine,  # MISSING aten::fake_quantize_per_channel_affine_cachemask
+    torch.fake_quantize_per_tensor_affine,  # MISSING aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams
+    torch.fft.fft,  # MISSING aten::_fft_r2c
+    torch.fft.fft2,  # MISSING aten::_fft_c2c
+    torch.fft.fftn,  # MISSING aten::_fft_c2c
+    torch.fft.fftshift,  # MISSING aten::roll
+    torch.fft.hfft2,  # MISSING aten::_fft_c2c
+    torch.fft.hfftn,  # MISSING aten::_fft_c2c
+    torch.fft.ifft,  # MISSING aten::_fft_r2c
+    torch.fft.ifft2,  # MISSING aten::_fft_c2c
+    torch.fft.ifftn,  # MISSING aten::_fft_c2c
+    torch.fft.ifftshift,  # MISSING aten::roll
+    torch.fft.ihfft,  # MISSING aten::_fft_r2c
+    torch.fft.ihfft2,  # MISSING aten::_fft_r2c
+    torch.fft.ihfftn,  # MISSING aten::_fft_r2c
+    torch.fft.irfft,  # MISSING aten::_fft_c2r
+    torch.fft.irfft2,  # MISSING aten::_fft_c2r
+    torch.fft.irfftn,  # MISSING aten::_fft_c2r
+    torch.fft.rfft,  # MISSING aten::_fft_r2c
+    torch.fft.rfft2,  # MISSING aten::_fft_r2c
+    torch.fft.rfftn,  # MISSING aten::_fft_r2c
+    torch.flip,  # MISSING aten::flip
+    torch.fliplr,  # MISSING aten::flip
+    torch.flipud,  # MISSING aten::flip
+    torch.floor_divide,  # MISSING aten::floor_divide
+    torch.frexp,  # MISSING aten::frexp.Tensor_out
+    torch.functional.cdist,  # MISSING aten::_cdist_forward
+    torch.functional.einsum,  # MISSING aten::dot
+    torch.functional.istft,  # MISSING aten::view_as_complex
+    torch.functional.lu,  # MISSING aten::lu_unpack
+    torch.functional.norm,  # MISSING aten::isnan
+    torch.functional.pca_lowrank,  # MISSING aten::_linalg_qr_helper
+    torch.functional.stft,  # MISSING aten::_fft_r2c
+    torch.functional.svd_lowrank,  # MISSING aten::_linalg_qr_helper
+    torch.functional.tensordot,  # MISSING aten::tensordot.out
+    torch.functional.unique,  # MISSING aten::_unique2
+    torch.functional.unique_consecutive,  # MISSING aten::unique_consecutive
+    torch.fused_moving_avg_obs_fake_quant,  # MISSING aten::_fused_moving_avg_obs_fq_helper
+    torch.geqrf,  # MISSING aten::geqrf
+    torch.group_norm,  # MISSING aten::native_batch_norm
+    torch.histc,  # MISSING aten::histc.out
+    torch.histogram,  # MISSING aten::histogram.bin_ct
+    torch.histogramdd,  # MISSING aten::_histogramdd_bin_edges
+    torch.index_select,  # MISSING aten::index_select
+    torch.inner,  # MISSING aten::tensordot.out
+    torch.inverse,  # MISSING aten::_local_scalar_dense
+    torch.isfinite,  # MISSING aten::abs.out
+    torch.isinf,  # MISSING aten::abs.out
+    torch.isnan,  # MISSING aten::isnan
+    torch.kthvalue,  # MISSING aten::kthvalue.values
+    torch.layer_norm,  # MISSING aten::native_batch_norm
+    torch.linalg.cholesky,  # MISSING aten::linalg_cholesky_ex
+    torch.linalg.cholesky_ex,  # MISSING aten::linalg_cholesky_ex
+    torch.linalg.cond,  # MISSING aten::abs.out
+    torch.linalg.det,  # MISSING aten::_det_lu_based_helper
+    torch.linalg.eig,  # MISSING aten::linalg_eig
+    torch.linalg.eig,  # MISSING aten::linalg_eig.out
+    torch.linalg.eigh,  # MISSING aten::linalg_eigh
+    torch.linalg.eigvals,  # MISSING aten::linalg_eig
+    torch.linalg.eigvalsh,  # MISSING aten::linalg_eigh
+    torch.linalg.eigvalsh,  # MISSING aten::linalg_eigvalsh.out
+    torch.linalg.householder_product,  # MISSING aten::linalg_householder_product
+    torch.linalg.inv,  # MISSING aten::_local_scalar_dense
+    torch.linalg.lstsq,  # MISSING aten::linalg_lstsq.out
+    torch.linalg.lu_factor,  # MISSING aten::_local_scalar_dense
+    torch.linalg.lu_factor_ex,  # MISSING aten::lu_unpack
+    torch.linalg.matmul,  # MISSING aten::dot
+    torch.linalg.matrix_exp,  # MISSING aten::linalg_matrix_exp
+    torch.linalg.matrix_norm,  # MISSING aten::abs.out
+    torch.linalg.matrix_power,  # MISSING aten::_local_scalar_dense
+    torch.linalg.matrix_power,  # MISSING aten::eye.m_out
+    torch.linalg.matrix_rank,  # MISSING aten::linalg_eigh
+    torch.linalg.matrix_rank,  # MISSING aten::linalg_eigvalsh.out
+    torch.linalg.matrix_rank,  # MISSING aten::where.self
+    torch.linalg.norm,  # MISSING aten::linalg_vector_norm
+    torch.linalg.pinv,  # MISSING aten::where.self
+    torch.linalg.qr,  # MISSING aten::_linalg_qr_helper
+    torch.linalg.slogdet,  # MISSING aten::linalg_slogdet
+    torch.linalg.solve,  # MISSING aten::linalg_solve
+    torch.linalg.solve_triangular,  # MISSING aten::linalg_solve_triangular
+    torch.linalg.tensorinv,  # MISSING aten::_local_scalar_dense
+    torch.linalg.tensorsolve,  # MISSING aten::linalg_solve
+    torch.linalg.vector_norm,  # MISSING aten::linalg_vector_norm
+    torch.logcumsumexp,  # MISSING aten::_logcumsumexp
+    torch.logdet,  # MISSING aten::abs.out
+    torch.logical_and,  # MISSING aten::logical_and.out
+    torch.logical_not,  # MISSING aten::logical_not.out
+    torch.logical_or,  # MISSING aten::logical_or.out
+    torch.logical_xor,  # MISSING aten::logical_xor.out
+    torch.logit,  # MISSING aten::logit
+    torch.logsumexp,  # MISSING aten::abs.out
+    torch.lstsq,  # MISSING aten::lstsq
+    torch.lu_solve,  # MISSING aten::lu_solve
+    torch.lu_unpack,  # MISSING aten::lu_unpack
+    torch.masked_select,  # MISSING aten::masked_select
+    torch.matmul,  # MISSING aten::dot
+    torch.matrix_exp,  # MISSING aten::linalg_matrix_exp
+    torch.matrix_power,  # MISSING aten::eye.m_out
+    torch.matrix_rank,  # MISSING aten::linalg_eigvalsh.out
+    torch.max,  # MISSING aten::max
+    torch.median,  # MISSING aten::median
+    torch.median,  # MISSING aten::median.dim_values
+    torch.min,  # MISSING aten::min
+    torch.mode,  # MISSING aten::mode
+    torch.msort,  # MISSING aten::sort
+    torch.multinomial,  # MISSING aten::multinomial
+    torch.mvlgamma,  # MISSING aten::_local_scalar_dense
+    torch.nan_to_num,  # MISSING aten::nan_to_num.out
+    torch.nanmean,  # MISSING aten::logical_not.out
+    torch.nanmedian,  # MISSING aten::nanmedian
+    torch.nanmedian,  # MISSING aten::nanmedian.dim_values
+    torch.nanquantile,  # MISSING aten::sort
+    torch.nansum,  # MISSING aten::nansum
+    torch.nn.functional.adaptive_avg_pool1d,  # MISSING aten::_adaptive_avg_pool2d
+    torch.nn.functional.adaptive_avg_pool2d,  # MISSING aten::_adaptive_avg_pool2d
+    torch.nn.functional.adaptive_avg_pool3d,  # MISSING aten::_adaptive_avg_pool3d
+    torch.nn.functional.batch_norm,  # MISSING aten::native_batch_norm
+    torch.nn.functional.binary_cross_entropy,  # MISSING aten::binary_cross_entropy
+    torch.nn.functional.binary_cross_entropy_with_logits,  # MISSING aten::clamp_min.out
+    torch.nn.functional.channel_shuffle,  # MISSING aten::channel_shuffle
+    torch.nn.functional.cosine_embedding_loss,  # MISSING aten::clamp_min.out
+    torch.nn.functional.cosine_similarity,  # MISSING aten::clamp_min.out
+    torch.nn.functional.cross_entropy,  # MISSING aten::_local_scalar_dense
+    torch.nn.functional.cross_entropy,  # MISSING aten::nll_loss2d_forward
+    torch.nn.functional.ctc_loss,  # MISSING aten::_ctc_loss
+    torch.nn.functional.embedding,  # MISSING aten::index_select
+    torch.nn.functional.embedding_bag,  # MISSING aten::_embedding_bag
+    torch.nn.functional.fold,  # MISSING aten::col2im
+    torch.nn.functional.gaussian_nll_loss,  # MISSING aten::_local_scalar_dense
+    torch.nn.functional.grid_sample,  # MISSING aten::grid_sampler_2d
+    torch.nn.functional.group_norm,  # MISSING aten::native_batch_norm
+    torch.nn.functional.hardswish,  # MISSING aten::hardswish
+    torch.nn.functional.hardtanh,  # MISSING aten::hardtanh
+    torch.nn.functional.hinge_embedding_loss,  # MISSING aten::clamp_min.out
+    torch.nn.functional.huber_loss,  # MISSING aten::huber_loss
+    torch.nn.functional.instance_norm,  # MISSING aten::native_batch_norm
+    torch.nn.functional.interpolate,  # MISSING aten::_adaptive_avg_pool2d
+    torch.nn.functional.interpolate,  # MISSING aten::upsample_nearest3d.vec
+    torch.nn.functional.kl_div,  # MISSING aten::where.self
+    torch.nn.functional.l1_loss,  # MISSING aten::abs.out
+    torch.nn.functional.layer_norm,  # MISSING aten::native_batch_norm
+    torch.nn.functional.logsigmoid,  # MISSING aten::log_sigmoid_forward
+    torch.nn.functional.lp_pool1d,  # MISSING aten::abs.out
+    torch.nn.functional.lp_pool2d,  # MISSING aten::abs.out
+    torch.nn.functional.margin_ranking_loss,  # MISSING aten::clamp_min.out
+    torch.nn.functional.max_pool3d,  # MISSING aten::max_pool3d_with_indices
+    torch.nn.functional.max_pool3d_with_indices,  # MISSING aten::max_pool3d_with_indices
+    torch.nn.functional.max_unpool1d,  # MISSING aten::max_unpool2d
+    torch.nn.functional.max_unpool2d,  # MISSING aten::max_unpool2d
+    torch.nn.functional.max_unpool3d,  # MISSING aten::max_unpool3d
+    torch.nn.functional.multi_head_attention_forward,  # MISSING aten::logical_or.out
+    torch.nn.functional.multi_margin_loss,  # MISSING aten::multi_margin_loss
+    torch.nn.functional.multilabel_margin_loss,  # MISSING aten::multilabel_margin_loss_forward
+    torch.nn.functional.multilabel_soft_margin_loss,  # MISSING aten::log_sigmoid_forward
+    torch.nn.functional.nll_loss,  # MISSING aten::nll_loss2d_forward
+    torch.nn.functional.normalize,  # MISSING aten::clamp_min.out
+    torch.nn.functional.one_hot,  # MISSING aten::min
+    torch.nn.functional.pad,  # MISSING aten::reflection_pad2d
+    torch.nn.functional.pdist,  # MISSING aten::_pdist_forward
+    torch.nn.functional.prelu,  # MISSING aten::prelu
+    torch.nn.functional.relu,  # MISSING aten::relu
+    torch.nn.functional.relu6,  # MISSING aten::hardtanh
+    torch.nn.functional.rrelu,  # MISSING aten::rrelu_with_noise
+    torch.nn.functional.softsign,  # MISSING aten::abs.out
+    torch.nn.functional.triplet_margin_loss,  # MISSING aten::clamp_min.out
+    torch.nn.functional.triplet_margin_with_distance_loss,  # MISSING aten::clamp_min.out
+    torch.nn.functional.unfold,  # MISSING aten::im2col
+    torch.nonzero,  # MISSING aten::nonzero
+    torch.normal,  # MISSING aten::min
+    torch.orgqr,  # MISSING aten::linalg_householder_product
+    torch.ormqr,  # MISSING aten::ormqr
+    torch.pinverse,  # MISSING aten::where.self
+    torch.poisson,  # MISSING aten::poisson
+    torch.polar,  # MISSING aten::polar.out
+    torch.prod,  # MISSING aten::prod
+    torch.qr,  # MISSING aten::_linalg_qr_helper
+    torch.quantile,  # MISSING aten::sort
+    torch.quantize_per_channel,  # MISSING aten::quantize_per_channel
+    torch.quantize_per_tensor,  # MISSING aten::quantize_per_tensor
+    torch.quantize_per_tensor_dynamic,  # MISSING aten::quantize_per_tensor_dynamic
+    torch.relu,  # MISSING aten::relu
+    torch.remainder,  # MISSING aten::remainder.Scalar_Tensor
+    torch.repeat_interleave,  # MISSING aten::repeat_interleave.Tensor
+    torch.rnn_relu,  # MISSING aten::relu
+    torch.rnn_relu_cell,  # MISSING aten::relu
+    torch.roll,  # MISSING aten::roll
+    torch.rot90,  # MISSING aten::flip
+    torch.rsub,  # MISSING aten::rsub.Tensor
+    torch.searchsorted,  # MISSING aten::searchsorted.Tensor
+    torch.sgn,  # MISSING aten::abs.out
+    torch.slogdet,  # MISSING aten::linalg_slogdet
+    torch.solve,  # MISSING aten::_solve_helper
+    torch.sort,  # MISSING aten::sort
+    torch.special.logit,  # MISSING aten::logit
+    torch.special.logsumexp,  # MISSING aten::abs.out
+    torch.special.multigammaln,  # MISSING aten::_local_scalar_dense
+    torch.square,  # MISSING aten::square.out
+    torch.std,  # MISSING aten::std.correction
+    torch.std_mean,  # MISSING aten::std_mean.correction
+    torch.symeig,  # MISSING aten::_symeig_helper
+    torch.take,  # MISSING aten::take
+    torch.threshold,  # MISSING aten::_local_scalar_dense
+    torch.trace,  # MISSING aten::trace
+    torch.var,  # MISSING aten::var.correction
+    torch.var_mean,  # MISSING aten::var_mean.correction
+    torch.vdot,  # MISSING aten::vdot
+    torch.where,  # MISSING aten::where.self
+    # END BLACKLIST
+    # Convolutions have a special error message
     torch.nn.functional.conv1d,
     torch.nn.functional.conv2d,
     torch.nn.functional.conv3d,
     torch.nn.functional.conv_transpose1d,
     torch.nn.functional.conv_transpose2d,
     torch.nn.functional.conv_transpose3d,
-    torch.nn.functional.cosine_embedding_loss,
-    torch.nn.functional.cosine_similarity,
-    torch.nn.functional.cross_entropy,
-    torch.nn.functional.ctc_loss,
-    torch.nn.functional.dropout,
-    torch.nn.functional.dropout2d,
-    torch.nn.functional.elu,
-    torch.nn.functional.embedding,
-    torch.nn.functional.embedding_bag,
-    torch.nn.functional.feature_alpha_dropout,
-    torch.nn.functional.fold,
-    torch.nn.functional.gaussian_nll_loss,
-    torch.nn.functional.gelu,
-    torch.nn.functional.glu,
-    torch.nn.functional.grid_sample,
-    torch.nn.functional.group_norm,
-    torch.nn.functional.hardshrink,
-    torch.nn.functional.hardsigmoid,
-    torch.nn.functional.hardswish,
-    torch.nn.functional.hardtanh,
-    torch.nn.functional.hinge_embedding_loss,
-    torch.nn.functional.huber_loss,
-    torch.nn.functional.instance_norm,
-    torch.nn.functional.interpolate,
-    torch.nn.functional.kl_div,
-    torch.nn.functional.l1_loss,
-    torch.nn.functional.layer_norm,
-    torch.nn.functional.leaky_relu,
-    torch.nn.functional.linear,
-    torch.nn.functional.local_response_norm,
-    torch.nn.functional.log_softmax,
-    torch.nn.functional.logsigmoid,
-    torch.nn.functional.lp_pool1d,
-    torch.nn.functional.lp_pool2d,
-    torch.nn.functional.margin_ranking_loss,
-    torch.nn.functional.max_pool1d_with_indices,
-    torch.nn.functional.max_pool2d,
-    torch.nn.functional.max_pool2d_with_indices,
-    torch.nn.functional.max_pool3d,
-    torch.nn.functional.max_pool3d_with_indices,
-    torch.nn.functional.max_unpool1d,
-    torch.nn.functional.max_unpool2d,
-    torch.nn.functional.max_unpool3d,
-    torch.nn.functional.mish,
-    torch.nn.functional.mse_loss,
-    torch.nn.functional.multi_head_attention_forward,
-    torch.nn.functional.multi_margin_loss,
-    torch.nn.functional.multilabel_margin_loss,
-    torch.nn.functional.multilabel_soft_margin_loss,
-    torch.nn.functional.nll_loss,
-    torch.nn.functional.normalize,
-    torch.nn.functional.one_hot,
-    torch.nn.functional.pad,
-    torch.nn.functional.pairwise_distance,
-    torch.nn.functional.pdist,
-    torch.nn.functional.poisson_nll_loss,
-    torch.nn.functional.prelu,
-    torch.nn.functional.relu,
-    torch.nn.functional.relu6,
-    torch.nn.functional.rrelu,
-    torch.nn.functional.selu,
-    torch.nn.functional.silu,
-    torch.nn.functional.smooth_l1_loss,
-    torch.nn.functional.soft_margin_loss,
-    torch.nn.functional.softmax,
-    torch.nn.functional.softmin,
-    torch.nn.functional.softplus,
-    torch.nn.functional.softshrink,
-    torch.nn.functional.softsign,
-    torch.nn.functional.tanhshrink,
-    torch.nn.functional.threshold,
-    torch.nn.functional.triplet_margin_loss,
-    torch.nn.functional.triplet_margin_with_distance_loss,
-    torch.nn.functional.unfold,
-    torch.nn.init.kaiming_uniform_,
-    torch.nn.init.uniform_,
-    torch.nonzero,
-    torch.normal,
-    torch.ones_like,
-    torch.orgqr,
-    torch.ormqr,
-    torch.outer,
-    torch.pinverse,
-    torch.poisson,
-    torch.polar,
-    torch.polygamma,
-    torch.pow,
-    torch.prod,
-    torch.qr,
-    torch.quantile,
-    torch.quantize_per_channel,
-    torch.quantize_per_tensor,
-    torch.rad2deg,
-    torch.rand_like,
-    torch.randint_like,
-    torch.randn_like,
-    torch.real,
-    torch.reciprocal,
-    torch.relu,
-    torch.remainder,
-    torch.renorm,
-    torch.repeat_interleave,
-    torch.rnn_relu,
-    torch.rnn_relu_cell,
-    torch.roll,
-    torch.rot90,
-    torch.round,
-    torch.rsqrt,
-    torch.rsub,
-    torch.scatter,
-    torch.scatter_add,
-    torch.scatter_reduce,
-    torch.searchsorted,
-    torch.select_scatter,
-    torch.sigmoid,
-    torch.sign,
-    torch.signbit,
-    torch.sin,
-    torch.sinc,
-    torch.sinh,
-    torch.slice_scatter,
-    torch.slogdet,
-    torch.softmax,
-    torch.solve,
-    torch.sort,
-    torch.sparse_csr_tensor,
-    torch.special.entr,
-    torch.special.erfcx,
-    torch.special.i0e,
-    torch.special.i1,
-    torch.special.i1e,
-    torch.special.log_ndtr,
-    torch.special.logit,
-    torch.special.logsumexp,
-    torch.special.multigammaln,
-    torch.special.ndtr,
-    torch.special.ndtri,
-    torch.special.polygamma,
-    torch.special.xlog1py,
-    torch.special.zeta,
-    torch.spmm,
-    torch.sqrt,
-    torch.square,
-    torch.stack,
-    torch.std,
-    torch.std_mean,
-    torch.sub,
-    torch.subtract,
-    torch.sum,
-    torch.svd,
-    torch.symeig,
-    torch.take,
-    torch.take_along_dim,
-    torch.tan,
-    torch.tanh,
-    torch.tensor,
-    torch.threshold,
-    torch.tile,
-    torch.topk,
-    torch.trace,
-    torch.trapezoid,
-    torch.trapz,
-    torch.triangular_solve,
-    torch.tril,
-    torch.triu,
-    torch.true_divide,
-    torch.trunc,
-    torch.var,
-    torch.var_mean,
-    torch.vdot,
+    # complex stuff handle it specially
     torch.view_as_complex,
     torch.view_as_real,
-    torch.vstack,
-    torch.where,
-    torch.xlogy,
-    torch.zeros_like,
-    # storage is funny business
+    # These operators happen very frequently, although they should
+    # work with meta we intentionally don't test them to speed
+    # up the test suite
+    torch.Tensor.__getitem__,
+    torch.Tensor.__rsub__,
+    torch.Tensor.__setitem__,
+    torch.Tensor.add,
+    torch.Tensor.add_,
+    torch.Tensor.clone,
+    torch.Tensor.detach,
+    torch.Tensor.div,
+    torch.Tensor.gt,
+    torch.Tensor.lt,
+    torch.Tensor.mul,
+    torch.Tensor.reshape,
+    torch.Tensor.sub,
+    torch.Tensor.sum,
+    torch.rand,
+    # These correctly report NotImplemented but they don't print
+    # correctly from resolve_name
+    torch.ops.quantized.linear_dynamic,
+    torch._VF.unique_dim,
+    torch._C._nn.binary_cross_entropy,
+    torch._C._nn.adaptive_avg_pool2d,
+    torch._C._nn._test_optional_filled_intlist,
+    torch._C._nn._test_optional_floatlist,
+    torch._C._nn._test_optional_intlist,
+    # Meta tensors don't support storage Python bindings at the
+    # moment, to be fixed
     torch.Tensor.storage,
     torch.Tensor.storage_type,
-    # These are known not to work and are fast-pathed out to
-    # avoid the slowdown induced by C++ exception throwing
-    torch.Tensor.cpu,
+    torch.Tensor.share_memory_,
+    # Weird stuff that hypothetically should work but it's weird
+    torch._make_dual,
+    # These functions cannot, even in principle, be implemented on meta
+    # tensors (because they involve accessing data somehow), so don't test
+    # them.
     torch.Tensor.__bool__,
+    torch.Tensor.__float__,
     torch.Tensor.__int__,
+    torch.Tensor.__complex__,
+    torch.Tensor.__index__,
+    torch.Tensor.__contains__,
+    torch.Tensor.cpu,
     torch.isclose,
     torch.Tensor.to,
+    torch.Tensor.tolist,
+    torch.Tensor.unbind,
     torch.Tensor.item,
-    # Stuff that's not worth doing
+    torch.Tensor.is_nonzero,
+    torch.Tensor.copy_,
+    torch.Tensor.numpy,
+    torch.Tensor.allclose,
+    torch.Tensor.argwhere,
+    torch.allclose,
+    torch.argwhere,
+    torch.Tensor.__array__,  # doesn't raise NotImplementedError
+    torch.Tensor.__dlpack_device__,  # doesn't raise NotImplementedError
+    torch.Tensor.__dlpack__,  # doesn't raise NotImplementedError
+    torch.to_dlpack,  # doesn't raise NotImplementedError
+    # Utility functions that get frequently invoked; don't test
+    torch.Tensor.__format__,
+    torch.Tensor.__repr__,
+    # These are getters/setters for properties on tensors; it's not
+    # really useful to test meta tensors on them
     torch.Tensor.device.__get__,
     torch.Tensor.dtype.__get__,
     torch.Tensor.grad.__get__,
@@ -1607,21 +1349,26 @@ meta_exclude_set = {
     torch.Tensor.data.__get__,
     torch.Tensor.data.__set__,
     torch.Tensor.is_shared,
-    # These perturb RNG and so should not be run
+    torch.Tensor.imag.__get__,
+    torch.Tensor.real.__get__,
+    torch.Tensor.is_complex,
+    torch.Tensor.is_floating_point,
+    torch.Tensor.numel,
+    torch.Tensor.requires_grad_,
+    torch.Tensor.size,
+    # These perturb RNG and can cause tests to fail, so don't run
+    # them (TODO: this is not a complete list)
     torch.randint,
     torch.randn,
-    # TODO: these should raise NotImplementedError, but raises a
-    # different error
-    torch.Tensor.new,
-    torch.Tensor.numpy,
-    torch.Tensor.__array__,
-    torch.Tensor.__dlpack_device__,
-    torch.Tensor.__dlpack__,
-    torch.to_dlpack,
-    # TODO: these probably aren't registered dispatcher correctly
+    # Indirect use of conjugate fallback
+    torch.fft.hfft,
+    # These don't raise NotImplementedError, which suggests something
+    # is wrong with how they're registered with the dispatcher
     torch.fbgemm_pack_gemm_matrix_fp16,
     torch.fbgemm_pack_quantized_matrix,
     torch.fbgemm_linear_fp16_weight,
+    torch._empty_per_channel_affine_quantized,
+    torch.fbgemm_linear_int8_weight,
     torch._grid_sampler_2d_cpu_fallback,  # WAT
     torch._nnpack_spatial_convolution,
     torch.lstm,
@@ -1635,63 +1382,55 @@ meta_exclude_set = {
     torch.choose_qparams_optimized,
     torch._validate_sparse_coo_tensor_args,
     torch.sparse.mm,
-    # WTF is this
-    torch.Tensor.resize,
-    # This is suspicious
-    torch.nn.functional.max_pool1d,
-    # TODO: our conversion to meta is not accurate enough (doesn't
-    # preserve storage_offset, e.g.)
-    torch.Tensor.as_strided,
-    # TODO: segfaults
-    torch.Tensor.type,
-    # TODO: IDK what's up with these.  TestTorch.test_sobolengine_bounds
+    torch.Tensor.new,
+    torch.Tensor.resize,  # WTF is this
     torch._sobol_engine_initialize_state_,
     torch._sobol_engine_draw,
     torch._sobol_engine_scramble_,
     torch._sobol_engine_ff_,
-    # TODO: maybe we can do this?  need to be tricky
     torch.tensor_split,
     torch.Tensor.tensor_split,
-    # TODO: this seems wrong; also it's structured, weird
-    torch.Tensor.index_add_,
-    torch.index_add,
-    torch.Tensor.index_add,
-    # TODO: we're incapable of cloning the history, so this won't work
-    torch.autograd.grad,
-    # TODO: these need to get fixed
     torch._pack_padded_sequence,
     torch._pad_packed_sequence,
-    # need to be a leaf for this to work
+    torch.sparse_coo_tensor,
+    # RuntimeError: Expected 3D or 4D (batch mode) tensor with optional 0 dim
+    # batch size for input, but got:[1, 1, 0]
+    # in test_nn.py TestNNDeviceTypeCPU.test_max_pool1d_corner_cases_cpu_float64
+    torch.nn.functional.max_pool1d,
+    # IndexError: select() cannot be applied to a 0-dim tensor.
+    # e.g. test_fn_fwgrad_bwgrad_index_add_cpu_complex128 (__main__.TestGradientsCPU)
+    torch.index_add,
+    # Can't copy out of meta tensor
+    torch.linalg.eigvals,
+    torch.linalg.lu_factor,
+    torch.nn.functional.ctc_loss,
+    # Our conversion to meta is not accurate enough (doesn't
+    # preserve storage_offset, e.g.)
+    torch.Tensor.as_strided,
+    # This one segfaults when you call it
+    torch.Tensor.type,
+    # We don't clone autograd history, so this will generally not work
+    torch.autograd.grad,
+    torch.Tensor.backward,
     torch.Tensor.__deepcopy__,
-    # f
-    torch.zeros_like,
-    torch._make_dual,
-    # don't do factories
+    # Don't do factories
     torch.ones,
+    torch.full,
     torch.empty,
     torch.randperm,
     torch.logspace,
     torch.zeros,
     torch.arange,
     torch.vander,
-    # TODO: sparse add to overrides
-    torch.sparse_coo_tensor,
-    # weirdo bindings torch._C._nn add to overrides
-    torch._C._nn.binary_cross_entropy,
-    torch._C._nn.adaptive_avg_pool2d,
-    torch._C._nn._test_optional_filled_intlist,
-    torch._C._nn._test_optional_floatlist,
-    torch._C._nn._test_optional_intlist,
+    torch.as_tensor,
+    torch.tensor,
+    torch.sparse_csr_tensor,
+    torch._sparse_coo_tensor_unsafe,
 }
 
 skipped = set()
 
-def print_skipped():
-    for s in skipped:
-        print(f"{torch.overrides.resolve_name(s) or s},  # SKIPPED")
-
-import atexit
-atexit.register(print_skipped)
+RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __init__(self, test_case):
@@ -1749,7 +1488,10 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 
         def to_meta(t):
             nonlocal hit, miss
-            if isinstance(t, torch.nn.parameter.UninitializedBuffer):
+            if isinstance(t, (
+                torch.nn.parameter.UninitializedBuffer,
+                torch.nn.utils._expanded_weights.expanded_weights_impl.ExpandedWeight
+            )):
                 miss += 1
                 return t
             # TODO: zero tensors?
@@ -1757,6 +1499,11 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                 if any([
                     t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
                     t.is_nested, torch._is_functional_tensor(t),
+                    # these are supported in meta conversion but the fallbacks
+                    # don't work
+                    t.is_neg(), t.is_conj(),
+                    # conjugate fallback does not support meta tensors
+                    t.dtype in (torch.complex128, torch.complex64),
                 ]):
                     # TODO: sparse should support meta
                     # NB technically to('meta') does work but our logging
@@ -1788,6 +1535,7 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                 return t
 
         do_meta = (
+            func not in skipped and
             func not in meta_exclude_set and not torch.jit.is_tracing() and
             not isinstance(func, torch.ScriptMethod)
         )
@@ -1815,10 +1563,17 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                     warnings.simplefilter("ignore")
                     meta_r = func(*meta_args, **meta_kwargs)
             except Exception as e:
-                skipped.add(func)
-                raise RuntimeError(f"""\
-failed to run:
-  {torch.overrides.resolve_name(func) or func}(
+                suppress = False
+                if isinstance(e, NotImplementedError):
+                    m = RE_NOT_IMPLEMENTED_MSG.search(e.args[0])
+                    if m and m.group(1) not in ("aten::_efficientzerotensor", "aten::view_as_real"):
+                        skipped.add(func)
+                        print(f"\n    {torch.overrides.resolve_name(func) or func},  # MISSING {m.group(1)}")
+                        sys.stdout.flush()
+                        suppress = True
+                if not suppress:
+                    raise RuntimeError(f"""\
+failed to run: {torch.overrides.resolve_name(func) or func}(
     *{meta_args},
     **{meta_kwargs}
   )""") from e
@@ -2813,6 +2568,13 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
+    def _run_with_crossref(self, result):
+        if TEST_WITH_CROSSREF:
+            with torch.overrides.push_torch_function_mode(partial(CrossRefMode, self)) as mode:
+                super().run(result=result)
+        else:
+            super().run(result=result)
+
     # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and enables early test
     # termination. [DISCLAIMER: ONLY WORKS WITH UNITTEST]
     # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
@@ -2828,7 +2590,7 @@ class TestCase(expecttest.TestCase):
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
             errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
-        super().run(result=result)
+        self._run_with_crossref(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             if result.wasSuccessful():
@@ -2871,11 +2633,8 @@ class TestCase(expecttest.TestCase):
 
 
     def run(self, result=None):
-        with contextlib.ExitStack() as stack:
-            if TEST_WITH_CROSSREF:
-                stack.enter_context(torch.overrides.push_torch_function_mode(partial(CrossRefMode, self)))
-            num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
-            self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
+        num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+        self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
 
     def setUp(self):
         check_if_enable(self)

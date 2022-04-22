@@ -1089,6 +1089,7 @@ class TestDisabledTorchFunction(TestCase):
         self.assertEqual(torch.nn.functional.linear(inp, t1, t2), "called")
         self.assertEqual(torch.nn.functional.linear(inp, t2, t1), "called")
 
+@skipIfCrossRef
 class TestTorchFunctionWarning(TestCase):
     def test_warn_on_invalid_torch_function(self):
         class Bad1():
