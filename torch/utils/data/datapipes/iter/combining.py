@@ -5,8 +5,16 @@ from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, T
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import check_lambda_fn
+from torch.utils.data.datapipes.utils.common import _check_lambda_fn
 from torch.utils.data._utils.serialization import DILL_AVAILABLE, SerializationType, serialize_fn, deserialize_fn
+
+__all__ = [
+    "ConcaterIterDataPipe",
+    "DemultiplexerIterDataPipe",
+    "ForkerIterDataPipe",
+    "MultiplexerIterDataPipe",
+    "ZipperIterDataPipe",
+]
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -252,7 +260,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
 
-        check_lambda_fn(classifier_fn)
+        _check_lambda_fn(classifier_fn)
 
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
