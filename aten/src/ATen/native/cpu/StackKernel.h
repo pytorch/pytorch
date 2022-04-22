@@ -1,7 +1,7 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 
 namespace at { namespace native {

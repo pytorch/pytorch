@@ -12,7 +12,7 @@ Each ``torch.Tensor`` has a :class:`torch.dtype`, :class:`torch.device`, and :cl
 torch.dtype
 -----------
 
-.. class:: torch.dtype
+.. class:: dtype
 
 A :class:`torch.dtype` is an object that represents the data type of a
 :class:`torch.Tensor`. PyTorch has twelve different data types:
@@ -134,7 +134,7 @@ Casting Examples::
 torch.device
 ------------
 
-.. class:: torch.device
+.. class:: device
 
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
@@ -204,7 +204,7 @@ Via a string and device ordinal:
 torch.layout
 ------------
 
-.. class:: torch.layout
+.. class:: layout
 
 .. warning::
   The ``torch.layout`` class is in beta and subject to change.
@@ -236,7 +236,7 @@ For more information on ``torch.sparse_coo`` tensors, see :ref:`sparse-docs`.
 torch.memory_format
 -------------------
 
-.. class:: torch.memory_format
+.. class:: memory_format
 
 A :class:`torch.memory_format` is an object representing the memory format on which a :class:`torch.Tensor` is
 or will be allocated.

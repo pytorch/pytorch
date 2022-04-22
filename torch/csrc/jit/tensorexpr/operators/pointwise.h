@@ -64,6 +64,14 @@ Tensor computeNoop(
     const c10::optional<ScalarType>& outputType,
     at::Device device);
 
+Tensor computeScalar(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
