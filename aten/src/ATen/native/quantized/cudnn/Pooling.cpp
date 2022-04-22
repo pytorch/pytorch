@@ -8,7 +8,8 @@
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/cudnn/Types.h>
-#endif
+#endif // AT_CUDNN_ENABLED
+#endif // USE_CUDA
 
 #include <ATen/ATen.h>
 #include <ATen/native/Pool.h>
@@ -62,6 +63,7 @@ Tensor quantized_max_pool2d_cudnn(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+#ifdef USE_CUDA
 #if AT_CUDNN_ENABLED()
 #if HAS_CUDNN_V8()
   check_maxpool2d_params(
