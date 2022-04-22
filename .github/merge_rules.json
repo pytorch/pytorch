@@ -100,6 +100,21 @@
       "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
+      "name": "Lazy Tensor",
+      "patterns": [
+         "torch/csrc/lazy/**",
+         "test/cpp/lazy/**",
+         "/test/lazy/**",
+         "codegen/api/lazy.py",
+         "codegen/dest/lazy_ir.py",
+         "codegen/dest/lazy_ts_lowering.py",
+         "codegen/gen_lazy_tensor.py",
+         "aten/src/ATen/native/ts_native_functions.yaml"
+      ],
+      "approved_by": ["wconstab", "desertfire", "alanwaketan", "krovatkin"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
       "name": "superuser",
       "patterns": ["*"],
       "approved_by": ["pytorch/metamates"],
