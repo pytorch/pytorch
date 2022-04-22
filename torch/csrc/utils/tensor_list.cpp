@@ -24,9 +24,7 @@ static PyObject* recursive_to_list(
     PyObject* obj = recursive_to_list(data, sizes, strides, dim + 1, scalarType, elementSize);
     if (!obj) throw python_error();
     PyList_SET_ITEM(list.get(), i, obj);
-    auto advance_data_ptr = strides[dim] * elementSize;
-    TORCH_INTERNAL_ASSERT(data || advance_data_ptr == 0);
-    data += advance_data_ptr;
+    data += strides[dim] * elementSize;
   }
   return list.release();
 }
