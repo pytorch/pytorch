@@ -443,25 +443,20 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
     "torch/csrc/lazy/core/thread_pool.cpp",
-    # We should better segment the sources, but for now there are actually dependencies
-    # from some core files on some of these ts_backend files
-    # so we continue to build these parts of ts_backend in all build configs
-    "torch/csrc/lazy/ts_backend/ir_builder.cpp",
 ]
 
 # We can't build all of the ts backend under certain build configurations, e.g. mobile,
 # since it depends on things like autograd, meta functions, which may be disabled
 lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/config.cpp",
-    "torch/csrc/lazy/ts_backend/config.cpp",
     "torch/csrc/lazy/ts_backend/dynamic_ir.cpp",
+    "torch/csrc/lazy/ts_backend/ir_builder.cpp",
     "torch/csrc/lazy/ts_backend/ops/batch_norm_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/cast.cpp",
     "torch/csrc/lazy/ts_backend/ops/device_data.cpp",
     "torch/csrc/lazy/ts_backend/ops/expand.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
-    "torch/csrc/lazy/ts_backend/ops/generic.cpp",
-    "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/as_strided.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/as_strided_view_update.cpp",
@@ -476,13 +471,13 @@ lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/view_ops/unsqueeze.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/select_view_update.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/view.cpp",
+    "torch/csrc/lazy/ts_backend/ts_node.cpp",
     "torch/csrc/lazy/ts_backend/tensor_aten_ops.cpp",
     "torch/csrc/lazy/ts_backend/ts_autograd_functions.cpp",
     "torch/csrc/lazy/ts_backend/ts_backend_impl.cpp",
     "torch/csrc/lazy/ts_backend/ts_eager_fallback.cpp",
     "torch/csrc/lazy/ts_backend/ts_lowering_context.cpp",
     "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
-    "torch/csrc/lazy/ts_backend/ts_node.cpp",
     "torch/csrc/lazy/ts_backend/ts_node_lowering.cpp",
 ]
 
