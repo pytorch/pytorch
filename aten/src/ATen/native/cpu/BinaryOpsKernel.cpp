@@ -57,11 +57,13 @@ void mul_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
   } else if (iter.dtype() == kComplexHalf) {
-    using scalar_t = c10::complex<at::Half>;
-    cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
-      using comp_t = c10::complex<float>;
-      return static_cast<scalar_t>(comp_t{a} * comp_t{b});
-    });
+    cpu_kernel(
+        iter,
+        [=](c10::complex<at::Half> a,
+            c10::complex<at::Half> b) -> c10::complex<at::Half> {
+          using comp_t = c10::complex<float>;
+          return comp_t{a} * comp_t{b};
+        });
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "mul_cpu", [&]() {
       cpu_kernel_vec(iter,
