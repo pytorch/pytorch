@@ -150,7 +150,8 @@ class Tensor(torch._C._TensorBase):
                         new_tensor = new_tensor.conj_physical()
                     if self.is_neg():
                         new_tensor = new_tensor.neg()
-                    new_tensor.requires_grad = self.requires_grad
+            if self.requires_grad:
+                new_tensor.requires_grad_()
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
