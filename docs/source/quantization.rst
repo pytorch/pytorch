@@ -508,10 +508,12 @@ In general, the flow is the following
 There are different modes of quantization, they can be classified in two ways:
 
 In terms of where we apply the quantization flow, we have:
+
 1. Post Training Quantization (apply quantization after training, quantization parameters are calculated based on sample calibration data)
 2. Quantization Aware Training (simulate quantization during training so that the quantization parameters can be learned together with the model using training data)
 
 And in terms of how we quantize the operators, we can have:
+
 - Weight Only Quantization (only weight is statically quantized)
 - Dynamic Quantization (weight is statically quantized, activation is dynamically quantized)
 - Static Quantization (both weight and activations are statically quantized)
@@ -636,9 +638,9 @@ Backend/Hardware Support
 
 Today, PyTorch supports the following backends for running quantized operators efficiently:
 
-* x86 CPUs with AVX2 support or higher (without AVX2 some operations have inefficient implementations), via `fbgemm` (`<https://github.com/pytorch/FBGEMM>`_).
-* ARM CPUs (typically found in mobile/embedded devices), via `qnnpack` (`<https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native/quantized/cpu/qnnpack>`_).
-* (early prototype) support for NVidia GPU via `TensorRT` (`<https://developer.nvidia.com/tensorrt>`_) through `fx2trt`
+* x86 CPUs with AVX2 support or higher (without AVX2 some operations have inefficient implementations), via `fbgemm <https://github.com/pytorch/FBGEMM>`_
+* ARM CPUs (typically found in mobile/embedded devices), via `qnnpack <https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native/quantized/cpu/qnnpack>`_
+* (early prototype) support for NVidia GPU via `TensorRT <https://developer.nvidia.com/tensorrt>`_ through `fx2trt` (to be open sourced)
 
 
 Note for native CPU backends
@@ -881,9 +883,11 @@ Example::
 Best Practices
 --------------
 
-1. Set the ``reduce_range`` argument on observers to `True` if you are using the
-   ``fbgemm`` backend.  This argument prevents overflow on some int8 instructions
-   by reducing the range of quantized data type by 1 bit.
+1. If you are using the ``fbgemm`` backend, we need to use 7 bits instead of 8 bits. Make sure you reduce the range for the ``quant\_min``, ``quant\_max``, e.g.
+if ``dtype`` is ``torch.quint8``, make sure to set a custom ``quant_min`` to be ``0`` and ``quant_max`` to be ``127`` (``255`` / ``2``)
+if ``dtype`` is ``torch.qint8``, make sure to set a custom ``quant_min`` to be ``-64`` and ``quant_max`` to be ``63`` (``255`` / ``2``), we already set this correctly if
+you call the `torch.ao.quantization.get_default_qconfig(backend)` or `torch.ao.quantization.get_default_qat_qconfig(backend)` function to get the default ``qconfig`` for
+``fbgemm`` or ``qnnpack`` backend
 
 Common Errors
 ---------------------------------------
@@ -1006,6 +1010,13 @@ An example::
   torch.jit.save(scripted, b)
   b.seek(0)
   scripted_quantized = torch.jit.load(b)
+
+Symbolic Trace Error when using FX Graph Mode Quantization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Symbolic traceability is a requirement for `(Prototype) FX Graph Mode Quantization`_, so if you pass a PyTorch Model that is not symbolically traceable to `torch.ao.quantization.prepare_fx` or `torch.ao.quantization.prepare_qat_fx`, we might see an error like the following::
+  torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
+
+Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pytorch.org/76223/fx.html#limitations-of-symbolic-tracing>`_ and use - `User Guide on Using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide.html>`_ to workaround the problem.
 
 Numerical Debugging (prototype)
 -------------------------------
