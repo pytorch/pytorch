@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
 
+#include <ATen/core/interned_strings.h>
+#include <c10/core/ScalarType.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -325,6 +327,10 @@ SugaredValuePtr ModuleValue::getitem(
           loc, m, idx, type_hint);
     }
   } else if (
+      concreteType_->getIterableModuleKind() == IterableModuleKind::PARAMLIST) {
+    return getSugaredNamedParameterList(loc, m)->getModules()->getitem(
+        loc, m, idx, type_hint);
+  } else if (
       concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (auto ivalue = toIValue(idx)) {
       auto sd = getSugaredDict(loc, m);
@@ -422,6 +428,34 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
   const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     if (selfType->is_buffer(i)) {
+      paramNames.push_back(selfType->getAttributeName(i));
+    }
+  }
+
+  std::vector<SugaredValuePtr> keys;
+  for (const auto& name : paramNames) {
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+    m.graph()->insertGetAttr(self_, name);
+    values.push_back(tryGetAttr(loc, m, name));
+    keys.push_back(name_v);
+  }
+
+  return std::make_shared<SugaredDict>(
+      std::make_shared<ModuleValue>(self_, concreteType_),
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
+}
+
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedParameterList(
+    const SourceRange& loc,
+    GraphFunction& m) {
+  std::vector<std::string> paramNames;
+  std::vector<SugaredValuePtr> values;
+
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+    if (selfType->is_parameter(i)) {
       paramNames.push_back(selfType->getAttributeName(i));
     }
   }
@@ -914,8 +948,11 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
             ->insertNode(caller.graph()->createTuple(message_values))
             ->output();
   }
+  Value* qualified_class_name =
+      insertConstant(*caller.graph(), exception_class_qualified_name_, loc);
 
-  return std::make_shared<ExceptionMessageValue>(error_message);
+  return std::make_shared<ExceptionMessageValue>(
+      error_message, qualified_class_name);
 }
 
 bool isNamedTupleClass(const py::object& obj) {
@@ -1104,6 +1141,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
+  auto opoverloadpacket_type =
+      py::module::import("torch").attr("_ops").attr("OpOverloadPacket");
+  py::bool_ is_overloadpacket = py::isinstance(obj, opoverloadpacket_type);
+  if (is_overloadpacket) {
+    obj = py::getattr(obj, "op");
+  }
+
   bool isRpcAvailable = py::cast<bool>(
       py::module::import("torch.distributed.rpc").attr("is_available")());
 
@@ -1149,6 +1193,25 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
                            << " a submodule of the caller";
+  }
+  std::vector<std::pair<const char*, at::ScalarType>> tensor_names = {
+      {"BoolTensor", at::ScalarType::Bool},
+      {"LongTensor", at::ScalarType::Long},
+      {"ByteTensor", at::ScalarType::Byte},
+      {"CharTensor", at::ScalarType::Char},
+      {"DoubleTensor", at::ScalarType::Double},
+      {"FloatTensor", at::ScalarType::Float},
+      {"IntTensor", at::ScalarType::Int},
+      {"ShortTensor", at::ScalarType::Short},
+      {"HalfTensor", at::ScalarType::Half},
+  };
+  for (const auto& name : tensor_names) {
+    if (obj.ptr() == py::module::import("torch").attr(name.first).ptr()) {
+      // torch.LongTensor and other related functions create on cpu,
+      // TODO: add support for torch.cuda.LongTensor for gpu
+      return LegacyTensorConstructor::create(
+          prim::LegacyTypedConstructor, name.second, at::kCPU);
+    }
   }
 
   py::object builtin_name =
@@ -1246,6 +1309,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(*callee);
     }
+  }
+  if (obj.ptr() == py::module::import("math").attr("inf").ptr()) {
+    return toSimple(
+        g.insertConstant(std::numeric_limits<double>::infinity(), loc));
   }
 
   py::bool_ isMethod = py::module::import("inspect").attr("ismethod")(obj);

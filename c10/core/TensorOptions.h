@@ -643,6 +643,9 @@ inline DispatchKey computeDispatchKey(
           }
           return DispatchKey::CUDA;
         }
+        case DeviceType::IPU: {
+          return DispatchKey::IPU;
+        }
         case DeviceType::XPU: {
           if (isQIntType(dtype_)) {
             return DispatchKey::QuantizedXPU;
@@ -716,6 +719,9 @@ inline DispatchKey computeDispatchKey(
               device_.type());
       }
     case Layout::SparseCsr:
+    case Layout::SparseCsc:
+    case Layout::SparseBsr:
+    case Layout::SparseBsc:
       switch (device_.type()) {
         case DeviceType::CPU:
           return DispatchKey::SparseCsrCPU;
@@ -723,7 +729,9 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::SparseCsrCUDA;
         default:
           AT_ERROR(
-              "Unsupported device type for sparse CSR layout: ",
+              "Unsupported device type for ",
+              layout_,
+              " layout: ",
               device_.type());
       }
     default:
@@ -738,9 +746,14 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     case DispatchKey::SparseHIP:
     case DispatchKey::SparseVE:
     case DispatchKey::SparseXPU:
+      return Layout::Sparse;
     case DispatchKey::SparseCsrCPU:
     case DispatchKey::SparseCsrCUDA:
-      return Layout::Sparse;
+      TORCH_CHECK(
+          false,
+          "Cannot map DispatchKey ",
+          dispatch_key,
+          " to a unique layout.");
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
     default:
@@ -780,6 +793,9 @@ inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
       return DeviceType::Meta;
 
     // stuff that people are actively developing
+    case DispatchKey::IPU:
+    case DispatchKey::AutogradIPU:
+      return DeviceType::IPU;
     case DispatchKey::XPU:
     case DispatchKey::SparseXPU:
     case DispatchKey::QuantizedXPU:
@@ -807,5 +823,15 @@ inline TensorOptions dispatchKeyToTensorOptions(DispatchKey dispatch_key) {
       .layout(dispatchKeyToLayout(dispatch_key))
       .device(dispatchKeyToDeviceType(dispatch_key));
 }
+
+namespace detail {
+inline bool backend_supports_empty_operator(const TensorOptions options) {
+  // Quantized backends don't support at::empty().
+  // They have separate operators like at::empty_quantized() that take in
+  // extra information about how to quantize the tensor.
+  return !isQIntType(typeMetaToScalarType(options.dtype()));
+}
+
+} // namespace detail
 
 } // namespace c10

@@ -8,7 +8,7 @@ from operator import methodcaller
 
 import torch
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol)
+    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck)
@@ -233,6 +233,7 @@ class TestModule(TestCase):
 
     @modules([module_info for module_info in module_db
               if 'inplace' in signature(module_info.module_cls).parameters])
+    @skipMeta
     def test_check_inplace(self, device, dtype, module_info):
         # Check if the inplace variant of the module gives the same result as the out of place
         # variant.
@@ -363,8 +364,11 @@ class TestModule(TestCase):
                     grad_output = default_output.clone().detach_().normal_()
                     default_output.backward(grad_output, retain_graph=True)
                 else:
-                    grad_output = tuple(o.clone().detach_().normal_() for o in default_output)
-                    for o, g_o in zip(default_output, grad_output):
+                    grad_output = tuple(self._traverse_obj(o, lambda o: o.clone().detach_().normal_())
+                                        for o in default_output)
+                    flattened_default_output, _ = torch.utils._pytree.tree_flatten(default_output)
+                    flattened_grad_output, _ = torch.utils._pytree.tree_flatten(grad_output)
+                    for o, g_o in zip(flattened_default_output, flattened_grad_output):
                         o.backward(g_o, retain_graph=True)
 
             default_input_args_grad, default_input_kwargs_grad = deepcopy(self._get_grads((input_args, input_kwargs)))
@@ -388,7 +392,9 @@ class TestModule(TestCase):
                     if isinstance(out, torch.Tensor):
                         out.backward(g_out_copy, retain_graph=True)
                     else:
-                        for o, g_o in zip(out, g_out_copy):
+                        flattened_out, _ = torch.utils._pytree.tree_flatten(out)
+                        flattened_g_out_copy, _ = torch.utils._pytree.tree_flatten(g_out_copy)
+                        for o, g_o in zip(flattened_out, flattened_g_out_copy):
                             o.backward(g_o, retain_graph=True)
 
                 input_args_grad, input_kwargs_grad = self._get_grads((in_args, in_kwargs))
@@ -447,7 +453,9 @@ class TestModule(TestCase):
                 new_kwargs = {name: obj for (name, _), obj in zip(kwarg_tensors, kwarg_args)}
 
                 with freeze_rng_state():
-                    return m(*new_input_args, **new_kwargs, **other_kwargs)
+                    output = m(*new_input_args, **new_kwargs, **other_kwargs)
+                    output_flattened, _ = torch.utils._pytree.tree_flatten(output)
+                    return output_flattened
 
             self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
 
@@ -531,7 +539,9 @@ class TestModule(TestCase):
                 if isinstance(cpu_outputs, torch.Tensor):
                     check_backward(cpu_outputs, gpu_outputs)
                 else:
-                    for cpu_output, gpu_output in zip(cpu_outputs, gpu_outputs):
+                    flatten_cpu_outputs, _ = torch.utils._pytree.tree_flatten(cpu_outputs)
+                    flatten_gpu_outputs, _ = torch.utils._pytree.tree_flatten(gpu_outputs)
+                    for cpu_output, gpu_output in zip(flatten_cpu_outputs, flatten_gpu_outputs):
                         check_backward(cpu_output, gpu_output)
 
 

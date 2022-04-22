@@ -13,6 +13,9 @@ from .utils import (
     HookType,
     get_torch_function_hook_type,
     get_module_hook_type,
+    OpQuantizeabilityType,
+    AutoQuantizationStateModuleDict,
+    get_fqn_valid_for_module_dict_key,
 )
 from .model_utils import (
     pack_weights_for_functionals,
@@ -38,9 +41,12 @@ def add_auto_observation(
     qconfig_dict: Dict[str, Any],
     example_inputs: Tuple[Any],
     input_dtypes: Any = (torch.float,),  # must be same structure as model inputs
-    output_dtypes: Any = (torch.float,),  # must be same structure as model outputs
     prepare_custom_config_dict: Dict[str, Any] = None,
 ) -> torch.nn.Module:
+    if prepare_custom_config_dict is None:
+        prepare_custom_config_dict = {}
+    output_dtypes = prepare_custom_config_dict.get('output_dtypes', (torch.float,))
+
     def convert_to_interception_proxy(x):
         if isinstance(x, torch.Tensor):
             return x.as_subclass(QuantizationPrepareTensorProxy)  # type: ignore[arg-type]
@@ -114,28 +120,51 @@ def add_auto_observation(
             kwargs = kwargs if kwargs else {}
             hook_type = get_torch_function_hook_type(parent_module, func)
 
-            if first_call and hook_type is not HookType.OP_HOOKS:
-                qstate = getattr(parent_module, '_auto_quant_state', None)
-                if qstate:
-                    qstate.add_seen_op_type_without_op_hooks(func)
-
             if hook_type is HookType.OP_HOOKS:
-                qstate = parent_module._auto_quant_state  # type: ignore[attr-defined]
                 fqn = module_id_to_fqn[id(parent_module)] if parent_module else None
+                qstate = parent_module._auto_quant_state  # type: ignore[attr-defined]
                 if not first_call:
                     qstate.validate_cur_op(func)
                 # run "before" hook
-                args, kwargs = qstate.op_prepare_before_hook(
-                    func, args, kwargs, first_call, qtensor_id, fqn, parent_module)
+                if first_call:
+                    args, kwargs = qstate.first_call_op_prepare_before_hook(
+                        func, args, kwargs, qtensor_id, fqn, parent_module,
+                        OpQuantizeabilityType.QUANTIZEABLE)
+                else:
+                    args, kwargs = qstate.op_prepare_before_hook(
+                        func, args, kwargs)
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
-                output = qstate.op_prepare_after_hook(
-                    func, output, args, first_call, qtensor_id, parent_module,
-                    global_op_idx)
+                if first_call:
+                    output = qstate.first_call_op_prepare_after_hook(
+                        func, output, args, qtensor_id,
+                        OpQuantizeabilityType.QUANTIZEABLE)
+                else:
+                    output = qstate.op_prepare_after_hook(
+                        func, output, args, global_op_idx)
                 qstate.mark_cur_op_complete(func)
             else:
+                # Hook type is not HookType.OP_HOOKS, if first_call is True we
+                # record the DAG of non-quantizeable ops.
+
+                if first_call:
+                    qstate = getattr(parent_module, '_auto_quant_state', None)
+                    if qstate:
+                        fqn = module_id_to_fqn.get(id(parent_module), None) \
+                            if parent_module else None
+                        args, kwargs = qstate.first_call_op_prepare_before_hook(
+                            func, args, kwargs, qtensor_id, fqn, parent_module,
+                            OpQuantizeabilityType.NOT_QUANTIZEABLE)
+
                 output = super().__torch_function__(func, types, args, kwargs)
+
+                if first_call:
+                    qstate = getattr(parent_module, '_auto_quant_state', None)
+                    if qstate:
+                        output = qstate.first_call_op_prepare_after_hook(
+                            func, output, args, qtensor_id,
+                            OpQuantizeabilityType.NOT_QUANTIZEABLE)
 
             # TODO: is this right? Don't really understand this
             if output is NotImplemented:
@@ -206,14 +235,6 @@ def add_auto_observation(
 
                     hook_type = get_module_hook_type(parent_module, cur_module)
 
-                    if first_call and hook_type is not HookType.OP_HOOKS and \
-                            parent_module is not None:
-                        parent_qstate_fc = getattr(
-                            parent_module, '_auto_quant_state', None)
-                        if parent_qstate_fc:
-                            parent_qstate_fc.add_seen_op_type_without_op_hooks(
-                                type(cur_module))
-
                     if hook_type is HookType.OP_HOOKS:
                         parent_qstate: AutoQuantizationState = \
                             parent_module._auto_quant_state  # type: ignore[union-attr, assignment]
@@ -229,11 +250,18 @@ def add_auto_observation(
                             global_disable_torch_function_override
                         global_disable_torch_function_override = True
 
-                        # mypy ignore is used instead of assert because this
-                        # runs on every forward and assert has a performance cost
-                        args, kwargs = parent_qstate.op_prepare_before_hook(
-                            cur_module, args, kwargs, first_call, qtensor_id,
-                            fqn, cur_module)  # type: ignore[arg-type]
+                        if first_call:
+                            # mypy ignore is used instead of assert because this
+                            # runs on every forward and assert has a performance cost
+                            args, kwargs = parent_qstate.first_call_op_prepare_before_hook(
+                                cur_module, args, kwargs, qtensor_id,
+                                fqn, cur_module,  # type: ignore[arg-type]
+                                OpQuantizeabilityType.QUANTIZEABLE)
+                        else:
+                            # mypy ignore is used instead of assert because this
+                            # runs on every forward and assert has a performance cost
+                            args, kwargs = parent_qstate.op_prepare_before_hook(
+                                cur_module, args, kwargs)  # type: ignore[arg-type]
 
                         # original forward
                         output = orig_module_call(self, *args, **kwargs)
@@ -243,10 +271,13 @@ def add_auto_observation(
                             old_global_disable_torch_function_override
 
                         # after hooks
-                        # TODO is it correct to call_cur_module twice here?
-                        output = parent_qstate.op_prepare_after_hook(
-                            cur_module, output, args, first_call, qtensor_id,
-                            cur_module, global_op_idx)
+                        if first_call:
+                            output = parent_qstate.first_call_op_prepare_after_hook(
+                                cur_module, output, args, qtensor_id,
+                                OpQuantizeabilityType.QUANTIZEABLE)
+                        else:
+                            output = parent_qstate.op_prepare_after_hook(
+                                cur_module, output, args, global_op_idx)
                         parent_qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
@@ -259,16 +290,39 @@ def add_auto_observation(
                         output = orig_module_call(self, *args, **kwargs)
 
                         # after hooks
-                        output = cur_qstate.outputs_prepare_hook(
-                            output, first_call, qtensor_id)
+                        if first_call:
+                            output = cur_qstate.first_call_outputs_prepare_hook(
+                                output, qtensor_id)
+                        else:
+                            output = cur_qstate.outputs_prepare_hook(output)
+
                         cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
+                        if first_call and parent_module is not None:
+                            parent_qstate_fc = getattr(
+                                parent_module, '_auto_quant_state', None)
+                            if parent_qstate_fc:
+                                args, kwargs = \
+                                    parent_qstate_fc.first_call_op_prepare_before_hook(
+                                        cur_module, args, kwargs, qtensor_id, fqn,
+                                        cur_module,
+                                        OpQuantizeabilityType.NOT_QUANTIZEABLE)
+
                         output = orig_module_call(self, *args, **kwargs)
                         # if this fp32 was inplace, make sure to set the output dtype
                         # back to torch.float
                         if hasattr(output, '_qtensor_info'):
                             del output._qtensor_info
+
+                        if first_call and parent_module is not None:
+                            parent_qstate_fc = getattr(
+                                parent_module, '_auto_quant_state', None)
+                            if parent_qstate_fc:
+                                output = \
+                                    parent_qstate_fc.first_call_op_prepare_after_hook(
+                                        cur_module, output, args, qtensor_id,
+                                        OpQuantizeabilityType.NOT_QUANTIZEABLE)
 
                     else:
                         output = orig_module_call(self, *args, **kwargs)
@@ -298,6 +352,8 @@ def add_auto_observation(
                             for _, child_child in child.named_modules():
                                 leaves.add(child_child)
 
+                    self._fqn_to_auto_quant_state_map = AutoQuantizationStateModuleDict()
+
                     for fqn, v in named_modules:
 
                         # fqn is the global FQN, i.e. 'foo.bar.baz'
@@ -314,17 +370,49 @@ def add_auto_observation(
                         if v is self:
                             # for the top level module only, specify input
                             # and output dtypes
-                            v._auto_quant_state = AutoQuantizationState(
+                            auto_quant_state = AutoQuantizationState(
                                 qconfig_dict, fqn,
                                 input_dtypes, output_dtypes)
-                            pass
                         else:
-                            v._auto_quant_state = AutoQuantizationState(
+                            auto_quant_state = AutoQuantizationState(
                                 qconfig_dict, fqn)
+
+                        # The code below registers the auto_quant_state object
+                        # of the child in the module hierarchy of the parent,
+                        # and adds the auto_quant_state object to the child
+                        # with a raw __setattr__, without registering it in
+                        # the module hierarchy of the child.
+                        # This is solving the problem of both storing extra state
+                        # (observers) as well as not modifying the meaning of user
+                        # code in child modules which iterates over all module
+                        # children.
+                        #
+                        # This narrows down the issue of dynamically adding
+                        # children to only affect the top level module and not
+                        # the children.
+
+                        # On the parent, register this module in the FQN map
+                        fqn_to_use_for_key = \
+                            get_fqn_valid_for_module_dict_key(fqn)
+                        self._fqn_to_auto_quant_state_map[fqn_to_use_for_key] = \
+                            auto_quant_state
+                        # On the child, manually set the attribute without
+                        # going through the `torch.nn.Module.__setattr__`
+                        # function, to prevent this object from appearing in
+                        # the child's module hierarchy.
+                        object.__setattr__(
+                            v, '_auto_quant_state', auto_quant_state)
 
                 global_op_idx[0] = 0
 
                 output = super().__call__(*new_args, **new_kwargs)
+
+                if first_call:
+                    for _, v in self.named_modules():
+                        if hasattr(v, '_auto_quant_state'):
+                            v._auto_quant_state.match_fusion_patterns()
+                            v._auto_quant_state.insert_observers(v)
+
                 return output
             finally:
                 torch.nn.Module.__call__ = orig_module_call
@@ -629,6 +717,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 # checking the fix into `torch.nn.Sequential` to avoid the patch.
 def _nn_sequential_patched_forward(cls, input):
     for module in cls:
-        if not isinstance(module, AutoQuantizationState):
+        if not isinstance(module, AutoQuantizationStateModuleDict):
             input = module(input)
     return input

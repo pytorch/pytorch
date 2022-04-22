@@ -308,7 +308,7 @@ c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
 #else
   // TODO: caffe2::PThreadPool only provides a data-parallel API.
   // Task parallelism is not currently supported.
-  auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(c10::dynT<NoneType>());
   func();
   future->markCompleted();
   return future;

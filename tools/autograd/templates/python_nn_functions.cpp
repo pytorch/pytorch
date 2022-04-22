@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // ${generated_comment}
 
 #include "torch/csrc/Device.h"
@@ -11,6 +12,12 @@
 #include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/structseq.h"
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+$ops_headers
+#endif
 
 using at::Tensor;
 using at::Scalar;
@@ -36,7 +43,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {
-    return handle_torch_function(r, args, kwargs, THPNNVariableFunctionsModule, "torch.nn");
+    return handle_torch_function(r, args, kwargs, THPNNVariableFunctionsModule, "torch.nn", "_parse_to");
   }
   auto parsed = parse_to_conversion(r, /*allow_copy*/ false); // we don't want copy for nn.Module.to
   auto& device = std::get<0>(parsed);
