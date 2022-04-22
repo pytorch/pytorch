@@ -338,7 +338,6 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
   // currently, limit padding support to groups=1 (ungrouped conv)
   // TODO: implement this for groups > 1; should be straightforward since we're only padding a single dimension
   if (act.size(1) % 4 != 0) {
-    TORCH_CHECK(groups_ == 1, "Quantized cudnn conv2d is currenty limited to groups = 1; received groups =", groups_);
     int8_t num_slices = 4 - act.size(1) % 4; // number of slices we need to pad
     auto act_padded = at::pad(act, {0, 0, 0, 0, 0, num_slices, 0, 0}, "constant", 0);
     apply_impl_helper<kReluFused>(
