@@ -360,7 +360,7 @@ class TestPublicBindings(TestCase):
                     looks_public_str = "" if looks_public else " NOT"
                     failure_list.append(f"  - Does{looks_public_str} look public: {why_looks_public}")
                     # Swap the str below to avoid having to create the NOT again
-                    failure_list.append(f"  - You can do either of these two things to fix this problem:")
+                    failure_list.append("  - You can do either of these two things to fix this problem:")
                     failure_list.append(f"    - To make it{looks_public_str} public: {fix_is_public}")
                     failure_list.append(f"    - To make it{is_public_str} look public: {fix_looks_public}")
 
