@@ -26,7 +26,7 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsuppo
                                  skipIfNoLapack, disableScriptTest, skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Union
 from torch import Tensor
 
 from torchvision import ops
@@ -284,8 +284,8 @@ def _init_test_roi_heads_faster_rcnn():
     return roi_heads
 
 def _construct_tensor_for_quantization_test(shape: Tuple[int],
-                                            offset: Optional[Any[int, float]] = None,
-                                            max_val: Optional[Any[int, float]] = None
+                                            offset: Optional[Union[int, float]] = None,
+                                            max_val: Optional[Union[int, float]] = None
 ) -> torch.Tensor:
     """Helper function to generate weights and test inputs in a deterministic way.
 
@@ -295,8 +295,8 @@ def _construct_tensor_for_quantization_test(shape: Tuple[int],
 
     Args:
         shape (Tuple[int]): Shape for tensor to construct.
-        offset (Optional[Any[int, float]]): Offset to be added to the generated tensor.
-        max_val (Optional[Any[int, float]]): If any element within tensor has a larger absolute value than
+        offset (Optional[Union[int, float]]): Offset to be added to the generated tensor.
+        max_val (Optional[Union[int, float]]): If any element within tensor has a larger absolute value than
             max_val, the tensor will be scaled by max_val / tensor.abs().max(). This step is done after
             applying offset.
     """
