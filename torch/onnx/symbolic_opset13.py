@@ -6,7 +6,8 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import (overload_by_arg_count, _maybe_cast_reduce_op_input,
-                                        nonzero, expand, zeros, ones, size)
+                                        nonzero, expand, zeros, ones, size, linear, conv2d,
+                                        relu)
 from torch.onnx.symbolic_opset11 import unsqueeze
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -417,3 +418,43 @@ def diagonal(g, self, offset, dim1, dim2):
     final_overrun_ = zeros(else_block, gather_shape, 6, None, None)
     _add_output_to_block(else_block, final_overrun_)
     return if_op
+
+class Quantized:
+    """
+    https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+    """
+    domain = "quantized"
+
+    @staticmethod
+    def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
+        input, input_scale, _, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _, axis = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale, axis)
+        bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = linear(g, input, weight, bias)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def conv2d(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
+        input, input_scale, _, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _, axis = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale, axis)
+        bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def conv2d_relu(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
+        input, input_scale, _, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _, axis = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale, axis)
+        bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+        output = relu(g, output)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
