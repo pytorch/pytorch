@@ -300,6 +300,12 @@ def embedding_bag(g,
 
 @parse_args("v", "v", "v", "i", "i")
 def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128, quant_max=127):
+    # NOTE: (0, 127) is a special case. PyTorch restricts activations to be in the range (0, 127).
+    #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
+    if (quant_min, quant_max) == (0, 127):
+        sym_help._onnx_opset_unsupported_detailed(
+            "fake_quantize_per_tensor_affine", 10, 13,
+            "Quantize range (0, 127) not supported, requires opset 13 Clip")
     if (quant_min, quant_max) not in [(0, 255), (-128, 127)]:
         raise RuntimeError(
             "For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
