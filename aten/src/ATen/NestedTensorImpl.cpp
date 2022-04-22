@@ -8,8 +8,7 @@
 namespace at {
 namespace native {
 
-inline std::vector<int64_t> construct_opt_sizes(
-    const at::Tensor& sizes) {
+inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   if (sizes.dim() == 0) {
     return std::vector<int64_t>();
   }
@@ -18,11 +17,13 @@ inline std::vector<int64_t> construct_opt_sizes(
     size_t nested_dim = result.size();
     int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
     result.resize(nested_dim + sizes.size(1));
-    for (int64_t i = 0; i < sizes.size(1); i++) {
+    int64_t sizes_size_0 = sizes.sizes()[0];
+    int64_t sizes_size_1 = sizes.sizes()[1];
+    for (const auto i : c10::irange(sizes_size_1)) {
       result[nested_dim + i] = sizes_ptr[i];
     }
-    for (int64_t j = 0; j < sizes.size(1); j++) {
-      for (int64_t i = 0; i < sizes.size(0); i++) {
+    for (const auto j : c10::irange(sizes_size_1)) {
+      for (const auto i : c10::irange(sizes_size_0)) {
         if (result[nested_dim + j] &&
             (result[nested_dim + j] != sizes_ptr[i * sizes.size(1) + j])) {
           result[nested_dim + j] = -1;
