@@ -5,22 +5,35 @@ IR format.  These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
 
-import torch
-import torch.jit
-import torch.autograd
-import torch.serialization
-import re
 import collections
 import contextlib
 import copy
-import numbers
-import warnings
 import inspect
+import numbers
+import re
+import warnings
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+import torch
+import torch.autograd
+import torch.jit
+import torch.serialization
+from torch._C import (
+    ListType,
+    OptionalType,
+    _check_onnx_proto,
+    _propagate_and_assign_input_shapes,
+)
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
-from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, SymbolicContext, TrainingMode, CheckerError
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
-from typing import List, Tuple, Union
+from torch.onnx import (
+    ONNX_ARCHIVE_MODEL_PROTO_NAME,
+    CheckerError,
+    ExportTypes,
+    OperatorExportTypes,
+    SymbolicContext,
+    TrainingMode,
+)
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
@@ -190,7 +203,11 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_fuse_addmm(graph)
     torch._C._jit_pass_lint(graph)
-    from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version, is_caffe2_aten_fallback
+    from torch.onnx.symbolic_helper import (
+        _export_onnx_opset_version,
+        _onnx_shape_inference,
+        is_caffe2_aten_fallback,
+    )
 
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lower_all_tuples(graph)
@@ -534,6 +551,7 @@ def _model_to_graph(model, args, verbose=False,
     """
     # TODO: can we simplify this to always return a tuple of Tensor or None?
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
+
     # Special case for common case of passing a single Tensor
     if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args, )
@@ -612,8 +630,11 @@ def export_to_pretty_string(model, args, export_params=True, verbose=False, trai
                             export_type=ExportTypes.PROTOBUF_FILE, google_printer=False, opset_version=None,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
                             do_constant_folding=True, dynamic_axes=None):
-    from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
-    from torch.onnx.symbolic_helper import _set_operator_export_type
+    from torch.onnx.symbolic_helper import (
+        _default_onnx_opset_version,
+        _set_operator_export_type,
+        _set_opset_version,
+    )
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     if custom_opsets is None:
@@ -654,7 +675,10 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
         Tuple[torch._C.Graph, List[str]], where the list includes the names
           of the unconvertible ops.
     """
-    from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+    from torch.onnx.symbolic_helper import (
+        _default_onnx_opset_version,
+        _set_opset_version,
+    )
     opset_version = opset_version or _default_onnx_opset_version
     _set_opset_version(opset_version)
     # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
@@ -761,8 +785,11 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         from torch.onnx.symbolic_helper import _set_onnx_shape_inference
         _set_onnx_shape_inference(onnx_shape_inference)
 
-        from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
-        from torch.onnx.symbolic_helper import _set_operator_export_type
+        from torch.onnx.symbolic_helper import (
+            _default_onnx_opset_version,
+            _set_operator_export_type,
+            _set_opset_version,
+        )
         if opset_version is None:
             opset_version = _default_onnx_opset_version
         if not operator_export_type:
@@ -993,11 +1020,14 @@ def _newNode(g, opname, outputs, *args, **kwargs):
     return n
 
 
-def _graph_op(g, opname, *raw_args, **kwargs):
-    r"""
-    Create an ONNX operator "opname", taking "args" as inputs and attributes
-    "kwargs"; returning the node representing the single output of this operator
-    (see the `outputs` keyword argument for multi-return nodes).
+def _graph_op(
+    g: torch._C.Graph,
+    opname: str,
+    *raw_args: torch._C.Node,
+    outputs: int = 1,
+    **kwargs,
+) -> Union[torch._C.Value, Tuple[torch._C.Value, ...]]:
+    r"""Creates an ONNX operator "opname", taking "args" as inputs and attributes "kwargs".
 
     The set of operators and the inputs/attributes they take
     is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
@@ -1005,24 +1035,27 @@ def _graph_op(g, opname, *raw_args, **kwargs):
     This function is monkey-patched onto Graph.
 
     Args:
-        opname (string): The ONNX operator name, e.g., `Abs` or `Add`.
-        args (Node...): The inputs to the operator; usually provided
+        g: The torch graph.
+        opname: The ONNX operator name, e.g., `Abs` or `Add`.
+        raw_args: The inputs to the operator; usually provided
             as arguments to the `symbolic` definition.
-        kwargs: The attributes of the ONNX operator, with keys named
+        outputs: The number of outputs this operator returns.
+            By default an operator is assumed to return a single output.
+            If `outputs` is greater than one, this functions returns a tuple
+            of output `Node`, representing each output of the ONNX operator
+            in positional.
+        kwargs: The attributes of the ONNX operator, whose keys are named
             according to the following convention: `alpha_f` indicates
             the `alpha` attribute with type `f`.  The valid type specifiers are
             `f` (float), `i` (int), `s` (string) or `t` (Tensor).  An attribute
             specified with type float accepts either a single float, or a
             list of floats (e.g., you would say `dims_i` for a `dims` attribute
             that takes a list of integers).
-        outputs (int, optional):  The number of outputs this operator returns;
-            by default an operator is assumed to return a single output.
-            If `outputs` is greater than one, this functions returns a tuple
-            of output `Node`, representing each output of the ONNX operator
-            in positional.
-    """
-    outputs = kwargs.pop("outputs", 1)
 
+    Returns:
+        The node representing the single output of this operator (see the `outputs`
+        keyword argument for multi-return nodes).
+    """
     # Filter out None attributes, this can be convenient client side because
     # now they can pass through None attributes, and have them not show up
     kwargs = dict((k, v) for k, v in kwargs.items() if v is not None)
@@ -1040,12 +1073,14 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     if _onnx_shape_inference:
-        from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
+        from torch.onnx.symbolic_helper import (
+            _export_onnx_opset_version as opset_version,
+        )
         torch._C._jit_pass_onnx_node_shape_type_inference(n, _params_dict, opset_version)
 
     if outputs == 1:
         return n.output()
-    return tuple(o for o in n.outputs())
+    return tuple(n.outputs())
 
 
 def _block_op(b, opname, *args, **kwargs):
@@ -1089,7 +1124,23 @@ def _add_output_to_block(block, value):
 # inplace annotations, but we are losing information this way.
 
 
-def _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type):
+def _find_symbolic_in_registry(
+    domain: str,
+    op_name: str,
+    opset_version: int,
+    operator_export_type: OperatorExportTypes,
+) -> Optional[Callable]:
+    """Looks up for the symbolic funtion in the registry.
+
+    Args:
+        domain: The domain of the symbolic function.
+        op_name: The name of the op.
+        opset_version: Currect opset used.
+        operator_export_type: An enum in OperatorExportTypes.
+
+    Returns:
+        The symbolic function if found, None otherwise.
+    """
     import torch.onnx.symbolic_registry as sym_registry
     if not sym_registry.is_registered_op(op_name, domain, opset_version):
         if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
@@ -1115,10 +1166,11 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
     # NB: Returning None means the node gets cloned as is into
     # the new graph
     try:
-        import torch
-        from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
-        from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
         import torch.onnx.symbolic_registry as sym_registry
+        from torch.onnx.symbolic_helper import (
+            _export_onnx_opset_version as opset_version,
+        )
+        from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
 
         sym_registry.register_version("", opset_version)
 
@@ -1257,7 +1309,7 @@ def get_ns_op_name_from_custom_op(symbolic_name):
 def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
     import torch.onnx.symbolic_registry as sym_registry
-    from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
+    from torch.onnx.symbolic_helper import _onnx_main_opset, _onnx_stable_opsets
 
     for version in _onnx_stable_opsets + [_onnx_main_opset]:
         if version >= opset_version:
@@ -1267,7 +1319,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
 def unregister_custom_op_symbolic(symbolic_name, opset_version):
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
     import torch.onnx.symbolic_registry as sym_registry
-    from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
+    from torch.onnx.symbolic_helper import _onnx_main_opset, _onnx_stable_opsets
 
     for version in _onnx_stable_opsets + [_onnx_main_opset]:
         if version >= opset_version:

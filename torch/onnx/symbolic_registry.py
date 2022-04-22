@@ -1,18 +1,22 @@
-import warnings
 import importlib
-from inspect import getmembers, isfunction
-from typing import Dict, Tuple, Any, Union
+import inspect
+import warnings
+from typing import Any, Dict, Tuple, Union
 
-# The symbolic registry "_registry" is a dictionary that maps operators
-# (for a specific domain and opset version) to their symbolic functions.
-# An operator is defined by its domain, opset version, and opname.
-# The keys are tuples (domain, version), (where domain is a string, and version is an int),
-# and the operator's name (string).
-# The map's entries are as follows : _registry[(domain, version)][op_name] = op_symbolic
-_registry: Dict[Tuple[str, int], Dict] = {}
+from torch.onnx.symbolic_helper import _onnx_main_opset, _onnx_stable_opsets
+
+"""
+The symbolic registry "_registry" is a dictionary that maps operators
+(for a specific domain and opset version) to their symbolic functions.
+An operator is defined by its domain, opset version, and opname.
+The keys are tuples (domain, version), (where domain is a string, and version is an int),
+and the operator's name (string).
+The map's entries are as follows : _registry[(domain, version)][op_name] = op_symbolic
+"""
+_registry: Dict[Tuple[str, int], Dict[str, Any]] = {}
 
 _symbolic_versions: Dict[Union[int, str], Any] = {}
-from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
+
 for opset_version in _onnx_stable_opsets + [_onnx_main_opset]:
     module = importlib.import_module("torch.onnx.symbolic_opset{}".format(opset_version))
     _symbolic_versions[opset_version] = module
@@ -61,15 +65,15 @@ def register_ops_in_version(domain, version):
 
 
 def get_ops_in_version(version):
-    members = getmembers(_symbolic_versions[version])
+    members = inspect.getmembers(_symbolic_versions[version])
     domain_opname_ops = []
     for obj in members:
         if isinstance(obj[1], type) and hasattr(obj[1], "domain"):
-            ops = getmembers(obj[1], predicate=isfunction)
+            ops = inspect.getmembers(obj[1], predicate=inspect.isfunction)
             for op in ops:
                 domain_opname_ops.append((obj[1].domain, op[0], op[1]))  # type: ignore[attr-defined]
 
-        elif isfunction(obj[1]):
+        elif inspect.isfunction(obj[1]):
             if obj[0] == "_len":
                 obj = ("len", obj[1])
             if obj[0] == "_list":
