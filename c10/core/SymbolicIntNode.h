@@ -13,6 +13,7 @@ class C10_API SymbolicIntNode
  public:
   c10::SymInt toSymInt();
   virtual ~SymbolicIntNode(){};
+  virtual SymbolicIntNode* add(SymbolicIntNode* other) = 0;
   virtual std::ostream& operator<<(std::ostream& os) {
     return os;
   };
@@ -22,6 +23,7 @@ class C10_API SymIntTable {
  public:
   uint64_t addNode(std::shared_ptr<SymbolicIntNode> sin);
   std::shared_ptr<SymbolicIntNode> getNode(size_t index);
+  void clear();
 
  private:
   std::vector<std::shared_ptr<SymbolicIntNode>> nodes_;

@@ -1,8 +1,10 @@
 #include <c10/util/irange.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/Size.h>
 
 #include <string>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_tuples.h>
@@ -56,6 +58,9 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
       if (THPUtils_checkLong(item)) {
         continue;
       }
+      if (torch::is_symint_node(item)) {
+        continue;
+      }
       if (torch::jit::tracer::isTracing() && isTracedZeroDimVar(item)) {
         continue;
       }
@@ -86,7 +91,12 @@ static PyObject * THPSize_repr(THPSize *self)
     if (i != 0) {
       repr += ", ";
     }
-    repr += std::to_string(THPUtils_unpackLong(PyTuple_GET_ITEM(self, i)));
+    auto item = PyTuple_GET_ITEM(self, i);
+    auto ih = py::handle(item);
+    
+    repr += torch::is_symint_node(ih) ? 
+      std::string(py::str(ih)) :
+      std::to_string(THPUtils_unpackLong(PyTuple_GET_ITEM(self, i)));
   }
   repr += "])";
   return THPUtils_packString(repr);

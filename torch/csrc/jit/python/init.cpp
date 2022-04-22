@@ -1,5 +1,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
+#include <pybind11/pytypes.h>
 
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/api/module.h>
@@ -95,6 +96,7 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
+#include <c10/core/SymbolicIntNode.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
@@ -106,6 +108,7 @@
 #include <pybind11/functional.h>
 #include <pybind11/iostream.h>
 #include <pybind11/operators.h>
+#include <pybind11/cast.h>
 
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <memory>
@@ -122,6 +125,24 @@ using ::c10::Argument;
 using ::c10::FunctionSchema;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
+
+class PythonSymbolicIntNode: public c10::SymbolicIntNode {
+public:
+  PythonSymbolicIntNode(py::object pyobj): 
+    c10::SymbolicIntNode() {
+      pyobj_ = std::make_shared<c10::SafePyObject>(pyobj.release().ptr(), getPyInterpreter());
+    };
+
+  virtual SymbolicIntNode* add(SymbolicIntNode* other) override {
+    auto pother = dynamic_cast<PythonSymbolicIntNode*>(other);
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr("__add__")(pother->getPyObj());
+    return new PythonSymbolicIntNode(r);
+  }
+
+  py::handle getPyObj() { return py::handle(pyobj_.get()->ptr(getPyInterpreter())); }
+  std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
+};
 
 namespace {
 
@@ -1058,6 +1079,31 @@ void initJITBindings(PyObject* module) {
         }
       });
 
+  py::class_<c10::SymbolicIntNode, std::shared_ptr<c10::SymbolicIntNode>>(m, "SymbolicIntNode")
+    .def_static("new_symint", [](py::object obj) -> std::shared_ptr<c10::SymbolicIntNode> {
+      return std::make_shared<PythonSymbolicIntNode>(obj);
+    })
+    .def_static("isinstance", [](py::object obj, bool convert) -> bool {
+      return pybind11::detail::type_caster<std::shared_ptr<c10::SymbolicIntNode>>().load(obj, convert);
+      //return false;
+    })
+    .def_static("types", [](py::object obj) {
+      auto tp_obj = obj.get_type();
+      auto tp_symn = py::type::of<c10::SymbolicIntNode>();
+      //auto tp_psymn = py::type::of<PythonSymbolicIntNode>();
+
+      std::cerr << " tp_obj " << tp_obj << std::endl;
+      std::cerr << " tp_symn " << tp_symn << std::endl;
+      //std::cerr << " tp_psymn " << tp_psymn << std::endl;
+      std::cerr << " tp_obj == tp_symn " << (tp_symn == tp_obj) << std::endl;
+      //std::cerr << " tp_obj == tp_psymn " << (tp_psymn == tp_obj) << std::endl;
+
+      //return false;
+    })
+    .def("__add__", [](std::shared_ptr<c10::SymbolicIntNode> a, std::shared_ptr<c10::SymbolicIntNode> b) {
+      return std::shared_ptr<c10::SymbolicIntNode> (a->add(b.get()));
+    });
+
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
       .def("__repr__", [](CompleteArgumentSpec& self) {
@@ -1683,7 +1729,13 @@ void initJITBindings(PyObject* module) {
   // because otherwise prim::Print() instruction won't work for JIT modules.
   auto atexit = py::module_::import("atexit");
   atexit.attr("register")(
-      py::cpp_function([]() { setPrintHandler(getDefaultPrintHandler()); }));
+      py::cpp_function([]() { 
+        setPrintHandler(getDefaultPrintHandler());
+        // we need to clear SymIntTable until we have python
+        // otherwise python classes are already deregistered
+        
+        //c10::getSymIntTable().clear();
+  }));
 }
 } // namespace jit
 } // namespace torch

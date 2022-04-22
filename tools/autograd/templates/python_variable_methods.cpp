@@ -95,6 +95,54 @@ static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_sym_size(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+
+  // TODO: implement parsing for `sym_size(int64_t dim)` overload.
+    auto& self_ = THPVariable_Unpack(self);
+    auto sym_sizes = self_.sym_sizes();
+
+    THPObjectPtr ret{PyTuple_New(sym_sizes.size())};
+    if (!ret) throw python_error();
+
+    for (auto i: c10::irange(sym_sizes.size())) {
+      auto si = sym_sizes[i];
+      if (si.is_symbolic()) {
+        auto py_symint = py::cast(si.toSymbolicIntNode()).release().ptr();
+        PyTuple_SET_ITEM(ret.get(), i, py_symint);
+      } else {
+        PyTuple_SET_ITEM(ret.get(), i, wrap(si.expect_int()));
+      }
+    }
+    return ret.release();
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * pack_sym_size(Tensor self_) {
+  HANDLE_TH_ERRORS
+
+    auto sym_sizes = self_.sym_sizes();
+
+    auto ret = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, sym_sizes.size()));
+    if (!ret) throw python_error();
+
+    for (auto i: c10::irange(sym_sizes.size())) {
+      auto si = sym_sizes[i];
+      if (si.is_symbolic()) {
+        auto py_symint = py::cast(si.toSymbolicIntNode()).release().ptr();
+        PyTuple_SET_ITEM(ret.get(), i, py_symint);
+      } else {
+        PyTuple_SET_ITEM(ret.get(), i, wrap(si.expect_int()));
+      }
+    }
+    return ret.release();
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -115,12 +163,16 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
     if (jit::tracer::isTracing()) {
       return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
     } else {
+      auto symint = c10::SymInt(self_.size(r.toInt64(0)));
+      if (symint.is_symbolic()) {
+        return py::cast(symint.toSymbolicIntNode()).release().ptr();
+      }
       return wrap(self_.size(r.toInt64(0)));
     }
   } else if (r.idx == 1) {
-    // we can't do the normal wrapping here because IntArrayRef maps to both
-    // torch.Size and tuple in python.
-    return THPSize_New(self_);
+    // TODO: this doesn't quite work yet since Size expects a tupe of ints.
+    // sym_size() does work though
+    return pack_sym_size(self_);
   }
   else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {
@@ -1276,6 +1328,7 @@ PyMethodDef variable_methods[] = {
   {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, NULL},
   {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"sym_size", castPyCFunctionWithKeywords(THPVariable_sym_size), METH_VARARGS | METH_KEYWORDS, NULL},
   {"_storage", THPVariable_storage, METH_NOARGS, NULL},
   {"storage_offset", THPVariable_storage_offset, METH_NOARGS, NULL},
   {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, NULL},

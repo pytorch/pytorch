@@ -605,22 +605,90 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // data
   // TODO: for_blob produces non-resizable tensors, we might want this to be
   // resizable (have to define a custom allocator in that case)
-  auto data = at::for_blob(nullptr, r.intlist(1))
-        .strides(r.intlistOptional(2))
-        .storage_offset(r.toInt64Optional(3))
-        .context(nullptr, [](void *ctx) {})
-        .target_device(options.device())  // TODO: this shouldn't be necessary if it came from options
-        .options(options)
-        .make_tensor();
-  data.set_requires_grad(r.toBool(9));
+
+    // auto data = TensorMaker{data, sizes}
+    //   .strides(strides)
+    //   .deleter(deleter)
+    //   .options(options)
+    //   .target_device(target_device)
+    //   .make_tensor();
+
+    Tensor tensor;
+    {
+      AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
+      tracer::impl::NoTracerDispatchMode tracer_guard{};
+
+
+      // if (device_ == nullopt) {
+      //   device_ = globalContext().getDeviceFromPtr(data_, opts_.device().type());
+      // }
+
+      // if (opts_.device().has_index()) {
+      //   // clang-format off
+      //   TORCH_CHECK_VALUE(
+      //       opts_.device() == *device_,
+      //       "Specified device ", opts_.device(), " does not match device of data ", *device_);
+      //   // clang-format on
+      // }
+
+      std::size_t size_bytes = 0;
+
+      // DataPtr data_ptr{};
+      // if (deleter_) {
+      //   data_ptr = makeDataPtrFromDeleter();
+      // } else {
+      //   data_ptr = makeDataPtrFromContext();
+      // }
+
+
+      Storage storage{Storage::use_byte_size_t{}, size_bytes, at::DataPtr{}};
+
+      // shouldn't dispatch key always be PythonKey for us
+      // if we are inlining this we should be able to hardcode it?
+      tensor = at::detail::make_tensor<TensorImpl>(
+          std::move(storage), options.computeDispatchKey(), options.dtype());
+
+        auto sym_sizes = r.symintlist(1);
+        auto int_sym_sizes = c10::fmap(sym_sizes, [](c10::SymInt s) {
+          return s.data();
+        });
+        TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+
+        tensor_impl->set_sizes_strides_policy(TensorImpl::SizesStridesPolicy::CustomSizes);
+
+        auto strides = r.intlistOptional(2);
+        auto strides_ref = static_cast<c10::optional<c10::IntArrayRef>>(strides);
+        if (strides_ref) {
+          tensor_impl->set_sizes_and_strides(int_sym_sizes, *strides_ref);
+        } else {
+          // TODO: this also needs to be updated
+          tensor_impl->set_sizes_contiguous(int_sym_sizes);
+        }
+
+        auto storage_offset = r.toInt64Optional(3);
+        if (storage_offset) {
+          tensor_impl->set_storage_offset(*storage_offset);
+        }
+      
+      tensor.set_requires_grad(r.toBool(9));
+    }
+
+  // auto data = at::for_blob(nullptr, r.symintlist(1))
+  //       .strides(r.intlistOptional(2))
+  //       .storage_offset(r.toInt64Optional(3))
+  //       .context(nullptr, [](void *ctx) {})
+  //       .target_device(options.device())  // TODO: this shouldn't be necessary if it came from options
+  //       .options(options)
+  //       .make_tensor();
+
 
   if (r.toBool(10)) {
-    data.unsafeGetTensorImpl()->set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
+    tensor.unsafeGetTensorImpl()->set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomStrides);
   }
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      std::move(data),
+      std::move(tensor),
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }

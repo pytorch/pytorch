@@ -582,8 +582,27 @@ static bool is_int_or_symint(PyObject* obj) {
 }
 
 static bool is_int_or_symint_list(PyObject* obj, int broadcast_size) {
-  // TODO: add a check for SymbolicIntNode
-  return is_int_list_(obj, broadcast_size);
+
+  if (PyTuple_Check(obj) || PyList_Check(obj)) {
+    if (PySequence_Size(obj) == 0) {
+      return true;
+    }
+    auto item = py::reinterpret_steal<py::object>(
+        PySequence_GetItem(obj, 0));
+
+    if (THPUtils_checkIndex(item.ptr()) || is_symint_node(item)) {
+      return true;
+    }
+    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+    // in an intlist argument. Even float or complex scalar tensors.
+    return (
+        jit::tracer::isTracing() &&
+        THPVariable_Check(item.ptr()) &&
+        THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+  }
+  // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
+  return broadcast_size > 0 && THPUtils_checkLong(obj);
+
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.

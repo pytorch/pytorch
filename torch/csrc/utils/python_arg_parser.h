@@ -74,6 +74,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <c10/core/SymbolicIntNode.h>
 
 namespace torch {
 
@@ -389,9 +390,46 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
 
+static bool is_symint_node(py::handle obj) {
+      auto static tp_symn = py::type::of<c10::SymbolicIntNode>();
+      return obj.get_type().equal(tp_symn);
+}
+
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
-  auto intlist = intlistWithDefault(i, signature.params[i].default_intlist);
-  return c10::fmap(intlist, [](int64_t n) {return c10::SymInt(n); });
+
+  if (!args[i]) {
+    return c10::fmap(signature.params[i].default_intlist, [](int64_t di) {
+      return c10::SymInt(di);
+    });
+  }
+
+  const auto size1 = signature.params[i].size;
+  if (size1 > 0 && THPUtils_checkLong(args[i])) {
+    return std::vector<c10::SymInt>(size1, c10::SymInt(THPUtils_unpackIndex(args[i])));
+  }
+
+  PyObject* arg = args[i];
+  auto tuple = PyTuple_Check(arg);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
+  const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  std::vector<c10::SymInt> res;
+  res.reserve(size2);
+  for(const auto idx : c10::irange(size2)) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    try {
+      if (is_symint_node(py::handle(obj))) {
+        res.push_back(py::handle(obj).cast<c10::SymbolicIntNode*>()->toSymInt());
+      } else {
+        res.push_back(THPUtils_unpackIndex(obj));
+      }
+    } catch (const std::exception &e) {
+      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
+          signature.name.c_str(), signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
+    }
+  }
+
+  return res;
 }
 
 inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<int64_t> default_intlist) {

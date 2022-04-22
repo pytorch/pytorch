@@ -570,6 +570,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return strides_default();
   }
 
+  c10::SymIntArrayRef  sym_sizes() const {
+    return c10::SymIntArrayRef(reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.sizes_data()), sizes_and_strides_.size());
+  }
+
   /**
    * Return the size of a tensor at some dimension, wrapping the dimension if
    * necessary.
@@ -1331,6 +1335,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "set_sizes_contiguous() called on tensor with symbolic shape")
     sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(new_size));
 
+    if (C10_UNLIKELY(
+          sizes_strides_policy_ >=
+          static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      //TODO: should we have a func ptr where users can specify what to do
+      // with sizes?
+      return;        
+    }
+
     refresh_numel();
     empty_tensor_restride(MemoryFormat::Contiguous);
   }
@@ -1385,6 +1397,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         if (dim == 0)
           break;
       }
+    }
+
+    if (C10_UNLIKELY(
+          sizes_strides_policy_ >=
+          static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      //TODO: should we have a func ptr where users can specify what to do
+      // with sizes?
+      return;        
     }
 
     refresh_numel();
@@ -2272,6 +2292,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_sizes_strides_policy(SizesStridesPolicy policy) {
     sizes_strides_policy_ = static_cast<uint8_t>(policy);
   }
+
+ protected:
+
 
   Storage storage_;
 
