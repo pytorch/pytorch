@@ -2307,7 +2307,7 @@ class TestCase(expecttest.TestCase):
                 self.fail('no warning caught')
             self.assertTrue(any([type(w.message) is category for w in ws]))
             self.assertTrue(
-                any([re.match(pattern, str(w.message)) for w in ws]),
+                any([re.search(pattern, str(w.message)) for w in ws]),
                 f'{pattern}, {[w.message for w in ws if type(w.message) is category]}')
 
     def assertExpected(self, s, subname=None):

@@ -293,7 +293,7 @@ def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[s
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
     rc = _fetch_url("https://api.github.com/graphql", data={"query": query, "variables": kwargs}, reader=json.load)
     if "errors" in rc:
-        raise RuntimeError(f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}")
+        raise RuntimeError(f"GraphQL query {query} failed: {rc['errors']}")
     return cast(Dict[str, Any], rc)
 
 
@@ -643,7 +643,15 @@ def find_matching_merge_rule(pr: GitHubPR,
     reject_reason_score = 0
     for rule in rules:
         rule_name = rule.name
+        rule_approvers_set = set()
+        for approver in rule.approved_by:
+            if "/" in approver:
+                org, name = approver.split("/")
+                rule_approvers_set.update(gh_get_team_members(org, name))
+            else:
+                rule_approvers_set.add(approver)
         patterns_re = patterns_to_regex(rule.patterns)
+        approvers_intersection = approved_by.intersection(rule_approvers_set)
         non_matching_files = []
         for fname in changed_files:
             if not patterns_re.match(fname):
@@ -655,21 +663,6 @@ def find_matching_merge_rule(pr: GitHubPR,
                 reject_reason = (f"{num_matching_files} files matched rule {rule_name}, but there are still non-matching files: " +
                                  f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}")
             continue
-        # If rule needs approvers but PR has not been reviewed, skip it
-        if len(rule.approved_by) > 0 and len(approved_by) == 0:
-            if reject_reason_score < 10000:
-                reject_reason_score = 10000
-                reject_reason = f"Matched rule {rule_name}, but PR has not been reviewed yet"
-            continue
-
-        rule_approvers_set = set()
-        for approver in rule.approved_by:
-            if "/" in approver:
-                org, name = approver.split("/")
-                rule_approvers_set.update(gh_get_team_members(org, name))
-            else:
-                rule_approvers_set.add(approver)
-        approvers_intersection = approved_by.intersection(rule_approvers_set)
         # If rule requires approvers but they aren't the ones that reviewed PR
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             if reject_reason_score < 10000:
@@ -774,8 +767,6 @@ def main() -> None:
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
         gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
-        import traceback
-        traceback.print_exc()
 
 
 if __name__ == "__main__":

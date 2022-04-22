@@ -1099,11 +1099,11 @@ class TestTorchFunctionWarning(TestCase):
 
         a = Bad1()
         for a in (Bad1(), Bad2()):
-            with self.assertWarnsRegex(DeprecationWarning, "as a plain method is deprecated"):
+            with self.assertWarnsOnceRegex(DeprecationWarning, "as a plain method is deprecated"):
                 # Function that handles torch_function on the python side
                 torch.nn.functional.dropout(a)
 
-            with self.assertWarnsRegex(UserWarning, "as a plain method is deprecated"):
+            with self.assertWarnsOnceRegex(UserWarning, "as a plain method is deprecated"):
                 # Function that handles torch_function in C++
                 torch.abs(a)
 
