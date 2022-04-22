@@ -21322,6 +21322,10 @@ TEST_F(NVFuserTest, FusionVectorizeInputToOutput_CUDA) {
   ASSERT_ANY_THROW(fe.runFusion({t0}, {t1_misaligned}));
 }
 
+TEST_F(NVFuserTest, MultiThreadedExecution_CUDA) {
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
