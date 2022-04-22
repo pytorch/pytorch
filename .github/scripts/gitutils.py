@@ -200,7 +200,9 @@ class GitRepo:
                         # which creates a tracking problem
                         if (
                             "pytorch/pytorch" not in self.remote_url() or
-                            frc.commit_hash != "0a6a1b27a464ba5be5f587cce2ee12ab8c504dbf"
+                            frc.commit_hash not in {"0a6a1b27a464ba5be5f587cce2ee12ab8c504dbf",
+                                                    "6d0f4a1d545a8f161df459e8d4ccafd4b9017dbe",
+                                                    "edf909e58f06150f7be41da2f98a3b9de3167bca"}
                         ):
                             raise RuntimeError(f"Unexpected differences between {frc} and {toc}")
                     from_commits.remove(frc.commit_hash)
