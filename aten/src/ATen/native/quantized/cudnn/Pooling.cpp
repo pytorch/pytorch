@@ -187,6 +187,10 @@ Tensor quantized_max_pool2d_cudnn(
   AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with cuDNN support");
   return Tensor{}; // never reached, placates the compiler
 #endif // AT_CUDNN_ENABLED()
+#else // USE_CUDA
+  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with USE_CUDA support");
+  return Tensor{}; // never reached, placates the compiler
+#endif
 }
 
 // Keep the registry in the anonymous namespace.
@@ -214,4 +218,3 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace
 } // namespace native
 } // namespace at
-#endif // USE_CUDA
