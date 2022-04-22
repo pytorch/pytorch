@@ -2,6 +2,7 @@
 #include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/DispatchStub.h>
@@ -81,13 +82,32 @@ __host__ __device__ static inline c10::complex<T> conj_wrapper(c10::complex<T> v
 }
 
 // NB: Ignores the negative bit on tensors
+const char conj_name[] = "conj_kernel";
 void conj_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  auto common_dtype = iter.common_dtype();
+  if (common_dtype == kComplexHalf) {
+    using scalar_t = c10::complex<at::Half>;
+    #if AT_USE_JITERATOR()
+      static const auto conj_string = jiterator_stringify(
+        template <typename T>
+        T conj_kernel(T z) {
+          return std::conj(z);
+        }
+      );
+      jitted_gpu_kernel<conj_name, scalar_t, scalar_t, 1>(iter, conj_string);
+    #else
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return conj_wrapper(a);
+      });
+    #endif
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cuda", [&]() {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
           return conj_wrapper(a);
         });
-      });
+    });
+  }
 }
 
 REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda);
