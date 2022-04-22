@@ -101,6 +101,9 @@ class DispatchKey(Enum):
     SparseHIP = auto()
     SparseXPU = auto()
 
+    NestedTensorCPU = auto()
+    NestedTensorCUDA = auto()
+
     AutogradCPU = auto()
     AutogradCUDA = auto()
     AutogradXLA = auto()
@@ -151,7 +154,8 @@ dispatch_keys = [
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
     DispatchKey.CompositeExplicitAutograd,
-    DispatchKey.NestedTensor,
+    DispatchKey.NestedTensorCPU,
+    DispatchKey.NestedTensorCUDA,
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,
@@ -174,6 +178,7 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.QuantizedCUDA,
         DispatchKey.SparseCUDA,
         DispatchKey.SparseCsrCUDA,
+        DispatchKey.NestedTensorCUDA,
         DispatchKey.AutogradCUDA,
         DispatchKey.CUDATensorId,
     }
@@ -1115,9 +1120,8 @@ class FunctionSchema:
                 "Did you forget to mark an out argument as keyword-only?"
             )
         if self.arguments.out:
-            assert len(self.arguments.out) == len(
-                self.returns
-            ), "Must return as many arguments as there are out arguments"
+            assert len(self.arguments.out) == len(self.returns) or len(self.returns) == 0, \
+                "Must return as many arguments as there are out arguments, or no return at all"
         if self.name.name.inplace:
             # TODO: fixme
             if not is_foreach_op(str(self.name)):
