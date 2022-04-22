@@ -31,8 +31,6 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
 namespace {
 
-constexpr int kBytes = 8;
-
 // RAII helper class to manage NCCL group API and CUDA free mutex.
 // The destructor is allowed to throw since this helper class only
 // manages group and lock lifetimes.
@@ -440,10 +438,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
-    // Use the passed in timeout if provided, otherwise use the default
-    // opTimeout for each WorkNCCL object.
-    std::chrono::milliseconds workTimeout =
-        timeout == kNoTimeout ? opTimeout_ : timeout;
     // Wait for the operation to complete.
     while (!isCompleted()) {
       if (timedOut()) {
@@ -604,25 +598,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::call_once(initialize_ucc_lib_flag, [&]{
     uccLib_ = loadTorchUCC();
     if (uccLib_ != nullptr) {
-      std::cout << "[Rank " << rank_  << "] torch_ucc.so loaded";
+      LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     } else { // DEBUG
-      std::cout << "[Rank " << rank_  << "] loadTorchUCC failed.";
+      LOG(INFO) << "[Rank " << rank_  << "] loadTorchUCC failed.";
     }
   });
 
   if (uccLib_ != nullptr) {
-    std::cout << "[Rank " << rank_  << "] torch_ucc.so loaded";
+    LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     typedef c10::intrusive_ptr<ProcessGroup> fn(const c10::intrusive_ptr<Store>& store, int rank, int size);
     auto createProcessGroupUCC = reinterpret_cast<fn*>(uccLib_->sym("createProcessGroupUCC"));
     if (createProcessGroupUCC != nullptr) {
       uccPG_ = createProcessGroupUCC(store, rank_, size_);
-      std::cout << "[Rank " << rank_  << "] ProcessGroupUCC created.";
-    } else { // DEBUG
-      std::cout << "[Rank " << rank_  << "] createProcessGroupUCC not found.";
+      LOG(INFO) << "[Rank " << rank_  << "] ProcessGroupUCC created.";
     }
   }
-#else
-  std::cout << "PyTorch not built with USE_NCCL_WITH_UCC=1" << std::endl;
 #endif
 }
 
