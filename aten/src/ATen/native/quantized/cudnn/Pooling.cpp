@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
