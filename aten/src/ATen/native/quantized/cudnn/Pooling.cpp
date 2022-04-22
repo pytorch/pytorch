@@ -1,17 +1,14 @@
-#ifdef USE_CUDA
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
 #if AT_CUDNN_ENABLED()
-
 #include <ATen/native/cudnn/Macros.h>
-
-#if HAS_CUDNN_V8()
-
-#include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/cudnn/Types.h>
+#endif
+
+#include <ATen/ATen.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/core/ScalarType.h>
@@ -63,6 +60,8 @@ Tensor quantized_max_pool2d_cudnn(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+#if AT_CUDNN_ENABLED()
+#if HAS_CUDNN_V8()
   check_maxpool2d_params(
       kernel_size,
       stride,
@@ -179,6 +178,14 @@ Tensor quantized_max_pool2d_cudnn(
 
   // recall we casted our input and output to 4D if qx was 3D, so we recast it back to 3D prior to returning
   return (ndim == 3 ? qy.view(std::vector<int64_t>(output_shape.begin() + 1, output_shape.end())) : qy);
+#else // HAS_CUDNN_V8()
+  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with cuDNN v8 support");
+  return Tensor{}; // never reached, placates the compiler
+#endif // HAS_CUDNN_V8()
+#else // AT_CUDNN_ENABLED()
+  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with cuDNN support");
+  return Tensor{}; // never reached, placates the compiler
+#endif // AT_CUDNN_ENABLED()
 }
 
 // Keep the registry in the anonymous namespace.
@@ -206,7 +213,3 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace
 } // namespace native
 } // namespace at
-
-#endif  // HAS_CUDNN_V8
-#endif  // AT_CUDNN_ENABLED
-#endif  // USE_CUDA
