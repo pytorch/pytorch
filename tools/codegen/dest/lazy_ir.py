@@ -122,10 +122,9 @@ class GenLazyIR(ABC):
     def lowering_function(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
         return ""
 
-    def node_base_ctor_call(self, func: NativeFunction, schema: LazyIrSchema) -> str:
+    def node_base_ctor_call(self, schema: LazyIrSchema) -> str:
         # backends can customize the way the node base class constructor is called,
-        # as long as all of its arguments can be generated from information available in
-        # func/schema
+        # as long as all of its arguments can be generated from information available from the schema
         return f"{self.node_base}(torch::lazy::OpKind({aten_symbol(schema)})"
 
     def gen(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -193,7 +192,7 @@ class GenLazyIR(ABC):
 class {schema.node_name} : public {self.node_base} {{
  public:
   {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
-      : {self.node_base_ctor_call(func, schema)},
+      : {self.node_base_ctor_call(schema)},
               {{{base_ctor_value_args}}}, std::move(shapes),
               /* num_outputs */ {len(func.returns)},
               torch::lazy::MHash({scalar_hashes})){comma_if_scalar_initializers}
@@ -243,13 +242,6 @@ class GenLazyNativeFuncDefinition:
     metrics_counter: str = 'TORCH_LAZY_FN_COUNTER("lazy::")'
     create_tensor: str = "LazyTensor::Create"
     create_from_first_tensor: bool = False
-
-    def gen_shape_call(self, func: NativeFunction) -> str:
-        metadata = self.backend_index.get_kernel(func)
-        assert metadata is not None
-        schema = LazyIrSchema(func.func)
-        all_args = schema.filtered_args()
-        returns_length = len(schema.returns)
 
     def lazy_tensor_decls(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
@@ -341,7 +333,7 @@ class GenLazyNativeFuncDefinition:
         return f"""auto node = torch::lazy::MakeNode<{schema.node_name}>({node_ctor_input_str},
                                                                                       std::move(shapes));"""
 
-    def create_lazy_tensor(self, first_tensor_name):
+    def create_lazy_tensor(self, first_tensor_name: str) -> str:
         # xla uses an instance method for tensor creation, for the time being
         if self.create_from_first_tensor:
             # TODO(whc) remove this if XLA switches to using static method for creation
@@ -392,8 +384,7 @@ class GenLazyNativeFuncDefinition:
         {self.build_ir_node(func, schema)}
         {self.return_aten_tensor(func, schema)}
     }};\n
-    """
-        ]
+    """]
 
 
 class ComputeShapeSignature:
