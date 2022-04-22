@@ -449,7 +449,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_enable_python_mode_error(self) -> None:
         z = LoggingTensor(torch.empty([]))
-        with self.assertRaisesRegex(ValueError, "must be None or the type"):
+        with self.assertRaisesRegex(ValueError, "expected to get PythonMode, Tensor-like class, or None"):
             with enable_python_mode(z):
                 pass
 
@@ -544,8 +544,9 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                 with enable_python_mode(A):
                     pass
 
-        # nested enable_python_modes are allowed if they're the same mode
-        # Will only write once to the log
+    def test_nesting_with_same_enable_python_mode(self) -> None:
+        # "nested" enable_python_modes are allowed if they're the same mode. It's the equivalent of
+        # a noop, so it will only write once to the log
         with capture_logs() as logs:
             x = LoggingTensor(torch.tensor([3.]))
             log_input("x", x)

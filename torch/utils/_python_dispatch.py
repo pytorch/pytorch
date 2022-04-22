@@ -1,13 +1,45 @@
+import torch
 import contextlib
 from typing import Iterator
 import functools
 
 from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
+from torch._C import _get_python_mode, _set_python_mode
 
-# NB: Calling an operator inside __torch_dispatch__ does go through
-# __torch_dispatch__ again. Please use _DisableTorchDispatch inside
-# __torch_dispatch__ to prevent infinite recursion.
-#
+
+class PythonModeInfo(_ModeInfo):
+    def __init__(self):
+        # hacky because torch_function mode and python_mode don't yet have parity
+        super().__init__(mode_type="python", mode_class=PythonMode,
+                         base_mode_class=BasePythonMode, mode_class_name="PythonMode",
+                         required_fn="__torch_dispatch__")
+
+    def is_allowed_type(self, mode) -> bool:
+        return mode is None or\
+               isinstance(mode, self.mode_class) or\
+               (isinstance(mode, type) and not issubclass(mode, self.mode_class))
+
+    def allowed_types_for_error_message(self) -> str:
+        return "PythonMode, Tensor-like class, or None"
+
+    def get_mode(self):
+        return _get_python_mode()
+
+    def help_text(self, mode) -> str:
+        if isinstance(mode, self.mode_class):
+            return f'Use push_{self.mode_type}_mode instead.'
+        else:
+            return (
+                'If you intended to completely override the preexisting mode, '
+                'pass ignore_preexisting=True.  This can result in unexpected '
+                'behavior; please consider rewriting your mode to be a subclass '
+                f'of {self.mode_class_name} to make it compositional!'
+            )
+
+    def set_mode(self, mode):
+        return _set_python_mode(mode)
+
+
 # TODO: Limitations and things about enable_python_mode we should fix before exposing it:
 # - We need a better user-facing api for _DisableTorchDispatch that
 #   is able to selectively disable __torch_dispatch__ of a particular class.
@@ -47,9 +79,9 @@ def enable_python_mode(mode, *, replace=None, ignore_preexisting=False) -> Itera
         ignore_preexisting (bool): if True, ignore any preexisting mode
             and overwrite it with the passed mode.
     """
-    mode_info = _ModeInfo(mode_type="python", mode_class=PythonMode,
-                          base_mode_class=BasePythonMode, mode_class_name="PythonMode")
-    return _enable_mode(mode, mode_info=mode_info, replace=replace, ignore_preexisting=ignore_preexisting)
+
+    return _enable_mode(mode, mode_info=PythonModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
+
 
 def _wrap_torch_dispatch(f):
     @functools.wraps(f)
@@ -141,6 +173,4 @@ class BasePythonMode(PythonMode):
 
 @contextlib.contextmanager
 def push_python_mode(ctor) -> Iterator[PythonMode]:
-    mode_info = _ModeInfo(mode_type="python", mode_class=PythonMode,
-                          base_mode_class=BasePythonMode, mode_class_name="PythonMode")
-    return _push_mode(ctor, mode_info=mode_info)
+    return _push_mode(ctor, mode_info=PythonModeInfo())
