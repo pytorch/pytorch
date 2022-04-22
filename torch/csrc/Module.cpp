@@ -1062,6 +1062,13 @@ Call this whenever a new thread is created in order to propagate values from
 #endif
 #undef SET_STR_DEFINE
 
+  py_module.def("_set_conj", [](const at::Tensor & x, bool conj) {
+    x._set_conj(conj);
+  });
+  py_module.def("_set_neg", [](const at::Tensor & x, bool neg) {
+    x._set_neg(neg);
+  });
+
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator = (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
   // This reference is meant to be given away, so no need to incref here.

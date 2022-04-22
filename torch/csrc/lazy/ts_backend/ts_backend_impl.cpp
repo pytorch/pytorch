@@ -43,6 +43,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     auto type = (env_use_cuda || FLAGS_torch_lazy_ts_cuda) ? at::kCUDA : at::kCPU;
     default_device_type_ = TSBackendDeviceType(type);
   }
+
   std::unique_ptr<torch::lazy::LoweringContext> CreateLoweringContext(
       const std::string& name,
       torch::lazy::BackendDevice device,
@@ -168,7 +169,7 @@ torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
 std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
     std::vector<torch::lazy::ComputationPtr> instances) const {
   for (const auto& instance : instances) {
-    auto ts_computation =
+    C10_UNUSED auto ts_computation =
         static_cast<torch::lazy::TSComputation*>(instance.get());
   }
   return instances;

@@ -190,6 +190,7 @@ environment variable or add NVCC to your system PATH. The extension compilation 
 '''
 ROCM_HOME = _find_rocm_home()
 MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
+HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
 ROCM_VERSION = None
 if torch.version.hip is not None:
@@ -1055,6 +1056,8 @@ def include_paths(cuda: bool = False) -> List[str]:
         paths.append(_join_rocm_home('include'))
         if MIOPEN_HOME is not None:
             paths.append(os.path.join(MIOPEN_HOME, 'include'))
+        if HIP_HOME is not None:
+            paths.append(os.path.join(HIP_HOME, 'include'))
     elif cuda:
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
@@ -1082,6 +1085,8 @@ def library_paths(cuda: bool = False) -> List[str]:
     if cuda and IS_HIP_EXTENSION:
         lib_dir = 'lib'
         paths.append(_join_rocm_home(lib_dir))
+        if HIP_HOME is not None:
+            paths.append(os.path.join(HIP_HOME, 'lib'))
     elif cuda:
         if IS_WINDOWS:
             lib_dir = 'lib/x64'
