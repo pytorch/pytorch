@@ -787,14 +787,6 @@ TensorView* TensorView::cacheBefore() {
       this,
       " its definition is a nullptr and we restrict using cacheBefore on an input.");
 
-  TORCH_CHECK(
-      isFusionOutput() ||
-          (definition()->getExprType() != ExprType::ReductionOp &&
-           definition()->getExprType() != ExprType::WelfordOp),
-      "Error adding cacheBefore ",
-      this,
-      " its definition is a reduction and it is not an output, instead please use cacheAfter.");
-
   // Previously, caching computed-at tensors was allowed but was never
   // really robust. Make it an error unless it is really needed.
   TORCH_CHECK(
