@@ -940,9 +940,10 @@ class LOBPCG(object):
         SBS = _utils.qform(B, S)
         d_row = SBS.diagonal(0, -2, -1) ** -0.5
         d_col = d_row.reshape(d_row.shape[0], 1)
-        # TODO use torch.linalg.cholesky_solve once it is implemented
         R = torch.linalg.cholesky((SBS * d_row) * d_col, upper=True)
-        return torch.linalg.solve_triangular(R, d_row.diag_embed(), upper=True, left=False)
+        Id = torch.eye(R.size(-1), dtype=R.dtype, device=R.device)
+        Rinv = torch.triangular_solve(Id, R, upper=True).solution
+        return Rinv * d_col
 
     def _get_svqb(self,
                   U: Tensor,     # Tensor
