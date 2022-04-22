@@ -2223,13 +2223,6 @@ def main() -> None:
 
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
     parsed_yaml = parse_native_yaml(native_yaml_path)
-
-    for n in parsed_yaml.native_functions:
-        if n.structured:
-            print(str(n.func.name.name))
-
-    import sys
-    sys.exit(0)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,

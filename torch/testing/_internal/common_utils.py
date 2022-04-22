@@ -24,6 +24,7 @@ import random
 import contextlib
 import shutil
 import threading
+import sqlite3
 from pathlib import Path
 import socket
 import subprocess
@@ -582,6 +583,8 @@ def lint_test_case_extension(suite):
                 succeed = False
     return succeed
 
+COVERAGE_DB_CONN = None
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IMPORT_SLOW_TESTS:
@@ -602,6 +605,53 @@ def run_tests(argv=UNITTEST_ARGS):
     if TEST_DISCOVER:
         _print_test_names()
         return
+    if TEST_WITH_COVERAGE_DB is not None:
+        global COVERAGE_DB_CONN
+        global COVERAGE_DB_FILE_ID
+        con = sqlite3.connect(TEST_WITH_COVERAGE_DB, isolation_level=None)
+
+        con.executescript("""
+PRAGMA journal_mode = OFF;
+PRAGMA synchronous = 0;
+PRAGMA locking_mode = EXCLUSIVE;
+PRAGMA temp_store = MEMORY;
+
+CREATE TABLE IF NOT EXISTS files ( file_id INTEGER NOT NULL PRIMARY KEY, file TEXT NOT NULL UNIQUE );
+CREATE TABLE IF NOT EXISTS tests ( test_id INTEGER NOT NULL PRIMARY KEY, test TEXT NOT NULL UNIQUE );
+CREATE TABLE IF NOT EXISTS funcs ( func_id INTEGER NOT NULL PRIMARY KEY, func TEXT NOT NULL UNIQUE );
+CREATE TABLE IF NOT EXISTS calls
+(
+    call_file INTEGER,
+    call_test INTEGER,
+    call_func INTEGER,
+    FOREIGN KEY(call_file) REFERENCES files(file_id),
+    FOREIGN KEY(call_test) REFERENCES tests(test_id),
+    FOREIGN KEY(call_func) REFERENCES files(func_id),
+    UNIQUE(call_file,call_test,call_func)
+);
+
+CREATE VIEW IF NOT EXISTS calls_view AS
+    SELECT files.file, tests.test, funcs.func
+    FROM calls
+        INNER JOIN files ON files.file_id = calls.call_file
+        INNER JOIN tests ON tests.test_id = calls.call_test
+        INNER JOIN funcs ON funcs.func_id = calls.call_func;
+
+CREATE TRIGGER IF NOT EXISTS calls_view_insert INSTEAD OF INSERT ON calls_view
+BEGIN
+  INSERT OR IGNORE INTO files (file) VALUES (NEW.file);
+  INSERT OR IGNORE INTO tests (test) VALUES (NEW.test);
+  INSERT OR IGNORE INTO funcs (func) VALUES (NEW.func);
+  INSERT OR IGNORE INTO calls (call_file, call_test, call_func) VALUES (
+    (SELECT file_id FROM files WHERE file = NEW.file),
+    (SELECT test_id FROM tests WHERE test = NEW.test),
+    (SELECT func_id FROM funcs WHERE func = NEW.func)
+  );
+END;
+        """)
+        con.execute("CREATE INDEX IF NOT EXISTS ix_func ON calls (call_func)")
+        con.execute("CREATE INDEX IF NOT EXISTS ix_file_test ON calls (call_file, call_test)")
+        COVERAGE_DB_CONN = con
 
     # Before running the tests, lint to check that every test class extends from TestCase
     suite = unittest.TestLoader().loadTestsFromModule(__main__)
@@ -799,6 +849,8 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # correction, before throwing out the extra compute and proceeding
 # as we had before.  By default, we don't run these tests.
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
+
+TEST_WITH_COVERAGE_DB = os.getenv('PYTORCH_TEST_WITH_COVERAGE_DB', None)
 
 def skipIfCrossRef(fn):
     @wraps(fn)
@@ -1427,6 +1479,7 @@ meta_exclude_set = {
     torch.as_tensor,
     torch.tensor,
     torch.zeros_like,
+    torch.randn_like,
     torch.sparse_csr_tensor,
     torch._sparse_coo_tensor_unsafe,
     torch._sparse_csr_tensor_unsafe,
@@ -1438,23 +1491,38 @@ skipped = set()
 RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
 class CoverageMode(torch.overrides.TorchFunctionMode):
-    """
-    prefix = Path(__file__).parent.parent.parent.parent
-    full_test_file = __main__.__file__
-    test_file = os.path.relpath(full_test_file, prefix)
-    """
+    if hasattr(__main__, '__file__'):
+        prefix = Path(__file__).parent.parent.parent.parent
+        full_test_file = __main__.__file__
+        test_file = os.path.relpath(full_test_file, prefix)
+    else:
+        test_file = '<stdin>'
 
     def __init__(self, conn, test_case):
         self.conn = conn
         self.test_case = test_case
-        self.rows = []
+        self.seen = set()
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        self.rows.append((self.test_file, self.test_case))
+        self.seen.add(func)
+        if kwargs is None:
+            kwargs = {}
         return func(*args, **kwargs)
 
     def commit(self):
-        pass
+        rows = [
+            (
+                self.test_file,
+                self.test_case.id(),
+                torch.overrides.resolve_name(func) or str(func)
+            )
+            for func in self.seen
+        ]
+        self.conn.executemany("INSERT INTO calls_view VALUES (?,?,?)", rows)
+        self.conn.commit()
+
+    def __del__(self):
+        self.commit()
 
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __init__(self, test_case):
@@ -1512,14 +1580,9 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 
         def to_meta(t):
             nonlocal hit, miss
-            if isinstance(t, (
-                torch.nn.parameter.UninitializedBuffer,
-                torch.nn.utils._expanded_weights.expanded_weights_impl.ExpandedWeight
-            )):
-                miss += 1
-                return t
-            # TODO: zero tensors?
-            elif type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
+            # TODO: zero tensors?  We appear to have eliminated them by
+            # excluding complex for now
+            if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
                 if any([
                     t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
                     t.is_nested, torch._is_functional_tensor(t),
@@ -1550,10 +1613,14 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
                     if type(t) is torch.nn.Parameter:
                         r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
                     return r
-            elif isinstance(t, torch.Tensor):
-                # It's some subclass; convert it to meta and pray (lol)
-                hit += 1
-                return t.to("meta")
+            elif torch.overrides.is_tensor_like(t):
+                # Blindly converting tensor subclasses to meta can cause
+                # unpredictable problems; e.g., FX tests will trace meta
+                # tensors into their trace / some subclasses don't correctly
+                # support meta.  Trying to YOLO this is more trouble than it's
+                # worth.
+                miss += 1
+                return t
             else:
                 # non-Tensor types don't count as hit or miss
                 return t
@@ -2592,12 +2659,22 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
-    def _run_with_crossref(self, result):
-        if TEST_WITH_CROSSREF:
-            with torch.overrides.push_torch_function_mode(partial(CrossRefMode, self)) as mode:
-                super().run(result=result)
+    def _run_with_coverage(self, result):
+        if COVERAGE_DB_CONN is not None:
+            with torch.overrides.push_torch_function_mode(partial(CoverageMode, COVERAGE_DB_CONN, self)) as mode:
+                try:
+                    super().run(result=result)
+                finally:
+                    mode.commit()
         else:
             super().run(result=result)
+
+    def _run_with_crossref(self, result):
+        if TEST_WITH_CROSSREF:
+            with torch.overrides.push_torch_function_mode(partial(CrossRefMode, self)):
+                self._run_with_coverage(result=result)
+        else:
+            self._run_with_coverage(result=result)
 
     # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and enables early test
     # termination. [DISCLAIMER: ONLY WORKS WITH UNITTEST]
