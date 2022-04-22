@@ -6,6 +6,8 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
+#include "c10/core/SymIntArrayRef.h"
+#include "lazy/core/dynamic_ir.h"
 
 namespace torch {
 namespace lazy {
@@ -163,6 +165,22 @@ at::IntArrayRef LTCTensorImpl::sizes() const {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::sizes();
+}
+
+c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  if (!sym_sizes_) {
+    auto tir = this->tensor_->GetIrValue();
+    auto rank = tir.shape().dim();
+    sym_sizes_ = c10::fmap(c10::irange(rank), [tir](size_t di) {
+      auto dim_node = MakeNode<SizeNode>(tir, di);
+      auto lmn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
+      return lmn->toSymInt();
+    }) 
+  }
+
+  return c10::SymIntArrayRef(*sym_sizes_);
+  
 }
 
 at::IntArrayRef LTCTensorImpl::strides() const {

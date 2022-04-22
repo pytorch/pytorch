@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include "c10/core/SymIntArrayRef.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -558,8 +559,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       ;
 #endif
 
+TENSORIMPL_MAYBE_VIRTUAL c10::SymIntArrayRef sym_sizes() const
+#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  {
+    if (C10_UNLIKELY(
+            sizes_customization_policy_ !=
+            static_cast<uint8_t>(CustomizableMethodPolicy::Default))) {
+      return sym_sizes_nondefault_policy_impl();
+    }
+    
+    const auto sref = sizes_and_strides_.sizes_arrayref();
+    return c10::SymIntArrayRef(reinterpret_cast<c10::SymInt>(sref.data()), sref.size());
+  }
+#else
+      ;
+#endif
+
  private:
   IntArrayRef sizes_nondefault_policy_impl() const;
+  c10::SymIntArrayRef sym_sizes_nondefault_policy_impl() const;
 
  public:
   /**

@@ -6,6 +6,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include "c10/core/SymIntArrayRef.h"
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -185,6 +186,11 @@ TensorImpl::TensorImpl(
 IntArrayRef TensorImpl::sizes() const {
   return sizes_and_strides_.sizes_arrayref();
 }
+
+c10::SymIntArrayRef TensorImpl::sym_sizes() const {
+
+}
+
 #endif
 
 IntArrayRef TensorImpl::strides() const {
@@ -413,6 +419,15 @@ IntArrayRef TensorImpl::sizes_nondefault_policy_impl() const {
         "custom behavior for sizes() is not supported; please add it or file "
         "an issue.")
   }
+}
+
+c10::SymIntArrayRef TensorImpl::sym_sizes_nondefault_policy_impl() const {
+  // We are unlikely to support sym_sizes in non-extensible mode
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not support sym_sizes");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {

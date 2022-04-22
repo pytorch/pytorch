@@ -4,6 +4,7 @@
 #include <c10/core/TensorImpl.h>
 
 #include <torch/csrc/lazy/core/tensor.h>
+#include "c10/core/SymIntArrayRef.h"
 
 namespace torch {
 namespace lazy {
@@ -39,6 +40,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   at::IntArrayRef sizes() const override;
   at::IntArrayRef strides() const override;
+  c10::SymIntArrayRef sym_sizes() const override;
   int64_t dim() const override;
   int64_t numel() const override;
 
@@ -51,6 +53,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   void setup_size_properties();
 
   LazyTensorPtr tensor_;
+  c10::optional<std::vector<c10::SymInt>> sym_sizes_;
   size_t generation_ {0};
 };
 
