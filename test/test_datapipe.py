@@ -2049,6 +2049,20 @@ class TestGraph(TestCase):
                                   dp2: {dp2.main_datapipe: {dp2.main_datapipe.main_datapipe: {}}}}}
         self.assertEqual(expected, graph)
 
+    def test_traverse_mapdatapipe(self):
+        source_dp = dp.map.SequenceWrapper(range(10))
+        map_dp = source_dp.map(partial(_fake_add, 1))
+        graph = torch.utils.data.graph.traverse(map_dp)
+        expected: Dict[Any, Any] = {map_dp: {source_dp: {}}}
+        self.assertEqual(expected, graph)
+
+    def test_traverse_mixdatapipe(self):
+        source_map_dp = dp.map.SequenceWrapper(range(10))
+        iter_dp = dp.iter.IterableWrapper(source_map_dp)
+        graph = torch.utils.data.graph.traverse(iter_dp)
+        expected: Dict[Any, Any] = {iter_dp: {source_map_dp: {}}}
+        self.assertEqual(expected, graph)
+
 
 class TestCircularSerialization(TestCase):
 
