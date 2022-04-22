@@ -70,7 +70,7 @@ void DecomposeOp(Node* n) {
   if (!schema) {
     return;
   }
-  auto decomposition = DecompositionGraphForSchema(n->schema());
+  auto decomposition = GetDecomposition(n->schema());
   if (!decomposition) {
     return;
   }
@@ -103,7 +103,7 @@ void RunDecompositions(std::shared_ptr<Graph> g) {
   }
 }
 
-c10::optional<std::shared_ptr<Graph>> DecompositionGraphForSchema(
+c10::optional<std::shared_ptr<Graph>> GetDecomposition(
     const FunctionSchema& schema) {
   loadDecompositionFunctions();
   GRAPH_DEBUG("Trying to find schema: ", schema);
@@ -130,7 +130,7 @@ c10::optional<GraphFunction*> GetDecompositionFunction(
   return &func;
 }
 
-void RegisterDecompositionForSchema(
+void RegisterDecomposition(
     const FunctionSchema& schema,
     std::shared_ptr<Graph> g) {
   loadDecompositionFunctions();
@@ -140,6 +140,14 @@ void RegisterDecompositionForSchema(
   Function* func = (user_registered_funcs[&schema]).get();
   schema_to_function[&schema] = func;
   schema_to_decomposition[&schema] = g;
+}
+
+GraphFunction* GetDecompositionExecutor(const char * schema_literal) {
+  auto& schema = getOperatorForLiteral("aten::var(Tensor self, bool unbiased=True) -> Tensor")
+                         ->schema();
+  auto maybe_func = GetDecompositionFunction(schema);
+  TORCH_INTERNAL_ASSERT(maybe_func);
+  return *maybe_func;
 }
 
 } // namespace jit

@@ -2992,12 +2992,7 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
   for (bool unbiased : {true, false}) {
     std::call_once(flag1, [&]() {
       // NB: take reference to schema here, `auto schema =` will not work
-      auto& schema = getOperatorForLiteral(
-                         "aten::var(Tensor self, bool unbiased=True) -> Tensor")
-                         ->schema();
-      auto maybe_func = GetDecompositionFunction(schema);
-      TORCH_INTERNAL_ASSERT(maybe_func);
-      func = *maybe_func;
+      func = torch::jit::GetDecompositionExecutor("aten::var(Tensor self, bool unbiased=True) -> Tensor");
     });
     auto input = at::rand({4, 4});
     Stack stack = {input, unbiased};
@@ -3006,6 +3001,7 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
     ASSERT_TRUE(at::allclose(out, input.var(unbiased)));
   }
 }
+
 
 TEST(TestShapeGraphLinting, Basic) {
   auto schemas = RegisteredShapeComputeSchemas();

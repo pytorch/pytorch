@@ -167,7 +167,7 @@ void initJITBindings(PyObject* module) {
             if (!n->maybeSchema()) {
               return c10::nullopt;
             }
-            return DecompositionGraphForSchema(n->schema());
+            return GetDecomposition(n->schema());
           })
       .def("_jit_pass_run_decompositions", RunDecompositions)
       // using Node* here instead of Schema because looking up the schema
@@ -191,7 +191,7 @@ void initJITBindings(PyObject* module) {
           [](Node* n, std::shared_ptr<Graph>& graph) {
             if (n->maybeSchema()) {
               const FunctionSchema& schema = n->schema();
-              RegisterDecompositionForSchema(schema, graph);
+              RegisterDecomposition(schema, graph);
             } else {
               TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
             }
