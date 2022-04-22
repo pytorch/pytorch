@@ -13,7 +13,53 @@ class C10_API SymbolicIntNode
  public:
   c10::SymInt toSymInt();
   virtual ~SymbolicIntNode(){};
+  // these could be pure virtual when we implement LTC versions
+  virtual std::shared_ptr<SymbolicIntNode> add(
+      std::shared_ptr<SymbolicIntNode> other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual std::shared_ptr<SymbolicIntNode> sub(
+      std::shared_ptr<SymbolicIntNode> other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual std::shared_ptr<SymbolicIntNode> mul(
+      std::shared_ptr<SymbolicIntNode> other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual std::shared_ptr<SymbolicIntNode> div(
+      std::shared_ptr<SymbolicIntNode> other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual std::shared_ptr<SymbolicIntNode> mod(
+      std::shared_ptr<SymbolicIntNode> other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual std::shared_ptr<SymbolicIntNode> eq(
+      std::shared_ptr<SymbolicIntNode> other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual std::shared_ptr<SymbolicIntNode> gt(
+      std::shared_ptr<SymbolicIntNode> other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual std::shared_ptr<SymbolicIntNode> lt(
+      std::shared_ptr<SymbolicIntNode> other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual std::shared_ptr<SymbolicIntNode> wrap(int64_t num) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual bool bool_() {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual int64_t int_() {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual std::string str() {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual std::ostream& operator<<(std::ostream& os) {
+    os << str();
     return os;
   };
 };
