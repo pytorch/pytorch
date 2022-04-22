@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 #include <torch/torch.h>
@@ -29,7 +30,10 @@ TEST(Ops, Sum) {
     const auto& outShape = outputShapes[idx];
 
     BufHandle a("a", {M, N}, kFloat);
-    Tensor b = computeSum({a, dims, false}, outShape, c10::kFloat, at::kCPU);
+    std::vector<ExprHandle> outStrides =
+        c10::fmap<ExprHandle>(make_channels_last_strides(outShape));
+    Tensor b = computeSum(
+        {a, dims, false}, outShape, outStrides, c10::kFloat, at::kCPU);
     auto cg = compile({a}, {b});
 
     auto at = at::arange(M * N, at::kFloat).view({M, N});
