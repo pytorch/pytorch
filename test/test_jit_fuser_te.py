@@ -2573,7 +2573,7 @@ def f({', '.join(param_names)}):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         for variant, sample in variant_sample_pairs:
-            trace = create_traced_fn(self, variant)
+            trace = create_traced_fn(self, variant, cache_traced_fn=True)
             ref = variant(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
             trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
