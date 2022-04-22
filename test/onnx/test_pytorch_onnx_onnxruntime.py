@@ -26,7 +26,7 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsuppo
                                  skipIfNoLapack, disableScriptTest, skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Union
 from torch import Tensor
 
 from torchvision import ops
@@ -282,6 +282,30 @@ def _init_test_roi_heads_faster_rcnn():
         bbox_reg_weights,
         box_score_thresh, box_nms_thresh, box_detections_per_img)
     return roi_heads
+
+def _construct_tensor_for_quantization_test(shape: Tuple[int],
+                                            offset: Optional[Union[int, float]] = None,
+                                            max_val: Optional[Union[int, float]] = None
+                                            ) -> torch.Tensor:
+    """Helper function to generate weights and test inputs in a deterministic way.
+
+    Due to difference in implementation details between PyTorch and ONNXRuntime, randomly generated
+    test data for quantization tests can be flaky. To help stablize the test, this helper function is
+    used to generate weights and test inputs in a deterministic way.
+
+    Args:
+        shape (Tuple[int]): Shape for tensor to construct.
+        offset (Optional[Union[int, float]]): Offset to be added to the generated tensor.
+        max_val (Optional[Union[int, float]]): If any element within tensor has a larger absolute value than
+            max_val, the tensor will be scaled by max_val / tensor.abs().max(). This step is done after
+            applying offset.
+    """
+    tensor = torch.arange(np.prod(shape), dtype=torch.float).view(shape)
+    if offset is not None:
+        tensor = tensor + offset
+    if max_val is not None and tensor.abs().max() > max_val:
+        tensor = tensor * max_val / tensor.abs().max()
+    return tensor
 
 def set_rng_seed(seed):
     torch.manual_seed(seed)
@@ -10778,6 +10802,141 @@ class _TestONNXRuntime:
 
         x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 0, torch.qint8)
         self.run_test(Module(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_qat_linear_per_channel(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.linear = torch.nn.Linear(4, 3)
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.linear(x)
+                x = self.dequant(x)
+                return x
+
+        model = M()
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model)
+        # Set fixed weight and bias to avoid flaky test.
+        model.linear.weight = torch.nn.Parameter(_construct_tensor_for_quantization_test((3, 4)))
+        model.linear.bias = torch.nn.Parameter(torch.arange(3, dtype=torch.float))
+        model = torch.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test((4, 4), offset=-8)
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_qat_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+        model = M()
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model)
+        model = torch.quantization.convert(model)
+        input = torch.randn(8, 4)
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_qat_conv2d(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv(x)
+                x = self.dequant(x)
+                return x
+
+        model = M()
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model)
+        # Set fixed weight and bias to avoid flaky test.
+        model.conv.weight = torch.nn.Parameter(_construct_tensor_for_quantization_test((2, 4, 3, 3), max_val=2))
+        model.conv.bias = torch.nn.Parameter(torch.tensor([0., 1.]))
+        model = torch.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test((3, 4, 8, 8), offset=-384, max_val=12)
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_qat_conv2d_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+        model = M()
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.prepare_qat(model)
+        # Set fixed weight and bias to avoid flaky test.
+        model.conv.weight = torch.nn.Parameter(_construct_tensor_for_quantization_test((2, 4, 3, 3), max_val=2))
+        model.conv.bias = torch.nn.Parameter(torch.tensor([0., 1.]))
+        model = torch.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test((3, 4, 8, 8), offset=-384, max_val=12)
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_qat_conv2d_relu_fused(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+        model = M()
+        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model = torch.quantization.fuse_modules(model.eval(), [["conv", "relu"]])
+        model = torch.quantization.prepare_qat(model.train())
+        # Set fixed weight and bias to avoid flaky test.
+        model.conv.weight = torch.nn.Parameter(_construct_tensor_for_quantization_test((2, 4, 3, 3), max_val=2))
+        model.conv.bias = torch.nn.Parameter(torch.tensor([0., 1.]))
+        model = torch.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test((3, 4, 8, 8), offset=-384, max_val=12)
+        self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_convolution_allow_tf32(self):
