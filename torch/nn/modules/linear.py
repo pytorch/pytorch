@@ -10,6 +10,15 @@ from .module import Module
 from .lazy import LazyModuleMixin
 
 
+__all__ = [
+    'Bilinear',
+    'Identity',
+    'LazyLinear',
+    'Linear',
+    'NonDynamicallyQuantizableLinear',
+]
+
+
 class Identity(Module):
     r"""A placeholder identity operator that is argument-insensitive.
 

@@ -56,6 +56,16 @@ except ImportError:
 
                 sys.stderr.write('\n')
 
+__all__ = [
+    'download_url_to_file',
+    'get_dir',
+    'help',
+    'list',
+    'load',
+    'load_state_dict_from_url',
+    'set_dir',
+]
+
 # matches bfd8deac from resnet18-bfd8deac.pth
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
