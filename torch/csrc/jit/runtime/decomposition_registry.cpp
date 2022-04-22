@@ -126,10 +126,17 @@ c10::optional<GraphFunction*> GetDecompositionFunction(
     return c10::nullopt;
   }
   auto& func = toGraphFunction(*cache_it->second);
+  // Simple Executor:
+  // To allow decomposition to run on tensor subclasses such as batched tensors,
+  // we set decompostion execution to use the simple executor so that
+  // optimizations that do not compose with arbitrary subclasses (such as
+  // fusion) do not run
   func._set_initial_executor_execution_mode(ExecutorExecutionMode::SIMPLE);
   return &func;
 }
 
+// Decomposition registers a Graph so that we can initialize a GraphFunction
+// that will run with Simple Executor
 void RegisterDecomposition(
     const FunctionSchema& schema,
     std::shared_ptr<Graph> g) {
@@ -142,9 +149,8 @@ void RegisterDecomposition(
   schema_to_decomposition[&schema] = g;
 }
 
-GraphFunction* GetDecompositionExecutor(const char * schema_literal) {
-  auto& schema = getOperatorForLiteral("aten::var(Tensor self, bool unbiased=True) -> Tensor")
-                         ->schema();
+GraphFunction* GetDecompositionExecutor(const char* schema_literal) {
+  auto& schema = getOperatorForLiteral(schema_literal)->schema();
   auto maybe_func = GetDecompositionFunction(schema);
   TORCH_INTERNAL_ASSERT(maybe_func);
   return *maybe_func;
