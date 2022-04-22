@@ -21,8 +21,8 @@ TEST(BackendDeviceTest, Basic1) {
 
   EXPECT_EQ(device.type(), 0);
   EXPECT_EQ(device.ordinal(), -1);
-  EXPECT_FALSE(device.is_valid());
-  EXPECT_STREQ(device.toString().c_str(), "Unknown-1");
+  EXPECT_FALSE(device.has_index());
+  EXPECT_STREQ(device.toString().c_str(), "Unknown");
 }
 
 TEST(BackendDeviceTest, Basic2) {
@@ -32,7 +32,7 @@ TEST(BackendDeviceTest, Basic2) {
 
   EXPECT_EQ(device.type(), 1);
   EXPECT_EQ(device.ordinal(), 1);
-  EXPECT_TRUE(device.is_valid());
+  EXPECT_TRUE(device.has_index());
   EXPECT_STREQ(device.toString().c_str(), "Unknown1");
 }
 
@@ -45,7 +45,7 @@ TEST(BackendDeviceTest, Basic3) {
 
   EXPECT_EQ(device.type(), 0);
   EXPECT_EQ(device.ordinal(), 1);
-  EXPECT_TRUE(device.is_valid());
+  EXPECT_TRUE(device.has_index());
   EXPECT_STREQ(device.toString().c_str(), "Test1");
 }
 

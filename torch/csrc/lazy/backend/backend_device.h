@@ -42,7 +42,7 @@ class TORCH_API BackendDevice {
   bool operator!=(const BackendDevice& other) const { return compare(other) != 0; }
   bool operator<(const BackendDevice& rhs) const { return compare(rhs) < 0; }
 
-  bool is_valid() const { return ordinal_ >= 0; }
+  bool has_index() const { return ordinal_ >= 0; }
 
   std::string toString() const;
 
