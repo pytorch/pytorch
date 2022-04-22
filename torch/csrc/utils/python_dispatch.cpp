@@ -196,6 +196,9 @@ void initDispatchBindings(PyObject* module) {
         dispatch_str(dispatch, CppFunction::makeFromBoxedFunctor(std::make_unique<PythonKernelHolder>(std::move(func))))
       );
     }, "", py::arg("name"), py::arg("dispatch"), py::arg("func"))
+    .def("define", [](py::object self, const char* schema) {
+      self.cast<torch::Library&>().def(torch::schema(schema, c10::AliasAnalysisKind::FROM_SCHEMA));
+    }, "", py::arg("schema"))
     .def("fallback_fallthrough", [](py::object self, const char* dispatch) {
       self.cast<torch::Library&>().fallback(
         dispatch_str(dispatch, CppFunction::makeFallthrough())

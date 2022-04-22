@@ -68,6 +68,16 @@ class TestPythonRegistration(TestCase):
         self.assertTrue(not torch.neg(x).is_neg())
         self.assertTrue(torch.mul(x, y)._is_zerotensor())
 
+    def test_create_new_library(self) -> None:
+        my_lib1 = torch.create_library("foo")
+        my_lib1.remove()
+        # # Example 1
+        # run = [False]
+
+        # def my_sum(*args, **kwargs):
+        #     run[0] = True
+        #     return args[0]
+
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
