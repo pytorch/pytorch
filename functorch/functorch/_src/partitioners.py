@@ -190,6 +190,16 @@ def _size_of(metadata):
     return numel * sizes[dtype]
 
 
+# Used for some investigative purposes
+def _count_ops(graph):
+    from collections import defaultdict
+    cnt = defaultdict(int)
+    for node in graph.nodes:
+        if node.op == 'call_function':
+            cnt[node.target.__name__] += 1
+    print(sorted(list(cnt.items()), key=lambda x: x[1], reverse=True))
+
+
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule, _joint_inputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
@@ -216,18 +226,46 @@ def min_cut_rematerialization_partition(
     except ImportError:
         raise RuntimeError("Need networkx installed to perform smart recomputation heuristics")
 
-    # draw_graph(joint_module, "joint.svg")
     full_bw_graph = joint_module.graph
 
-    tangent_closure = set()
     name_to_node = {}
-    for node in full_bw_graph.nodes:
+    for node in joint_module.graph.nodes:
         name_to_node[node.name] = node
-        if node.op == 'placeholder' and "tangents" in node.target:
-            tangent_closure.add(node)
-        if node in tangent_closure:
-            for user in node.users:
-                tangent_closure.add(user)
+
+    def classify_nodes(joint_module):
+        required_bw_nodes = set()
+        for node in joint_module.graph.nodes:
+            if node.op == 'placeholder' and "tangents" in node.target:
+                required_bw_nodes.add(node)
+            if node in required_bw_nodes:
+                for user in node.users:
+                    required_bw_nodes.add(user)
+
+        primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
+        fwd_outputs, _ = _extract_fwd_bwd_outputs(joint_module)
+        forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
+        required_fw_nodes = set([name_to_node[node.name] for node in forward_only_graph.nodes
+                                 if node.op != 'output'])
+        unclaimed_nodes = set([node for node in joint_module.graph.nodes
+                               if node not in required_fw_nodes and node not in required_bw_nodes])
+        return required_fw_nodes, required_bw_nodes, unclaimed_nodes
+
+    required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
+    cache = {}
+
+    def dist_from_fw(node):
+        if node in cache:
+            return cache[node]
+        if node not in required_fw_nodes:
+            return 0
+        dist = int(1e9)
+        for n in node.users:
+            dist = min(dist_from_fw(n) + 1, dist)
+        cache[node] = dist
+        return dist
+
+    for node in joint_module.graph.nodes:
+        node.dist_from_fw = dist_from_fw(node)
 
     aten = torch.ops.aten
 
@@ -242,17 +280,20 @@ def min_cut_rematerialization_partition(
     # Not used by default since NVFuser can't fuse view ops
     # view_ops = [aten.expand, aten.clone, aten.transpose, aten.t, aten.view, aten._unsafe_view, aten.permute, aten.transpose, aten.t, aten._reshape_alias, aten.squeeze, aten.unsqueeze, aten.reshape, aten.cat, aten.slice, aten.split, aten.select, aten.repeat]  # noqa: E501
 
-    unrecomputable_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.native_dropout, aten.rand_like, aten.randn_like, aten.upsample_bilinear2d]  # noqa: E501
+    # These are the view ops that NVFuser can fuse
+    view_ops = [aten.squeeze, aten.unsqueeze]
+    random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
+    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d]  # noqa: E501
+    unrecomputable_ops = random_ops + compute_intensive_ops
 
     recomputable_ops = set(
         pointwise_ops
         + misc_ops
         + reduction_ops
-        # + norm_ops
-        # + view_ops
+        + view_ops
     )
-    # ops = set([i.target for i in joint_module.graph.nodes if i.op == 'call_function'])
-    # print(ops - recomputable_ops)
+    fusible_ops = recomputable_ops | set(random_ops)
+
     AGGRESSIVE_RECOMPUTATION = False
 
     def ban_recomputation(node):
@@ -271,16 +312,32 @@ def min_cut_rematerialization_partition(
                 return (output_size * 4 < input_tensors_size)
             return False
 
+    def is_fusible(a, b):
+        return a.target in fusible_ops and b.target in fusible_ops
+
+    def is_materialized(node):
+        if node.op == 'placeholder':
+            return True
+
+        return not all([is_fusible(node, user) for user in node.users])
+
     def get_node_weight(node):
         mem_sz = _size_of(node.meta['tensor_meta'])
-        if node.op == 'placeholder' and "primals" in node.target:
+
+        # Heuristic to bias towards nodes closer to the backwards pass
+        mem_sz = int(mem_sz + node.dist_from_fw)
+
+        if is_materialized(node):
             return mem_sz
         else:
             return mem_sz * 2
 
     nx_graph = nx.DiGraph()
     for node in full_bw_graph.nodes:
-        if node in tangent_closure and node.op != 'output':
+        if node.op == 'output':
+            continue
+
+        if node in required_bw_nodes:
             nx_graph.add_edge(node.name+"_in", "sink", capacity=math.inf)
             continue
 
@@ -289,7 +346,8 @@ def min_cut_rematerialization_partition(
 
         # If a node can't be recomputed (too expensive or involves randomness),
         # we prevent it from being recomputed by adding an inf edge to the source
-        if ban_recomputation(node):
+        # We only need to ban nodes in the fw pass, as those are the only ones that would be recomputed.
+        if ban_recomputation(node) and node in required_fw_nodes:
             nx_graph.add_edge("source", node.name+"_in", capacity=math.inf)
 
         if 'tensor_meta' not in node.meta:
@@ -313,7 +371,6 @@ def min_cut_rematerialization_partition(
         assert node_in[:-3] == node_out[:-4]
         node_name = node_in[:-3]
         cut_nodes.add(node_name)
-    # print(len(cut_nodes), sorted(list(cut_nodes)))
 
     saved_values = [name_to_node[node] for node in cut_nodes]
 
