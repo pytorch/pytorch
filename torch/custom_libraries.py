@@ -1,5 +1,7 @@
 import torch
 
+existing_libraries = {'aten', 'quantized'}
+
 # User created fragment libraries to extend existing libraries
 fragments_for_existing_libraries = {}
 
@@ -13,8 +15,8 @@ class _Library:
     # kind can be DEF, FRAGMENT (in C++ IMPL)
     def __init__(self, kind, ns, dispatch_key=""):
        # also prevent users from creating libraries with existing C++ libraries, e.g., aten
-       if ns in torch.ops.__dir__() and kind == "DEF":
-          raise ValueError("A library with name ", ns, " already exists. " \
+       if ns in existing_libraries and kind == "DEF":
+          raise ValueError("A library with name '" + ns + "' already exists. " \
                             "It's not allowed to have more than one library with the same name")
        elif kind == "FRAGMENT":
           self.m = torch._C._dispatch_library(kind, ns, dispatch_key)
@@ -44,7 +46,7 @@ class _Library:
 # We don't guarantee the user that another library that they imported is not overriding aten
 # However two libraries are not allowed to override the same operator in the same namespace for the same dispatch key
 def extend_library(ns):
-    if ns in torch.ops.__dir__():
+    if ns in existing_libraries:
         return _Library("FRAGMENT", ns)
     else:
-        raise ValueError("A library with name ", ns, " does not exist.")
+        raise ValueError("A library with name " + ns + " does not exist.")

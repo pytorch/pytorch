@@ -10677,12 +10677,7 @@ class _TestONNXRuntime:
         input = torch.randn(4, 4)
         input = torch.arange(16, dtype=torch.float).view(4, 4) - 8
         input_tensor = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
-        # Currently, we need convert the model to ScriptModule before export.
-        # The reason is that PackedParams contains int (not tensor).
-        # Then it fails when the exporter calls _trace_and_get_graph_from_model().
-        # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1547858
-        self.run_test(torch.jit.trace(model, input_tensor), (input_tensor,))
-        self.run_test(torch.jit.script(model), (input_tensor,))
+        self.run_test(model, input_tensor)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv2d(self):
@@ -10694,14 +10689,14 @@ class _TestONNXRuntime:
         model.set_weight_bias(q_weight, bias)
         input = torch.randn(3, 16, 32, 32)
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
-        self.run_test(torch.jit.trace(model, q_input), (q_input,))
+        self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_adaptive_avg_pool2d(self):
         model = torch.nn.AdaptiveAvgPool2d((5, 7))
         input = torch.randn(4, 3, 10, 14)
         q_input = torch.quantize_per_tensor(input, 0.2, 128, torch.quint8)
-        self.run_test(torch.jit.trace(model, q_input), (q_input,))
+        self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv2d_relu(self):
@@ -10713,21 +10708,21 @@ class _TestONNXRuntime:
         model.set_weight_bias(q_weight, bias)
         input = torch.randn(3, 16, 32, 32)
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
-        self.run_test(torch.jit.trace(model, q_input), (q_input,))
+        self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_hardswish(self):
-        model = torch.nn.quantized.Hardswish(1, 0)
+        model = torch.nn.quantized.Hardswish(1., 0)
         input = torch.randn(2, 6)
         q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
-        self.run_test(torch.jit.trace(model, q_input), (q_input,))
+        self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_hardsigmoid(self):
         model = torch.nn.Hardsigmoid()
         input = torch.randn(2, 6)
         q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
-        self.run_test(torch.jit.trace(model, q_input), (q_input,))
+        self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_flatten(self):
@@ -10736,10 +10731,11 @@ class _TestONNXRuntime:
                 return torch.flatten(input)
 
         x = torch.quantize_per_tensor(torch.randn(1, 2, 3, 4), 1, 0, torch.quint8)
-        self.run_test(torch.jit.trace(FlattenModel(), x), x)
+        self.run_test(FlattenModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    def test_quantized_arithmetic(self):
+    @disableScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
+    def test_quantized_arithmetic_qfunctional(self):
         x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)
         y = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)
 
@@ -10749,7 +10745,12 @@ class _TestONNXRuntime:
                 o = torch.nn.quantized.QFunctional().mul(o, x)
                 return o
 
-        self.run_test(torch.jit.trace(ArithmeticModel(), (x, y)), (x, y))
+        self.run_test(ArithmeticModel(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_arithmetic(self):
+        x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)
+        y = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)
 
         class ArithmeticModel2(torch.nn.Module):
             def forward(self, x, y):
@@ -10757,7 +10758,7 @@ class _TestONNXRuntime:
                 o = torch.ops.quantized.mul(o, x, 0.4, 100)
                 return o
 
-        self.run_test(torch.jit.trace(ArithmeticModel2(), (x, y)), (x, y))
+        self.run_test(ArithmeticModel2(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantize_per_tensor(self):
@@ -10767,7 +10768,7 @@ class _TestONNXRuntime:
                         torch.quantize_per_tensor(x, 0.2, 128, torch.quint8))
 
         x = torch.randn(4, 6)
-        self.run_test(torch.jit.trace(Module(), x), x)
+        self.run_test(Module(), x)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_dequantize(self):
@@ -10776,7 +10777,7 @@ class _TestONNXRuntime:
                 return torch.dequantize(x)
 
         x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 0, torch.qint8)
-        self.run_test(torch.jit.trace(Module(), x), x)
+        self.run_test(Module(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_convolution_allow_tf32(self):
