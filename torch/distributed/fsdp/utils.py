@@ -1,4 +1,5 @@
 from typing import Dict, List, Tuple, Union, Any, Callable, Set
+from torch.nn.utils.rnn import PackedSequence
 
 import torch
 
@@ -8,11 +9,11 @@ from collections import OrderedDict
 
 
 def _apply_to_tensors(
-    fn: Callable, container: Union[torch.Tensor, Dict, List, Tuple, Set]
+    fn: Callable, container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
 ) -> Any:
     """Recursively apply to all tensor in different kinds of container types."""
 
-    def apply(x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict]) -> Any:
+    def apply(x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]) -> Any:
         if torch.is_tensor(x):
             return fn(x)
         elif isinstance(x, OrderedDict):
@@ -20,6 +21,9 @@ def _apply_to_tensors(
             for key, value in x.items():
                 od[key] = apply(value)
             return od
+        elif isinstance(x, PackedSequence):
+            apply(x.data)
+            return x
         elif isinstance(x, dict):
             return {key: apply(value) for key, value in x.items()}
         elif isinstance(x, (list, tuple, set)):
