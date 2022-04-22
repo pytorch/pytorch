@@ -1400,6 +1400,7 @@ meta_exclude_set = {
     # IndexError: select() cannot be applied to a 0-dim tensor.
     # e.g. test_fn_fwgrad_bwgrad_index_add_cpu_complex128 (__main__.TestGradientsCPU)
     torch.index_add,
+    torch.Tensor.index_add,
     # Can't copy out of meta tensor
     torch.linalg.eigvals,
     torch.linalg.lu_factor,
