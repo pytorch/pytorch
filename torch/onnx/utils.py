@@ -1,8 +1,9 @@
-r"""
-The torch.onnx module contains functions to export models into the ONNX
-IR format.  These models can be loaded with the ONNX library and then
+"""Functions to export models into the ONNX IR format.
+
+These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
+from __future__ import annotations
 
 import collections.abc
 import contextlib
@@ -12,9 +13,7 @@ import numbers
 import os
 import re
 import warnings
-from typing import Callable, Dict, List, Optional, Tuple, Union
-
-from typing_extensions import Literal
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.autograd
@@ -216,10 +215,10 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(
-    graph,
-    operator_export_type,
-    _disable_torch_constant_prop=False,
-    fixed_batch_size=False,
+    graph: torch._C.Graph,
+    operator_export_type: OperatorExportTypes,
+    _disable_torch_constant_prop: bool = False,
+    fixed_batch_size: bool = False,
     params_dict=None,
     dynamic_axes=None,
     input_names=None,
@@ -339,12 +338,13 @@ def _optimize_graph(
     return graph
 
 
-# We accept dictionaries and strings as ONNX inputs,
-# but they should be only for configuration use.
-# we detect here if these inputs are modified, and if so
-# we warn the user that the changes won't take effect in the
-# traced ONNX graph
 def warn_on_static_input_change(input_states):
+    """Warns the user that the changes won't take effect in the traced ONNX graph.
+
+    We accept dictionaries and strings as ONNX inputs, but they should be only for
+    configuration use. we detect here if these inputs are modified, and if so we warn
+    the user that the changes won't take effect in the traced ONNX graph.
+    """
     for input, traced_input in zip(input_states[0], input_states[1]):
         if isinstance(input, dict):
             if list(input.keys()) != list(traced_input.keys()):
@@ -368,7 +368,7 @@ def warn_on_static_input_change(input_states):
 
 
 def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
-    # This helper method resolves the arguments that are ignored when export_type != operator_export_type.ONNX
+    """Resolves the arguments that are ignored when export_type != operator_export_type.ONNX."""
     if (
         operator_export_type is not operator_export_type.ONNX
         and torch.onnx._CAFFE2_ATEN_FALLBACK
@@ -384,21 +384,27 @@ def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
 
 
 def _decide_keep_init_as_input(
-    keep_initializers_as_inputs, operator_export_type, opset_version
+    keep_initializers_as_inputs: Optional[bool],
+    operator_export_type: OperatorExportTypes,
+    opset_version: int,
 ):
-    # This method encapsulates the logic to decide whether the initializers in the graph
-    # should be listed as ONNX graph inputs (i.e., whether to choose ONNX IR v3 or v4).
-    # If keep_initializers_as_inputs is not specified (None), then we decide whether to keep
-    # initializers as graph inputs (val_keep_init_as_ip) based on export type. If export type
-    # is ONNX, then do not keep initializers as input (val_keep_init_as_ip=False). For all other
-    # export types keep initializers as input (val_keep_init_as_ip=True).
-    # If keep_initializers_as_inputs is specified, then respect it. Unless opset version <= 8,
-    # in which case it must be ignored because for opset version <= 8, all initializers MUST be
-    # part of graph input (only ONNX IR v3 is allowed), i.e. val_keep_init_as_ip=True.
+    """Decides whether the initializers in the graph should be listed as ONNX graph inputs.
 
-    # Special handling is needed for opset version 8 or lower, because irrespective
-    # of user input for keep_initializers_as_inputs, the graph must follow ONNX IR v3
-    # semantics, i.e. all initializers must be listed as ONNX graph input.
+    This method encapsulates the logic to decide whether the initializers in the graph
+    should be listed as ONNX graph inputs (i.e., whether to choose ONNX IR v3 or v4).
+    If keep_initializers_as_inputs is not specified (None), then we decide whether to keep
+    initializers as graph inputs (val_keep_init_as_ip) based on export type. If export type
+    is ONNX, then do not keep initializers as input (val_keep_init_as_ip=False). For all other
+    export types keep initializers as input (val_keep_init_as_ip=True).
+    If keep_initializers_as_inputs is specified, then respect it. Unless opset version <= 8,
+    in which case it must be ignored because for opset version <= 8, all initializers MUST be
+    part of graph input (only ONNX IR v3 is allowed), i.e. val_keep_init_as_ip=True.
+
+    Special handling is needed for opset version 8 or lower, because irrespective
+    of user input for keep_initializers_as_inputs, the graph must follow ONNX IR v3
+    semantics, i.e. all initializers must be listed as ONNX graph input.
+    """
+
     if opset_version < 9:
         if keep_initializers_as_inputs is False:
             warnings.warn(
@@ -494,7 +500,6 @@ def _trace(func, args, operator_export_type, return_outs=False):
 
 
 def _trace_and_get_graph_from_model(model, args):
-
     # A basic sanity check: make sure the state_dict keys are the same
     # before and after running the model.  Fail fast!
     orig_state_dict_keys = _unique_state_dict(model).keys()
@@ -625,10 +630,10 @@ def _pre_trace_quant_model(model, args):
 
 
 def _assign_onnx_node_name(graph, node_names):
-    r"""Takes in ONNX graph, and mapping from torch._C.Node to node name in exported ONNX ModelProto.
+    """Takes in ONNX graph, and mapping from torch._C.Node to node name in exported ONNX ModelProto.
 
     Returns:
-      graph (torch._C.Graph): A TorchScript IR Graph with ONNX nodes, where each torch._C.Node gets its name
+        graph (torch._C.Graph): A TorchScript IR Graph with ONNX nodes, where each torch._C.Node gets its name
         in exported ONNX ModelProto assigned as attribute ``onnx_name``.
     """
 
@@ -658,16 +663,20 @@ def _model_to_graph(
     fixed_batch_size=False,
     training=None,
     dynamic_axes=None,
-):
-    r"""Converts model into an ONNX graph.
+) -> Tuple[
+    torch._C.Graph,
+    Dict[str, torch.Tensor],
+    Optional[Union[torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]]],
+]:
+    """Converts model into an ONNX graph.
 
     Returns:
-      graph (torch._C.Graph): A TorchScript IR Graph with ONNX nodes.
-      params_dict (Dict[str, torch.Tensor]): Dict from input param name to param value.
-      torch_out (Union[NoneType, torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]]):
-        The output tensors resulting from the trace of ``model``.
-        If ``model`` is a :class:`torch.jit.ScriptModule` or :class:`torch.jit.ScriptFunction`,
-        this will be None, since we are not doing any tracing.
+        graph (torch._C.Graph): A TorchScript IR Graph with ONNX nodes.
+        params_dict (Dict[str, torch.Tensor]): Dict from input param name to param value.
+        torch_out (Union[NoneType, torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]]):
+            The output tensors resulting from the trace of ``model``.
+            If ``model`` is a :class:`torch.jit.ScriptModule` or :class:`torch.jit.ScriptFunction`,
+            this will be None, since we are not doing any tracing.
     """
     # TODO: can we simplify this to always return a tuple of Tensor or None?
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
@@ -851,7 +860,7 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
 
     Returns:
         Tuple[torch._C.Graph, List[str]], where the list includes the names
-          of the unconvertible ops.
+        of the unconvertible ops.
     """
     from torch.onnx.symbolic_helper import (
         _default_onnx_opset_version,
@@ -862,7 +871,6 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
     _set_opset_version(opset_version)
     # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
-    operator_export_type = OperatorExportTypes.ONNX_FALLTHROUGH
     with exporter_context(model, training, False):
         args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(
@@ -1381,15 +1389,15 @@ def _block_op(b, opname, *args, **kwargs):
     return tuple(o for o in n.outputs())
 
 
-def _add_block(node):
+def _add_block(node: torch._C.Node):
     return node.addBlock()
 
 
-def _add_input_to_block(block):
+def _add_input_to_block(block: torch._C.Block):
     return block.addInputToBlock()
 
 
-def _add_output_to_block(block, value):
+def _add_output_to_block(block: torch._C.Block, value: torch._C.Value):
     new_output = block.registerOutput(value)
     return new_output
 
@@ -1408,7 +1416,7 @@ def _find_symbolic_in_registry(
     op_name: str,
     opset_version: int,
     operator_export_type: OperatorExportTypes,
-):
+) -> Optional[Callable]:
     """Looks up for the symbolic function in the registry.
 
     Args:
@@ -1451,13 +1459,19 @@ def _need_symbolic_context(symbolic_fn):
 def _run_symbolic_function(
     g: torch._C.Graph,
     block: torch._C.Block,
-    n,
-    inputs,
+    n: torch._C.Node,
+    inputs: Any,
     env: Dict[torch._C.Value, torch._C.Value],
     operator_export_type=OperatorExportTypes.ONNX,
-):
-    # NB: Returning None means the node gets cloned as is into
-    # the new graph
+) -> Optional[Union[torch._C.Value, Tuple[torch._C.Value, ...]]]:
+    """Runs a symbolic function.
+
+    The function is used in C++ to export the node to ONNX.
+
+    Returns:
+        A single or a tuple of Values.
+        None when the node gets cloned as is into the new graph.
+    """
     try:
         import torch.onnx.symbolic_registry as sym_registry
         from torch.onnx.symbolic_helper import (
@@ -1490,6 +1504,8 @@ def _run_symbolic_function(
             symbolic_fn = _find_symbolic_in_registry(
                 domain, op_name, opset_version, operator_export_type
             )
+            assert symbolic_fn is not None
+
             attrs = {k: n[k] for k in n.attributeNames()}
             if _need_symbolic_context(symbolic_fn):
                 ctx = SymbolicContext(_params_dict, env, n, block)
@@ -1536,7 +1552,7 @@ def _graph_constant(
     g,
     value,
     dims,
-    type_: Literal["char", "short", "int", "long", "half", "float", "double"],
+    type_: str,
     *args,
     **kwargs,
 ):
@@ -1586,11 +1602,9 @@ def _graph_constant(
 
 
 def _node_getitem(self, k):
-    r"""
-    Accessor for attributes of a node which is polymorphic over
-    return type.
+    """Gets attributes of a node which is polymorphic over return type.
 
-    NB: This is monkey-patched onto Node.
+    This is monkey-patched onto Node.
     """
     sel = self.kindOf(k)
     return getattr(self, sel)(k)
@@ -1601,20 +1615,16 @@ def get_ns_op_name_from_custom_op(symbolic_name):
         re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)
     ):
         raise ValueError(
-            "Failed to register operator {}. \
-                          The symbolic name must match the format Domain::Name, \
-                          and should start with a letter and contain only \
-                          alphanumerical characters".format(
-                symbolic_name
-            )
+            f"Failed to register operator {symbolic_name}."
+            "The symbolic name must match the format Domain::Name, "
+            "and should start with a letter and contain only "
+            "alphanumerical characters"
         )
+
     ns, op_name = symbolic_name.split("::")
     if ns == "onnx":
         raise ValueError(
-            "Failed to register operator {}. \
-                          {} domain cannot be modified.".format(
-                symbolic_name, ns
-            )
+            f"Failed to register operator {symbolic_name}. {ns} domain cannot be modified."
         )
 
     if ns == "aten":
@@ -1623,11 +1633,14 @@ def get_ns_op_name_from_custom_op(symbolic_name):
     return ns, op_name
 
 
-# When the user registers symbolic for custom/contrib ops,
-# it is highly recommended to add shape inference for that operator via setType API,
-# otherwise the exported graph may have incorrect shape inference in some extreme cases.
-# An example of setType is test_aten_embedding_2 in test_operators.py..
 def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
+    """Registers a symbolic function for a custom operator.
+
+    When the user registers symbolic for custom/contrib ops,
+    it is highly recommended to add shape inference for that operator via setType API,
+    otherwise the exported graph may have incorrect shape inference in some extreme cases.
+    An example of setType is `test_aten_embedding_2` in `test_operators.py`.
+    """
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
     import torch.onnx.symbolic_registry as sym_registry
     from torch.onnx.symbolic_helper import _onnx_main_opset, _onnx_stable_opsets
@@ -1647,8 +1660,8 @@ def unregister_custom_op_symbolic(symbolic_name, opset_version):
             sym_registry.unregister_op(op_name, ns, version)
 
 
-# This helper function ensures dynamic axes argument is following the expected format
 def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
+    """Ensures dynamic axes argument is follows the expected format."""
     if len(dynamic_axes) == 0:
         return
 

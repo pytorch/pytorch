@@ -10,7 +10,7 @@ if typing.TYPE_CHECKING:
     import torch._C
 
 
-SymbolicFunction = Callable[[Any], Union[torch._C.Value, Tuple[torch._C.Value]]]
+SymbolicFunction = Callable[..., Union[torch._C.Value, Tuple[torch._C.Value]]]
 
 """
 The symbolic registry "_registry" is a dictionary that maps operators
