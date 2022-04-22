@@ -909,7 +909,7 @@ class MultiheadAttention(Module):
 
     If the optimized implementation is in use, a
     `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
-    ``query``/``key``/``value`` to more represent padding more efficiently than using a
+    ``query``/``key``/``value`` to represent padding more efficiently than using a
     padding mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_
     will be returned, and an additional speedup proportional to the fraction of the input
     that is padding can be expected.

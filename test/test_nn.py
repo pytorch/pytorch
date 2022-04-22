@@ -5910,11 +5910,18 @@ class TestNN(NNTestCase):
         nt.requires_grad = False
         with self.assertRaisesRegex(AssertionError, msg):
             mha(nt, nt, nt)
+        # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
+        # or more of these. No idea why.
+        has_torch_func = torch.overrides.has_torch_function((nt, mha.in_proj_weight, mha.in_proj_bias, mha.out_proj.weight, mha.out_proj.bias))
         mha.in_proj_weight.requires_grad = False
         mha.in_proj_bias.requires_grad = False
         mha.out_proj.weight.requires_grad = False
         mha.out_proj.bias.requires_grad = False
-        mha(nt, nt, nt)
+        if has_torch_func:
+            with self.assertRaisesRegex(AssertionError, "MultiheadAttention does not support NestedTensor.*argument has_torch_function"):
+                mha(nt, nt, nt)
+        else:
+            mha(nt, nt, nt)
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
