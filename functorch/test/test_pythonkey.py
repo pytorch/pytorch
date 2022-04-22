@@ -21,7 +21,7 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition
+    num_of_recompilations, default_partition, default_decompositions
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -436,15 +436,19 @@ def extract_graph(fx_g, _, graph_cell):
     return fx_g
 
 
-def get_num_ins_outs(fx_g):
-    num_inps = 0
-    num_outs = 0
+def get_ins_outs(fx_g):
+    ins = []
+    outs = []
     for n in fx_g.graph.nodes:
         if n.op == 'placeholder':
-            num_inps += 1
+            ins.append(n)
         elif n.op == 'output':
-            num_outs = len(n.args[0])
-    return num_inps, num_outs
+            outs = tuple(n.args[0])
+    return ins, outs
+
+
+def get_num_ins_outs(fx_g):
+    return tuple(len(i) for i in get_ins_outs(fx_g))
 
 
 def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition):
@@ -453,7 +457,8 @@ def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition):
     aot_function(f,
                  fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                  bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
-                 partition_fn=partitioner)(*inps)
+                 partition_fn=partitioner,
+                 decompositions=default_decompositions)(*inps)
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
@@ -536,6 +541,14 @@ class TestPartitioning(TestCase):
         fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(3, requires_grad=True) for _ in range(4)])
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
+
+        def f(x):
+            return torch.mm(x, torch.ones(x.shape)).tanh().tanh()
+        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(5, 5, requires_grad=True)])
+        self.assertEqual(get_num_ins_outs(fw_graph), (1, 2))
+
+        ins, outs = get_ins_outs(fw_graph)
+        self.assertEqual(outs[1].target, torch.ops.aten.mm)
 
 
 class TestContiguous(TestCase):
