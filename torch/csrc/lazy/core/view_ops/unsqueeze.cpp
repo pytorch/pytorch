@@ -20,8 +20,8 @@ Unsqueeze::Unsqueeze(const torch::lazy::Value& input, int dim)
           /*num_outputs=*/1,
           torch::lazy::MHash(dim)),
       dim_(dim) {
-  SetShapeDeferred([&]() {
-    const auto& input_shape = GetShapeFromTsValue(input);
+  addComputedShape([&]() {
+    const auto& input_shape = input.shape();
     return torch::lazy::Shape(
         input_shape.scalar_type(),
         BuildUnsqueezedDimensions(input_shape.sizes(), dim));

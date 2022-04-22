@@ -94,7 +94,7 @@ constexpr double real_impl <c10::complex<double>, double> (c10::complex<double> 
 }
 
 template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
-constexpr VALUE_TYPE imag_impl (SCALAR_TYPE z) {
+constexpr VALUE_TYPE imag_impl (SCALAR_TYPE /*z*/) {
   return 0;
 }
 

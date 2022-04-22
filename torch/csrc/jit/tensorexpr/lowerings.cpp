@@ -1736,15 +1736,14 @@ int nnc_lowerings_lazy_registration() {
 
   RegisterNNCLoweringsFunction aten_upsample_nearest2d(
       {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)"},
-      computeUpsampleNearest2d);
+      computeUpsampleNearest2dExternalCall);
 
   return 0;
 }
 } // namespace
 
 NNCLoweringFunction getStandardLoweringFor(const std::string& schema_str) {
-  // NOLINTNEXTLINE
-  static const int once = nnc_lowerings_lazy_registration();
+  C10_UNUSED static const int once = nnc_lowerings_lazy_registration();
   const auto& lowerings = getNNCLoweringRegistry();
   if (auto l = lowerings.find(parseSchema(schema_str))) {
     return *l;

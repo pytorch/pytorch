@@ -174,13 +174,10 @@ class Hardtanh(Module):
 
     .. math::
         \text{HardTanh}(x) = \begin{cases}
-            1 & \text{ if } x > 1 \\
-            -1 & \text{ if } x < -1 \\
+            \text{max\_val} & \text{ if } x > \text{ max\_val } \\
+            \text{min\_val} & \text{ if } x < \text{ min\_val } \\
             x & \text{ otherwise } \\
         \end{cases}
-
-    The range of the linear region :math:`[-1, 1]` can be adjusted using
-    :attr:`min_val` and :attr:`max_val`.
 
     Args:
         min_val: minimum value of the linear region range. Default: -1
@@ -1020,7 +1017,7 @@ class MultiheadAttention(Module):
             the attention weight.
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
             heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
-            effect when ``need_weights=True.``. Default: True (i.e. average weights across heads)
+            effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
 
     Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
@@ -1031,7 +1028,7 @@ class MultiheadAttention(Module):
           returns attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
           :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
           :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
-          head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
+          head of shape :math:`(\text{num\_heads}, L, S)` when input is unbatched or :math:`(N, \text{num\_heads}, L, S)`.
 
         .. note::
             `batch_first` argument is ignored for unbatched inputs.

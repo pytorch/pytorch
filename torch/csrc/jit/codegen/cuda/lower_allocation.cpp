@@ -58,9 +58,6 @@ class AllocationInserter : public kir::ExprMutator {
   // Fills info.buffer, info.alloc_pos, info.init_for_loop,
   // info.init_place_before, info.alloc_for_loop, info.alloc_place_before
   void fillAllocationInformation(AllocationInformation& info, Expr* expr) {
-    size_t alloc_pos = 0;
-    kir::ForLoop* init_for_loop = nullptr;
-    size_t fl_idx_next = 0;
     auto loop_alloc_info =
         loop_utils::getAllocInformation(info.buffer, for_loops_);
 
@@ -453,6 +450,8 @@ class AllocationInserter : public kir::ExprMutator {
             default_val == nullptr,
             "Reduction should not have a default initialization value for predicate elimination.");
         init = expr->as<ReductionOp>()->init();
+      } else if (expr->isA<MmaOp>()) {
+        init = expr->as<MmaOp>()->init();
       } else if (expr->isA<WelfordOp>()) {
         TORCH_INTERNAL_ASSERT(
             default_val == nullptr,

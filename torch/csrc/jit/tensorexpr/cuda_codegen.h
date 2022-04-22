@@ -273,6 +273,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   std::unique_ptr<CudaAnalysis> cuda_analysis_;
   std::unique_ptr<GPUMetaVarRewriter> metavar_rewriter_;
   std::unordered_set<std::string> taken_func_names;
+  std::mutex eval_lock_;
   CUfunction function_;
   bool has_random_ = false;
   int thread_block_size_ = -1;

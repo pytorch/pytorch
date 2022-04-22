@@ -31,6 +31,7 @@ using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
+using c10::SymIntType;
 using c10::TensorType;
 using c10::TupleType;
 using c10::UnionType;
@@ -61,6 +62,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"float", c10::TypeFactory::get<FloatType>()},
       {"complex", c10::TypeFactory::get<ComplexType>()},
       {"int", c10::TypeFactory::get<IntType>()},
+      {"SymInt", c10::TypeFactory::get<SymIntType>()},
       {"bool", c10::TypeFactory::get<BoolType>()},
       {"None", c10::TypeFactory::get<NoneType>()},
       {"NoneType", c10::TypeFactory::get<NoneType>()},

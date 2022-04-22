@@ -189,7 +189,12 @@ Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scal
   return norm_backward(grad, self, p_, norm, {}, true);
 }
 
-Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+Tensor norm_backward(
+    Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+  // NB: We mask fill the NaNs in the output to be zero but still do float division
+  //     by zero, which ASAN complains about. One way to appease ASAN is to fill the problematic
+  //     values with something arbitrary before the division, but we decide not to due to
+  //     the perf hit. Instead we just silence ASAN where necessary
   size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -205,34 +210,102 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   } else if (p == 1.0) {
     return self.sgn() * grad;
   } else if (p == 2.0) {
-    self_scaled = self;
-    scale_v = grad / norm;
+    return self * (grad / norm).masked_fill_(norm == 0, 0);
   } else if (std::isinf(p)) {
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
     const auto& self_and_norm_isnan = areAnyTensorSubclassLike({self, norm}) ?
       self_isnan.logical_and(norm_isnan) :
       self_isnan.logical_and_(norm_isnan);
-    Tensor is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
+    auto is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
     self_scaled = self.sgn() * is_eq_max;
-    Tensor nb_max = is_eq_max.count_nonzero(dim);
+    auto nb_max = is_eq_max.count_nonzero(dim);
     if (self.dim() != 0) {
       nb_max = unsqueeze_multiple(nb_max, dim, ndim);
     }
     scale_v = grad / nb_max;
+    return self_scaled * scale_v;
+  } else if (p < 1.0) {
+    self_scaled = self.sgn() * self.abs().pow_(p - 1).masked_fill_(self == 0, 0);
+    return self_scaled * grad * norm.pow(1 - p);
   } else if (p < 2.0) {
-    self_scaled = self.sgn() * self.abs().pow(p - 1);
+    self_scaled = self.sgn() * self.abs().pow_(p - 1);
     scale_v = grad / norm.pow(p - 1);
+    scale_v.masked_fill_(norm == 0, 0);
+    return self_scaled * scale_v;
   } else {
-    self_scaled = self * self.abs().pow(p - 2);
+    self_scaled = self * self.abs().pow_(p - 2);
     scale_v = grad / norm.pow(p - 1);
+    scale_v.masked_fill_(norm == 0, 0);
+    return self_scaled * scale_v;
   }
-  // handle case at 0 where we return a subgradient containing 0
-  scale_v.masked_fill_(norm == 0, 0);
-  return self_scaled * scale_v;
 }
 
-Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
+// See norm_backward above for a note on ignoring the sanitizer
+Tensor norm_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const optional<Scalar> & p_,
+  Tensor norm,
+  IntArrayRef dim,
+  bool keepdim
+) {
+  // NB: currently norm_jvp is also reused for dist's jvp (which haas two differentiable inputs)
+  //     but self_t still cannot be a ZT because that would require both self_t and other_t to be ZT
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor());
+  size_t ndim = self_p.dim();  // composite compliance?
+  double p = p_.value_or(2.0).toDouble();
+
+  if (p == 0.0) {
+    return at::zeros_like(norm);
+  } else if (p == 1.0) {
+    auto result = self_p.sgn();
+    result = areAnyTensorSubclassLike({self_t}) ? result.mul(self_t.conj()) : result.mul_(self_t.conj());
+    result = at::real(result);
+    return result.sum(dim, keepdim);
+  } else if (p == 2.0) {
+    auto result = self_p.mul(self_t.conj());
+    result = at::real(result);
+    result = result.sum(dim, keepdim);
+    return result.div_(norm).masked_fill_(norm == 0, 0);
+  } else if (std::isinf(p)) {
+    if (!keepdim && self_p.dim() != 0) {
+      norm = unsqueeze_multiple(norm, dim, ndim);
+    }
+    const auto self_isnan = self_p.isnan();
+    const auto norm_isnan = norm.isnan();
+    const auto& self_and_norm_isnan = areAnyTensorSubclassLike({norm}) ?
+      self_isnan.logical_and(norm_isnan) :
+      self_isnan.logical_and_(norm_isnan);
+    const auto is_eq_max = (self_p.abs() == norm).logical_or_(self_and_norm_isnan).type_as(norm);
+    auto nb_max = is_eq_max.count_nonzero(dim);
+    if (self_p.dim() != 0) {
+      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
+    }
+    return (at::real(self_p.sgn() * self_t.conj()) * is_eq_max / nb_max).sum(dim, keepdim);
+  } else if (p < 1.0) {
+    auto sumpow_t = (self_p.abs().pow_(p - 1).masked_fill_(self_p == 0, 0) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
+    return sumpow_t * norm.pow(1 - p);
+  } else if (p < 2.0) {
+    auto sumpow_t = (self_p.abs().pow_(p - 1) * at::real(self_p.sgn() * self_t.conj())).sum(dim, keepdim);
+    auto out = sumpow_t / norm.pow(p - 1);
+    return out.masked_fill_(norm == 0, 0);
+  } else {
+    auto sumpow_t = (self_p.abs().pow_(p - 2) * at::real(self_p * self_t.conj())).sum(dim, keepdim);
+    auto out = sumpow_t / norm.pow(p - 1);
+    return out.masked_fill_(norm == 0, 0);
+  }
+}
+
+Tensor norm_jvp(const Tensor& self_p, const Tensor& self_t, const optional<Scalar> & p_, Tensor norm) {
+  return norm_jvp(self_p, self_t, p_, norm, {}, true);
+}
+
+Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+  auto dim = opt_dim.value_or(IntArrayRef({}));
+  return norm_jvp(self_p, self_t, scalar_ord, norm, dim, keepdim);
+}
+
+Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
 }
@@ -717,6 +790,22 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
   return ret;
 }
 
+at::Tensor clamp_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const Tensor& min_p, const Tensor& min_t,
+  const Tensor& max_p, const Tensor& max_t
+) {
+  if (min_p.defined() && max_p.defined()) {
+    return where(min_p > max_p, max_t, where(self_p < min_p, min_t, where(self_p > max_p, max_t, self_t)));
+  } else if (min_p.defined()) {
+    return where(self_p > min_p, self_t, min_t);
+  } else if (max_p.defined()) {
+    return where(self_p < max_p, self_t, max_t);
+  } else {
+    return self_t;
+  }
+}
+
 Tensor convolution_jvp(
     const Tensor& input_p, const Tensor& input_t,
     const Tensor& weight_p, const Tensor& weight_t,
@@ -764,7 +853,7 @@ Tensor convolution_backward_jvp_grad_bias(
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
-        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 4, but got: ",
+        "convolution_backward_jvp_grad_bias expected dim of grad_out_t to be 3, 4, or 5, but got: ",
         grad_out_t.dim());
   }
 }
@@ -797,39 +886,35 @@ at::IntArrayRef strides_or_error(const Tensor & input, c10::string_view const & 
       "Please either use a strided tensor or set requires_grad=False for '",
       input_name, "'");
     if (input.is_mkldnn()) return IntArrayRef({});
+    if (input.is_sparse_csr()) return IntArrayRef({});
     return input.strides();
   } else {
     return IntArrayRef({});
   }
 }
 
-Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, const Scalar & alpha) {
-  // if input was column-major, return grad as column-order for efficiency
-  if (mat1_strides[0] == 1 && mat1_strides[1] == mat1_sizes[0]) {
-    return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha.conj());
-  } else {
-    return maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
+Tensor mm_mat1_backward(const Tensor& grad, const Tensor& mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, c10::Layout mat1_layout, const Scalar& alpha) {
+  if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided && mat1_layout == c10::kStrided) {
+    // if input was column-major, return grad as column-order for efficiency
+    if (mat1_strides[0] == 1 && mat1_strides[1] == mat1_sizes[0]) {
+      return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha.conj());
+    }
   }
+
+  // General fallback, should work for any layout
+  return maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
 }
 
-Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef sizes, IntArrayRef strides, const Scalar & alpha) {
-  // if input was column-major, return grad as column-order for efficiency
-  if (strides[0] == 1 && strides[1] == sizes[0]) {
-    if (mat1.is_sparse()) {
-      // Since mm(dense, sparse) doesn't exist,
-      // pass a transposed output matrix to the underlying "addmm"
-      // function directly.
-      int64_t out_rows = mat1.size(1);
-      int64_t out_cols = grad.size(1);
-      Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
-      Tensor r = at::empty({out_cols, out_rows}, grad.options()).t();
-      at::addmm_out(r, t, mat1.t(), grad, alpha, 1);
-      return r;
+Tensor mm_mat2_backward(const Tensor& grad, const Tensor& mat1, IntArrayRef mat2_sizes, IntArrayRef mat2_strides, c10::Layout mat2_layout, const Scalar& alpha) {
+  if (grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided && mat2_layout == c10::kStrided) {
+    // if input was column-major, return grad as column-order for efficiency
+    if (mat2_strides[0] == 1 && mat2_strides[1] == mat2_sizes[0]) {
+      return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha.conj());
     }
-    return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha.conj());
-  } else {
-    return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
   }
+
+  // General fallback, should work for any layout
+  return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
 }
 
 Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {
@@ -1050,7 +1135,7 @@ static Tensor var_backward(const Tensor & grad, const Tensor & self, int64_t cor
   return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
 }
 
-Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> dim_opt,
+Tensor var_backward(Tensor grad, const Tensor& self, at::OptionalIntArrayRef dim_opt,
     c10::optional<int64_t> correction_opt, bool keepdim) {
   auto correction = correction_opt.value_or(1);
   if (self.dim() == 0 || !dim_opt.has_value()) {
@@ -1065,7 +1150,7 @@ Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> 
   return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
 }
 
-Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, c10::optional<IntArrayRef> dim_opt,
+Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, at::OptionalIntArrayRef dim_opt,
     c10::optional<int64_t> correction_opt, bool keepdim) {
   auto correction = correction_opt.value_or(1);
   if (self_p.dim() == 0 || !dim_opt.has_value()) {
@@ -1078,7 +1163,7 @@ Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result,
 
 Tensor std_backward(
     const Tensor& result, const Tensor& grad, const Tensor& self,
-    c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim) {
+    at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim) {
   auto grad_var = (grad / (result * 2)).masked_fill_(result == 0, 0);
   return var_backward(grad_var, self, dim, correction, keepdim);
 }
@@ -1093,7 +1178,7 @@ Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int64_t numel) {
 
 static Tensor mean_backward(
     const Tensor& grad, const IntArrayRef sizes, int64_t numel,
-    c10::optional<IntArrayRef> dim, bool keepdim) {
+    at::OptionalIntArrayRef dim, bool keepdim) {
   if (dim.has_value()) {
     return mean_backward(grad, sizes, *dim, keepdim);
   } else {
@@ -1103,7 +1188,7 @@ static Tensor mean_backward(
 
 Tensor var_std_mean_backward(
     const variable_list& grads, const Tensor& self, const Tensor& r1,
-    const Tensor& r2, c10::optional<IntArrayRef> dim,
+    const Tensor& r2, at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction, bool keepdim, bool is_std) {
   Tensor grad;
   if (grads[0].defined()) {
@@ -1133,60 +1218,86 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
   return mask_selected.view(sizes);
 }
 
-Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& L, bool upper) {
+Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
   at::NoTF32Guard disable_tf32;
-  // Differentiation of the Cholesky decomposition, Iain Murray
-  // https://arxiv.org/abs/1602.07527
-  // equation 8
-  auto input_tangent_ = upper ? input_tangent.mH() : input_tangent;
-  auto L_ = upper ? L.mH() : L;
+  // Let A = LL^H
+  // dA = dLL^H + L(dL)^H
+  // L^{-1}dA(L^{-H}) = L^{-1}dL + (L^{-1}dL)^H
+  //               = sym(L^{-1}dL)
+  // where sym(X) = X + X^H
+  // A short computaiton gives that the inverse of sym is given by
+  // \pi(X) = X.tril() - 0.5*diag(X)
+  // so
+  // dL = L\pi(L^{-1}dA(L^{-H}))
 
-  auto L_inverse = at::linalg_solve_triangular(L_, at::eye(L.size(-1), L.options()), /*upper=*/false);
-  auto phi = at::matmul(at::matmul(L_inverse, input_tangent_), L_inverse.mH());
-  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
-  auto L_tangent = L_.matmul(phi);
-  return upper ? L_tangent.mH() : L_tangent;
+  // Precondition: dA is symmetric/Hermitian
+  auto L_ = upper ? L.mH() : L;
+  auto dL = at::linalg_solve_triangular(L_, dA, /*upper=*/false, /*left=*/true);
+  dL = at::linalg_solve_triangular(L_.mH(), dL, /*upper=*/true, /*left=*/false);
+  dL = dL.tril() - dL.diagonal(0, -2, -1).mul(0.5).diag_embed();
+  dL = L_.matmul(dL);
+  return upper ? dL.mH() : dL;
 }
 
-Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
+Tensor cholesky_backward(const Tensor& gL, bool upper, const Tensor& L) {
   at::NoTF32Guard disable_tf32;
-  // cf. Iain Murray (2016); arXiv 1602.07527
-  // This gradient is symmetric, and not triangular.
-  // Cholesky additionally assumes that the input is symmetric, which is a subspace of
-  // R^{n x n}, and hence the derivative is not well-defined for off-diagonal
-  // elements. We resolve this by taking the gradient of the functionally independent
-  // elements of the matrix (i.e., the lower triangular portion of the input) and then
-  // reflect it on the upper triangular portion, thereby symmetrizing the gradient of
-  // the cholesky operation. The motivation behind this choice is that symmetric gradient
-  // leads to stable gradient updates, and retains symmetry of the updated matrix if it
-  // were updated by a gradient based algorithm.
-  if (upper) {
-    L = L.mH();
-    grad = grad.mH();
-  }
-  auto L_inverse = at::linalg_solve_triangular(L, at::eye(L.size(-1), L.options()), /*upper=*/false);
-  auto phi = at::matmul(L.mH(), grad);
-  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
+  // From cholesky_jvp we have that
+  // dL = L\pi(L^{-1}dA(L^-H))
+  //
+  // Let gL be the projection into the lower-triangular gradient wrt L. Taking adjoints we have
+  // gA = L^{-H}\pi^*((L^HgL).tril())L^{-1}
+  // where \pi^*(X) = 0.5 * (X + X^H - diag(X))
+  // The only non-standard point of this derivation is noting that the adjoint to multiplying
+  // on the left by a lower triangular matrix L is multiplying by L^H and then projecting back to
+  // the lower triangular matrices (hence the .tril() projection)
+  // Note that the gradient is symmetric and not triangular.
+  auto L_ = upper ? L.mH() : L;
+  auto gL_ = upper ? gL.mH() : gL;
 
-  auto grad_input = at::matmul(at::matmul(L_inverse.mH(), phi), L_inverse);
-  return grad_input.add(grad_input.mH()).mul_(0.5);  // Symmetrizing the gradient
+  // Nb. We don't need to compute gL_ = gL.tril() as
+  // tril(L^H gL) = tril(L^H (triu(gL, 1) + tril(gL)))
+  //              = tril(L^H tril(gL)) + tril(L^H triu(gL, 1))
+  //              = tril(L^H tril(gL))
+  // since tril(L^H triu(gL, 1)) = 0, as L^H triu(gL, 1) is upper triangular
+  auto gA = L_.mH().matmul(gL_).tril();
+  // Equivalent to 0.5 * (gA + gA^H - diag(gA))
+  gA = 0.5 * (gA + gA.tril(-1).mH());
+  gA = at::linalg_solve_triangular(L_.mH(), gA, /*upper=*/true, /*left=*/true);
+  gA = at::linalg_solve_triangular(L_, gA, /*upper=*/false, /*left=*/false);
+  return gA;
 }
 
 Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {
   at::NoTF32Guard disable_tf32;
   Tensor grad_L;
   if (grad.defined()) {
-    Tensor common_term = grad + grad.mT();
+    Tensor common_term = grad + grad.mH();
     common_term = at::matmul(inverse, at::matmul(common_term, inverse));
     if (upper) {
       grad_L = -at::matmul(L, common_term);
     } else {
       grad_L = -at::matmul(common_term, L);
     }
-  } else {
-    grad_L = at::zeros({1}, L.options()).expand_as(L);
   }
+
   return grad_L;
+}
+
+// If X = (L L^H)^{-1} with L lower-triangular with a real positive diagonal,
+// then dX = K^H + K, where
+// K =  L^{-H} dL^{-1} [dL^{-1} = -L^{-1} dL L^{-1}]
+//   = -L^{-H} L^{-1} dL L^{-1} [L^{-H} L^{-1} = X]
+//   = -X dL L^{-1} [X = X^H = L^{-H} L^{-1} = L^{-1} L^{-H}]
+//   = -X dL X L^{H}.
+// If X = (U^H U)^{-1} with U upper-triangular with a real positive diagonal,
+// then K becomes
+// K = -X dU^H X U
+Tensor cholesky_inverse_jvp(const Tensor& F, const Tensor& dF, const Tensor& X, bool upper) {
+  at::NoTF32Guard disable_tf32;
+  const auto CF = upper ? F : F.mH();
+  const auto dCF = upper ? dF.mH() : dF;
+  const auto partial_dX = -X.matmul(dCF).matmul(X).matmul(CF);
+  return partial_dX + partial_dX.mH();
 }
 
 // The formula for forward AD is adapted from
@@ -2968,12 +3079,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
   // E_{ij} = L_j - L_i if i != j
   //          1         otherwise
 
-  // Note: The Hermitian case is a simplification of this formula using that V^{-1} = V^H and that L is real
-  if (is_hermitian) {
-    TORCH_CHECK(at::allclose(dA, dA.mH(), /*rtol=*/1e-2, /*atol=*/1e-2),
-                "linalg_eig_jvp: The tangent part of the matrix A should also be ", (dA.is_complex() ? "Hermitian" : "symmetric."));
-  }
-
+  // Precondition: if is_hermitian == true, then dA is Hermitian
   const auto to_complex = [](const Tensor& A){ return A.to(c10::toComplexType(A.scalar_type())); };
 
   const auto dP = is_hermitian ? at::matmul(at::matmul(V.mH(), dA), V)
@@ -4701,7 +4807,7 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
 
     out_fw_grad = at::cat(fw_grads, dim);
@@ -4724,7 +4830,7 @@ Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
     std::vector<Tensor> fw_grads;
 
     for (auto& t: tensors) {
-      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::_efficientzerotensor(t.sizes(), t.options()));
     }
     out_fw_grad = at::stack(fw_grads, dim);
   }
@@ -4950,7 +5056,6 @@ Tensor group_norm_jvp(
 Tensor group_norm_mean_jvp(
     const Tensor& input_t, const Tensor& mean_p, int64_t groups) {
   int64_t N = input_t.size(0);
-  int64_t C = input_t.size(1);
   std::array<int64_t, 3> view_shape = {1, N * groups, N ? -1 : 1};
   auto input_t_reshaped = input_t.view(view_shape);
   return input_t_reshaped.mean({2}, false).view_as(mean_p);
@@ -4961,7 +5066,6 @@ Tensor group_norm_invstd_jvp(
     const Tensor& mean_p, const Tensor& invstd_p,
     int64_t groups) {
   int64_t N = input_p.size(0);
-  int64_t C = input_p.size(1);
 
   std::vector<int64_t> view_shape = {1, N * groups, N ? -1 : 1};
 
@@ -5200,6 +5304,25 @@ Tensor lu_factor_ex_jvp(
   }
 }
 
+Tensor logsumexp_jvp(const Tensor& self_p, const Tensor& self_t, IntArrayRef dim, bool keepdim) {
+  // NB: for simplicitly, we recompute some values that can be reused from forward
+  auto self_p_exp = (self_p - at::amax(self_p, dim, true)).exp();  // Use the exp-normalize trick
+  auto sumexp_p = self_p_exp.sum(dim, keepdim);
+
+  // NB: it's OK for logsumexp_jvp to be reused for formulas like softmax/log_softmax
+  //     that only have one differentiable input, because that means self_t are never zerotensors
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
+  if (areAnyTensorSubclassLike({self_p, self_t})) {
+    auto result = (self_p_exp * self_t).sum(dim, keepdim);
+    result /= sumexp_p;
+    return result;
+  } else {
+    self_p_exp *= self_t;
+    auto sumexp_t = self_p_exp.sum(dim, keepdim);
+    return sumexp_t /= sumexp_p;
+  }
+}
+
 Tensor warn_backwards(const Tensor &grad_output) {
   TORCH_WARN("Warn from backward");
   return grad_output;
@@ -5224,44 +5347,66 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   return result;
 }
 
-Tensor scatter_reduce_backward(const Tensor & grad,
-                               const Tensor& input,
-                               int dim,
-                               const Tensor & index,
-                               c10::string_view reduce,
-                               const Tensor & result){
-  Tensor grad_input;
+std::tuple<Tensor, Tensor> scatter_reduce_backward(
+  const Tensor& grad,
+  const Tensor& self,
+  int dim,
+  const Tensor& index,
+  const Tensor& src,
+  c10::string_view reduce,
+  bool include_self,
+  const Tensor& result) {
+  Tensor grad_self, grad_src;
 
+  // FIXME: complex gradients not handled correctly
+  // For now this is ok as scatter_reduce isn't added to the whitelist
+  // in tools/autograd/gen_variable_type.py
 
-  // TODO: gather doesn't support broadcasting of input and index
-  // currently this works because scatter_reduce doesn't support broadcasting yet but
-  // this needs to be fixed when scatter_reduce is upgraded to support broadcasting
-  // by broadcasting index here too.
+  if (!grad.defined()) {
+    return std::make_tuple(grad_self, grad_src);
+  }
 
   if (reduce == "sum") {
-    grad_input = grad.gather(dim, index);
+    grad_self = grad;
+    grad_src = grad.gather(dim, index);
   } else if (reduce == "prod") {
-    grad_input = (grad * result).gather(dim, index) / input;
-    // handle nans in above computation when input = 0, we know result = 0 (0 / 0 -> nan)
-    // so just replace with 0
-    grad_input.masked_fill_(input == 0, 0);
+    grad_self = (grad * result) / self;
+    grad_self.masked_fill_(self == 0, 0);
+    grad_src = (grad * result).gather(dim, index) / src;
+    grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
-    Tensor N = zeros_like(grad);
-    N.scatter_add_(dim, index, ones_like(input));
-    Tensor N_input = N.gather(dim, index);
-    grad_input = grad.gather(dim, index) / N_input;
-    grad_input.masked_fill_(N_input == 0, 0);
+    Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
+    N = N.scatter_add(dim, index, ones_like(src));
+    N.masked_fill_(N == 0, 1);
+    grad_self = grad / N;
+    Tensor N_src = N.gather(dim, index);
+    grad_src = grad.gather(dim, index) / N_src;
   } else if (reduce == "amax" || reduce == "amin") {
+    grad_self = (self == result) * grad;
     Tensor value = result.gather(dim, index);
-    grad_input = (input == value) * grad.gather(dim, index);
+    grad_src = (src == value) * grad.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
   }
 
-  return grad_input;
+  if (!include_self) {
+    grad_self = grad_self.scatter(dim, index, 0);
+  }
+
+  return std::make_tuple(grad_self, grad_src);
 
 }
 
+Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_options) {
+  // Handle R->C copies without raising a warning
+  const auto self_type = self_options.dtype().toScalarType();
+  auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grad_);
+  if (!c10::isComplexType(self_type) && grad->is_complex()) {
+    grad = c10::MaybeOwned<at::Tensor>::owned(at::real(grad_));
+  }
+
+  return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
+}
 
 } // namespace details
 } // namespace generated

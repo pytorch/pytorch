@@ -15,8 +15,10 @@ from torch.onnx.symbolic_helper import (_set_opset_version,
                                         _unpack_list,
                                         parse_args)
 import torch.utils.cpp_extension
+from autograd_helper import CustomFunction as CustomFunction2
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
-                                 skipIfUnsupportedMaxOpsetVersion)
+                                 skipIfUnsupportedMaxOpsetVersion,
+                                 skipIfNoCuda)
 from verify import verify
 
 import torchvision
@@ -954,18 +956,17 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     def test_onnx_fallthrough(self):
         # Test aten export of op with symbolic for aten
-        x = torch.randn(100, 128)
-        y = torch.randn(100, 128)
-        model = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.digamma(x)
 
-        graph, _, __ = self._model_to_graph(model, (x, y),
+        x = torch.randn(100, 128)
+        graph, _, __ = self._model_to_graph(Module(), (x, ),
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
-                                            input_names=["x", "y"],
-                                            dynamic_axes={"x": [0, 1], "y": [0, 1]})
+                                            input_names=["x"],
+                                            dynamic_axes={"x": [0, 1]})
         iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "aten::cosine_similarity")
+        self.assertEqual(next(iter).kind(), "aten::digamma")
 
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
     @skipIfUnsupportedMaxOpsetVersion(10)
@@ -1037,6 +1038,36 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                            input_names=["batch"], dynamic_axes={"batch": [0, 1]})
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "prim::PythonOp")
+
+    def test_autograd_module_name(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                return input.clamp(min=0)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                input, = ctx.saved_tensors
+                grad_input = grad_output.clone()
+                grad_input[input < 0] = 0
+                return grad_input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input) + CustomFunction2.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = self._model_to_graph(model, batch,
+                                           input_names=["batch"], dynamic_axes={"batch": [0, 1]})
+        iter = graph.nodes()
+        autograd1 = next(iter)
+        autograd2 = next(iter)
+        self.assertEqual(autograd1.kind(), "prim::PythonOp")
+        self.assertEqual(autograd2.kind(), "prim::PythonOp")
+        self.assertNotEqual(autograd1.s("module"), autograd2.s("module"))
 
     def test_unused_initializers(self):
         class Model(torch.nn.Module):
@@ -1252,6 +1283,13 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph = onnx.load(io.BytesIO(f.getvalue()))
         self.assertSetEqual(set([i.name for i in graph.graph.initializer]), param_name_set)
 
+        model.train()
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f, training=TrainingMode.PRESERVE,
+                          opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), param_name_set)
+
         # Test eval mode.
         model.eval()
         f = io.BytesIO()
@@ -1266,6 +1304,24 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     def test_deduplicate_initializers_torchscript(self):
         self._test_deduplicate_initializers(torchscript=True)
+
+    @skipIfNoCuda
+    def test_deduplicate_initializers_diff_devices(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w_cpu = torch.nn.Parameter(torch.ones(3, device=torch.device("cpu")))
+                self.w_cuda = torch.nn.Parameter(torch.ones(3, device=torch.device("cuda")))
+
+            def forward(self, x, y):
+                return x + self.w_cpu, y + self.w_cuda
+
+        x = torch.randn(3, 3, device=torch.device("cpu"))
+        y = torch.randn(3, 3, device=torch.device("cuda"))
+        f = io.BytesIO()
+        torch.onnx.export(Model(), (x, y), f, opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), {"w_cpu"})
 
     def test_duplicated_output_node(self):
         class DuplicatedOutputNet(torch.nn.Module):

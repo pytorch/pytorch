@@ -337,15 +337,25 @@ class CodeGen(object):
 
             typename = _type_repr(o)
 
-            # This is a generic type, e.g. typing.List[torch.Tensor]
             if hasattr(o, '__origin__'):
+                # This is a generic type, e.g. typing.List[torch.Tensor]
                 origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
-                # Assign global names for each of the inner type variables.
-                args = [type_repr(arg) for arg in o.__args__]
+                if hasattr(o, '__args__'):
+                    # Assign global names for each of the inner type variables.
+                    args = [type_repr(arg) for arg in o.__args__]
 
-                return f'{origin_typename}[{",".join(args)}]'
+                    if len(args) == 0:
+                        # Bare type, such as `typing.Tuple` with no subscript
+                        # This code-path used in Python < 3.9
+                        return origin_typename
+
+                    return f'{origin_typename}[{",".join(args)}]'
+                else:
+                    # Bare type, such as `typing.Tuple` with no subscript
+                    # This code-path used in Python 3.9+
+                    return origin_typename
 
             # Common case: this is a regular module name like 'foo.bar.baz'
             return add_global(typename, o)
@@ -670,6 +680,7 @@ class Graph:
         memo = memo if memo else {}
         g = Graph(tracer_cls=self._tracer_cls)
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
+        g._codegen = copy.deepcopy(self._codegen)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
         g.output(output_val, type_expr=getattr(old_output_val, 'type', None))

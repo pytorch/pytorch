@@ -576,7 +576,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               [](const c10::intrusive_ptr<::c10d::Store>& store,
                  std::string selfName,
                  worker_id_t selfId,
-                 int worldSize,
+                 optional<int> worldSize,
                  TensorPipeRpcBackendOptions opts,
                  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
                  std::vector<c10::Device> devices) {
@@ -632,6 +632,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "_get_device_map",
           (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
               TensorPipeAgent::getDeviceMap,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_backend_options",
+          &TensorPipeAgent::getBackendOptions,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_update_group_membership",
+          &TensorPipeAgent::updateGroupMembership,
           py::call_guard<py::gil_scoped_release>());
 
 #endif // USE_TENSORPIPE
