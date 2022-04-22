@@ -5,7 +5,7 @@ import torch
 Instructions:
 
 1. pytest -n 8 test/test_vmap.py test/test_ops.py test/test_pythonkey.py > result.txt
-2. test/xfail_suggester.py
+2. python test/xfail_suggester.py
 """
 
 with open('result.txt') as f:
@@ -30,12 +30,12 @@ base_names = {
     'test_vjpvmap_',
     'test_jvp_',
     'test_vmapjvp_',
-    'test_vmapjvpall_has_batch_rule',
+    'test_vmapjvpall_has_batch_rule_',
     'test_vmapjvpall_',
     'test_jvpvjp_',
     'test_vjpvjp_',
     'test_decomposition_',
-    'test_make_fx_',
+    'test_make_fx_exhaustive_',
     'test_vmap_exhaustive_',
     'test_op_has_batch_rule_',
 }
