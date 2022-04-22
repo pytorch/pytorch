@@ -11,6 +11,10 @@ namespace jit {
 TORCH_API c10::optional<std::shared_ptr<Graph>> DecompositionGraphForSchema(
     const FunctionSchema& schema);
 
+TORCH_API void RegisterDecompositionForSchema(
+    const FunctionSchema& schema,
+    std::shared_ptr<Graph> g);
+
 TORCH_API void RunDecompositions(std::shared_ptr<Graph> g);
 
 TORCH_API c10::optional<GraphFunction*> GetDecompositionFunction(

@@ -9,6 +9,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <memory>
 #include <unordered_map>
 
 namespace torch {
@@ -20,6 +21,10 @@ std::mutex lock;
 auto compilation_unit = std::make_shared<CompilationUnit>();
 std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     schema_to_decomposition;
+
+// Holds User-Registered Functions and keeps them alive
+std::unordered_map<const FunctionSchema*, std::shared_ptr<Function>>
+    user_registered_funcs;
 
 std::unordered_map<const FunctionSchema*, Function*> schema_to_function;
 
@@ -123,6 +128,18 @@ c10::optional<GraphFunction*> GetDecompositionFunction(
   auto& func = toGraphFunction(*cache_it->second);
   func._set_initial_executor_execution_mode(ExecutorExecutionMode::SIMPLE);
   return &func;
+}
+
+void RegisterDecompositionForSchema(
+    const FunctionSchema& schema,
+    std::shared_ptr<Graph> g) {
+  loadDecompositionFunctions();
+  std::lock_guard<std::mutex> guard(lock);
+  user_registered_funcs.emplace(
+      &schema, new GraphFunction(schema.name(), g, nullptr));
+  Function* func = (user_registered_funcs[&schema]).get();
+  schema_to_function[&schema] = func;
+  schema_to_decomposition[&schema] = g;
 }
 
 } // namespace jit

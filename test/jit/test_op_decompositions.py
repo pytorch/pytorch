@@ -21,3 +21,19 @@ class TestOpDecompositions(JitTestCase):
         inp = torch.rand([10, 10])
         self.assertEqual(foo(inp), foo_s(inp))
         FileCheck().check_not("aten::var").run(foo_s.graph)
+
+    def test_registered_decomposition(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.square(x)
+
+        @torch.jit.script
+        def square_decomp(x):
+            return torch.pow(x, 2)
+
+        node = foo.graph.findNode("aten::square")
+        torch._C._jit_register_decomposition_for_node(node, square_decomp.graph)
+        torch._C._jit_pass_run_decompositions(foo.graph)
+        FileCheck().check_not("aten::square").check("aten::pow").run(foo.graph)
+        x = torch.rand([4])
+        self.assertEqual(foo(x), torch.square(x))
