@@ -1,11 +1,11 @@
-#include <torch/csrc/lazy/core/dynamic_ir.h>
+#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 
 namespace torch {
 namespace lazy {
 
 DimensionNode::DimensionNode(OpKind op, OpList operands, hash_t hash_seed):
   TsNode(op, operands, /*num_outputs=*/1,
-  /* node_hash */ HashCombine(op.hash(), hash_seed)){}
+  /* hash_seed */ HashCombine(op.hash(), hash_seed)){}
 
 std::string DimensionNode::ToString() const {
   return "DimensionNode";

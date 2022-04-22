@@ -79,7 +79,7 @@ public:
 
     // Pre-scan for arguments that match defaults
     int64_t default_suffix_len = 0;
-    for (auto idx = arguments.size() - 1; idx >= 0; idx--) {
+    for (size_t idx = arguments.size() - 1; idx >= 0; idx--) {
       const auto& arg = schema.arguments()[idx];
       if (!arg.default_value().has_value()) {
         break;
@@ -203,6 +203,7 @@ void initDispatchBindings(PyObject* module) {
       return self;
     }, "", py::arg("dispatch") = "")
   ;
+
   m.def("_dispatch_library", [](const char* kind, std::string name, const char* dispatch) {
     return std::make_unique<torch::Library>(
       parseKind(kind),

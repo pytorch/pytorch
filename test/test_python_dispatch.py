@@ -4,7 +4,8 @@ import tempfile
 import torch
 from copy import deepcopy
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.logging_tensor import LoggingTensor, log_input, capture_logs, no_dispatch
+from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
+    log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
 from torch.utils._python_dispatch import enable_python_mode
 
@@ -513,16 +514,16 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                 pass
 
     def test_enable_python_mode_basic(self) -> None:
-        with enable_python_mode(LoggingTensor):
+        with enable_python_mode(LoggingTensorMode):
             z = torch.empty([])
-            self.assertTrue(isinstance(z, LoggingTensor))
+            self.assertTrue(isinstance(z, LoggingTensorMode))
 
     def test_enable_python_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
         y = torch.randn([])
-        with enable_python_mode(LoggingTensor):
+        with enable_python_mode(LoggingTensorMode):
             z = x + y
-            self.assertTrue(isinstance(z, LoggingTensor))
+            self.assertTrue(isinstance(z, LoggingTensorMode))
 
     def test_enable_python_mode_subclass_priority(self) -> None:
         class ErrorA(RuntimeError):
@@ -566,17 +567,17 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                 a + b
 
     def test_enable_python_mode_respects_no_dispatch(self) -> None:
-        with enable_python_mode(LoggingTensor):
+        with enable_python_mode(LoggingTensorMode):
             z = torch.ones([2, 3])
-            self.assertTrue(isinstance(z, LoggingTensor))
+            self.assertTrue(isinstance(z, LoggingTensorMode))
             with no_dispatch():
                 expected = torch.ones([2, 3])
                 self.assertEqual(z.elem, expected)
 
     def test_nested_enable_python_mode(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "has already been set"):
-            with enable_python_mode(LoggingTensor):
-                with enable_python_mode(LoggingTensor):
+            with enable_python_mode(LoggingTensorMode):
+                with enable_python_mode(LoggingTensorMode):
                     pass
 
     def test_tolist_numpy_with_python_mode(self) -> None:
@@ -672,15 +673,15 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
             out.backward()
 
     def test_storage_can_be_converted_to_python_object(self):
-        with enable_python_mode(LoggingTensor):
+        with enable_python_mode(LoggingTensorMode):
             s = torch.Storage()
-            z = LoggingTensor(torch.empty([]))
+            z = LoggingTensorMode(torch.empty([]))
             z.set_(s)
 
     def test_autograd_in_attr(self):
         # We want the wrapped Tensor to require gradients!
         true_t = torch.rand(2, requires_grad=True)
-        t = LoggingTensor(true_t)
+        t = LoggingTensorReentrant(true_t)
 
         out = t + 2
 

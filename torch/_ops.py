@@ -7,6 +7,7 @@ import types
 
 import torch.jit
 import torch._utils_internal
+
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
 
