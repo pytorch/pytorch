@@ -322,7 +322,7 @@ class FullyShardedDataParallel(nn.Module):
             Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
         mixed_precision: (Optional[MixedPrecision]): A ``MixedPrecision`` instance
             describing the mixed precision training config to be used. ``MixedPrecision``
-            supports configuring paramter, buffer, and gradient communication dtype. Note
+            supports configuring parameter, buffer, and gradient communication dtype. Note
             that only floating point data is cast to the reduced precision. This allows
             users potential memory saving and training speedup while trading off
             accuracy during model training. If ``None``, no mixed precision is applied.
