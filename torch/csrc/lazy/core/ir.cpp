@@ -1,6 +1,10 @@
+#include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/cache.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 
+// Enables caching on for dynamic shapes (aka disable hash on shapes)
 C10_DEFINE_bool(ltc_enable_dynamic_shapes, false, "Whether dynamic shape is enabled");
 
 namespace torch {
@@ -25,12 +29,8 @@ hash_t Value::hash() const {
   return HashCombine(node->hash(), Hash(index));
 }
 
-hash_t Value::hash_with_sizes() const {
-  return HashCombine(node->hash_with_sizes(), Hash(index));
-}
-
-hash_t Value::hash_without_sizes() const {
-  return HashCombine(node->hash_without_sizes(), Hash(index));
+hash_t Value::shapeHash() const {
+  return HashCombine(node->shapeHash(), Hash(index));
 }
 
 OpKind OpKind::Get(const std::string& name) {
@@ -41,50 +41,19 @@ hash_t OpKind::hash() const {
   return StringHash(op.toQualString());
 }
 
-hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSizes) {
-  hash_t hash = seed;
-  for (auto& operand : operands) {
-    if (!operand) {
-      hash = HashCombine(hash, static_cast<uint64_t>(kNullOpt));
-      continue;
-    }
-    auto operand_hash = bakeInSizes ? operand.hash_with_sizes() : operand.hash_without_sizes();
-    hash = HashCombine(hash, operand_hash);
-  }
-  return hash;
-}
-
 bool Node::enableDynamicShape() {
   static bool enabled = std::getenv("LTC_ENABLE_DYNAMIC_SHAPES") != nullptr;
   return enabled || FLAGS_ltc_enable_dynamic_shapes;
 }
 
-Node::Node(OpKind op, size_t num_outputs, hash_t node_hash, std::function<hash_t(bool)> dag_hash_fn)
+Node::Node(OpKind op, size_t num_outputs)
     : op_(op),
       num_outputs_(num_outputs),
-      node_hash_(node_hash),
-      dag_hash_without_sizes_(dag_hash_fn(false)),
-      dag_hash_with_sizes_(dag_hash_fn(true)),
       metadata_(GetMetaDataIfDebugging()) {}
 
-Node::Node(OpKind op, size_t num_outputs, std::function<hash_t(bool)> node_hash_fn)
-    : op_(op),
-      num_outputs_(num_outputs),
-      node_hash_(node_hash_fn(!enableDynamicShape())),
-      dag_hash_without_sizes_(node_hash_fn(false)),
-      dag_hash_with_sizes_(node_hash_fn(true)),
-      metadata_(GetMetaDataIfDebugging()) {}
+Node::Node(OpKind op, OpList operands, std::vector<Shape>&& shapes, size_t num_outputs)
+    : Node(op, num_outputs) {
 
-
-Node::Node(OpKind op, OpList operands, std::vector<Shape>&& shapes,
-           size_t num_outputs, hash_t hash_seed)
-    : Node(op, num_outputs,
-           // TODO(WHC) this is inefficient (having to compute node_hash twice
-           // since I can't call hash() yet) so probably move dag_hash
-           // initialization to a separate function?
-           /* node_hash */ HashCombine(op.hash(), hash_seed),
-           /* dag_hash */
-           [&](bool bakeInSizes) { return OperandHashes(operands, HashCombine(op.hash(), hash_seed), bakeInSizes); }) {
   // Move shapes into node
   shapes_.insert(
     shapes_.end(),
@@ -104,20 +73,20 @@ Node::Node(OpKind op, OpList operands, std::vector<Shape>&& shapes,
   }
 }
 
-Node::Node(OpKind op, OpList operands, size_t num_outputs, hash_t hash_seed)
-  : Node(op, operands, std::vector<Shape>{}, num_outputs, hash_seed) {}
+Node::Node(OpKind op, OpList operands, const std::function<Shape()>& shape_fn, size_t num_outputs)
+    : Node(op, operands, std::vector<Shape>{}, num_outputs) {
+  addComputedShape(shape_fn);
+}
 
-Node::Node(OpKind op, Shape shape, size_t num_outputs, hash_t hash_seed)
-    : Node(op, num_outputs, [&](bool bakeInSizes) -> hash_t { return GetOpHash(op, shape, hash_seed, bakeInSizes); }) {
+Node::Node(OpKind op, OpList operands, size_t num_outputs)
+    : Node(op, operands, std::vector<Shape>{}, num_outputs) {}
+
+Node::Node(OpKind op, Shape shape, size_t num_outputs)
+    : Node(op, num_outputs) {
   shapes_.push_back(std::move(shape));
 }
 
 Node::~Node() = default;
-
-hash_t Node::GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed, bool bakeInSizes) {
-  hash_t h = HashCombine(op.hash(), shape.hash(bakeInSizes));
-  return HashCombine(h, hash_seed);
-}
 
 // Retrieves the full shape of the IR Node.
 c10::ArrayRef<Shape> Node::shapes() const { return shapes_; }
@@ -125,6 +94,26 @@ c10::ArrayRef<Shape> Node::shapes() const { return shapes_; }
 // Retrieves the shape of the output at a given index.
 const Shape& Node::shape(size_t output_index) const {
   return shapes_.at(output_index);
+}
+
+// Add the shape computed by the shape_fn
+
+void Node::addComputedShape(const std::function<Shape()>& shape_fn) {
+  shapes_.push_back(computeShape(shape_fn));
+}
+
+using ShapeCache = Cache<hash_t, Shape, HashReducer>;
+
+// Compute the shape using the provided shape_fn.
+Shape Node::computeShape(const std::function<Shape()>& shape_fn) {
+  static ShapeCache* cache = new ShapeCache(FLAGS_torch_lazy_shape_cache_size);
+
+  auto hash = shapeHash();
+  auto shape = cache->Get(hash);
+  if (shape == nullptr) {
+    shape = cache->Add(hash, std::make_shared<Shape>(shape_fn()));
+  }
+  return *shape;
 }
 
 const std::vector<Output>& Node::operands() const {

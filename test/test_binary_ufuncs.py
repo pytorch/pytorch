@@ -13,6 +13,7 @@ import warnings
 import operator
 from functools import partial
 
+import torch.autograd.forward_ad as fwAD
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, slowTest, iter_indices, TEST_WITH_ASAN, run_tests, gradcheck,
@@ -20,7 +21,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyNativeDeviceTypes,
-    skipCUDAIfRocm, skipIf, ops, OpDTypes, skipMeta)
+    skipIf, ops, OpDTypes, skipMeta)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, integral_types, complex_types, integral_types_and,
@@ -383,7 +384,6 @@ class TestBinaryUfuncs(TestCase):
 
                     out = torch.empty_like(lhs_i16)
                     self.assertEqual(op(lhs_i32, rhs_i64, out=out).dtype, torch.int16)
-                    self.assertEqual(op(lhs_i32, rhs_i64), out, exact_dtype=False)
                 else:
                     # Float outs cannot be safely cast to integer types
                     with self.assertRaisesRegex(RuntimeError, "can't be cast"):
@@ -397,11 +397,9 @@ class TestBinaryUfuncs(TestCase):
                 # All these output types can be cast to any float or complex type
                 out = torch.empty_like(lhs_i64, dtype=torch.float16)
                 self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.float16)
-                self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_i64, dtype=torch.bfloat16)
                 self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.bfloat16)
-                self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_i64, dtype=torch.float32)
                 self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.float32)
@@ -429,7 +427,6 @@ class TestBinaryUfuncs(TestCase):
                 # All these output types can be cast to any float or complex type
                 out = torch.empty_like(lhs_f64, dtype=torch.float16)
                 self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.float16)
-                self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_f64, dtype=torch.bfloat16)
                 self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.bfloat16)
@@ -470,8 +467,10 @@ class TestBinaryUfuncs(TestCase):
             if op.supports_out:
                 # All these output types can be cast to any or complex type
                 out = torch.empty_like(lhs_c64, dtype=torch.complex64)
+
                 self.assertEqual(op(lhs_c64, rhs_c128, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_c64, rhs_c128), out, exact_dtype=False)
+                result = op(lhs_c64, rhs_c128)
+                self.assertEqual(result, out.to(result.dtype))
 
                 if not op.always_returns_bool:
                     # complex outs can't be cast to float types
@@ -1808,6 +1807,33 @@ class TestBinaryUfuncs(TestCase):
         run_test(torch.maximum, [0., 1., 2.], [1., 1., 1.], [0., 0.5, 1.], [1., 0.5, 0.])
         run_test(torch.minimum, [0., 1., 2.], [1., 1., 1.], [1., 0.5, 0.], [0., 0.5, 1.])
 
+    def test_maximum_minimum_forward_ad_float32(self, device):
+        # TODO: This should really be covered by OpInfo but it isn't. The problem
+        # is that our gradient tests test using float64 but it should also test
+        # float32
+        x = torch.randn(3, device=device, dtype=torch.float32)
+        y = torch.randn(3, device=device, dtype=torch.float32)
+        tx = torch.randn(3, device=device, dtype=torch.float32)
+        ty = torch.randn(3, device=device, dtype=torch.float32)
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(x, tx)
+            y_dual = fwAD.make_dual(y, ty)
+            result = torch.maximum(x_dual, y_dual)
+            _, result_tangent = fwAD.unpack_dual(result)
+
+        expected = torch.where(x > y, tx, ty)
+        self.assertEqual(result_tangent, expected)
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(x, tx)
+            y_dual = fwAD.make_dual(y, ty)
+            result = torch.minimum(x_dual, y_dual)
+            _, result_tangent = fwAD.unpack_dual(result)
+
+        expected = torch.where(x < y, tx, ty)
+        self.assertEqual(result_tangent, expected)
+
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
@@ -2117,7 +2143,6 @@ class TestBinaryUfuncs(TestCase):
             self.assertTrue(torch.all(fn(x, zero).isnan()))
 
     @onlyNativeDeviceTypes  # Check Issue https://github.com/pytorch/pytorch/issues/48130
-    @skipCUDAIfRocm  # Error happens on both ROCM and XLA
     @dtypes(*integral_types())
     def test_fmod_remainder_by_zero_integral(self, device, dtype):
         fn_list = (torch.fmod, torch.remainder)
@@ -2129,13 +2154,16 @@ class TestBinaryUfuncs(TestCase):
             if self.device_type == 'cpu':
                 with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
                     fn(x, zero)
-            # Different value for different dtype on CUDA:
-            # Due to it's an undefined behavior, CUDA returns a pattern of all 1s
-            # for integral dividend (other than int64) divided by zero. For int64,
-            # CUDA returns all 1s for negative dividend, half 1s for positive dividend.
-            # uint8: 0xff -> 255
-            # int32: 0xffffffff -> -1
+            elif torch.version.hip is not None:
+                # ROCm behavior: x % 0 is a no-op; x is returned
+                self.assertEqual(fn(x, zero), x)
             else:
+                # CUDA behavior: Different value for different dtype
+                # Due to it's an undefined behavior, CUDA returns a pattern of all 1s
+                # for integral dividend (other than int64) divided by zero. For int64,
+                # CUDA returns all 1s for negative dividend, half 1s for positive dividend.
+                # uint8: 0xff -> 255
+                # int32: 0xffffffff -> -1
                 if dtype == torch.int64:
                     self.assertEqual(fn(x, zero) == 4294967295, x >= 0)
                     self.assertEqual(fn(x, zero) == -1, x < 0)
@@ -2795,6 +2823,23 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(actual, actual_out)
                 expected = start + weight * (end - start)
                 self.assertEqual(expected, actual)
+
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    def test_lerp_lowp(self, device, dtype):
+        ref_dtype = torch.float
+        xvals = (0., -30000.)
+        yvals = (0.1, -20000.)
+        xs = [torch.full((4,), xval, device=device, dtype=dtype) for xval in xvals]
+        ys = [torch.full((4,), yval, device=device, dtype=dtype) for yval in yvals]
+        weights = [70000, torch.full((4,), 8, device=device, dtype=dtype)]
+        for x, y, w in zip(xs, ys, weights):
+            xref = x.float()
+            yref = y.float()
+            wref = w.float() if isinstance(w, torch.Tensor) else w
+            actual = torch.lerp(x, y, w)
+            expected = torch.lerp(xref, yref, wref).to(dtype)
+            self.assertEqual(actual, expected, atol=0., rtol=0.)
 
     def _test_logaddexp(self, device, dtype, base2):
         if base2:

@@ -2039,16 +2039,32 @@ class TestCircularSerialization(TestCase):
         _ = traverse(dp2, only_datapipe=True)
         _ = traverse(dp2, only_datapipe=False)
 
+    class LambdaIterDataPipe(IterDataPipe):
+        def add_one(self, x):
+            return x + 1
+
+        def classify(self, x):
+            return 0
+
+        def __init__(self, fn, source_dp=None):
+            self.fn = fn
+            self.lambda_fn = lambda x: x + 1
+            self.source_dp = source_dp if source_dp else dp.iter.IterableWrapper([1, 2, 4])
+            self._dp = self.source_dp.map(self.add_one).map(self.lambda_fn).demux(2, self.classify)[0]
+
+        def __iter__(self):
+            yield from self._dp
+
     @skipIfNoDill
     def test_circular_serialization_with_dill(self):
         # Test for circular reference issue with dill
-        self.assertTrue(list(TestCircularSerialization.CustomIterDataPipe(lambda x: x + 1)) ==
-                        list(dill.loads(dill.dumps(TestCircularSerialization.CustomIterDataPipe(lambda x: x + 1)))))
-        _ = traverse(TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn), only_datapipe=True)
-        _ = traverse(TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn), only_datapipe=False)
+        self.assertTrue(list(TestCircularSerialization.LambdaIterDataPipe(lambda x: x + 1)) ==
+                        list(dill.loads(dill.dumps(TestCircularSerialization.LambdaIterDataPipe(lambda x: x + 1)))))
+        _ = traverse(TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn), only_datapipe=True)
+        _ = traverse(TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn), only_datapipe=False)
 
-        dp1 = TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn)
-        dp2 = TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn, source_dp=dp1)
+        dp1 = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn)
+        dp2 = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn, source_dp=dp1)
         self.assertTrue(list(dp2) == list(dill.loads(pickle.dumps(dp2))))
         _ = traverse(dp2, only_datapipe=True)
         _ = traverse(dp2, only_datapipe=False)

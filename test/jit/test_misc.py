@@ -12,6 +12,7 @@ import sys
 import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
+from torch.testing._internal.common_utils import freeze_rng_state
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -171,6 +172,22 @@ class TestMisc(JitTestCase):
 
         self.checkScript(if_function, (torch.randn(5),))
 
+    def test_hacked_twin(self):
+
+        def gen_data():
+            with freeze_rng_state():
+                return torch.randn(10), torch.randint(10, (20,)), torch.randn(20)
+
+        input, index, value, = gen_data()
+        input1, index1, value1, = gen_data()
+        out1 = torch.ops.aten.index_put.hacked_twin(input, [index], value, accumulate=False)
+        out2 = torch.index_put(input1, [index1], value1, accumulate=False)
+        self.assertEqual(out1, out2)
+
+        torch.ops.aten.index_put_.hacked_twin(input, [index], value, accumulate=False)
+        torch.index_put_(input1, [index1], value1, accumulate=False)
+        self.assertEqual(input, input1)
+
     def test_export_opnames_interface(self):
 
         @torch.jit.interface
@@ -227,6 +244,14 @@ class TestMisc(JitTestCase):
         scripted_M_mod.sub = torch.jit.script(FooMod())
         self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
+
+    def test_math_inf(self):
+        from math import inf
+
+        def foo():
+            return inf
+
+        self.checkScript(foo, ())
 
     def test_list_literal_infer(self):
         def expects_intlist(x: List[int]):
