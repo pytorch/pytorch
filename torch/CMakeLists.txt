@@ -340,6 +340,19 @@ if(USE_DEPLOY)
       )
 
   add_dependencies(torch_python_obj gen_torch_version)
+  add_library(torch_python_obj_lib $<TARGET_OBJECTS:torch_python_obj> )
+  install(TARGETS torch_python_obj_lib
+        EXPORT torch_python_obj_lib_targets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  )
+  install(EXPORT torch_python_obj_lib_targets
+        FILE torch_python_obj_lib_targets.cmake
+        NAMESPACE torch_python_obj::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/torch_python_obj_lib
+  )
 
 endif()
 
