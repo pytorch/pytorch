@@ -32,7 +32,7 @@ from ._six import string_classes as _string_classes
 
 from typing import Set, Type, TYPE_CHECKING, Union, Callable
 import builtins
-
+from .custom_libraries import extend_library
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
@@ -47,7 +47,7 @@ __all__ = [
     'are_deterministic_algorithms_enabled',
     'is_deterministic_algorithms_warn_only_enabled',
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
-    'set_warn_always', 'is_warn_always_enabled',
+    'set_warn_always', 'is_warn_always_enabled', 'extend_library'
 ]
 
 ################################################################################

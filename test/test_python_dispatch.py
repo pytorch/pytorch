@@ -19,7 +19,10 @@ class TestPythonRegistration(TestCase):
             run[0] = True
             return args[0]
 
-        torch.ops.aten.sum.default.impl("CPU", my_sum)
+        my_lib1 = torch.extend_library("aten")
+        my_lib2 = torch.extend_library("aten")
+
+        torch.ops.aten.sum.default.impl(my_lib1, "CPU", my_sum)
 
         x = torch.tensor([1, 2])
         self.assertEqual(torch.sum(x), x)
@@ -31,29 +34,36 @@ class TestPythonRegistration(TestCase):
 
         # Now we are secretly making the operator a view op so autograd needs to know how
         # to handle it
-        torch.ops.aten.neg.default.impl("AutogradCPU", my_neg)
-
-        self.assertTrue(torch.neg(x).is_neg())
+        torch.ops.aten.neg.default.impl(my_lib2, "AutogradCPU", my_neg)
 
         # Example 3
         def my_mul(*args, **kwargs):
             return torch.zeros_like(args[0])
 
-        torch.ops.aten.mul.Tensor.impl("ZeroTensor", my_mul)
+        torch.ops.aten.mul.Tensor.impl(my_lib2, "ZeroTensor", my_mul)
 
+        # Assert that a user can't override the behavior of a (ns, op, dispatch_key)
+        # combination if someone overrided the behavior for the same before them
+        with self.assertRaisesRegex(RuntimeError, 'already a kernel overriding'):
+            torch.ops.aten.sum.default.impl(my_lib2, "CPU", my_sum)
+
+        my_lib1.remove()
+
+        # Validate that the old behavior is restored for sum
+        self.assertEqual(torch.sum(x), torch.tensor(3))
+
+        # Validate that lib2 is not affected by removing lib1
+        self.assertTrue(torch.neg(x).is_neg())
         y = torch._efficientzerotensor(2)
         self.assertTrue(not torch.mul(x, y)._is_zerotensor())
 
-        # Remove the custom registrations
-        # End state: torch.remove_custom_library('aten')
-        # Concerns: you could be importing a library "foo" that's also registering stuff
-        # And say you wanna register something for the same op, dispatch key and
-        # then wanna delete the implementations at the end to fallback foo's implementations
-        # and not aten's for instance. This call will not do that and also remove foo's implementations.
-        torch.ops.aten.sum.default.remove_impl()
+        # Overriding sum for CPU is now okay
+        torch.ops.aten.sum.default.impl(my_lib2, "CPU", my_sum)
+        self.assertEqual(torch.sum(x), x)
 
-        # Validate that the old behavior is restored
-        self.assertEqual(torch.sum(x), torch.tensor(3))
+        my_lib2.remove()
+
+        # Validate that the old behavior is restored for neg and mul
         self.assertTrue(not torch.neg(x).is_neg())
         self.assertTrue(torch.mul(x, y)._is_zerotensor())
 
