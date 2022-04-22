@@ -310,7 +310,7 @@ class TestIterableDataPipeBasic(TestCase):
         # The output order should be always the same.
         self.assertEqual(list(datapipe), list(datapipe))
 
-    def test_readfilesfromdisk_iterable_datapipe(self):
+    def test_openfilesfromdisk_iterable_datapipe(self):
         # test import datapipe class directly
         from torch.utils.data.datapipes.iter import (
             FileLister,
@@ -329,6 +329,22 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertEqual(rec[1].read(), f.read())
                 rec[1].close()
         self.assertEqual(count, len(self.temp_files))
+
+        # functional API
+        datapipe2 = datapipe1.open_files(mode='b')
+
+        count = 0
+        for rec in datapipe2:
+            count = count + 1
+            self.assertTrue(rec[0] in self.temp_files)
+            with open(rec[0], 'rb') as f:
+                self.assertEqual(rec[1].read(), f.read())
+                rec[1].close()
+        self.assertEqual(count, len(self.temp_files))
+
+        # __len__ Test
+        with self.assertRaises(TypeError):
+            len(datapipe2)
 
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
@@ -1380,6 +1396,24 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp_nolen = IDP_NoLen(range(10))
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
+
+    def test_streaw_reader_iterdatapipe(self):
+        from io import StringIO
+
+        input_dp = dp.iter.IterableWrapper([("f1", StringIO("abcde")), ("f2", StringIO("bcdef"))])
+        expected_res = ["abcde", "bcdef"]
+
+        # Functional Test: Read full chunk
+        dp1 = input_dp.read_from_stream()
+        self.assertEqual([d[1] for d in dp1], expected_res)
+
+        # Functional Test: Read full chunk
+        dp2 = input_dp.read_from_stream(chunk=1)
+        self.assertEqual([d[1] for d in dp2], [c for s in expected_res for c in s])
+
+        # `__len__` Test
+        with self.assertRaises(TypeError):
+            len(dp1)
 
     def test_shuffle_iterdatapipe(self):
         exp = list(range(20))
