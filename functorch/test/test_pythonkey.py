@@ -209,6 +209,7 @@ make_fx_failures = {
     xfail('nn.functional.max_unpool1d', '', device_type='cpu'),
     xfail('nn.functional.max_unpool2d', '', device_type='cpu'),
     xfail('nn.functional.max_unpool3d', '', device_type='cpu'),
+    skip('linalg.lstsq'),  # flaky, probably just a precision issue
 }
 
 
