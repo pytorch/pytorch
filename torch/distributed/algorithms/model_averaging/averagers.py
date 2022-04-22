@@ -1,6 +1,7 @@
 import warnings
 from abc import ABC, abstractmethod
-
+from typing import Union, Iterable, Dict
+import torch
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.utils as utils
 
@@ -82,7 +83,7 @@ class PeriodicModelAverager(ModelAverager):
         self,
         period,
         warmup_steps=0,
-        process_group=None,
+        process_group=None
     ):
         super().__init__(process_group)
         if warmup_steps < 0:
@@ -94,20 +95,23 @@ class PeriodicModelAverager(ModelAverager):
             warnings.warn(
                 "When period is 1, no need to use model averaging because the communication cost "
                 "of all-reducing parameters will be no less than the cost of all-reducing gradients "
-                "by DistributedDataParall in the backward pass. Therefore, only "
+                "by DistributedDataParallel in the backward pass. Therefore, only "
                 "DistributedDataParallel should be used for this case."
             )
         self.period = period
 
-    def average_parameters(self, params):
-        r"""
-        Averages parameters if ``step`` is no less than ``warmup_steps``
+    def average_parameters(self, params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]]):
+        """
+        Averages parameters or parameter groups of an optimizer if ``step`` is no less than ``warmup_steps``
         and it can be divided by ``period``, where ``step`` is increased by 1
         at each iteration in the training loop.
+        Args:
+            params: The parameters of a model or parameter groups of an optimizer.
+
         """
         if (
             self.step >= self.warmup_steps
             and (self.step - self.warmup_steps) % self.period == 0
         ):
-            utils.average_parameters(iter(params), self.process_group)
+            utils.average_parameters_or_parameter_groups(params, self.process_group)
         self.step += 1

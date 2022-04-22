@@ -1,5 +1,5 @@
 import collections.abc
-from contextlib import contextmanager
+import copy
 from typing import Optional, List, Sequence
 
 import torch
@@ -13,36 +13,6 @@ from torch.distributed._shard.sharding_spec._internals import (
 from torch.distributed._shard.metadata import ShardMetadata
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
-
-# Tracks the current process group in the load context manager.
-_CURRENT_PROCESS_GROUP = None
-
-@contextmanager
-def load_with_process_group(process_group):
-    """
-    Context manager to set the process group with which to load a ShardedTensor.
-    """
-    global _CURRENT_PROCESS_GROUP
-    if _CURRENT_PROCESS_GROUP is not None:
-        raise RuntimeError(
-            'ProcessGroup already set by previous "load_with_process_group" '
-            'context manager')
-    _CURRENT_PROCESS_GROUP = process_group
-    try:
-        yield process_group
-    finally:
-        _CURRENT_PROCESS_GROUP = None
-
-def get_current_process_group():
-    """
-    Retrieves the current process group set by ``load_with_process_group``.
-    If not set, it just returns the default group.
-    """
-    global _CURRENT_PROCESS_GROUP
-    if _CURRENT_PROCESS_GROUP is None:
-        return distributed_c10d._get_default_group()
-    else:
-        return _CURRENT_PROCESS_GROUP
 
 def _parse_and_validate_remote_device(pg, remote_device):
 
@@ -197,7 +167,7 @@ def build_global_metadata(gathered_metadatas: Sequence[Optional[ShardedTensorMet
             continue
 
         if global_sharded_tensor_metadata is None:
-            global_sharded_tensor_metadata = rank_metadata
+            global_sharded_tensor_metadata = copy.deepcopy(rank_metadata)
             global_metadata_rank = rank
         else:
             _raise_if_mismatch(global_sharded_tensor_metadata.size,

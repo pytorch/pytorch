@@ -146,14 +146,18 @@ class C10_API intrusive_ptr_target {
   // intrusive_ptr_target supports copy and move: but refcount and weakcount
   // don't participate (since they are intrinsic properties of the memory
   // location)
-  intrusive_ptr_target(intrusive_ptr_target&& other) noexcept
+  intrusive_ptr_target(intrusive_ptr_target&& /*other*/) noexcept
       : intrusive_ptr_target() {}
-  intrusive_ptr_target& operator=(intrusive_ptr_target&& other) noexcept {
+
+  intrusive_ptr_target& operator=(intrusive_ptr_target&& /*other*/) noexcept {
     return *this;
   }
-  intrusive_ptr_target(const intrusive_ptr_target& other) noexcept
+
+  intrusive_ptr_target(const intrusive_ptr_target& /*other*/) noexcept
       : intrusive_ptr_target() {}
-  intrusive_ptr_target& operator=(const intrusive_ptr_target& other) noexcept {
+
+  intrusive_ptr_target& operator=(
+      const intrusive_ptr_target& /*other*/) noexcept {
     return *this;
   }
 
@@ -591,6 +595,20 @@ inline bool operator==(
   return lhs.get() == rhs.get();
 }
 
+template <class TTarget1, class NullType1>
+inline bool operator==(
+    const intrusive_ptr<TTarget1, NullType1>& lhs,
+    std::nullptr_t) noexcept {
+  return lhs.get() == nullptr;
+}
+
+template <class TTarget2, class NullType2>
+inline bool operator==(
+    std::nullptr_t,
+    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
+  return nullptr == rhs.get();
+}
+
 template <class TTarget1, class NullType1, class TTarget2, class NullType2>
 inline bool operator!=(
     const intrusive_ptr<TTarget1, NullType1>& lhs,
@@ -598,6 +616,19 @@ inline bool operator!=(
   return !operator==(lhs, rhs);
 }
 
+template <class TTarget1, class NullType1>
+inline bool operator!=(
+    const intrusive_ptr<TTarget1, NullType1>& lhs,
+    std::nullptr_t) noexcept {
+  return !operator==(lhs, nullptr);
+}
+
+template <class TTarget2, class NullType2>
+inline bool operator!=(
+    std::nullptr_t,
+    const intrusive_ptr<TTarget2, NullType2>& rhs) noexcept {
+  return !operator==(nullptr, rhs);
+}
 template <typename T>
 struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
   using owned_type = c10::intrusive_ptr<T>;
@@ -624,7 +655,7 @@ struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
   }
 };

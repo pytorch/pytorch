@@ -1,14 +1,31 @@
 from typing import Any, Dict, List
 
-from torch.utils.data import (
-    DFIterDataPipe,
-    IterDataPipe,
-    functional_datapipe,
-)
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import DFIterDataPipe, IterDataPipe
 
 from torch.utils.data.datapipes.dataframe.structures import DataChunkDF
 
 # TODO(VitalyFedyunin): Add error when two different traces get combined
+
+__all__ = [
+    "Capture",
+    "CaptureAdd",
+    "CaptureCall",
+    "CaptureDataFrame",
+    "CaptureDataFrameWithDataPipeOps",
+    "CaptureF",
+    "CaptureGetAttr",
+    "CaptureGetItem",
+    "CaptureInitial",
+    "CaptureMul",
+    "CaptureSetItem",
+    "CaptureSub",
+    "CaptureVariable",
+    "CaptureVariableAssign",
+    "DataFrameTracer",
+    "DataFrameTracedOps",
+    "get_val",
+]
 
 
 class DataFrameTracedOps(DFIterDataPipe):

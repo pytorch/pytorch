@@ -763,6 +763,8 @@ ProcessGroupGloo::ProcessGroupGloo(
   for(const auto i : c10::irange(threads_.size())) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
+
+  init();
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -2834,8 +2836,9 @@ void ProcessGroupGloo::monitoredBarrier(
 
   waitLoop(sendWorkMap);
 
-  auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - startTime);
+  using namespace std::chrono;
+  C10_UNUSED auto elapsedTime = duration_cast<milliseconds>(
+      steady_clock::now() - startTime);
 }
 
 void ProcessGroupGloo::setSequenceNumberForGroup() {

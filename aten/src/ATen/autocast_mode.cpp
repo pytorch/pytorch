@@ -28,6 +28,14 @@ void set_cpu_enabled(bool new_enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCPU, !new_enabled);
 }
 
+bool is_xpu_enabled() {
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXPU);
+}
+
+void set_xpu_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXPU, !new_enabled);
+}
+
 namespace {
 // Imitate Apex and cache some of the casts to streamline parameter reuse.
 // Our heuristic is to cache lower_precision_fp casts of fp32 model weights (see cached_cast below).
@@ -58,6 +66,9 @@ thread_local int nesting = 0;
 // autocast_cpu_dtype is the lower_precision_fp used by AutocastCPU.
 thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
 
+// autocast_xpu_dtype is the lower_precision_fp used by AutocastXPU.
+thread_local at::ScalarType autocast_xpu_dtype = at::kBFloat16;
+
 // should we enabled the cache inside autocast.
 thread_local bool cache_enabled = true;
 
@@ -85,6 +96,10 @@ at::ScalarType get_autocast_cpu_dtype() {
   return autocast_cpu_dtype;
 }
 
+at::ScalarType get_autocast_xpu_dtype() {
+  return autocast_xpu_dtype;
+}
+
 void set_autocast_cpu_dtype(at::ScalarType dtype) {
   TORCH_CHECK(
       dtype == at::kBFloat16,
@@ -94,6 +109,10 @@ void set_autocast_cpu_dtype(at::ScalarType dtype) {
 
 void set_autocast_gpu_dtype(at::ScalarType dtype) {
   autocast_gpu_dtype = dtype;
+}
+
+void set_autocast_xpu_dtype(at::ScalarType dtype) {
+  autocast_xpu_dtype = dtype;
 }
 
 bool is_autocast_cache_enabled() {
@@ -325,6 +344,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL(ADD_NS(addr), "addr", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL(ADD_NS(matmul), "matmul", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
+  KERNEL(ADD_NS(einsum), "einsum", Tensor (c10::string_view, TensorList), lower_precision_fp)
   KERNEL(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
   KERNEL(ADD_NS(mv), "mv", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
   KERNEL(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&), lower_precision_fp)
@@ -487,23 +507,23 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(avg_pool3d), "avg_pool3d", Tensor (const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, bool, c10::optional<int64_t>), fp32)
   KERNEL_CPU(ADD_NS(gelu), "gelu", Tensor (const Tensor &, c10::string_view), fp32)
   KERNEL_CPU(ADD_NS(upsample_nearest1d), "upsample_nearest1d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>), fp32)
-  KERNEL_CPU(ADD_NS(upsample_nearest1d), "upsample_nearest1d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>), fp32)
+  KERNEL_CPU(ADD_NS(upsample_nearest1d), "upsample_nearest1d.vec", Tensor (const Tensor &, at::OptionalIntArrayRef, c10::optional<ArrayRef<double>>), fp32)
   KERNEL_CPU(ADD_NS(_upsample_nearest_exact1d), "_upsample_nearest_exact1d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>), fp32)
-  KERNEL_CPU(ADD_NS(_upsample_nearest_exact1d), "_upsample_nearest_exact1d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>), fp32)
+  KERNEL_CPU(ADD_NS(_upsample_nearest_exact1d), "_upsample_nearest_exact1d.vec", Tensor (const Tensor &, at::OptionalIntArrayRef, c10::optional<ArrayRef<double>>), fp32)
   KERNEL_CPU(ADD_NS(upsample_nearest2d), "upsample_nearest2d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(ADD_NS(upsample_nearest2d), "upsample_nearest2d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>), fp32)
+  KERNEL_CPU(ADD_NS(upsample_nearest2d), "upsample_nearest2d.vec", Tensor (const Tensor &, at::OptionalIntArrayRef, c10::optional<ArrayRef<double>>), fp32)
   KERNEL_CPU(ADD_NS(_upsample_nearest_exact2d), "_upsample_nearest_exact2d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(ADD_NS(_upsample_nearest_exact2d), "_upsample_nearest_exact2d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>), fp32)
+  KERNEL_CPU(ADD_NS(_upsample_nearest_exact2d), "_upsample_nearest_exact2d.vec", Tensor (const Tensor &, at::OptionalIntArrayRef, c10::optional<ArrayRef<double>>), fp32)
   KERNEL_CPU(ADD_NS(upsample_nearest3d), "upsample_nearest3d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(ADD_NS(upsample_nearest3d), "upsample_nearest3d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>), fp32)
+  KERNEL_CPU(ADD_NS(upsample_nearest3d), "upsample_nearest3d.vec", Tensor (const Tensor &, at::OptionalIntArrayRef, c10::optional<ArrayRef<double>>), fp32)
   KERNEL_CPU(ADD_NS(_upsample_nearest_exact3d), "_upsample_nearest_exact3d", Tensor (const Tensor &, IntArrayRef, c10::optional<double>, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(ADD_NS(_upsample_nearest_exact3d), "_upsample_nearest_exact3d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, c10::optional<ArrayRef<double>>), fp32)
+  KERNEL_CPU(ADD_NS(_upsample_nearest_exact3d), "_upsample_nearest_exact3d.vec", Tensor (const Tensor &, at::OptionalIntArrayRef, c10::optional<ArrayRef<double>>), fp32)
   KERNEL_CPU(ADD_NS(upsample_linear1d), "upsample_linear1d", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<double>), fp32)
-  KERNEL_CPU(ADD_NS(upsample_linear1d), "upsample_linear1d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>), fp32)
+  KERNEL_CPU(ADD_NS(upsample_linear1d), "upsample_linear1d.vec", Tensor (const Tensor &, at::OptionalIntArrayRef, bool, c10::optional<ArrayRef<double>>), fp32)
   KERNEL_CPU(ADD_NS(upsample_bilinear2d), "upsample_bilinear2d", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(ADD_NS(upsample_bilinear2d), "upsample_bilinear2d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>), fp32)
+  KERNEL_CPU(ADD_NS(upsample_bilinear2d), "upsample_bilinear2d.vec", Tensor (const Tensor &, at::OptionalIntArrayRef, bool, c10::optional<ArrayRef<double>>), fp32)
   KERNEL_CPU(ADD_NS(upsample_trilinear3d), "upsample_trilinear3d", Tensor (const Tensor &, IntArrayRef, bool, c10::optional<double>, c10::optional<double>, c10::optional<double>), fp32)
-  KERNEL_CPU(ADD_NS(upsample_trilinear3d), "upsample_trilinear3d.vec", Tensor (const Tensor &, c10::optional<IntArrayRef>, bool, c10::optional<ArrayRef<double>>), fp32)
+  KERNEL_CPU(ADD_NS(upsample_trilinear3d), "upsample_trilinear3d.vec", Tensor (const Tensor &, at::OptionalIntArrayRef, bool, c10::optional<ArrayRef<double>>), fp32)
 
   KERNEL_CPU(ADD_NS(binary_cross_entropy), "binary_cross_entropy", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t), fp32)
   KERNEL_CPU(ADD_NS(binary_cross_entropy_with_logits), "binary_cross_entropy_with_logits", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&, int64_t), fp32)
@@ -522,6 +542,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(nanquantile), "nanquantile", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>, bool, c10::string_view), fp32)
   KERNEL_CPU(ADD_NS(nanquantile), "nanquantile.scalar", Tensor(const Tensor &, double, c10::optional<int64_t>, bool, c10::string_view), fp32)
   KERNEL_CPU(ADD_NS(stft), "stft", Tensor(const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, c10::optional<bool>, c10::optional<bool>), fp32)
+  KERNEL_CPU(ADD_NS(stft), "stft.center", Tensor(const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const c10::optional<Tensor> &, bool, c10::string_view, bool, c10::optional<bool>, c10::optional<bool>), fp32)
   KERNEL_CPU(ADD_NS(cdist), "cdist", Tensor(const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
   KERNEL_CPU(ADD_NS(cross), "cross", Tensor(const Tensor &, const Tensor &, c10::optional<int64_t>), fp32)
   KERNEL_CPU(ADD_NS(cumprod), "cumprod", Tensor(const Tensor &, int64_t, c10::optional<at::ScalarType>), fp32)
@@ -580,16 +601,16 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(multilabel_margin_loss), "multilabel_margin_loss", Tensor(const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL_CPU(ADD_NS(fft_fft), "fft_fft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(fft_ifft), "fft_ifft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
-  KERNEL_CPU(ADD_NS(fft_fft2), "fft_fft2", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
-  KERNEL_CPU(ADD_NS(fft_ifft2), "fft_ifft2", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
-  KERNEL_CPU(ADD_NS(fft_fftn), "fft_fftn", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, c10::optional<at::IntArrayRef>, c10::optional<c10::string_view>), fp32)
-  KERNEL_CPU(ADD_NS(fft_ifftn), "fft_ifftn", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, c10::optional<at::IntArrayRef>, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_fft2), "fft_fft2", Tensor(const Tensor &, at::OptionalIntArrayRef, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_ifft2), "fft_ifft2", Tensor(const Tensor &, at::OptionalIntArrayRef, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_fftn), "fft_fftn", Tensor(const Tensor &, at::OptionalIntArrayRef, at::OptionalIntArrayRef, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_ifftn), "fft_ifftn", Tensor(const Tensor &, at::OptionalIntArrayRef, at::OptionalIntArrayRef, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(fft_rfft), "fft_rfft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(fft_irfft), "fft_irfft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
-  KERNEL_CPU(ADD_NS(fft_rfft2), "fft_rfft2", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
-  KERNEL_CPU(ADD_NS(fft_irfft2), "fft_irfft2", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
-  KERNEL_CPU(ADD_NS(fft_rfftn), "fft_rfftn", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, c10::optional<at::IntArrayRef>, c10::optional<c10::string_view>), fp32)
-  KERNEL_CPU(ADD_NS(fft_irfftn), "fft_irfftn", Tensor(const Tensor &, c10::optional<at::IntArrayRef>, c10::optional<at::IntArrayRef>, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_rfft2), "fft_rfft2", Tensor(const Tensor &, at::OptionalIntArrayRef, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_irfft2), "fft_irfft2", Tensor(const Tensor &, at::OptionalIntArrayRef, at::IntArrayRef, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_rfftn), "fft_rfftn", Tensor(const Tensor &, at::OptionalIntArrayRef, at::OptionalIntArrayRef, c10::optional<c10::string_view>), fp32)
+  KERNEL_CPU(ADD_NS(fft_irfftn), "fft_irfftn", Tensor(const Tensor &, at::OptionalIntArrayRef, at::OptionalIntArrayRef, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(fft_hfft), "fft_hfft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(fft_ihfft), "fft_ihfft", Tensor(const Tensor &, c10::optional<int64_t>, int64_t, c10::optional<c10::string_view>), fp32)
   KERNEL_CPU(ADD_NS(conv_tbc), "conv_tbc", Tensor(const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
@@ -607,7 +628,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(linalg_inv), "linalg_inv", Tensor(const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(linalg_householder_product), "linalg_householder_product", Tensor(const Tensor &, const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(linalg_tensorinv), "linalg_tensorinv", Tensor(const Tensor &, int64_t), fp32)
-  KERNEL_CPU(ADD_NS(linalg_tensorsolve), "linalg_tensorsolve", Tensor(const Tensor &, const Tensor &, c10::optional<at::IntArrayRef>), fp32)
+  KERNEL_CPU(ADD_NS(linalg_tensorsolve), "linalg_tensorsolve", Tensor(const Tensor &, const Tensor &, at::OptionalIntArrayRef), fp32)
   KERNEL_CPU(ADD_NS(fake_quantize_per_tensor_affine), "fake_quantize_per_tensor_affine", Tensor (const Tensor &, double, int64_t, int64_t, int64_t), fp32)
   KERNEL_CPU(ADD_NS(glu), "glu", Tensor (const Tensor &, int64_t), fp32)
 

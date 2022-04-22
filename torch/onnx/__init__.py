@@ -126,7 +126,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         verbose (bool, default False): if True, prints a description of the
             model being exported to stdout. In addition, the final ONNX graph will include the
             field ``doc_string``` from the exported model which mentions the source code locations
-            for ``model``.
+            for ``model``. If True, ONNX exporter logging will be turned on.
         training (enum, default TrainingMode.EVAL):
             * ``TrainingMode.EVAL``: export the model in inference mode.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
@@ -195,7 +195,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
                 Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 9): The version of the
+        opset_version (int, default 13): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
             to target. Must be >= 7 and <= 15.
         do_constant_folding (bool, default True): Apply the constant-folding optimization.
@@ -425,3 +425,46 @@ def unregister_custom_op_symbolic(symbolic_name, opset_version):
 
     from torch.onnx import utils
     utils.unregister_custom_op_symbolic(symbolic_name, opset_version)
+
+
+def is_onnx_log_enabled():
+    r"""
+    Returns True iff ONNX logging is turned on.
+    """
+    return _C._jit_is_onnx_log_enabled()
+
+
+def enable_log():
+    r"""
+    Enables ONNX logging.
+    """
+    _C._jit_set_onnx_log_enabled(True)
+
+
+def disable_log():
+    r"""
+    Disables ONNX logging.
+    """
+    _C._jit_set_onnx_log_enabled(False)
+
+
+def set_log_stream(stream_name="stdout"):
+    r"""
+    Set output stream for ONNX logging.
+
+    Args:
+      stream_name (str, default "stdout"): Only ``stdout`` and ``stderr`` are supported
+        as `stream_name`.
+    """
+    _C._jit_set_onnx_log_output_stream(stream_name)
+
+
+def log(*args):
+    r"""
+    A simple logging facility for ONNX exporter.
+
+    Args:
+      args: Arguments are converted to string, concatenated together with a newline
+        character appended to the end, and flushed to output stream.
+    """
+    _C._jit_onnx_log(*args)

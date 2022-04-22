@@ -1,8 +1,11 @@
 from typing import Callable, Iterator, TypeVar
 
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
-from torch.utils.data.datapipes.utils.common import check_lambda_fn
+from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+
+__all__ = ["FilterIterDataPipe", ]
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -37,7 +40,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
                  ) -> None:
         super().__init__()
         self.datapipe = datapipe
-        check_lambda_fn(filter_fn)
+        _check_lambda_fn(filter_fn)
 
         self.filter_fn = filter_fn  # type: ignore[assignment]
         self.drop_empty_batches = drop_empty_batches

@@ -2,19 +2,21 @@ import os
 import fnmatch
 import warnings
 
-from enum import Enum
 from io import IOBase
 from typing import Iterable, List, Tuple, Union, Optional
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
+__all__ = [
+    "StreamWrapper",
+    "get_file_binaries_from_pathnames",
+    "get_file_pathnames_from_root",
+    "match_masks",
+    "validate_pathname_binary_tuple",
+]
 
-class SerializationType(Enum):
-    PICKLE = "pickle"
-    DILL = "dill"
 
-
-def check_lambda_fn(fn):
+def _check_lambda_fn(fn):
     # Partial object has no attribute '__name__', but can be pickled
     if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
         warnings.warn(
@@ -102,12 +104,36 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
         )
 
 
-def deprecation_warning(name, new_name: str = ""):
-    new_name_statement = ""
-    if new_name:
-        new_name_statement = f" Please use {new_name} instead."
-    warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`." +
-                  new_name_statement, DeprecationWarning)
+def _deprecation_warning(
+    old_class_name: str,
+    *,
+    deprecation_version: str,
+    removal_version: str,
+    old_functional_name: str = "",
+    new_class_name: str = "",
+    new_functional_name: str = "",
+) -> None:
+    msg = f"`{old_class_name}()`"
+    if old_functional_name:
+        msg = f"{msg} and its functional API `.{old_functional_name}()` are"
+    else:
+        msg = f"{msg} is"
+    msg = (
+        f"{msg} deprecated since {deprecation_version} and will be removed in {removal_version}. "
+        f"See https://github.com/pytorch/data/issues/163 for details."
+    )
+
+    if new_class_name or new_functional_name:
+        msg = f"{msg} Please use"
+        if new_class_name:
+            msg = f"{msg} `{new_class_name}()`"
+        if new_class_name and new_functional_name:
+            msg = f"{msg} or"
+        if new_functional_name:
+            msg = f"{msg} `.{new_functional_name}()`"
+        msg = f"{msg} instead."
+
+    warnings.warn(msg, FutureWarning)
 
 
 class StreamWrapper:
