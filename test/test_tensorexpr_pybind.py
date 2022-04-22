@@ -355,7 +355,7 @@ graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
                     te.ExprHandle.isnan(load), te.ExprHandle.float(0.0), load
                 )
 
-            return te.Compute2("custom_nan_to_num", out_shape, out_strides, compute)
+            return te.Compute2("custom_nan_to_num", out_shape, compute)
 
         kernel = te.TensorExprKernel(graph, {"aten::nan_to_num": my_custom_lowering})
         res1 = kernel.run((x,))
