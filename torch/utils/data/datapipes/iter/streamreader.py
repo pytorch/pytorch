@@ -1,6 +1,8 @@
 from typing import Tuple
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 
+__all__ = ["StreamReaderIterDataPipe", ]
+
 
 class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
     r"""
