@@ -393,7 +393,7 @@ BENCHMARK_DEFINE_F(Reduce1D, Op)(benchmark::State& state) {
 
   te::BufHandle a("A", {M}, te::kFloat);
   te::Tensor b =
-      te::computeSum({a, te::IntList({0}), false}, {}, at::kFloat, at::kCPU);
+      te::computeSum({a, te::IntList({0}), false}, {}, {}, at::kFloat, at::kCPU);
   te::LoopNest nest({b});
 
   auto loops = nest.getLoopStmtsFor(b);
@@ -457,7 +457,7 @@ BENCHMARK_DEFINE_F(Reduce2DCol, OpSchedule)(benchmark::State& state) {
   constexpr int kCacheSize = 1 << 12;
   te::BufHandle a("A", {M, N}, te::kFloat);
   te::Tensor b =
-      te::computeSum({a, te::IntList({0}), false}, {N}, at::kFloat, at::kCPU);
+      te::computeSum({a, te::IntList({0}), false}, {N}, {1}, at::kFloat, at::kCPU);
   te::LoopNest nest({b});
 
   auto sch = state.range(2);
@@ -566,7 +566,7 @@ BENCHMARK_DEFINE_F(Reduce2DRow, OpSchedule)(benchmark::State& state) {
   constexpr int kChunkSize = 8;
   te::BufHandle a("A", {M, N}, te::kFloat);
   te::Tensor b =
-      te::computeSum({a, te::IntList({1}), false}, {M}, at::kFloat, at::kCPU);
+      te::computeSum({a, te::IntList({1}), false}, {M}, {1}, at::kFloat, at::kCPU);
   te::LoopNest nest({b});
 
   auto sch = state.range(2);
