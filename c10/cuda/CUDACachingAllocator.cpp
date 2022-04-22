@@ -71,7 +71,7 @@ namespace Native {
  * must be available for the graph to use during replay. DeviceCachingAllocator
  * assigns and frees memory eagerly and dynamically, so if we're not careful
  * about managing graphs' memory, at replay time those memory addresses could be
- * use by other tensors.
+ * used by other tensors.
  *
  * To guarantee a graph's baked in addresses are safe to reuse in replay,
  * DeviceAllocator satisfies allocations from a graph-private memory pool during
@@ -313,6 +313,93 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 } // anonymous namespace
 } // namespace Native
 
+// Backend static initialization.
+#define DECLARE_BACKEND_INTERFACE(RET, FUNC, ARGS) \
+  RET FUNC ARGS;
+
+// Not called directly by clients.
+namespace Native {
+FORALL_ALLOCATOR_INTERFACE(DECLARE_BACKEND_INTERFACE)
+}
+
+// Not called directly by clients.
+namespace CudaMallocAsync {
+FORALL_ALLOCATOR_INTERFACE(DECLARE_BACKEND_INTERFACE)
+}
+
+#undef DECLARE_BACKEND_INTERFACE
+
+#define DEFINE_CHOSEN(RET, FUNC, ARGS) \
+  RET (*FUNC) ARGS = 0;
+
+namespace Chosen {
+  FORALL_ALLOCATOR_INTERFACE(DEFINE_CHOSEN);
+} // namespace Chosen
+
+#define INITIALIZE_NATIVE(RET, FUNC, ARGS) \
+  Chosen::FUNC = Native::FUNC;
+
+#define INITIALIZE_CUDAMALLOCASYNC(RET, FUNC, ARGS) \
+  Chosen::FUNC = CudaMallocAsync::FUNC;
+
+struct BackendStaticInitializer {
+  AllocatorBackend backend;
+
+  // Parses env for backend at load time, duplicating some logic from CachingAllocatorConfig.
+  // CachingAllocatorConfig double-checks it later (at runtime).
+  // Defers verbose exceptions and error checks, including Cuda version checks,
+  // to CachingAllocatorConfig's runtime doublecheck.
+  // If this works, maybe we should move all of CachingAllocatorConfig here?
+  AllocatorBackend parseEnvForBackend() {
+    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
+
+    if (val == NULL) {
+      return AllocatorBackend::NATIVE;
+    } else {
+      const std::string config(val);
+
+      std::regex exp("[\\s,]+");
+      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
+      std::sregex_token_iterator end;
+      std::vector<std::string> options(it, end);
+
+      for (auto option : options) {
+        std::regex exp2("[:]+");
+        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
+        std::sregex_token_iterator end2;
+        std::vector<std::string> kv(it2, end2);
+        if (kv.size() >= 2) {
+          if (kv[0].compare("backend") == 0) {
+            if (kv[1].compare("cudaMallocAsync") == 0) return AllocatorBackend::CUDAMALLOCASYNC;
+            if (kv[1].compare("native") == 0) return AllocatorBackend::NATIVE;
+          }
+        }
+      }
+    }
+    return AllocatorBackend::NATIVE;
+  }
+
+  BackendStaticInitializer() {
+    backend = parseEnvForBackend();
+    switch(backend) {
+      case AllocatorBackend::NATIVE:
+        FORALL_ALLOCATOR_INTERFACE(INITIALIZE_NATIVE)
+        break;
+      case AllocatorBackend::CUDAMALLOCASYNC:
+        FORALL_ALLOCATOR_INTERFACE(INITIALIZE_CUDAMALLOCASYNC)
+        break;
+      default:
+        // What error should we raise at load time?
+        break;
+    }
+  }
+};
+
+#undef INITIALIZE_NATIVE
+#undef INITIALIZE_CUDAMALLOCAYSNC
+
+BackendStaticInitializer backend_static_initializer{};
+
 // Environment config parser
 // Defined here, rather than its own .cpp file,
 // because parseArgs needs to know kLargeBuffer.
@@ -420,6 +507,9 @@ class CachingAllocatorConfig {
                           CUDA_VERSION);
 #endif
             }
+            TORCH_INTERNAL_ASSERT(m_allocator_backend == backend_static_initializer.backend,
+                                  "Allocator backend parsed at runtime != "
+                                  "allocator backend parsed at load time");
           } else if (kv[0].compare("garbage_collection_threshold") == 0) {
             /*
              * Perform garbage collection of GPU memory blocks to avoid
