@@ -33,7 +33,6 @@ def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
     Returns:
         Torch scripted model.
     """
-
     for node in fx_g.graph.nodes:
         if node.target in (torch.ops.aten.new_zeros, torch.ops.aten.new_empty):
             if node.args[1] == []:
@@ -261,7 +260,6 @@ default_decompositions = set(
     [
         aten.detach,
         aten.gelu_backward,
-        aten._log_softmax_backward_data,
         aten.leaky_relu_backward,
         aten.sigmoid_backward,
         aten.threshold_backward,
@@ -270,8 +268,16 @@ default_decompositions = set(
         aten.hardswish_backward,
         aten.tanh_backward,
         aten.silu_backward,
+        aten.elu_backward,
         aten.cudnn_batch_norm,
         aten.cudnn_batch_norm_backward,
+        aten.masked_fill.Scalar,
+        aten.masked_fill.Tensor,
+        aten.elu,
+        aten.leaky_relu,
+        aten.hardtanh,
+        aten.hardswish,
+        aten.hardsigmoid,
     ]
 )
 default_decompositions = get_decompositions(default_decompositions)
