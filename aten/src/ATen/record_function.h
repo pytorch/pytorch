@@ -284,7 +284,7 @@ struct TORCH_API RecordFunction {
   template <typename F>
   void before(
       F fn,
-      c10::ArrayRef<const IValue> args,
+      c10::ArrayRef<const c10::IValue> args,
       int64_t current_sequence_nr = -1) {
     if (!isActive()) {
       return;
@@ -294,6 +294,14 @@ struct TORCH_API RecordFunction {
     state_->inputs_valid_ = true;
 #endif
     before(fn, current_sequence_nr);
+  }
+
+  template <typename F>
+  void before(
+      F fn,
+      const std::vector<IValue>* args,
+      int64_t current_sequence_nr = -1) {
+    before(std::move(fn), c10::ArrayRef<const c10::IValue>(args->data(), args->size()), current_sequence_nr);
   }
 
   // Destructor calls end callbacks
