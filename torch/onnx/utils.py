@@ -499,11 +499,10 @@ def _pre_trace_quant_model(model, args):
     r"""Returns `torch.jit.trace(model, args)` if model is quantized. Otherwise do nothing and return
     original model.
 
-    This is because the quantized weights are stored in special `PackedParams` structure. They need to
-    be handled by `torch.jit.trace` to be exportable to ONNX.
+    This is due to https://github.com/pytorch/pytorch/issues/75761.
     """
-    if (any([hasattr(m, "_packed_params") for m in getattr(model, "modules", lambda: [])()]) or
-            any([getattr(arg, "is_quantized", False) for arg in args])):
+    if (any(hasattr(m, "_packed_params") for m in getattr(model, "modules", lambda: [])()) or
+            any(getattr(arg, "is_quantized", False) for arg in args)):
         return torch.jit.trace(model, args)
     return model
 
@@ -587,10 +586,10 @@ def _model_to_graph(model, args, verbose=False,
             output_wrapped = torch_out  # type: ignore[assignment]
 
         output_tensors, out_desc = torch._C._jit_flatten(tuple(output_wrapped))
-        # NOTE: assign_output_shape pass is not compatible with quantized outputs.
-        #       Quantized outputs are flattened to 3 values in ONNX, while packed as
-        #       single value in PyTorch.
-        if not any([getattr(out, "is_quantized", False) for out in output_tensors]):
+        # assign_output_shape pass is not compatible with quantized outputs.
+        # Quantized outputs are flattened to 3 values in ONNX, while packed as
+        # single value in PyTorch.
+        if not any(getattr(out, "is_quantized", False) for out in output_tensors):
             torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
 
     _set_input_and_output_names(graph, input_names, output_names)

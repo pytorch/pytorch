@@ -7229,6 +7229,17 @@ class _TestONNXRuntime:
             self.run_test(LinalgMatrixNormModel(ord_val, (0, 2)), x)
             self.run_test(LinalgMatrixNormModel(ord_val, (0, 2), True), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_linalg_cross(self):
+        class Cross(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.linalg.cross(x, y, dim=1), \
+                    torch.linalg.cross(x, y)
+
+        x = torch.randn(5, 3, 2, 3)
+        y = torch.randn(1, 3, 1, 3)
+        self.run_test(Cross(), input=(x, y))
+
     # This test checks output scalar type in the ONNX graph should not be null
     # https://github.com/pytorch/pytorch/issues/28607
     @skipIfUnsupportedMinOpsetVersion(10)
@@ -7345,6 +7356,33 @@ class _TestONNXRuntime:
         x = torch.randn(5, 3, 2)
         y = torch.randn(5, 3, 2)
         self.run_test(torch.nn.CosineSimilarity(dim=2), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_pairwise_distance(self):
+        x = torch.randn(5, 3, 2)
+        y = torch.randn(5, 3, 2)
+        self.run_test(torch.nn.PairwiseDistance(p=2.0), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_cross(self):
+        class Cross(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.cross(x, y, dim=3), \
+                    torch.cross(x, y)
+
+        x = torch.randn(5, 3, 2, 3)
+        y = torch.randn(5, 3, 2, 3)
+        self.run_test(Cross(), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_cdist(self):
+        class Cdist(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.cdist(x, y)
+
+        x = torch.randn(5, 3, 3)
+        y = torch.randn(5, 2, 3)
+        self.run_test(Cdist(), input=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):
