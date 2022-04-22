@@ -52,12 +52,16 @@ query ($owner: String!, $name: String!, $number: Int!) {
             oid
           }
         }
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
         totalCount
       }
       commits(last: 1) {
         nodes {
           commit {
-            checkSuites(first: 50) {
+            checkSuites(first: 10) {
               nodes {
                 app {
                   name
@@ -68,7 +72,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
                     name
                   }
                 }
-                checkRuns(first: 10) {
+                checkRuns(first: 50) {
                   nodes {
                     name
                     conclusion
@@ -156,7 +160,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
         nodes {
           commit {
             oid
-            checkSuites(first: 100, after: $cursor) {
+            checkSuites(first: 10, after: $cursor) {
               nodes {
                 app {
                   name
@@ -167,7 +171,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
                     name
                   }
                 }
-                checkRuns(first: 10) {
+                checkRuns(first: 50) {
                   nodes {
                     name
                     conclusion
@@ -237,6 +241,33 @@ query($org: String!, $name: String!, $cursor: String) {
 }
 """
 
+GH_GET_PR_NEXT_AUTHORS_QUERY = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      commits_with_authors: commits(first: 100, after: $cursor) {
+        nodes {
+          commit {
+            author {
+              user {
+                login
+              }
+              email
+              name
+            }
+            oid
+          }
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+      }
+    }
+  }
+}
+"""
+
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_SOURCE_ID = re.compile(r'^ghstack-source-id: (.+)\n?', re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
@@ -293,7 +324,7 @@ def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[s
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
     rc = _fetch_url("https://api.github.com/graphql", data={"query": query, "variables": kwargs}, reader=json.load)
     if "errors" in rc:
-        raise RuntimeError(f"GraphQL query {query} failed: {rc['errors']}")
+        raise RuntimeError(f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}")
     return cast(Dict[str, Any], rc)
 
 
@@ -347,6 +378,7 @@ class GitHubPR:
         self.changed_files: Optional[List[str]] = None
         self.conclusions: Optional[Dict[str, str]] = None
         self.comments: Optional[List[GitHubComment]] = None
+        self._authors: Optional[List[Tuple[str, str]]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -414,16 +446,41 @@ class GitHubPR:
     def get_pr_creator_login(self) -> str:
         return cast(str, self.info["author"]["login"])
 
+    def _fetch_authors(self) -> List[Tuple[str, str]]:
+        if self._authors is not None:
+            return self._authors
+        authors: List[Tuple[str, str]] = []
+
+        def add_authors(info: Dict[str, Any]) -> None:
+            for node in info["commits_with_authors"]["nodes"]:
+                author_node = node["commit"]["author"]
+                user_node = author_node["user"]
+                author = f"{author_node['name']} <{author_node['email']}>"
+                if user_node is None:
+                    # If author is not github user, user node will be null
+                    authors.append(("", author))
+                else:
+                    authors.append((cast(str, user_node["login"]), author))
+
+        info = self.info
+        for _ in range(100):
+            add_authors(info)
+            if not info["commits_with_authors"]["pageInfo"]["hasNextPage"]:
+                break
+            rc = gh_graphql(GH_GET_PR_NEXT_AUTHORS_QUERY,
+                            name=self.project,
+                            owner=self.org,
+                            number=self.pr_num,
+                            cursor=info["commits_with_authors"]["pageInfo"]["endCursor"])
+            info = rc["data"]["repository"]["pullRequest"]
+        self._authors = authors
+        return authors
+
     def get_committer_login(self, num: int = 0) -> str:
-        user = self.info["commits_with_authors"]["nodes"][num]["commit"]["author"]["user"]
-        # If author is not github user, user node will be null
-        if user is None:
-            return ""
-        return cast(str, user["login"])
+        return self._fetch_authors()[num][0]
 
     def get_committer_author(self, num: int = 0) -> str:
-        node = self.info["commits_with_authors"]["nodes"][num]["commit"]["author"]
-        return f"{node['name']} <{node['email']}>"
+        return self._fetch_authors()[num][1]
 
     def get_checkrun_conclusions(self) -> Dict[str, str]:
         """ Returns list of checkrun / conclusions """
@@ -626,7 +683,11 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
         return cast(List[MergeRule], rc)
 
 
-def find_matching_merge_rule(pr: GitHubPR, repo: Optional[GitRepo] = None, force: bool = False) -> MergeRule:
+def find_matching_merge_rule(pr: GitHubPR,
+                             repo: Optional[GitRepo] = None,
+                             force: bool = False,
+                             skip_internal_checks: bool = False
+                             ) -> MergeRule:
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
@@ -639,15 +700,7 @@ def find_matching_merge_rule(pr: GitHubPR, repo: Optional[GitRepo] = None, force
     reject_reason_score = 0
     for rule in rules:
         rule_name = rule.name
-        rule_approvers_set = set()
-        for approver in rule.approved_by:
-            if "/" in approver:
-                org, name = approver.split("/")
-                rule_approvers_set.update(gh_get_team_members(org, name))
-            else:
-                rule_approvers_set.add(approver)
         patterns_re = patterns_to_regex(rule.patterns)
-        approvers_intersection = approved_by.intersection(rule_approvers_set)
         non_matching_files = []
         for fname in changed_files:
             if not patterns_re.match(fname):
@@ -659,6 +712,21 @@ def find_matching_merge_rule(pr: GitHubPR, repo: Optional[GitRepo] = None, force
                 reject_reason = (f"{num_matching_files} files matched rule {rule_name}, but there are still non-matching files: " +
                                  f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}")
             continue
+        # If rule needs approvers but PR has not been reviewed, skip it
+        if len(rule.approved_by) > 0 and len(approved_by) == 0:
+            if reject_reason_score < 10000:
+                reject_reason_score = 10000
+                reject_reason = f"Matched rule {rule_name}, but PR has not been reviewed yet"
+            continue
+
+        rule_approvers_set = set()
+        for approver in rule.approved_by:
+            if "/" in approver:
+                org, name = approver.split("/")
+                rule_approvers_set.update(gh_get_team_members(org, name))
+            else:
+                rule_approvers_set.add(approver)
+        approvers_intersection = approved_by.intersection(rule_approvers_set)
         # If rule requires approvers but they aren't the ones that reviewed PR
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             if reject_reason_score < 10000:
@@ -680,7 +748,7 @@ def find_matching_merge_rule(pr: GitHubPR, repo: Optional[GitRepo] = None, force
                     pass_checks = False
             if not pass_checks:
                 continue
-        if pr.has_internal_changes():
+        if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
     raise RuntimeError(reject_reason)
@@ -763,6 +831,8 @@ def main() -> None:
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
         gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
