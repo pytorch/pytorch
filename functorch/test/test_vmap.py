@@ -3184,6 +3184,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.householder_product'),
         xfail('linalg.inv'),
         xfail('linalg.lstsq'),
+        xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.matrix_norm'),
         xfail('linalg.matrix_power'),
         xfail('linalg.matrix_rank'),
