@@ -315,58 +315,27 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
     return grad_input;
 }
 
-Tensor binary_cross_entropy_with_logits(
-    const Tensor& input,
-    const Tensor& target,
-    const c10::optional<Tensor>& weight_opt,
-    const c10::optional<Tensor>& pos_weight_opt,
-    int64_t reduction) {
+Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned =
-      at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& pos_weight =
-      c10::value_or_else(pos_weight_opt, [] { return Tensor(); });
+  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
 
-  Tensor loss;
-  auto max_val = (-input).clamp_min_(0);
-  auto hasSubclassTensors = at::areAnyTensorSubclassLike({target, input});
-  if (pos_weight.defined()) {
-    // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
-    auto log_weight = (pos_weight - 1).mul(target).add_(1);
-    loss = hasSubclassTensors
-        ? (1 - target)
-              .mul(input)
-              .add(log_weight.mul(
-                  ((-max_val).exp().add((-input - max_val).exp()))
-                      .log()
-                      .add(max_val)))
-        : (1 - target)
-              .mul_(input)
-              .add_(log_weight.mul_(
-                  ((-max_val).exp_().add_((-input - max_val).exp_()))
-                      .log_()
-                      .add_(max_val)));
-  } else {
-    loss = hasSubclassTensors
-        ? (1 - target)
-              .mul(input)
-              .add(max_val)
-              .add((-max_val).exp().add((-input - max_val).exp()).log())
-        : (1 - target)
-              .mul_(input)
-              .add_(max_val)
-              .add_((-max_val).exp_().add_((-input - max_val).exp_()).log_());
-  }
-  if (weight.defined()) {
-    if (at::areAnyTensorSubclassLike({loss, weight})) {
-      loss = loss.mul(weight);
+    Tensor loss;
+    auto max_val = (-input).clamp_min_(0);
+    if (pos_weight.defined()) {
+        // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+        auto log_weight = (pos_weight - 1).mul(target).add_(1);
+        loss = (1 - target).mul_(input).add_(log_weight.mul_(((-max_val).exp_().add_((-input - max_val).exp_())).log_().add_(max_val)));
     } else {
-      loss.mul_(weight);
+        loss = (1 - target).mul_(input).add_(max_val).add_((-max_val).exp_().add_((-input -max_val).exp_()).log_());
     }
-  }
 
-  return apply_loss_reduction(loss, reduction);
+    if (weight.defined()) {
+        loss.mul_(weight);
+    }
+
+    return apply_loss_reduction(loss, reduction);
 }
 
 Tensor binary_cross_entropy_with_logits_backward(
