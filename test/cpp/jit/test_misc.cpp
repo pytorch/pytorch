@@ -2987,7 +2987,7 @@ graph(%x.1 : Tensor):
 }
 
 TEST(TestFunctionExecutor, RunDecompositionTest) {
-  static GraphFunction* func = torch::jit::GetDecompositionExecutor(
+  static auto* func = torch::jit::GetDecompositionExecutor(
       "aten::var(Tensor self, bool unbiased=True) -> Tensor");
   for (bool unbiased : {true, false}) {
     auto input = at::rand({4, 4});
