@@ -197,6 +197,12 @@ class TORCH_API Buf : public ExprNode<Buf> {
   static BufHandle make(
       const std::string& name_hint,
       const std::vector<ExprHandle>& dims,
+      const std::vector<ExprHandle>& strides,
+      Dtype dtype);
+
+  static BufHandle make(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
       Dtype dtype,
       c10::optional<ExprHandle> initializer = c10::nullopt,
       c10::optional<std::vector<ExprHandle>> strides = c10::nullopt,
@@ -339,7 +345,7 @@ class TORCH_API BufHandle : public ExprHandle {
       const std::vector<ExprHandle>& dims,
       const std::vector<ExprHandle>& strides,
       Dtype dtype)
-      : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
+      : ExprHandle(Buf::make(name_hint, dims, strides, dtype)) {}
 
   BufHandle(const std::vector<ExprHandle>& dims, Dtype dtype)
       : ExprHandle(Buf::make("_", dims, dtype)) {}
@@ -393,6 +399,10 @@ class TORCH_API BufHandle : public ExprHandle {
   bool is_contiguous(
       at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
     return node()->is_contiguous(memory_format);
+  }
+
+  bool is_channels_last_1d_contiguous() const {
+    return node()->is_channels_last_1d_contiguous();
   }
 };
 

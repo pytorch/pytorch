@@ -433,6 +433,19 @@ BufHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
 BufHandle Buf::make(
     const std::string& name_hint,
     const std::vector<ExprHandle>& dims,
+    const std::vector<ExprHandle>& strides,
+    Dtype dtype) {
+  return BufHandle(alloc<Buf>(
+      name_hint,
+      ExprHandleVectorToExprVector(dims),
+      dtype,
+      nullptr,
+      ExprHandleVectorToExprVector(strides)));
+}
+
+BufHandle Buf::make(
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims,
     Dtype dtype,
     c10::optional<ExprHandle> initializer,
     c10::optional<std::vector<ExprHandle>> strides,
