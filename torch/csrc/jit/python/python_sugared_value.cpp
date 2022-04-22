@@ -831,10 +831,14 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, GraphFunction& m) {
         << "Only constant Sequential, ModueList, or ModuleDict can be used as an iterable";
   }
 
-  auto module_dict = getSugaredDict(loc, m);
   if (iterableModuleKind == IterableModuleKind::DICT) {
+    auto module_dict = getSugaredDict(loc, m);
     return module_dict->keys_;
   } else if (iterableModuleKind == IterableModuleKind::LIST) {
+    auto module_dict = getSugaredDict(loc, m);
+    return module_dict->modules_;
+  } else if (iterableModuleKind == IterableModuleKind::PARAMLIST) {
+    auto module_dict = getSugaredNamedParameterList(loc, m);
     return module_dict->modules_;
   } else {
     TORCH_INTERNAL_ASSERT(false);
