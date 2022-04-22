@@ -1403,6 +1403,7 @@ meta_exclude_set = {
     torch.Tensor.is_shared,
     torch.Tensor.imag.__get__,
     torch.Tensor.real.__get__,
+    torch.Tensor.__setstate__,
     torch.Tensor.is_complex,
     torch.Tensor.is_floating_point,
     torch.Tensor.numel,
