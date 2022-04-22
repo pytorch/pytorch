@@ -109,12 +109,12 @@ def is_inplace(func):
     return name[-1] == '_'
 
 
-def generate_cct(enable_torch_dispatch=False,
+def generate_cct(enable_recursive_torch_dispatch=False,
                  autograd_view_consistency=True):
     # This function returns a new class CompositeCompliantTensor
     # The two arguments control the behaviour described below.
 
-    # enable_torch_dispatch:
+    # enable_recursive_torch_dispatch:
     #   If True, enable __torch_dispatch__ before calling the func in
     #   CCT's __torch_dispatch__ implementation else call
     #   the func under `no_dispatch`.
@@ -194,7 +194,7 @@ def generate_cct(enable_torch_dispatch=False,
                         'Please try to avoid this in-place operation.')
 
             with enable_reentrant_dispatch():
-                with contextlib.nullcontext() if enable_torch_dispatch else no_dispatch():
+                with contextlib.nullcontext() if enable_recursive_torch_dispatch else no_dispatch():
                     unwrapped_args = tree_map(unwrap, args)
                     unwrapped_kwargs = tree_map(unwrap, kwargs)
                     unwrapped_rs = func(*unwrapped_args, **unwrapped_kwargs)
@@ -451,7 +451,7 @@ def check_backward_formula(op, args, kwargs):
 def check_forward_ad_formula(op, args, kwargs):
     assert op.supports_forward_ad
 
-    CCT = generate_cct(enable_torch_dispatch=True, autograd_view_consistency=False)
+    CCT = generate_cct(enable_recursive_torch_dispatch=True, autograd_view_consistency=False)
     # Permutations of arg and kwargs in CCT.
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
