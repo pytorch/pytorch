@@ -20,12 +20,8 @@ TORCH_API void RunDecompositions(std::shared_ptr<Graph> g);
 TORCH_API c10::optional<GraphFunction*> GetDecompositionFunction(
     const FunctionSchema& schema);
 
-// To Embed in C++ Code, invoke as :
-// static GraphFunction * func = GetDecompositionExecutor("aten::var(Tensor self, bool unbiased=True) -> Tensor")
-// Stack stack = {at::rand({4, 4}), false};
-// func->run(stack)
-// at::Tensor out = pop(stack).toTensor()
-TORCH_API GraphFunction* GetDecompositionExecutor(const char * schema_literal);
+// For invocation in C++, recommended is to assign to static local variable
+TORCH_API GraphFunction* GetDecompositionExecutor(const char* schema_literal);
 
 } // namespace jit
 } // namespace torch
