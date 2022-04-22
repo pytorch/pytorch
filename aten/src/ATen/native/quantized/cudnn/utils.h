@@ -317,7 +317,6 @@ cudnn_frontend::ExecutionPlan get_execplan_from_heuristics_else_fall_back(cudnn_
   }
 
   {
-    auto total_engines = opGraph.getEngineCount();
     // std::cout << opGraph.describe() << " has " << total_engines << " engines." << std::endl;
     auto engine = cudnn_frontend::EngineBuilder().setGlobalEngineIdx(0).setOperationGraph(opGraph).build();
     // std::cout << engine.describe() << std::endl;
