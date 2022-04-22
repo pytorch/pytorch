@@ -1056,13 +1056,31 @@ class MultiheadAttention(Module):
             `batch_first` argument is ignored for unbatched inputs.
         """
         is_batched = query.dim() == 3
-        if (is_batched and not self.training and self.batch_first and self.bias_k is None and
-            self.bias_v is None and self.dropout == 0 and
-            not self.add_zero_attn and self._qkv_same_embed_dim and
-            ((key_padding_mask is None and attn_mask is None)
-                 if query.is_nested
-                 else (key_padding_mask is None or attn_mask is None)) and
-            query is key and key is value):
+        why_not_fast_path = ''
+        if not is_batched:
+            why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
+        elif query is not key or key is not value:
+            why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
+        elif self.training:
+            why_not_fast_path = "training is enabled"
+        elif not self.batch_first:
+            why_not_fast_path = "batch_first was not True"
+        elif self.bias_k is not None:
+            why_not_fast_path = "self.bias_k was not None"
+        elif self.bias_v is not None:
+            why_not_fast_path = "self.bias_v was not None"
+        elif self.dropout:
+            why_not_fast_path = "dropout was not zero"
+        elif self.add_zero_attn:
+            why_not_fast_path = "add_zero_attn was enabled"
+        elif not self._qkv_same_embed_dim:
+            why_not_fast_path = "_qkv_same_embed_dim was not True"
+        elif query.is_nested and (key_padding_mask is not None or attn_mask is not None):
+            why_not_fast_path = "key_padding_mask and attn_mask are not supported with NestedTensor input"
+        elif not query.is_nested and key_padding_mask is not None and attn_mask is not None:
+            why_not_fast_path = "key_padding_mask and attn_mask were both supplied"
+
+        if not why_not_fast_path:
             tensor_args = (
                 query,
                 key,
@@ -1072,11 +1090,16 @@ class MultiheadAttention(Module):
                 self.out_proj.weight,
                 self.out_proj.bias,
             )
-            if (not torch.overrides.has_torch_function(tensor_args) and
-                    # We have to use a list comprehension here because
-                    # Torchscript doesn't support generator expressions.
-                    all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]) and
-                    not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args])):
+            # We have to use list comprehensions below because TorchScript does not support
+            # generator expressions.
+            if torch.overrides.has_torch_function(tensor_args):
+                why_not_fast_path = "some Tensor argument has_torch_function"
+            elif not all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
+                why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
+            elif torch.is_grad_enabled() and any([x.requires_grad for x in tensor_args]):
+                why_not_fast_path = ("grad is enabled and at least one of query or the "
+                                     "input/output projection weights or biases requires_grad")
+            if not why_not_fast_path:
                 return torch._native_multi_head_attention(
                     query,
                     key,
@@ -1091,7 +1114,7 @@ class MultiheadAttention(Module):
                     need_weights,
                     average_attn_weights)
         any_nested = query.is_nested or key.is_nested or value.is_nested
-        assert not any_nested, "MultiheadAttention does not support NestedTensor outside of its fast path (see the MultiheadAttention docstring for fast path requirements)"
+        assert not any_nested, f"MultiheadAttention does not support NestedTensor outside of its fast path. The fast path was not hit because {why_not_fast_path}"
 
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property

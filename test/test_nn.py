@@ -5899,9 +5899,22 @@ class TestNN(NNTestCase):
     def test_multihead_attn_nested_tensor_outside_fast_path(self):
         mha = torch.nn.MultiheadAttention(3, 3, batch_first=True).eval()
         nt = torch.nested_tensor([torch.randn(3, 3)])
-        msg = "MultiheadAttention does not support NestedTensor outside of its fast path"
+        msg = "MultiheadAttention does not support NestedTensor outside of its fast path.*grad is enabled and.*or biases requires_grad"
         with self.assertRaisesRegex(AssertionError, msg):
             mha(nt, nt, nt)
+        with torch.no_grad():
+            mha(nt, nt, nt)
+        with torch.inference_mode():
+            mha(nt, nt, nt)
+        nt = torch.nested_tensor([torch.randn(3, 3, requires_grad=False)])
+        nt.requires_grad = False
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(nt, nt, nt)
+        mha.in_proj_weight.requires_grad = False
+        mha.in_proj_bias.requires_grad = False
+        mha.out_proj.weight.requires_grad = False
+        mha.out_proj.bias.requires_grad = False
+        mha(nt, nt, nt)
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
@@ -10123,11 +10136,20 @@ class TestNN(NNTestCase):
         self.assertLessEqual(out, 1.0)
 
         # Check dividing by 0.
+        # previous behavior: <x,y>/max(eps, ||x|| * ||y||)
+        # current: <x/max(eps, ||x||), y/max(eps,||y||)>
+        # if f(x,y) is the cosine similarity, then
+        # df/dx = y/(||x|| * ||y||) - (x * <x,y> * ||y||/||x||)/(||x|| * ||y||)^2
+        # the tests below check division by zero in the backward formula when
+        # x := input2 = 0, y := input1 != 0.
+        # For these inputs the gradient wrt x simplifies to g(x,y) := y/(||x|| * ||y||)
+        # Previous test checks g(x,y) == y/eps,
+        # Current test checks g(x,y) == (y/||y||)/eps.
         input1 = torch.randn(10).requires_grad_()
         input2 = torch.zeros_like(input1).requires_grad_()
         torch.cosine_similarity(input1, input2, 0).sum().backward()
         self.assertEqual(input1.grad, torch.zeros_like(input1))
-        self.assertEqual(input2.grad, input1 * 1e8)
+        self.assertEqual(input2.grad, input1 / input1.norm() * 1e8)
 
         # Check type promotion, issue #61454
         input = torch.tensor(12.)

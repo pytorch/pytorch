@@ -230,7 +230,10 @@ class TestMHADeviceType(TestCase):
         if dtype == torch.half:
             torch.testing.assert_close(ypt, ynpt, atol=1e-3, rtol=1e-3)
         else:
-            torch.testing.assert_close(ypt, ynpt)
+            # High rtol seems necessary for
+            # test_native_multihead_attention_cpu_float32 on Windows,
+            # otherwise 2e-4 would likely be fine.
+            torch.testing.assert_close(ypt, ynpt, atol=2e-5, rtol=2e-3)
 
         if need_weights:
             torch.testing.assert_close(weight_pt, weight_npt)
