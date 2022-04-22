@@ -548,12 +548,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_default();
   }
 
-  c10::SymIntArrayRef sym_sizes() const {
-    if (C10_UNLIKELY(
-            sizes_strides_policy_ >=
-            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
-      return sym_sizes_custom();
-    }
+  virtual c10::SymIntArrayRef sym_sizes() const {
     return sym_sizes_default();
   }
 
@@ -1305,6 +1300,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline bool is_empty() const {
     return numel() == 0;
   }
+
+  // if we are going to use sym sizes, we should be setting sym strides at the
+  // same time, otherwise it's very easy to misuse this API
+  void set_sym_sizes_and_strides(
+      c10::SymIntArrayRef sizes,
+      c10::SymIntArrayRef strides);
 
   /**
    * Change the size at some dimension.  This DOES NOT update strides;
@@ -2320,7 +2321,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Customizable sizes behavior, e.g., nested tensor
     //
     // Can override: strides(), is_contiguous(), sizes(), dim(), numel()
-    CustomSizes = 2,
+    CustomSizes = 2
   };
 
   void set_sizes_strides_policy(SizesStridesPolicy policy) {
@@ -2331,6 +2332,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     custom_device_ = custom_device;
   }
 
+ protected:
   Storage storage_;
 
  private:
