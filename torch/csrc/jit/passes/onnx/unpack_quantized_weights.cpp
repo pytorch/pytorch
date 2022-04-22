@@ -130,69 +130,24 @@ Node* CreateQuantizedBiasCaffe2(
 }
 
 std::vector<Node*> CreateQuantizedWeights(
-    int8_t* data,
-    std::shared_ptr<Graph>& graph,
-    const std::vector<int64_t>& shapes,
-    const std::vector<int64_t>& strides,
-    float scale,
-    int64_t zero_point) {
-  Node* const_node_1 = graph->create(prim::Constant);
-  auto const_value =
-      at::from_blob(
-          data, c10::IntArrayRef(shapes), c10::IntArrayRef(strides), at::kChar)
-          .to(at::kCPU);
-  auto options = c10::TensorOptions().dtype(at::kChar).device(at::kCPU);
-  at::Tensor const_value_copy = at::empty_strided(
-      c10::IntArrayRef(shapes), c10::IntArrayRef(strides), options);
-  const_value_copy.copy_(const_value);
-  const_node_1->t_(Symbol::attr("value"), const_value_copy);
-
-  Node* const_node_2 = graph->create(prim::Constant);
-  std::vector<float> scale_v{scale};
-  std::vector<int64_t> scale_shapes{1};
-  auto const_shape =
-      at::from_blob(scale_v.data(), c10::IntArrayRef(scale_shapes), at::kFloat)
-          .to(at::kCPU);
-  options = c10::TensorOptions().dtype(at::kFloat).device(at::kCPU);
-  at::Tensor const_shape_copy =
-      at::empty(c10::IntArrayRef(scale_shapes), options);
-  const_shape_copy.copy_(const_shape);
-  const_node_2->t_(Symbol::attr("value"), const_shape_copy);
-
-  Node* const_node_3 = graph->create(prim::Constant);
-  std::vector<int64_t> zero_point_v{zero_point};
-  std::vector<int64_t> zero_shapes{1};
-  auto const_zero =
-      at::from_blob(
-          zero_point_v.data(), c10::IntArrayRef(zero_shapes), at::kInt)
-          .to(at::kCPU);
-  options = c10::TensorOptions().dtype(at::kInt).device(at::kCPU);
-  at::Tensor const_zero_copy =
-      at::empty(c10::IntArrayRef(zero_shapes), options);
-  const_zero_copy.copy_(const_zero);
-  const_node_3->t_(Symbol::attr("value"), const_zero_copy);
-
-  return {const_node_1, const_node_2, const_node_3};
-}
-
-std::vector<Node*> CreateQuantizedWeights(
     std::shared_ptr<Graph>& graph,
     const at::Tensor& weight,
     int8_t* data,
     const std::vector<int64_t>& shapes,
     const std::vector<int64_t>& strides) {
-  auto qschema = weight.qscheme();
+  auto qscheme = weight.qscheme();
   std::vector<Node*> unpacked_wt;
 
   // Retrieve scales and zero_points. Their formats are different depending on
-  // different weight qschema.
+  // different weight qscheme.
   std::vector<float> scale_data;
   std::vector<int64_t> scale_shapes;
   std::vector<int64_t> zero_point_data;
   std::vector<int64_t> zero_point_shapes;
   std::vector<int64_t> axis_data;
-  switch (qschema) {
+  switch (qscheme) {
     case c10::kPerTensorAffine: {
+      // Cast to float since ONNX (De)QuantizeLinear only supports float scale.
       scale_data = {static_cast<float>(weight.q_scale())};
       scale_shapes = {1};
       zero_point_data = {weight.q_zero_point()};
@@ -209,6 +164,7 @@ std::vector<Node*> CreateQuantizedWeights(
           scale_shapes.size() == 1,
           "quantized per channel scales are expected as 1-d array.");
       scale_data.resize(scale_shapes[0]);
+      // Cast to float since ONNX (De)QuantizeLinear only supports float scale.
       std::transform(
           scale_data_raw,
           scale_data_raw + scale_shapes[0],
@@ -229,7 +185,7 @@ std::vector<Node*> CreateQuantizedWeights(
     }
     default:
       TORCH_CHECK(
-          false, "Unsupported qschema for weight, got ", toString(qschema));
+          false, "Unsupported qscheme for weight, got ", toString(qscheme));
   }
 
   Node* data_node = graph->create(prim::Constant);
