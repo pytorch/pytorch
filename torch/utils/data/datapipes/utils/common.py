@@ -110,21 +110,33 @@ def _deprecation_warning(
     deprecation_version: str,
     removal_version: str,
     old_functional_name: str = "",
+    old_argument_name: str = "",
     new_class_name: str = "",
     new_functional_name: str = "",
+    new_argument_name: str = "",
 ) -> None:
+    if new_functional_name and not old_functional_name:
+        raise ValueError("Old functional API needs to be specified for the deprecation warning.")
+    if new_argument_name and not old_argument_name:
+        raise ValueError("Old argument name needs to be specified for the deprecation warning.")
+
+    if old_functional_name and old_argument_name:
+        raise ValueError("Deprecating warning for functional API and argument should be separated.")
+
     msg = f"`{old_class_name}()`"
     if old_functional_name:
         msg = f"{msg} and its functional API `.{old_functional_name}()` are"
+    elif old_argument_name:
+        msg = f"The argument `{old_argument_name}` of {msg} is"
     else:
         msg = f"{msg} is"
     msg = (
-        f"{msg} deprecated since {deprecation_version} and will be removed in {removal_version}. "
-        f"See https://github.com/pytorch/data/issues/163 for details."
+        f"{msg} deprecated since {deprecation_version} and will be removed in {removal_version}."
+        f"\nSee https://github.com/pytorch/data/issues/163 for details."
     )
 
     if new_class_name or new_functional_name:
-        msg = f"{msg} Please use"
+        msg = f"{msg}\nPlease use"
         if new_class_name:
             msg = f"{msg} `{new_class_name}()`"
         if new_class_name and new_functional_name:
@@ -132,6 +144,9 @@ def _deprecation_warning(
         if new_functional_name:
             msg = f"{msg} `.{new_functional_name}()`"
         msg = f"{msg} instead."
+
+    if new_argument_name:
+        msg = f"{msg}\nPlease use `{old_class_name}({new_argument_name}=)` instead."
 
     warnings.warn(msg, FutureWarning)
 

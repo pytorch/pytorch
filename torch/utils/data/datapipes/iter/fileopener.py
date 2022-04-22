@@ -82,7 +82,7 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         _deprecation_warning(
             cls.__name__,
             deprecation_version="1.12",
-            removal_version="1.14",
+            removal_version="1.13",
             new_class_name="FileOpener",
         )
         return FileOpenerIterDataPipe(datapipe=datapipe, mode=mode, length=length)
