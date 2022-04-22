@@ -22,6 +22,7 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   shallow_copy_from(value_.getIntrusivePtr());
   storage_ = functional_storage;
   storage_access_should_throw_ = false;
+  key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize) | value_.key_set();
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -297,7 +298,7 @@ c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::opt
 std::vector<Tensor> from_functional_tensor(const TensorList& t_list) {
   std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(from_functional_tensor(t_list[i]));
+    outputs[i] = from_functional_tensor(t_list[i]);
   }
   return outputs;
 }
