@@ -13831,7 +13831,7 @@ class TestNNDeviceType(NNTestCase):
         inp = torch.randn((1, 15, 13) if N == 2 else (1, 15, 13, 13), device=device)
         output_size = (1, 240, 200) if N == 2 else (1, 240, 200, 200)
         ConvTransposeNd = getattr(nn, 'ConvTranspose{}d'.format(N))
-        m = ConvTransposeNd(1, 1, kernel_size=16, stride=16, padding=7, bias=False)
+        m = ConvTransposeNd(1, 1, kernel_size=16, stride=16, padding=7, bias=False, device=device)
         output = m(inp, output_size=output_size)
         self.assertEqual(output.shape, output_size)
 
