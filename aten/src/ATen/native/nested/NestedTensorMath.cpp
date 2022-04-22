@@ -362,8 +362,9 @@ Tensor NestedTensor_embedding(
 
 int64_t NestedTensor_size_int(const Tensor& self, int64_t d) {
   const auto* nt_indices = get_nested_tensor_impl(self);
-  TORCH_CHECK(nt_indices->get_opt_size(d), "Irregular dimension ", d, " does not have a size.");
-  return *nt_indices->get_opt_size(d);
+  const auto opt_size_d = nt_indices->opt_size(d);
+  TORCH_CHECK(opt_size_d, "Irregular dimension ", d, " does not have a size.");
+  return *opt_size_d;
 }
 
 std::vector<at::Tensor> NestedTensor_nested_size(const Tensor& self) {
