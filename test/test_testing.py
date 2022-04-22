@@ -15,7 +15,7 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
-     parametrize, subtest, instantiate_parametrized_tests, dtype_name)
+     parametrize, subtest, instantiate_parametrized_tests, dtype_name, skipIfCrossRef)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
@@ -423,6 +423,7 @@ instantiate_device_type_tests(TestTesting, globals())
 class TestFrameworkUtils(TestCase):
 
     @skipIfRocm
+    @skipIfCrossRef
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     def test_filtering_env_var(self):
