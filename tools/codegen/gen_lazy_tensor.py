@@ -16,7 +16,7 @@ from typing import (
     Tuple,
     Type,
 )
-from tools.codegen.dest.lazy_ir import LazyIR, TSLazyIR
+from tools.codegen.dest.lazy_ir import GenLazyIR, GenTSLazyIR
 from tools.codegen.gen import (
     get_grouped_native_functions,
     parse_native_yaml,
@@ -163,7 +163,7 @@ class default_args:
     shape_inference_hdr: str = "torch/csrc/lazy/core/shape_inference.h"
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
-    lazy_ir_cls: Type[LazyIR] = LazyIR
+    lazy_ir_generator: Type[GenLazyIR] = GenLazyIR
     backend_name: str = "TorchScript"
 
 
@@ -228,9 +228,9 @@ def main() -> None:
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     torch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
     aten_path = str(torch_root / "aten" / "src" / "ATen")
-    ir_gen_class: Type[LazyIR] = default_args.lazy_ir_cls
+    lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator
     if options.gen_ts_lowerings:
-        ir_gen_class = TSLazyIR
+        lazy_ir_generator = GenTSLazyIR
 
     run_gen_lazy_tensor(
         aten_path,
@@ -243,7 +243,7 @@ def main() -> None:
         options.tensor_class,
         options.tensor_class_hdr,
         options.shape_inference_hdr,
-        ir_gen_class,
+        lazy_ir_generator,
         options.backend_name,
     )
 
@@ -259,7 +259,7 @@ def run_gen_lazy_tensor(
     tensor_class: str = default_args.tensor_class,
     tensor_class_hdr: str = default_args.tensor_class_hdr,
     shape_inference_hdr: str = default_args.shape_inference_hdr,
-    lazy_ir_cls: Type[LazyIR] = default_args.lazy_ir_cls,
+    lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator,
     # build_in_tree is true for TS backend and affects include paths
     build_in_tree: bool = False,
     # per_operator_headers changes whether ATen/Functions.h or individual operator headers are used
@@ -490,7 +490,7 @@ def run_gen_lazy_tensor(
             ],
             "ir_declarations": list(
                 concat_map_codegen(
-                    lazy_ir_cls(backend_indices[backend_key], node_base),
+                    lazy_ir_generator(backend_indices[backend_key], node_base),
                     grouped_native_functions,
                 )
             ),
