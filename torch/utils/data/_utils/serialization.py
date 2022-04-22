@@ -1,5 +1,3 @@
-import pickle
-
 from enum import Enum
 
 try:
