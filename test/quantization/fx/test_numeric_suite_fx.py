@@ -16,6 +16,7 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     prepare_qat_fx,
 )
+from torch.testing._internal.common_utils import skipIfCrossRef
 from torch.testing._internal.common_quantization import (
     ConvBnModel,
     ConvBnReLUModel,
@@ -955,6 +956,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         return results
 
 
+@skipIfCrossRef
 class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM

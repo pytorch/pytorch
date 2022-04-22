@@ -1401,6 +1401,7 @@ meta_exclude_set = {
     # e.g. test_fn_fwgrad_bwgrad_index_add_cpu_complex128 (__main__.TestGradientsCPU)
     torch.index_add,
     torch.Tensor.index_add,
+    torch.Tensor.index_add_,
     # Can't copy out of meta tensor
     torch.linalg.eigvals,
     torch.linalg.lu_factor,
@@ -1425,13 +1426,35 @@ meta_exclude_set = {
     torch.vander,
     torch.as_tensor,
     torch.tensor,
+    torch.zeros_like,
     torch.sparse_csr_tensor,
     torch._sparse_coo_tensor_unsafe,
+    torch._sparse_csr_tensor_unsafe,
+    torch._validate_sparse_csr_tensor_args,
 }
 
 skipped = set()
 
 RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
+
+class CoverageMode(torch.overrides.TorchFunctionMode):
+    """
+    prefix = Path(__file__).parent.parent.parent.parent
+    full_test_file = __main__.__file__
+    test_file = os.path.relpath(full_test_file, prefix)
+    """
+
+    def __init__(self, conn, test_case):
+        self.conn = conn
+        self.test_case = test_case
+        self.rows = []
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        self.rows.append((self.test_file, self.test_case))
+        return func(*args, **kwargs)
+
+    def commit(self):
+        pass
 
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __init__(self, test_case):
