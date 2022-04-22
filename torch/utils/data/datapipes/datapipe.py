@@ -5,6 +5,13 @@ from torch.utils.data.datapipes._typing import _DataPipeMeta
 from torch.utils.data._utils.serialization import serialize_fn, SerializationType, deserialize_fn, DILL_AVAILABLE
 from torch.utils.data.dataset import Dataset, IterableDataset
 
+__all__ = [
+    "DataChunk",
+    "DFIterDataPipe",
+    "IterDataPipe",
+    "MapDataPipe",
+]
+
 T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
 

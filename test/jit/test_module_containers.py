@@ -664,7 +664,7 @@ class TestModuleContainers(JitTestCase):
         # Check that ignored method is still intact.
         self.assertEqual(inp, n.ignored_method(inp))
 
-    def test_parameterlist_script(self):
+    def test_parameterlist_script_getitem(self):
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -677,3 +677,18 @@ class TestModuleContainers(JitTestCase):
                 return x
 
         self.checkModule(MyModule(), (torch.zeros(1)))
+
+    def test_parameterlist_script_iter(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module_list = nn.ModuleList([nn.Linear(1, 1) for _ in range(10)])
+                self.parameter_list = nn.ParameterList([nn.Parameter(torch.zeros(1)) for _ in range(10)])
+
+            def forward(self, x):
+                r = x
+                for i, p in enumerate(self.parameter_list):
+                    r = r + p + i
+                return r
+
+        self.checkModule(MyModule(), (torch.zeros(1),))
