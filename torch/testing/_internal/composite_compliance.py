@@ -135,6 +135,9 @@ def generate_cct(dispatch=False, alias=True):
 
         @staticmethod
         def __new__(cls, elem, *args, **kwargs):
+            assert type(elem) is not cls, \
+                "Wrapping a CompositeCompliantTensor in a CompositeCompliantTensor is not supported"
+
             # The storage of CompositeCompliantTensor should never be used directly
             # by a Composite operation; if the Composite
             # operator attempts to read from the storage without dispatching then it'll
@@ -451,6 +454,7 @@ def check_forward_ad_formula(op, args, kwargs):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
 
         def maybe_tangent(t):
+            assert type(t) is not CCT
             # Generate `tangent` tensor
             # if given object is a Tensor and requires grad is set.
             if isinstance(t, torch.Tensor) and t.requires_grad:
