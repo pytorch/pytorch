@@ -31,7 +31,8 @@ def rebase_onto(pr: GitHubPR, repo: GitRepo, dry_run: bool = False) -> None:
                             f"Tried to rebase and push PR #{pr.pr_num}, but it was already up to date", dry_run=dry_run)
         else:
             gh_post_comment(pr.org, pr.project, pr.pr_num,
-                            f"Successfully rebased {pr.head_ref()} onto {onto_branch}, please pull locally before adding more changes", dry_run=dry_run)
+                            f"Successfully rebased {pr.head_ref()} onto {onto_branch}, please pull locally " +
+                            "before adding more changes", dry_run=dry_run)
 
 
 def main() -> None:
