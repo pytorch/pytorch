@@ -206,6 +206,9 @@ make_fx_failures = {
     xfail('nn.functional.feature_alpha_dropout', 'with_train', device_type='cpu'),
     xfail('bernoulli', device_type='cpu'),
     xfail('nn.functional.dropout2d', device_type='cpu'),
+    xfail('nn.functional.max_unpool1d', '', device_type='cpu'),
+    xfail('nn.functional.max_unpool2d', '', device_type='cpu'),
+    xfail('nn.functional.max_unpool3d', '', device_type='cpu'),
 }
 
 
@@ -372,6 +375,7 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('trapezoid'),
         xfail('trapz'),
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
+        skip('nn.functional.margin_ranking_loss'),  # seems flaky
     })
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         def f(args, kwargs):
