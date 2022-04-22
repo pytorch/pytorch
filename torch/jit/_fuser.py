@@ -1,8 +1,7 @@
 import contextlib
 
 import torch
-from typing import List, Tuple, Any
-import warnings
+from typing import List, Tuple
 
 @contextlib.contextmanager
 def optimized_execution(should_optimize):
@@ -139,33 +138,3 @@ def set_fusion_strategy(strategy: List[Tuple[str, int]]):
     apis for specific fusers.
     """
     return torch._C._jit_set_fusion_strategy(strategy)
-
-
-class strict_fusion(object):
-    """
-    This class errors if not all nodes have been fused in
-    inference, or symbolically differentiated in training.
-
-    Example:
-
-    Forcing fusion of additions.
-
-    .. code-block:: python
-
-        @torch.jit.script
-        def foo(x):
-            with torch.jit.strict_fusion():
-                return x + x + x
-
-    """
-
-    def __init__(self):
-        if not torch._jit_internal.is_scripting():
-            warnings.warn("Only works in script mode")
-        pass
-
-    def __enter__(self):
-        pass
-
-    def __exit__(self, type: Any, value: Any, tb: Any) -> None:
-        pass

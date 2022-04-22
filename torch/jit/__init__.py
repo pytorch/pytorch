@@ -49,7 +49,7 @@ from torch.jit._trace import (
 )
 from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load, jit_module_from_flatbuffer, save_jit_module_to_flatbuffer
-from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy, strict_fusion
+from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
 from torch.jit._ir_utils import _InsertPoint
 
@@ -200,6 +200,35 @@ def _hide_source_ranges() -> Iterator[None]:
     finally:
         torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
+
+class strict_fusion(object):
+    """
+    This class errors if not all nodes have been fused in
+    inference, or symbolically differentiated in training.
+
+    Example:
+
+    Forcing fusion of additions.
+
+    .. code-block:: python
+
+        @torch.jit.script
+        def foo(x):
+            with torch.jit.strict_fusion():
+                return x + x + x
+
+    """
+
+    def __init__(self):
+        if not torch._jit_internal.is_scripting():
+            warnings.warn("Only works in script mode")
+        pass
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, type, value, tb) -> None:
+        pass
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
