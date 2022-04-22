@@ -286,7 +286,7 @@ def _init_test_roi_heads_faster_rcnn():
 def _construct_tensor_for_quantization_test(shape: Tuple[int],
                                             offset: Optional[Union[int, float]] = None,
                                             max_val: Optional[Union[int, float]] = None
-) -> torch.Tensor:
+                                            ) -> torch.Tensor:
     """Helper function to generate weights and test inputs in a deterministic way.
 
     Due to difference in implementation details between PyTorch and ONNXRuntime, randomly generated
