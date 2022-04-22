@@ -1232,6 +1232,19 @@ class TestJit(JitTestCase):
 
         self.assertExportImport(g, (x, y))
 
+    def test_cse_context_managers(self):
+        def bar(x):
+            with torch.no_grad():
+                y = x * 2
+
+            z = 2 * x + y
+            return z, x.requires_grad, y.requires_grad, z.requires_grad
+
+        a = torch.rand(3, requires_grad=True)
+        b = torch.rand(3, requires_grad=True)
+
+        self.checkScript(bar, (a,))
+
     def test_cse_not_introduce_aliasing(self):
         @torch.jit.script
         def tensor_alias_outputs(x):
