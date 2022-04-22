@@ -82,6 +82,9 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   // This is a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.
   is_non_overlapping_and_dense_ = false;
+
+  // Error out on sizes() if PyTorch is built w/ C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  set_sizes_customization_policy(CustomizableMethodPolicy::NotSupported);
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
