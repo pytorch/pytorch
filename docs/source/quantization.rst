@@ -410,6 +410,7 @@ after quantization, thereby ensuring that operations like padding do not cause
 additional quantization error.
 
 Here are a few key attributes for quantized Tensor:
+
 * QScheme (torch.qscheme): a enum that specifies the way we quantize the Tensor
 
   * torch.per_tensor_affine
@@ -457,7 +458,7 @@ Quantized Operators/Modules
 * Quantized Operator are the operators that takes quantized Tensor as inputs, and outputs a quantized Tensor.
 * Quantized Modules are PyTorch Modules that performs quantized operations. They are typically defined for weighted operations like linear and conv.
 
-Quantization Engine
+Quantized Engine
 ~~~~~~~~~~~~~~~~~~~~
 When a quantized model is executed, the qengine (torch.backends.quantized.engine) specifies which backend is to be used for execution. It is important to ensure that the qengine is compatible with the quantized model in terms of value range of quantized activation and weights.
 
@@ -491,6 +492,7 @@ QConfig
 General Quantization Flow
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 In general, the flow is the following
+
 * prepare
 
   * insert Observer/FakeQuantize modules based on user specified qconfig
@@ -627,7 +629,7 @@ Backend/Hardware Support
 |                 |               |                         |            |
 +-----------------+---------------+------------+------------+------------+
 |server GPU       |TensorRT (early|Not support |Supported   |Static      |
-|                 |proottype)     |this it     |            |Quantization|
+|                 |prototype)     |this it     |            |Quantization|
 |                 |               |requries a  |            |            |
 |                 |               |graph       |            |            |
 +-----------------+---------------+------------+------------+------------+
