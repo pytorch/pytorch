@@ -789,8 +789,8 @@ TensorView* TensorView::cacheBefore() {
 
   TORCH_CHECK(
       isFusionOutput() ||
-          definition()->getExprType() != ExprType::ReductionOp ||
-          definition()->getExprType() != ExprType::WelfordOp,
+          (definition()->getExprType() != ExprType::ReductionOp &&
+           definition()->getExprType() != ExprType::WelfordOp),
       "Error adding cacheBefore ",
       this,
       " its definition is a reduction and it is not an output, instead please use cacheAfter.");
