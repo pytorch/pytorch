@@ -8731,6 +8731,32 @@ class _TestONNXRuntime:
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerChannelModel(), (x))
 
+    @skipIfUnsupportedMinOpsetVersion(13)
+    @disableScriptTest()  # RuntimeError: Can't redefine method: forward on class: __torch__.torch.nn.modules.linear.Linear
+    def test_fake_quantize_activation(self):
+        from torch import quantization
+        m = torch.nn.Linear(1, 1)
+        m.qconfig = quantization.QConfig(
+            activation=quantization.default_fake_quant,
+            weight=quantization.default_per_channel_weight_fake_quant)
+        quantization.prepare_qat(m.train(), inplace=True)
+        m.apply(quantization.enable_observer)
+        m.apply(quantization.enable_fake_quant)
+        for module in m.modules():
+            if isinstance(module, quantization.FakeQuantize):
+                module.calculate_qparams()
+
+        m.apply(quantization.disable_observer)
+        m.eval()
+
+        # Fake quantize activation is a special case, as it restricts quantized range to be (0, 127),
+        # while standard 8bit quantization range is (-128, 127) or (0, 255).
+        # Set fixed weight, bias and inputs to test if ONNX handles the overflow correctly.
+        m.weight = torch.nn.Parameter(torch.tensor([[1.], [1.], [1.]]))
+        m.bias = torch.nn.Parameter(torch.tensor([0.]))
+        x = torch.tensor([[150.], [127.], [-5.]])
+        self.run_test(m, x)
+
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

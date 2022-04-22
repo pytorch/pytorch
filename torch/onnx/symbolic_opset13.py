@@ -7,7 +7,7 @@ import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import (overload_by_arg_count, _maybe_cast_reduce_op_input,
                                         nonzero, expand, zeros, ones, size, linear, conv2d,
-                                        relu)
+                                        relu, unused)
 from torch.onnx.symbolic_opset11 import unsqueeze
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -132,25 +132,29 @@ def where(g, condition, self=None, other=None, _outputs=None):
 
 @parse_args("v", "v", "v", "i", "i", "i")
 def fake_quantize_per_channel_affine(g, inputs, scale, zero_point, axis, quant_min=-128, quant_max=127):
-    if (quant_min, quant_max) not in [(0, 255), (-128, 127)]:
+    # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
+    #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
+    if (quant_min, quant_max) not in [(0, 255), (-128, 127), (0, 127)]:
         raise RuntimeError(
-            "For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
+            "For (quant_min, quant_max), ONNX allows only (0, 127), (0, 255) and (-128, 127). "
             "Got ({}, {})".format(quant_min, quant_max))
     # ONNX defines zero_point to be int8 or uint8
     if quant_min == 0:
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
     else:
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
-    return g.op(
-        "DequantizeLinear",
-        g.op("QuantizeLinear", inputs, scale, zero_point, axis_i=axis),
-        scale, zero_point, axis_i=axis)
+    quantized = g.op("QuantizeLinear", inputs, scale, zero_point, axis_i=axis)
+    if (quant_min, quant_max) == (0, 127):
+        quantized = g.op("Clip", quantized, unused(g), g.op("Constant", value_t=torch.tensor(127, dtype=torch.uint8)))
+    return g.op("DequantizeLinear", quantized, scale, zero_point, axis_i=axis)
 
 @parse_args("v", "v", "v", "i", "i")
 def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128, quant_max=127):
-    if (quant_min, quant_max) not in [(0, 255), (-128, 127)]:
+    # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
+    #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
+    if (quant_min, quant_max) not in [(0, 255), (-128, 127), (0, 127)]:
         raise RuntimeError(
-            "For (quant_min, quant_max), ONNX allows only (0, 255) and (-128, 127). "
+            "For (quant_min, quant_max), ONNX allows only (0, 127), (0, 255) and (-128, 127). "
             "Got ({}, {})".format(quant_min, quant_max))
     if quant_min == 0:
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
@@ -158,7 +162,10 @@ def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
     if scale.type().scalarType() != "Float":
         scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
-    return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
+    quantized = g.op("QuantizeLinear", inputs, scale, zero_point)
+    if (quant_min, quant_max) == (0, 127):
+        quantized = g.op("Clip", quantized, unused(g), g.op("Constant", value_t=torch.tensor(127, dtype=torch.uint8)))
+    return g.op("DequantizeLinear", quantized, scale, zero_point)
 
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
