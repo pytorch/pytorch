@@ -162,13 +162,13 @@ def opinfo_in_dict(opinfo, d):
     return (opinfo.name in d) or (f'{opinfo.name}.{opinfo.variant_test_name}' in d)
 
 
-def xfail(op_name, variant_name=None, *, device_type=None, dtypes=None):
+def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
     return (op_name, variant_name, device_type, dtypes, True)
 
 # TODO: this doesn't work in python < 3.8
 
 
-def skip(op_name, variant_name=None, *, device_type=None, dtypes=None):
+def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
     return (op_name, variant_name, device_type, dtypes, False)
 
 
@@ -176,14 +176,9 @@ def skipOps(test_case_name, base_test_name, to_skip):
     all_opinfos = functorch_lagging_op_db + additional_op_db
     for xfail in to_skip:
         op_name, variant_name, device_type, dtypes, expected_failure = xfail
-        if variant_name is None:
-            # match all variants
-            matching_opinfos = [o for o in all_opinfos if o.name == op_name]
-            assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
-        else:
-            matching_opinfos = [o for o in all_opinfos
-                                if o.name == op_name and o.variant_test_name == variant_name]
-            assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
+        matching_opinfos = [o for o in all_opinfos
+                            if o.name == op_name and o.variant_test_name == variant_name]
+        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
         for opinfo in matching_opinfos:
             decorators = list(opinfo.decorators)
             if expected_failure:
