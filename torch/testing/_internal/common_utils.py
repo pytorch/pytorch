@@ -442,7 +442,7 @@ def _get_test_report_path():
     test_source = override if override is not None else 'python-unittest'
     return os.path.join('test-reports', test_source)
 
-is_running_via_run_test = __main__.__file__ == "run_test.py"
+is_running_via_run_test = "run_test.py" in __main__.__file__
 parser = argparse.ArgumentParser(add_help=not is_running_via_run_test)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
