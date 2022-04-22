@@ -23,6 +23,7 @@ from torch.ao.quantization.fake_quantize import (
     default_symmetric_fixed_qparams_fake_quant,
 )
 from torch.ao.quantization.utils import get_combined_dict
+from torch.nn.utils.parametrize import type_before_parametrizations
 
 # Default map for swapping float module to reference quantized modules
 DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
@@ -157,6 +158,7 @@ DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS : Dict[Union[Callable, str], Callab
 DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
     nn.Hardsigmoid: default_affine_fixed_qparams_fake_quant,
     nn.Sigmoid: default_affine_fixed_qparams_fake_quant,
+    nn.Softmax: default_affine_fixed_qparams_fake_quant,
     nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
 }
 
@@ -306,7 +308,7 @@ def _get_special_act_post_process(module: torch.nn.Module) -> Optional[Callable]
     input: torch.nn.Sigmoid
     output: default_affine_fixed_qparam_fake_quant
     """
-    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(type(module), None)
+    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(type_before_parametrizations(module), None)
 
 def _has_special_act_post_process(module: torch.nn.Module) -> bool:
     return module.training and type(module) in DEFAULT_MODULE_TO_ACT_POST_PROCESS

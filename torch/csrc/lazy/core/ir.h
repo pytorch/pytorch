@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/core/hash.h>
@@ -67,11 +68,12 @@ inline std::ostream& operator<<(std::ostream& stream, const OpKind& op) {
 
 using OpList = c10::ArrayRef<Value>;
 
-// A node in the graph. Nodes for operations which requires extra data to be
-// stored for lowering, should inherit from this class and add operation
+hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSizes);
+// A node in the graph. Nodes for operations which require extra data to be
+// stored for lowering should inherit from this class and add an operation
 // specific member there. For example, a constant might create a new
 // NodeConstant class (inheriting from Node) with an extra lazy_tensors::Literal
-// field, or a tensor value might create a new NodeTensor with computation
+// field, or a tensor value might create a new NodeTensor with a computation
 // client data handle in it.
 class TORCH_API Node {
  public:
@@ -83,10 +85,19 @@ class TORCH_API Node {
   //
   // None leaf node's node_hash does not contains shape information always.
   // So we pass in the hash value rather than a function.
-  Node(OpKind op, size_t num_outputs, hash_t node_hash, std::function<hash_t(bool)> dag_hash_fn);
+  Node(OpKind op, size_t num_outputs);
 
-  // Contructor used to create leaf nodes.
-  Node(OpKind op, size_t num_outputs, std::function<hash_t(bool)> node_hash_fn);
+  // Construct node with operands and shapes
+  Node(OpKind op, OpList operands, std::vector<Shape>&& shapes, size_t num_outputs = 1);
+
+  // Construct node with operands and shape generated from a function
+  Node(OpKind op, OpList operands, const std::function<Shape()>& shape_fn, size_t num_outputs = 1);
+
+  // Construct node with operands and no shape
+  Node(OpKind op, OpList operands, size_t num_outputs = 1);
+
+  // Construct node with shape and no operands
+  Node(OpKind op, Shape shape, size_t num_outputs = 1);
 
   virtual ~Node();
 
@@ -98,29 +109,26 @@ class TORCH_API Node {
     return num_outputs_;
   }
 
-  virtual c10::ArrayRef<Shape> shapes() const = 0;
+  // Retrieves the full shape of the IR Node.
+  virtual c10::ArrayRef<Shape> shapes() const;
 
-  virtual const Shape& shape(size_t output_index = 0) const = 0;
+  virtual const Shape& shape(size_t output_index = 0) const;
 
-  virtual const std::vector<Output>& operands() const = 0;
+  // Add the shape computed by the shape_fn
+  void addComputedShape(const std::function<Shape()>& shape_fn);
 
-  virtual const Output& operand(size_t i) const = 0;
+  // Compute the shape using the provided shape_fn if not previously cached
+  Shape computeShape(const std::function<Shape()>& shape_fn);
 
-  hash_t node_hash() const {
-    return node_hash_;
-  }
+  virtual const std::vector<Output>& operands() const;
 
-  hash_t hash() const {
-    return enableDynamicShape() ? dag_hash_without_sizes_ : dag_hash_with_sizes_;
-  }
+  virtual const Output& operand(size_t i) const;
 
-  hash_t hash_without_sizes() const {
-    return dag_hash_without_sizes_;
-  }
+  // Returns the hash of the dag used to look up the compiled graph
+  virtual hash_t hash() const = 0;
 
-  hash_t hash_with_sizes() const {
-    return dag_hash_with_sizes_;
-  }
+  // Returns the hash of the dag used to for shape caching
+  virtual hash_t shapeHash() const = 0;
 
   const MetaData& metadata() const {
     return metadata_;
@@ -143,24 +151,22 @@ class TORCH_API Node {
   OpKind op_;
   size_t num_outputs_ = 1;
 
-  // The hash value of this node.
-  hash_t node_hash_;
-  // dag_hash represents the hash value of the graph rooted at this node. There are 2 variants, one
-  // with sizes info and one without. We need 2 such hashes to support dynamic
-  // shape. Here are the logic to pick the hash in the 2 major scenarios that a hash is needed:
-  // - shape cache: in this case, we always use the dag hash with size info. This way, looking up the
-  //   shape for one node does not get the shape for another node with the same rank but different sizes
-  // - lookup the compiled graph by a hash: in this case, we will use the dag hash
-  //   WITHOUT size info if dynamic shape is enabled and use the dag hash WITH size info otherwise.
-  // The different requirement for the hash in these 2 scenarios forces us to maintain 2
-  // different hashes.
-  hash_t dag_hash_without_sizes_;
-  hash_t dag_hash_with_sizes_;
   // The IR specific metadata attached to the IR node.
   MetaData metadata_;
   // The IR framework user can attach a user defined metadata object deriving
   // from UserMetaData.
   std::shared_ptr<UserMetaData> user_metadata_;
+
+protected:
+  // Adds node's index output number as operand.
+  void AddOperand(NodePtr node, size_t index = 0);
+
+  std::vector<Shape> shapes_;
+  // A node holds a real reference to its operands.
+  std::vector<NodePtr> operands_;
+  // Outputs do not hold references on the nodes, and neither do the uses, since
+  // otherwise we get into circular reference counting.
+  std::vector<Output> operands_as_outputs_;
 };
 
 
@@ -237,8 +243,7 @@ struct TORCH_API Value {
   /* implicit */ Value(const NodePtr& node, size_t index = 0) : node(node), index(index) {}
 
   hash_t hash() const;
-  hash_t hash_with_sizes() const;
-  hash_t hash_without_sizes() const;
+  hash_t shapeHash() const;
 
   operator bool() const {
     return node != nullptr;
@@ -259,7 +264,6 @@ struct TORCH_API Value {
   NodePtr node;
   size_t index = 0;
 };
-
 
 } // namespace lazy
 } // namespace torch

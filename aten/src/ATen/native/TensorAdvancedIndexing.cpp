@@ -195,7 +195,9 @@ TORCH_META_FUNC2(scatter_reduce, two)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce) {
+ const c10::string_view reduce,
+ bool include_self) {
+  (void) include_self;
   scatter_meta_impl</*use_new_options=*/true>(*this, self, dim, index, src, reduce);
 }
 
@@ -1195,6 +1197,36 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
 }
 
+static void scatter_reduce_exclude_self_helper(
+  const Tensor& self,
+  int64_t dim,
+  const Tensor& index,
+  const SCATTER_GATHER_OP& op) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+    at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
+    self.scalar_type(), "scatter_reduce_exclude_input_init", [&] {
+    scalar_t init_val;
+    switch (op) {
+      case SCATTER_GATHER_OP::REDUCE_ADD:
+        init_val = (scalar_t)0;
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MULTIPLY:
+        init_val = (scalar_t)1;
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
+        init_val = std::numeric_limits<scalar_t>::lowest();
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MINIMUM:
+        init_val = std::numeric_limits<scalar_t>::max();
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MEAN:
+        init_val = (scalar_t)0;
+        break;
+    }
+    self.scatter_(dim, index, init_val);
+  });
+}
+
 template <bool use_new_options = false, typename T, typename ReduceStub, typename FillStub>
 void scatter_impl(
     const Tensor& self,
@@ -1204,7 +1236,8 @@ void scatter_impl(
     const Tensor& out,
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
-    const c10::optional<c10::string_view> reduce = nullopt) {
+    const c10::optional<c10::string_view> reduce = nullopt,
+    bool reduce_includes_self = true) {
 
   dim = at::maybe_wrap_dim(dim, self.dim());
   auto mut_out = const_cast<Tensor&>(out);
@@ -1217,6 +1250,10 @@ void scatter_impl(
 
   if (reduce.has_value()) {
     auto op = meta::get_operator_enum(reduce.value(), use_new_options);
+    if (!reduce_includes_self) {
+      // scatter inits for reduction to appropriate indices (used by scatter_reduce.two)
+      scatter_reduce_exclude_self_helper(mut_out, dim, index, op);
+    }
     reduce_stub(self.device().type(), mut_out, dim, index, src, op);
   } else {
     fill_stub(self.device().type(), mut_out, dim, index, src);
@@ -1307,19 +1344,23 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce,
+ bool include_self,
  const Tensor& out) {
   // See issue https://github.com/pytorch/pytorch/issues/74770
-  TORCH_WARN_ONCE("scatter_reduce() is an early prototype and the API may change at any time.");
+  TORCH_WARN_ONCE("scatter_reduce() is in beta and the API may change at any time.");
 
   scatter_impl</*use_new_options=*/true>(self, dim, index, src, out,
                                          scatter_reduce_two_stub,
                                          scatter_stub,
-                                         reduce);
+                                         reduce,
+                                         include_self);
 
   if (meta::get_operator_enum(reduce, true) == SCATTER_GATHER_OP::REDUCE_MEAN) {
     auto ones = at::ones_like(src);
-    auto count = at::ones_like(out);
+    auto count = include_self ? at::ones_like(out) : at::zeros_like(out);
     count.scatter_add_(dim, index, ones);
+    count.masked_fill_(count == 0, 1);
+
     if (out.is_floating_point() || out.is_complex()) {
       out.div_(count);
     } else {

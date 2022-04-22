@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/record_function.h>
+#include <ATen/core/PythonFallbackKernel.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -23,12 +24,14 @@
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
+#include <ATen/PythonTorchFunctionTLS.h>
 
 #include <set>
 #include <unordered_set>
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
+  using namespace torch::profiler::impl;
   auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch._tensor"));
   if (!tensor_module)
     return nullptr;
@@ -70,9 +73,58 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("KINETO", ProfilerState::KINETO)
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
 
+  using torch::profiler::impl::ActiveProfilerType;
+  py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
+      .value("NONE", ActiveProfilerType::NONE)
+      .value("LEGACY", ActiveProfilerType::LEGACY)
+      .value("KINETO", ActiveProfilerType::KINETO)
+      .value("NVTX", ActiveProfilerType::NVTX);
+
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
       .value("CUDA", ActivityType::CUDA);
+
+  py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
+      .def(py::init<
+          std::vector<std::string> /* profiler_metrics */,
+          bool  /* profiler_measure_per_kernel */
+          >(),
+          "An experimental config for Kineto features. Please note that"
+          "backward compatibility is not guaranteed.\n"
+          "    profiler_metrics : a list of CUPTI profiler metrics used\n"
+          "       to measure GPU performance events.\n"
+          "       If this list contains values Kineto runs in CUPTI profiler mode\n"
+          "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
+          "       or for the entire measurement duration.",
+          py::arg("profiler_metrics") = std::vector<std::string>(),
+          py::arg("profiler_measure_per_kernel") = false)
+    .def(py::pickle(
+        [](const ExperimentalConfig &p) { // __getstate__
+            py::list py_metrics;
+            for (const auto& metric : p.profiler_metrics) {
+              py::bytes mbytes(metric);
+              py_metrics.append(mbytes);
+            }
+            /* Return a tuple that fully encodes the state of the config */
+            return py::make_tuple(
+                py_metrics, p.profiler_measure_per_kernel);
+        },
+        [](py::tuple t) { // __setstate__
+            if (t.size() != 2) {
+                throw std::runtime_error("Expected 2 values in state");
+            }
+
+            py::list py_metrics = t[0].cast<py::list>();
+            std::vector<std::string> metrics{py_metrics.size()};
+
+            for (const auto& py_metric : py_metrics) {
+              metrics.push_back(py::str(py_metric));
+            }
+
+            return ExperimentalConfig(std::move(metrics), t[1].cast<bool>());
+        }
+    ));
+
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(py::init<ProfilerState,
@@ -80,7 +132,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
           bool, /* profile_memory */
           bool, /* with_stack */
           bool, /* with_flops */
-          bool  /* with_modules */
+          bool, /* with_modules */
+          ExperimentalConfig /* experimental_config */
           >());
 
   py::class_<LegacyEvent>(m, "ProfilerEvent")
@@ -288,6 +341,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       disableProfilerLegacy,
       py::arg("profiler_disable_options") = ProfilerDisableOptions());
   m.def("_profiler_enabled", profilerEnabled);
+  m.def("_profiler_type", torch::profiler::impl::profilerType);
   m.def("_enable_record_function", [](bool enable) {
     at::enableRecordFunction(enable);
   });
@@ -318,6 +372,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
+
+  py::class_<at::impl::RestorePythonTLSSnapshot>(_C_m, "_RestorePythonTLSSnapshot")
+      .def(py::init<>());
 
   // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
@@ -560,6 +617,31 @@ static PyObject * exit_python_mode(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * set_torch_function_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg == Py_None) {
+    at::impl::PythonTorchFunctionTLS::set_mode(nullptr);
+  } else {
+    Py_INCREF(arg);
+    at::impl::PythonTorchFunctionTLS::set_mode(std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * get_torch_function_mode(PyObject* _unused, PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto& mode = at::impl::PythonTorchFunctionTLS::get_mode();
+  if (!mode) {
+    Py_RETURN_NONE;
+  } else {
+    auto* r = mode->ptr(getPyInterpreter());
+    Py_INCREF(r);
+    return r;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -584,6 +666,8 @@ static PyMethodDef methods[] = { // NOLINT
   {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_enter_python_mode", enter_python_mode, METH_O, nullptr},
   {"_exit_python_mode", exit_python_mode, METH_NOARGS, nullptr},
+  {"_set_torch_function_mode", set_torch_function_mode, METH_O, nullptr},
+  {"_get_torch_function_mode", get_torch_function_mode, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
