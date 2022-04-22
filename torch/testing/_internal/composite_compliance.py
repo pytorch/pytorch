@@ -452,7 +452,7 @@ def check_forward_ad_formula(op, args, kwargs):
 
         def maybe_tangent(t):
             # Generate `tangent` tensor
-            # if given object is a Tensor and requires grad.
+            # if given object is a Tensor and requires grad is set.
             if isinstance(t, torch.Tensor) and t.requires_grad:
                 return torch.randn_like(t)
             elif is_tensorlist(t):
@@ -471,13 +471,14 @@ def check_forward_ad_formula(op, args, kwargs):
 
             with fwAD.dual_level():
                 def maybe_make_dual(dual):
+                    # Returns dual tensor if primal is a tensor/tensor subclass
+                    # with requires_grad set.
                     primal, tangent = dual
-                    if tangent is None:
-                        return primal
-                    if isinstance(primal, torch.Tensor):
+                    if isinstance(primal, torch.Tensor) and primal.requires_grad:
                         return fwAD.make_dual(primal, tangent)
                     elif is_tensorlist(primal):
-                        return tuple(fwAD.make_dual(pri, tang) if tang is not None else pri for pri, tang in zip(primal, tangent))
+                        return tuple(fwAD.make_dual(pri, tang) if tang is not None else pri
+                                     for pri, tang in zip(primal, tangent))
                     return primal
 
                 op_args = tuple(map(maybe_make_dual, zip(new_args, new_tang_args)))
