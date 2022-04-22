@@ -5,9 +5,7 @@ from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack, \
 
 import torch
 import torch.onnx
-from torch.onnx.symbolic_helper import (parse_args,
-                                        _get_tensor_dim_size,
-                                        _get_tensor_sizes)
+from torch.onnx.symbolic_helper import parse_args, _get_tensor_dim_size, _get_tensor_sizes
 from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
 from torch.autograd import Variable, Function
 from torch.nn import Module, functional
