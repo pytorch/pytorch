@@ -2101,7 +2101,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         dst = dst if dst is not None else (self.rank + 1) % self.world_size
 
         # only run profiler on rank 1.
-        p = _profile if not kineto_profile else torch.profiler.profile # kineto
+        p = _profile if not kineto_profile else torch.profiler.profile  # kineto
         if self.rank == 1:
             with p() as prof:
                 record_function_ctx_mgr = (
