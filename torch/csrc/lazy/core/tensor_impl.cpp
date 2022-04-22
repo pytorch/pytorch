@@ -1,8 +1,10 @@
 #include <torch/csrc/lazy/core/tensor_impl.h>
 
+#include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
 namespace torch {
@@ -64,6 +66,10 @@ C10_REGISTER_GUARD_IMPL(Lazy, LTCGuardImpl);
 
 }  // namespace
 
+// TODO(whc) when do we want to clone vs share?
+LTCTensorImpl::LTCTensorImpl(const LazyTensorPtr& tensor)
+    : LTCTensorImpl(LazyTensor(*tensor)) {}
+
 LTCTensorImpl::LTCTensorImpl(const LazyTensor& tensor)
     : LTCTensorImpl(LazyTensor(tensor)) {}
 
@@ -72,14 +78,14 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
                                           c10::DispatchKey::AutogradLazy},
                       c10::scalarTypeToTypeMeta(tensor.dtype()),
                       backendDeviceToAtenDevice(tensor.GetDevice())),
-      tensor_(std::move(tensor)) {
+      tensor_(c10::make_intrusive<LazyTensor>(std::move(tensor))) {
   // This is a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.
   is_non_overlapping_and_dense_ = false;
 }
 
-void LTCTensorImpl::set_tensor(const LazyTensor& lazy_tensor) {
-  tensor_ = lazy_tensor;
+void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
+  tensor_ = c10::make_intrusive<LazyTensor>(*lazy_tensor);
   generation_ = 0;
 }
 
@@ -116,7 +122,7 @@ void LTCTensorImpl::shallow_copy_from(
       /*dest_impl=*/this,
       /*version_counter=*/version_counter(),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
-  ltc_impl->tensor_.ShallowCopyTo(&tensor_);
+  ltc_impl->tensor_->ShallowCopyTo(tensor_);
   generation_ = 0;
 }
 
@@ -133,18 +139,18 @@ int64_t LTCTensorImpl::stride(int64_t d) const {
 }
 
 void LTCTensorImpl::setup_size_properties() {
-  size_t generation = tensor_.generation();
+  size_t generation = tensor_->generation();
   if (generation != generation_) {
     // Fill up the basic dimension data members which the base class
     // implementation uses in its APIs.
-    auto shape = tensor_.shape();
+    auto shape = tensor_->shape();
     // We can't call refresh_numel() given we override sizes() too.
     numel_ = shape.Get().numel();
     sizes_and_strides_.set_sizes(shape.Get().sizes());
     // We can't call empty_tensor_restride(c10::MemoryFormat::Contiguous) given we override sizes() too.
     std::vector<int64_t> updated_strides;
     updated_strides = ComputeArrayStrides(shape.Get().sizes());
-    for (int i = 0; i < updated_strides.size(); i++) {
+    for (const auto i : c10::irange(updated_strides.size())) {
       sizes_and_strides_.stride_at_unchecked(i) = updated_strides[i];
     }
     generation_ = generation;
@@ -178,17 +184,12 @@ int64_t LTCTensorImpl::numel() const {
 }
 
 bool LTCTensorImpl::is_contiguous(c10::MemoryFormat _unused) const {
-  if (tensor_.CurrentTensorData()) {
-    return tensor_.CurrentTensorData()->is_contiguous();
+  if (tensor_->CurrentTensorData()) {
+    return tensor_->CurrentTensorData()->is_contiguous();
   }
   // Only check that the storage is already contiguous.
   CHECK(is_contiguous_) << "Non-contiguous storage for lazy tensor";
   return true;
-}
-
-const at::Storage& LTCTensorImpl::storage() const {
-  TORCH_CHECK("Lazy tensors do not have storage");
-  return storage_;
 }
 
 #endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY

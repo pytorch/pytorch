@@ -121,8 +121,10 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_mlc", "prim"},
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
+           {"is_ipu", "prim"},
            {"is_meta", "prim"},
            {"is_leaf", "aten"},
+           {"is_nested", "prim"},
            {"requires_grad", "prim"},
            {"layout", "prim"},
            {"T", "prim"},
@@ -219,6 +221,14 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   // Handle calling tolist() on a Tensor.
   if (value_->type()->isSubtypeOf(*TensorType::get()) && field == "tolist") {
     return SpecialFormValue::create(prim::tolist);
+  }
+
+  // Handle calling __getitem__() directly on a Tensor, it needs special
+  // handling because desired method name (`__getitem__`) doesn't match `aten`
+  // operator name of `aten::index`.
+  if (value_->type()->isSubtypeOf(*TensorType::get()) &&
+      field == "__getitem__") {
+    return SpecialFormValue::create(aten::index);
   }
 
   ErrorReport report(loc);

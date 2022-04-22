@@ -1,8 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cuda/TensorTopK.h>
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
+
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cuda/Sort.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/CUDAFunctions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/sort_cuda_dispatch.h>
+#include <ATen/ops/topk_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -14,7 +27,7 @@ void topk_out_with_sort(
   const Tensor& indices
 ) {
   Tensor sorted_values, sorted_indices;
-  std::tie(sorted_values, sorted_indices) = at::native::sort_cuda(self, dim, largest);
+  std::tie(sorted_values, sorted_indices) = at::cuda::sort(self, /* stable= */false, dim, largest);
   values.copy_(sorted_values.narrow(dim, 0, k));
   indices.copy_(sorted_indices.narrow(dim, 0, k));
 }
@@ -26,7 +39,7 @@ bool should_use_sort(const Tensor& self, int64_t dim) {
   int64_t slice_size = self.size(dim);
   if (slice_size == 0) return false;
   int64_t num_slices = self.numel() / slice_size;
-  return num_slices <= 16 && slice_size >= 100000;
+  return num_slices <= 10 && slice_size >= 100000;
 }
 
 TORCH_IMPL_FUNC(topk_out_cuda)
@@ -49,7 +62,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
     return;
   }
 
-  launch_gather_topk_kernel(self, k, dim, largest, sorted, values, indices);
+  launch_gather_topk_kernel(self, k, dim, largest, values, indices);
 
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting
@@ -71,7 +84,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
       Tensor sortedIndices = at::empty_like(indices);
       Tensor sortedValues = at::empty_like(values);
-      sort_out_cuda(values, dim, largest, sortedValues, sortedIndices);
+      at::cuda::sort_outf(values, /* stable= */ false, dim, largest, sortedValues, sortedIndices);
       indices.copy_(indices.gather(dim, sortedIndices));
       values.copy_(sortedValues);
     }

@@ -7734,6 +7734,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cub::ArgMin", ("hipcub::ArgMin", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BLOCK_REDUCE_WARP_REDUCTIONS", ("hipcub::BLOCK_REDUCE_WARP_REDUCTIONS", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::BlockReduce", ("hipcub::BlockReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
+        ("cub::BlockScan", ("hipcub::BlockScan", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::CachingDeviceAllocator", ("hipcub::CachingDeviceAllocator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::CountingInputIterator", ("hipcub::CountingInputIterator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::DeviceRadixSort", ("hipcub::DeviceRadixSort", CONV_SPECIAL_FUNC, API_RUNTIME)),
@@ -7754,6 +7755,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("nvtxMarkA", ("roctxMarkA", CONV_OTHER, API_ROCTX)),
         ("nvtxRangePushA", ("roctxRangePushA", CONV_OTHER, API_ROCTX)),
         ("nvtxRangePop", ("roctxRangePop", CONV_OTHER, API_ROCTX)),
+        ("nvtxRangeStartA", ("roctxRangeStartA", CONV_OTHER, API_ROCTX)),
+        ("nvtxRangeEnd", ("roctxRangeStop", CONV_OTHER, API_ROCTX)),
     ]
 )
 

@@ -893,7 +893,9 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
       static_cast<long>((value.count() % 1000) * 1000)};
 #else
   struct timeval timeoutTV = {
-      .tv_sec = value.count() / 1000, .tv_usec = (value.count() % 1000) * 1000};
+      .tv_sec = value.count() / 1000,
+      .tv_usec = static_cast<suseconds_t>((value.count() % 1000) * 1000),
+  };
 #endif
   SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
       socket_.handle(),
