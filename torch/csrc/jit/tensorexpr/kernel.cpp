@@ -511,9 +511,11 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
            buf_->is_channels_last_1d_contiguous());
     }
 
+    // Does not support mixing the contiguous tensor and channels-last contigous
+    // tensor
     TORCH_INTERNAL_ASSERT(
         is_tensor_creation ||
-        ((is_contiguous xor is_channels_last_contiguous) &&
+        ((is_contiguous ^ is_channels_last_contiguous) &&
          (is_contiguous || is_channels_last_contiguous)));
   }
 
