@@ -45,7 +45,7 @@ class TORCH_API BackendDevice {
   std::string toString() const;
 
   // The string -> Device conversion should be handled by the backend interface.
-  C10_DEPRECATED explicit BackendDevice(const std::string& device_spec);
+  // C10_DEPRECATED explicit BackendDevice(const std::string& device_spec);
 
  private:
   int compare(const BackendDevice& rhs) const;

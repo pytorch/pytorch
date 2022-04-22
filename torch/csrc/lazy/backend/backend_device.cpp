@@ -17,8 +17,8 @@ BackendDevice::BackendDevice()
 BackendDevice::BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int64_t ordinal)
   : type_(std::move(type)), ordinal_(ordinal) {}
 
-BackendDevice::BackendDevice(const std::string& device_spec)
-  : BackendDevice::BackendDevice() {}
+// BackendDevice::BackendDevice(const std::string& device_spec)
+//   : BackendDevice::BackendDevice() {}
 
 int8_t BackendDevice::type() const {
   TORCH_INTERNAL_ASSERT(type_);
