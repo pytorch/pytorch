@@ -599,8 +599,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     uccLib_ = loadTorchUCC();
     if (uccLib_ != nullptr) {
       LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
-    } else { // DEBUG
-      LOG(INFO) << "[Rank " << rank_  << "] loadTorchUCC failed.";
     }
   });
 
