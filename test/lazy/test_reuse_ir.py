@@ -8,7 +8,7 @@ import torch._lazy.ts_backend
 import torch._lazy.metrics as metrics
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 import os
-import unittest
+from unittest import skip, skipIf
 
 torch._lazy.ts_backend.init()
 torch._lazy.config.set_reuse_ir(True)
@@ -16,7 +16,7 @@ torch._lazy.config.set_reuse_ir(True)
 def get_test_device():
     return 'cuda' if 'LTC_TS_CUDA' in os.environ else 'cpu'
 
-@unittest.skipIf(IS_WINDOWS, "To be fixed")
+skipIf(IS_WINDOWS, "To be fixed")
 class TestLazyReuseIr(TestCase):
     def testAdd(self):
         device = get_test_device()
@@ -104,15 +104,20 @@ class TestLazyReuseIr(TestCase):
     def testBatchNorm(self):
         device = get_test_device()
         x = torch.randn(16, 3, 224, 224, device=device)
-        bn = torch.nn.BatchNorm2d(3).to(device=device)
+        weight = torch.randn(3, device=device)
+        bias = torch.randn(3, device=device)
+
         for i in range(10):
-            z = bn(x)
+            # BatchNorm2d does extra checks on dimensions which SymInts don't support yet
+            # so we call `torch.ops.aten.native_batch_norm` to bypass the checks.
+            z, _, _ = torch.ops.aten.native_batch_norm(x, weight, bias, None, None, True, 0.1, 1e-5)
 
         device = "lazy"
         x_lazy = x.detach().clone().to(device=device)
-        bn = bn.to(device=device)
+        weight_lazy = weight.detach().clone().to(device=device)
+        bias_lazy = bias.detach().clone().to(device=device)
         for i in range(10):
-            z_lazy = bn(x_lazy)
+            z_lazy, _, _ = torch.ops.aten.native_batch_norm(x_lazy, weight_lazy, bias_lazy, None, None, True, 0.1, 1e-5)
             torch._lazy.mark_step()
 
         torch.testing.assert_close(z.cpu(), z_lazy.cpu())
