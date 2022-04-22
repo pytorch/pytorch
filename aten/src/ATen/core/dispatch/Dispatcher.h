@@ -9,8 +9,9 @@
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/LeftRight.h>
-#include <mutex>
 #include <list>
+#include <mutex>
+#include <type_traits>
 
 #include <ATen/core/grad_mode.h>
 
@@ -264,8 +265,7 @@ private:
 
   static int64_t sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey);
   static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey);
-  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, torch::jit::Stack &&stack);
-  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, const torch::jit::Stack &stack);
+  static void runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args);
 
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
   OperatorHandle findOrRegisterName_(const OperatorName& op_name);
@@ -490,6 +490,52 @@ struct CaptureKernelCall<void> {
   void release() && {}
 };
 
+template <class T>
+static inline constexpr size_t boxed_size_one() {
+  static_assert(!std::is_same<std::decay_t<T>, c10::TensorOptions>::value, "need to patch this path to support TensorOptions passed by reference");
+  return 1;
+}
+
+template <>
+inline constexpr size_t boxed_size_one<c10::TensorOptions>() {
+  return 4;
+}
+
+
+// NOTE: this could probably be simplified with C++17 fold expressions.
+template <typename...>
+struct BoxedSize : std::integral_constant<size_t, 0> {};
+template <class T, class... Args>
+struct BoxedSize<T, Args...> : std::integral_constant<size_t, boxed_size_one<T>() + BoxedSize<Args...>::value> {};
+
+template <class... Args>
+static inline constexpr size_t boxed_size() {
+  return BoxedSize<Args...>::value;
+}
+
+using IValueStorage = std::aligned_storage_t<sizeof(IValue), alignof(IValue)>;
+
+template <typename T>
+C10_DISPATCHER_INLINE_UNLESS_MOBILE void box(IValueStorage* dest, T& arg, int& lastIdx) {
+  new (&dest[lastIdx]) IValue(arg);
+  lastIdx++;
+}
+
+C10_DISPATCHER_INLINE_UNLESS_MOBILE void box(IValueStorage* dest, c10::TensorOptions options, int& lastIdx) {
+  new (&dest[lastIdx++]) IValue(c10::typeMetaToScalarType(options.dtype()));
+  new (&dest[lastIdx++]) IValue(options.layout());
+  new (&dest[lastIdx++]) IValue(options.device());
+  new (&dest[lastIdx++]) IValue(options.pinned_memory());
+}
+
+inline void boxArgs(IValueStorage* dest, int& lastIdx) {}
+
+template<typename T, typename... Args>
+C10_DISPATCHER_INLINE_UNLESS_MOBILE void boxArgs(IValueStorage* dest, int& lastIdx, T& arg, Args &... args) {
+  box(dest, arg, lastIdx);
+  boxArgs(dest, lastIdx, args...);
+}
+
 } // namespace detail
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
@@ -501,9 +547,30 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.operatorDef_->op.isObserved());
   auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-  guard.needsInputs()
-      ? runRecordFunction(guard, op, dispatchKey, impl::boxArgs(args...))
-      : runRecordFunction(guard, op, dispatchKey);
+  if (guard.needsInputs()) {
+    constexpr auto num_boxed_args = detail::boxed_size<Args...>();
+    // If we used std::array<IValue, num_boxed_args> here, we would
+    // have to spend time default constructing the IValues in
+    // boxedArgs. aligned_storage has no such requirement.
+    std::aligned_storage_t<sizeof(IValue), alignof(IValue)> boxedArgs[num_boxed_args];
+    // For debugging only; could be removed (but the compiler will do
+    // that for us and it's nice to have the extra assurance of
+    // correctness from our debug builds).
+    int lastArgIdx = 0;
+    detail::boxArgs(boxedArgs, lastArgIdx, args...);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(lastArgIdx == num_boxed_args);
+    // I don't *think* we need std::launder here, because IValue has
+    // no subclasses and no const or reference fields. (We also
+    // couldn't use it even if we wanted to because we are currently
+    // stuck on C++14 rather than C++17, but we could do a backport
+    // similar to folly::launder if needed.)
+    runRecordFunction(guard, op, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
+    for (size_t ii = 0; ii < num_boxed_args; ++ii) {
+      reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
+    }
+  } else {
+    runRecordFunction(guard, op, dispatchKey);
+  }
 
   if (C10_UNLIKELY(guard.needsOutputs())) {
     // Calls the kernel and capture the output temporarily to pass to
@@ -555,7 +622,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
     at::RecordFunction guard(std::move(step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-    guard.needsInputs() ? runRecordFunction(guard, op, dispatchKey, *stack)
+    guard.needsInputs() ? runRecordFunction(guard, op, dispatchKey, c10::ArrayRef<const c10::IValue>(stack->data(), stack->size()))
                         : runRecordFunction(guard, op, dispatchKey);
 
     // keeping the guard alive while executing the kernel
