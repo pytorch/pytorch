@@ -3,7 +3,7 @@ import pickle
 
 from torch.utils.data import IterDataPipe, MapDataPipe
 
-from typing import Any, Dict, Union, Set, Type
+from typing import Any, Dict, Set, Tuple, Type, Union
 
 __all__ = ["traverse", ]
 
@@ -39,7 +39,7 @@ def _list_connected_datapipes(scan_obj, only_datapipe, cache):
             captured_connections.append(obj)
             return _stub_unpickler, ()
 
-    datapipe_classes: Set[Type[DataPipe]] = {IterDataPipe, MapDataPipe}
+    datapipe_classes: Tuple[Type[DataPipe]] = (IterDataPipe, MapDataPipe)  # type: ignore[assignment]
 
     try:
         for cls in datapipe_classes:
