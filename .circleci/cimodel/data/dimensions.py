@@ -1,23 +1,24 @@
-#!/usr/bin/env python3
-
-
 PHASES = ["build", "test"]
 
 CUDA_VERSIONS = [
-    None,  # cpu build
-    "90",
-    "100",
+    "102",
+    "113",
+    "115",
+    "116",
 ]
+
+ROCM_VERSIONS = [
+    "4.3.1",
+    "4.5.2",
+]
+
+ROCM_VERSION_LABELS = ["rocm" + v for v in ROCM_VERSIONS]
+
+GPU_VERSIONS = [None] + ["cuda" + v for v in CUDA_VERSIONS] + ROCM_VERSION_LABELS
 
 STANDARD_PYTHON_VERSIONS = [
-    "2.7",
-    "3.5",
-    "3.6",
     "3.7",
-]
-
-CONDA_PYTHON_VERSIONS = [
-    "2.7",
-    "3.6",
-    "3.7",
+    "3.8",
+    "3.9",
+    "3.10"
 ]

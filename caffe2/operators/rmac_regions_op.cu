@@ -1,9 +1,21 @@
 #include <cub/block/block_reduce.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/rmac_regions_op.h"
 
+#if defined(USE_ROCM)
+#include <cfloat>
+#endif
+
+#if defined(USE_ROCM)
+namespace rocprim {
+#else
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
+namespace at_cuda_detail {
+#endif
 namespace cub {
+#endif
 
 template <typename KeyT, typename ValueT>
 inline __host__ __device__ bool operator<(
@@ -14,6 +26,9 @@ inline __host__ __device__ bool operator<(
 }
 
 } // namespace cub
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
+}  // namespace at_cuda_detail
+#endif
 
 namespace caffe2 {
 
@@ -187,6 +202,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
       overlap_,
       scales_,
       num_rois_.mutable_data<int>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Bit awkward, but the size of the output tensor depends on the output of
   // NumRMACRegionsKernel (number of RoIs), so need to copy that to CPU
@@ -203,6 +219,7 @@ bool RMACRegionsOp<CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       W, H, N, num_rois_.data<int>(), output->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }

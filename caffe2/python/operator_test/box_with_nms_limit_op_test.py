@@ -1,12 +1,12 @@
-from __future__ import division
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import unittest
 import numpy as np
@@ -65,7 +65,8 @@ def gen_multiple_boxes(centers, scores, count, num_classes):
 
 
 class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
-    @serial.given(**HU_CONFIG)
+    @given(**HU_CONFIG)
+    @settings(deadline=10000)
     def test_simple(self, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
         in_scores = [0.9, 0.8, 0.6]
@@ -82,6 +83,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [scores, boxes], ref)
 
     @given(**HU_CONFIG)
+    @settings(deadline=10000)
     def test_score_thresh(self, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
         in_scores = [0.7, 0.85, 0.6]
@@ -100,6 +102,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [scores, boxes], ref)
 
     @given(det_per_im=st.integers(1, 3), **HU_CONFIG)
+    @settings(deadline=10000)
     def test_detections_per_im(self, det_per_im, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
         in_scores = [0.7, 0.85, 0.6]
@@ -128,6 +131,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         output_classes_include_bg_cls=st.booleans(),
         **HU_CONFIG
     )
+    @settings(deadline=10000)
     def test_multiclass(
         self,
         num_classes,
@@ -142,7 +146,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
         boxes, scores = gen_multiple_boxes(in_centers, in_scores, 10, num_classes)
 
         if not input_boxes_include_bg_cls:
-            # remove backgound class
+            # remove background class
             boxes = boxes[:, 4:]
         if cls_agnostic_bbox_reg:
             # only leave one class
@@ -159,7 +163,7 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
             np.array(range(1, num_classes), dtype=np.float32),
             (gt_boxes.shape[0], 1)).T.flatten()
         if not output_classes_include_bg_cls:
-            # remove backgound class
+            # remove background class
             gt_classes -= 1
         gt_boxes = np.tile(gt_boxes, (num_classes - 1, 1))
         gt_scores = np.tile(gt_scores, (num_classes - 1, 1)).flatten()

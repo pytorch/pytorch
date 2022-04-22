@@ -9,29 +9,51 @@
 
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 
-# Build protobuf from third_party so we have a host protoc binary.
-echo "Building protoc"
-BITCODE_FLAGS="-DCMAKE_C_FLAGS=-fembed-bitcode -DCMAKE_CXX_FLAGS=-fembed-bitcode "
-$CAFFE2_ROOT/scripts/build_host_protoc.sh --other-flags $BITCODE_FLAGS
-
-# Now, actually build the iOS target.
-BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_ios"}
-INSTALL_PREFIX=${BUILD_ROOT}/install
-mkdir -p $BUILD_ROOT
-cd $BUILD_ROOT
-
 CMAKE_ARGS=()
 
-# Use locally built protoc because we'll build libprotobuf for the
-# target architecture and need an exact version match.
-CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
+if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
+  # Build PyTorch mobile
+  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
+  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+  CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
+  # custom build with selected ops
+  if [ -n "${SELECTED_OP_LIST}" ]; then
+    SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
+    echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
+    if [ ! -r ${SELECTED_OP_LIST} ]; then
+      echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
+      exit 1
+    fi
+    CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
+  fi
+  # bitcode
+  if [ "${ENABLE_BITCODE:-}" == '1' ]; then
+    CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
+    CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
+  fi
+else
+  # Build Caffe2 mobile
+  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=ON")
+  # Build protobuf from third_party so we have a host protoc binary.
+  echo "Building protoc"
+  BITCODE_FLAGS="-DCMAKE_C_FLAGS=-fembed-bitcode -DCMAKE_CXX_FLAGS=-fembed-bitcode "
+  $CAFFE2_ROOT/scripts/build_host_protoc.sh --other-flags $BITCODE_FLAGS
+  # Use locally built protoc because we'll build libprotobuf for the
+  # target architecture and need an exact version match.
+  CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
+  # Bitcode is enabled by default for caffe2
+  CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
+  CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
+fi
 
 # Use ios-cmake to build iOS project from CMake.
 # This projects sets CMAKE_C_COMPILER to /usr/bin/gcc and
 # CMAKE_CXX_COMPILER to /usr/bin/g++. In order to use ccache (if it is available) we
 # must override these variables via CMake arguments.
-CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$CAFFE2_ROOT/third_party/ios-cmake/toolchain/iOS.cmake")
-CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
+CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$CAFFE2_ROOT/cmake/iOS.cmake")
+if [ -n "${CCACHE_WRAPPER_PATH:-}"]; then
+  CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
+fi
 if [ -d "$CCACHE_WRAPPER_PATH" ]; then
   CMAKE_ARGS+=("-DCMAKE_C_COMPILER=$CCACHE_WRAPPER_PATH/gcc")
   CMAKE_ARGS+=("-DCMAKE_CXX_COMPILER=$CCACHE_WRAPPER_PATH/g++")
@@ -40,18 +62,40 @@ fi
 # IOS_PLATFORM controls type of iOS platform (see ios-cmake)
 if [ -n "${IOS_PLATFORM:-}" ]; then
   CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
+  if [ "${IOS_PLATFORM}" == "WATCHOS" ]; then
+      # enable bitcode by default for watchos
+      CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
+      CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
+      # disable the QNNPACK
+      CMAKE_ARGS+=("-DUSE_PYTORCH_QNNPACK=OFF")
+  fi
 else
   # IOS_PLATFORM is not set, default to OS, which builds iOS.
   CMAKE_ARGS+=("-DIOS_PLATFORM=OS")
 fi
 
-# IOS_ARCH controls type of iOS architecture (see ios-cmake)
 if [ -n "${IOS_ARCH:-}" ]; then
   CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
-else
-  # IOS_ARCH is not set, default to arm64
-  CMAKE_ARGS+=("-DIOS_ARCH=arm64")
 fi
+
+if [ "${BUILD_LITE_INTERPRETER}" == 0 ]; then
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
+else
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
+fi
+if [ "${TRACING_BASED}" == 1 ]; then
+  CMAKE_ARGS+=("-DTRACING_BASED=ON")
+else
+  CMAKE_ARGS+=("-DTRACING_BASED=OFF")
+fi
+if [ "${USE_LIGHTWEIGHT_DISPATCH}" == 1 ]; then
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=ON")
+  CMAKE_ARGS+=("-DSTATIC_DISPATCH_BACKEND=CPU")
+else
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=OFF")
+fi
+
+CMAKE_ARGS+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
 
 # Don't build binaries or tests (only the library)
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
@@ -65,6 +109,19 @@ CMAKE_ARGS+=("-DUSE_OPENCV=OFF")
 CMAKE_ARGS+=("-DUSE_LMDB=OFF")
 CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
+CMAKE_ARGS+=("-DUSE_NUMPY=OFF")
+CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
+CMAKE_ARGS+=("-DUSE_MKLDNN=OFF")
+
+# Metal
+if [ "${USE_PYTORCH_METAL:-}" == "1" ]; then
+  CMAKE_ARGS+=("-DUSE_PYTORCH_METAL=ON")
+fi
+
+# Core ML
+if [ "${USE_COREML_DELEGATE}" == "1" ]; then
+  CMAKE_ARGS+=("-DUSE_COREML_DELEGATE=ON")
+fi
 
 # pthreads
 CMAKE_ARGS+=("-DCMAKE_THREAD_LIBS_INIT=-lpthread")
@@ -76,11 +133,17 @@ if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
 fi
 
-CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
-CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
+# enable ARC
+CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fobjc-arc")
+
+# Now, actually build the iOS target.
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_ios"}
+INSTALL_PREFIX=${BUILD_ROOT}/install
+mkdir -p $BUILD_ROOT
+cd $BUILD_ROOT
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=MinSizeRel \
     -DBUILD_SHARED_LIBS=OFF \
     ${CMAKE_ARGS[@]} \
     $@

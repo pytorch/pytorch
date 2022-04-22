@@ -9,8 +9,8 @@ libraries users call in the workers. In this file and `DataLoader.cpp`, we make
 our best effort to provide some error message to users when such unfortunate
 events happen.
 
-When a _DataLoaderIter starts worker processes, their pids are registered in a
-defined in `DataLoader.cpp`: id(_DataLoaderIter) => Collection[ Worker pids ]
+When a _BaseDataLoaderIter starts worker processes, their pids are registered in a
+defined in `DataLoader.cpp`: id(_BaseDataLoaderIter) => Collection[ Worker pids ]
 via `_set_worker_pids`.
 
 When an error happens in a worker process, the main process received a SIGCHLD,
@@ -49,7 +49,7 @@ def _set_SIGCHLD_handler():
     if IS_WINDOWS:
         return
     # can't set signal in child threads
-    if not isinstance(threading.current_thread(), threading._MainThread):
+    if not isinstance(threading.current_thread(), threading._MainThread):  # type: ignore[attr-defined]
         return
     global _SIGCHLD_handler_set
     if _SIGCHLD_handler_set:
@@ -65,6 +65,7 @@ def _set_SIGCHLD_handler():
         # Python can still get and update the process status successfully.
         _error_if_any_worker_fails()
         if previous_handler is not None:
+            assert callable(previous_handler)
             previous_handler(signum, frame)
 
     signal.signal(signal.SIGCHLD, handler)

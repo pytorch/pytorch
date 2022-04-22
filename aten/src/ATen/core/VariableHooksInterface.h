@@ -1,53 +1,73 @@
 #pragma once
 
-#include <c10/core/Backend.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Registry.h>
+#include <c10/macros/Export.h>
+#include <ATen/core/Tensor.h>
+
+// A little explanation about why this file exists at all.  We have
+// a few methods on Tensor class which require access to reified access to
+// AutogradMeta.  In open source, this isn't a big deal: we just access
+// torch/csrc/autograd/variable.h from aten/src/ATen/core/Tensor.cpp and
+// we can put the definitions inline.  This is because everything gets balled
+// into a single dynamic library in the end.
+//
+// However, inside our Facebook internal version of our build system, we
+// have a split between aten and torch/csrc.  So we cannot simply just
+// cross this boundary.  "Now wait," you might say, "Why don't we just
+// merge the libraries inside Facebook".  Well, the problem is that there
+// are some downstream applications which are at binary size limit, and
+// incorporating all of the extra code from libtorch would push them
+// over (admarket/adreview/service:adreviewservice, see also
+// https://github.com/pytorch/pytorch/pull/29299)  So if you want to do that,
+// we have to fix all of the services like this.
+//
+// I didn't want to block eliminating Tensor-Variable on this work, so I
+// had to introduce another dynamic dispatch to get to the variable
+// implementations (which live in torch/csrc/autograd/variable.cpp, FYI).
+//
+// I also considered using our existing dynamic dispatch mechanism, c10
+// dispatcher, to do this.  However, (1) some of the functions on Tensor
+// have weird signatures that are not supported by autograd, and (2)
+// see this bug https://github.com/pytorch/pytorch/issues/30102
+
+namespace torch { namespace autograd {
+
+struct Node;
+
+}} // namespace torch::autograd
 
 namespace at {
-  class LegacyTypeDispatch;
-  struct Type;
-}
+namespace impl {
 
-// NB: Registry class not actually in the namespace detail, due to limitations
-// of Registry.h
-namespace at {
+struct TORCH_API VariableHooksInterface {
+  virtual ~VariableHooksInterface() = default;
+  virtual TensorBase tensor_data(const TensorBase&) const = 0;
+  virtual TensorBase variable_data(const TensorBase&) const = 0;
+  virtual const std::shared_ptr<torch::autograd::Node>& grad_fn(const TensorBase&) const = 0;
+  virtual unsigned _register_hook(
+      const TensorBase&,
+      std::function<TensorBase(const TensorBase&)> hook) const = 0;
+  virtual void remove_hook(const TensorBase&, unsigned pos) const = 0;
+  virtual bool is_view(const TensorBase&) const = 0;
+  virtual const TensorBase& base(const TensorBase&) const = 0;
+  virtual const std::string& name(const TensorBase&) const = 0;
+  virtual bool is_leaf(const TensorBase&) const = 0;
+  virtual int64_t output_nr(const TensorBase&) const = 0;
+  virtual void set_data(const TensorBase&, const TensorBase&) const = 0;
+  virtual TensorBase data(const TensorBase&) const = 0;
+  virtual int64_t _version(const TensorBase&) const = 0;
+  virtual void retain_grad(const TensorBase&) const = 0;
+  virtual bool retains_grad(const TensorBase&) const = 0;
+  virtual void _backward(const Tensor&, TensorList, const c10::optional<Tensor>&, c10::optional<bool>, bool) const = 0;
+  virtual void requires_grad_(const TensorBase&, bool) const = 0;
+};
 
-// The VariableHooksInterface is an interface for autograd functionality
-// which currently doesn't live in libATen.so AND needs to be called from
-// ATen.  In this case, it is only the type registry for Variable types,
-// letting us add extra variables types if CUDA types are initialized lazily.
-//
-// We may choose to absorb autograd into ATen, in which case this interface is obsolete.
-//
-struct CAFFE2_API VariableHooksInterface {
-  // This should never actually be implemented, but it is used to
-  // squelch -Werror=non-virtual-dtor
-  virtual ~VariableHooksInterface() {}
+TORCH_API void SetVariableHooks(VariableHooksInterface* hooks);
+TORCH_API VariableHooksInterface* GetVariableHooks();
 
-  virtual Type& getVariableTypeFromBaseType(const at::Type& baseType) const {
-    AT_ERROR("cannot getVariableTypeFromBaseType without libtorch");
-  }
-
-  virtual void registerVariableTypeFor(LegacyTypeDispatch*, Backend backend) const {
-    // no-op if Variable not available; it'll get handled (if at all) when
-    // libtorch.so gets loaded
+struct TORCH_API VariableHooksRegisterer {
+  explicit VariableHooksRegisterer(VariableHooksInterface* hooks) {
+    SetVariableHooks(hooks);
   }
 };
 
-// NB: dummy argument to suppress "ISO C++11 requires at least one argument
-// for the "..." in a variadic macro"
-struct CAFFE2_API VariableHooksArgs {};
-
-C10_DECLARE_REGISTRY(
-    VariableHooksRegistry,
-    VariableHooksInterface,
-    VariableHooksArgs);
-#define REGISTER_VARIABLE_HOOKS(clsname) \
-  C10_REGISTER_CLASS(VariableHooksRegistry, clsname, clsname)
-
-namespace detail {
-CAFFE2_API const VariableHooksInterface& getVariableHooks();
-}
-
-} // namespace at
+}} // namespace at::impl

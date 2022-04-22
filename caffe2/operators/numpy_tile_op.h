@@ -6,6 +6,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -31,8 +32,9 @@ class NumpyTileOp : public Operator<Context> {
         input.dim(),
         "repeats input have the same"
         " number of elements as `inputs` has dimensions.");
-    const int64_t *repeats_data = repeats.template data<int64_t>();
-    for (size_t i = 0; i < repeats.numel(); ++i) {
+    const int64_t* repeats_data = repeats.template data<int64_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    for (const auto i : c10::irange(repeats.numel())) {
       CAFFE_ENFORCE_GE(repeats_data[i], 0);
     }
 
@@ -44,7 +46,7 @@ class NumpyTileOp : public Operator<Context> {
     Tensor *src = &buffer, *dst = output;
     src->CopyFrom(input);
     vector<int64_t> output_dims(input.sizes().vec());
-    for (size_t i = 0; i < repeats.numel(); ++i) {
+    for (const auto i : c10::irange(repeats.numel())) {
       if (repeats_data[i] == 1) {
         continue;
       }
@@ -92,15 +94,17 @@ class NumpyTileOp : public Operator<Context> {
 
  private:
   void DoTile(
-      const TypeMeta& meta,
+      const TypeMeta meta,
       int item_size,
       int outer_dim,
       int inner_dim,
       int64_t num_tiles,
       const char* input_data,
       char* output_data) {
-    for (auto i = 0; i < outer_dim; ++i) {
-      for (auto t = 0; t < num_tiles; ++t) {
+    for (const auto i : c10::irange(outer_dim)) {
+      (void)i; // Suppress unused variable warning
+      for (const auto t : c10::irange(num_tiles)) {
+        (void)t; // Suppress unused variable warning
         context_.CopyItemsSameDevice(meta, inner_dim, input_data, output_data);
         output_data += inner_dim * item_size;
       }

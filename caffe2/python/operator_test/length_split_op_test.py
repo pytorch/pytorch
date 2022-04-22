@@ -1,10 +1,10 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
@@ -27,7 +27,8 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
                     output.append(val - 1)
         return [np.array(output).astype(np.int32)]
 
-    @serial.given(**hu.gcs_cpu_only)
+    @given(**hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_length_split_edge(self, gc, dc):
         input_lengths = np.array([3, 4, 5]).astype(np.int32)
         n_split_ = np.array([5]).astype(np.int32)
@@ -52,6 +53,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [input_lengths, n_split_], [0])
 
     @given(**hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_length_split_arg(self, gc, dc):
         input_lengths = np.array([9, 4, 5]).astype(np.int32)
         n_split = 3
@@ -74,6 +76,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [input_lengths], [0])
 
     @given(**hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_length_split_override_arg(self, gc, dc):
         input_lengths = np.array([9, 4, 5]).astype(np.int32)
         n_split_ignored = 2
@@ -99,6 +102,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
 
     @given(m=st.integers(1, 100), n_split=st.integers(1, 20),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_length_split_even_divide(self, m, n_split, gc, dc):
         # multiples of n_split
         input_lengths = np.random.randint(100, size=m).astype(np.int32) * n_split
@@ -124,6 +128,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
 
     @given(m=st.integers(1, 100), n_split=st.integers(1, 20),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_length_split_random(self, m, n_split, gc, dc):
         input_lengths = np.random.randint(100, size=m).astype(np.int32)
         n_split_ = np.array([n_split]).astype(np.int32)

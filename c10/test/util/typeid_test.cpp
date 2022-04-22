@@ -1,4 +1,4 @@
-#include "c10/util/typeid.h"
+#include <c10/util/typeid.h>
 #include <gtest/gtest.h>
 
 using std::string;
@@ -8,10 +8,10 @@ namespace {
 
 class TypeMetaTestFoo {};
 class TypeMetaTestBar {};
-}
+} // namespace
 
-CAFFE_KNOWN_TYPE(TypeMetaTestFoo);
-CAFFE_KNOWN_TYPE(TypeMetaTestBar);
+CAFFE_KNOWN_TYPE_NOEXPORT(TypeMetaTestFoo);
+CAFFE_KNOWN_TYPE_NOEXPORT(TypeMetaTestBar);
 
 namespace {
 
@@ -29,17 +29,11 @@ TEST(TypeMetaTest, TypeMetaStatic) {
 
 TEST(TypeMetaTest, Names) {
   TypeMeta null_meta;
-  EXPECT_TRUE(string(null_meta.name()) == "nullptr (uninitialized)");
+  EXPECT_EQ("nullptr (uninitialized)", null_meta.name());
   TypeMeta int_meta = TypeMeta::Make<int>();
-  EXPECT_TRUE(string(int_meta.name()) == "int");
-#ifdef __GXX_RTTI
+  EXPECT_EQ("int", int_meta.name());
   TypeMeta string_meta = TypeMeta::Make<string>();
-  // For string, we should have a demangled name.
-  EXPECT_TRUE(
-      string(string_meta.name()) != typeid(string).name());
-  EXPECT_TRUE(
-      string(string_meta.name()) == c10::demangle(typeid(string).name()));
-#endif  // __GXX_RTTI
+  EXPECT_TRUE(c10::string_view::npos != string_meta.name().find("string"));
 }
 
 TEST(TypeMetaTest, TypeMeta) {
@@ -70,21 +64,16 @@ TEST(TypeMetaTest, TypeMeta) {
   EXPECT_EQ(float_meta.itemsize(), TypeMeta::ItemSize<float>());
   EXPECT_EQ(foo_meta.itemsize(), TypeMeta::ItemSize<TypeMetaTestFoo>());
   EXPECT_EQ(bar_meta.itemsize(), TypeMeta::ItemSize<TypeMetaTestBar>());
-  EXPECT_STREQ(int_meta.name(), "int");
-  EXPECT_STREQ(float_meta.name(), "float");
-#ifdef __GXX_RTTI
-  EXPECT_NE(
-      std::string(foo_meta.name()).find("TypeMetaTestFoo"), std::string::npos);
-  EXPECT_NE(
-      std::string(bar_meta.name()).find("TypeMetaTestBar"), std::string::npos);
-#endif
+  EXPECT_EQ(int_meta.name(), "int");
+  EXPECT_EQ(float_meta.name(), "float");
+  EXPECT_NE(foo_meta.name().find("TypeMetaTestFoo"), c10::string_view::npos);
+  EXPECT_NE(bar_meta.name().find("TypeMetaTestBar"), c10::string_view::npos);
 }
-
 
 class ClassAllowAssignment {
  public:
   ClassAllowAssignment() : x(42) {}
-  ClassAllowAssignment(const ClassAllowAssignment& src) : x(src.x) {}
+  ClassAllowAssignment(const ClassAllowAssignment& src) = default;
   ClassAllowAssignment& operator=(const ClassAllowAssignment& src) = default;
   int x;
 };
@@ -96,10 +85,10 @@ class ClassNoAssignment {
   ClassNoAssignment& operator=(const ClassNoAssignment& src) = delete;
   int x;
 };
-}
+} // namespace
 
-CAFFE_KNOWN_TYPE(ClassAllowAssignment);
-CAFFE_KNOWN_TYPE(ClassNoAssignment);
+CAFFE_KNOWN_TYPE_NOEXPORT(ClassAllowAssignment);
+CAFFE_KNOWN_TYPE_NOEXPORT(ClassNoAssignment);
 
 namespace {
 
@@ -136,5 +125,5 @@ TEST(TypeMetaTest, Float16IsNotUint16) {
   EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<at::Half>());
 }
 
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2

@@ -17,7 +17,6 @@ class TopKOp : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "k", k_, -1),
         OP_SINGLE_ARG(int, "axis", axis_, -1) {
-    CAFFE_ENFORCE(k_ >= 1, "k argument must be >= 1");
   }
 
   ~TopKOp() {}

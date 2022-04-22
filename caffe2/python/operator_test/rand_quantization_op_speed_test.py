@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import time
 
@@ -6,7 +6,7 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, workspace
-from hypothesis import given
+from hypothesis import given, settings
 
 
 np.set_printoptions(precision=6)
@@ -27,6 +27,7 @@ class TestSpeedFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
         ),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_speed_of_rand_quantization(self, bitwidth_, random_, data_shape_, gc, dc):
         X1 = np.random.rand(data_shape_[0], data_shape_[1]).astype(np.float32)
         X2 = np.random.rand(data_shape_[0], data_shape_[1]).astype(np.float32)

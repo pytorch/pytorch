@@ -3,6 +3,7 @@
 #include "caffe2/core/operator.h"
 
 #include <atomic>
+#include <iostream>
 
 namespace caffe2 {
 
@@ -13,8 +14,15 @@ struct CudaEventWrapper {
         status_(EventStatus::EVENT_INITIALIZED) {
     CAFFE_ENFORCE(option.device_type(), PROTO_CUDA);
     CUDAGuard g(device_id_);
-    CUDA_ENFORCE(cudaEventCreateWithFlags(
-        &cuda_event_, cudaEventDefault | cudaEventDisableTiming));
+    try {
+      CUDA_ENFORCE(cudaEventCreateWithFlags(
+          &cuda_event_, cudaEventDefault | cudaEventDisableTiming));
+    } catch (const Error&) {
+      std::cerr << "ERROR: Failed to load CUDA.\n"
+                << "HINT: Check that this binary contains GPU code."
+                << std::endl;
+      throw;
+    }
   }
   ~CudaEventWrapper() {
     CUDAGuard g(device_id_);
@@ -155,6 +163,9 @@ EventStatus EventQueryCUDA(const Event* event) {
       std::unique_lock<std::mutex> lock(wrapper->mutex_recorded_);
       wrapper->err_msg_ = err_msg;
       wrapper->status_ = EventStatus::EVENT_FAILED;
+    } else {
+      // ignore and clear the error if not ready
+      (void)cudaGetLastError();
     }
   }
   return static_cast<EventStatus>(wrapper->status_.load());

@@ -5,10 +5,6 @@
 #include "binaries/benchmark_args.h"
 #include "binaries/benchmark_helper.h"
 
-using std::make_shared;
-using std::map;
-using std::string;
-using std::vector;
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
@@ -22,6 +18,7 @@ int main(int argc, char** argv) {
       FLAGS_input_file,
       FLAGS_input_type,
       FLAGS_iter,
+      FLAGS_measure_memory,
       FLAGS_net,
       FLAGS_output,
       FLAGS_output_folder,

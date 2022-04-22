@@ -1,9 +1,9 @@
 ## @package sparse_feature_hash
 # Module caffe2.python.layers.sparse_feature_hash
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import schema, core
 from caffe2.python.layers.layers import (
@@ -42,8 +42,8 @@ class SparseFeatureHash(ModelLayer):
             self.modulo = modulo or self.extract_hash_size(input_record.items.metadata)
             metadata = schema.Metadata(
                 categorical_limit=self.modulo,
-                feature_specs=input_record.items.metadata.feature_specs,
-                expected_value=input_record.items.metadata.expected_value
+                feature_specs=input_record.items.metadata.feature_specs if input_record.items.metadata else None,
+                expected_value=input_record.items.metadata.expected_value if input_record.items.metadata else None
             )
             with core.NameScope(name):
                 self.output_schema = schema.NewRecord(model.net, IdList)

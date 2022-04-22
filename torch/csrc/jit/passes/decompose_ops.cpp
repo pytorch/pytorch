@@ -1,20 +1,29 @@
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
+
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
+
+#include <ATen/core/symbol.h>
 
 namespace torch {
 namespace jit {
+
+namespace {
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
+}
+} // namespace
 
 // helper to determine if an optional tensor argument/value passed in is
 // statically defined (neither a None constant nor a Optional[Tensor] type)
 // return yes, no, or no value if we can't tell
 c10::optional<bool> isDefined(Value* tensor) {
-  if (tensor->type()->isSubtypeOf(TensorType::get())) {
+  if (tensor->type()->isSubtypeOf(*TensorType::get())) {
     return true;
   }
   if (tensor->node()->mustBeNone()) {
@@ -29,13 +38,17 @@ bool isDecomposableNorm(Node* normalize_op) {
       "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor",
   };
   Value* input = normalize_op->namedInput(attr::input);
-  auto tensor_type = input->type()->cast<DimensionedTensorType>();
-  // As of now, we do the decomposition for batchnorm/layernorm on GPU device only
-  if (!tensor_type || tensor_type->device().is_cpu()) {
+  if (!input->type()->isSubtypeOf(*TensorType::get())) {
+    return false;
+  }
+  auto device = input->type()->expectRef<TensorType>().device();
+  // As of now, we do the decomposition for batchnorm/layernorm on GPU device
+  // only
+  if (!device || !(*device).is_cuda()) {
     return false;
   }
 
-  if (decomposable_normalization_ops.find(normalize_op)) {
+  if (normalize_op->isMemberOf(decomposable_normalization_ops)) {
     // If we can't determine if weight and bias is defined statically there's
     // really no point in decomposing normalization into simpler ops, since it
     // won't get fused into a single kernel.
@@ -45,70 +58,68 @@ bool isDecomposableNorm(Node* normalize_op) {
   return false;
 }
 
-RegisterOperators reg_bn_unsqueeze({Operator(
-    "aten::_ncf_unsqueeze(Tensor self, int ndim) -> Tensor",
-    [](const Node* node) {
-      return [](Stack& stack) {
-        const int64_t ndim = pop(stack).toInt();
-        auto self = pop(stack).toTensor();
-        c10::SmallVector<int64_t, 8> sizes(ndim, 1);
-        AT_ASSERT(self.dim() == 1);
-        sizes.at(1) = self.size(0);
-        push(stack, self.reshape(sizes));
-        return 0;
-      };
-    })});
+RegisterOperators reg_ops(
+    {Operator(
+         "aten::_ncf_unsqueeze(Tensor(a) self, int ndim) -> Tensor(a)",
+         [](Stack& stack) {
+           const int64_t ndim = pop(stack).toInt();
+           auto self = pop(stack).toTensor();
+           c10::SmallVector<int64_t, 8> sizes(ndim, 1);
+           AT_ASSERT(self.dim() == 1);
+           sizes.at(1) = self.size(0);
+           push(stack, self.reshape(sizes));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::_ncf_view(Tensor(a) self, int[] input_shape, int normalized_ndim) -> Tensor(a)",
+         [](Stack& stack) {
+           const int64_t normalized_ndim = pop(stack).toInt();
+           auto input_shape = pop(stack).toIntList();
+           auto self = pop(stack).toTensor();
+           const int64_t input_ndim = input_shape.size();
+           c10::SmallVector<int64_t, 8> sizes(input_ndim, 1);
+           for (int i = 0; i < input_ndim - normalized_ndim; ++i) {
+             sizes.at(i) = input_shape.get(i);
+           }
+           push(stack, self.reshape(sizes));
+         },
+         aliasAnalysisFromSchema())});
 
-RegisterOperators reg_ln_view({Operator(
-    "aten::_ncf_view(Tensor self, int[] input_shape, int normalized_ndim) -> Tensor",
-    [](const Node* node) {
-      return [](Stack& stack) {
-        const int64_t normalized_ndim = pop(stack).toInt();
-        auto input_shape = pop(stack).toIntList();
-        auto self = pop(stack).toTensor();
-        const int64_t input_ndim = input_shape.size();
-        c10::SmallVector<int64_t, 8> sizes(input_ndim, 1);
-        for (int i = 0; i < input_ndim - normalized_ndim; ++i) {
-          sizes.at(i) = input_shape.get(i);
-        }
-        push(stack, self.reshape(sizes));
-        return 0;
-      };
-    })});
-
-
-bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
+bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
   bool decomposed = false;
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
-      ++it) {
+       ++it) {
     for (auto sub : it->blocks()) {
       DecomposeOps(sub, decompose_funcs);
     }
 
     if (it->matches(
-          "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
-          /*const_inputs=*/{attr::beta, attr::alpha})) {
+            "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
+            /*const_inputs=*/{attr::beta, attr::alpha})) {
       // For the case where we have an addmm where alpha and beta are Attributes
       // and both of those scalars are equal to 1.0, decompose this into an mm
-      // followed by an add so that it can go through the existing optimization (batchmm)
-      if (it->get<at::Scalar>(attr::alpha)->toDouble() != 1.0 ||
-          it->get<at::Scalar>(attr::beta)->toDouble() != 1.0) {
+      // followed by an add so that it can go through the existing optimization
+      // (batchmm)
+      if (it->get<at::Scalar>(attr::alpha)->toComplexDouble() != 1.0 ||
+          it->get<at::Scalar>(attr::beta)->toComplexDouble() != 1.0) {
         continue;
       }
 
       decomposed = true;
       WithInsertPoint guard(*it);
-
-      std::shared_ptr<Graph> d_graph = decompose_funcs.get_function("addmm").graph();
-      Value* new_output = inlineCallTo(*it->owningGraph(), *d_graph, it->inputs()).at(0);
-      // Set the output of the decomposed graph to have the same output type as the
-      // original op otherwise the canonicalized graph will have
-      // TensorType as the output of this node which is incorrect
+      std::shared_ptr<Graph> d_graph =
+          toGraphFunction(decompose_funcs.get_function("addmm")).graph();
+      Value* new_output =
+          insertGraph(*it->owningGraph(), *d_graph, it->inputs()).at(0);
+      // Set the output of the decomposed graph to have the same output type as
+      // the original op otherwise the canonicalized graph will have TensorType
+      // as the output of this node which is incorrect
       new_output->setType(it->output()->type());
       it->output()->replaceAllUsesWith(new_output);
       it.destroyCurrent();
-    } else if (it->matches(
-          "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")) {
+    } else if (
+        it->matches(
+            "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")) {
       if (!isDecomposableNorm(*it)) {
         continue;
       }
@@ -117,18 +128,18 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       Graph* graph = it->owningGraph();
       Value* input = it->namedInput(attr::input);
       Value* input_dim = graph->insert(aten::dim, {input});
-      std::vector<Value*> inputs {
-        input,
-        it->namedInput(attr::running_mean),
-        it->namedInput(attr::running_var),
-        it->namedInput(attr::training),
-        it->namedInput(attr::momentum),
-        it->namedInput(attr::eps)
-      };
+      std::vector<Value*> inputs{
+          input,
+          it->namedInput(attr::running_mean),
+          it->namedInput(attr::running_var),
+          it->namedInput(attr::training),
+          it->namedInput(attr::momentum),
+          it->namedInput(attr::eps)};
 
       // inline the compiled decomposed batchnorm
-      std::shared_ptr<Graph> d_graph = decompose_funcs.get_function("batch_norm").graph();
-      Value* new_output = inlineCallTo(*graph, *d_graph, inputs).at(0);
+      std::shared_ptr<Graph> d_graph =
+          toGraphFunction(decompose_funcs.get_function("batch_norm")).graph();
+      Value* new_output = insertGraph(*graph, *d_graph, inputs).at(0);
 
       // post processing the graph
       Value* weight = it->namedInput(attr::weight);
@@ -145,24 +156,25 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       }
       it->output()->replaceAllUsesWith(new_output);
       it.destroyCurrent();
-    } else if (it->matches(
-          "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor")) {
+    } else if (
+        it->matches(
+            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor")) {
       if (!isDecomposableNorm(*it)) {
         continue;
       }
       decomposed = true;
       WithInsertPoint insert_guard{*it};
       Graph* graph = it->owningGraph();
-      std::vector<Value*> inputs {
-        it->namedInput(attr::input),
-        it->namedInput(attr::normalized_shape),
-        it->namedInput(attr::eps),
-        it->namedInput(attr::cudnn_enable)
-      };
+      std::vector<Value*> inputs{
+          it->namedInput(attr::input),
+          it->namedInput(attr::normalized_shape),
+          it->namedInput(attr::eps),
+          it->namedInput(attr::cudnn_enable)};
 
       // inline the compiled decomposed layernorm
-      std::shared_ptr<Graph> d_graph = decompose_funcs.get_function("layer_norm").graph();
-      Value* new_output = inlineCallTo(*graph, *d_graph, inputs).at(0);
+      std::shared_ptr<Graph> d_graph =
+          toGraphFunction(decompose_funcs.get_function("layer_norm")).graph();
+      Value* new_output = insertGraph(*graph, *d_graph, inputs).at(0);
 
       // post processing the graph
       Value* weight = it->namedInput(attr::weight);
@@ -181,7 +193,7 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
 }
 
 void DecomposeOps(std::shared_ptr<Graph>& graph) {
-  static script::CompilationUnit decompose_funcs(R"SCRIPT(
+  static CompilationUnit decompose_funcs(R"SCRIPT(
       def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: number = 1.0, alpha: number = 1.0):
           return self + mat1.mm(mat2)
 

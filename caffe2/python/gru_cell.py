@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import functools
 from caffe2.python import brew, rnn_cell
@@ -31,7 +31,7 @@ class GRUCell(rnn_cell.RNNCell):
     # (reset gate -> output_gate)
     # So, much of the logic to calculate the reset gate output and modified
     # output gate input is set here, in the graph definition.
-    # The remaining logic lives in in gru_unit_op.{h,cc}.
+    # The remaining logic lives in gru_unit_op.{h,cc}.
     def _apply(
         self,
         model,

@@ -22,9 +22,21 @@ PyObject *THPQScheme_New(at::QScheme qscheme, const std::string& name)
   return self.release();
 }
 
+PyObject *THPQScheme_reduce(PyObject *_self, PyObject *noargs) {
+  auto self = (THPQScheme*)_self;
+  return THPUtils_packString(self->name);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
+static PyMethodDef THPQScheme_methods[] = {
+  {"__reduce__", THPQScheme_reduce, METH_NOARGS, nullptr},
+  {nullptr}  /* Sentinel */
+};
+
 PyObject *THPQScheme_repr(THPQScheme *self)
 {
-  return THPUtils_packString(self->name);
+  std::string name = self->name;
+  return THPUtils_packString("torch." + name);
 }
 
 PyTypeObject THPQSchemeType = {
@@ -33,7 +45,7 @@ PyTypeObject THPQSchemeType = {
   sizeof(THPQScheme),                          /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */
@@ -55,7 +67,7 @@ PyTypeObject THPQSchemeType = {
   0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
-  nullptr,                                     /* tp_methods */
+  THPQScheme_methods,                          /* tp_methods */
   nullptr,                                     /* tp_members */
   nullptr,                                     /* tp_getset */
   nullptr,                                     /* tp_base */

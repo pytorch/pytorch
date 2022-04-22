@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import collections
 
@@ -7,7 +7,7 @@ import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, utils, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import check_quantized_results_close
+from caffe2.quantization.server.dnnlowp_test_utils import check_quantized_results_close
 from hypothesis import given
 
 
@@ -21,7 +21,7 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
         size=st.integers(10, 16),
         input_channels=st.integers(2, 16),
         output_channels=st.integers(2, 16),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
@@ -46,8 +46,9 @@ class DNNLowPOpSpatialBNTest(hu.HypothesisTestCase):
         X = np.round(np.random.rand(batch_size, size, size, input_channels)).astype(
             np.float32
         )
-        X[0, 0, 0, 0] = X_min
-        X[0, 0, 0, 1] = X_max
+        if batch_size != 0:
+            X[0, 0, 0, 0] = X_min
+            X[0, 0, 0, 1] = X_max
 
         epsilon = np.abs(np.random.rand())
         scale = np.random.rand(input_channels).astype(np.float32)

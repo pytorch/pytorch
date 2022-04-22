@@ -1,6 +1,6 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import errno
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -9,74 +9,73 @@ import tempfile
 import torch
 import warnings
 import zipfile
-
-if sys.version_info[0] == 2:
-    from urlparse import urlparse
-    from urllib2 import urlopen  # noqa f811
-else:
-    from urllib.request import urlopen
-    from urllib.parse import urlparse  # noqa: F401
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import urlopen, Request
+from urllib.parse import urlparse  # noqa: F401
 
 try:
-    from tqdm import tqdm
+    from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
 except ImportError:
-    # fake tqdm if it's not installed
-    class tqdm(object):
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        # fake tqdm if it's not installed
+        class tqdm(object):  # type: ignore[no-redef]
 
-        def __init__(self, total=None, disable=False,
-                     unit=None, unit_scale=None, unit_divisor=None):
-            self.total = total
-            self.disable = disable
-            self.n = 0
-            # ignore unit, unit_scale, unit_divisor; they're just for real tqdm
+            def __init__(self, total=None, disable=False,
+                         unit=None, unit_scale=None, unit_divisor=None):
+                self.total = total
+                self.disable = disable
+                self.n = 0
+                # ignore unit, unit_scale, unit_divisor; they're just for real tqdm
 
-        def update(self, n):
-            if self.disable:
-                return
+            def update(self, n):
+                if self.disable:
+                    return
 
-            self.n += n
-            if self.total is None:
-                sys.stderr.write("\r{0:.1f} bytes".format(self.n))
-            else:
-                sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
-            sys.stderr.flush()
+                self.n += n
+                if self.total is None:
+                    sys.stderr.write("\r{0:.1f} bytes".format(self.n))
+                else:
+                    sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
+                sys.stderr.flush()
 
-        def __enter__(self):
-            return self
+            def close(self):
+                self.disable = True
 
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            if self.disable:
-                return
+            def __enter__(self):
+                return self
 
-            sys.stderr.write('\n')
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                if self.disable:
+                    return
+
+                sys.stderr.write('\n')
 
 # matches bfd8deac from resnet18-bfd8deac.pth
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
-MASTER_BRANCH = 'master'
+_TRUSTED_REPO_OWNERS = ("facebookresearch", "facebookincubator", "pytorch", "fairinternal")
+ENV_GITHUB_TOKEN = 'GITHUB_TOKEN'
 ENV_TORCH_HOME = 'TORCH_HOME'
 ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
 DEFAULT_CACHE_DIR = '~/.cache'
 VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
 READ_DATA_CHUNK = 8192
-hub_dir = None
+_hub_dir = None
 
 
 # Copied from tools/shared/module_loader to be included in torch package
-def import_module(name, path):
-    if sys.version_info >= (3, 5):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(name, path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-    elif sys.version_info >= (3, 0):
-        from importlib.machinery import SourceFileLoader
-        return SourceFileLoader(name, path).load_module()
-    else:
-        import imp
-        return imp.load_source(name, path)
+def _import_module(name, path):
+    import importlib.util
+    from importlib.abc import Loader
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    assert isinstance(spec.loader, Loader)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _remove_if_exists(path):
@@ -87,19 +86,9 @@ def _remove_if_exists(path):
             shutil.rmtree(path)
 
 
-def _git_archive_link(repo_owner, repo_name, branch):
-    return 'https://github.com/{}/{}/archive/{}.zip'.format(repo_owner, repo_name, branch)
-
-
-def _download_archive_zip(url, filename):
-    sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, filename))
-    response = urlopen(url)
-    with open(filename, 'wb') as f:
-        while True:
-            data = response.read(READ_DATA_CHUNK)
-            if len(data) == 0:
-                break
-            f.write(data)
+def _git_archive_link(repo_owner, repo_name, ref):
+    # See https://docs.github.com/en/rest/reference/repos#download-a-repository-archive-zip
+    return f"https://github.com/{repo_owner}/{repo_name}/zipball/{ref}"
 
 
 def _load_attr_from_module(module, func_name):
@@ -112,54 +101,119 @@ def _load_attr_from_module(module, func_name):
 def _get_torch_home():
     torch_home = os.path.expanduser(
         os.getenv(ENV_TORCH_HOME,
-                  os.path.join(os.getenv(ENV_XDG_CACHE_HOME, DEFAULT_CACHE_DIR), 'torch')))
+                  os.path.join(os.getenv(ENV_XDG_CACHE_HOME,
+                                         DEFAULT_CACHE_DIR), 'torch')))
     return torch_home
 
 
-def _setup_hubdir():
-    global hub_dir
-    # Issue warning to move data if old env is set
-    if os.getenv('TORCH_HUB'):
-        warnings.warn('TORCH_HUB is deprecated, please use env TORCH_HOME instead')
+def _parse_repo_info(github):
+    if ':' in github:
+        repo_info, ref = github.split(':')
+    else:
+        repo_info, ref = github, None
+    repo_owner, repo_name = repo_info.split('/')
 
-    if hub_dir is None:
-        torch_home = _get_torch_home()
-        hub_dir = os.path.join(torch_home, 'hub')
+    if ref is None:
+        # The ref wasn't specified by the user, so we need to figure out the
+        # default branch: main or master. Our assumption is that if main exists
+        # then it's the default branch, otherwise it's master.
+        try:
+            with urlopen(f"https://github.com/{repo_owner}/{repo_name}/tree/main/"):
+                ref = 'main'
+        except HTTPError as e:
+            if e.code == 404:
+                ref = 'master'
+            else:
+                raise
+    return repo_owner, repo_name, ref
 
+
+def _read_url(url):
+    with urlopen(url) as r:
+        return r.read().decode(r.headers.get_content_charset('utf-8'))
+
+
+def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
+    # Use urlopen to avoid depending on local git.
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    token = os.environ.get(ENV_GITHUB_TOKEN)
+    if token is not None:
+        headers['Authorization'] = f'token {token}'
+    for url_prefix in (
+            f'https://api.github.com/repos/{repo_owner}/{repo_name}/branches',
+            f'https://api.github.com/repos/{repo_owner}/{repo_name}/tags'):
+        page = 0
+        while True:
+            page += 1
+            url = f'{url_prefix}?per_page=100&page={page}'
+            response = json.loads(_read_url(Request(url, headers=headers)))
+            # Empty response means no more data to process
+            if not response:
+                break
+            for br in response:
+                if br['name'] == ref or br['commit']['sha'].startswith(ref):
+                    return
+
+    raise ValueError(f'Cannot find {ref} in https://github.com/{repo_owner}/{repo_name}. '
+                     'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
+
+
+
+def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=True, skip_validation=False):
+    # Setup hub_dir to save downloaded files
+    hub_dir = get_dir()
     if not os.path.exists(hub_dir):
         os.makedirs(hub_dir)
-
-
-def _parse_repo_info(github):
-    branch = MASTER_BRANCH
-    if ':' in github:
-        repo_info, branch = github.split(':')
-    else:
-        repo_info = github
-    repo_owner, repo_name = repo_info.split('/')
-    return repo_owner, repo_name, branch
-
-
-def _get_cache_or_reload(github, force_reload):
     # Parse github repo information
-    repo_owner, repo_name, branch = _parse_repo_info(github)
-
+    repo_owner, repo_name, ref = _parse_repo_info(github)
+    # Github allows branch name with slash '/',
+    # this causes confusion with path on both Linux and Windows.
+    # Backslash is not allowed in Github branch name so no need to
+    # to worry about it.
+    normalized_br = ref.replace('/', '_')
     # Github renames folder repo-v1.x.x to repo-1.x.x
     # We don't know the repo name before downloading the zip file
     # and inspect name from it.
     # To check if cached repo exists, we need to normalize folder names.
-    repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, branch]))
+    owner_name_branch = '_'.join([repo_owner, repo_name, normalized_br])
+    repo_dir = os.path.join(hub_dir, owner_name_branch)
+    # Check that the repo is in the trusted list
+    _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo=trust_repo, calling_fn=calling_fn)
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
 
     if use_cache:
-        sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
+        if verbose:
+            sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
     else:
-        cached_file = os.path.join(hub_dir, branch + '.zip')
+        # Validate the tag/branch is from the original repo instead of a forked repo
+        if not skip_validation:
+            _validate_not_a_forked_repo(repo_owner, repo_name, ref)
+
+        cached_file = os.path.join(hub_dir, normalized_br + '.zip')
         _remove_if_exists(cached_file)
 
-        url = _git_archive_link(repo_owner, repo_name, branch)
-        _download_archive_zip(url, cached_file)
+        try:
+            url = _git_archive_link(repo_owner, repo_name, ref)
+            sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, cached_file))
+            download_url_to_file(url, cached_file, progress=False)
+        except HTTPError as err:
+            if err.code == 300:
+                # Getting a 300 Multiple Choices error likely means that the ref is both a tag and a branch
+                # in the repo. This can be disambiguated by explicitely using refs/heads/ or refs/tags
+                # See https://git-scm.com/book/en/v2/Git-Internals-Git-References
+                # Here, we do the same as git: we throw a warning, and assume the user wanted the branch
+                warnings.warn(
+                    f"The ref {ref} is ambiguous. Perhaps it is both a tag and a branch in the repo? "
+                    "Torchhub will now assume that it's a branch. "
+                    "You can disambiguate tags and branches by explicitly passing refs/heads/branch_name or "
+                    "refs/tags/tag_name as the ref. That might require using skip_validation=True."
+                )
+                disambiguated_branch_ref = f"refs/heads/{ref}"
+                url = _git_archive_link(repo_owner, repo_name, ref=disambiguated_branch_ref)
+                download_url_to_file(url, cached_file, progress=False)
+            else:
+                raise
 
         with zipfile.ZipFile(cached_file) as cached_zipfile:
             extraced_repo_name = cached_zipfile.infolist()[0].filename
@@ -174,45 +228,60 @@ def _get_cache_or_reload(github, force_reload):
 
     return repo_dir
 
+def _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo, calling_fn="load"):
+    hub_dir = get_dir()
+    filepath = os.path.join(hub_dir, "trusted_list")
+
+    if not os.path.exists(filepath):
+        Path(filepath).touch()
+    with open(filepath, 'r') as file:
+        trusted_repos = tuple(line.strip() for line in file)
+
+    # To minimize friction of introducing the new trust_repo mechanism, we consider that
+    # if a repo was already downloaded by torchhub, then it is already trusted (even if it's not in the allowlist)
+    trusted_repos_legacy = next(os.walk(hub_dir))[1]
+
+    owner_name = '_'.join([repo_owner, repo_name])
+    is_trusted = (
+        owner_name in trusted_repos
+        or owner_name_branch in trusted_repos_legacy
+        or repo_owner in _TRUSTED_REPO_OWNERS
+    )
+
+    # TODO: Remove `None` option in 1.14 and change the default to "check"
+    if trust_repo is None:
+        if not is_trusted:
+            warnings.warn(
+                "You are about to download and run code from an untrusted repository. In a future release, this won't "
+                "be allowed. To add the repository to your trusted list, change the command to {calling_fn}(..., "
+                "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
+                f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
+                f"'yes'. You can also use {calling_fn}(..., trust_repo='check') which will only prompt for "
+                f"confirmation if the repo is not already trusted. This will eventually be the default behaviour")
+        return
+
+    if (trust_repo is False) or (trust_repo == "check" and not is_trusted):
+        response = input(
+            f"The repository {owner_name} does not belong to the list of trusted repositories and as such cannot be downloaded. "
+            "Do you trust this repository and wish to add it to the trusted list of repositories (y/N)?")
+        if response.lower() in ("y", "yes"):
+            if is_trusted:
+                print("The repository is already trusted.")
+        elif response.lower() in ("n", "no", ""):
+            raise Exception("Untrusted repository.")
+        else:
+            raise ValueError(f"Unrecognized response {response}.")
+
+    # At this point we're sure that the user trusts the repo (or wants to trust it)
+    if not is_trusted:
+        with open(filepath, "a") as file:
+            file.write(owner_name + "\n")
+
 
 def _check_module_exists(name):
-    if sys.version_info >= (3, 4):
-        import importlib.util
-        return importlib.util.find_spec(name) is not None
-    elif sys.version_info >= (3, 3):
-        # Special case for python3.3
-        import importlib.find_loader
-        return importlib.find_loader(name) is not None
-    else:
-        # NB: Python2.7 imp.find_module() doesn't respect PEP 302,
-        #     it cannot find a package installed as .egg(zip) file.
-        #     Here we use workaround from:
-        #     https://stackoverflow.com/questions/28962344/imp-find-module-which-supports-zipped-eggs?lq=1
-        #     Also imp doesn't handle hierarchical module names (names contains dots).
-        try:
-            # 1. Try imp.find_module(), which searches sys.path, but does
-            # not respect PEP 302 import hooks.
-            import imp
-            result = imp.find_module(name)
-            if result:
-                return True
-        except ImportError:
-            pass
-        path = sys.path
-        for item in path:
-            # 2. Scan path for import hooks. sys.path_importer_cache maps
-            # path items to optional "importer" objects, that implement
-            # find_module() etc.  Note that path must be a subset of
-            # sys.path for this to work.
-            importer = sys.path_importer_cache.get(item)
-            if importer:
-                try:
-                    result = importer.find_module(name, [item])
-                    if result:
-                        return True
-                except ImportError:
-                    pass
-        return False
+    import importlib.util
+    return importlib.util.find_spec(name) is not None
+
 
 def _check_dependencies(m):
     dependencies = _load_attr_from_module(m, VAR_DEPENDENCY)
@@ -241,48 +310,81 @@ def _load_entry_from_hubconf(m, model):
     return func
 
 
-def set_dir(d):
+def get_dir():
     r"""
-    Optionally set hub_dir to a local dir to save downloaded models & weights.
+    Get the Torch Hub cache directory used for storing downloaded models & weights.
 
-    If ``set_dir`` is not called, default path is ``$TORCH_HOME/hub`` where
+    If :func:`~torch.hub.set_dir` is not called, default path is ``$TORCH_HOME/hub`` where
     environment variable ``$TORCH_HOME`` defaults to ``$XDG_CACHE_HOME/torch``.
     ``$XDG_CACHE_HOME`` follows the X Design Group specification of the Linux
-    filesytem layout, with a default value ``~/.cache`` if the environment
+    filesystem layout, with a default value ``~/.cache`` if the environment
     variable is not set.
-
-
-    Args:
-        d: path to a local folder to save downloaded models & weights.
     """
-    global hub_dir
-    hub_dir = d
+    # Issue warning to move data if old env is set
+    if os.getenv('TORCH_HUB'):
+        warnings.warn('TORCH_HUB is deprecated, please use env TORCH_HOME instead')
+
+    if _hub_dir is not None:
+        return _hub_dir
+    return os.path.join(_get_torch_home(), 'hub')
 
 
-def list(github, force_reload=False):
+def set_dir(d):
     r"""
-    List all entrypoints available in `github` hubconf.
+    Optionally set the Torch Hub directory used to save downloaded models & weights.
 
     Args:
-        github: Required, a string with format "repo_owner/repo_name[:tag_name]" with an optional
-            tag/branch. The default branch is `master` if not specified.
-            Example: 'pytorch/vision[:hub]'
-        force_reload: Optional, whether to discard the existing cache and force a fresh download.
-            Default is `False`.
+        d (string): path to a local folder to save downloaded models & weights.
+    """
+    global _hub_dir
+    _hub_dir = os.path.expanduser(d)
+
+
+def list(github, force_reload=False, skip_validation=False, trust_repo=None):
+    r"""
+    List all callable entrypoints available in the repo specified by ``github``.
+
+    Args:
+        github (string): a string with format "repo_owner/repo_name[:ref]" with an optional
+            ref (tag or branch). If ``ref`` is not specified, the default branch is assumed to be ``main`` if
+            it exists, and otherwise ``master``.
+            Example: 'pytorch/vision:0.10'
+        force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
+            Default is ``False``.
+        skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
+            specified by the ``github`` argument properly belongs to the repo owner. This will make
+            requests to the GitHub API; you can specify a non-default GitHub token by setting the
+            ``GITHUB_TOKEN`` environment variable. Default is ``False``.
+        trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
+            This parameter helps ensuring that users only run code from repos that they trust.
+
+            - If ``False``, a prompt will ask the user whether the repo should
+              be trusted.
+            - If ``True``, the repo will be added to the trusted list and loaded
+              without requiring explicit confirmation.
+            - If ``"check"``, the repo will be checked against the list of
+              trusted repos in the cache. If it is not present in that list, the
+              behaviour will fall back onto the ``trust_repo=False`` option.
+            - If ``None``: this will raise a warning, inviting the user to set
+              ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
+              is only present for backward compatibility and will be removed in
+              v1.14.
+
+            Default is ``None`` and will eventually change to ``"check"`` in a future version.
+
     Returns:
-        entrypoints: a list of available entrypoint names
+        list: The available callables entrypoint
 
     Example:
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
-    # Setup hub_dir to save downloaded files
-    _setup_hubdir()
-
-    repo_dir = _get_cache_or_reload(github, force_reload)
+    repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "list", verbose=True,
+                                    skip_validation=skip_validation)
 
     sys.path.insert(0, repo_dir)
 
-    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+    hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
+    hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
     sys.path.remove(repo_dir)
 
@@ -292,28 +394,48 @@ def list(github, force_reload=False):
     return entrypoints
 
 
-def help(github, model, force_reload=False):
+def help(github, model, force_reload=False, skip_validation=False, trust_repo=None):
     r"""
-    Show the docstring of entrypoint `model`.
+    Show the docstring of entrypoint ``model``.
 
     Args:
-        github: Required, a string with format <repo_owner/repo_name[:tag_name]> with an optional
-            tag/branch. The default branch is `master` if not specified.
-            Example: 'pytorch/vision[:hub]'
-        model: Required, a string of entrypoint name defined in repo's hubconf.py
-        force_reload: Optional, whether to discard the existing cache and force a fresh download.
-            Default is `False`.
+        github (string): a string with format <repo_owner/repo_name[:ref]> with an optional
+            ref (a tag or a branch). If ``ref`` is not specified, the default branch is assumed
+            to be ``main`` if it exists, and otherwise ``master``.
+            Example: 'pytorch/vision:0.10'
+        model (string): a string of entrypoint name defined in repo's ``hubconf.py``
+        force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
+            Default is ``False``.
+        skip_validation (bool, optional): if ``False``, torchhub will check that the ref
+            specified by the ``github`` argument properly belongs to the repo owner. This will make
+            requests to the GitHub API; you can specify a non-default GitHub token by setting the
+            ``GITHUB_TOKEN`` environment variable. Default is ``False``.
+        trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
+            This parameter helps ensuring that users only run code from repos that they trust.
+
+            - If ``False``, a prompt will ask the user whether the repo should
+              be trusted.
+            - If ``True``, the repo will be added to the trusted list and loaded
+              without requiring explicit confirmation.
+            - If ``"check"``, the repo will be checked against the list of
+              trusted repos in the cache. If it is not present in that list, the
+              behaviour will fall back onto the ``trust_repo=False`` option.
+            - If ``None``: this will raise a warning, inviting the user to set
+              ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
+              is only present for backward compatibility and will be removed in
+              v1.14.
+
+            Default is ``None`` and will eventually change to ``"check"`` in a future version.
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
-    # Setup hub_dir to save downloaded files
-    _setup_hubdir()
-
-    repo_dir = _get_cache_or_reload(github, force_reload)
+    repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "help", verbose=True,
+                                    skip_validation=skip_validation)
 
     sys.path.insert(0, repo_dir)
 
-    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+    hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
+    hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
     sys.path.remove(repo_dir)
 
@@ -322,54 +444,138 @@ def help(github, model, force_reload=False):
     return entry.__doc__
 
 
-# Ideally this should be `def load(github, model, *args, forece_reload=False, **kwargs):`,
-# but Python2 complains syntax error for it. We have to skip force_reload in function
-# signature here but detect it in kwargs instead.
-# TODO: fix it after Python2 EOL
-def load(github, model, *args, **kwargs):
+def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_reload=False, verbose=True,
+         skip_validation=False,
+         **kwargs):
     r"""
-    Load a model from a github repo, with pretrained weights.
+    Load a model from a github repo or a local directory.
+
+    Note: Loading a model is the typical use case, but this can also be used to
+    for loading other objects such as tokenizers, loss functions, etc.
+
+    If ``source`` is 'github', ``repo_or_dir`` is expected to be
+    of the form ``repo_owner/repo_name[:ref]`` with an optional
+    ref (a tag or a branch).
+
+    If ``source`` is 'local', ``repo_or_dir`` is expected to be a
+    path to a local directory.
 
     Args:
-        github: Required, a string with format "repo_owner/repo_name[:tag_name]" with an optional
-            tag/branch. The default branch is `master` if not specified.
-            Example: 'pytorch/vision[:hub]'
-        model: Required, a string of entrypoint name defined in repo's hubconf.py
-        *args: Optional, the corresponding args for callable `model`.
-        force_reload: Optional, whether to force a fresh download of github repo unconditionally.
-            Default is `False`.
-        **kwargs: Optional, the corresponding kwargs for callable `model`.
+        repo_or_dir (string): If ``source`` is 'github',
+            this should correspond to a github repo with format ``repo_owner/repo_name[:ref]`` with
+            an optional ref (tag or branch), for example 'pytorch/vision:0.10'. If ``ref`` is not specified,
+            the default branch is assumed to be ``main`` if it exists, and otherwise ``master``.
+            If ``source`` is 'local'  then it should be a path to a local directory.
+        model (string): the name of a callable (entrypoint) defined in the
+            repo/dir's ``hubconf.py``.
+        *args (optional): the corresponding args for callable ``model``.
+        source (string, optional): 'github' or 'local'. Specifies how
+            ``repo_or_dir`` is to be interpreted. Default is 'github'.
+        trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
+            This parameter helps ensuring that users only run code from repos that they trust.
+
+            - If ``False``, a prompt will ask the user whether the repo should
+              be trusted.
+            - If ``True``, the repo will be added to the trusted list and loaded
+              without requiring explicit confirmation.
+            - If ``"check"``, the repo will be checked against the list of
+              trusted repos in the cache. If it is not present in that list, the
+              behaviour will fall back onto the ``trust_repo=False`` option.
+            - If ``None``: this will raise a warning, inviting the user to set
+              ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
+              is only present for backward compatibility and will be removed in
+              v1.14.
+
+            Default is ``None`` and will eventually change to ``"check"`` in a future version.
+        force_reload (bool, optional): whether to force a fresh download of
+            the github repo unconditionally. Does not have any effect if
+            ``source = 'local'``. Default is ``False``.
+        verbose (bool, optional): If ``False``, mute messages about hitting
+            local caches. Note that the message about first download cannot be
+            muted. Does not have any effect if ``source = 'local'``.
+            Default is ``True``.
+        skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
+            specified by the ``github`` argument properly belongs to the repo owner. This will make
+            requests to the GitHub API; you can specify a non-default GitHub token by setting the
+            ``GITHUB_TOKEN`` environment variable. Default is ``False``.
+        **kwargs (optional): the corresponding kwargs for callable ``model``.
+
+    Returns:
+        The output of the ``model`` callable when called with the given
+        ``*args`` and ``**kwargs``.
+
+    Example:
+        >>> # from a github repo
+        >>> repo = 'pytorch/vision'
+        >>> model = torch.hub.load(repo, 'resnet50', pretrained=True)
+        >>> # from a local directory
+        >>> path = '/some/local/path/pytorch/vision'
+        >>> model = torch.hub.load(path, 'resnet50', pretrained=True)
+    """
+    source = source.lower()
+
+    if source not in ('github', 'local'):
+        raise ValueError(
+            f'Unknown source: "{source}". Allowed values: "github" | "local".')
+
+    if source == 'github':
+        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, trust_repo, "load",
+                                           verbose=verbose, skip_validation=skip_validation)
+
+    model = _load_local(repo_or_dir, model, *args, **kwargs)
+    return model
+
+
+def _load_local(hubconf_dir, model, *args, **kwargs):
+    r"""
+    Load a model from a local directory with a ``hubconf.py``.
+
+    Args:
+        hubconf_dir (string): path to a local directory that contains a
+            ``hubconf.py``.
+        model (string): name of an entrypoint defined in the directory's
+            ``hubconf.py``.
+        *args (optional): the corresponding args for callable ``model``.
+        **kwargs (optional): the corresponding kwargs for callable ``model``.
 
     Returns:
         a single model with corresponding pretrained weights.
 
     Example:
-        >>> model = torch.hub.load('pytorch/vision', 'resnet50', pretrained=True)
+        >>> path = '/some/local/path/pytorch/vision'
+        >>> model = _load_local(path, 'resnet50', pretrained=True)
     """
-    # Setup hub_dir to save downloaded files
-    _setup_hubdir()
+    sys.path.insert(0, hubconf_dir)
 
-    force_reload = kwargs.get('force_reload', False)
-    kwargs.pop('force_reload', None)
-
-    repo_dir = _get_cache_or_reload(github, force_reload)
-
-    sys.path.insert(0, repo_dir)
-
-    hub_module = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+    hubconf_path = os.path.join(hubconf_dir, MODULE_HUBCONF)
+    hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
     entry = _load_entry_from_hubconf(hub_module, model)
-
     model = entry(*args, **kwargs)
 
-    sys.path.remove(repo_dir)
+    sys.path.remove(hubconf_dir)
 
     return model
 
 
-def _download_url_to_file(url, dst, hash_prefix, progress):
+def download_url_to_file(url, dst, hash_prefix=None, progress=True):
+    r"""Download object at the given URL to a local path.
+
+    Args:
+        url (string): URL of the object to download
+        dst (string): Full path where object will be saved, e.g. ``/tmp/temporary_file``
+        hash_prefix (string, optional): If not None, the SHA256 downloaded file should start with ``hash_prefix``.
+            Default: None
+        progress (bool, optional): whether or not to display a progress bar to stderr
+            Default: True
+
+    Example:
+        >>> torch.hub.download_url_to_file('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth', '/tmp/temporary_file')
+
+    """
     file_size = None
-    u = urlopen(url)
+    req = Request(url, headers={"User-Agent": "torch.hub"})
+    u = urlopen(req)
     meta = u.info()
     if hasattr(meta, 'getheaders'):
         content_length = meta.getheaders("Content-Length")
@@ -378,7 +584,13 @@ def _download_url_to_file(url, dst, hash_prefix, progress):
     if content_length is not None and len(content_length) > 0:
         file_size = int(content_length[0])
 
-    f = tempfile.NamedTemporaryFile(delete=False)
+    # We deliberately save it in a temp file and move it after
+    # download is complete. This prevents a local working checkpoint
+    # being overridden by a broken download.
+    dst = os.path.expanduser(dst)
+    dst_dir = os.path.dirname(dst)
+    f = tempfile.NamedTemporaryFile(delete=False, dir=dst_dir)
+
     try:
         if hash_prefix is not None:
             sha256 = hashlib.sha256()
@@ -406,25 +618,56 @@ def _download_url_to_file(url, dst, hash_prefix, progress):
             os.remove(f.name)
 
 
-def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True):
+# Hub used to support automatically extracts from zipfile manually compressed by users.
+# The legacy zip format expects only one file from torch.save() < 1.6 in the zip.
+# We should remove this support since zipfile is now default zipfile format for torch.save().
+def _is_legacy_zip_format(filename):
+    if zipfile.is_zipfile(filename):
+        infolist = zipfile.ZipFile(filename).infolist()
+        return len(infolist) == 1 and not infolist[0].is_dir()
+    return False
+
+
+def _legacy_zip_load(filename, model_dir, map_location):
+    warnings.warn('Falling back to the old format < 1.6. This support will be '
+                  'deprecated in favor of default zipfile format introduced in 1.6. '
+                  'Please redo torch.save() to save it in the new zipfile format.')
+    # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
+    #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
+    #       E.g. resnet18-5c106cde.pth which is widely used.
+    with zipfile.ZipFile(filename) as f:
+        members = f.infolist()
+        if len(members) != 1:
+            raise RuntimeError('Only one file(not dir) is allowed in the zipfile')
+        f.extractall(model_dir)
+        extraced_name = members[0].filename
+        extracted_file = os.path.join(model_dir, extraced_name)
+    return torch.load(extracted_file, map_location=map_location)
+
+
+def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True, check_hash=False, file_name=None):
     r"""Loads the Torch serialized object at the given URL.
 
-    If the object is already present in `model_dir`, it's deserialized and
-    returned. The filename part of the URL should follow the naming convention
-    ``filename-<sha256>.ext`` where ``<sha256>`` is the first eight or more
-    digits of the SHA256 hash of the contents of the file. The hash is used to
-    ensure unique names and to verify the contents of the file.
+    If downloaded file is a zip file, it will be automatically
+    decompressed.
 
-    The default value of `model_dir` is ``$TORCH_HOME/checkpoints`` where
-    environment variable ``$TORCH_HOME`` defaults to ``$XDG_CACHE_HOME/torch``.
-    ``$XDG_CACHE_HOME`` follows the X Design Group specification of the Linux
-    filesytem layout, with a default value ``~/.cache`` if not set.
+    If the object is already present in `model_dir`, it's deserialized and
+    returned.
+    The default value of ``model_dir`` is ``<hub_dir>/checkpoints`` where
+    ``hub_dir`` is the directory returned by :func:`~torch.hub.get_dir`.
 
     Args:
         url (string): URL of the object to download
         model_dir (string, optional): directory in which to save the object
         map_location (optional): a function or a dict specifying how to remap storage locations (see torch.load)
-        progress (bool, optional): whether or not to display a progress bar to stderr
+        progress (bool, optional): whether or not to display a progress bar to stderr.
+            Default: True
+        check_hash(bool, optional): If True, the filename part of the URL should follow the naming convention
+            ``filename-<sha256>.ext`` where ``<sha256>`` is the first eight or more
+            digits of the SHA256 hash of the contents of the file. The hash is used to
+            ensure unique names and to verify the contents of the file.
+            Default: False
+        file_name (string, optional): name for the downloaded file. Filename from ``url`` will be used if not set.
 
     Example:
         >>> state_dict = torch.hub.load_state_dict_from_url('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth')
@@ -435,8 +678,8 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
         warnings.warn('TORCH_MODEL_ZOO is deprecated, please use env TORCH_HOME instead')
 
     if model_dir is None:
-        torch_home = _get_torch_home()
-        model_dir = os.path.join(torch_home, 'checkpoints')
+        hub_dir = get_dir()
+        model_dir = os.path.join(hub_dir, 'checkpoints')
 
     try:
         os.makedirs(model_dir)
@@ -450,9 +693,17 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
 
     parts = urlparse(url)
     filename = os.path.basename(parts.path)
+    if file_name is not None:
+        filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
-        hash_prefix = HASH_REGEX.search(filename).group(1)
-        _download_url_to_file(url, cached_file, hash_prefix, progress=progress)
+        hash_prefix = None
+        if check_hash:
+            r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]
+            hash_prefix = r.group(1) if r else None
+        download_url_to_file(url, cached_file, hash_prefix, progress=progress)
+
+    if _is_legacy_zip_format(cached_file):
+        return _legacy_zip_load(cached_file, model_dir, map_location)
     return torch.load(cached_file, map_location=map_location)

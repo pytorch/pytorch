@@ -1,10 +1,12 @@
 #include <torch/nn/init.h>
 
+#include <torch/linalg.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cmath>
@@ -38,13 +40,14 @@ struct Fan {
 double calculate_kaiming_std(
     Tensor tensor,
     double a,
-    FanMode mode,
-    Nonlinearity nonlinearity) {
+    FanModeType mode,
+    NonlinearityType nonlinearity) {
   NoGradGuard guard;
   Fan fan(tensor);
   const auto gain = calculate_gain(nonlinearity, a);
   double std = 0.0;
-  if (mode == FanMode::FanIn) {
+
+  if (c10::get_if<enumtype::kFanIn>(&mode)) {
     std = gain / std::sqrt(fan.in);
   } else {
     std = gain / std::sqrt(fan.out);
@@ -53,13 +56,13 @@ double calculate_kaiming_std(
 }
 } // namespace
 
-double calculate_gain(Nonlinearity nonlinearity, double param) {
-  if (nonlinearity == Nonlinearity::Tanh) {
-    return 5.0 / 3.0;
-  } else if (nonlinearity == Nonlinearity::ReLU) {
-    return std::sqrt(2.0);
-  } else if (nonlinearity == Nonlinearity::LeakyReLU) {
-    return std::sqrt(2.0 / (1 + pow(param, 2)));
+double calculate_gain(NonlinearityType nonlinearity, double param) {
+  if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
+    return 5.0 / 3.0;  // NOLINT
+  } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {
+    return std::sqrt(2.0);  // NOLINT
+  } else if (c10::get_if<enumtype::kLeakyReLU>(&nonlinearity)) {
+    return std::sqrt(2.0 / (1 + pow(param, 2)));  // NOLINT
   }
 
   return 1.0;
@@ -81,7 +84,7 @@ Tensor dirac_(Tensor tensor) {
   const auto min_dim = std::min(sizes[0], sizes[1]);
 
   tensor.zero_();
-  for (int64_t d = 0; d < min_dim; ++d) {
+  for (const auto d : c10::irange(min_dim)) {
     switch (tensor.ndimension()) {
       case 3: // Temporal convolution
         tensor[d][d][sizes[2] / 2] = 1;
@@ -132,7 +135,7 @@ Tensor orthogonal_(Tensor tensor, double gain) {
 
   // Compute the qr factorization
   Tensor q, r;
-  std::tie(q, r) = torch::qr(flattened);
+  std::tie(q, r) = torch::linalg::qr(flattened);
   // Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
   auto d = torch::diag(r, 0);
   auto ph = d.sign();
@@ -158,7 +161,7 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
   const auto columns = tensor.size(1);
   const int64_t num_zeros = std::ceil(sparsity * rows);
   tensor.normal_(0, std);
-  for (int64_t column = 0; column < columns; ++column) {
+  for (const auto column : c10::irange(columns)) {
     auto row_indices = torch::randperm(rows, tensor.options().dtype(kLong));
     auto zero_indices =
         row_indices.slice(/*dim=*/0, /*start=*/0, /*end=*/num_zeros);
@@ -178,8 +181,8 @@ Tensor uniform_(Tensor tensor, double low, double high) {
 Tensor kaiming_uniform_(
     Tensor tensor,
     double a,
-    FanMode mode,
-    Nonlinearity nonlinearity) {
+    FanModeType mode,
+    NonlinearityType nonlinearity) {
   NoGradGuard guard;
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   // Calculate uniform bounds from standard deviation
@@ -190,8 +193,8 @@ Tensor kaiming_uniform_(
 Tensor kaiming_normal_(
     Tensor tensor,
     double a,
-    FanMode mode,
-    Nonlinearity nonlinearity) {
+    FanModeType mode,
+    NonlinearityType nonlinearity) {
   NoGradGuard guard;
 
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
@@ -202,6 +205,7 @@ Tensor xavier_normal_(Tensor tensor, double gain) {
   NoGradGuard guard;
 
   Fan fan(tensor);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const auto std = gain * std::sqrt(2.0 / (fan.in + fan.out));
   return tensor.normal_(0, std);
 }
@@ -209,6 +213,7 @@ Tensor xavier_normal_(Tensor tensor, double gain) {
 Tensor xavier_uniform_(Tensor tensor, double gain) {
   NoGradGuard guard;
   Fan fan(tensor);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const auto std = gain * std::sqrt(2.0 / (fan.in + fan.out));
   // Calculate uniform bounds from standard deviation with
   const auto a = std::sqrt(3.0) * std;
@@ -218,6 +223,30 @@ Tensor xavier_uniform_(Tensor tensor, double gain) {
 Tensor zeros_(Tensor tensor) {
   NoGradGuard guard;
   return tensor.zero_();
+}
+
+std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(const Tensor& tensor) {
+  const auto dimensions = tensor.dim();
+  TORCH_CHECK(dimensions >= 2,
+    "Fan in and fan out can not be computed "
+    "for tensor with fewer than 2 dimensions")
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t fan_in, fan_out;
+  if (dimensions == 2) { // Linear
+    fan_in = tensor.size(1);
+    fan_out = tensor.size(0);
+  } else {
+    const auto num_input_fmaps = tensor.size(1);
+    const auto num_output_fmaps = tensor.size(0);
+    auto receptive_field_size = 1;
+    if (tensor.dim() > 2) {
+      receptive_field_size = tensor[0][0].numel();
+    }
+    fan_in = num_input_fmaps * receptive_field_size;
+    fan_out = num_output_fmaps * receptive_field_size;
+  }
+  return std::tie(fan_in, fan_out);
 }
 
 } // namespace init

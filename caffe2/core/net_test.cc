@@ -42,6 +42,7 @@ class NetTestDummyOp final : public OperatorBase {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool fail_;
 };
 
@@ -115,6 +116,7 @@ TEST(NetTest, ConstructionDeclaredOutput) {
 TEST(NetTest, DeclaredInputInsufficient) {
   Workspace ws;
   ws.CreateBlob("in");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(
       CreateNetTestHelper(&ws, vector<string>{"unuseful_in"}, vector<string>()),
       EnforceNotMet);
@@ -123,6 +125,7 @@ TEST(NetTest, DeclaredInputInsufficient) {
 TEST(NetDeathTest, DeclaredOutputNotMet) {
   Workspace ws;
   ws.CreateBlob("in");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(
       CreateNetTestHelper(
           &ws, vector<string>(), vector<string>{"unproduced_out"}),
@@ -144,8 +147,7 @@ void checkChainingAndRun(
   Workspace ws;
   ws.CreateBlob("in");
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -161,11 +163,11 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   Workspace ws;
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
   net_def.set_num_workers(4);
 
   // Create all external inputs
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto inp : net_def.external_input()) {
     ws.CreateBlob(inp);
   }
@@ -557,8 +559,7 @@ TEST(NetTest, DISABLED_FailingOperator) {
   ws.CreateBlob("in");
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     net_def.set_num_workers(4);
@@ -612,8 +613,7 @@ TEST(NetTest, OperatorWithExecutorHelper) {
 )DOC";
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   net_def.set_num_workers(kTestPoolSize);
@@ -641,8 +641,7 @@ TEST(NetTest, DISABLED_OperatorWithDisabledEvent) {
   ws.CreateBlob("in");
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -665,8 +664,7 @@ TEST(NetTest, ExecutorOverride) {
   )DOC";
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     Workspace ws;
@@ -689,8 +687,7 @@ TEST(NetTest, AsyncEmptyNet) {
 
   Workspace ws;
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -723,8 +720,7 @@ TEST(NetTest, DISABLED_RunAsyncFailure) {
   ws.CreateBlob("in");
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -746,8 +742,7 @@ TEST(NetTest, NoTypeNet) {
 
   Workspace ws;
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -791,14 +786,18 @@ TEST(NetTest, PendingOpsAndNetFailure) {
 )DOC";
 
   NetDef net_def;
-  CAFFE_ENFORCE(
-      TextFormat::ParseFromString(spec, &net_def));
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
 
-  // net is not stuck and returns false
-  ASSERT_FALSE(net->Run());
+  try {
+    // net is not stuck and returns false
+    ASSERT_FALSE(net->Run());
+  } catch (const caffe2::AsyncNetCancelled&) {
+    // Cancellation exception is fine since if the ops run concurrently the
+    // NotFinishingOp may be cancelled with an exception.
+  }
 }
 
 class AsyncErrorOp final : public Operator<CPUContext> {
@@ -824,16 +823,20 @@ class AsyncErrorOp final : public Operator<CPUContext> {
       if (thread_) {
         thread_->join();
       }
-      thread_ = caffe2::make_unique<std::thread>([this]() {
+      thread_ = std::make_unique<std::thread>([this]() {
         try {
           std::this_thread::sleep_for(std::chrono::seconds(sleep_time_s_));
           if (throw_) {
             throw std::logic_error(error_msg_);
           } else {
-            event().SetFinished(error_msg_.c_str());
+            if (!cancel_.test_and_set()) {
+              event().SetFinished(error_msg_.c_str());
+            }
           }
         } catch (...) {
-          event().SetFinishedWithException(error_msg_.c_str());
+          if (!cancel_.test_and_set()) {
+            event().SetFinishedWithException(error_msg_.c_str());
+          }
         }
       });
       return true;
@@ -842,6 +845,10 @@ class AsyncErrorOp final : public Operator<CPUContext> {
 
   bool HasAsyncPart() const override {
     return true;
+  }
+
+  void CancelAsyncCallback() override {
+    cancel_.test_and_set();
   }
 
   ~AsyncErrorOp() override {
@@ -856,6 +863,7 @@ class AsyncErrorOp final : public Operator<CPUContext> {
   bool fail_in_sync_;
   int sleep_time_s_;
   std::string error_msg_;
+  std::atomic_flag cancel_ = ATOMIC_FLAG_INIT;
 };
 
 REGISTER_CPU_OPERATOR(AsyncErrorOp, AsyncErrorOp);
@@ -897,7 +905,10 @@ TEST(NetTest, AsyncErrorOpTest) {
 
   // Throw in sync part
   auto net = AsyncErrorNet(&ws, "net1", /*throw_*/ true, /*fail_in_sync*/ true);
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(net->Run(), std::logic_error);
+#endif
 
   // Return false in sync part
   net = AsyncErrorNet(&ws, "net2", /*throw_*/ false, /*fail_in_sync*/ true);
@@ -905,7 +916,10 @@ TEST(NetTest, AsyncErrorOpTest) {
 
   // SetFinishedWithException in async part
   net = AsyncErrorNet(&ws, "net3", /*throw_*/ true, /*fail_in_sync*/ false);
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(net->Run(), std::logic_error);
+#endif
 
   // SetFinished(err) in async part
   net = AsyncErrorNet(&ws, "net4", /*throw_*/ false, /*fail_in_sync*/ false);
@@ -989,6 +1003,7 @@ class SyncErrorOp final : public Operator<CPUContext> {
     }
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~SyncErrorOp() override {}
 
  private:
@@ -1037,7 +1052,10 @@ TEST(NetTest, ChainErrorTest) {
   Workspace ws;
 
   auto net = ChainErrorNet(&ws, "net1", /*throw_*/ true);
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(net->Run(), std::logic_error);
+#endif
 
   net = ChainErrorNet(&ws, "net2", /*throw_*/ false);
   ASSERT_FALSE(net->Run());

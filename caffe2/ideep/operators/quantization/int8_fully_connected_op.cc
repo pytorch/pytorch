@@ -26,6 +26,7 @@ public:
     }
     Y_scales_ = ConvertScales({scale_});
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPInt8FullyConnectedOp() {}
 
   bool RunOnDevice() override {
@@ -40,13 +41,11 @@ public:
     }
 
     if (cached_X_descriptor_ != X.get_descriptor()) {
-      op_key_.clear();
       cached_X_descriptor_ = X.dup_descriptor();
       Y_.init({{X.get_dim(0), filter.get_dim(0)}, idtype::f32});
     }
 
     if (cached_weights_descriptor_ != filter.get_descriptor()) {
-      op_key_.clear();
       cached_weights_descriptor_ = filter.dup_descriptor();
       CAFFE_ENFORCE(filter.get_data_type() == idtype::s8 && filter.has_scale());
 
@@ -66,11 +65,10 @@ public:
 
     if (InputSize() > BIAS) {
       ideep::inner_product_forward::compute(
-          op_key_, X_in, filter_, bias_, Y_);
+          X_in, filter_, bias_, Y_);
     } else {
-      ideep::inner_product_forward::compute(op_key_, X_in, filter_, Y_);
+      ideep::inner_product_forward::compute(X_in, filter_, Y_);
     }
-
     Y->init({Y_.get_dims(), Y_data_type_});
     Y->set_scale(Y_scales_);
     Y->feed_from(Y_);
@@ -83,7 +81,6 @@ private:
   float scale_;
   int32_t zero_point_;
 
-  ikey op_key_;
   idtype Y_data_type_;
   itensor filter_, bias_, Y_;
   iscale  Y_scales_;

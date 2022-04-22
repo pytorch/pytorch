@@ -1,18 +1,18 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import collections
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 from caffe2.python import core, dyndep, workspace
-from caffe2.python.fb import hardcode_scale_zp
+from caffe2.python.fb import hardcode_scale_zp  # type: ignore[import]
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import (
+from caffe2.quantization.server.dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
     run_conv_or_fc,
 )
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -30,13 +30,14 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         group=st.integers(1, 4),
         input_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
         output_channels_per_group=st.integers(2, 16),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
         prepack_weight=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_groupwise_dnnlowp_conv_int(
         self,
         stride,
@@ -104,9 +105,9 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
                 net.Proto().op.extend([quantize])
 
             if do_prepack_weight:
-                x_q_param = hardcode_scale_zp.choose_quantization_params(
-                    X.min(), X.max()
-                )
+                X_min = 0 if X.size == 0 else X.min()
+                X_max = 0 if X.size == 0 else X.max()
+                x_q_param = hardcode_scale_zp.choose_quantization_params(X_min, X_max)
                 inputs = ["W"]
                 if do_dequantize:
                     inputs += ["b"]
@@ -114,11 +115,15 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
                     "Int8ConvPackWeight",
                     inputs,
                     ["W_packed"],
+                    stride=stride,
+                    kernel=kernel,
+                    dilation=dilation,
+                    pad=pad,
+                    preserve_weight_sparsity=preserve_weight_sparsity,
+                    engine=engine,
                     group=group,
                     quantize_groupwise=1,
-                    preserve_weight_sparsity=preserve_weight_sparsity,
                     in_scale=x_q_param.scale,
-                    engine=engine,
                 )
                 init_net.Proto().op.extend([pack])
 
@@ -177,10 +182,11 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         group=st.integers(1, 4),
         input_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
         output_channels_per_group=st.integers(2, 16),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_groupwise_dnnlowp_conv_relu_int(
         self,
         stride,

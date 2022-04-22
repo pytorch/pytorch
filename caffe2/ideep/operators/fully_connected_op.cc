@@ -14,6 +14,7 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
         training_mode_(OperatorBase::GetSingleArgument<int>("training_mode", 0)) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPFullyConnectedOp() override {}
 
   bool RunOnDevice() override {
@@ -28,7 +29,6 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
     }
 
     if (training_mode_) {
-      op_key_.clear();
       filter_ = filter;
       auto filter_dims = CanonicalDims(filter_.get_dims(), axis_w_);
       if (filter_.get_dims() != filter_dims) {
@@ -40,12 +40,10 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
       }
     } else {
       if (cached_X_descriptor_ != X.get_descriptor()) {
-        op_key_.clear();
         cached_X_descriptor_ = X.dup_descriptor();
       }
 
       if (cached_weights_descriptor_ != filter.get_descriptor()) {
-        op_key_.clear();
         cached_weights_descriptor_ = filter.dup_descriptor();
 
         filter_ = filter.has_scale() ? filter.to_public() : filter;
@@ -63,9 +61,9 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
 
     if (InputSize() > BIAS) {
       ideep::inner_product_forward::compute(
-          op_key_, X_in, filter_, bias_, *Y);
+          X_in, filter_, bias_, *Y);
     } else {
-      ideep::inner_product_forward::compute(op_key_, X_in, filter_, *Y);
+      ideep::inner_product_forward::compute(X_in, filter_, *Y);
     }
 
     return true;
@@ -76,7 +74,6 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
   size_t axis_w_{1};
   bool training_mode_;
 
-  ikey op_key_;
   itensor filter_, bias_;
   itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
 
@@ -93,6 +90,7 @@ class IDEEPFullyConnectedGradientOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPFullyConnectedGradientOp() override {}
 
   bool RunOnDevice() override {
@@ -115,6 +113,7 @@ class IDEEPFullyConnectedGradientOp final : public IDEEPOperator {
     }
 
     ideep::inner_product_backward_weights::compute(X_in, dY, *dfilter, *dbias);
+    dfilter->to_default_format();
 
     /**
      * In mkl-dnn,weight gradient shape is determined by X_in,

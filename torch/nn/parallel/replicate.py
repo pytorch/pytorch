@@ -1,5 +1,7 @@
-import torch.cuda.comm as comm
-from torch.cuda._utils import _get_device_index
+from . import comm
+from torch._utils import _get_device_index
+
+from collections import OrderedDict
 
 
 def _is_script_module(module):
@@ -19,14 +21,13 @@ def _init_script_module():
 
 def _is_jit_enabled():
     import torch.jit
-    return torch.jit._enabled
+    return torch.jit._state._enabled
 
 
 # Check if we can safely replicate the module.
-# there are three types of module:
+# there are two types of module:
 # 1. python modules
-# 2. weak python modules (nn.Module annotated by @weak_module)
-# 3. ScriptModule
+# 2. ScriptModule
 #
 # currently a module cannot be replicated properly if the descendants of
 # any ScriptModule contains python module (type 1 above)
@@ -43,7 +44,7 @@ def _replicatable_module(module, memo=None):
     if memo is None:
         memo = set()
 
-    # memorize visited modules
+    # memoize visited modules
     memo.add(module)
     if _is_script_module(module):
         memo.update(descendant_modules(module))
@@ -59,16 +60,6 @@ def _replicatable_module(module, memo=None):
             return False
 
     return True
-
-
-def _copy_scriptmodule_methods(modules, module_copies, module_indices):
-    for i, module in enumerate(modules):
-        if not _is_script_module(module):
-            continue
-        replica = module_copies[i]
-        for method_name in module._c._method_names():
-            replica._c.clone_method(module._c, method_name)
-
 
 def _broadcast_coalesced_reshape(tensors, devices, detach=False):
     from ._functions import Broadcast
@@ -89,7 +80,10 @@ def replicate(network, devices, detach=False):
         raise RuntimeError("Cannot replicate network where python modules are "
                            "childrens of ScriptModule")
 
-    devices = list(map(lambda x: _get_device_index(x, True), devices))
+    if not devices:
+        return []
+
+    devices = [_get_device_index(x, True) for x in devices]
     num_replicas = len(devices)
 
     params = list(network.parameters())
@@ -114,32 +108,17 @@ def replicate(network, devices, detach=False):
     modules = list(network.modules())
     module_copies = [[] for device in devices]
     module_indices = {}
-    scriptmodule_skip_attr = {"_parameters", "_buffers", "_modules", "forward", "_c"}
 
     for i, module in enumerate(modules):
         module_indices[module] = i
         for j in range(num_replicas):
-            if _is_script_module(module):
-                # we have to initialize ScriptModule properly so that
-                # it works with pybind11
-                replica = _init_script_module()
-
-                attribute_names = set(entry[0] for entry in module._c._get_attributes())
-
-                keys = set(module.__dict__.keys()) - scriptmodule_skip_attr - attribute_names
-                for key in keys:
-                    if not _is_script_method(module.__dict__[key]):
-                        replica.__dict__[key] = module.__dict__[key]
-                for name, the_type, value in module._c._get_attributes():
-                    if name in module._buffers.keys():
-                        continue
-                    replica._c._register_attribute(name, the_type, value)
-            else:
-                replica = module.__new__(type(module))
-                replica.__dict__ = module.__dict__.copy()
-                replica._parameters = replica._parameters.copy()
-                replica._buffers = replica._buffers.copy()
-                replica._modules = replica._modules.copy()
+            replica = module._replicate_for_data_parallel()
+            # This is a temporary fix for DDP. DDP needs to access the
+            # replicated model parameters. It used to do so through
+            # `mode.parameters()`. The fix added in #33907 for DP stops the
+            # `parameters()` API from exposing the replicated parameters.
+            # Hence, we add a `_former_parameters` dict here to support DDP.
+            replica._former_parameters = OrderedDict()
 
             module_copies[j].append(replica)
 
@@ -153,7 +132,7 @@ def replicate(network, devices, detach=False):
                 module_idx = module_indices[child]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    replica._modules[key] = module_copies[j][module_idx]
+                    setattr(replica, key, module_copies[j][module_idx])
         for key, param in module._parameters.items():
             if param is None:
                 for j in range(num_replicas):
@@ -163,7 +142,12 @@ def replicate(network, devices, detach=False):
                 param_idx = param_indices[param]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    replica._parameters[key] = param_copies[j][param_idx]
+                    param = param_copies[j][param_idx]
+                    # parameters in replicas are no longer leaves,
+                    # so setattr them as non-parameter attributes
+                    setattr(replica, key, param)
+                    # expose the parameter for DDP
+                    replica._former_parameters[key] = param
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
@@ -178,9 +162,6 @@ def replicate(network, devices, detach=False):
                     buffer_idx = buffer_indices_not_rg[buf]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    replica._buffers[key] = buffer_copies[j][buffer_idx]
-
-    for j in range(num_replicas):
-        _copy_scriptmodule_methods(modules, module_copies[j], module_indices)
+                    setattr(replica, key, buffer_copies[j][buffer_idx])
 
     return [module_copies[j][0] for j in range(num_replicas)]

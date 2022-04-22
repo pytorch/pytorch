@@ -1,10 +1,11 @@
-# coding=utf-8
+# -*- coding: utf-8 -*-
 from .module import Module
 from .. import functional as F
-from ..._jit_internal import weak_module, weak_script_method
+
+from torch import Tensor
+from ..common_types import _size_any_t
 
 
-@weak_module
 class Fold(Module):
     r"""Combines an array of sliding local blocks into a large containing
     tensor.
@@ -70,13 +71,39 @@ class Fold(Module):
         copying from the large tensor. So, if the blocks overlap, they are not
         inverses of each other.
 
+        In general, folding and unfolding operations are related as
+        follows. Consider :class:`~torch.nn.Fold` and
+        :class:`~torch.nn.Unfold` instances created with the same
+        parameters:
+
+        >>> fold_params = dict(kernel_size=..., dilation=..., padding=..., stride=...)
+        >>> fold = nn.Fold(output_size=..., **fold_params)
+        >>> unfold = nn.Unfold(**fold_params)
+
+        Then for any (supported) ``input`` tensor the following
+        equality holds:
+
+        ::
+
+            fold(unfold(input)) == divisor * input
+
+        where ``divisor`` is a tensor that depends only on the shape
+        and dtype of the ``input``:
+
+        >>> input_ones = torch.ones(input.shape, dtype=input.dtype)
+        >>> divisor = fold(unfold(input_ones))
+
+        When the ``divisor`` tensor contains no zero elements, then
+        ``fold`` and ``unfold`` operations are inverses of each
+        other (up to constant divisor).
+
     .. warning::
-        Currently, only 4-D output tensors (batched image-like tensors) are
-        supported.
+        Currently, only unbatched (3D) or batched (4D) image-like output tensors are supported.
 
     Shape:
-        - Input: :math:`(N, C \times \prod(\text{kernel\_size}), L)`
-        - Output: :math:`(N, C, \text{output\_size}[0], \text{output\_size}[1], \dots)` as described above
+        - Input: :math:`(N, C \times \prod(\text{kernel\_size}), L)` or :math:`(C \times \prod(\text{kernel\_size}), L)`
+        - Output: :math:`(N, C, \text{output\_size}[0], \text{output\_size}[1], \dots)`
+          or :math:`(C, \text{output\_size}[0], \text{output\_size}[1], \dots)` as described above
 
     Examples::
 
@@ -92,8 +119,20 @@ class Fold(Module):
     """
     __constants__ = ['output_size', 'kernel_size', 'dilation', 'padding',
                      'stride']
+    output_size: _size_any_t
+    kernel_size: _size_any_t
+    dilation: _size_any_t
+    padding: _size_any_t
+    stride: _size_any_t
 
-    def __init__(self, output_size, kernel_size, dilation=1, padding=0, stride=1):
+    def __init__(
+        self,
+        output_size: _size_any_t,
+        kernel_size: _size_any_t,
+        dilation: _size_any_t = 1,
+        padding: _size_any_t = 0,
+        stride: _size_any_t = 1
+    ) -> None:
         super(Fold, self).__init__()
         self.output_size = output_size
         self.kernel_size = kernel_size
@@ -101,23 +140,21 @@ class Fold(Module):
         self.padding = padding
         self.stride = stride
 
-    @weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.fold(input, self.output_size, self.kernel_size, self.dilation,
                       self.padding, self.stride)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'output_size={output_size}, kernel_size={kernel_size}, ' \
             'dilation={dilation}, padding={padding}, stride={stride}'.format(
                 **self.__dict__
             )
 
 
-@weak_module
 class Unfold(Module):
     r"""Extracts sliding local blocks from a batched input tensor.
 
-    Consider an batched :attr:`input` tensor of shape :math:`(N, C, *)`,
+    Consider a batched :attr:`input` tensor of shape :math:`(N, C, *)`,
     where :math:`N` is the batch dimension, :math:`C` is the channel dimension,
     and :math:`*` represent arbitrary spatial dimensions. This operation flattens
     each sliding :attr:`kernel_size`-sized block within the spatial dimensions
@@ -175,6 +212,32 @@ class Unfold(Module):
         copying from the large tensor. So, if the blocks overlap, they are not
         inverses of each other.
 
+        In general, folding and unfolding operations are related as
+        follows. Consider :class:`~torch.nn.Fold` and
+        :class:`~torch.nn.Unfold` instances created with the same
+        parameters:
+
+        >>> fold_params = dict(kernel_size=..., dilation=..., padding=..., stride=...)
+        >>> fold = nn.Fold(output_size=..., **fold_params)
+        >>> unfold = nn.Unfold(**fold_params)
+
+        Then for any (supported) ``input`` tensor the following
+        equality holds:
+
+        ::
+
+            fold(unfold(input)) == divisor * input
+
+        where ``divisor`` is a tensor that depends only on the shape
+        and dtype of the ``input``:
+
+        >>> input_ones = torch.ones(input.shape, dtype=input.dtype)
+        >>> divisor = fold(unfold(input_ones))
+
+        When the ``divisor`` tensor contains no zero elements, then
+        ``fold`` and ``unfold`` operations are inverses of each
+        other (up to constant divisor).
+
     .. warning::
         Currently, only 4-D input tensors (batched image-like tensors) are
         supported.
@@ -209,19 +272,28 @@ class Unfold(Module):
 
     """
     __constants__ = ['kernel_size', 'dilation', 'padding', 'stride']
+    kernel_size: _size_any_t
+    dilation: _size_any_t
+    padding: _size_any_t
+    stride: _size_any_t
 
-    def __init__(self, kernel_size, dilation=1, padding=0, stride=1):
+    def __init__(
+        self,
+        kernel_size: _size_any_t,
+        dilation: _size_any_t = 1,
+        padding: _size_any_t = 0,
+        stride: _size_any_t = 1
+    ) -> None:
         super(Unfold, self).__init__()
         self.kernel_size = kernel_size
         self.dilation = dilation
         self.padding = padding
         self.stride = stride
 
-    @weak_script_method
-    def forward(self, input):
+    def forward(self, input: Tensor) -> Tensor:
         return F.unfold(input, self.kernel_size, self.dilation,
                         self.padding, self.stride)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return 'kernel_size={kernel_size}, dilation={dilation}, padding={padding},' \
             ' stride={stride}'.format(**self.__dict__)

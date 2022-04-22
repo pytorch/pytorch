@@ -3,6 +3,7 @@
 #include "caffe2/core/scope_guard.h"
 
 #include <iomanip>
+#include <iostream>
 #include <mutex>
 
 C10_DEFINE_bool(
@@ -96,9 +97,15 @@ bool GlobalInit() {
   // On mobile devices, use this global init, since we cannot pass the
   // command line options to caffe2, no arguments are passed.
   int mobile_argc = 1;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   static char caffe2_name[] = "caffe2";
   char* mobile_name = &caffe2_name[0];
   char** mobile_argv = &mobile_name;
   return ::caffe2::GlobalInit(&mobile_argc, &mobile_argv);
+}
+
+bool unsafeRunCaffe2InitFunction(const char* name, int* pargc, char*** pargv) {
+  return internal::Caffe2InitializeRegistry::Registry()->RunNamedFunction(
+      name, pargc, pargv);
 }
 }  // namespace caffe2

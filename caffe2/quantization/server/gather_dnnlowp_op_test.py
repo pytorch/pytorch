@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import collections
 
@@ -6,7 +6,7 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
-from dnnlowp_test_utils import check_quantized_results_close
+from caffe2.quantization.server.dnnlowp_test_utils import check_quantized_results_close
 from hypothesis import given
 
 
@@ -18,11 +18,14 @@ class DNNLowPGatherOpTest(hu.HypothesisTestCase):
     @given(
         dim1=st.integers(256, 512),
         dim2=st.integers(32, 256),
+        is_empty=st.booleans(),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         **hu.gcs_cpu_only
     )
-    def test_dnnlowp_gather(self, dim1, dim2, in_quantized, out_quantized, gc, dc):
+    def test_dnnlowp_gather(self, dim1, dim2, is_empty, in_quantized, out_quantized, gc, dc):
+        if is_empty:
+            dim2 = 0
         # FIXME : DNNLOWP Gather doesn't support quantized input and
         # dequantized output
         if in_quantized:

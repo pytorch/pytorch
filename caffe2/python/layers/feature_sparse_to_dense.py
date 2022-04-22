@@ -1,24 +1,46 @@
 # @package sparse_to_dense
 # Module caffe2.python.layers.sparse_to_dense
-from __future__ import absolute_import, division, print_function, unicode_literals
+
+
+from collections import defaultdict
 
 import numpy as np
 from caffe2.python import schema
-from caffe2.python.layers.layers import ModelLayer
+from caffe2.python.layers.layers import AccessedFeatures, ModelLayer
 
 
 class FeatureSparseToDense(ModelLayer):
     def __init__(
-        self, model, input_record, input_specs, name="feature_sparse_to_dense", **kwargs
+        self,
+        model,
+        input_record,
+        input_specs,
+        name="feature_sparse_to_dense",
+        default_dense_value=None,
+        **kwargs
     ):
         """
         `input_specs` follows the format of FeatureSpec from schema. To be more
         precise it's a namedtuple that should have:
             'feature_type', 'feature_names', 'feature_ids'
+        Default_dense_value can only be 0.0 or float("NaN"). Any input that isn't
+        None will be NaN.
         """
         super(FeatureSparseToDense, self).__init__(model, name, input_record, **kwargs)
+        if default_dense_value is None:
+            default_dense_value = 0.0
+        default_dense_value = float(default_dense_value)
+        assert (
+            np.isnan(default_dense_value) or default_dense_value == 0.0
+        ), "default_dense_value can only be 0.0 or NaN"
 
         self.input_specs = input_specs
+        self.default_float_value = (
+            model.global_constants["NAN"]
+            if np.isnan(default_dense_value)
+            else model.global_constants["ZERO"]
+        )
+        self.zero_range = model.global_constants["ZERO_RANGE"]
 
         outputs = []
         for field, feature_specs in self.input_specs:
@@ -115,7 +137,7 @@ class FeatureSparseToDense(ModelLayer):
                 # we keep ranges blob to check input data later.
                 # Currently this schema with ranges and values is only for
                 # generic type enum 1. If new types are implemented, we need to
-                # modify the ParseGeneric operator, and this part accordinly
+                # modify the ParseGeneric operator, and this part accordingly
                 outputs.append(
                     (
                         field,
@@ -149,7 +171,7 @@ class FeatureSparseToDense(ModelLayer):
         self.output_schema = schema.Struct(*outputs)
 
         # TODO(amalevich): Consider moving this data to schema, instead
-        # Structs doens't support attaching metadata to them and clonning
+        # Structs doesn't support attaching metadata to them and clonning
         # will break things badly, but this is the most elegant way to pass
         # this info around. Should we change it or it'll be too much work and
         # not worse it?
@@ -157,8 +179,6 @@ class FeatureSparseToDense(ModelLayer):
             schema.attach_metadata_to_scalars(
                 self.output_schema[field], schema.Metadata(feature_specs=feature_specs)
             )
-        self.zero = model.global_constants["ZERO"]
-        self.zero_range = model.global_constants["ZERO_RANGE"]
 
     # Add operators to all types that need to be densified
     def add_ops(self, net):
@@ -169,7 +189,7 @@ class FeatureSparseToDense(ModelLayer):
                     [
                         record[field].keys(),
                         record[field].values(),
-                        self.zero,
+                        self.default_float_value,
                         record[field].lengths(),
                     ],
                     [self.output_schema[field]()],
@@ -259,7 +279,7 @@ class FeatureSparseToDense(ModelLayer):
                 # Currently our implementation only supports
                 # generic type enum 1. If new types are implemented, we need to
                 # modify the ParseGeneric operator, the schema above,
-                # and this part accordinly to parse the generic feature strings
+                # and this part accordingly to parse the generic feature strings
                 # into input_record
 
                 ranges = net.LengthsToRanges(
@@ -294,3 +314,17 @@ class FeatureSparseToDense(ModelLayer):
             if feature_specs.feature_type == "FLOAT":
                 metadata[-1][0]["cardinality"] = 1
         return metadata
+
+    def get_accessed_features(self):
+        accessed_features = defaultdict(list)
+
+        # The features that are accessed are just those features that appear in
+        # the input specs
+        for field, feature_specs in self.input_specs:
+            accessed_features[field].append(
+                AccessedFeatures(
+                    feature_specs.feature_type, set(feature_specs.feature_ids)
+                )
+            )
+
+        return accessed_features

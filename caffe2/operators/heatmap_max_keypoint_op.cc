@@ -122,6 +122,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       // Solve Ax=b
       const float div = A.determinant();
       EVecXf delta(2);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float deltaScore;
       const float MAX_DELTA = 1.5;
       if (std::abs(div) < 1e-4f) {
@@ -140,7 +141,7 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
       }
       assert(std::abs(delta(0)) <= MAX_DELTA);
       assert(std::abs(delta(1)) <= MAX_DELTA);
-      // find maximum of detla scores
+      // find maximum of delta scores
       keypoints(k, 0 * keypoint_count + j) =
           x0 + (0.5 + maxX + delta(0)) * xLen / heatmap_size;
       keypoints(k, 1 * keypoint_count + j) =
@@ -158,3 +159,18 @@ bool HeatmapMaxKeypointOp<float, CPUContext>::RunOnDevice() {
 }
 
 } // namespace caffe2
+
+using HeatmapMaxKeypointOpFloatCPU =
+    caffe2::HeatmapMaxKeypointOp<float, caffe2::CPUContext>;
+
+// clang-format off
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    HeatmapMaxKeypoint,
+    "_caffe2::HeatmapMaxKeypoint("
+      "Tensor heatmaps, "
+      "Tensor bboxes_in, "
+      "bool should_output_softmax = True"
+    ") -> Tensor keypoints",
+    HeatmapMaxKeypointOpFloatCPU);
+
+// clang-format on

@@ -3,8 +3,8 @@
 #ifndef BOX_WITH_NMS_AND_LIMIT_OP_H_
 #define BOX_WITH_NMS_AND_LIMIT_OP_H_
 
-#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/operator.h"
 
 C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(BoxWithNMSLimit)
@@ -51,7 +51,7 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
         "Unexpected soft_nms_method");
     soft_nms_method_ = (soft_nms_method_str_ == "linear") ? 1 : 2;
 
-    // When input `boxes` doesn't inlcude background class, the score will skip
+    // When input `boxes` doesn't include background class, the score will skip
     // background class and start with foreground classes directly, and put the
     // background class in the end, i.e. score[:, 0:NUM_CLASSES-1] represents
     // foreground classes and score[:,NUM_CLASSES] represents background class.
@@ -60,7 +60,16 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
 
   ~BoxWithNMSLimitOp() {}
 
-  bool RunOnDevice() override;
+  bool RunOnDevice() override {
+    if (InputSize() > 2) {
+      return DispatchHelper<TensorTypes<int, float>>::call(this, Input(2));
+    } else {
+      return DoRunWithType<float>();
+    }
+  }
+
+  template <typename T>
+  bool DoRunWithType();
 
  protected:
   // TEST.SCORE_THRESH

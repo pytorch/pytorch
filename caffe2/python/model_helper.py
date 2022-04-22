@@ -1,11 +1,12 @@
 ## @package model_helper
 # Module caffe2.python.model_helper
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from caffe2.python import core, scope, workspace, helpers
+
+
+
+
+from caffe2.python import core, scope, workspace
+from caffe2.python.helpers.db_input import db_input
 from caffe2.python.modeling import parameter_info
 from caffe2.python.modeling.parameter_sharing import (
     parameter_sharing_context,
@@ -20,7 +21,6 @@ from future.utils import viewitems, viewkeys
 from itertools import chain
 
 import logging
-import six
 
 
 # _known_working_ops are operators that do not need special care.
@@ -170,7 +170,7 @@ class ModelHelper(object):
         be created in the CurrentNameScope with the respect of all parameter
         sharing logic, i.e. 'resolved_name_scope/param_name'.
 
-        Parameter sharing logic is going to override CurrentNameScope accoring
+        Parameter sharing logic is going to override CurrentNameScope according
         to the rules that are specified through ParameterSharing contexts,
         all ParameterSharing contexts are applied recursively until there are no
         extra overrides present, where on each step the best match will be
@@ -198,7 +198,7 @@ class ModelHelper(object):
         # ParameterSharing will be applied.
         if isinstance(param_name, core.BlobReference):
             param_name = str(param_name)
-        elif isinstance(param_name, six.string_types):
+        elif isinstance(param_name, str):
             # Parameter name will be equal to current Namescope that got
             # resolved with the respect of parameter sharing of the scopes.
             param_name = parameter_sharing_context.get_parameter_name(
@@ -414,7 +414,7 @@ class ModelHelper(object):
             """You cannot pass reader to model_helper.TensorProtosDBInput.
                Use model.net.TensorProtosDBInput instead to create the op."""
 
-        return helpers.db_input.db_input(
+        return db_input(
             self, blob_out, batch_size, db, db_type, **kwargs)
 
     def GetDevices(self):

@@ -1,13 +1,15 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 
 #include <ATen/core/functional.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 
 #include <ATen/ATen.h>
 #include <algorithm>
@@ -15,6 +17,12 @@
 
 namespace torch {
 namespace jit {
+
+namespace {
+c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
+  return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
+}
+} // namespace
 
 // This pass looks for trees in the graph, where leaves are mm ops, and the
 // inner vertices are add nodes. Once we have such a tree they can be reduced to
@@ -100,64 +108,63 @@ bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
   return m < 512 || ((l < 256 && r < 256) || (l > 256 && r > 256));
 }
 
-RegisterOperators mm_tree_reduction_reg(
-    {Operator(prim::MMTreeReduce, [](const Node* node) {
-      size_t num_inputs = node->inputs().size();
-      return [num_inputs](Stack& stack) {
-        std::vector<at::Tensor> inputs;
-        inputs.reserve(num_inputs);
-        for (auto it = stack.end() - num_inputs; it != stack.end(); ++it) {
-          inputs.push_back(std::move(*it).toTensor());
-        }
-        drop(stack, num_inputs);
+RegisterOperators mm_tree_reduction_reg({Operator(
+    "prim::MMTreeReduce(...) -> Tensor",
+    [](Stack& stack) {
+      auto num_inputs = pop(stack).toInt();
+      std::vector<at::Tensor> inputs;
+      inputs.reserve(num_inputs);
+      for (auto it = stack.end() - num_inputs; it != stack.end(); ++it) {
+        inputs.push_back(std::move(*it).toTensor());
+      }
+      drop(stack, num_inputs);
 
-        AT_ASSERT(inputs.size() > 0);
-        AT_ASSERT(inputs.size() % 2 == 0);
-        size_t side_num_elems = inputs.size() / 2;
-        auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
-        auto rhs_inputs = at::TensorList(inputs).slice(side_num_elems);
-        // TODO: checking this is not free, so we should stop if this keeps
-        // failing
-        if (have_same_shape(lhs_inputs) && have_same_shape(rhs_inputs) &&
-            shape_is_fast_for_reduce(lhs_inputs[0], rhs_inputs[0])) {
-          // sometimes lhs_inputs or rhs_inputs are not contiguous, and that
-          // causes at::cat to go through slow path view them as contiguous if
-          // possible by transposing
-          bool lhs_input_transposed = should_be_transposed(lhs_inputs);
-          bool rhs_input_transposed = should_be_transposed(rhs_inputs);
-          at::Tensor lhs, rhs;
-          if (lhs_input_transposed) {
-            std::vector<at::Tensor> lhs_contig_inputs =
-                transpose_inputs(lhs_inputs);
-            lhs = at::cat(lhs_contig_inputs, /*dim*/ 0);
-            lhs = lhs.t();
-          } else {
-            lhs = at::cat(lhs_inputs, /*dim=*/1);
-          }
-          if (rhs_input_transposed) {
-            std::vector<at::Tensor> rhs_contig_inputs =
-                transpose_inputs(rhs_inputs);
-            rhs = at::cat(rhs_contig_inputs, /*dim*/ 1);
-            rhs = rhs.t();
-          } else {
-            rhs = at::cat(rhs_inputs, /*dim=*/0);
-          }
-          push(stack, at::mm(lhs, rhs));
+      AT_ASSERT(inputs.size() > 0);
+      AT_ASSERT(inputs.size() % 2 == 0);
+      size_t side_num_elems = inputs.size() / 2;
+      auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
+      auto rhs_inputs = at::TensorList(inputs).slice(side_num_elems);
+      // TODO: checking this is not free, so we should stop if this keeps
+      // failing
+      if (have_same_shape(lhs_inputs) && have_same_shape(rhs_inputs) &&
+          shape_is_fast_for_reduce(lhs_inputs[0], rhs_inputs[0])) {
+        // sometimes lhs_inputs or rhs_inputs are not contiguous, and that
+        // causes at::cat to go through slow path view them as contiguous if
+        // possible by transposing
+        bool lhs_input_transposed = should_be_transposed(lhs_inputs);
+        bool rhs_input_transposed = should_be_transposed(rhs_inputs);
+        at::Tensor lhs, rhs;
+        if (lhs_input_transposed) {
+          std::vector<at::Tensor> lhs_contig_inputs =
+              transpose_inputs(lhs_inputs);
+          lhs = at::cat(lhs_contig_inputs, /*dim*/ 0);
+          lhs = lhs.t();
         } else {
-          auto acc = at::mm(inputs[0], inputs[side_num_elems]);
-          for (size_t i = 1; i < side_num_elems; ++i) {
-            acc.add_(at::mm(inputs[i], inputs[side_num_elems + i]));
-          }
-          push(stack, std::move(acc));
+          lhs = at::cat(lhs_inputs, /*dim=*/1);
         }
-        return 0;
-      };
-    })});
+        if (rhs_input_transposed) {
+          std::vector<at::Tensor> rhs_contig_inputs =
+              transpose_inputs(rhs_inputs);
+          rhs = at::cat(rhs_contig_inputs, /*dim*/ 1);
+          rhs = rhs.t();
+        } else {
+          rhs = at::cat(rhs_inputs, /*dim=*/0);
+        }
+        push(stack, at::mm(lhs, rhs));
+      } else {
+        auto acc = at::mm(inputs[0], inputs[side_num_elems]);
+        for (const auto i : c10::irange(1, side_num_elems)) {
+          acc.add_(at::mm(inputs[i], inputs[side_num_elems + i]));
+        }
+        push(stack, std::move(acc));
+      }
+    },
+    aliasAnalysisIsSpecialCase())});
 
 // TreeTokens will be used to label nodes of the graph, if the nodes will fit
 // our mm/add tree pattern. Basically we do dynamic programming on DAGs, where
 // when we reach node N with inputs A and B, then A and B have already been
-// procesed, and we can try to unify their TreeTokens (if they have them)
+// processed, and we can try to unify their TreeTokens (if they have them)
 // and build a larger tree.
 struct TreeToken {
   uint64_t tree_size = 0; // NOTE: measured in number of leaves i.e. mm ops
@@ -243,22 +250,26 @@ struct TreeToken {
 
 enum class Side { LHS, RHS };
 
-void BatchMMTreeReduce(Block* block) {
+void BatchMMTreeReduce(Block* block, AliasDb& alias_db) {
   auto graph = block->owningGraph();
 
   // Look for trees in the block
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : block->nodes()) {
-    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") &&
+        !alias_db.hasWriters(node)) {
       tokens[node] = TreeToken::mm(node);
-    } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
+    } else if (
+        node->matches("aten::t(Tensor self) -> Tensor") &&
+        !alias_db.hasWriters(node)) {
       auto input_it = tokens.find(node->input()->node());
       if (input_it != tokens.end()) {
         tokens[node] = TreeToken::transpose(node, input_it->second);
       }
     } else if (
         node->matches(
-            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
+            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") &&
+        !alias_db.hasWriters(node)) {
       Node* lhs = node->inputs()[0]->node();
       Node* rhs = node->inputs()[1]->node();
       auto lhs_it = tokens.find(lhs);
@@ -279,7 +290,7 @@ void BatchMMTreeReduce(Block* block) {
       }
     } else {
       for (auto block : node->blocks()) {
-        BatchMMTreeReduce(block);
+        BatchMMTreeReduce(block, alias_db);
       }
     }
   }
@@ -309,8 +320,9 @@ bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
   return other_side_input.numel() <= 1024 * 2048;
 }
 
-RegisterOperators mm_batch_side_reg(
-    {Operator(prim::MMBatchSide, [](const Node* node) {
+RegisterOperators mm_batch_side_reg({Operator(
+    prim::MMBatchSide,
+    [](const Node* node) -> Operation {
       size_t num_other_side_inputs = node->inputs().size() - 1;
       Side single_side = static_cast<Side>(node->i(Symbol::attr("side")));
       return [num_other_side_inputs, single_side](Stack& stack) {
@@ -351,10 +363,9 @@ RegisterOperators mm_batch_side_reg(
             }
           }
         }
-
-        return 0;
       };
-    })});
+    },
+    aliasAnalysisIsSpecialCase())});
 
 std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     Value* value,
@@ -369,7 +380,7 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     // Filter out dependent MMs. This algorithm might do very badly if e.g. you
     // have a lot of independent MMs, that depend on the first one, but I doubt
     // this will be a common scenario.
-    for (size_t i = 0; i < mms.size(); ++i) {
+    for (const auto i : c10::irange(mms.size())) {
       if (mms[i] == nullptr)
         continue;
       for (size_t j = i + 1; j < mms.size(); ++j) {
@@ -388,7 +399,8 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
   std::vector<Node*> rhses; // Like above, but rhs
   for (Use u : value->uses()) {
     if (u.user->owningBlock() == block &&
-        u.user->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+        u.user->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") &&
+        !alias_db.hasWriters(u.user)) {
       if (u.offset == 0 && u.user->inputs()[1] != value) {
         lhses.push_back(u.user);
       } else if (u.offset == 1 && u.user->inputs()[0] != value) {
@@ -418,7 +430,7 @@ void BatchMMSide(Block* block, AliasDb& alias_db) {
     batch_mm->i_(Symbol::attr("side"), static_cast<int>(side));
     Value* const_side = mms[0]->inputs().at(side == Side::LHS ? 0 : 1);
     batch_mm->addInput(const_side);
-    for (size_t i = 0; i < mms.size(); ++i) {
+    for (const auto i : c10::irange(mms.size())) {
       batch_mm->addInput(mms[i]->inputs().at(side == Side::LHS ? 1 : 0));
       mms[i]->output()->replaceAllUsesWith(batch_mm->outputs().at(i));
     }
@@ -426,7 +438,8 @@ void BatchMMSide(Block* block, AliasDb& alias_db) {
 
   std::unordered_set<Value*> considered_values;
   for (Node* node : block->nodes()) {
-    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") &&
+        !alias_db.hasWriters(node)) {
       for (Value* input : node->inputs()) {
         if (/*bool not_inserted = */ !considered_values.emplace(input).second) {
           continue;
@@ -459,18 +472,30 @@ bool hasMutableOperators(Block* block) {
   return false;
 }
 
+bool hasMMOperators(std::shared_ptr<Graph>& graph) {
+  DepthFirstGraphNodeIterator it(graph);
+  Node* n = nullptr;
+  while ((n = it.next()) != nullptr) {
+    if (n->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void BatchMM(std::shared_ptr<Graph>& graph) {
-  if (hasMutableOperators(graph->block())) {
-    // TODO(suo): make BatchMM mutability-safe
+  if (!hasMMOperators(graph)) {
     return;
   }
   AliasDb alias_db(graph);
-  BatchMMTreeReduce(graph->block());
+  BatchMMTreeReduce(graph->block(), alias_db);
   BatchMMSide(graph->block(), alias_db);
   EliminateDeadCode(graph);
   // It's possible that transpose rearrangements have created sequences of
   // consecutive transposes that didn't exist before.
-  PeepholeOptimize(graph);
+
+  // tensor type properties are not guaranteed to be correct
+  PeepholeOptimize(graph, /*disable_shape_peepholes*/ true);
 }
 
 } // namespace jit

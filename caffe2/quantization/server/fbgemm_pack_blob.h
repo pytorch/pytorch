@@ -4,6 +4,7 @@
 
 #include <fbgemm/Fbgemm.h>
 
+#include <caffe2/core/tensor.h>
 #include "caffe2/quantization/server/dnnlowp.h"
 
 namespace caffe2 {
@@ -15,7 +16,7 @@ struct Int8FCDNNLowPPackedWeightBlob {
   std::vector<dnnlowp::TensorQuantizationParams> qparams;
   std::shared_ptr<std::vector<std::int32_t>> column_offsets;
 
-  // The original tensor before packing
+  // The original tensor before packing but only with meta information
   Tensor original_tensor{CPU};
 
   std::shared_ptr<std::vector<std::int32_t>> bias;
@@ -36,9 +37,11 @@ struct Int8FCDNNLowPPackedWeightBlob {
  */
 struct Int8ConvDNNLowPPackedWeightBlob : public Int8FCDNNLowPPackedWeightBlob {
   // Only for 32-bit accumulation
-  std::shared_ptr<fbgemm::Packed3x3ConvMatrix> W_depthwise_3x3;
-  std::shared_ptr<fbgemm::Packed3x3x3ConvMatrix> W_depthwise_3x3x3;
+  std::shared_ptr<fbgemm::PackedDepthWiseConvMatrix> W_depthwise;
   std::shared_ptr<fbgemm::PackWeightMatrixForGConv<std::int8_t>> W_gconv;
+  std::shared_ptr<
+      fbgemm::PackWeightMatrixForGConv<std::int8_t, std::int32_t, 3>>
+      W_gconv3d;
 };
 
 } // namespace caffe2

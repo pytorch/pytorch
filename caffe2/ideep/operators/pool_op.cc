@@ -33,6 +33,7 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPPoolOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -41,12 +42,13 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
     auto Y_dims = CalcOutputDims(X, X.get_dim(1));
 
     if (cached_X_descriptor_ != X.get_descriptor()) {
-      op_key_.clear();
       cached_X_descriptor_ = X.dup_descriptor();
     }
 
-    ideep::pooling_forward::compute(op_key_, X, Y_dims, *Y,
-        stride_, kernel_, pad_tl(), pad_br(), algo_, pk_);
+    ideep::pooling_forward::compute(X, Y_dims, *Y,
+                                    {stride_.begin(), stride_.end()},
+                                    {kernel_.begin(), kernel_.end()},
+                                    pad_tl(), pad_br(), algo_, pk_);
 
     return true;
   }
@@ -54,7 +56,6 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
  private:
   iprop pk_;
   ialgo algo_;
-  ikey op_key_;
   itensor::descriptor cached_X_descriptor_;
 
   INPUT_TAGS(INPUT);
@@ -86,6 +87,7 @@ class IDEEPPoolGradientOp final : public IDEEPConvPoolOpBase {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPPoolGradientOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -95,7 +97,9 @@ class IDEEPPoolGradientOp final : public IDEEPConvPoolOpBase {
     auto* dX = Output(INPUT_GRAD);
 
     ideep::pooling_backward::compute(dY, Y, X, *dX,
-        stride_, kernel_, pad_tl(), pad_br(), algo_);
+                                     {stride_.begin(), stride_.end()},
+                                     {kernel_.begin(), kernel_.end()},
+                                     pad_tl(), pad_br(), algo_);
 
     return true;
   }

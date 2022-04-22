@@ -48,7 +48,7 @@ class IdWrapper {
   //      Fix this once we don't need GCC 4.8 anymore.
   friend constexpr bool operator==(
       const concrete_type& lhs,
-      const concrete_type& rhs) {
+      const concrete_type& rhs) noexcept {
     return lhs.id_ == rhs.id_;
   }
 
@@ -57,7 +57,7 @@ class IdWrapper {
   //      Fix this once we don't need GCC 4.8 anymore.
   friend constexpr bool operator!=(
       const concrete_type& lhs,
-      const concrete_type& rhs) {
+      const concrete_type& rhs) noexcept {
     return !(lhs == rhs);
   }
 
@@ -66,12 +66,12 @@ class IdWrapper {
 
 } // namespace c10
 
-#define C10_DEFINE_HASH_FOR_IDWRAPPER(ClassName)\
-  namespace std {                               \
-  template <>                                   \
-  struct hash<ClassName> {                      \
-    size_t operator()(ClassName x) const {      \
-      return hash_value(x);                     \
-    }                                           \
-  };                                            \
+#define C10_DEFINE_HASH_FOR_IDWRAPPER(ClassName) \
+  namespace std {                                \
+  template <>                                    \
+  struct hash<ClassName> {                       \
+    size_t operator()(ClassName x) const {       \
+      return hash_value(x);                      \
+    }                                            \
+  };                                             \
   }

@@ -1,14 +1,18 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
+#include <c10/util/Registry.h>
+#include "caffe2/core/operator.h"
+
 // TODO Also register c10 operators on mobile
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
-#include "caffe2/core/operator.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -36,7 +40,6 @@ class C10OperatorWrapper final : public Operator<Context> {
       Workspace* ws)
       : Operator<Context>(operator_def, ws),
         op_(op),
-        kernel_(at::nullopt),
         has_preallocated_outputs_(
             op_.schema().arguments().size() != 0 &&
             op_.schema().arguments().back().name() ==
@@ -44,8 +47,9 @@ class C10OperatorWrapper final : public Operator<Context> {
     AT_ASSERT(
         !has_preallocated_outputs_ ||
         op_.schema().arguments().back().type()->isSubtypeOf(
-            OptionalType::create(ListType::ofTensors())));
+            *OptionalType::create(ListType::ofTensors())));
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     AT_ASSERT(operator_def.output_size() == op_.schema().returns().size());
     AT_ASSERT(
         operator_def.input_size() + (has_preallocated_outputs_ ? 1 : 0) <=
@@ -86,26 +90,27 @@ class C10OperatorWrapper final : public Operator<Context> {
 
         AT_ASSERTM(
             argument.type()->isSubtypeOf(
-                OptionalType::create(ListType::ofTensors())),
+                *OptionalType::create(ListType::ofTensors())),
             "Error in caffe2->c10 wrapper: Operator schema has a parameter named ",
             detail::PREALLOCATED_OUTPUT_ARGNAME,
             ", but it's not of type TensorList?");
         stack_.emplace_back(preallocated_outputs_());
 
-      } else if (argument.type()->isSubtypeOf(TensorType::get())) {
+      } else if (argument.type()->isSubtypeOf(*TensorType::get())) {
         AT_ASSERTM(
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             input_tensor_index < InputSize(),
             "Error in caffe2->c10 wrapper: Too few tensor arguments given (",
             InputSize(),
             "), operator schema expected more.");
         stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
-      } else if (argument.type()->isSubtypeOf(OptionalType::ofTensor())) {
+      } else if (argument.type()->isSubtypeOf(*OptionalType::ofTensor())) {
         if (input_tensor_index < InputSize()) {
           stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
         } else {
           stack_.emplace_back(IValue());
         }
-      } else if (argument.type()->isSubtypeOf(ListType::ofTensors())) {
+      } else if (argument.type()->isSubtypeOf(*ListType::ofTensors())) {
         AT_ASSERTM(
             input_tensor_index == 0,
             "Error in caffe2->c10 wrapper: Schema can only have either one or more Tensor inputs or one TensorList input.");
@@ -127,47 +132,45 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   void callKernel_() {
     AT_ASSERT(stack_.size() == op_.schema().arguments().size());
-    if (!kernel_.has_value()) {
-      // TODO if kernel is already set, try re-dispatch to assert it goes to the same kernel
-      kernel_ = c10::Dispatcher::singleton().lookup(op_, &stack_);
-    }
-    kernel_->call(&stack_);
+    op_.callBoxed(&stack_);
   }
 
   void popOutputs_() {
     AT_ASSERT(stack_.size() == op_.schema().returns().size());
-    for (size_t i = 0; i < op_.schema().returns().size(); ++i) {
+    for (const auto i : c10::irange(op_.schema().returns().size())) {
       OperatorBase::SetOutputTensor(i, Tensor(std::move(stack_[i]).toTensor()));
     }
     stack_.clear();
   }
 
   c10::List<at::Tensor> array_inputs_() {
-    c10::List<at::Tensor> result = c10::make_list<at::Tensor>();
+    c10::List<at::Tensor> result;
     result.reserve(InputSize());
-    for (size_t i = 0; i < InputSize(); ++i) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    for (const auto i : c10::irange(InputSize())) {
       result.emplace_back(Input(i));
     }
     return result;
   }
 
   c10::List<at::Tensor> preallocated_outputs_() {
-    c10::List<at::Tensor> result = c10::make_list<at::Tensor>();
+    c10::List<at::Tensor> result;
     result.reserve(OutputSize());
-    for (size_t i = 0; i < OutputSize(); ++i) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    for (const auto i : c10::irange(OutputSize())) {
       result.emplace_back(OperatorBase::OutputTensorOrUndefined(i));
     }
     return result;
   }
 
   IValue get_nontensor_argument_(const c10::Argument& argument) {
-    if (argument.type()->isSubtypeOf(IntType::get())) {
+    if (argument.type()->isSubtypeOf(*IntType::get())) {
       return get_nontensor_argument_<int>(
           argument.name(), argument.default_value());
-    } else if (argument.type()->isSubtypeOf(FloatType::get())) {
+    } else if (argument.type()->isSubtypeOf(*FloatType::get())) {
       return get_nontensor_argument_<double>(
           argument.name(), argument.default_value());
-    } else if (argument.type()->isSubtypeOf(BoolType::get())) {
+    } else if (argument.type()->isSubtypeOf(*BoolType::get())) {
       return get_nontensor_argument_<bool>(
           argument.name(), argument.default_value());
     } else {
@@ -196,7 +199,6 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   c10::OperatorHandle op_;
-  c10::optional<OpKernel> kernel_;
 
   // has_preallocated_outputs_ is true iff the operator schema has a last
   // argument that is a TensorList and has a name equal to with the name equal
@@ -225,7 +227,7 @@ createC10OperatorWrapper(const c10::OperatorName& op_name) {
         ".",
         op_name.overload_name,
         " with caffe2, but didn't find the c10 operator.");
-    return c10::guts::make_unique<C10OperatorWrapper<Context>>(
+    return std::make_unique<C10OperatorWrapper<Context>>(
         *op_handle, op_def, ws);
   };
 }

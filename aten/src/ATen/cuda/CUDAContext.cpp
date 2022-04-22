@@ -1,5 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCGeneral.hpp>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <ATen/cuda/CUDAConfig.h>
 #include <mutex>
@@ -29,6 +29,10 @@ void initDeviceProperty(DeviceIndex device_index) {
 
 } // anonymous namespace
 
+// We need this function to force the linking against torch_cuda(_cpp) on Windows.
+// If you need to modify this function, please specify a new function and apply
+// the changes according to https://github.com/pytorch/pytorch/pull/34288.
+// Related issue: https://github.com/pytorch/pytorch/issues/31611.
 /* Device info */
 int warp_size() {
   return getCurrentDeviceProperties()->warpSize;
@@ -47,17 +51,18 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
   return &device_properties[device];
 }
 
+bool canDeviceAccessPeer(int64_t device, int64_t peer_device) {
+  std::call_once(init_flag, initCUDAContextVectors);
+  if (device == -1) device = c10::cuda::current_device();
+  AT_ASSERT(device >= 0 && device < num_gpus);
+  AT_ASSERT(peer_device >= 0 && peer_device < num_gpus);
+  int can_access = 0;
+  AT_CUDA_CHECK(cudaDeviceCanAccessPeer(&can_access, device, peer_device));
+  return can_access != 0;
+}
+
 Allocator* getCUDADeviceAllocator() {
-  return at::globalContext().getTHCState()->cudaDeviceAllocator;
-}
-
-/* Handles */
-cusparseHandle_t getCurrentCUDASparseHandle() {
-  return THCState_getCurrentSparseHandle(at::globalContext().getTHCState());
-}
-
-cublasHandle_t getCurrentCUDABlasHandle() {
-  return THCState_getCurrentBlasHandle(at::globalContext().getTHCState());
+  return c10::cuda::CUDACachingAllocator::get();
 }
 
 } // namespace cuda

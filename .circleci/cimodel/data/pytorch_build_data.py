@@ -1,59 +1,7 @@
-#!/usr/bin/env python3
-
-from cimodel.lib.conf_tree import ConfigNode, X, XImportant
+from cimodel.lib.conf_tree import ConfigNode
 
 
 CONFIG_TREE_DATA = [
-    ("trusty", [
-        (None, [
-            XImportant("2.7.9"),
-            X("2.7"),
-            X("3.5"),
-            X("nightly"),
-        ]),
-        ("gcc", [
-            ("4.8", [X("3.6")]),
-            ("5.4", [
-                XImportant("3.6"),
-                ("3.6", [
-                    ("xla", [XImportant(True)]),
-                    ("namedtensor", [XImportant(True)]),
-                ]),
-            ]),
-            ("7", [X("3.6")]),
-        ]),
-    ]),
-    ("xenial", [
-        ("clang", [
-            ("5", [
-                XImportant("3.6"),  # This is actually the ASAN build
-                ("3.6", [
-                    ("namedtensor", [XImportant(True)]),  # ASAN
-                ]),
-            ]),
-        ]),
-        ("cuda", [
-            ("9", [
-                # Note there are magic strings here
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L21
-                # and
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L143
-                # and
-                # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
-                # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                X("2.7"),
-                XImportant("3.6"),
-                ("2.7", [
-                    ("namedtensor", [XImportant(True)]),
-                ]),
-            ]),
-            ("9.2", [X("3.6")]),
-            ("10", [X("3.6")]),
-        ]),
-        ("android", [
-            ("r19c", [XImportant("3.6")]),
-        ]),
-    ]),
 ]
 
 
@@ -95,38 +43,18 @@ class DistroConfigNode(TreeConfigNode):
         distro = self.find_prop("distro_name")
 
         next_nodes = {
-            "trusty": TrustyCompilerConfigNode,
             "xenial": XenialCompilerConfigNode,
+            "bionic": BionicCompilerConfigNode,
         }
         return next_nodes[distro]
-
-
-class TrustyCompilerConfigNode(TreeConfigNode):
-
-    def modify_label(self, label):
-        return label or "<unspecified>"
-
-    def init2(self, node_name):
-        self.props["compiler_name"] = node_name
-
-    def child_constructor(self):
-        return TrustyCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
-
-
-class TrustyCompilerVersionConfigNode(TreeConfigNode):
-
-    def init2(self, node_name):
-        self.props["compiler_version"] = node_name
-
-    # noinspection PyMethodMayBeStatic
-    def child_constructor(self):
-        return PyVerConfigNode
 
 
 class PyVerConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["pyver"] = node_name
         self.props["abbreviated_pyver"] = get_major_pyver(node_name)
+        if node_name == "3.9":
+            self.props["abbreviated_pyver"] = "py3.9"
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
@@ -141,11 +69,41 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         experimental_feature = self.find_prop("experimental_feature")
 
         next_nodes = {
+            "asan": AsanConfigNode,
             "xla": XlaConfigNode,
-            "namedtensor": NamedTensorConfigNode,
+            "mlc": MLCConfigNode,
+            "vulkan": VulkanConfigNode,
+            "parallel_tbb": ParallelTBBConfigNode,
+            "crossref": CrossRefConfigNode,
+            "parallel_native": ParallelNativeConfigNode,
+            "onnx": ONNXConfigNode,
+            "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
+            "build_only": BuildOnlyConfigNode,
+            "shard_test": ShardTestConfigNode,
+            "cuda_gcc_override": CudaGccOverrideConfigNode,
+            "pure_torch": PureTorchConfigNode,
+            "slow_gradcheck": SlowGradcheckConfigNode,
         }
         return next_nodes[experimental_feature]
+
+
+class SlowGradcheckConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_slow_gradcheck"] = True
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
+
+class PureTorchConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PURE_TORCH=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_pure_torch"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
 
 
 class XlaConfigNode(TreeConfigNode):
@@ -158,13 +116,110 @@ class XlaConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
-
-class NamedTensorConfigNode(TreeConfigNode):
+class MLCConfigNode(TreeConfigNode):
     def modify_label(self, label):
-        return "NAMEDTENSOR=" + str(label)
+        return "MLC=" + str(label)
 
     def init2(self, node_name):
-        self.props["is_namedtensor"] = node_name
+        self.props["is_mlc"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class AsanConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "Asan=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_asan"] = node_name
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
+
+
+class ONNXConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "Onnx=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_onnx"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class VulkanConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "Vulkan=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_vulkan"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class ParallelTBBConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PARALLELTBB=" + str(label)
+
+    def init2(self, node_name):
+        self.props["parallel_backend"] = "paralleltbb"
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class CrossRefConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_crossref"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class ParallelNativeConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PARALLELNATIVE=" + str(label)
+
+    def init2(self, node_name):
+        self.props["parallel_backend"] = "parallelnative"
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class LibTorchConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "BUILD_TEST_LIBTORCH=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_libtorch"] = node_name
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
+
+
+class CudaGccOverrideConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["cuda_gcc_override"] = node_name
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
+
+
+class BuildOnlyConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["build_only"] = node_name
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
+
+
+class ShardTestConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["shard_test"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
@@ -182,16 +237,41 @@ class ImportantConfigNode(TreeConfigNode):
 
 
 class XenialCompilerConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return label or "<unspecified>"
 
     def init2(self, node_name):
         self.props["compiler_name"] = node_name
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
-        return XenialCompilerVersionConfigNode
+
+        return XenialCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
+
+
+class BionicCompilerConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return label or "<unspecified>"
+
+    def init2(self, node_name):
+        self.props["compiler_name"] = node_name
+
+    # noinspection PyMethodMayBeStatic
+    def child_constructor(self):
+
+        return BionicCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
 
 
 class XenialCompilerVersionConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["compiler_version"] = node_name
+
+    # noinspection PyMethodMayBeStatic
+    def child_constructor(self):
+        return PyVerConfigNode
+
+
+class BionicCompilerVersionConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["compiler_version"] = node_name
 

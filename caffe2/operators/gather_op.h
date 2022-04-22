@@ -3,6 +3,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -15,7 +16,8 @@ template <typename IndexType, typename DataDimsVec, typename IndexDimsVec>
 static vector<IndexType> calc_output_shape_vector(
     const DataDimsVec& data_dims,
     const IndexDimsVec& indices_dims,
-    int axis) {
+    int axis,
+    bool match_outer) {
   vector<IndexType> shape;
   // If the dimension we are indexing is empty, just use data_dims as shape.
   // This replicates behavior in (https://github.com/pytorch/pytorch/pull/13781)
@@ -24,7 +26,12 @@ static vector<IndexType> calc_output_shape_vector(
     shape.insert(shape.end(), data_dims.begin(), data_dims.end());
   } else {
     shape.insert(shape.end(), data_dims.begin(), data_dims.begin() + axis);
-    shape.insert(shape.end(), indices_dims.begin(), indices_dims.end());
+    if (match_outer) {
+      shape.insert(
+          shape.end(), indices_dims.begin() + axis, indices_dims.end());
+    } else {
+      shape.insert(shape.end(), indices_dims.begin(), indices_dims.end());
+    }
     shape.insert(shape.end(), data_dims.begin() + axis + 1, data_dims.end());
   }
   return shape;
@@ -38,7 +45,7 @@ static void check_indexarray_range(
     IndexType indexing_axis_dim,
     bool wrap_indices) {
   //
-  for (auto i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     auto idx = indices[i];
     if (wrap_indices && idx < 0) {
       idx = idx + indexing_axis_dim;
@@ -60,7 +67,8 @@ static bool gather_impl(
     int indicesIdx,
     int outputIdx,
     int axis,
-    bool wrap_indices) {
+    bool wrap_indices,
+    bool match_outer) {
   // If we endup using it on GPU doing O(N) memcpy is probably not best :)
   // TODO: implement prefetching if it starts mattering (TF does it)
 
@@ -79,8 +87,8 @@ static bool gather_impl(
 
   // New shape:
   //  [data dims before axis] + [indices dims] + [data dims after axis]
-  vector<int64_t> shape =
-      calc_output_shape_vector<int64_t>(data.sizes(), indices.sizes(), axis);
+  vector<int64_t> shape = calc_output_shape_vector<int64_t>(
+      data.sizes(), indices.sizes(), axis, match_outer);
   Tensor* output = op->Output(outputIdx, shape, at::dtype(dataType));
   auto out = static_cast<char*>(output->raw_mutable_data(dataType));
 
@@ -103,20 +111,35 @@ static bool gather_impl(
   auto src_batch_bytesize = data.size_from_dim(axis) * item_bytesize;
   // Treat indices as a single block even if they have multiple dimensions.
   // The "gathered batch" is a cumulative result combining indexed blocks.
+  auto idx_inner_dims_product = indices.size_from_dim(axis);
   auto N = indices.numel();
+  if (match_outer) {
+    CAFFE_ENFORCE_GE(axis, 1, "Axis should be at least 1");
+    for (const auto i : c10::irange(axis)) {
+      CAFFE_ENFORCE_EQ(
+          data.size(i),
+          indices.size(i),
+          "INDICES must have the same outer dims as DATA (before dim AXIS)");
+    }
+    N = idx_inner_dims_product;
+  }
+
   auto gathered_batch_bytesize = N * block_size * item_bytesize;
 
   check_indexarray_range<Index>(idxs, N, src_indexing_axis_dim, wrap_indices);
 
   // Special-case single-float copy for efficiency
   if (data.template IsType<float>() && block_size == 1) {
-    for (auto batch = 0; batch < outer_dims_product; ++batch) {
+    for (const auto batch : c10::irange(outer_dims_product)) {
       const float* src_floats =
           (const float*)(src_base + batch * src_batch_bytesize);
       float* dst_floats = (float*)(out + batch * gathered_batch_bytesize);
 
-      for (auto i = 0; i < N; ++i) {
+      for (const auto i : c10::irange(N)) {
         auto idx = idxs[i];
+        if (match_outer) {
+          idx = idxs[batch * idx_inner_dims_product + i];
+        }
         if (wrap_indices && idx < 0) {
           idx = idx + src_indexing_axis_dim;
         }
@@ -126,9 +149,12 @@ static bool gather_impl(
   } else {
     // outer_dims_product specifies how many times we repeat inner dimensions,
     // so we just iterate over it to cover all outer dimensions.
-    for (auto batch = 0; batch < outer_dims_product; ++batch) {
-      for (auto i = 0; i < N; ++i) {
+    for (const auto batch : c10::irange(outer_dims_product)) {
+      for (const auto i : c10::irange(N)) {
         auto idx = idxs[i];
+        if (match_outer) {
+          idx = idxs[batch * idx_inner_dims_product + i];
+        }
         if (wrap_indices && idx < 0) {
           idx = idx + src_indexing_axis_dim;
         }
@@ -152,13 +178,14 @@ class GatherOp : public Operator<Context> {
   template <class... Args>
   explicit GatherOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
-        OP_SINGLE_ARG(int, "axis", axis_, 0) {
+        OP_SINGLE_ARG(int, "axis", axis_, 0),
+        OP_SINGLE_ARG(bool, "match_outer", match_outer_, false) {
     // TBD: We may want to fix the old index wrap behaviour once we have
     // operator versioning, to only apply it when needed as otherwise its likely
     // an error.
     // Right now, we apply index wrapping by default only to axis == 0,
     // since we have ONNX conversion code that uses it. For other ops it
-    // needs to be speified explicitly with argument or you don't get it.
+    // needs to be specified explicitly with argument or you don't get it.
     if (OperatorBase::HasArgument("wrap_indices")) {
       wrap_indices_ = Operator<Context>::template GetSingleArgument<bool>(
           "wrap_indices", (false));
@@ -177,7 +204,7 @@ class GatherOp : public Operator<Context> {
   template <typename Index>
   bool DoRunWithType() {
     return gather_helper::gather_impl<Index, Context>(
-        this, DATA, INDICES, 0, axis_, wrap_indices_);
+        this, DATA, INDICES, 0, axis_, wrap_indices_, match_outer_);
   }
 
   INPUT_TAGS(DATA, INDICES);
@@ -185,6 +212,7 @@ class GatherOp : public Operator<Context> {
  protected:
   int axis_;
   bool wrap_indices_;
+  bool match_outer_;
 };
 
 } // namespace caffe2

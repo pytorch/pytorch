@@ -1,0 +1,331 @@
+name: pull
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+      - release/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  linux-xenial-py3_7-gcc5_4-build:
+    name: linux-xenial-py3.7-gcc5.4
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-py3.7-gcc5.4
+      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
+
+  linux-xenial-py3_7-gcc5_4-test:
+    name: linux-xenial-py3.7-gcc5.4
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-xenial-py3_7-gcc5_4-build
+    with:
+      build-environment: linux-xenial-py3.7-gcc5.4
+      docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
+
+  linux-docs:
+    name: linux-docs
+    uses: ./.github/workflows/_docs.yml
+    needs: linux-xenial-py3_7-gcc5_4-build
+    with:
+      build-environment: linux-xenial-py3.7-gcc5.4
+      docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4-build.outputs.docker-image }}
+
+  linux-xenial-py3_7-gcc7-build:
+    name: linux-xenial-py3.7-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-py3.7-gcc7
+      docker-image-name: pytorch-linux-xenial-py3.7-gcc7
+
+  linux-xenial-py3_7-gcc7-test:
+    name: linux-xenial-py3.7-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-xenial-py3_7-gcc7-build
+    with:
+      build-environment: linux-xenial-py3.7-gcc7
+      docker-image: ${{ needs.linux-xenial-py3_7-gcc7-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+        ]}
+
+  linux-xenial-py3_7-clang7-asan-build:
+    name: linux-xenial-py3.7-clang7-asan
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-py3.7-clang7-asan
+      docker-image-name: pytorch-linux-xenial-py3-clang7-asan
+
+  linux-xenial-py3_7-clang7-asan-test:
+    name: linux-xenial-py3.7-clang7-asan
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-xenial-py3_7-clang7-asan-build
+    with:
+      build-environment: linux-xenial-py3.7-clang7-asan
+      docker-image: ${{ needs.linux-xenial-py3_7-clang7-asan-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+        ]}
+
+  linux-xenial-py3_7-gcc7-no-ops:
+    name: linux-xenial-py3.7-gcc7-no-ops
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-py3.7-gcc7-no-ops
+      docker-image-name: pytorch-linux-xenial-py3.7-gcc7
+
+  linux-xenial-py3_7-clang7-onnx-build:
+    name: linux-xenial-py3.7-clang7-onnx
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-py3.7-clang7-onnx
+      docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
+
+  linux-xenial-py3_7-clang7-onnx-test:
+    name: linux-xenial-py3.7-clang7-onnx
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-xenial-py3_7-clang7-onnx-build
+    with:
+      build-environment: linux-xenial-py3.7-clang7-onnx
+      docker-image: ${{ needs.linux-xenial-py3_7-clang7-onnx-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+        ]}
+
+  linux-bionic-py3_7-clang9-build:
+    name: linux-bionic-py3.7-clang9
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-py3.7-clang9
+      docker-image-name: pytorch-linux-bionic-py3.7-clang9
+
+  linux-bionic-py3_7-clang9-test:
+    name: linux-bionic-py3.7-clang9
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-py3_7-clang9-build
+    with:
+      build-environment: linux-bionic-py3.7-clang9
+      docker-image: ${{ needs.linux-bionic-py3_7-clang9-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "crossref", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
+
+  linux-bionic-cuda11_3-py3_7-clang9-build:
+    name: linux-bionic-cuda11.3-py3.7-clang9
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda11.3-py3.7-clang9
+      docker-image-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
+
+  linux-vulkan-bionic-py3_7-clang9-build:
+    name: linux-vulkan-bionic-py3.7-clang9
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-vulkan-bionic-py3.7-clang9
+      docker-image-name: pytorch-linux-bionic-py3.7-clang9
+
+  linux-vulkan-bionic-py3_7-clang9-test:
+    name: linux-vulkan-bionic-py3.7-clang9
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-vulkan-bionic-py3_7-clang9-build
+    with:
+      build-environment: linux-vulkan-bionic-py3.7-clang9
+      docker-image: ${{ needs.linux-vulkan-bionic-py3_7-clang9-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
+
+  linux-xenial-cuda11_3-py3_7-gcc7-build:
+    name: linux-xenial-cuda11.3-py3.7-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
+      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+
+  linux-xenial-cuda11_3-py3_7-gcc7-test:
+    name: linux-xenial-cuda11.3-py3.7-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-xenial-cuda11_3-py3_7-gcc7-build
+    with:
+      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
+      docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.8xlarge.nvidia.gpu" },
+        ]}
+
+  linux-bionic-rocm5_0-py3_7-build:
+    name: linux-bionic-rocm5.0-py3.7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-rocm5.0-py3.7
+      docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
+
+  linux-bionic-rocm5_0-py3_7-test:
+    name: linux-bionic-rocm5.0-py3.7
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: linux-bionic-rocm5_0-py3_7-build
+    with:
+      build-environment: linux-bionic-rocm5.0-py3.7
+      docker-image: ${{ needs.linux-bionic-rocm5_0-py3_7-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+        ]}
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+
+  linux-xenial-py3-clang5-mobile-build:
+    name: linux-xenial-py3-clang5-mobile-build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-py3-clang5-mobile-build
+      docker-image-name: pytorch-linux-xenial-py3-clang5-asan
+      build-generates-artifacts: false
+
+  linux-xenial-py3-clang5-mobile-custom-build-static:
+    name: linux-xenial-py3-clang5-mobile-custom-build-static
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-py3-clang5-mobile-custom-build-static
+      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      build-generates-artifacts: false
+
+  pytorch-xla-linux-bionic-py3_7-clang8-build:
+    name: pytorch-xla-linux-bionic-py3.7-clang8
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: pytorch-xla-linux-bionic-py3.7-clang8
+      docker-image-name: xla_base
+
+  pytorch-xla-linux-bionic-py3_7-clang8-test:
+    if: ${{ false }}
+    name: pytorch-xla-linux-bionic-py3.7-clang8
+    uses: ./.github/workflows/_linux-test.yml
+    needs: pytorch-xla-linux-bionic-py3_7-clang8-build
+    with:
+      build-environment: pytorch-xla-linux-bionic-py3.7-clang8
+      docker-image: ${{ needs.pytorch-xla-linux-bionic-py3_7-clang8-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "xla", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
+
+  win-vs2019-cpu-py3-build:
+    name: win-vs2019-cpu-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2019-cpu-py3
+      cuda-version: cpu
+
+  win-vs2019-cpu-py3-test:
+    name: win-vs2019-cpu-py3
+    uses: ./.github/workflows/_win-test.yml
+    needs: win-vs2019-cpu-py3-build
+    with:
+      build-environment: win-vs2019-cpu-py3
+      cuda-version: cpu
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "windows.4xlarge" },
+          { config: "default", shard: 2, num_shards: 2, runner: "windows.4xlarge" },
+        ]}
+
+  win-vs2019-cuda11_3-py3-build:
+    name: win-vs2019-cuda11.3-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2019-cuda11.3-py3
+      cuda-version: "11.3"
+
+  win-vs2019-cuda11_3-py3-test:
+    name: win-vs2019-cuda11.3-py3
+    uses: ./.github/workflows/_win-test.yml
+    needs: win-vs2019-cuda11_3-py3-build
+    with:
+      build-environment: win-vs2019-cuda11.3-py3
+      cuda-version: "11.3"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
+        ]}
+
+  linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
+    name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
+    uses: ./.github/workflows/_bazel-build-test.yml
+    with:
+      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
+      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+
+  pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single:
+    name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+    uses: ./.github/workflows/_android-build-test.yml
+    with:
+      build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+
+  pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit:
+    name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
+    uses: ./.github/workflows/_android-build-test.yml
+    with:
+      build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
+      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+
+  linux-xenial-py3_7-gcc5_4-mobile-lightweight-dispatch-build:
+    name: linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build
+      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
+      build-generates-artifacts: false
+
+  deploy-linux-xenial-cuda11_3-py3_7-gcc7-build:
+    name: deploy-linux-xenial-cuda11.3-py3.7-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7
+      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+
+  deploy-linux-xenial-cuda11_3-py3_7-gcc7-test:
+    name: linux-xenial-cuda11.3-py3.7-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: deploy-linux-xenial-cuda11_3-py3_7-gcc7-build
+    with:
+      build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7
+      docker-image: ${{ needs.deploy-linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}

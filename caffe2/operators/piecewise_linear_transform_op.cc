@@ -82,3 +82,19 @@ bound.
 
 SHOULD_NOT_DO_GRADIENT(PiecewiseLinearTransform);
 } // namespace caffe2
+
+using PiecewiseLinearTransformOpFloatCPU =
+    caffe2::PiecewiseLinearTransformOp<float, caffe2::CPUContext>;
+
+// clang-format off
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    PiecewiseLinearTransform,
+    "_caffe2::PiecewiseLinearTransform("
+      "Tensor predictions, "
+      "float[] bounds, "
+      "float[] slopes, "
+      "float[] intercepts, "
+      "bool binary"
+    ") -> (Tensor output_0)",
+    PiecewiseLinearTransformOpFloatCPU);
+// clang-format on

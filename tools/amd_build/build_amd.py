@@ -1,47 +1,53 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from __future__ import absolute_import, division, print_function
+
 import os
-import subprocess
 import argparse
-from functools import reduce
-from itertools import chain
+import sys
 
-from pyHIPIFY import hipify_python
+sys.path.append(
+    os.path.realpath(
+        os.path.join(
+            __file__, os.path.pardir, os.path.pardir, os.path.pardir, "torch", "utils"
+        )
+    )
+)
 
-parser = argparse.ArgumentParser(description='Top-level script for HIPifying, filling in most common parameters')
+from hipify import hipify_python  # type: ignore[import]
+
+parser = argparse.ArgumentParser(
+    description="Top-level script for HIPifying, filling in most common parameters"
+)
 parser.add_argument(
-    '--out-of-place-only',
-    action='store_true',
-    help="Whether to only run hipify out-of-place on source files")
+    "--out-of-place-only",
+    action="store_true",
+    help="Whether to only run hipify out-of-place on source files",
+)
 
 parser.add_argument(
-    '--project-directory',
+    "--project-directory",
     type=str,
-    default='',
+    default="",
     help="The root of the project.",
-    required=False)
+    required=False,
+)
 
 parser.add_argument(
-    '--output-directory',
+    "--output-directory",
     type=str,
-    default='',
+    default="",
     help="The directory to store the hipified project",
-    required=False)
+    required=False,
+)
 
 parser.add_argument(
-    '--extra-include-dir',
+    "--extra-include-dir",
     type=str,
     default=[],
-    nargs='+',
+    nargs="+",
     help="The list of extra directories in caffe2 to hipify",
-    required=False)
-
-# Hipify using HIP-Clang launch.
-parser.add_argument(
-    '--hip-clang-launch',
-    action='store_true',
-    help=argparse.SUPPRESS)
+    required=False,
+)
 
 args = parser.parse_args()
 
@@ -70,6 +76,7 @@ includes = [
     "caffe2/db/*",
     "caffe2/utils/*",
     "caffe2/contrib/gloo/*",
+    "caffe2/contrib/nccl/*",
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
     "modules/*",
@@ -78,14 +85,14 @@ includes = [
     "aten/src/ATen/cuda/*",
     "aten/src/ATen/native/cuda/*",
     "aten/src/ATen/native/cudnn/*",
+    "aten/src/ATen/native/nested/cuda/*",
     "aten/src/ATen/native/sparse/cuda/*",
+    "aten/src/ATen/native/quantized/cuda/*",
     "aten/src/THC/*",
-    "aten/src/THCUNN/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
     # we do want to handle, so explicitly specify them
     "aten/src/THC/CMakeLists.txt",
-    "aten/src/THCUNN/CMakeLists.txt",
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
 ]
@@ -93,53 +100,81 @@ includes = [
 for new_dir in args.extra_include_dir:
     abs_new_dir = os.path.join(proj_dir, new_dir)
     if os.path.exists(abs_new_dir):
-        new_dir = os.path.join(new_dir, '**/*')
+        new_dir = os.path.join(new_dir, "**/*")
         includes.append(new_dir)
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
     "caffe2/operators/pool_op_cudnn.cu",
-    '*/hip/*',
+    "*/hip/*",
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
-    "torch/csrc/autograd/engine.cpp",
+    "torch/csrc/jit/codegen/cuda/codegen.cpp",
+    "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/grid_reduction.cu",
+    "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h",
+    "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
     "torch/include/*",
 ]
 
-if not args.out_of_place_only:
-    # Apply patch files in place (PyTorch only)
-    patch_folder = os.path.join(amd_build_dir, "patches")
-    for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
-        subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
+# Check if the compiler is hip-clang.
+def is_hip_clang() -> bool:
+    try:
+        hip_path = os.getenv("HIP_PATH", "/opt/rocm/hip")
+        with open(hip_path + "/lib/.hipInfo") as f:
+            return "HIP_COMPILER=clang" in f.read()
+    except IOError:
+        return False
 
-    # Make various replacements inside AMD_BUILD/torch directory
-    ignore_files = [
-        # These files use nvrtc, hip doesn't have equivalent
-        "csrc/autograd/profiler.h",
-        "csrc/autograd/profiler.cpp",
-        # These files are compatible with both cuda and hip
-        "csrc/autograd/engine.cpp"
-    ]
-    paths = ("torch", "tools")
-    for root, _directories, files in chain.from_iterable(os.walk(path) for path in paths):
-        for filename in files:
-            if filename.endswith(".cpp") or filename.endswith(".h") or filename.endswith(".hpp"):
-                source = os.path.join(root, filename)
-                # Disabled files
-                if reduce(lambda result, exclude: source.endswith(exclude) or result, ignore_files, False):
-                    continue
-                # Update contents.
-                with open(source, "r+") as f:
-                    contents = f.read()
-                    contents = contents.replace("USE_CUDA", "USE_ROCM")
-                    contents = contents.replace("CUDA_VERSION", "0")
-                    f.seek(0)
-                    f.write(contents)
-                    f.truncate()
-                    f.flush()
-                    os.fsync(f)
+
+# TODO Remove once gloo submodule is recent enough to contain upstream fix.
+if is_hip_clang():
+    gloo_cmake_file = "third_party/gloo/cmake/Hip.cmake"
+    do_write = False
+    if os.path.exists(gloo_cmake_file):
+        with open(gloo_cmake_file, "r") as sources:
+            lines = sources.readlines()
+        newlines = [line.replace(" hip_hcc ", " amdhip64 ") for line in lines]
+        if lines == newlines:
+            print("%s skipped" % gloo_cmake_file)
+        else:
+            with open(gloo_cmake_file, "w") as sources:
+                for line in newlines:
+                    sources.write(line)
+            print("%s updated" % gloo_cmake_file)
+
+gloo_cmake_file = "third_party/gloo/cmake/Modules/Findrccl.cmake"
+if os.path.exists(gloo_cmake_file):
+    do_write = False
+    with open(gloo_cmake_file, "r") as sources:
+        lines = sources.readlines()
+    newlines = [line.replace("RCCL_LIBRARY", "RCCL_LIBRARY_PATH") for line in lines]
+    if lines == newlines:
+        print("%s skipped" % gloo_cmake_file)
+    else:
+        with open(gloo_cmake_file, "w") as sources:
+            for line in newlines:
+                sources.write(line)
+        print("%s updated" % gloo_cmake_file)
+
+# TODO Remove once gloo submodule is recent enough to contain upstream fix.
+if is_hip_clang():
+    gloo_cmake_file = "third_party/gloo/cmake/Dependencies.cmake"
+    do_write = False
+    if os.path.exists(gloo_cmake_file):
+        with open(gloo_cmake_file, "r") as sources:
+            lines = sources.readlines()
+        newlines = [line.replace("HIP_HCC_FLAGS", "HIP_CLANG_FLAGS") for line in lines]
+        if lines == newlines:
+            print("%s skipped" % gloo_cmake_file)
+        else:
+            with open(gloo_cmake_file, "w") as sources:
+                for line in newlines:
+                    sources.write(line)
+            print("%s updated" % gloo_cmake_file)
 
 hipify_python.hipify(
     project_directory=proj_dir,
@@ -147,4 +182,5 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    hip_clang_launch=args.hip_clang_launch)
+    hip_clang_launch=is_hip_clang(),
+)

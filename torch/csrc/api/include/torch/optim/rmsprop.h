@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
+#include <torch/serialize/archive.h>
 #include <torch/types.h>
 
 #include <functional>
@@ -21,44 +21,60 @@ class InputArchive;
 namespace torch {
 namespace optim {
 
-struct TORCH_API RMSpropOptions {
-  RMSpropOptions(double learning_rate);
-  TORCH_ARG(double, learning_rate);
+struct TORCH_API RMSpropOptions : public OptimizerCloneableOptions<RMSpropOptions> {
+  RMSpropOptions(double lr = 1e-2);
+  TORCH_ARG(double, lr) = 1e-2;
   TORCH_ARG(double, alpha) = 0.99;
   TORCH_ARG(double, eps) = 1e-8;
   TORCH_ARG(double, weight_decay) = 0;
   TORCH_ARG(double, momentum) = 0;
   TORCH_ARG(bool, centered) = false;
+
+ public:
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
+  TORCH_API friend bool operator==(const RMSpropOptions& lhs, const RMSpropOptions& rhs);
+  ~RMSpropOptions() override = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
+};
+
+struct TORCH_API RMSpropParamState : public OptimizerCloneableParamState<RMSpropParamState> {
+  TORCH_ARG(int64_t, step) = 0;
+  TORCH_ARG(torch::Tensor, square_avg);
+  TORCH_ARG(torch::Tensor, momentum_buffer) = {};
+  TORCH_ARG(torch::Tensor, grad_avg) = {};
+
+ public:
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
+  TORCH_API friend bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs);
+  ~RMSpropParamState() override = default;
 };
 
 class TORCH_API RMSprop : public Optimizer {
  public:
-  template <typename ParameterContainer>
-  explicit RMSprop(
-      ParameterContainer&& parameters,
-      const RMSpropOptions& options)
-      : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options(options) {}
+  explicit RMSprop(std::vector<OptimizerParamGroup> param_groups,
+      RMSpropOptions defaults = {}) : Optimizer(std::move(param_groups), std::make_unique<RMSpropOptions>(defaults)) {
+    TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
+    TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
+    TORCH_CHECK(defaults.momentum() >= 0, "Invalid momentum value: ", defaults.momentum());
+    TORCH_CHECK(defaults.weight_decay() >= 0, "Invalid weight_decay value: ", defaults.weight_decay());
+    TORCH_CHECK(defaults.alpha() >= 0, "Invalid alpha value: ", defaults.alpha());
+  }
 
-  void step() override;
+  explicit RMSprop(std::vector<Tensor> params,
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      RMSpropOptions defaults = {}) : RMSprop({std::move(OptimizerParamGroup(params))}, defaults) {}
 
-  RMSpropOptions options;
-
+  torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 
-  std::vector<Tensor> square_average_buffers;
-  std::vector<Tensor> momentum_buffers;
-  std::vector<Tensor> grad_average_buffers;
-
  private:
-  RMSprop() : options(0) {}
-
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    _TORCH_OPTIM_SERIALIZE(square_average_buffers);
-    _TORCH_OPTIM_SERIALIZE(momentum_buffers);
-    _TORCH_OPTIM_SERIALIZE(grad_average_buffers);
+    _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(RMSprop);
   }
 };
 } // namespace optim

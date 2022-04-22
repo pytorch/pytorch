@@ -1,9 +1,10 @@
-ir_version: 4
+ir_version: 7
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "1"
+    output: "onnx::Sub_1"
+    name: "Constant_0"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -15,14 +16,15 @@ graph {
     }
   }
   node {
-    input: "1"
-    input: "x"
+    input: "onnx::Sub_1"
+    input: "onnx::Sub_0"
     output: "2"
+    name: "Sub_1"
     op_type: "Sub"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "x"
+    name: "onnx::Sub_0"
     type {
       tensor_type {
         elem_type: 11
@@ -55,5 +57,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

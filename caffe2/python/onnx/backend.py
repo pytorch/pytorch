@@ -5,14 +5,8 @@
 
 To run this, you will need to have Caffe2 installed as well.
 """
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
-import os
 import collections
-from subprocess import Popen, PIPE
+import sys
 import zipfile
 import itertools
 
@@ -22,26 +16,21 @@ import itertools
 # importing onnx first, which will cause it to go out and pick up the
 # system protobuf.
 import onnx.backend
-
-import caffe2
 from caffe2.python import core, workspace, rnn_cell, gru_cell
-from caffe2.python.compatibility import container_abcs
 from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
 import caffe2.python.utils
 import numpy as np
 import onnx
-from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto
+from onnx import TensorProto
 import onnx.numpy_helper
 import onnx.defs
-import onnx.optimizer
 import onnx.shape_inference
 import onnx.utils
 from onnx.backend.base import Backend, Device, DeviceType, namedtupledict
 
 from caffe2.python.onnx.workspace import Workspace
 from caffe2.python.onnx.backend_rep import Caffe2Rep
-from caffe2.python.onnx.backend_cpp_rep import Caffe2CppRep
 
 import caffe2.python._import_c_extension as C
 
@@ -662,7 +651,13 @@ class Caffe2Backend(Backend):
             passes.append('split_init')
         if predict:
             passes.append('split_predict')
-        out = onnx.optimizer.optimize(input, passes)
+        try:
+            out = onnx.optimizer.optimize(input, passes)
+        except AttributeError:
+            warnings.warn("OptimizerWarning: optimizer module not found in ONNX version {}".format(onnx.__version__))
+            # ONNX does no ship onnx.optimizer since version 1.9+
+            import onnxoptimizer
+            out = onnxoptimizer.optimize(input, passes)
         return out
 
     @classmethod
@@ -704,7 +699,13 @@ class Caffe2Backend(Backend):
             else:
                 opset_version = 1
 
-        model = onnx.shape_inference.infer_shapes(model)
+        # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
+        # in the onnx shape inference call were being supressed. Hence a try-catch block
+        # is added around the infer_shapes call to avoid these failures and preserve status
+        try:
+            model = onnx.shape_inference.infer_shapes(model)
+        except RuntimeError:
+            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
 
         ws = Workspace()
         device_option = get_device_option(Device(device))
@@ -774,7 +775,7 @@ class Caffe2Backend(Backend):
         ops = translator(init_model, pred_model, OnnxNode(node_def), opset_version)
         if isinstance(ops, Caffe2Ops):
             return ops
-        if not isinstance(ops, container_abcs.Iterable):
+        if not isinstance(ops, collections.abc.Iterable):
             ops = [ops]
         return Caffe2Ops(ops, [], [])
 
@@ -872,9 +873,25 @@ class Caffe2Backend(Backend):
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
         device_option = get_device_option(Device(device))
 
-        onnx_model = onnx.utils.polish_model(onnx_model)
-        init_model = cls.optimize_onnx(onnx_model, init=True)
-        pred_model = cls.optimize_onnx(onnx_model, predict=True)
+        # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
+        # in the onnx shape inference call were being supressed. Hence a try-catch block
+        # is added around the infer_shapes call to avoid these failures and preserve status
+        try:
+            onnx_model = onnx.utils.polish_model(onnx_model)
+        except RuntimeError:
+            warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
+        except AttributeError:
+            warnings.warn("ShapeInferenceWarning: utils module not found in ONNX version {}".format(onnx.__version__))
+
+        # Optimizer module has been removed in ONNX-1.9 or later, warn caller if that is the case
+        try:
+            init_model = cls.optimize_onnx(onnx_model, init=True)
+            pred_model = cls.optimize_onnx(onnx_model, predict=True)
+        except ModuleNotFoundError:
+            warnings.warn("OptimizerWarning: onnxoptimizer module not installed. "
+                          "init_model and pred_model models will not be splitted, which can cause a runtime error")
+            init_model = onnx_model
+            pred_model = onnx_model
 
         init_net = caffe2_pb2.NetDef()
         pred_net = caffe2_pb2.NetDef()
@@ -887,7 +904,7 @@ class Caffe2Backend(Backend):
 
         cls._dummy_name.reset(cls._all_names_in_graph(init_model.graph) | cls._all_names_in_graph(pred_model.graph))
 
-        success = True
+        errors = []
         for net, model in ( (init_net, init_model), (pred_net, pred_model) ):
             net.device_option.CopyFrom(device_option)
             for node in model.graph.node:
@@ -895,8 +912,9 @@ class Caffe2Backend(Backend):
                     c2ops = cls._onnx_node_to_caffe2_op(
                         init_model, pred_model, node, opset_version)
                 except Exception as e:
-                    success = False
-                    print('ONNX FATAL:', e)
+                    msg = 'Error while processing node: {}. Exception: {}'.format(node, e)
+                    errors.append(msg)
+                    print('ONNX FATAL:', msg, file=sys.stderr)
                     continue
                 init_net.op.extend(c2ops.init_ops)
                 net.op.extend(c2ops.ops)
@@ -906,12 +924,14 @@ class Caffe2Backend(Backend):
             net.external_input.extend(
                 value_info.name for value_info in model.graph.input)
 
-        if not success:
-            raise RuntimeError('ONNX conversion failed')
+        if len(errors) > 0:
+            raise RuntimeError(
+                "ONNX conversion failed, encountered {} errors:\n\n{}".format(
+                    len(errors), "\n\n".join(errors)))
 
         return init_net, pred_net
 
-    # wrapper for backwards compatability
+    # wrapper for backwards compatibility
     @classmethod
     def onnx_graph_to_caffe2_net(cls, model, device="CPU", opset_version=_known_opset_version):
         return cls._onnx_model_to_caffe2_net(model, device=device, opset_version=opset_version, include_initializers=True)

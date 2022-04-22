@@ -1,14 +1,16 @@
+# Owner(s): ["module: unknown"]
+
 import os.path
 import tempfile
-import unittest
 
 import torch
 from torch import ops
 
 from model import Model, get_custom_op_library_path
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-class TestCustomOperators(unittest.TestCase):
+class TestCustomOperators(TestCase):
     def setUp(self):
         self.library_path = get_custom_op_library_path()
         ops.load_library(self.library_path)
@@ -34,6 +36,39 @@ class TestCustomOperators(unittest.TestCase):
         self.assertEqual(len(output), 1)
         self.assertTrue(output[0].allclose(torch.ones(5)))
 
+    def test_calling_custom_op_with_autograd(self):
+        x = torch.randn((5, 5), requires_grad=True)
+        y = torch.randn((5, 5), requires_grad=True)
+        output = ops.custom.op_with_autograd(x, 2, y)
+        self.assertTrue(output.allclose(x + 2 * y + x * y))
+
+        go = torch.ones((), requires_grad=True)
+        output.sum().backward(go, False, True)
+        grad = torch.ones(5, 5)
+
+        self.assertEqual(x.grad, y + grad)
+        self.assertEqual(y.grad, x + grad * 2)
+
+        # Test with optional arg.
+        x.grad.zero_()
+        y.grad.zero_()
+        z = torch.randn((5, 5), requires_grad=True)
+        output = ops.custom.op_with_autograd(x, 2, y, z)
+        self.assertTrue(output.allclose(x + 2 * y + x * y + z))
+
+        go = torch.ones((), requires_grad=True)
+        output.sum().backward(go, False, True)
+        self.assertEqual(x.grad, y + grad)
+        self.assertEqual(y.grad, x + grad * 2)
+        self.assertEqual(z.grad, grad)
+
+    def test_calling_custom_op_with_autograd_in_nograd_mode(self):
+        with torch.no_grad():
+            x = torch.randn((5, 5), requires_grad=True)
+            y = torch.randn((5, 5), requires_grad=True)
+            output = ops.custom.op_with_autograd(x, 2, y)
+            self.assertTrue(output.allclose(x + 2 * y + x * y))
+
     def test_calling_custom_op_inside_script_module(self):
         model = Model()
         output = model.forward(torch.ones(5))
@@ -57,4 +92,4 @@ class TestCustomOperators(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

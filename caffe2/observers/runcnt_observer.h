@@ -9,7 +9,8 @@ namespace caffe2 {
 
 class RunCountNetObserver;
 
-class CAFFE2_API RunCountOperatorObserver final : public ObserverBase<OperatorBase> {
+class TORCH_API RunCountOperatorObserver final
+    : public ObserverBase<OperatorBase> {
  public:
   explicit RunCountOperatorObserver(OperatorBase* op) = delete;
   RunCountOperatorObserver(OperatorBase* op, RunCountNetObserver* netObserver);
@@ -26,9 +27,9 @@ class CAFFE2_API RunCountOperatorObserver final : public ObserverBase<OperatorBa
   RunCountNetObserver* netObserver_;
 };
 
-class CAFFE2_API RunCountNetObserver final : public OperatorAttachingNetObserver<
-                                      RunCountOperatorObserver,
-                                      RunCountNetObserver> {
+class TORCH_API RunCountNetObserver final : public OperatorAttachingNetObserver<
+                                                RunCountOperatorObserver,
+                                                RunCountNetObserver> {
  public:
   explicit RunCountNetObserver(NetBase* subject_)
       : OperatorAttachingNetObserver<

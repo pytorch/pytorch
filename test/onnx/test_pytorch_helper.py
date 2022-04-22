@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 # Some standard imports
 import numpy as np
 from torch import nn
@@ -14,6 +16,7 @@ from test_pytorch_common import skipIfNoLapack
 class TestCaffe2Backend(unittest.TestCase):
 
     @skipIfNoLapack
+    @unittest.skip("test broken because Lapack was always missing.")
     def test_helper(self):
 
         class SuperResolutionNet(nn.Module):
@@ -37,9 +40,9 @@ class TestCaffe2Backend(unittest.TestCase):
                 return x
 
             def _initialize_weights(self):
-                init.orthogonal(self.conv1.weight, init.calculate_gain('relu'))
-                init.orthogonal(self.conv2.weight, init.calculate_gain('relu'))
-                init.orthogonal(self.conv3.weight, init.calculate_gain('relu'))
+                init.orthogonal(self.conv1.weight, init.calculate_gain("relu"))
+                init.orthogonal(self.conv2.weight, init.calculate_gain("relu"))
+                init.orthogonal(self.conv3.weight, init.calculate_gain("relu"))
                 init.orthogonal(self.conv4.weight)
 
         torch_model = SuperResolutionNet(upscale_factor=3)
@@ -48,13 +51,13 @@ class TestCaffe2Backend(unittest.TestCase):
 
         # use ModelHelper to create a C2 net
         helper = ModelHelper(name="test_model")
-        start = helper.Sigmoid(['the_input'])
+        start = helper.Sigmoid(["the_input"])
         # Embed the ONNX-converted pytorch net inside it
         toutput, = PyTorchModule(helper, torch_model, (fake_input,), [start])
         output = helper.Sigmoid(toutput)
 
         workspace.RunNetOnce(helper.InitProto())
-        workspace.FeedBlob('the_input', fake_input.data.numpy())
+        workspace.FeedBlob("the_input", fake_input.data.numpy())
         # print([ k for k in workspace.blobs ])
         workspace.RunNetOnce(helper.Proto())
         c2_out = workspace.FetchBlob(str(output))
@@ -64,5 +67,5 @@ class TestCaffe2Backend(unittest.TestCase):
         np.testing.assert_almost_equal(torch_out.data.cpu().numpy(), c2_out, decimal=3)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
-#include "c10/util/Flags.h"
-#include "c10/macros/Macros.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/Flags.h>
 
 #include <cstdlib>
 #include <iostream>

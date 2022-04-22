@@ -4,6 +4,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/QScheme.h>
 #include <c10/core/QScheme.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -12,17 +13,8 @@
 namespace torch {
 namespace utils {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyObject* thp_qscheme_array[at::COMPILE_TIME_NUM_QSCHEMES];
-#define _ADD_QSCHEME(qscheme, name)                                      \
-  {                                                                      \
-    std::string module_name = "torch.";                                  \
-    PyObject* qscheme_obj = THPQScheme_New(qscheme, module_name + name); \
-    thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj;          \
-    Py_INCREF(qscheme_obj);                                              \
-    if (PyModule_AddObject(torch_module, name, qscheme_obj) != 0) {      \
-      throw python_error();                                              \
-    }                                                                    \
-  }
 
 void initializeQSchemes() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
@@ -30,10 +22,16 @@ void initializeQSchemes() {
     throw python_error();
   }
 
-  _ADD_QSCHEME(at::kPerTensorAffine, "per_tensor_affine");
-  _ADD_QSCHEME(at::kPerChannelAffine, "per_channel_affine");
-  _ADD_QSCHEME(at::kPerTensorSymmetric, "per_tensor_symmetric");
-  _ADD_QSCHEME(at::kPerChannelSymmetric, "per_channel_symmetric");
+  for (const auto i : c10::irange(at::COMPILE_TIME_NUM_QSCHEMES)) {
+    auto qscheme = static_cast<at::QScheme>(i);
+    PyObject* qscheme_obj = THPQScheme_New(qscheme, toString(qscheme));
+    thp_qscheme_array[static_cast<int>(qscheme)] = qscheme_obj;
+    Py_INCREF(qscheme_obj);
+    if (PyModule_AddObject(
+            torch_module, toString(qscheme).c_str(), qscheme_obj) != 0) {
+      throw python_error();
+    }
+  }
 }
 
 PyObject* getTHPQScheme(at::QScheme qscheme) {

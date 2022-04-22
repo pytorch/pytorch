@@ -22,6 +22,9 @@ example:
 Note that the above link has CPU-only libtorch. If you would like to download a GPU-enabled
 libtorch, find the right link in the link selector on https://pytorch.org
 
+If you're a Windows developer and wouldn't like to use CMake, you could jump to the Visual Studio
+Extension section.
+
 Next, we can write a minimal CMake build configuration to develop a small
 application that depends on LibTorch. CMake is not a hard requirement for using
 LibTorch, but it is the recommended and blessed build system and will be well
@@ -34,10 +37,23 @@ this:
   project(example-app)
 
   find_package(Torch REQUIRED)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 
   add_executable(example-app example-app.cpp)
   target_link_libraries(example-app "${TORCH_LIBRARIES}")
-  set_property(TARGET example-app PROPERTY CXX_STANDARD 11)
+  set_property(TARGET example-app PROPERTY CXX_STANDARD 14)
+
+  # The following code block is suggested to be used on Windows.
+  # According to https://github.com/pytorch/pytorch/issues/25457,
+  # the DLLs need to be copied to avoid memory errors.
+  if (MSVC)
+    file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
+    add_custom_command(TARGET example-app
+                       POST_BUILD
+                       COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                       ${TORCH_DLLS}
+                       $<TARGET_FILE_DIR:example-app>)
+  endif (MSVC)
 
 The implementation of our example will simply create a new `torch::Tensor` and
 print it:
@@ -73,10 +89,17 @@ We can now run the following commands to build the application from within the
   mkdir build
   cd build
   cmake -DCMAKE_PREFIX_PATH=/absolute/path/to/libtorch ..
-  make
+  cmake --build . --config Release
 
 where ``/absolute/path/to/libtorch`` should be the absolute (!) path to the unzipped LibTorch
-distribution. If all goes well, it will look something like this:
+distribution. If PyTorch was installed via conda or pip, `CMAKE_PREFIX_PATH` can be queried
+using `torch.utils.cmake_prefix_path` variable. In that case CMake configuration step would look something like follows:
+
+.. code-block:: sh
+
+  cmake -DCMAKE_PREFIX_PATH=`python -c 'import torch;print(torch.utils.cmake_prefix_path)'`
+
+If all goes well, it will look something like this:
 
 .. code-block:: sh
 
@@ -109,7 +132,7 @@ distribution. If all goes well, it will look something like this:
   -- Configuring done
   -- Generating done
   -- Build files have been written to: /example-app/build
-  root@4b5a67132e81:/example-app/build# make
+  root@4b5a67132e81:/example-app/build# cmake --build . --config Release
   Scanning dependencies of target example-app
   [ 50%] Building CXX object CMakeFiles/example-app.dir/example-app.cpp.o
   [100%] Linking CXX executable example-app
@@ -127,8 +150,17 @@ should now merrily print the tensor (exact output subject to randomness):
 
 .. tip::
   On Windows, debug and release builds are not ABI-compatible. If you plan to
-  build your project in debug mode, we recommend
-  `building PyTorch from source <https://github.com/pytorch/pytorch#from-source>`_.
+  build your project in debug mode, please try the debug version of LibTorch.
+  Also, make sure you specify the correct configuration in the ``cmake --build .``
+  line above.
+
+Visual Studio Extension
+-----------------------
+
+`LibTorch Project Template <https://marketplace.visualstudio.com/items?itemName=YiZhang.LibTorch001>`_ can help Windows developers
+set all libtorch project settings and link options for debug and release.
+It's easy to use and you could check out the `demo video <https://ossci-windows.s3.us-east-1.amazonaws.com/vsextension/demo.mp4>`_.
+The only prerequisite is to download the libtorch on https://pytorch.org
 
 Support
 -------

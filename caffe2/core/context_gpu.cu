@@ -4,13 +4,14 @@
 #include <string>
 #include <unordered_map>
 
+#include <ATen/Context.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include "cub/util_allocator.cuh"
 
 // Needed to be included first to check the CAFFE2_USE_CUDNN macros.
 #include "caffe2/core/macros.h"
 
-#include "caffe2/core/asan.h"
 #include "caffe2/core/blob_stats.h"
 #ifdef CAFFE2_USE_CUDNN
 #include "caffe2/core/common_cudnn.h"
@@ -20,6 +21,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/string_utils.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 C10_DEFINE_string(
     caffe2_cuda_memory_pool,
@@ -88,9 +90,9 @@ void CUDAContext::CopyBytesAsync(
   // events, so it's fine.  In order to make it a standalone function proper
   // synchronization between stream is required
   int gpu_id = 0;
-  if (dst_device.type() == DeviceType::CUDA) {
+  if (dst_device.is_cuda()) {
     gpu_id = dst_device.index();
-  } else if (src_device.type() == DeviceType::CUDA) {
+  } else if (src_device.is_cuda()) {
     gpu_id = src_device.index();
   } else {
     LOG(FATAL) << "shouldn't be called with non-cuda device";
@@ -174,7 +176,7 @@ std::unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
 static std::unordered_map<void*, uint8_t> g_cuda_device_affiliation;
 
 // Data structures for optional memory tracking. Access to these structures
-// is garded by the CUDAContext::mutex.
+// is guarded by the CUDAContext::mutex.
 static std::unordered_map<void*, long> g_size_map;
 static std::vector<long> g_total_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
 static std::vector<long> g_max_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
@@ -279,6 +281,8 @@ static void Caffe2SetCUDAMemoryPool() {
     SetUpCub();
   } else if (FLAGS_caffe2_cuda_memory_pool == "thc") {
     g_cuda_memory_pool_type = CudaMemoryPoolType::THC;
+    // Initialize caching allocator
+    at::globalContext().lazyInitCUDA();
   } else {
     CAFFE_THROW(
         "Unrecognized cuda memory pool type: ", FLAGS_caffe2_cuda_memory_pool);
@@ -294,7 +298,7 @@ static void Caffe2SetCUDAMemoryPool() {
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  *
- * NB: This behavior is probably too agressive. We should consider asking users
+ * NB: This behavior is probably too aggressive. We should consider asking users
  * to do on-demand memory pinning (like exposed in PyTorch APIs) instead.
  */
 struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
@@ -321,6 +325,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
           "Failed to swap deleter (already swapped?)");
     } else {
       CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
+      profiledCPUMemoryReporter().New(data, nbytes);
       data_ptr = {data, data, &Delete, at::Device(CPU)};
     }
     memset(data, 0, nbytes);
@@ -347,6 +352,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
       GetDefaultCPUAllocator()->raw_deleter()(data);
     } else {
       cudaError_t err = cudaFreeHost(data);
+      profiledCPUMemoryReporter().Delete(data);
       if (err == cudaErrorInvalidValue) {
         free(data);
         // Calling cudaGetLastError will reset the cuda error.
@@ -366,7 +372,7 @@ static PinnedCPUAllocator g_pinned_cpu_alloc;
 // An initialization function that sets the CPU side to use pinned cpu
 // allocator.
 void Caffe2UsePinnedCPUAllocator() {
-#if CAFFE2_ASAN_ENABLED
+#if C10_ASAN_ENABLED
   // Note(jiayq): for more details, see
   //     https://github.com/google/sanitizers/issues/629
   LOG(WARNING) << "There are known issues between address sanitizer and "
@@ -380,7 +386,13 @@ void Caffe2UsePinnedCPUAllocator() {
     return;
   }
   VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
-  SetCPUAllocator(&g_pinned_cpu_alloc);
+
+  // If CUDA is enabled, using CPU allocators other than PinnedCPUAllocator
+  // will cause memory corruptions. Therefore, we need to set the priority
+  // to highest to avoid being overwritten.
+  SetCPUAllocator(
+      &g_pinned_cpu_alloc,
+      std::numeric_limits<uint8_t>::max() /* priority */);
 #endif
 }
 
@@ -428,6 +440,23 @@ CUDAContext::CUDAContext(const DeviceOption& option)
   DCHECK_EQ(option.device_type(), PROTO_CUDA);
 }
 
+CUDAContext::~CUDAContext() {
+  try {
+    if (curand_generator_) {
+      CURAND_CHECK(curandDestroyGenerator(curand_generator_));
+    }
+    // CUDAContext is used in 2 cases now:
+    // - long-lived instance inside OperatorBase in which case what happens in
+    //   destructor doesn't really matter
+    // - short-lived on-the-fly instances that are utilized as CUDAGuard - in
+    //   this case there's only one stream id (passed to SwitchToDevice) and
+    //   it's preferrable to synchronize in the destructor
+    FinishDeviceComputation();
+  } catch (const std::exception& e)  {
+    LOG(ERROR) << "Encountered following in " << __FUNCTION__ << ": " << e.what();
+  }
+}
+
 // shared mutex to lock out alloc / free during NCCL launches
 std::mutex& CUDAContext::mutex() {
   static std::mutex m;
@@ -455,7 +484,7 @@ void TrackMemoryAlloc(size_t nbytes) {
   int this_gpu = CaffeCudaGetDevice();
   g_total_by_gpu_map[this_gpu] += nbytes;
   g_max_by_gpu_map[this_gpu] =
-      max(g_max_by_gpu_map[this_gpu], g_total_by_gpu_map[this_gpu]);
+      std::max(g_max_by_gpu_map[this_gpu], g_total_by_gpu_map[this_gpu]);
   g_total_mem += nbytes;
   if (g_total_mem - g_last_rep >
       FLAGS_caffe2_gpu_memory_report_interval_mb * 1024 * 1024) {

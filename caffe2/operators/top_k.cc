@@ -94,15 +94,22 @@ bool TopKOp<T, Context>::RunOnDevice() {
   auto* indices = Output(1);
   auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
+  int64_t k = k_;
+  if(k == -1 && InputSize() == 2) {
+    k = Input(1).template data<int64_t>()[0];
+  }
+  CAFFE_ENFORCE(k >= 1, "k argument must be >= 1");
+
   at::IntArrayRef input_dims = input.sizes();
   if (axis_ == -1) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     axis_ = input_dims.size() - 1;
   }
   CAFFE_ENFORCE_GE(axis_, 0);
   CAFFE_ENFORCE_LT(axis_, input_dims.size());
 
   std::vector<int64_t> output_dims = input_dims.vec();
-  output_dims[axis_] = k_;
+  output_dims[axis_] = k;
   values->Resize(output_dims);
   indices->Resize(output_dims);
   if (flatten_indices != nullptr) {
@@ -127,14 +134,16 @@ bool TopKOp<T, Context>::RunOnDevice() {
       input_dims.cbegin(),
       input_dims.cbegin() + axis_,
       int64_t(1),
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int64_t>());
   const int64_t next_size = std::accumulate(
       input_dims.cbegin() + axis_ + 1,
       input_dims.cend(),
       int64_t(1),
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int64_t>());
   const int64_t src_offset_stride = input_dims[axis_] * next_size;
-  const int64_t dst_offset_stride = k_ * next_size;
+  const int64_t dst_offset_stride = k * next_size;
   int64_t src_offset = 0;
   int64_t dst_offset = 0;
   for (int64_t i = 0; i < prev_size; ++i) {
@@ -142,7 +151,7 @@ bool TopKOp<T, Context>::RunOnDevice() {
       GetTopK(
           input_data,
           input_dims[axis_],
-          k_,
+          k,
           src_offset + j,
           dst_offset + j,
           next_size,
@@ -170,6 +179,7 @@ bool TopKGradientOp<T, Context>::RunOnDevice() {
   const int64_t* indices_data = indices.template data<int64_t>();
   T* output_data = output->template mutable_data<T>();
   if (axis_ == -1) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     axis_ = values_dims.size() - 1;
   }
   const int k = values_dims[axis_];
@@ -178,11 +188,13 @@ bool TopKGradientOp<T, Context>::RunOnDevice() {
       values_dims.cbegin(),
       values_dims.cbegin() + axis_,
       int64_t(1),
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int64_t>());
   const int64_t next_size = std::accumulate(
       values_dims.cbegin() + axis_ + 1,
       values_dims.cend(),
       int64_t(1),
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<int64_t>());
   const int64_t src_offset_stride = k * next_size;
   const int64_t dst_offset_stride = origin_dims[axis_] * next_size;
@@ -209,7 +221,7 @@ REGISTER_CPU_OPERATOR(TopK, TopKOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(TopKGradient, TopKGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(TopK)
-    .NumInputs(1)
+    .NumInputs(1, 2)
     .NumOutputs(2, 3)
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
@@ -228,6 +240,7 @@ OPERATOR_SCHEMA(TopK)
                 in[0].dims().begin(),
                 in[0].dims().end() - 1,
                 1,
+                // NOLINTNEXTLINE(modernize-use-transparent-functors)
                 std::multiplies<long>()) *
             k);
         out.push_back(flatten_indices_shape);
@@ -235,7 +248,9 @@ OPERATOR_SCHEMA(TopK)
       return out;
     })
     .SetDoc(R"DOC(
-Retrieve the top-K elements of the last dimension. Given an input tensor of shape $(a_1, a_2, ..., a_n, r)$ and integer argument `k`, return up to three outputs:
+Retrieve the top-K elements of the last dimension.
+Given an input tensor of shape $(a_1, a_2, ..., a_n, r)$. `k` can be passed as an integer argument or a 1D tensor containing a single integer.
+Returns up to three outputs:
 
 1. Value tensor of shape $(a_1, a_2, ..., a_n, k)$ which contains the values of the top k elements along the last dimension
 2. Index tensor of shape $(a_1, a_2, ..., a_n, k)$ which contains the indices of the top k elements (original indices from the input tensor).
@@ -324,6 +339,10 @@ Flattened_indices: [ 1  0  3  4  8  7 10 11 13 14 17 16 20 18 23 22 26 25]
       0,
       "X",
       "(*Tensor`<float>`*): input tensor of shape $(a_1, a_2, ..., a_n, r)$")
+    .Input(
+      1,
+      "k",
+      "(*int*): number of top elements to retrieve")
     .Output(
         0,
         "Values",
@@ -335,8 +354,7 @@ Flattened_indices: [ 1  0  3  4  8  7 10 11 13 14 17 16 20 18 23 22 26 25]
     .Output(
         2,
         "Flattened_indices",
-        "(*Tensor`<int>`*): tensor of indices of shape $(a_1 * a_2 * ... * a_n * k,)$; indices values refer to each element's index in the flattened input tensor `X`")
-    .Arg("k", "(*int*): number of top elements to retrieve");
+        "(*Tensor`<int>`*): tensor of indices of shape $(a_1 * a_2 * ... * a_n * k,)$; indices values refer to each element's index in the flattened input tensor `X`");
 
 OPERATOR_SCHEMA(TopKGradient).NumInputs(3).NumOutputs(1);
 

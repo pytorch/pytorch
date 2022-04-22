@@ -3,17 +3,20 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/Parallel.h>
 #include <c10/util/TypeList.h>
+#include <c10/core/Scalar.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 
-namespace at { namespace native { namespace {
+namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
-using namespace vec256;
+using namespace vec;
 
 #define VEC_LOOP_HEADER(func_t, data) \
   using scalar_t = typename function_traits<func_t>::result_type; \
-  using Vec = Vec256<scalar_t>; \
-  char* out_ptr = data[0];
+  using Vec = Vectorized<scalar_t>; \
+  char* out_ptr = data[0]; \
+  (void) out_ptr;
 
 // reduction that is contiguous over the input in dim 0
 template <typename traits>
@@ -31,14 +34,15 @@ static inline bool is_outer_reduction(const int64_t* strides) {
 }
 
 template <typename func_t, typename vec_func_t>
-static inline void reduction128(char** data, int64_t n, int64_t stride, func_t op, vec_func_t vop, bool reduce) {
+static inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
+                                        func_t op, vec_func_t vop, bool reduce) {
   VEC_LOOP_HEADER(func_t, data)
   const char* in1_ptr = data[1];
   Vec acc[4];
-  for  (int j = 0; j < 4; j++) {
+  for (const auto j : c10::irange(4)) {
     acc[j] = Vec::loadu(in1_ptr + j * Vec::size() * sizeof(scalar_t));
   }
-  for (int64_t i = 1; i < n; i++) {
+  for (const auto i : c10::irange(1, n)) {
     const char* ptr = in1_ptr + stride * i;
     acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size() * sizeof(scalar_t))));
     acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size() * sizeof(scalar_t))));
@@ -49,13 +53,13 @@ static inline void reduction128(char** data, int64_t n, int64_t stride, func_t o
     scalar_t buffer[Vec::size()];
     acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
     acc[0].store(buffer);
-    for (int j = 1; j < Vec::size(); j++) {
+    for (const auto j : c10::irange(1, Vec::size())) {
       buffer[0] = op(buffer[0], buffer[j]);
     }
     auto dst = (scalar_t*)out_ptr;
     *dst = op(*dst, buffer[0]);
   } else {
-    for (int j = 0; j < 4; j++) {
+    for (const auto j : c10::irange(4)) {
       auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
       acc[j] = vop(acc[j], Vec::loadu(dst));
       acc[j].store(dst);
@@ -65,7 +69,8 @@ static inline void reduction128(char** data, int64_t n, int64_t stride, func_t o
 
 template <typename F>
 static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
-  for (int j = 0; j < n; j++) {
+  for (const auto j : c10::irange(n)) {
+    (void)j; //Suppress unused variable warning
     f();
     data[0] += strides[0];
     data[1] += strides[1];
@@ -79,7 +84,7 @@ static inline void vectorized_inner_reduction(char** data, int64_t n, func_t op,
   int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
   int64_t count = n / (4 * Vec::size());
   if (count > 0) {
-    reduction128(data, count, vector_stride, op, vop, /*reduce=*/true);
+    vectorized_reduction(data, count, vector_stride, op, vop, /*reduce=*/true);
   }
   char* ptrs[3] = { data[0], data[0], data[1] };
   int64_t strides[] = { 0, 0, sizeof(scalar_t) };
@@ -91,10 +96,14 @@ template <typename func_t, typename vec_func_t>
 static inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_t size0, int64_t size1, func_t op, vec_func_t vop) {
   VEC_LOOP_HEADER(func_t, data)
 
-  // reduce down each column of 4 * Vec::size() elements (128 bytes)
+  // reduce down each column of 4 * Vec::size() elements (128 or 256 bytes)
+#if defined(CPU_CAPABILITY_AVX512)
+  int64_t outer_stride[2] = { 256, 256 };
+#else
   int64_t outer_stride[2] = { 128, 128 };
+#endif
   UNARY_OUTER_LOOP(data, outer_stride, size1 / (4 * Vec::size()), [&] {
-    reduction128(data, size0, inner_stride, op, vop, /*reduce=*/false);
+    vectorized_reduction(data, size0, inner_stride, op, vop, /*reduce=*/false);
   });
 
   // reduce down the remaining columns
@@ -108,8 +117,8 @@ static inline void vectorized_outer_reduction(char** data, int64_t inner_stride,
 }
 
 template<typename traits, typename res_t>
-static void set_result(const int index, const res_t result, const TensorIterator &iter, const int num_outputs) {
-  static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
+static void set_result(const int index, const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
+  // static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
   if (index < num_outputs) {
     char *out = (char *) iter.data_ptr(index);
     *(res_t *) out = result;
@@ -117,21 +126,21 @@ static void set_result(const int index, const res_t result, const TensorIterator
 }
 
 template<typename traits, typename res_t>
-static void set_results(const res_t result, const TensorIterator &iter, const int num_outputs) {
+static void set_results(const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
   AT_ASSERT(num_outputs == 1);
   set_result<traits>(0, result, iter, num_outputs);
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
 static inline typename std::enable_if<i == sizeof...(tuple_t), std::size_t>::type
-for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, const int num_outputs) {
+for_each_in_tuple(const std::tuple<tuple_t...>& /*t*/, const TensorIteratorBase& /*iter*/, const int /*num_outputs*/) {
   return i;
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
 static inline typename std::enable_if<i < sizeof...(tuple_t), std::size_t>::type
-for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, const int num_outputs) {
-  if (i < num_outputs) {
+for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &iter, const int num_outputs) {
+  if (i < (size_t)num_outputs) {
     set_result<traits>(i, std::get<i>(t), iter, num_outputs);
     return for_each_in_tuple<traits, i + 1, tuple_t...>(t, iter, num_outputs);
   }
@@ -139,26 +148,27 @@ for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, c
 }
 
 template<typename traits, typename... res_t>
-static void set_results(const std::tuple<res_t...>& result, const TensorIterator &iter, const int num_outputs) {
+static void set_results(const std::tuple<res_t...>& result, const TensorIteratorBase &iter, const int num_outputs) {
   AT_ASSERT(num_outputs >= 1);
   std::size_t result_size = for_each_in_tuple<traits>(result, iter, num_outputs);
-  AT_ASSERT(num_outputs == result_size);
+  AT_ASSERT((size_t)num_outputs == result_size);
 }
 
 template <typename T, typename... Args>
-struct all_same : c10::guts::conjunction<
+struct all_same : guts::conjunction<
   std::is_same<T, Args>...
 > {};
 
 // data_t is the input/output data type.
 // acc_t is a type that contains all the necessary data
 // to continue reducing.
+// index_t is a one-dimensional index
 //
 // ops_t is such that &ops_t::reduce, &ops_t::combine, and &ops_t::project exist and satisfy
 // the following.
-// reduce: (acc_t, data_t) -> acc_t adds one data point to the accumulated value.
+// reduce: (acc_t, data_t, index_t) -> acc_t adds one data point to the accumulated value.
 // combine: (acc_t, acc_t) -> acc_t combines two accumulated values into one.
-// project: acc_t -> data_t finishes the reduction, getting the required output.
+// project: acc_t -> out_t finishes the reduction, getting the required output.
 //
 // Additionally, acc_t must be default-constructible:
 // acc_t {} is an identity for combine,
@@ -176,7 +186,7 @@ struct all_same : c10::guts::conjunction<
 // into several pieces, reduce each separately, and then combine them.
 
 template <typename ops_t, typename init_t>
-void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
+void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
   using rf_t = decltype(&ops_t::reduce);
   using cf_t = decltype(&ops_t::combine);
   using pf_t = decltype(&ops_t::project);
@@ -200,19 +210,19 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
     "the accumulate type must be default-constructible"
   );
   const int num_outputs = iter.noutputs();
-  iter.foreach_reduced_elt([&ops, &init, num_outputs](TensorIterator &sub_iter) {
+  iter.foreach_reduced_elt([&ops, &init, num_outputs](TensorIteratorBase &sub_iter) {
     auto reduction_body = [&ops, &sub_iter, num_outputs](acc_t acc, int64_t begin, int64_t end) -> acc_t {
       int ntensors = sub_iter.ntensors();
-      sub_iter.serial_for_each([&acc, &ops, num_outputs, ntensors](char** data, const int64_t* strides, int64_t size) {
+      sub_iter.serial_for_each([&acc, &ops, num_outputs, ntensors, begin](char** data, const int64_t* strides, int64_t size) {
         AT_ASSERT(ntensors - num_outputs == 1);
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];
-        for (int64_t i = 0; i < size; ++i) {
-          acc = ops.reduce(acc, *(data_t*)in);
+        for (const auto i : c10::irange(size)) {
+          acc = ops.reduce(acc, *(data_t*)in, begin + i);
           in += stride;
         }
       }, {begin, end});
-      return acc;
+      return ops.translate_idx(acc, sub_iter.view_offsets()[0]);
     };
     acc_t total_acc = init;
     auto numel = sub_iter.numel();
@@ -233,7 +243,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
           acc = reduction_body(acc, begin, end);
         }
       );
-      for (int i = 0; i < max_threads; ++i) {
+      for (const auto i : c10::irange(max_threads)) {
         total_acc = ops.combine(total_acc, buffer[i]);
       }
     }
@@ -242,7 +252,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
 }
 
 template <typename func_t, typename vec_func_t>
-void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, double ident=0) {
+void binary_kernel_reduce_vec(TensorIteratorBase& iter, func_t op, vec_func_t vop, double ident = 0) {
   using traits = binary_function_traits<func_t>;
   static_assert(
     all_same<
@@ -251,7 +261,7 @@ void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, d
       typename traits::arg2_t>::value,
     "all types must match");
 
-  iter.output().fill_(ident);
+  iter.output_base().fill_(ident);
   iter.parallel_reduce([&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
     int64_t outer_strides[] = { strides[2], strides[3] };
     if (is_contiguous_reduction<traits>(strides)) {
@@ -271,6 +281,34 @@ void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, d
       });
     }
   });
+}
+
+// when reduction is on most inner dimension (dim 0 in TensorIterator)
+// and input has contiguous most inner dimension, `binary_kernel_reduce_lastdim`
+// can be used.
+static inline bool is_reduce_lastdim(TensorIteratorBase& iter) {
+  return iter.num_reduce_dims() == 1 && iter.is_dim_reduced(0)
+      && iter.ninputs() == 1 && iter.strides(1)[0] == iter.element_size(1);
+}
+
+template <typename reduce_func_t>
+void binary_kernel_reduce_lastdim(TensorIteratorBase& iter, reduce_func_t reduce_op) {
+  auto shape = iter.shape();
+  int64_t dim_size = shape[0];
+  int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / dim_size);
+  TensorIterator sub_iter(iter);
+  // create sub iterator to parallel on all non-reduce-dims
+  sub_iter.narrow(0, 0, 1);
+  auto loop = [&](char** data, const int64_t* strides, int64_t size) {
+    char* out = data[0];
+    char* in = data[1];
+    for (int64_t i = 0; i < size; ++i) {
+      reduce_op(out, in, dim_size);
+      out += strides[0];
+      in += strides[1];
+    }
+  };
+  sub_iter.for_each(loop, grain_size);
 }
 
 }}}  // namespace at::native::<anonymous>

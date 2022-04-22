@@ -1,36 +1,44 @@
-#include <ATen/ATen.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/EmptyTensor.h>
+#include <ATen/InitialTensorOptions.h>
+#include <ATen/native/cuda/Resize.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/native/cuda/Resize.cuh>
+#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 
-#include <THC/THCGeneral.h>
-#include <THC/THCThrustAllocator.cuh>
-#include <thrust/device_ptr.h>
-#include <thrust/sort.h>
-#include <thrust/execution_policy.h>
-#include <thrust/sequence.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_efficientzerotensor_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_strided_native.h>
+#include <ATen/ops/eye_native.h>
+#include <ATen/ops/tril_indices_native.h>
+#include <ATen/ops/tril_native.h>
+#include <ATen/ops/triu_indices_native.h>
+#include <ATen/ops/triu_native.h>
+#endif
 
 #include <algorithm>
-#include <cstddef>
 #include <cmath>
+#include <cstddef>
 
 namespace at {
 namespace native {
 
-Tensor& eye_out_cuda(Tensor& result, int64_t n) {
-  return at::native::eye_out_cuda(result, n, /*m=*/-1);
+Tensor& eye_out_cuda(int64_t n, Tensor& result) {
+  // the default value of `m` equals to `n`
+  return at::native::eye_out_cuda(n, n, result);
 }
 
-Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
+Tensor& eye_out_cuda(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
-
-  if(m < 0) {
-    m = n;
-  }
+  TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   result.resize_({n, m});
   result.zero_();
@@ -43,74 +51,29 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
-Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
-  AT_ASSERT(options.backend() == at::Backend::CUDA);
-  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
-  TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
-  check_size_nonnegative(size);
-
-  auto* allocator = at::cuda::getCUDADeviceAllocator();
-  int64_t nelements = prod_intlist(size);
-  auto dtype = options.dtype();
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
-    dtype,
-    nelements,
-    allocator->allocate(nelements * dtype.itemsize()),
-    allocator,
-    /*resizeable=*/true);
-
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId());
-  // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-  }
-  return tensor;
+Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+  return at::detail::empty_cuda(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
-  auto t = at::native::empty_cuda({0}, options);
-  at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
-  return t;
-}
-
-Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
-  TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
-  TORCH_CHECK(at::scalar_tensor(n, result.options()).defined(),
-  "n is too large for result tensor type: '", result.type().toString(), "'");
-
-  result.resize_({n});
-
-  if (result.scalar_type() == at::ScalarType::Half) {
-    auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)));
-    result.copy_(randperm_out_cuda(result_float, n, generator));
-  } else {
-    if (n < 30000) {  // For small inputs, we offload it to CPU instead.
-      auto result_cpu = at::empty({n}, result.options().device(kCPU));
-      randperm_out(result_cpu, n, generator);
-      result.copy_(result_cpu);
-    } else {
-      // Generate random values for the keys array
-      AT_DISPATCH_ALL_TYPES(
-        result.scalar_type(), "randperm_out_cuda", [&] {
-          auto keys = at::empty(result.sizes(), result.options()).random_(generator);
-
-          auto result_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
-          auto keys_data = thrust::device_ptr<scalar_t>(keys.data<scalar_t>());
-
-          auto state = globalContext().getTHCState();
-          THCThrustAllocator thrustAlloc(state);
-          auto policy = thrust::cuda::par(thrustAlloc).on(at::cuda::getCurrentCUDAStream());
-
-          thrust::sequence(policy, result_data, result_data + n);
-
-          // Use the sorted order of keys to rearrange the result array
-          thrust::sort_by_key(policy, keys_data, keys_data + n, result_data);
-        }
-      );
+Tensor _efficientzerotensor_cuda(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+    auto device_ = device_or_default(device);
+    if (!device_.has_index()) {
+      device_.set_index(at::cuda::current_device());
     }
-  }
+    auto allocator = at::native::ZeroTensorAllocator(device_);
+    auto dtype_ = dtype_or_default(dtype);
+    auto zero_ks = at::DispatchKeySet(c10::DispatchKey::CUDA) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
+    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+    return out;
+}
 
-  return result;
+
+Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  return at::detail::empty_strided_cuda(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -121,7 +84,7 @@ namespace {
 // iterations. This would give the accurate result, but is relatively slow and
 // is an overkill for most cases where double's precision suffice.
 //
-// If we directly use sqrt to calculate the root, the convertion from int64_t
+// If we directly use sqrt to calculate the root, the conversion from int64_t
 // to double would lose 11 bits precision.
 //
 // The following solution uses sqrt directly for most cases, and would only
@@ -191,7 +154,7 @@ inline int64_t resolve_root_int(
 //                       (row + 2f - 1)row <= 2x
 //                  row^2 + (2f-1)row - 2x <= 0.                            [3]
 //
-// Based on ineuqality [3], we have the following coefficients for formula of
+// Based on inequality [3], we have the following coefficients for formula of
 // root:
 //                               a = 1
 //                               b = 2f - 1
@@ -234,7 +197,7 @@ inline void get_coordinate_in_tril_trapezoid(
 //                       (-row + 2f + 1)row <= 2x
 //                   row^2 - (2f+1)row + 2x >= 0.                           [3]
 //
-// Based on ineuqality [3], we have the following coefficients for formula of
+// Based on inequality [3], we have the following coefficients for formula of
 // root:
 //                               a = 1
 //                               b = -1 - 2f
@@ -266,7 +229,7 @@ inline void get_coordinate_in_triu_trapezoid(
 
 template <typename scalar_t>
 __global__
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_1(512)
 #endif
 void tril_indices_kernel(scalar_t * tensor,
@@ -301,11 +264,12 @@ void tril_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor tril_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);
-  auto tensor = empty_cuda({2, tril_size}, options);
+  auto tensor = empty_cuda({2, tril_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   if (tril_size > 0) {
     auto m_first_row = offset > 0 ?
@@ -329,12 +293,13 @@ Tensor tril_indices_cuda(
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data<scalar_t>(),
+        tensor.data_ptr<scalar_t>(),
         trapezoid_row_offset,
         m_first_row,
         col,
         tril_size - rectangle_size,
         tril_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
 
@@ -375,11 +340,12 @@ void triu_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor triu_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
-  auto tensor = empty_cuda({2, triu_size}, options);
+  auto tensor = empty_cuda({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   if (triu_size > 0) {
     // # of triu elements in the first row
@@ -405,12 +371,13 @@ Tensor triu_indices_cuda(
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data<scalar_t>(),
+        tensor.data_ptr<scalar_t>(),
         std::max<int64_t>(0, offset),
         m_first_row,
         col,
         rectangle_size,
         triu_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
 

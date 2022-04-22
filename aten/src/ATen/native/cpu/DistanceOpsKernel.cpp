@@ -1,18 +1,20 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Distance.h>
 
-#include <numeric>
-#include <iterator>
 #include <algorithm>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/cpu/vml.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native { namespace {
 
 template<typename scalar_t>
 struct Dist {
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
 
   // Depending on the value of the pnorm, there are specific implementations
   // that are much faster than std::pow(std::abs(a - b), p), but have the same
@@ -26,7 +28,7 @@ struct Dist {
   //     map :      This tells how to modify (a - b) to form the component that
   //                gets summed.
   //     red :      This tells how to sum the result of map up. This is
-  //                separate because the inf norm actuall uses max instead of
+  //                separate because the inf norm actually uses max instead of
   //                sum.
   //     finish :   This tells what to do with the aggregated value to compute
   //                the norm. Generally this is the result of val ^ (1 / p).
@@ -39,10 +41,10 @@ struct Dist {
   // there's a struct with only a backward pass for this case.
 
   // TODO This is an inefficient way to compite sign, and can be much faster
-  // using native SSE instructions that should be added to Vec256.
+  // using native SSE instructions that should be added to Vectorized.
   static inline Vec sign(Vec val) {
-    return vec256::minimum(vec256::maximum(Vec(0), val.ceil()), Vec(1)) +
-      vec256::minimum(vec256::maximum(Vec(-1), val.floor()), Vec(0));
+    return vec::minimum(vec::maximum(Vec(0), val.ceil()), Vec(1)) +
+      vec::minimum(vec::maximum(Vec(-1), val.floor()), Vec(0));
   }
 
   static inline Vec abs(Vec val) {
@@ -62,7 +64,7 @@ struct Dist {
   }
 
   static inline Vec min(Vec val, scalar_t other) {
-    return vec256::minimum(val, Vec(other));
+    return vec::minimum(val, Vec(other));
   }
 
   static inline scalar_t min(scalar_t val, scalar_t other) {
@@ -70,7 +72,7 @@ struct Dist {
   }
 
   static inline Vec max(Vec val, Vec other) {
-    return vec256::maximum(val, other);
+    return vec::maximum(val, other);
   }
 
   static inline scalar_t max(scalar_t val, scalar_t other) {
@@ -90,7 +92,7 @@ struct Dist {
   struct zdist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return min(ceil(abs(diff)), 1); }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
-    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
   };
 
   // One norm
@@ -98,13 +100,17 @@ struct Dist {
   struct odist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
     static inline data_t red(const data_t& agg, const data_t& up) { return agg + up; }
-    static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff); }
+    static inline scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t /*dist*/, const Vec& /*p*/) { return Vec(grad) * sign(diff); }
   };
 
   // Special general pnorm derivative if p is less than two
   struct lttdist_calc {
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return dist == 0.0 ? Vec(0) : sign(diff) * diff.abs().pow(p - Vec(1)) * Vec(grad) / Vec(dist).pow(p - Vec(1)); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) {
+      Vec result = (dist == 0.0) ? Vec(0) : (sign(diff) * diff.abs().pow(p - Vec(1)) * Vec(grad) / Vec(dist).pow(p - Vec(1)));
+      result = Vec::blendv(result, Vec(0), (diff == Vec(0)) & (p < Vec(1)));
+      return result;
+    }
   };
 
   // Two norm
@@ -126,7 +132,7 @@ struct Dist {
     static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return dist == 0.0 ? Vec(0) : diff * diff.abs().pow(p - Vec(2)) * Vec(grad) / Vec(dist).pow(p - Vec(1)); }
   };
 
-  // Info norm
+  // Inf norm
   template<typename data_t>
   struct idist_calc {
     static inline data_t map(const data_t& diff, const data_t& p) { return diff; }
@@ -134,17 +140,17 @@ struct Dist {
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
     // TODO This backward pass uses a very complext expression to compute (diff
     // == dist) that could be much faster if using SSE instructions.
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
   };
 
   template <typename F>
   static void run_parallel_pdist(Tensor& result, const Tensor& self, const scalar_t p) {
-    const scalar_t * const self_start = self.data<scalar_t>();
+    const scalar_t * const self_start = self.data_ptr<scalar_t>();
     const scalar_t * const self_end = self_start + self.numel();
     int64_t n = self.size(0);
     int64_t m = self.size(1);
 
-    scalar_t * const res_start = result.data<scalar_t>();
+    scalar_t * const res_start = result.data_ptr<scalar_t>();
     int64_t combs = result.numel(); // n * (n - 1) / 2
 
     // We conceptually iterate over tuples of (i, j, k) where i is the first
@@ -155,6 +161,7 @@ struct Dist {
       const Vec pvec(p);
       double n2 = n - .5;
       // The -1 accounts for floating point truncation issues
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
@@ -164,7 +171,7 @@ struct Dist {
       const scalar_t * const res_end = res_start + end;
 
       while (res != res_end) {
-        *res = F::finish(vec256::map2_reduce_all<scalar_t>(
+        *res = F::finish(vec::map2_reduce_all<scalar_t>(
           [&pvec](Vec a, Vec b) { return F::map((a - b).abs(), pvec); },
           F::red, self_i, self_j, m), p);
 
@@ -195,14 +202,14 @@ struct Dist {
 
   template <typename F>
   static void run_parallel_cdist(Tensor& result, const Tensor& t1, const Tensor& t2, const scalar_t p) {
-    const scalar_t * const t1_start = t1.data<scalar_t>();
-    const scalar_t * const t2_start = t2.data<scalar_t>();
+    const scalar_t * const t1_start = t1.data_ptr<scalar_t>();
+    const scalar_t * const t2_start = t2.data_ptr<scalar_t>();
     int64_t d = t1.size(0);
     int64_t r1 = t1.size(-2);
     int64_t r2 = t2.size(-2);
     int64_t m = t1.size(-1);
 
-    scalar_t * const res_start = result.data<scalar_t>();
+    scalar_t * const res_start = result.data_ptr<scalar_t>();
     int64_t combs = r1 * r2;
     int64_t size1 = r1 * m;
     int64_t size2 = r2 * m;
@@ -222,7 +229,7 @@ struct Dist {
         const scalar_t * self_j = t2_start + size2 * l + j;
 
         scalar_t agg = 0;
-        for (int x = 0; x < m; x++) {
+        for (const auto x : c10::irange(m)) {
           scalar_t a = *(self_i + x);
           scalar_t b = *(self_j + x);
           agg = F::red(agg, F::map(std::abs(a-b), p));
@@ -288,10 +295,10 @@ struct Dist {
     const int64_t m = self.size(1);
     const int64_t gs = grad.stride(0);
 
-    const scalar_t * const grad_start = grad.data<scalar_t>();
-    const scalar_t * const dist_start = dist.data<scalar_t>();
-    const scalar_t * const self_start = self.data<scalar_t>();
-    scalar_t * const res_start = result.data<scalar_t>();
+    const scalar_t * const grad_start = grad.data_ptr<scalar_t>();
+    const scalar_t * const dist_start = dist.data_ptr<scalar_t>();
+    const scalar_t * const self_start = self.data_ptr<scalar_t>();
+    scalar_t * const res_start = result.data_ptr<scalar_t>();
 
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
@@ -354,13 +361,16 @@ struct Dist {
     const int64_t d = result.size(0);
     const int64_t l1_size = r1 * m;
     const int64_t l2_size = r2 * m;
-    const int64_t gs = grad.stride(-1);
+    //current implementation supports only tensor that can be collapsed to 1D. However, to avoid checking if grad satisfies this assumption,
+    //we call .contiguous() on grad before backward, thus stride is guaranteed to be 1
+    //don't use grad.stride(-1), because if last dimension is 1, stride can be bogus.
+    const int64_t gs = 1;
 
-    const scalar_t * const grad_start = grad.data<scalar_t>();
-    const scalar_t * const dist_start = dist.data<scalar_t>();
-    const scalar_t * const t1_start = t1.data<scalar_t>();
-    const scalar_t * const t2_start = t2.data<scalar_t>();
-    scalar_t * const res_start = result.data<scalar_t>();
+    const scalar_t * const grad_start = grad.data_ptr<scalar_t>();
+    const scalar_t * const dist_start = dist.data_ptr<scalar_t>();
+    const scalar_t * const t1_start = t1.data_ptr<scalar_t>();
+    const scalar_t * const t2_start = t2.data_ptr<scalar_t>();
+    scalar_t * const res_start = result.data_ptr<scalar_t>();
 
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (16 * r1), [=](int64_t l, int64_t end) {
       const Vec pvec(p);
@@ -384,7 +394,8 @@ struct Dist {
     const scalar_t * t1_end = t1 + l1_size;
     const scalar_t * t2_end = t2 + l2_size;
 
-    for (int64_t l = 0; l < d; l++) {
+    for (const auto l : c10::irange(d)) {
+      (void)l; //Suppress unused variable warning
       for (; t1 != t1_end; t1 += m, res += m) {
         const Vec vec_t1 = Vec::loadu(t1, count);
         Vec res_vec = Vec::loadu(res, count);

@@ -4,7 +4,7 @@
 /* Commandline flags support for C10.
  *
  * This is a portable commandline flags tool for c10, so we can optionally
- * choose to use gflags or a lightweighted custom implementation if gflags is
+ * choose to use gflags or a lightweight custom implementation if gflags is
  * not possible on a certain platform. If you have gflags installed, set the
  * macro C10_USE_GFLAGS will seamlessly route everything to gflags.
  *
@@ -32,8 +32,8 @@
 
 #include <string>
 
-#include "c10/macros/Macros.h"
-#include "c10/util/Registry.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/Registry.h>
 
 namespace c10 {
 /**
@@ -115,7 +115,7 @@ namespace gflags = google;
 // flags defined in C10. This is done via a global reference, so the flag
 // itself is not duplicated - under the hood it is the same global gflags flag.
 #define C10_GFLAGS_DEF_WRAPPER(type, real_type, name, default_value, help_str) \
-  DEFINE_##type(name, default_value, help_str);                                \
+  DEFINE_##type(name, default_value, help_str);
 
 #define C10_DEFINE_int(name, default_value, help_str) \
   C10_GFLAGS_DEF_WRAPPER(int32, gflags::int32, name, default_value, help_str)
@@ -131,8 +131,7 @@ namespace gflags = google;
   C10_GFLAGS_DEF_WRAPPER(string, ::fLS::clstring, name, default_value, help_str)
 
 // DECLARE_typed_var should be used in header files and in the global namespace.
-#define C10_GFLAGS_DECLARE_WRAPPER(type, real_type, name) \
-  DECLARE_##type(name);                                   \
+#define C10_GFLAGS_DECLARE_WRAPPER(type, real_type, name) DECLARE_##type(name);
 
 #define C10_DECLARE_int(name) \
   C10_GFLAGS_DECLARE_WRAPPER(int32, gflags::int32, name)
@@ -159,7 +158,6 @@ namespace c10 {
 
 class C10_API C10FlagParser {
  public:
-  C10FlagParser() {}
   bool success() {
     return success_;
   }
@@ -167,7 +165,7 @@ class C10_API C10FlagParser {
  protected:
   template <typename T>
   bool Parse(const std::string& content, T* value);
-  bool success_;
+  bool success_{false};
 };
 
 C10_DECLARE_REGISTRY(C10FlagsRegistry, C10FlagParser, const std::string&);

@@ -1,7 +1,7 @@
 #pragma once
 
 namespace at { namespace native {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
 // take these out when ROCm implements std:: math functions
 #include <math.h>
 template <typename scalar_t>

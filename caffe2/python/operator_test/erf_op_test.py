@@ -1,13 +1,12 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import math
 
 from caffe2.python import core
-from hypothesis import given
-from hypothesis import strategies as st
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
@@ -16,9 +15,10 @@ import unittest
 
 
 class TestErfOp(serial.SerializedTestCase):
-    @serial.given(
-        X=hu.tensor(elements=st.floats(min_value=-0.7, max_value=0.7)),
+    @given(
+        X=hu.tensor(elements=hu.floats(min_value=-0.7, max_value=0.7)),
         **hu.gcs)
+    @settings(deadline=10000)
     def test_erf(self, X, gc, dc):
         op = core.CreateOperator('Erf', ["X"], ["Y"])
         self.assertReferenceChecks(gc, op, [X], lambda x: (np.vectorize(math.erf)(X),))

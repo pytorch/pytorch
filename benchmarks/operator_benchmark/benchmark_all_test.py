@@ -1,16 +1,9 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import operator_benchmark as op_bench
-from ops.pt import ( # noqa
-    add_test, batchnorm_test, conv_test, linear_test, matmul_test # noqa
+from pt import (  # noqa: F401
+    unary_test,
 )
-from ops.c2 import ( # noqa
-    add_test, matmul_test # noqa
-)
-
+import benchmark_all_other_test  # noqa: F401
+import benchmark_all_quantized_test  # noqa: F401
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()

@@ -5,16 +5,33 @@
 // 1. Graves et al: http://www.cs.toronto.edu/~graves/icml_2006.pdf
 // We use the equations from above link, but note that [1] has 1-based indexing and we (of course) use 0-based.
 // Graves et al call the probabilities y, we use log_probs (also calling them inputs)
-// A few optimizations (simmilar to those here, but also some I didn't take) are described in
+// A few optimizations (similar to those here, but also some I didn't take) are described in
 // 2. Minmin Sun: http://on-demand.gputechconf.com/gtc/2016/presentation/s6383-minmin-sun-speech-recognition.pdf
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
-
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/TensorOperators.h>
+#include <ATen/cuda/Atomic.cuh>
+#include <ATen/cuda/CUDAContext.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_ctc_loss_backward_native.h>
+#include <ATen/ops/_ctc_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/exp.h>
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/imag.h>
+#include <ATen/ops/logsumexp.h>
+#include <ATen/ops/tensor.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <type_traits>
 #include <numeric>
@@ -24,10 +41,20 @@ namespace native {
 
 namespace {
 
-// this ad-hoc converts from targets (l in [1]) to augmented targets (l' in [1]) note that no bound-checking is done
-// __restrict__ impact to be measured, https://devblogs.nvidia.com/cuda-pro-tip-optimize-pointer-aliasing/
-template<typename target_t>
-__device__ static inline int64_t get_target_prime(const target_t* __restrict__ target, int64_t offset, int64_t stride, int64_t idx, int64_t BLANK) {
+// this ad-hoc converts from targets (l in [1]) to augmented targets (l' in [1])
+// so if l is l_0 l_1 ... l_(tl-1) then this looks up idx in
+// l' = BLANK l_0 BLANK l_1 BLANK ... BLANK l_(tl-1) BLANK
+// - note that no bound-checking is done
+// - it is important to only call it witth idx == 0 if the target length is 0
+// - __restrict__ impact to be measured, see
+//   https://devblogs.nvidia.com/cuda-pro-tip-optimize-pointer-aliasing/
+template <typename target_t>
+__device__ static inline int64_t get_target_prime(
+    const target_t* __restrict__ target,
+    int64_t offset,
+    int64_t stride,
+    int64_t idx,
+    int64_t BLANK) {
   if (idx % 2 == 0) {
     return BLANK;
   } else {
@@ -46,7 +73,7 @@ __device__ static inline int64_t get_target_prime(const target_t* __restrict__ t
 // computed when we start a new block_s. This is why we have our own for loop here.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
@@ -80,12 +107,16 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
       la = log_probs_data[lp_batch_offset + lp_char_stride * BLANK];
       break;
     case 1:
-      if (target_length > 0) {
-        la = log_probs_data[lp_batch_offset + lp_char_stride * get_target_prime(targets_data, tg_batch_offset, tg_target_stride, 1, BLANK)];
-      }
-      else {
-        la = neginf;
-      }
+      la = target_length == 0 ? neginf
+                              : log_probs_data
+                                    [lp_batch_offset +
+                                     lp_char_stride *
+                                         get_target_prime(
+                                             targets_data,
+                                             tg_batch_offset,
+                                             tg_target_stride,
+                                             1,
+                                             BLANK)];
       break;
     default:
       la = neginf;
@@ -100,16 +131,28 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
     // These two only depend on s, so we can cache them.
     int64_t current_char;       // l_s in eq (6)
     bool have_three;            // flag which of the two cases in eq (6) we have
-    if (s < 2*target_length+1) {
-      current_char = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
-      have_three = ((s > 1) && (get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s-2, BLANK) != current_char));
+    if (s < 2 * target_length + 1 && target_length > 0) {
+      current_char = get_target_prime(
+          targets_data,
+          tg_batch_offset,
+          tg_target_stride,
+          s,
+          BLANK);
+      have_three =
+          ((s > 1) &&
+           (get_target_prime(
+                targets_data,
+                tg_batch_offset,
+                tg_target_stride,
+                s - 2,
+                BLANK) != current_char));
     } else {
       current_char = BLANK;
       have_three = false;
     }
     for (int64_t t=1; t < max_input_length; t++) {
       __syncthreads(); // on cuda 9 we might use partial synchronization of only the threads within the same batch
-      if ((t < input_length) && (target_length > 0) && (s < 2*target_length+1)) {
+      if ((t < input_length) && (s < 2 * target_length + 1)) {
         // only for valid t, s. This is equation (6) and (7), la1, la2, la3 are the three summands,
         // lamax is the maximum for the logsumexp trick.
         scalar_t la1 = log_alpha_data[la_batch_offset + la_input_stride * (t-1) + la_target_stride * s];
@@ -146,7 +189,11 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
   // compute the loss (eq (8))
   if (threadIdx.x == 0) {
     scalar_t l1 = log_alpha_data[la_batch_offset + la_input_stride * (input_length-1) + la_target_stride * (target_length*2)];
-    scalar_t l2 = log_alpha_data[la_batch_offset + la_input_stride * (input_length-1) + la_target_stride * (target_length*2-1)];
+    scalar_t l2 = target_length > 0
+        ? log_alpha_data
+              [la_batch_offset + la_input_stride * (input_length - 1) +
+               la_target_stride * (target_length * 2 - 1)]
+        : neginf;
     scalar_t m = ((l1 > l2) ? l1 : l2);
     m = ((m == neginf) ? 0 : m);
     scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
@@ -183,13 +230,11 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   TORCH_CHECK(input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
   TORCH_CHECK(target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
-  int64_t lp_input_stride = log_probs.stride(0);
-  int64_t lp_char_stride = log_probs.stride(2);
   int64_t tg_target_stride;
 
   int64_t max_target_length = 0;
   auto tg_batch_offsets = at::empty({batch_size}, at::device(at::kCPU).dtype(at::kLong));
-  auto tg_batch_offsets_data = tg_batch_offsets.data<int64_t>();
+  auto tg_batch_offsets_data = tg_batch_offsets.data_ptr<int64_t>();
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     for (int64_t i = 0; i < batch_size; i++) {
@@ -218,7 +263,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
     TORCH_CHECK(input_lengths[b] <= max_input_length,
-             "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", targets.size(0), " for ", targets_arg,
+             "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
   }
 
@@ -236,21 +281,20 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
     threads_target /= 2;
   }
   int threads_batch = std::min(max_threads / threads_target, (int) batch_size);
-
   dim3 block(threads_target, threads_batch);
   dim3 grid((2*max_target_length+1 + threads_target-1)/threads_target, (batch_size+threads_batch-1)/threads_batch);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   ctc_loss_log_alpha_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>(
-                      log_alpha.data<scalar_t>(),
-                      log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-                      targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
-                      neg_log_likelihood.data<scalar_t>(),
+                      log_alpha.data_ptr<scalar_t>(),
+                      log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(), log_probs.size(0),
+                      targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(), max_target_length,
+                      neg_log_likelihood.data_ptr<scalar_t>(),
                       log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
                       log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
-                      tg_batch_offsets.data<int64_t>(), tg_target_stride,
+                      tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
                       batch_size, BLANK);
-  THCudaCheck(cudaGetLastError()); // catch launch errors
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   return std::make_tuple(neg_log_likelihood, log_alpha);
 }
 
@@ -285,8 +329,13 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
     scalar_t lb;
     if (s == 2*target_length) {
       lb = log_probs_data[lp_batch_offset + (input_length-1) * lp_input_stride + lp_char_stride * BLANK];
-    } else if ((target_length > 0) && (s == 2*target_length-1)) {
-      int64_t current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
+    } else if (s == 2 * target_length - 1) { // false for target_length == 0
+      int64_t current_target_prime = get_target_prime(
+          targets_data,
+          tg_batch_offset,
+          tg_target_stride,
+          s,
+          BLANK);
       lb = log_probs_data[lp_batch_offset + (input_length-1) * lp_input_stride + lp_char_stride * current_target_prime];
     } else {
       lb = neginf;
@@ -301,11 +350,21 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
     int64_t s = threadIdx.x + block_s;
     int64_t current_target_prime;
     bool have_three;
-    if (s < 2*target_length+1) {
-      current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
-      have_three = ((s < 2*target_length-1) &&
-                    (get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s+2, BLANK) !=
-                     current_target_prime));
+    if (s < 2 * target_length + 1 && target_length > 0) {
+      current_target_prime = get_target_prime(
+          targets_data,
+          tg_batch_offset,
+          tg_target_stride,
+          s,
+          BLANK);
+      have_three =
+          ((s < 2 * target_length - 1) &&
+           (get_target_prime(
+                targets_data,
+                tg_batch_offset,
+                tg_target_stride,
+                s + 2,
+                BLANK) != current_target_prime));
     } else {
       current_target_prime = BLANK;
       have_three = false;
@@ -313,7 +372,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
     // now go backward in t. Note that we need to skip the last timestep that we did above.
     for (int64_t t=max_input_length-2; t>=0; t--) {
       __syncthreads(); // on cuda 9 we might use partial synchronization of only the threads within the same batch item
-      if ((t < input_length-1) && (target_length > 0) && (s < 2*target_length+1)) {
+      if ((t < input_length - 1) && (s < 2 * target_length + 1)) {
         scalar_t lb1 = log_beta_data[lb_batch_offset + lb_input_stride * (t+1) + lb_target_stride * s];
         scalar_t lbmax = lb1;
         scalar_t lb2, lb3;
@@ -339,8 +398,13 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
           + log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * current_target_prime];
 
         log_beta_data[lb_batch_offset + lb_input_stride * t + lb_target_stride * s] = lb;
-      } else if ((s < 2*max_target_length+1) && ((target_length == 0) || (s >= 2*target_length+1) || (t >= input_length))) {
-          log_beta_data[lb_batch_offset + lb_input_stride * t + lb_target_stride * s] = neginf;
+      } else if (
+          (s < 2 * max_target_length + 1) &&
+          (((target_length == 0) && (s > 0)) || (s >= 2 * target_length + 1) ||
+           (t >= input_length))) {
+        log_beta_data
+            [lb_batch_offset + lb_input_stride * t + lb_target_stride * s] =
+                neginf;
       }
     }
   }
@@ -363,23 +427,23 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
 // alphabets the inplace nature is a considerable advantage.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
                                                      const scalar_t* __restrict__ log_alpha_data, const scalar_t* __restrict__ log_beta_data,
-                                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
-                                                     const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths, int64_t max_target_length,
+                                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths,
+                                                     const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths,
                                                      const scalar_t* __restrict__ neg_log_likelihood_data,
                                                      int64_t gr_input_stride, int64_t gr_batch_stride, int64_t gr_char_stride,
                                                      int64_t lp_input_stride, int64_t lp_batch_stride, int64_t lp_char_stride,
                                                      int64_t la_batch_stride, int64_t la_input_stride, int64_t la_target_stride,
                                                      int64_t lb_batch_stride, int64_t lb_input_stride, int64_t lb_target_stride,
                                                      const int64_t* __restrict__ tg_batch_offsets, int64_t tg_target_stride,
-                                              int64_t batch_size, int64_t num_labels, int64_t BLANK, bool zero_infinity) {
+                                              int64_t batch_size, bool zero_infinity) {
   int64_t b = threadIdx.y + blockIdx.y * blockDim.y;
-  int64_t s = threadIdx.x + blockIdx.x * blockDim.y; // note, this directly indexes into targets, no targets prime!
+  int64_t s = threadIdx.x + blockIdx.x * blockDim.x; // note, this directly indexes into targets, not targets prime!
 
   if (b >= batch_size)
     return;
@@ -404,7 +468,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 
   for (int64_t t = 0; t < input_length; t++) {
     scalar_t lp = log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * target];
-    atomicAdd(&gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * target],
+    gpuAtomicAddNoReturn(&gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * target],
               -std::exp(log_alpha_data[la_batch_offset + la_input_stride * t + la_target_stride * (s*2+1)]
                         + log_beta_data[lb_batch_offset + lb_input_stride * t + lb_target_stride * (s*2+1)]
                         + nll - lp) * gr);
@@ -415,7 +479,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 // It appears to be faster than the above method for small batch sizes.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
@@ -448,8 +512,13 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
 
   // collected[b, t, target'[s]] "log+=" log_alpha[t, s]+log_beta[t, s]
   for (int s = 0; s < 2*max_target_length+1; s++) {
-    if ((target_length > 0) && (s < 2*target_length+1)) {
-      int64_t current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
+    if (s < 2 * target_length + 1) { // if target_length == 0, s == 0
+      int64_t current_target_prime = get_target_prime(
+          targets_data,
+          tg_batch_offset,
+          tg_target_stride,
+          s,
+          BLANK);
       scalar_t log_alpha_beta = (log_alpha_data[la_batch_offset + la_input_stride * t + la_target_stride * s]
                                  + log_beta_data[lb_batch_offset + lb_input_stride * t + lb_target_stride * s]);
       scalar_t& lcab = gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * current_target_prime];
@@ -482,7 +551,7 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
 // elements are padded
 template<typename scalar_t>
 __global__ void
-#if defined (__HIP_PLATFORM_HCC__)
+#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_zero_padded_gradients(
@@ -520,13 +589,11 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
-  int64_t lp_input_stride = log_probs.stride(0);
-  int64_t lp_char_stride = log_probs.stride(2);
   int64_t tg_target_stride;
 
   int64_t max_target_length;
   auto tg_batch_offsets = at::empty({batch_size}, TensorOptions(at::CPU(kLong)));
-  auto tg_batch_offsets_data = tg_batch_offsets.data<int64_t>();
+  auto tg_batch_offsets_data = tg_batch_offsets.data_ptr<int64_t>();
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     max_target_length = 0;
@@ -551,10 +618,10 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
   tg_batch_offsets = tg_batch_offsets.cuda();
 
-  Tensor log_beta = at::empty_like(log_alpha);
+  Tensor log_beta = at::empty_like(log_alpha, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   log_beta.fill_(neginf);
 
-  Tensor grad = at::full_like(log_probs, neginf); // initialization for log(sum (alpha beta))
+  Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // initialization for log(sum (alpha beta))
 
   // As above, there may be better configurations to use.
   constexpr int max_threads = std::is_same<scalar_t, float>::value ? 1024 : 896; // we need 72 or so 32 bit registers for double
@@ -569,16 +636,15 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   {
     dim3 block(threads_target, threads_batch);
     dim3 grid((2*max_target_length+1 + threads_target-1)/threads_target, (batch_size+threads_batch-1)/threads_batch);
-
     ctc_loss_backward_log_beta_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
-      (log_beta.data<scalar_t>(),
-       log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-       targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
+      (log_beta.data_ptr<scalar_t>(),
+       log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(), log_probs.size(0),
+       targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(), max_target_length,
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
-       tg_batch_offsets.data<int64_t>(), tg_target_stride,
+       tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
        batch_size, BLANK);
-    THCudaCheck(cudaGetLastError()); // catch launch errors
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   // Very crude heuristic for what is a small problem., based on linearly regressing problem dimensions on
@@ -588,7 +654,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   bool is_large = (2*log_probs.size(0)+(24*batch_size)/10+(2*num_labels)/10) > 450;
   if (is_large) { // large alphabet, large batch
     // this computes the probs, minuend in (16)
-    exp_out(grad, log_probs);
+    at::exp_out(grad, log_probs);
     // now we compute the subtrahend for the blanks. It is a straightforward reduction because we know that
     // blanks are in every other position.
     // maybe we should kernelize this, too.
@@ -612,50 +678,53 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     // For the non-blank characters, we use a kernel to compute the subtrahend.
     // Again we might configure block and grid in a better way.
     int threads_target = max_threads;
-    while (threads_target / 2 >= max_target_length) {
+    while (threads_target / 2 >= max_target_length && threads_target > 1) {
       threads_target /= 2;
     }
     int threads_batch = std::min(max_threads / threads_target, (int) batch_size);
     dim3 block(threads_target, threads_batch);
-    dim3 grid((max_target_length + threads_target-1)/threads_target, (batch_size+threads_batch-1)/threads_batch);
+    dim3 grid(
+        std::max<int>(
+            (max_target_length + threads_target - 1) / threads_target, 1),
+        (batch_size + threads_batch - 1) / threads_batch,
+        1);
     ctc_loss_backward_collect_nonblank_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
-      (grad.data<scalar_t>(),
-       grad_out.data<scalar_t>(), grad_out.stride(0),
-       log_alpha.data<scalar_t>(), log_beta.data<scalar_t>(),
-       log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-       targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
-       neg_log_likelihood.data<scalar_t>(),
+      (grad.data_ptr<scalar_t>(),
+       grad_out.data_ptr<scalar_t>(), grad_out.stride(0),
+       log_alpha.data_ptr<scalar_t>(), log_beta.data_ptr<scalar_t>(),
+       log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(),
+       targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(),
+       neg_log_likelihood.data_ptr<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
-       tg_batch_offsets.data<int64_t>(), tg_target_stride,
-       batch_size, num_labels, BLANK, zero_infinity);
-    THCudaCheck(cudaGetLastError()); // catch launch errors
+       tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
+       batch_size, zero_infinity);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else { // small problem, use naive algorithm
     // Still no block/grid configuration guru...
     int threads_input = max_threads;
-    while (threads_input / 2 >= log_probs.size(0)) {
+    while (threads_input / 2 >= log_probs.size(0) && threads_input > 1) {
       threads_input /= 2;
     }
     threads_batch = std::min(max_threads / threads_input, (int) batch_size);
     dim3 block(threads_input, threads_batch);
     dim3 grid((log_probs.size(0) + threads_input-1)/threads_input, (batch_size+threads_batch-1)/threads_batch);
-
     ctc_loss_backward_collect_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
-      (grad.data<scalar_t>(),
-       grad_out.data<scalar_t>(), grad_out.stride(0),
-       log_alpha.data<scalar_t>(), log_beta.data<scalar_t>(),
-       log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-       targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
-       neg_log_likelihood.data<scalar_t>(),
+      (grad.data_ptr<scalar_t>(),
+       grad_out.data_ptr<scalar_t>(), grad_out.stride(0),
+       log_alpha.data_ptr<scalar_t>(), log_beta.data_ptr<scalar_t>(),
+       log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(), log_probs.size(0),
+       targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(), max_target_length,
+       neg_log_likelihood.data_ptr<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
-       tg_batch_offsets.data<int64_t>(), tg_target_stride,
+       tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
        batch_size, num_labels, BLANK, zero_infinity);
-    THCudaCheck(cudaGetLastError()); // catch launch errors
+    C10_CUDA_KERNEL_LAUNCH_CHECK(); // catch launch errors
   }
 
   // zero those invalid graident elements due to padding
@@ -670,8 +739,8 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       (log_probs.size(0) + threads_input-1)/threads_input,
       (batch_size+threads_batch-1)/threads_batch);
     ctc_loss_zero_padded_gradients<scalar_t><<<grid, block, 0, stream>>>(
-      grad.data<scalar_t>(),
-      input_lengths_t.data<int64_t>(),
+      grad.data_ptr<scalar_t>(),
+      input_lengths_t.data_ptr<int64_t>(),
       grad.stride(0),
       grad.stride(1),
       grad.stride(2),
@@ -679,7 +748,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       grad.size(1),
       grad.size(2)
     );
-    THCudaCheck(cudaGetLastError());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   return grad;
@@ -700,6 +769,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu(const Tensor& log_probs, const Tensor& t
 
 Tensor ctc_loss_backward_gpu(const Tensor& grad, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                              const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("ctc_loss_backward_gpu");
   return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_backward_cuda", [&] {
       if (targets.scalar_type() == kLong) {
         return ctc_loss_backward_gpu_template<scalar_t, kLong>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);

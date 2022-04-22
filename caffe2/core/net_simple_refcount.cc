@@ -24,7 +24,7 @@ SimpleRefCountNet::SimpleRefCountNet(
 
   std::map<string, int> last_consumed_at;
   std::set<string> created_by_me;
-  // For each opeartor
+  // For each operator
   for (int idx = 0; idx < net_def->op_size(); ++idx) {
     const auto& op_def = net_def->op(idx);
     for (const string& in_name : op_def.input()) {
@@ -59,7 +59,7 @@ SimpleRefCountNet::SimpleRefCountNet(
 bool SimpleRefCountNet::Run() {
   StartAllObservers();
   VLOG(1) << "Running net " << name_;
-  for (int op_id = 0; op_id < operators_.size(); ++op_id) {
+  for (auto op_id = 0U; op_id < operators_.size(); ++op_id) {
     auto& op = operators_[op_id];
     VLOG(1) << "Running operator " << op->debug_def().name() << "("
             << op->debug_def().type() << ").";

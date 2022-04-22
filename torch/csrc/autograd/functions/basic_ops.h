@@ -1,6 +1,7 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/irange.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -10,9 +11,9 @@
 
 namespace torch { namespace autograd {
 
-struct TORCH_API Error : public Function {
+struct TORCH_API Error : public Node {
   Error(std::string msg, edge_list&& next_edges)
-    : Function(std::move(next_edges))
+    : Node(std::move(next_edges))
     , msg(std::move(msg)) {}
 
   Error(std::string msg)
@@ -36,28 +37,59 @@ struct TORCH_API NotImplemented : public Error {
 };
 
 // Identity in forward, Error in backward. Used to implement @once_differentiable
-struct TORCH_API DelayedError : public Function {
+struct TORCH_API DelayedError : public Node {
   DelayedError(std::string msg, int num_inputs)
     : msg(std::move(msg)) {
-      for (int i = 0; i < num_inputs; i++)
-        add_input_metadata(Function::undefined_input());
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+    for (const auto i : c10::irange(num_inputs)) {
+      (void)i; //Suppress unused variable warning
+      add_input_metadata(Node::undefined_input());
     }
+  }
 
   variable_list apply(variable_list&& inputs) override;
 
   std::string msg;
 };
 
-struct TORCH_API GraphRoot : public Function {
+struct TORCH_API UndefinedGrad : public Node {
+  UndefinedGrad() {
+    add_input_metadata(Node::undefined_input());
+  }
+
+  variable_list apply(variable_list&& inputs) override;
+};
+
+struct TORCH_API UndefinedGradBackward : public Node {
+  UndefinedGradBackward(edge_list&& next_edges)
+    : Node(std::move(next_edges)) {}
+
+  UndefinedGradBackward() = default;
+
+  variable_list apply(variable_list&& inputs) override;
+};
+
+struct TORCH_API GraphRoot : public Node {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphRoot(edge_list functions, variable_list inputs)
-      : Function(std::move(functions)),
-        outputs(std::move(inputs)) {}
+      : Node(std::move(functions)),
+      outputs(std::move(inputs)) {
+    // Ensures calls to stream() on a GraphRoot instance reflect current stream(s)
+    // on devices of root grad tensors at the time the instance is constructed.
+    for (const auto& t : outputs) {
+      add_input_metadata(t);
+    }
+  }
 
   variable_list apply(variable_list&& inputs) override {
     return outputs;
   }
 
   variable_list outputs;
+};
+
+struct TORCH_API Identity : public Node {
+  variable_list apply(variable_list&& inputs) override;
 };
 
 }}

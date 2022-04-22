@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 import unittest
@@ -112,6 +112,7 @@ class DataWorkersTest(unittest.TestCase):
         # Let's now shutdown and see it succeeds.
         self.assertTrue(coordinator.stop())
 
+    @unittest.skip("Test is flaky: https://github.com/pytorch/pytorch/issues/9064")
     def testInputOrder(self):
         #
         # Create two models (train and validation) with same input blobs

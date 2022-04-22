@@ -68,7 +68,7 @@
  * The following example shows a general use case for the C++
  * bindings, including support for the optional exception feature and
  * also the supplied vector and string classes, see following sections for
- * decriptions of these features.
+ * descriptions of these features.
  *
  * \code
  * #define __CL_ENABLE_EXCEPTIONS
@@ -1196,7 +1196,7 @@ inline cl_int getInfoHelper(Func f, cl_uint name, size_t<N>* param, long)
         return err;
     }
 
-    for(int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
         (*param)[i] = value[i];
     }
 

@@ -5,13 +5,17 @@
 #include <cstring>
 #include <sstream>
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 Tokenizer::Tokenizer(const std::vector<char>& delims, char escape)
     : escape_(escape) {
   reset();
   std::memset(delimTable_, 0, sizeof(delimTable_));
-  for (int i = 0; i < delims.size(); ++i) {
+  for (const auto i : c10::irange(delims.size())) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     delimTable_[(unsigned char)delims.at(i)] = i + 1;
   }
 }
@@ -29,16 +33,17 @@ void Tokenizer::next(char* start, char* end, TokenizedString& tokenized) {
   char* currentStart = start;
   std::string* copied = nullptr;
   if (!leftover_.empty()) {
-    tokenized.modifiedStrings_.emplace_back(new std::string());
+    tokenized.modifiedStrings_.emplace_back(std::make_shared<std::string>());
     copied = tokenized.modifiedStrings_.back().get();
     *copied = std::move(leftover_);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   char* ch;
   for (ch = start + toBeSkipped_; ch < end; ++ch) {
     if (*ch == escape_) {
       if (!copied) {
-        tokenized.modifiedStrings_.emplace_back(new std::string());
+        tokenized.modifiedStrings_.emplace_back(std::make_shared<std::string>());
         copied = tokenized.modifiedStrings_.back().get();
       }
       copied->append(currentStart, ch);
@@ -69,6 +74,7 @@ void Tokenizer::next(char* start, char* end, TokenizedString& tokenized) {
   }
   tokenized.lastDelim_ = startDelimId_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   toBeSkipped_ = ch - end;
   if (copied) {
     copied->append(currentStart, end);

@@ -1,10 +1,14 @@
 #pragma once
 
+#include <ATen/core/ivalue_to.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
 #include <vector>
 
 namespace at {
@@ -13,34 +17,56 @@ class Tensor;
 namespace c10 {
 struct IValue;
 template<class T> class List;
-template<class T> List<T> make_list();
-template<class T> List<T> make_list(ArrayRef<T> values);
+struct Type;
 
 namespace detail {
 
-template<class StorageT>
 struct ListImpl final : public c10::intrusive_ptr_target {
-  using list_type = std::vector<StorageT>;
+  using list_type = std::vector<IValue>;
+
+  explicit ListImpl(list_type list_, TypePtr elementType_)
+  : list(std::move(list_))
+  , elementType(std::move(elementType_)) {}
+
   list_type list;
 
+  TypePtr elementType;
+
   intrusive_ptr<ListImpl> copy() const {
-    auto result = make_intrusive<ListImpl>();
-    result->list = list;
-    return result;
+    return make_intrusive<ListImpl>(list, elementType);
   }
+  friend TORCH_API bool operator==(const ListImpl& lhs, const ListImpl& rhs);
 };
 }
 
 namespace impl {
 
-template<class T, class Iterator, class StorageT> class ListIterator;
+template<class T, class Iterator> class ListIterator;
 
-template<class T, class Iterator, class StorageT> class ListElementReference;
+template<class T, class Iterator> class ListElementReference;
 
-template<class T, class Iterator, class StorageT>
-void swap(ListElementReference<T, Iterator, StorageT>&& lhs, ListElementReference<T, Iterator, StorageT>&& rhs);
+template<class T, class Iterator>
+void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs);
 
-template<class T, class Iterator, class StorageT>
+template<class T, class Iterator>
+bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
+
+template<class T, class Iterator>
+bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
+
+template<class T>
+struct ListElementConstReferenceTraits {
+  // In the general case, we use IValue::to().
+  using const_reference = typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
+};
+
+// There is no to() overload for c10::optional<std::string>.
+template<>
+struct ListElementConstReferenceTraits<c10::optional<std::string>> {
+  using const_reference = c10::optional<std::reference_wrapper<const std::string>>;
+};
+
+template<class T, class Iterator>
 class ListElementReference final {
 public:
   operator T() const;
@@ -52,7 +78,11 @@ public:
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
 
-  friend void swap<T, Iterator, StorageT>(ListElementReference&& lhs, ListElementReference&& rhs);
+  const IValue& get() const& {
+    return *iterator_;
+  }
+
+  friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
 private:
   ListElementReference(Iterator iter)
@@ -69,14 +99,14 @@ private:
   }
 
   friend class List<T>;
-  friend class ListIterator<T, Iterator, StorageT>;
+  friend class ListIterator<T, Iterator>;
 
   Iterator iterator_;
 };
 
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
-template<class T, class Iterator, class StorageT>
+template<class T, class Iterator>
 class ListIterator final : public std::iterator<std::random_access_iterator_tag, T> {
 public:
   explicit ListIterator() = default;
@@ -131,8 +161,12 @@ public:
     return lhs.iterator_ - rhs.iterator_;
   }
 
-  ListElementReference<T, Iterator, StorageT> operator*() const {
-      return {iterator_};
+  ListElementReference<T, Iterator> operator*() const {
+    return {iterator_};
+  }
+
+  ListElementReference<T, Iterator> operator[](typename List<T>::size_type offset) const {
+    return {iterator_ + offset};
   }
 
 private:
@@ -164,17 +198,15 @@ private:
     return lhs.iterator_ >= rhs.iterator_;
   }
 
-  friend class ListIterator<T, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT>;
+  friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   friend class List<T>;
 };
 
 template<class T> List<T> toTypedList(List<IValue> list);
-template<class T> List<IValue> toGenericList(List<T> list);
+template<class T> List<IValue> toList(List<T>&& list);
+template<class T> List<IValue> toList(const List<T>& list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
-template<class T> List<T> toList(std::vector<T> list);
-template<class T> const std::vector<T>& toVector(const List<T>& list);
 }
-template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
 
 /**
  * An object of this class stores a list of values of type T.
@@ -182,7 +214,7 @@ template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
  * This is a pointer type. After a copy, both Lists
  * will share the same storage:
  *
- * > List<int> a = make_list<string>();
+ * > List<int> a;
  * > List<int> b = a;
  * > b.push_back("three");
  * > ASSERT("three" == a.get(0));
@@ -195,51 +227,43 @@ template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
 template<class T>
 class List final {
 private:
-  // List of types that don't use IValue based lists
-  using types_with_direct_list_implementation = guts::typelist::typelist<
-    int64_t,
-    double,
-    bool,
-    at::Tensor
-  >;
-
-  using StorageT = guts::conditional_t<
-    guts::typelist::contains<types_with_direct_list_implementation, T>::value,
-    T, // The types listed in types_with_direct_list_implementation store the list as std::vector<T>
-    IValue  // All other types store the list as std::vector<IValue>
-  >;
-
   // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // ListImpl.
-  c10::intrusive_ptr<detail::ListImpl<StorageT>> impl_;
+  c10::intrusive_ptr<c10::detail::ListImpl> impl_;
 
-  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl<typename List<T>::StorageT>::list_type::iterator, typename List<T>::StorageT>;
+  using internal_reference_type = impl::ListElementReference<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using internal_const_reference_type = typename impl::ListElementConstReferenceTraits<T>::const_reference;
 
 public:
   using value_type = T;
-  using size_type = typename detail::ListImpl<StorageT>::list_type::size_type;
-  using iterator = impl::ListIterator<T, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT>;
-  using reverse_iterator = impl::ListIterator<T, typename detail::ListImpl<StorageT>::list_type::reverse_iterator, StorageT>;
-  using internal_value_type_test_only = StorageT;
+  using size_type = typename c10::detail::ListImpl::list_type::size_type;
+  using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using const_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using reverse_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::reverse_iterator>;
 
   /**
    * Constructs an empty list.
    */
-  friend List make_list<T>();
+  explicit List();
 
   /**
-   * Constructs a list with some initial values
+   * Constructs a list with some initial values.
+   * Example:
+   *   List<int> a({2, 3, 4});
    */
-  friend List make_list<T>(ArrayRef<T>);
+  List(std::initializer_list<T> initial_values);
+  explicit List(ArrayRef<T> initial_values);
 
-  // please use make_list instead.
-  List() = delete;
+  /**
+   * Create a generic list with runtime type information.
+   * This only works for c10::impl::GenericList and is not part of the public API
+   * but only supposed to be used internally by PyTorch.
+   */
+  explicit List(TypePtr elementType);
 
   List(const List&) = default;
   List& operator=(const List&) = default;
-  List(List&&) noexcept;
-  List& operator=(List&&) noexcept;
 
   /**
    * Create a new List pointing to a deep copy of the same data.
@@ -272,7 +296,9 @@ public:
    *   list[2] = 5;
    *   int64_t v = list[1];
    */
-  internal_reference_type operator[](size_type pos) const;
+  internal_const_reference_type operator[](size_type pos) const;
+
+  internal_reference_type operator[](size_type pos);
 
   /**
    * Assigns a new value to the element at location pos.
@@ -350,6 +376,12 @@ public:
   void push_back(T&& value) const;
 
   /**
+   * Appends the given list to the end of the container. Uses at most one memory allocation.
+   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   */
+  void append(List<T> lst) const;
+
+  /**
    * Appends the given element value to the end of the container.
    * The new element is constructed with the given arguments.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
@@ -391,11 +423,23 @@ public:
   void resize(size_type count, const T& value) const;
 
   /**
-   * Compares two lists for equality. Two lists are equal if they have the
-   * same number of elements and for each list position the elements at
-   * that position are equal.
+   * Value equality comparison. This function implements Python-like semantics for
+   * equality: two lists with the same identity (e.g. same pointer) trivially
+   * compare equal, otherwise each element is compared for equality.
    */
-  friend bool list_is_equal<T>(const List& lhs, const List& rhs);
+  template <class T_>
+  friend bool operator==(const List<T_>& lhs, const List<T_>& rhs);
+
+  template <class T_>
+  friend bool operator!=(const List<T_>& lhs, const List<T_>& rhs);
+
+  /**
+   * Identity comparison. Returns true if and only if `rhs` represents the same
+   * List object as `this`.
+   */
+  bool is(const List<T>& rhs) const;
+
+  std::vector<T> vec() const;
 
   /**
    * Returns the number of Lists currently pointing to this same list.
@@ -404,14 +448,19 @@ public:
   // TODO Test use_count
   size_t use_count() const;
 
+  TypePtr elementType() const;
+
+  // See [unsafe set type] for why this exists.
+  void unsafeSetElementType(TypePtr t);
+
 private:
-  explicit List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
+  explicit List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements);
+  explicit List(const c10::intrusive_ptr<c10::detail::ListImpl>& elements);
   friend struct IValue;
   template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
-  template<class T_> friend List<IValue> impl::toGenericList(List<T_>);
+  template<class T_> friend List<IValue> impl::toList(List<T_>&&);
+  template<class T_> friend List<IValue> impl::toList(const List<T_>&);
   friend const IValue* impl::ptr_to_first_element(const List<IValue>& list);
-  template<class T_> friend List<T_> impl::toList(std::vector<T_> list);
-  template<class T_> friend const std::vector<T_>& impl::toVector(const List<T_>& list);
 };
 
 namespace impl {
@@ -420,43 +469,8 @@ namespace impl {
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
 
-inline GenericList make_generic_list() {
-  return make_list<IValue>();
-}
-
-inline GenericList make_generic_list(ArrayRef<IValue> values) {
-  return make_list<IValue>(values);
-}
-
-template<class T>
-List<T> toTypedList(GenericList list) {
-  static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toTypedList with lists that store their elements as IValues.");
-  return List<T>(std::move(list.impl_));
-}
-
-template<class T>
-GenericList toGenericList(List<T> list) {
-  static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toGenericList with lists that store their elements as IValues.");
-  return GenericList(std::move(list.impl_));
-}
-
 inline const IValue* ptr_to_first_element(const GenericList& list) {
   return &list.impl_->list[0];
-}
-
-template<class T>
-const std::vector<T>& toVector(const List<T>& list) {
-  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename List<T>::StorageT>::value, "toVector only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-
-  return list.impl_->list;
-}
-
-template<class T>
-List<T> toList(std::vector<T> list) {
-  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename List<T>::StorageT>::value, "toList only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-  List<T> result = make_list<T>();
-  result.impl_->list = std::move(list);
-  return result;
 }
 
 }
@@ -466,4 +480,4 @@ namespace torch {
   template<class T> using List = c10::List<T>;
 }
 
-#include <ATen/core/List_inl.h>
+#include <ATen/core/List_inl.h>  // IWYU pragma: keep

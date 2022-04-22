@@ -6,6 +6,7 @@
 #if defined(__CUDACC__) || defined(__HIPCC__)
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 
 #ifdef __HIPCC__
 #define __MATH_FUNCTIONS_DECL__ inline C10_DEVICE
@@ -35,6 +36,34 @@ __MATH_FUNCTIONS_DECL__ double exp(double x) {
   return ::exp(x);
 }
 
+__MATH_FUNCTIONS_DECL__ float ceil(float x) {
+  return ::ceilf(x);
+}
+__MATH_FUNCTIONS_DECL__ double ceil(double x) {
+  return ::ceil(x);
+}
+
+__MATH_FUNCTIONS_DECL__ float copysign(float x, float y) {
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
+  return ::copysignf(x, y);
+#else
+  // std::copysign gets ICE/Segfaults with gcc 7.5/8 on arm64
+  // (e.g. Jetson), see PyTorch PR #51834
+  // This host function needs to be here for the compiler but is never used
+  TORCH_INTERNAL_ASSERT(
+      false, "CUDAMathCompat copysign should not run on the CPU");
+#endif
+}
+__MATH_FUNCTIONS_DECL__ double copysign(double x, double y) {
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
+  return ::copysign(x, y);
+#else
+  // see above
+  TORCH_INTERNAL_ASSERT(
+      false, "CUDAMathCompat copysign should not run on the CPU");
+#endif
+}
+
 __MATH_FUNCTIONS_DECL__ float floor(float x) {
   return ::floorf(x);
 }
@@ -49,11 +78,26 @@ __MATH_FUNCTIONS_DECL__ double log(double x) {
   return ::log(x);
 }
 
+__MATH_FUNCTIONS_DECL__ float log1p(float x) {
+  return ::log1pf(x);
+}
+
+__MATH_FUNCTIONS_DECL__ double log1p(double x) {
+  return ::log1p(x);
+}
+
 __MATH_FUNCTIONS_DECL__ float max(float x, float y) {
   return ::fmaxf(x, y);
 }
 __MATH_FUNCTIONS_DECL__ double max(double x, double y) {
   return ::fmax(x, y);
+}
+
+__MATH_FUNCTIONS_DECL__ float min(float x, float y) {
+  return ::fminf(x, y);
+}
+__MATH_FUNCTIONS_DECL__ double min(double x, double y) {
+  return ::fmin(x, y);
 }
 
 __MATH_FUNCTIONS_DECL__ float pow(float x, float y) {
@@ -77,11 +121,25 @@ __MATH_FUNCTIONS_DECL__ double sqrt(double x) {
   return ::sqrt(x);
 }
 
+__MATH_FUNCTIONS_DECL__ float rsqrt(float x) {
+  return ::rsqrtf(x);
+}
+__MATH_FUNCTIONS_DECL__ double rsqrt(double x) {
+  return ::rsqrt(x);
+}
+
 __MATH_FUNCTIONS_DECL__ float tan(float x) {
   return ::tanf(x);
 }
 __MATH_FUNCTIONS_DECL__ double tan(double x) {
   return ::tan(x);
+}
+
+__MATH_FUNCTIONS_DECL__ float tanh(float x) {
+  return ::tanhf(x);
+}
+__MATH_FUNCTIONS_DECL__ double tanh(double x) {
+  return ::tanh(x);
 }
 
 __MATH_FUNCTIONS_DECL__ float normcdf(float x) {

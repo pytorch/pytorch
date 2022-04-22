@@ -138,7 +138,8 @@ bool FullyConnectedGradientOp<
   return RunFullyConnectedGradientOpOnCUDADevice(float16_compute_, this);
 }
 
-#if CUDA_VERSION >= 9000
+
+#if !defined(USE_ROCM)
 
 // Require these to be defined otherwise TensorCore FC ops will end
 // up calling the default FC implementation which doesn't have
@@ -190,7 +191,8 @@ REGISTER_CUDA_OPERATOR(
         DefaultEngine,
         false /* don't transpose weight */>);
 
-#if CUDA_VERSION >= 9000
+#if !defined(USE_ROCM)
+
 REGISTER_CUDA_OPERATOR_WITH_ENGINE(
     FC,
     TENSORCORE,
@@ -214,6 +216,7 @@ REGISTER_CUDA_OPERATOR_WITH_ENGINE(
         CUDAContext,
         TensorCoreEngine,
         false /* don't transpose weight */>);
+
 #endif
 
 } // namespace caffe2

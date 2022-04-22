@@ -6,12 +6,15 @@
 
 namespace caffe2 {
 
-std::vector<std::string> split(char separator, const std::string& string) {
+std::vector<std::string>
+split(char separator, const std::string& string, bool ignore_empty) {
   std::vector<std::string> pieces;
   std::stringstream ss(string);
   std::string item;
   while (getline(ss, item, separator)) {
-    pieces.push_back(std::move(item));
+    if (!ignore_empty || !item.empty()) {
+      pieces.push_back(std::move(item));
+    }
   }
   return pieces;
 }
@@ -72,6 +75,7 @@ int32_t editDistanceHelper(const char* s1,
       swap(current, previous);
       current[0] = i;
 
+      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
       char c2 = s2[str2_offset];
       char prev1 = 0;
       int32_t str1_offset = 0;
@@ -84,6 +88,7 @@ int32_t editDistanceHelper(const char* s1,
         size_t deletion = current[j - 1] + 1;
         size_t substitution = previous[j - 1];
         size_t transposition = insertion;
+        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
         char c1 = s1[str1_offset];
 
         NEXT_UNSAFE(s1, str1_offset, c1);

@@ -1,3 +1,25 @@
+if((NOT BUILD_CAFFE2) OR (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
+  list(APPEND Caffe2_CPU_SRCS
+    utils/string_utils.cc
+    utils/threadpool/ThreadPool.cc
+  )
+
+  if(USE_PTHREADPOOL AND NOT USE_INTERNAL_PTHREADPOOL_IMPL)
+    list(APPEND Caffe2_CPU_SRCS
+      utils/threadpool/pthreadpool-cpp.cc
+      utils/threadpool/thread_pool_guard.cpp
+    )
+  endif()
+
+  if(NOT BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
+    list(APPEND Caffe2_CPU_SRCS
+      utils/proto_wrap.cc
+    )
+  endif()
+  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
+  return()
+endif()
+
 list(APPEND Caffe2_CPU_SRCS
   utils/bench_utils.cc
   utils/cpuid.cc
@@ -11,19 +33,20 @@ list(APPEND Caffe2_CPU_SRCS
   utils/proto_convert.cc
   utils/proto_utils.cc
   utils/proto_wrap.cc
+  utils/threadpool/ThreadPool.cc
   utils/signal_handler.cc
   utils/smart_tensor_printer.cc
-  utils/string_utils.cc
-  utils/threadpool/ThreadPool.cc)
+  utils/string_utils.cc)
 
-# ---[ threadpool/pthreadpool* is a local modification of the NNPACK
-# pthreadpool with a very similar interface. Neither NNPACK, nor this
-# thread pool supports Windows.
-if (NOT MSVC AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
-  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
-          utils/threadpool/pthreadpool.cc
-          utils/threadpool/pthreadpool_impl.cc
-          )
+if(USE_PTHREADPOOL)
+  list(APPEND Caffe2_CPU_SRCS
+    utils/threadpool/pthreadpool-cpp.cc
+    utils/threadpool/thread_pool_guard.cpp)
+  if(USE_INTERNAL_PTHREADPOOL_IMPL)
+    list(APPEND Caffe2_CPU_SRCS
+      utils/threadpool/pthreadpool.cc
+      utils/threadpool/pthreadpool_impl.cc)
+  endif()
 endif()
 
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}

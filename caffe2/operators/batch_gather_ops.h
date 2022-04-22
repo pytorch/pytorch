@@ -13,7 +13,13 @@ template <class Context>
 class BatchGatherOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(BatchGatherOp)
+
+  template <class... Args>
+  explicit BatchGatherOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        OP_SINGLE_ARG(bool, "match_outer", match_outer_, false) {}
+
+  // virtual ~BatchGatherOp() noexcept {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -24,9 +30,12 @@ class BatchGatherOp final : public Operator<Context> {
   bool DoRunWithType() {
     // BatchGather is a special-case of Gather with Axis = 1.
     return gather_helper::gather_impl<TInd, Context>(
-        this, DATA, INDICES, 0, 1, false);
+        this, DATA, INDICES, 0, 1, false, match_outer_);
   }
   INPUT_TAGS(DATA, INDICES);
+
+ protected:
+  bool match_outer_;
 };
 
 template <class Context>
@@ -34,12 +43,13 @@ class BatchGatherGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  // Constructor to recieve axis in case it was passed for GatherOp gradient,
+  // Constructor to receive axis in case it was passed for GatherOp gradient,
   // use default of 1 for batch gather otherwise.
   template <class... Args>
   explicit BatchGatherGradientOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
-        OP_SINGLE_ARG(int, "axis", axis_, 1) {}
+        OP_SINGLE_ARG(int, "axis", axis_, 1),
+        OP_SINGLE_ARG(bool, "match_outer", match_outer_, false) {}
   virtual ~BatchGatherGradientOp() noexcept {}
 
   bool RunOnDevice() override {
@@ -62,6 +72,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
 
     // ONNX allows negative axis to index from the back, valid range: [-r, r].
     int axis = axis_;
+    bool match_outer = match_outer_;
     if (axis < 0) {
       axis = data.dim() + axis;
     }
@@ -69,7 +80,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
     CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
     // Outer dimensions of input data and gradient should be the same
     // because they are preserved for gathers with axis > 0.
-    for (int acheck = 0; acheck < axis; acheck++) {
+    for (const auto acheck : c10::irange(axis)) {
       CAFFE_ENFORCE_EQ(
           data.size(acheck),
           grad.size(acheck),
@@ -90,22 +101,34 @@ class BatchGatherGradientOp final : public Operator<Context> {
     auto batch_size = data.size_from_dim(axis);
     auto block_size = data.size_from_dim(axis + 1);
     auto N = indices.numel();
-    auto gathered_grad_batch_size = N * block_size;
 
+    auto idx_inner_dims_product = indices.size_from_dim(axis);
+    if (match_outer) {
+      CAFFE_ENFORCE_GE(axis, 1, "Axis should be at least 1");
+      for (const auto i : c10::irange(axis)) {
+        CAFFE_ENFORCE_EQ(
+            data.size(i),
+            indices.size(i),
+            "INDICES must have the same outer dims as DATA (before dim AXIS)");
+      }
+      N = idx_inner_dims_product;
+    }
+
+    auto gathered_grad_batch_size = N * block_size;
     // Check indexing bounds.
     auto src_indexing_axis_dim = data.dim(axis);
     gather_helper::check_indexarray_range<TInd>(
-      idxs,
-      N,
-      src_indexing_axis_dim,
-      false);
+        idxs, N, src_indexing_axis_dim, false);
 
-    for (auto batch = 0; batch < outer_dims_product; ++batch) {
+    for (const auto batch : c10::irange(outer_dims_product)) {
       auto grad_batch_base = grad_data + batch * gathered_grad_batch_size;
       auto out_batch_base = out_data + batch * batch_size;
 
-      for (auto i = 0; i < N; ++i) {
+      for (const auto i : c10::irange(N)) {
         auto idx = idxs[i];
+        if (match_outer) {
+          idx = idxs[batch * idx_inner_dims_product + i];
+        }
         if (idx < 0) {
           idx = idx + src_indexing_axis_dim;
         }
@@ -135,8 +158,10 @@ class BatchGatherGradientOp final : public Operator<Context> {
   }
 
   INPUT_TAGS(DATA, INDICES, GRAD);
-protected:
+
+ protected:
   int axis_;
+  bool match_outer_;
 };
 
 } // namespace caffe2

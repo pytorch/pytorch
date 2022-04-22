@@ -7,15 +7,13 @@
 
 #include <torch/csrc/autograd/functions/comm.h>
 #include <torch/csrc/autograd/functions/utils.h>
-#ifdef USE_CUDA
-#include <torch/csrc/cuda/comm.h>
-#endif
 #include <ATen/core/functional.h>
 
 #include <ATen/Device.h>
 #include <ATen/Parallel.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <cstddef>
 #include <exception>
@@ -61,13 +59,13 @@ namespace {
 
 // Autograd function for the replicate step in data parallel. This is only used
 // in data parallel, and should not be exposed as a user API.
-struct ReduceAdd : public autograd::Function {
+struct ReduceAdd : public autograd::Node {
   explicit ReduceAdd(const at::Device& destination_device)
       : destination_device_(destination_device) {};
   ~ReduceAdd() override {}
 
   autograd::variable_list apply(autograd::variable_list&& inputs) override {
-    TORCH_CHECK(!compute_requires_grad(inputs),
+    TORCH_CHECK(!torch::autograd::compute_requires_grad(inputs),
         "ReduceAdd can only be used during the backward pass of data parallel.");
 
     Tensor output = torch::zeros_like(inputs[0], {destination_device_});
@@ -103,21 +101,21 @@ void replicate_grad_edges(
     const std::vector<std::shared_ptr<ModuleType>>& replicas,
     const std::vector<Device>& devices) {
 
-  for (auto& parameter : module->parameters_) {
+  for (auto& parameter : module->named_parameters(/*recurse=*/false)) {
     auto grad_fn = std::make_shared<ReduceAdd>((*parameter).device());
     grad_fn->set_next_edges(autograd::collect_next_edges(*parameter));
 
-    for (size_t i = 0; i < devices.size(); ++i) {
+    for (const auto i : c10::irange(devices.size())) {
       autograd::set_history(replicas[i]->parameters_[parameter.key()], grad_fn);
     }
   }
 
-  for (auto& buffer : module->buffers_) {
+  for (auto& buffer : module->named_buffers(/*recurse=*/false)) {
     if (buffer.value().requires_grad()){
       auto grad_fn = std::make_shared<ReduceAdd>((*buffer).device());
       grad_fn->set_next_edges(autograd::collect_next_edges(*buffer));
 
-      for (size_t i = 0; i < devices.size(); ++i) {
+      for (const auto i : c10::irange(devices.size())) {
         autograd::set_history(replicas[i]->buffers_[buffer.key()], grad_fn);
       }
     }
@@ -258,8 +256,8 @@ Tensor data_parallel(
         device_count > 0, "Expected at least one CUDA device to be available");
     devices = std::vector<Device>();
     devices->reserve(device_count);
-    for (size_t index = 0; index < device_count; ++index) {
-      devices->emplace_back(kCUDA, index);
+    for (const auto index : c10::irange(device_count)) {
+      devices->emplace_back(kCUDA, static_cast<torch::DeviceIndex>(index));
     }
   }
   if (!output_device) {
@@ -272,19 +270,18 @@ Tensor data_parallel(
     return module->forward(std::move(input)).to(*output_device);
   }
 
-#ifdef USE_CUDA
   autograd::Scatter scatter(*devices, /*chunk_sizes=*/nullopt, dim);
   auto scattered_inputs = fmap<Tensor>(scatter.apply({std::move(input)}));
+  // Input tensor might not be big enough to scale across all available devices
+  if (scattered_inputs.size() < devices->size()) {
+    devices->resize(scattered_inputs.size(), Device(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES));
+  }
 
   auto replicas = replicate(module, *devices);
   auto outputs = parallel_apply(replicas, scattered_inputs, *devices);
   return autograd::Gather(*output_device, dim)
       .apply(fmap<autograd::Variable>(std::move(outputs)))
       .front();
-#else
-  AT_ERROR("data_parallel not supported without CUDA");
-  return Tensor();
-#endif
 }
 
 } // namespace parallel

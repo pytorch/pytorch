@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from hypothesis import given
+
+
+
+
+from hypothesis import given, settings
 import hypothesis.strategies as st
 from multiprocessing import Process, Queue
 
@@ -26,7 +26,6 @@ dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/gloo:gloo_ops_gpu")
 
 op_engine = 'GLOO'
-
 
 class TemporaryDirectory:
     def __enter__(self):
@@ -213,10 +212,11 @@ class TestCase(hu.HypothesisTestCase):
                 workspace.RunNet(net.Name())
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
-           blob_size=st.integers(min_value=1e3, max_value=1e6),
+           blob_size=st.integers(min_value=int(1e3), max_value=int(1e6)),
            num_blobs=st.integers(min_value=1, max_value=4),
            device_option=st.sampled_from([hu.cpu_do]),
            use_float16=st.booleans())
+    @settings(deadline=10000)
     def test_broadcast(self, comm_size, blob_size, num_blobs, device_option,
                        use_float16):
         TestCase.test_counter += 1
@@ -328,10 +328,11 @@ class TestCase(hu.HypothesisTestCase):
                     (num_blobs * comm_size) * (num_blobs * comm_size - 1) / 2)
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
-           blob_size=st.integers(min_value=1e3, max_value=1e6),
+           blob_size=st.integers(min_value=int(1e3), max_value=int(1e6)),
            num_blobs=st.integers(min_value=1, max_value=4),
            device_option=st.sampled_from([hu.cpu_do]),
            use_float16=st.booleans())
+    @settings(deadline=10000)
     def test_allreduce(self, comm_size, blob_size, num_blobs, device_option,
                        use_float16):
         TestCase.test_counter += 1
@@ -416,10 +417,11 @@ class TestCase(hu.HypothesisTestCase):
             workspace.RunNet(net.Name())
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
-           blob_size=st.integers(min_value=1e3, max_value=1e6),
+           blob_size=st.integers(min_value=int(1e3), max_value=int(1e6)),
            num_blobs=st.integers(min_value=1, max_value=4),
            device_option=st.sampled_from([hu.cpu_do]),
            use_float16=st.booleans())
+    @settings(deadline=10000)
     def test_reduce_scatter(self, comm_size, blob_size, num_blobs,
                             device_option, use_float16):
         TestCase.test_counter += 1
@@ -496,10 +498,11 @@ class TestCase(hu.HypothesisTestCase):
             workspace.RunNet(net.Name())
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
-           blob_size=st.integers(min_value=1e3, max_value=1e6),
+           blob_size=st.integers(min_value=int(1e3), max_value=int(1e6)),
            num_blobs=st.integers(min_value=1, max_value=4),
            device_option=st.sampled_from([hu.cpu_do]),
            use_float16=st.booleans())
+    @settings(max_examples=10, deadline=None)
     def test_allgather(self, comm_size, blob_size, num_blobs, device_option,
                        use_float16):
         TestCase.test_counter += 1
@@ -522,6 +525,7 @@ class TestCase(hu.HypothesisTestCase):
                     use_float16=use_float16)
 
     @given(device_option=st.sampled_from([hu.cpu_do]))
+    @settings(deadline=10000)
     def test_forked_cw(self, device_option):
         TestCase.test_counter += 1
         if os.getenv('COMM_RANK') is not None:
@@ -529,10 +533,16 @@ class TestCase(hu.HypothesisTestCase):
                 self._test_allreduce_multicw,
                 device_option=device_option)
         else:
+            # Note: this test exercises the path where we fork a common world.
+            # We therefore don't need a comm size larger than 2. It used to be
+            # run with comm_size=8, which causes flaky results in a stress run.
+            # The flakiness was caused by too many listening sockets being
+            # created by Gloo context initialization (8 processes times
+            # 7 sockets times 20-way concurrency, plus TIME_WAIT).
             with TemporaryDirectory() as tmpdir:
                 self.run_test_locally(
                     self._test_allreduce_multicw,
-                    comm_size=8,
+                    comm_size=2,
                     device_option=device_option,
                     tmpdir=tmpdir)
 
@@ -562,6 +572,7 @@ class TestCase(hu.HypothesisTestCase):
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
            device_option=st.sampled_from([hu.cpu_do]))
+    @settings(deadline=10000)
     def test_barrier(self, comm_size, device_option):
         TestCase.test_counter += 1
         if os.getenv('COMM_RANK') is not None:
@@ -612,6 +623,7 @@ class TestCase(hu.HypothesisTestCase):
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
            device_option=st.sampled_from([hu.cpu_do]))
+    @settings(deadline=10000)
     def test_close_connection(self, comm_size, device_option):
         import time
         start_time = time.time()
@@ -627,8 +639,13 @@ class TestCase(hu.HypothesisTestCase):
                     comm_size=comm_size,
                     device_option=device_option,
                     tmpdir=tmpdir)
-        # Check that test finishes quickly because connections get closed
-        self.assertLess(time.time() - start_time, 2.0)
+        # Check that test finishes quickly because connections get closed.
+        # This assert used to check that the end to end runtime was less
+        # than 2 seconds, but this may not always be the case if there
+        # is significant overhead in starting processes. Ideally, this
+        # assert is replaced by one that doesn't depend on time but rather
+        # checks the success/failure status of the barrier that is run.
+        self.assertLess(time.time() - start_time, 20.0)
 
     def _test_io_error(
         self,
@@ -668,6 +685,7 @@ class TestCase(hu.HypothesisTestCase):
 
     @given(comm_size=st.integers(min_value=2, max_value=8),
            device_option=st.sampled_from([hu.cpu_do]))
+    @settings(deadline=10000)
     def test_io_error(self, comm_size, device_option):
         TestCase.test_counter += 1
         with self.assertRaises(IoError):

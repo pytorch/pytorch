@@ -7,6 +7,7 @@ namespace {
 const float* getTensorDataPtr(const Tensor& tensor, int t, int n) {
   const auto dims = tensor.sizes();
   CAFFE_ENFORCE_EQ(dims.size(), 3);
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int offset = (t * dims[1] + n) * dims[2];
   CAFFE_ENFORCE_LT(offset, tensor.numel());
   return tensor.template data<float>() + offset;
@@ -21,7 +22,6 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
   // shape: batch_size
 
   // shape: sum over all decoded_length
-
   const auto inputs_dims = inputs.sizes();
   int32_t max_activation_length = inputs_dims[0];
   int32_t batch_size = inputs_dims[1];
@@ -31,13 +31,20 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
       (InputSize() == 2) ? Input(SEQ_LEN).data<int>() : nullptr;
 
   vector<int32_t> values_cache;
+  const int total_candidates = batch_size * num_candidates_;
   auto* output_len =
-      Output(OUTPUT_LEN, vector<int64_t>{batch_size}, at::dtype<int>());
+      Output(OUTPUT_LEN, vector<int64_t>{total_candidates}, at::dtype<int>());
   int* output_len_data = output_len->mutable_data<int>();
+  memset(output_len_data, 0, total_candidates * sizeof(int));
+  auto* output_prob = Output(
+      OUTPUT_PROB, vector<int64_t>{total_candidates}, at::dtype<float>());
+  float* output_prob_data = output_prob->mutable_data<float>();
+  memset(output_prob_data, 0, total_candidates * sizeof(float));
 
   for (int32_t i = 0; i < batch_size; ++i) {
     const int32_t activation_length =
         (seq_len_data) ? seq_len_data[i] : max_activation_length;
+    // NOLINTNEXTLINE(modernize-use-transparent-functors)
     std::multimap<float, vector<int32_t>, std::greater<float>> A_next_inv;
     // For a given time step, Pb maps prefixes to the probability of all
     // candidate sequences that end in a blank and Pnb maps prefixes to the
@@ -94,11 +101,11 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
       }
 
       std::map<vector<int32_t>, float> A_next(Pb[t + 1]);
-      for (auto& it : Pnb[t + 1]) {
+      for (const auto& it : Pnb[t + 1]) {
         A_next[it.first] += it.second;
       }
       A_next_inv.clear();
-      for (auto& it : A_next) {
+      for (const auto& it : A_next) {
         A_next_inv.insert({it.second, it.first});
       }
 
@@ -113,16 +120,25 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
       }
     }
 
-    vector<int32_t> decoded =
-        (A_next_inv.empty()) ? vector<int32_t>() : A_next_inv.begin()->second;
-
-    output_len_data[i] = decoded.size();
-    values_cache.insert(values_cache.end(), decoded.begin(), decoded.end());
+    auto it = A_next_inv.begin();
+    for (int index = 0; index < num_candidates_; index++, it++) {
+      if (it == A_next_inv.end()) {
+        break;
+      }
+      auto& candidate = it->second;
+      output_len_data[i * num_candidates_ + index] = candidate.size();
+      output_prob_data[i * num_candidates_ + index] =
+          Pb.back()[candidate] + Pnb.back()[candidate];
+      values_cache.insert(
+          values_cache.end(), candidate.begin(), candidate.end());
+    }
   }
 
-  int32_t cache_size = values_cache.size();
-  auto* values = Output(VALUES, vector<int64_t>{cache_size}, at::dtype<int>());
+  int32_t values_cache_size = values_cache.size();
+  auto* values =
+      Output(VALUES, vector<int64_t>{values_cache_size}, at::dtype<int>());
   int* values_data = values->mutable_data<int>();
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < values_cache.size(); ++i) {
     values_data[i] = values_cache.at(i);
   }
@@ -134,7 +150,7 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
 REGISTER_CPU_OPERATOR(CTCBeamSearchDecoder, CTCBeamSearchDecoderOp<CPUContext>);
 OPERATOR_SCHEMA(CTCBeamSearchDecoder)
     .NumInputs(1, 2)
-    .NumOutputs(2)
+    .NumOutputs(2, 3)
     .SetDoc(
         "Prefix beam search decoder for connectionist temporal classification.")
     .Arg(
@@ -157,13 +173,18 @@ OPERATOR_SCHEMA(CTCBeamSearchDecoder)
     .Output(
         0,
         "OUTPUT_LEN",
-        "Output_len matrix size (batch_size). "
-        "Each index stores final output length of its corresponding batch item.")
+        "Output_len matrix size (batch_size * num_candidates). "
+        "Each index stores lengths of candidates for its corresponding batch item.")
     .Output(
         1,
         "VALUES",
         "Values vector, size (total_decoded_outputs). "
         "The flattened vector of final output sequences, in batch order.")
+    .Output(
+        2,
+        "OUTPUT_PROB",
+        "Probability vector, size (total_decoded_outputs). "
+        "Each index stores final output probability of its corresponding batch item.")
     .InheritOnnxSchema();
 SHOULD_NOT_DO_GRADIENT(CTCBeamSearchDecoder);
 

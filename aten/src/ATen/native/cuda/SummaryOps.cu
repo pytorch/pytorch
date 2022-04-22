@@ -1,6 +1,21 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NumericUtils.h>
+#include <ATen/native/Resize.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/bincount_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/histc_native.h>
+#include <ATen/ops/zeros_native.h>
+#endif
 
 namespace at {
 namespace cuda {
@@ -17,7 +32,7 @@ namespace cuda {
 enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
 namespace {
   template<typename input_t, typename IndexType>
-  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int nbins) {
+  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int64_t nbins) {
     IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
     // (only applicable for histc)
     // while each bin is inclusive at the lower end and exclusive at the higher, i.e. [start, end)
@@ -40,14 +55,12 @@ template <
     int BDims,
     CUDAHistogramMemoryType MemoryType = CUDAHistogramMemoryType::MULTI_BLOCK,
     typename Op>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
+C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
 __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
     detail::TensorInfo<input_t, IndexType> b, /* input */
-    int nbins,
+    int64_t nbins,
     input_t minvalue,
     input_t maxvalue,
     IndexType totalElements,
@@ -72,7 +85,7 @@ __global__ void kernelHistogram1D(
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
-        atomicAdd(&smem[bin], getOp(linearIndex));
+        gpuAtomicAddNoReturn(&smem[bin], getOp(linearIndex));
       }
     }
     __syncthreads();
@@ -82,7 +95,7 @@ __global__ void kernelHistogram1D(
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       const IndexType aOffset =
           detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
-      atomicAdd(&a.data[aOffset], smem[i]);
+      gpuAtomicAddNoReturn(&a.data[aOffset], smem[i]);
     }
 
   } else if (MemoryType == CUDAHistogramMemoryType::MULTI_BLOCK) {
@@ -101,7 +114,7 @@ __global__ void kernelHistogram1D(
         const IndexType pIdx = p.strides[0] * blockIdx.x + bin;
         const IndexType pOffset =
             detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
-        atomicAdd(&p.data[pOffset], getOp(linearIndex));
+        gpuAtomicAddNoReturn(&p.data[pOffset], getOp(linearIndex));
       }
     }
     __syncthreads();
@@ -114,7 +127,7 @@ __global__ void kernelHistogram1D(
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       const IndexType aOffset =
           detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
-      atomicAdd(&a.data[aOffset], p.data[pOffset + i]);
+      gpuAtomicAddNoReturn(&a.data[aOffset], p.data[pOffset + i]);
     }
 
   } else {
@@ -131,20 +144,20 @@ __global__ void kernelHistogram1D(
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType aOffset =
             detail::IndexToOffset<output_t, IndexType, ADims>::get(bin, a);
-        atomicAdd(&a.data[aOffset], getOp(linearIndex));
+        gpuAtomicAddNoReturn(&a.data[aOffset], getOp(linearIndex));
       }
     }
   }
 }
 
-#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                   \
-  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, -1, MEMORY_TYPE>    \
-      <<<grid,                                                             \
-         block,                                                            \
-         SHARED_MEM,                                                       \
-         getCurrentCUDAStream()>>>(                    \
-          aInfo, pInfo, bInfo, nbins, minvalue, maxvalue, totalElements, WEIGHTS_OP);        \
-  AT_ASSERTM(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
+#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                              \
+  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, -1, MEMORY_TYPE>              \
+      <<<grid,                                                                        \
+         block,                                                                       \
+         SHARED_MEM,                                                                  \
+         getCurrentCUDAStream()>>>(                                                   \
+          aInfo, pInfo, bInfo, nbins, minvalue, maxvalue, totalElements, WEIGHTS_OP); \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_SWITCH_CASE(mType, getOp)                                   \
   switch (mType) {                                                         \
@@ -162,7 +175,7 @@ inline int64_t getFreeGlobalMemory() {
   // no need to use `cudaSetDevice`
   size_t free_mem, total_mem;
   cudaMemGetInfo(&free_mem, &total_mem);
-  AT_ASSERTM(
+  TORCH_INTERNAL_ASSERT(
       cudaGetLastError() == cudaSuccess,
       "CUDA_tensor_histogram failed to get free global memory");
   return static_cast<int64_t>(free_mem);
@@ -203,6 +216,10 @@ bool CUDA_tensor_histogram(
   }
   auto totalElements = b.numel();
 
+  if (totalElements == 0) {
+    return false;
+  }
+
   const dim3 block = getApplyBlock();
   dim3 grid;
   int64_t curDevice = current_device();
@@ -234,7 +251,12 @@ bool CUDA_tensor_histogram(
   detail::TensorInfo<output_t, IndexType> pInfo(nullptr, 0, {}, {});
   Tensor partial_output;
   if (memType == CUDAHistogramMemoryType::MULTI_BLOCK) {
-    partial_output = native::zeros({grid.x, nbins}, a.options());
+    partial_output = native::zeros(
+        {grid.x, nbins},
+        optTypeMetaToScalarType(a.options().dtype_opt()),
+        a.options().layout_opt(),
+        a.options().device_opt(),
+        a.options().pinned_memory_opt());
     pInfo = detail::getTensorInfo<output_t, IndexType>(partial_output);
   }
 
@@ -271,11 +293,16 @@ Tensor _bincount_cuda_template(
     AT_ERROR("minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
-    return native::zeros({minlength}, device(kCUDA).dtype(kLong));
+    return native::zeros(
+        {minlength},
+        kLong,
+        c10::nullopt /* layout */,
+        kCUDA,
+        c10::nullopt /* pin_memory */);
   }
   if (self.dim() != 1 ||
       (!std::is_same<input_t, uint8_t>::value &&
-       *self.min().cpu().data<input_t>() < 0)) {
+       *self.min().cpu().data_ptr<input_t>() < 0)) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
 
@@ -284,18 +311,28 @@ Tensor _bincount_cuda_template(
     AT_ERROR("input and weights should have the same length");
   }
 
-  const int64_t nbins = std::max(*self.max().cpu().data<input_t>() + (int64_t)1, minlength);
+  const int64_t nbins = std::max(*self.max().cpu().data_ptr<input_t>() + (int64_t)1, minlength);
   const input_t minvalue = 0;
   const input_t maxvalue = nbins;
   // alloc output counter on GPU
   Tensor output;
   if (has_weights) {
-    output = native::zeros({nbins}, weights.options());
-    auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
+    output = native::zeros(
+        {nbins},
+        optTypeMetaToScalarType(weights.options().dtype_opt()),
+        weights.options().layout_opt(),
+        weights.options().device_opt(),
+        weights.options().pinned_memory_opt());
+    cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
         output, self, weights, nbins, minvalue, maxvalue);
   } else {
-    output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
-    auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
+    output = native::zeros(
+        {nbins},
+        kLong,
+        c10::nullopt /* layout */,
+        DeviceType::CUDA,
+        c10::nullopt /* pin_memory */);
+    cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, minvalue, maxvalue);
   }
   return output;
@@ -311,19 +348,45 @@ Tensor _histc_cuda_template(
   if (nbins <= 0) {
     AT_ERROR("bins must be > 0");
   }
-  Tensor output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(self.scalar_type()));
+  Tensor output = native::zeros(
+      {nbins},
+      self.scalar_type(),
+      c10::nullopt /* layout */,
+      DeviceType::CUDA,
+      c10::nullopt /* pin_memory */);
   input_t minvalue = min;
   input_t maxvalue = max;
-  if (min == max) {
-    minvalue = *self.min().cpu().data<input_t>();
-    maxvalue = *self.max().cpu().data<input_t>();
+  if (min == max && self.numel() > 0) {
+    minvalue = *self.min().cpu().data_ptr<input_t>();
+    maxvalue = *self.max().cpu().data_ptr<input_t>();
   }
   if (minvalue == maxvalue) {
     minvalue = minvalue - 1;
     maxvalue = maxvalue + 1;
   }
 
-  auto ret = cuda::CUDA_tensor_histogram<input_t, input_t, false>(
+#if !defined(USE_ROCM)
+  TORCH_CHECK(
+      !(at::_isinf(minvalue) || at::_isinf(maxvalue) ||
+        at::_isnan(minvalue) || at::_isnan(maxvalue)),
+      "range of [",
+      minvalue,
+      ", ",
+      maxvalue,
+      "] is not finite");
+#else
+  TORCH_CHECK(
+      !(std::isinf(minvalue) || std::isinf(maxvalue) || std::isnan(minvalue) ||
+        std::isnan(maxvalue)),
+      "range of [",
+      minvalue,
+      ", ",
+      maxvalue,
+      "] is not finite");
+#endif
+  TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
+
+  cuda::CUDA_tensor_histogram<input_t, input_t, false>(
     output, self, Tensor(), nbins, minvalue, maxvalue);
   return output;
 }
@@ -331,34 +394,43 @@ Tensor _histc_cuda_template(
 
 namespace native {
 Tensor _bincount_cuda(
-    const Tensor& self,
-    const Tensor& weights,
+    const Tensor& self, const c10::optional<Tensor>& weights_opt,
     int64_t minlength) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
+  const Tensor& weights = *weights_maybe_owned;
+
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("_bincount_cuda");
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cuda", [&] {
     const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
       return _bincount_cuda_template<scalar_t, float>(self, weights, minlength);
     return _bincount_cuda_template<scalar_t, double>(
-        self, weights.toType(CUDA(kDouble)), minlength);
+        self, weights.to(kDouble), minlength);
   });
 }
 
 Tensor _histc_cuda(
     const Tensor& self,
     int64_t nbins,
-    Scalar min,
-    Scalar max) {
+    const Scalar& min,
+    const Scalar& max) {
   if (self.scalar_type() == ScalarType::Half) {
     AT_ERROR("HalfTensor is not supported");
   }
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("_histc_cuda");
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "histc", [&] {
     return _histc_cuda_template<scalar_t>(self, nbins, min.to<scalar_t>(), max.to<scalar_t>());
   });
 }
 
-Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, Scalar min, Scalar max) {
+Tensor& _histc_out_cuda(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, Tensor& result) {
   auto ret = _histc_cuda(self, bins, min, max);
-  result.resize_as_(ret);
+  resize_output(result, ret.sizes());
   result.copy_(ret);
   return result;
 }

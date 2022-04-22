@@ -4,16 +4,14 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <list>
 #include <vector>
 
 namespace torch {
 namespace jit {
-
-using ::c10::ProfiledTensorTypePtr;
 
 TORCH_API void EliminateRedundantGuards(std::shared_ptr<Graph> graph);
 

@@ -34,7 +34,8 @@ class EnsureCPUOutputOp : public Operator<Context> {
   bool CopyWithContext() {
     // Output is always on CPU
     auto* output = this->template Output<Tensor>(0, CPU);
-    auto& input = this->template Input<Tensor>(0, InputContext::GetDeviceType());
+    auto& input =
+        this->template Input<Tensor>(0, InputContext::GetDeviceType());
     output->ResizeLike(input);
     context_.CopyItemsToCPU(
         input.dtype(),

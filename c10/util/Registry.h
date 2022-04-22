@@ -19,8 +19,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "c10/macros/Macros.h"
-#include "c10/util/Type.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/Type.h>
 
 namespace c10 {
 
@@ -55,7 +55,8 @@ class Registry {
  public:
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
-  Registry() : registry_(), priority_(), terminate_(true) {}
+  Registry(bool warning = true)
+      : registry_(), priority_(), terminate_(true), warning_(warning) {}
 
   void Register(
       const SrcType& key,
@@ -71,11 +72,11 @@ class Registry {
     if (registry_.count(key) != 0) {
       auto cur_priority = priority_[key];
       if (priority > cur_priority) {
-  #ifdef DEBUG
+#ifdef DEBUG
         std::string warn_msg =
             "Overwriting already registered item for key " + KeyStrRepr(key);
         fprintf(stderr, "%s\n", warn_msg.c_str());
-  #endif
+#endif
         registry_[key] = creator;
         priority_[key] = priority;
       } else if (priority == cur_priority) {
@@ -87,7 +88,7 @@ class Registry {
         } else {
           throw std::runtime_error(err_msg);
         }
-      } else {
+      } else if (warning_) {
         std::string warn_msg =
             "Higher priority item already registered, skipping registration of " +
             KeyStrRepr(key);
@@ -153,6 +154,7 @@ class Registry {
   std::unordered_map<SrcType, Creator> registry_;
   std::unordered_map<SrcType, RegistryPriority> priority_;
   bool terminate_;
+  const bool warning_;
   std::unordered_map<SrcType, std::string> help_message_;
   std::mutex register_mutex_;
 
@@ -220,6 +222,17 @@ class Registerer {
     return registry;                                                       \
   }
 
+#define C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(                            \
+    RegistryName, SrcType, ObjectType, PtrType, ...)                          \
+  C10_EXPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*    \
+  RegistryName() {                                                            \
+    static ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*      \
+        registry =                                                            \
+            new ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>( \
+                false);                                                       \
+    return registry;                                                          \
+  }
+
 // Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
 // creator with comma in its templated arguments.
 #define C10_REGISTER_TYPED_CREATOR(RegistryName, key, ...)                  \
@@ -257,12 +270,21 @@ class Registerer {
   C10_DEFINE_TYPED_REGISTRY(                               \
       RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
 
+#define C10_DEFINE_REGISTRY_WITHOUT_WARNING(RegistryName, ObjectType, ...) \
+  C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(                               \
+      RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
+
 #define C10_DECLARE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
   C10_DECLARE_TYPED_REGISTRY(                                      \
       RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
 
 #define C10_DEFINE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
   C10_DEFINE_TYPED_REGISTRY(                                      \
+      RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
+
+#define C10_DEFINE_SHARED_REGISTRY_WITHOUT_WARNING( \
+    RegistryName, ObjectType, ...)                  \
+  C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(        \
       RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
 
 // C10_REGISTER_CREATOR and C10_REGISTER_CLASS are hard-wired to use std::string

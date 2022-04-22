@@ -12,7 +12,6 @@ namespace {
 __global__ void PieceWiseLinearTransformGeneralKernel(
     const int N,
     const int M,
-    const int num_grp,
     const int num_fnc_per_grp,
     const float* bounds,
     const float* slopes,
@@ -47,8 +46,6 @@ __global__ void PieceWiseLinearTransformGeneralKernel(
 namespace {
 __global__ void PieceWiseLinearTransformBinaryKernel1(
     const int N,
-    const int M,
-    const int num_grp,
     const int num_fnc_per_grp,
     const float* bounds,
     const float* slopes,
@@ -75,7 +72,6 @@ namespace {
 __global__ void PieceWiseLinearTransformBinaryKernel2(
     const int N,
     const int M,
-    const int num_grp,
     const int num_fnc_per_grp,
     const float* bounds,
     const float* slopes,
@@ -212,13 +208,13 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
       context_.cuda_stream()>>>(
       N,
       M,
-      num_group,
       num_func_per_group,
       bounds_device_.data<float>(),
       slopes_device_.data<float>(),
       intercepts_device_.data<float>(),
       X.data<float>(),
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -247,14 +243,13 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
         0,
         context_.cuda_stream()>>>(
         N,
-        M,
-        num_group,
         num_func_per_group,
         bounds_device_.data<float>(),
         slopes_device_.data<float>(),
         intercepts_device_.data<float>(),
         X.data<float>(),
         Y->template mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     // don't want N*M threads, only N*M/2
     PieceWiseLinearTransformBinaryKernel2<<<
@@ -264,13 +259,13 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
         context_.cuda_stream()>>>(
         N,
         M,
-        num_group,
         num_func_per_group,
         bounds_device_.data<float>(),
         slopes_device_.data<float>(),
         intercepts_device_.data<float>(),
         X.data<float>(),
         Y->template mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   return true;
@@ -281,3 +276,10 @@ REGISTER_CUDA_OPERATOR(
     PiecewiseLinearTransformOp<float, CUDAContext>);
 
 } // namespace caffe2
+
+using PiecewiseLinearTransformOpFloatCUDA =
+    caffe2::PiecewiseLinearTransformOp<float, caffe2::CUDAContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(
+    PiecewiseLinearTransform,
+    PiecewiseLinearTransformOpFloatCUDA);

@@ -1,15 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <torch/data.h>
-#include <torch/nn/modules/batchnorm.h>
-#include <torch/nn/modules/conv.h>
-#include <torch/nn/modules/dropout.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/optim/adam.h>
-#include <torch/optim/optimizer.h>
-#include <torch/optim/sgd.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <c10/util/irange.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
@@ -62,6 +54,7 @@ class CartPole {
     step_ = 0;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CartPole() {
     reset();
   }
@@ -130,10 +123,14 @@ bool test_mnist(
   torch::Device device(with_cuda ? torch::kCUDA : torch::kCPU);
   model->to(device);
 
-  for (size_t epoch = 0; epoch < number_of_epochs; epoch++) {
+  for (const auto epoch : c10::irange(number_of_epochs)) {
+    (void)epoch; // Suppress unused variable warning
+    // NOLINTNEXTLINE(performance-for-range-copy)
     for (torch::data::Example<> batch : *data_loader) {
-      auto data = batch.data.to(device), targets = batch.target.to(device);
+      auto data = batch.data.to(device);
+      auto targets = batch.target.to(device);
       torch::Tensor prediction = forward_op(std::move(data));
+      // NOLINTNEXTLINE(performance-move-const-arg)
       torch::Tensor loss = torch::nll_loss(prediction, std::move(targets));
       AT_ASSERT(!torch::isnan(loss).any().item<int64_t>());
       optimizer.zero_grad();
@@ -191,6 +188,7 @@ TEST_F(IntegrationTest, CartPole) {
 
   auto finishEpisode = [&] {
     auto R = 0.;
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     for (int i = rewards.size() - 1; i >= 0; i--) {
       R = rewards[i] + 0.99 * R;
       rewards[i] = R;
@@ -201,11 +199,11 @@ TEST_F(IntegrationTest, CartPole) {
 
     std::vector<torch::Tensor> policy_loss;
     std::vector<torch::Tensor> value_loss;
-    for (auto i = 0U; i < saved_log_probs.size(); i++) {
-      auto r = rewards[i] - saved_values[i].item<float>();
-      policy_loss.push_back(-r * saved_log_probs[i]);
+    for (const auto i : c10::irange(0U, saved_log_probs.size())) {
+      auto advantage = r_t[i] - saved_values[i].item<float>();
+      policy_loss.push_back(-advantage * saved_log_probs[i]);
       value_loss.push_back(
-          torch::smooth_l1_loss(saved_values[i], torch::ones(1) * rewards[i]));
+          torch::smooth_l1_loss(saved_values[i], torch::ones(1) * r_t[i]));
     }
 
     auto loss =
@@ -259,7 +257,7 @@ TEST_F(IntegrationTest, MNIST_CUDA) {
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto drop = Dropout(0.3);
-  auto drop2d = FeatureDropout(0.3);
+  auto drop2d = Dropout2d(0.3);
   auto linear1 = model->add(Linear(320, 50), "linear1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
@@ -293,10 +291,10 @@ TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
-  auto batchnorm2d = model->add(BatchNorm(10), "batchnorm2d");
+  auto batchnorm2d = model->add(BatchNorm2d(10), "batchnorm2d");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto linear1 = model->add(Linear(320, 50), "linear1");
-  auto batchnorm1 = model->add(BatchNorm(50), "batchnorm1");
+  auto batchnorm1 = model->add(BatchNorm1d(50), "batchnorm1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {

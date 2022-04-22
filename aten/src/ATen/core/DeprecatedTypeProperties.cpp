@@ -21,8 +21,4 @@ Tensor DeprecatedTypeProperties::copy(const Tensor & src, bool non_blocking, c10
   return src.to(src.options().dtype(scalarType()), non_blocking, /*copy=*/true);
 }
 
-Type & DeprecatedTypeProperties::getDispatchType() const {
-  return globalLegacyTypeDispatch().getType(backend_, scalar_type_, is_variable_);
-}
-
 } // namespace at

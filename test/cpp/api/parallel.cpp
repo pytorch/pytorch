@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/functions/comm.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/conv.h>
@@ -37,7 +38,7 @@ TEST_F(ParallelTest, DifferentiableScatter_MultiCUDA) {
                   .allclose(input));
 
   torch::Tensor sum = output[0].to({torch::kCUDA, 1}) + output[1];
-  sum.backward();
+  sum.backward(torch::ones_like(sum));
 
   ASSERT_TRUE(input.grad().defined());
   ASSERT_TRUE(input.grad().device().is_cpu());
@@ -61,7 +62,7 @@ TEST_F(ParallelTest, DifferentiableGather_MultiCUDA) {
   ASSERT_TRUE(chunks[0].to({torch::kCUDA, 0}).allclose(a));
   ASSERT_TRUE(chunks[1].allclose(b));
 
-  output.backward();
+  output.backward(torch::ones_like(output));
 
   ASSERT_TRUE(a.grad().defined());
   ASSERT_EQ(a.grad().device(), torch::Device(torch::kCUDA, 0));
@@ -86,11 +87,11 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
   }
   replicas[0]->to(torch::kCPU);
   ASSERT_EQ(replica1_parameters.size(), original_parameters.size());
-  for (size_t i = 0; i < original_parameters.size(); ++i) {
+  for (const auto i : c10::irange(original_parameters.size())) {
     ASSERT_TRUE(replica1_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
-        replica1_parameters[i].data<float>() !=
-        original_parameters[i].data<float>());
+        replica1_parameters[i].data_ptr<float>() !=
+        original_parameters[i].data_ptr<float>());
   }
 
   auto replica2_parameters = replicas[1]->parameters();
@@ -99,11 +100,11 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
   }
   replicas[1]->to(torch::kCPU);
   ASSERT_EQ(replica2_parameters.size(), original_parameters.size());
-  for (size_t i = 0; i < original_parameters.size(); ++i) {
+  for (const auto i : c10::irange(original_parameters.size())) {
     ASSERT_TRUE(replica2_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
-        replica2_parameters[i].data<float>() !=
-        original_parameters[i].data<float>());
+        replica2_parameters[i].data_ptr<float>() !=
+        original_parameters[i].data_ptr<float>());
   }
 }
 
@@ -212,17 +213,17 @@ TEST_F(ParallelTest, DataParallelUsesAllAvailableCUDADevices_CUDA) {
   struct M : torch::nn::Cloneable<M> {
     void reset() override {}
     torch::Tensor forward(torch::Tensor input) {
-      return torch::tensor(input.device().index());
+      return torch::tensor({input.device().index()});
     }
   };
 
   auto m = std::make_shared<M>();
-  auto input = torch::ones({10, 3});
+  const auto device_count = torch::cuda::device_count();
+  auto input = torch::ones({std::max(10, int(2 * device_count)), 3});
   auto output = parallel::data_parallel(m, input);
 
-  const auto device_count = torch::cuda::device_count();
   ASSERT_EQ(output.numel(), device_count);
-  for (size_t i = 0; i < device_count; ++i) {
+  for (const auto i : c10::irange(device_count)) {
     ASSERT_EQ(output[i].item<int32_t>(), i);
   }
 }
@@ -258,7 +259,7 @@ TEST_F(ParallelTest, DataParallelNumericalEquivalence_MultiCUDA) {
     auto model_dp = std::dynamic_pointer_cast<M>(model->clone());
 
     // run 3 training iterations
-    for (int i = 0; i < 3; ++i) {
+    for (const auto i : c10::irange(3)) {
       input += i;
       input_dp += i;
 

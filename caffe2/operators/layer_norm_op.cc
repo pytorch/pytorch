@@ -157,8 +157,7 @@ void LayerNormGradientOp<CPUContext>::GammaBetaBackward(
     const T* rstd,
     const T* g_scale,
     T* dgamma,
-    T* dbeta,
-    T* /* scratch */) {
+    T* dbeta) {
   math::Set<T, CPUContext>(N, T(0), dgamma, &context_);
   math::Set<T, CPUContext>(N, T(0), dbeta, &context_);
   ConstEigenArrayMap<T> dYxX_arr(dYxX, N, M);
@@ -171,6 +170,7 @@ void LayerNormGradientOp<CPUContext>::GammaBetaBackward(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 OPERATOR_SCHEMA(LayerNormGradient).NumInputs({5, 6}).NumOutputs({1, 3});
 
 REGISTER_CPU_OPERATOR(LayerNormGradient, LayerNormGradientOp<CPUContext>);

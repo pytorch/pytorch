@@ -5,21 +5,21 @@
 
 namespace caffe2 {
 
-template <typename T, class Context>
-bool BucketizeOp<T, Context>::RunOnDevice() {
+template <>
+bool BucketizeOp<CPUContext>::RunOnDevice() {
   auto& input = Input(X);
   CAFFE_ENFORCE_GE(input.dim(), 1);
 
   auto N = input.numel();
-  auto* output = Output(INDICES, input.sizes(), at::dtype<T>());
+  auto* output = Output(INDICES, input.sizes(), at::dtype<int32_t>());
   const auto* input_data = input.template data<float>();
-  auto* output_data = output->template mutable_data<T>();
+  auto* output_data = output->template mutable_data<int32_t>();
 
-  math::Set<T, Context>(output->numel(), 0.0, output_data, &context_);
+  math::Set<int32_t, CPUContext>(output->numel(), 0.0, output_data, &context_);
 
   for (int64_t pos = 0; pos < N; pos++) {
     // here we assume the boundary values for each feature are sorted
-    int64_t bucket_idx =
+    auto bucket_idx =
         std::lower_bound(
             boundaries_.begin(), boundaries_.end(), input_data[pos]) -
         boundaries_.begin();
@@ -28,7 +28,7 @@ bool BucketizeOp<T, Context>::RunOnDevice() {
 
   return true;
 };
-REGISTER_CPU_OPERATOR(Bucketize, BucketizeOp<int32_t, CPUContext>);
+REGISTER_CPU_OPERATOR(Bucketize, BucketizeOp<CPUContext>);
 
 OPERATOR_SCHEMA(Bucketize)
     .NumInputs(1)
@@ -58,7 +58,20 @@ output = [[1, 2], [2, 1], [1, 2]]
         "output",
         "indices of bins given by boundaries to which each value"
         "in data belongs")
+    .TensorInferenceFunction([](const OperatorDef& /* def */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(in);
+      out[0].set_data_type(TensorProto::INT32);
+      return out;
+    })
     .Arg("boundaries", "bucketization boundaries");
 
 NO_GRADIENT(BucketizeOp);
 } // namespace caffe2
+
+using BucketizeInt = caffe2::BucketizeOp<caffe2::CPUContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    Bucketize,
+    "_caffe2::Bucketize(Tensor data, float[] boundaries) -> Tensor output",
+    BucketizeInt);

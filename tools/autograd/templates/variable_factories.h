@@ -2,50 +2,59 @@
 
 // ${generated_comment}
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/TracerMode.h>
+#include <ATen/core/grad_mode.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/core/MemoryFormat.h>
+#include <torch/csrc/api/include/torch/detail/TensorDataContainer.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/ir.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/from_blob.h>
+$ops_headers
+#endif
 
 #include <functional>
 #include <initializer_list>
 #include <utility>
 
-#ifdef NAMEDTENSOR_ENABLED
-using at::DimnameList;
-#endif
-
 namespace torch {
 
-#define TENSOR(T, S, _1)                                                   \
-  inline at::Tensor tensor(                                                \
-      at::ArrayRef<T> values, const at::TensorOptions& options) {          \
-    at::Tensor result =                                                    \
-        at::tensor(values, at::TensorOptions(options).is_variable(false)); \
-    return autograd::make_variable(result, options.requires_grad());       \
-  }                                                                        \
-  inline at::Tensor tensor(                                                \
-      std::initializer_list<T> values, const at::TensorOptions& options) { \
-    return torch::tensor(at::ArrayRef<T>(values), options);                \
-  }                                                                        \
-  inline at::Tensor tensor(T value, const at::TensorOptions& options) {    \
-    return torch::tensor(at::ArrayRef<T>(value), options);                 \
-  }                                                                        \
-  inline at::Tensor tensor(at::ArrayRef<T> values) {                       \
-    return torch::tensor(std::move(values), at::dtype(at::k##S));          \
-  }                                                                        \
-  inline at::Tensor tensor(std::initializer_list<T> values) {              \
-    return torch::tensor(at::ArrayRef<T>(values));                         \
-  }                                                                        \
-  inline at::Tensor tensor(T value) {                                      \
-    return torch::tensor(at::ArrayRef<T>(value));                          \
-  }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
-#undef TENSOR
+/// NOTE: Currently `torch::tensor(...)` doesn't support mixed data types
+/// (i.e. `torch::tensor({{bool, 2.0}})` doesn't work). We might be able to
+/// support it in the future by iterating over all sub-lists to find
+/// the largest data type that can represent all of the elements, or by using
+/// variadic templates.
+///
+/// NOTE: C++ `torch::tensor` with a floating-point type or an `at::ArrayRef` / `std::vector` /
+/// (nested) braced-init-list of floating-point types always produces a tensor of dtype
+/// `torch::get_default_dtype()`, matching Python `torch.tensor` behavior.
+///
+/// NOTE: C++ `torch::tensor` with an integer type or an `at::ArrayRef` / `std::vector` /
+/// (nested) braced-init-list of integer types always produces a tensor of dtype `at::kLong`
+/// (aka. int64_t), matching Python `torch.tensor` behavior.
+///
+/// NOTE: The following dtypes are not supported by `torch::tensor` currently:
+/// - `unsigned int`
+/// - `unsigned long int`
+/// - `unsigned long long int`
+/// - `long long int`
+inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {}) {
+  return autograd::make_variable(
+    // note: we remove the requires_grad setting from the TensorOptions because
+    // it is ignored anyways (and we actually have an assertion that it isn't set
+    // which would fail otherwise). We handle requires_grad explicitly here
+    // instead of passing it through to the kernel.
+    tensor_data_container.convert_to_tensor(options.requires_grad(c10::nullopt)),
+    options.requires_grad());
+}
 
 /// A generic deleter function.
 using Deleter = std::function<void(void*)>;
+using at::MemoryFormat;
 
 /// Exposes the given `data` as a `Tensor` without taking ownership of the
 /// original data. `sizes` should specify the shape of the tensor, `strides` the
@@ -60,8 +69,11 @@ inline at::Tensor from_blob(
     at::IntArrayRef strides,
     const Deleter& deleter,
     const at::TensorOptions& options = at::TensorOptions()) {
-  at::Tensor tensor =
-      at::from_blob(data, sizes, strides, deleter, options.is_variable(false));
+  at::Tensor tensor = ([&]() {
+    at::AutoDispatchBelowAutograd guard;  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    return at::from_blob(data, sizes, strides, deleter, options.requires_grad(c10::nullopt));
+  })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
 
@@ -75,12 +87,12 @@ inline at::Tensor from_blob(
     at::IntArrayRef sizes,
     at::IntArrayRef strides,
     const at::TensorOptions& options = at::TensorOptions()) {
-  return torch::from_blob(
-      data,
-      sizes,
-      strides,
-      /*deleter=*/[](void*) {},
-      options);
+  at::Tensor tensor = ([&]() {
+    at::AutoDispatchBelowAutograd guard;  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    return at::from_blob(data, sizes, strides, options.requires_grad(c10::nullopt));
+  })();
+  return autograd::make_variable(tensor, options.requires_grad());
 }
 
 /// Exposes the given `data` as a `Tensor` without taking ownership of the
@@ -94,8 +106,11 @@ inline at::Tensor from_blob(
     at::IntArrayRef sizes,
     const Deleter& deleter,
     const at::TensorOptions& options = at::TensorOptions()) {
-  at::Tensor tensor =
-      at::from_blob(data, sizes, deleter, options.is_variable(false));
+  at::Tensor tensor = ([&]() {
+    at::AutoDispatchBelowAutograd guard;  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    return at::from_blob(data, sizes, deleter, options.requires_grad(c10::nullopt));
+  })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
 
@@ -107,7 +122,12 @@ inline at::Tensor from_blob(
     void* data,
     at::IntArrayRef sizes,
     const at::TensorOptions& options = at::TensorOptions()) {
-  return torch::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
+  at::Tensor tensor = ([&]() {
+    at::AutoDispatchBelowAutograd guard;  // TODO: remove
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    return at::from_blob(data, sizes, options.requires_grad(c10::nullopt));
+  })();
+  return autograd::make_variable(tensor, options.requires_grad());
 }
 
 ${function_definitions}

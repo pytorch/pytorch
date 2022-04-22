@@ -10,23 +10,22 @@ namespace at {
 
 class DeprecatedTypeProperties;
 
-struct CAFFE2_API DeprecatedTypePropertiesDeleter {
+struct TORCH_API DeprecatedTypePropertiesDeleter {
   void operator()(DeprecatedTypeProperties * ptr);
 };
 
-class CAFFE2_API DeprecatedTypePropertiesRegistry {
+class TORCH_API DeprecatedTypePropertiesRegistry {
  public:
   DeprecatedTypePropertiesRegistry();
 
-  DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s, bool is_variable) const;
+  DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) const;
 
 private:
   std::unique_ptr<DeprecatedTypeProperties> registry
     [static_cast<int>(Backend::NumOptions)]
-    [static_cast<int>(ScalarType::NumOptions)]
-    [2];  // is_variable
+    [static_cast<int>(ScalarType::NumOptions)];
 };
 
-CAFFE2_API DeprecatedTypePropertiesRegistry& globalDeprecatedTypePropertiesRegistry();
+TORCH_API DeprecatedTypePropertiesRegistry& globalDeprecatedTypePropertiesRegistry();
 
 } // namespace at

@@ -22,13 +22,14 @@ inline float addErrorTolerance(float scale) {
 
 inline std::unique_ptr<int8::Int8TensorCPU> q(
     const std::vector<int64_t>& dims) {
-  auto r = caffe2::make_unique<int8::Int8TensorCPU>();
+  auto r = std::make_unique<int8::Int8TensorCPU>();
   r->scale = 0.01;
   r->zero_point = static_cast<int32_t>(std::numeric_limits<uint8_t>::max()) / 2;
   ReinitializeTensor(&r->t, dims, at::dtype<uint8_t>().device(CPU));
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_int_distribution<uint8_t> dis;
+  std::uniform_int_distribution<uint32_t> dis{
+      0, std::numeric_limits<uint8_t>::max()};
   for (auto i = 0; i < r->t.numel(); ++i) {
     r->t.mutable_data<uint8_t>()[i] = dis(gen);
   }
@@ -38,7 +39,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> q(
 inline std::unique_ptr<int8::Int8TensorCPU> biasq(
     const std::vector<int64_t>& dims,
     double scale) {
-  auto r = caffe2::make_unique<int8::Int8TensorCPU>();
+  auto r = std::make_unique<int8::Int8TensorCPU>();
   r->scale = scale;
   r->zero_point = 0;
   r->t.Resize(dims);
@@ -53,7 +54,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> biasq(
 }
 
 inline std::unique_ptr<TensorCPU> dq(const int8::Int8TensorCPU& XQ) {
-  auto r = caffe2::make_unique<Tensor>(CPU);
+  auto r = std::make_unique<Tensor>(CPU);
   r->Resize(XQ.t.sizes());
   for (auto i = 0; i < r->numel(); ++i) {
     r->mutable_data<float>()[i] =
@@ -64,7 +65,7 @@ inline std::unique_ptr<TensorCPU> dq(const int8::Int8TensorCPU& XQ) {
 }
 
 inline std::unique_ptr<TensorCPU> biasdq(const int8::Int8TensorCPU& XQ) {
-  auto r = caffe2::make_unique<Tensor>(CPU);
+  auto r = std::make_unique<Tensor>(CPU);
   r->Resize(XQ.t.sizes());
   for (auto i = 0; i < r->numel(); ++i) {
     r->mutable_data<float>()[i] =
@@ -76,7 +77,7 @@ inline std::unique_ptr<TensorCPU> biasdq(const int8::Int8TensorCPU& XQ) {
 #define EXPECT_TENSOR_EQ(_YA, _YE)                                     \
   do {                                                                 \
     EXPECT_TRUE((_YA).sizes() == (_YE).sizes());                       \
-    for (auto i = 0; i < (_YA).numel(); ++i) {                         \
+    for (const auto i : c10::irange((_YA).numel())) {                         \
       EXPECT_FLOAT_EQ((_YA).data<float>()[i], (_YE).data<float>()[i]); \
     }                                                                  \
   } while (0);
@@ -84,7 +85,7 @@ inline std::unique_ptr<TensorCPU> biasdq(const int8::Int8TensorCPU& XQ) {
 #define EXPECT_TENSOR_APPROX_EQ(_YA, _YE, _tol)                            \
   do {                                                                     \
     EXPECT_TRUE((_YA).sizes() == (_YE).sizes());                           \
-    for (auto i = 0; i < (_YA).numel(); ++i) {                             \
+    for (const auto i : c10::irange((_YA).numel())) {                             \
       EXPECT_NEAR((_YA).data<float>()[i], (_YE).data<float>()[i], (_tol)); \
     }                                                                      \
   } while (0);
@@ -101,7 +102,7 @@ inline void add_input(
     const string& name,
     Workspace* ws) {
   // auto* t = ws->CreateBlob(name)->GetMutable<TensorCPU>();
-  auto t = caffe2::make_unique<Tensor>(CPU);
+  auto t = std::make_unique<Tensor>(CPU);
   t->Resize(shape);
   std::copy(values.begin(), values.end(), t->mutable_data<float>());
   BlobGetMutableTensor(ws->CreateBlob(name), CPU)->CopyFrom(*t);

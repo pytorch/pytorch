@@ -12,15 +12,18 @@
 
 #ifndef _WIN32
 
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/python_numbers.h>
+
+#include <c10/util/irange.h>
+#include <fmt/format.h>
+
 #include <atomic>
 #include <map>
 #include <set>
 #include <csignal>
 #include <sstream>
 #include <sys/wait.h>
-
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/utils/python_numbers.h>
 
 using namespace torch;
 
@@ -63,7 +66,7 @@ SIGNAL_HANDLER(SIGBUS, handler_SIGBUS, "ERROR: Unexpected bus error encountered 
 SIGNAL_HANDLER(SIGSEGV, handler_SIGSEGV, "ERROR: Unexpected segmentation fault encountered in worker.\n");
 SIGNAL_HANDLER(SIGFPE, handler_SIGFPE, "ERROR: Unexpected floating-point exception encountered in worker.\n");
 
-// When an error happend in DataLoader methods and Python starts to exit, the
+// When an error happened in DataLoader methods and Python starts to exit, the
 // error trace will keep the loader alive, and Python may kill the children
 // processes first before deleting the loader object. Then the cleaning up
 // methods in DataLoader.__del__ are not yet called, and SIGCHILD will print an
@@ -98,10 +101,13 @@ static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *a
 
 static std::map<int64_t, std::set<pid_t>> worker_pids = {};
 
-static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
+static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *noargs) {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int error;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::set<pid_t> *pid_set;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   pid_t worker_pid;
   siginfo_t infop;
 
@@ -131,6 +137,10 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
         std::ostringstream oss;
         oss << "DataLoader worker (pid " << worker_pid << ") is killed "
             << "by signal: " << strsignal(infop.si_status) << ". ";
+        if (infop.si_status == SIGBUS) {
+            oss << "It is possible that dataloader's workers are out of shared memory. "
+                << "Please try to raise your shared memory limit.";
+        }
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set->clear();
@@ -151,7 +161,7 @@ static PyObject *THPModule_setWorkerPIDs(PyObject *module, PyObject *args) {
   }
   int64_t key = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
   if (worker_pids.find(key) != worker_pids.end()) {
-    throw ValueError("_set_worker_pids should be called only once for each _DataLoaderIter.");
+    throw ValueError("_set_worker_pids should be called only once for each _BaseDataLoaderIter.");
   }
   PyObject *child_pids = PyTuple_GET_ITEM(args, 1);
   if (!PyTuple_Check(child_pids)) {
@@ -161,7 +171,7 @@ static PyObject *THPModule_setWorkerPIDs(PyObject *module, PyObject *args) {
 
   std::set<pid_t> pids_set = {};
   auto size = PyTuple_GET_SIZE(child_pids);
-  for (int idx = 0; idx < size; idx++) {
+  for(const auto idx : c10::irange(size)) {
     PyObject* obj = PyTuple_GET_ITEM(child_pids, idx);
     pids_set.insert(static_cast<pid_t>(THPUtils_unpackLong(obj)));
   }
@@ -178,7 +188,7 @@ static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_i
   int64_t key = THPUtils_unpackLong(loader_id);
   auto it = worker_pids.find(key);
   if (it == worker_pids.end()) {
-    throw ValueError("Cannot find worker information for _DataLoaderIter with id %ld.", key);
+    throw ValueError(fmt::format("Cannot find worker information for _BaseDataLoaderIter with id {}", key));
   }
   worker_pids.erase(it);
 
@@ -209,10 +219,11 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *_ig
 
 #endif
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 PyMethodDef DataLoaderMethods[] = {
-  {"_set_worker_signal_handlers",  (PyCFunction)THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
-  {"_set_worker_pids",             (PyCFunction)THPModule_setWorkerPIDs,            METH_VARARGS,  nullptr},
-  {"_remove_worker_pids",          (PyCFunction)THPModule_removeWorkerPIDs,         METH_O,        nullptr},
-  {"_error_if_any_worker_fails",   (PyCFunction)THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   nullptr},
+  {"_set_worker_signal_handlers",  THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
+  {"_set_worker_pids",             THPModule_setWorkerPIDs,            METH_VARARGS,  nullptr},
+  {"_remove_worker_pids",          THPModule_removeWorkerPIDs,         METH_O,        nullptr},
+  {"_error_if_any_worker_fails",   THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   nullptr},
   {nullptr, nullptr, 0, nullptr}
 };

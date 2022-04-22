@@ -18,7 +18,7 @@ namespace multiprocessing {
 
 namespace {
 
-PyObject* multiprocessing_init(PyObject* _unused) {
+PyObject* multiprocessing_init(PyObject* _unused, PyObject *noargs) {
   auto multiprocessing_module =
       THPObjectPtr(PyImport_ImportModule("torch.multiprocessing"));
   if (!multiprocessing_module) {
@@ -40,10 +40,11 @@ PyObject* multiprocessing_init(PyObject* _unused) {
 } // namespace
 
 // multiprocessing methods on torch._C
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef methods[] = {
     {
         "_multiprocessing_init",
-        (PyCFunction)multiprocessing_init,
+        multiprocessing_init,
         METH_NOARGS,
         nullptr,
     },

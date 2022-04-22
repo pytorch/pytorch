@@ -17,6 +17,9 @@ class LambdaRankNdcgOp final : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...),
         use_ndcg_as_loss_(
             this->template GetSingleArgument<bool>("use_ndcg_as_loss", false)),
+        use_idcg_normalization_(this->template GetSingleArgument<bool>(
+            "use_idcg_normalization",
+            true)),
         use_exp_gain_(
             this->template GetSingleArgument<bool>("use_exp_gain", true)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -35,6 +38,7 @@ class LambdaRankNdcgOp final : public Operator<Context> {
       const Tensor& r,
       Tensor** dy);
   bool use_ndcg_as_loss_;
+  bool use_idcg_normalization_;
   bool use_exp_gain_;
   Tensor gain_;
   Tensor discount_;

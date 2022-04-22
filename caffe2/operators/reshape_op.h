@@ -6,6 +6,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -44,17 +45,38 @@ class ReshapeOp : public Operator<Context> {
           "New shape is specified by the input blob, do not pass in "
           "the argument `shape`.");
 
-      auto& shape = Input(1);
-      CAFFE_ENFORCE(shape.dim() == 1, "Shape should be 1-D");
-
-      const T* shape_data = shape.template data<T>();
-
-      // Bit awkward, but needed so works on both CPU and CUDA contexts
-      std::vector<T> tmpv(shape.numel());
-      if (shape.numel() > 0) {
-        context_.CopyBytesToCPU(
-            shape.numel() * sizeof(T), shape_data, &tmpv[0]);
-        actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.numel());
+      // Shape should be always stored only on CPU
+      // Just in case if for some reason shape is on GPU
+      if (this->InputIsTensorType(1, CPU)) {
+        // originally, shape input must be in CPU context
+        auto& shape = this->template Input<Tensor>(1, CPU);
+        CAFFE_ENFORCE_EQ(
+            shape.dim(),
+            1,
+            "When input_as_shape is true, the input must be a 1D tensor of "
+            "data type int64_t");
+        CAFFE_ENFORCE(shape.numel() > 0);
+        auto* shape_data = shape.template data<T>();
+        actual_new_shape.insert(
+            actual_new_shape.end(), shape_data, shape_data + shape.dim32(0));
+      } else {
+        auto& shape = Input(1);
+        CAFFE_ENFORCE_EQ(
+            shape.dim(),
+            1,
+            "When input_as_shape is true, the input must be a 1D tensor of "
+            "data type int64_t");
+        CAFFE_ENFORCE(shape.numel() > 0);
+        auto* shape_data = shape.template data<T>();
+        // Fetch copy from
+        std::unique_ptr<T[]> shape_data_copy =
+            std::make_unique<T[]>(shape.dim32(0));
+        context_.template CopyToCPU<T>(
+            shape.dim32(0), shape_data, shape_data_copy.get());
+        actual_new_shape.insert(
+            actual_new_shape.end(),
+            shape_data_copy.get(),
+            shape_data_copy.get() + shape.dim32(0));
       }
     }
 
@@ -67,6 +89,7 @@ class ReshapeOp : public Operator<Context> {
     // NOTE: support for legacy caffe1 syntax
     // Copy over the dimensions for those that are specified zero.
     if (total_size != 0) {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t i = 0; i < actual_new_shape.size() && i < input.dim(); ++i) {
         if (actual_new_shape[i] == 0) {
           actual_new_shape[i] = input.size(i);
@@ -75,7 +98,7 @@ class ReshapeOp : public Operator<Context> {
     }
 
     int unknown_idx = -1;
-    for (int i = 0; i < actual_new_shape.size(); ++i) {
+    for (const auto i : c10::irange(actual_new_shape.size())) {
       const auto dim = actual_new_shape[i];
       if (dim == -1) {
         CAFFE_ENFORCE(
@@ -127,10 +150,12 @@ class ReshapeOp : public Operator<Context> {
     }
 
     // Write the original shape to the second output.
-    auto* old_shape = Output(1, {input.dim()}, at::dtype<T>());
+    auto* old_shape = this->template Output<Tensor>(1, CPU);
+    old_shape->Resize(input.sizes().size());
     T* old_shape_data = old_shape->template mutable_data<T>();
-    for (int i = 0; i < input.dim(); ++i) {
-      math::Set<T, Context>(1, input.size(i), old_shape_data + i, &context_);
+    std::vector<T> old_shape_vector(input.sizes().begin(), input.sizes().end());
+    for (const auto i : c10::irange(old_shape_vector.size())) {
+      old_shape_data[i] = old_shape_vector[i];
     }
 
     output->Resize(actual_new_shape);

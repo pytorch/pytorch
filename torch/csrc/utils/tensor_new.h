@@ -1,25 +1,50 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 namespace torch { namespace utils {
 
-at::Tensor legacy_tensor_ctor(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor legacy_tensor_new(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
+at::Tensor base_tensor_ctor(PyObject* args, PyObject* kwargs);
+at::Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
+at::Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor indexing_tensor_from_data(
-    const at::Type& type,
+    c10::TensorOptions options,
     at::ScalarType scalar_type,
     c10::optional<at::Device> device,
     PyObject* data);
-at::Tensor sparse_coo_tensor_ctor(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor tensor_ctor(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor as_tensor(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor new_tensor(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor new_empty(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor new_full(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor new_ones(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor new_zeros(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-
+at::Tensor sparse_coo_tensor_ctor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r);
+at::Tensor _sparse_coo_tensor_unsafe_ctor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r);
+void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
+at::Tensor sparse_csr_tensor_ctor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r);
+at::Tensor _sparse_csr_tensor_unsafe_ctor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r);
+void _validate_sparse_csr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
+void _validate_sparse_compressed_tensor_args(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
+at::Tensor tensor_ctor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r);
+at::Tensor as_tensor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r);
+at::Tensor new_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
+at::Tensor new_ones(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
+at::Tensor tensor_frombuffer(PyObject* buffer, at::ScalarType dtype, int64_t count, int64_t offset, bool requires_grad);
+at::Tensor tensor_fromDLPack(PyObject *data);
+at::Tensor asarray(PyObject* obj, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Device> device, c10::optional<bool> copy, bool requires_grad);
 }} // namespace torch::utils

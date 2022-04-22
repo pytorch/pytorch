@@ -1,34 +1,62 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <THC/THC.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#endif
 
 namespace at {
 namespace native {
 
-using namespace at::cuda;
+void neg_kernel_cuda(TensorIteratorBase &iter);
+void conj_kernel_cuda(TensorIteratorBase &iter);
 
-template <typename dst_t, typename src_t>
-void copy_kernel_impl(TensorIterator& iter) {
-  gpu_kernel(iter, []GPU_LAMBDA(src_t x) -> dst_t {
-    return static_cast<dst_t>(static_cast<native::inter_copy_type_t<dst_t>>(x));
-  });
+namespace {
+void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
+  ScalarType dtype = iter.dtype(0);
+  if (isQIntType(dtype)) {
+    AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        kHalf, kBool, kBFloat16, kComplexHalf, dtype, "copy_", [&] {
+          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+    });
+  }
 }
 
+void neg_conj_kernel_cuda(TensorIteratorBase &iter) {
+  AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "neg_conj_cuda", [&] {
+    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -std::conj(x); });
+  });
+}
+}  // namespace (anonymous)
+
+using namespace at::cuda;
+
 // device-to-device copy, does type conversion
-static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
+void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   int64_t numel = iter.numel();
 
   // We can memcpy the memory if both tensors have the same type AND both
   // tensors are contiguous after dimension coalescing and reordering.
   bool same_type = iter.dtype(0) == iter.dtype(1);
-  bool memcpy_eligible = same_type && iter.is_contiguous();
+  bool same_conj = iter.tensor(0).is_conj() == iter.tensor(1).is_conj();
+  bool same_neg = iter.tensor(0).is_neg() == iter.tensor(1).is_neg();
+  bool memcpy_eligible = same_type && same_conj && same_neg && iter.is_contiguous();
 
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
@@ -57,20 +85,30 @@ static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   }
 
   if (memcpy_eligible) {
-    // Perform the copy
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        iter.data_ptr(0),
-        iter.data_ptr(1),
-        numel * iter.element_size(0),
-        cudaMemcpyDeviceToDevice,
-        copy_stream));
+    void *dst = iter.data_ptr(0);
+    void *src = iter.data_ptr(1);
+    size_t size = numel * iter.element_size(0);
+    if (src != dst || src_device != dst_device) {
+      // Perform the copy
+      AT_CUDA_CHECK(cudaMemcpyAsync(
+          dst, src, size,
+          cudaMemcpyDeviceToDevice,
+          copy_stream));
+    }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(0), "copy_", [&] {
-      using dst_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(1), "copy_", [&] {
-        copy_kernel_impl<dst_t, scalar_t>(iter);
-      });
-    });
+    if (same_neg) {
+      if (!same_conj) {
+        conj_kernel_cuda(iter);
+      } else {
+        direct_copy_kernel_cuda(iter);
+      }
+    } else {
+      if (!same_conj) {
+        neg_conj_kernel_cuda(iter);
+      } else {
+        neg_kernel_cuda(iter);
+      }
+    }
   }
 
   if (src_device != dst_device) {
@@ -116,8 +154,7 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
   if (dst_device.is_cpu() || src_device.is_cpu()) {
     return false;
   }
-  return THCState_getPeerToPeerAccess(
-        globalContext().getTHCState(), src_device.index(), dst_device.index());
+  return at::cuda::get_p2p_access(src_device.index(), dst_device.index());
 }
 
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
@@ -126,7 +163,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
 
-  // Enable p2p access between devices. (No-op if it invovles the CPU)
+  // Enable p2p access between devices. (No-op if it involves the CPU)
   bool p2p_enabled = maybe_enable_p2p_access(dst_device, src_device);
 
   if (copy_requires_temporaries(iter, p2p_enabled)) {
@@ -139,13 +176,20 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     // Type conversions are performed on the CPU for CPU-GPU copies and on
     // the src device for GPU-GPU copies.
     if (iter.device_type(0) == kCUDA) {
-      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst);
+      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
       bool same_type = iter.dtype(0) == iter.dtype(1);
-      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1));
+      dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
+
+    // propagate the correct conjugate bit
+    dst_contig._set_conj(dst.is_conj());
+    src_contig._set_conj(iter.tensor(1).is_conj());
+
+    dst_contig._set_neg(dst.is_neg());
+    src_contig._set_neg(iter.tensor(1).is_neg());
 
     // perform a same-dtype copy on contiguous tensors
     TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
@@ -184,13 +228,36 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   int64_t nbytes = iter.numel() * iter.element_size(0);
   CUDAStream stream = getCurrentCUDAStream();
 
-  AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-
   if (non_blocking) {
-    void* ptr = (dst_device == kCPU ? dst : src);
-    AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(ptr, stream));
+    AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
+    // we use both the storage context and the tensor data pointer as the key
+    // for the caching host allocator. This allows us to better attribute the
+    // events to the original tensor allocation correctly. The cases we seek to
+    // handle are:
+
+    // 1: a user can pass a pinned memory tensor with an alternative
+    // context, for example if allocating memory directly from the pinned memory
+    // allocator and constructing a tensor with torch::from_blob.
+
+    // 2: a user can pass a tensor with a different base pointer to the original
+    // allocation (via slicing).
+    const auto& dst_tensor = iter.tensor(0);
+    const auto& src_tensor = iter.tensor(1);
+    const auto& host_tensor = (dst_device == kCPU ? dst_tensor : src_tensor);
+    auto* ptr = (dst_device == kCPU ? dst : src);
+    auto* ctx = host_tensor.storage().data_ptr().get_context();
+    // TODO: warn on the return value.
+    CachingHostAllocator_recordEvent(ptr, ctx, stream);
+
   } else {
-    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+    at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
+  }
+
+  if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
+     iter.tensor(0).conj_physical_();
+  }
+  if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
+     iter.tensor(0).neg_();
   }
 }
 

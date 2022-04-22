@@ -1,43 +1,20 @@
-import os
-import glob
-import ctypes
-import platform
+from contextlib import contextmanager
 
-lib = None
+try:
+    from torch._C import _nvtx
+except ImportError:
+    class _NVTXStub(object):
+        @staticmethod
+        def _fail(*args, **kwargs):
+            raise RuntimeError("NVTX functions not installed. Are you sure you have a CUDA build?")
 
-__all__ = ['range_push', 'range_pop', 'mark']
+        rangePushA = _fail
+        rangePop = _fail
+        markA = _fail
 
+    _nvtx = _NVTXStub()  # type: ignore[assignment]
 
-def windows_nvToolsExt_lib():
-    lib_path = windows_nvToolsExt_path()
-    if len(lib_path) > 0:
-        lib_name = os.path.basename(lib_path)
-        lib = os.path.splitext(lib_name)[0]
-        return ctypes.cdll.LoadLibrary(lib)
-    else:
-        return None
-
-
-def windows_nvToolsExt_path():
-    WINDOWS_HOME = 'C:/Program Files/NVIDIA Corporation/NvToolsExt'
-    NVTOOLEXT_HOME = os.getenv('NVTOOLSEXT_PATH', WINDOWS_HOME)
-    if os.path.exists(NVTOOLEXT_HOME):
-        lib_paths = glob.glob(NVTOOLEXT_HOME + '/bin/x64/nvToolsExt*.dll')
-        if len(lib_paths) > 0:
-            lib_path = lib_paths[0]
-            return lib_path
-    return ''
-
-
-def _libnvToolsExt():
-    global lib
-    if lib is None:
-        if platform.system() != 'Windows':
-            lib = ctypes.cdll.LoadLibrary(None)
-        else:
-            lib = windows_nvToolsExt_lib()
-        lib.nvtxMarkA.restype = None
-    return lib
+__all__ = ["range_push", "range_pop", "range_start", "range_end", "mark", "range"]
 
 
 def range_push(msg):
@@ -45,12 +22,10 @@ def range_push(msg):
     Pushes a range onto a stack of nested range span.  Returns zero-based
     depth of the range that is started.
 
-    Arguments:
+    Args:
         msg (string): ASCII message to associate with range
     """
-    if _libnvToolsExt() is None:
-        raise RuntimeError('Unable to load nvToolsExt library')
-    return lib.nvtxRangePushA(ctypes.c_char_p(msg.encode("ascii")))
+    return _nvtx.rangePushA(msg)
 
 
 def range_pop():
@@ -58,18 +33,56 @@ def range_pop():
     Pops a range off of a stack of nested range spans.  Returns the
     zero-based depth of the range that is ended.
     """
-    if _libnvToolsExt() is None:
-        raise RuntimeError('Unable to load nvToolsExt library')
-    return lib.nvtxRangePop()
+    return _nvtx.rangePop()
+
+
+def range_start(msg) -> int:
+    """
+    Mark the start of a range with string message. It returns an unique handle
+    for this range to pass to the corresponding call to rangeEnd().
+
+    A key difference between this and range_push/range_pop is that the
+    range_start/range_end version supports range across threads (start on one
+    thread and end on another thread).
+
+    Returns: A range handle (uint64_t) that can be passed to range_end().
+
+    Args:
+        msg (string): ASCII message to associate with the range.
+    """
+    return _nvtx.rangeStartA(msg)
+
+
+def range_end(range_id) -> None:
+    """
+    Mark the end of a range for a given range_id.
+
+    Args:
+        range_id (int): an unique handle for the start range.
+    """
+    _nvtx.rangeEnd(range_id)
 
 
 def mark(msg):
     """
     Describe an instantaneous event that occurred at some point.
 
-    Arguments:
+    Args:
         msg (string): ASCII message to associate with the event.
     """
-    if _libnvToolsExt() is None:
-        raise RuntimeError('Unable to load nvToolsExt library')
-    return lib.nvtxMarkA(ctypes.c_char_p(msg.encode("ascii")))
+    return _nvtx.markA(msg)
+
+
+@contextmanager
+def range(msg, *args, **kwargs):
+    """
+    Context manager / decorator that pushes an NVTX range at the beginning
+    of its scope, and pops it at the end. If extra arguments are given,
+    they are passed as arguments to msg.format().
+
+    Args:
+        msg (string): message to associate with the range
+    """
+    range_push(msg.format(*args, **kwargs))
+    yield
+    range_pop()

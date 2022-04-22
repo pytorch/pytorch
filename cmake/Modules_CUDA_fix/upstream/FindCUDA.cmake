@@ -234,9 +234,9 @@
 #       - "Auto" detects local machine GPU compute arch at runtime.
 #       - "Common" and "All" cover common and entire subsets of architectures
 #      ARCH_AND_PTX : NAME | NUM.NUM | NUM.NUM(NUM.NUM) | NUM.NUM+PTX
-#      NAME: Fermi Kepler Maxwell Kepler+Tegra Kepler+Tesla Maxwell+Tegra Pascal
+#      NAME: Kepler Maxwell Kepler+Tesla Maxwell+Tegra Pascal Volta Turing
 #      NUM: Any number. Only those pairs are currently accepted by NVCC though:
-#            2.0 2.1 3.0 3.2 3.5 3.7 5.0 5.2 5.3 6.0 6.2
+#            3.5 3.7 5.0 5.2 5.3 6.0 6.1 6.2 7.0 7.2 7.5
 #      Returns LIST of flags to be added to CUDA_NVCC_FLAGS in ${out_variable}
 #      Additionally, sets ${out_variable}_readable to the resulting numeric list
 #      Example:
@@ -673,7 +673,7 @@ endif()
 # Search for the cuda distribution.
 if(NOT CUDA_TOOLKIT_ROOT_DIR AND NOT CMAKE_CROSSCOMPILING)
   # Search in the CUDA_BIN_PATH first.
-  find_path(CUDA_TOOLKIT_ROOT_DIR
+  find_program(CUDA_TOOLKIT_ROOT_DIR_NVCC
     NAMES nvcc nvcc.exe
     PATHS
       ENV CUDA_TOOLKIT_ROOT
@@ -685,19 +685,22 @@ if(NOT CUDA_TOOLKIT_ROOT_DIR AND NOT CMAKE_CROSSCOMPILING)
     )
 
   # Now search default paths
-  find_path(CUDA_TOOLKIT_ROOT_DIR
+  find_program(CUDA_TOOLKIT_ROOT_DIR_NVCC
     NAMES nvcc nvcc.exe
     PATHS /opt/cuda/bin
     PATH_SUFFIXES cuda/bin
     DOC "Toolkit location."
     )
 
-  if (CUDA_TOOLKIT_ROOT_DIR)
+  if (CUDA_TOOLKIT_ROOT_DIR_NVCC)
+    get_filename_component(CUDA_TOOLKIT_ROOT_DIR_NVCC_PAR "${CUDA_TOOLKIT_ROOT_DIR_NVCC}" DIRECTORY)
+    get_filename_component(CUDA_TOOLKIT_ROOT_DIR "${CUDA_TOOLKIT_ROOT_DIR_NVCC_PAR}" DIRECTORY CACHE)
     string(REGEX REPLACE "[/\\\\]?bin[64]*[/\\\\]?$" "" CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT_DIR})
     # We need to force this back into the cache.
     set(CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT_DIR} CACHE PATH "Toolkit location." FORCE)
     set(CUDA_TOOLKIT_TARGET_DIR ${CUDA_TOOLKIT_ROOT_DIR})
   endif()
+  unset(CUDA_TOOLKIT_ROOT_DIR_NVCC CACHE)
 
   if (NOT EXISTS ${CUDA_TOOLKIT_ROOT_DIR})
     if(CUDA_FIND_REQUIRED)
@@ -764,11 +767,30 @@ else()
   # Search default search paths, after we search our own set of paths.
   cuda_find_host_program(CUDA_NVCC_EXECUTABLE nvcc)
 endif()
+
+# FAST_NVCC
+if(USE_FAST_NVCC AND CUDA_NVCC_EXECUTABLE AND NOT CUDA_NVCC_EXECUTABLE_ORIGIN)
+  set(CUDA_NVCC_EXECUTABLE_ORIGIN "${CUDA_NVCC_EXECUTABLE}")
+  set(FAST_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/fast_nvcc.py")
+  configure_file(${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.sh.in "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.sh")
+  file(COPY "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.sh"
+    DESTINATION "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/"
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  )
+  set(CUDA_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.sh")
+endif()
 mark_as_advanced(CUDA_NVCC_EXECUTABLE)
 
 if(CUDA_NVCC_EXECUTABLE AND NOT CUDA_VERSION)
   # Compute the version.
-  execute_process (COMMAND ${CUDA_NVCC_EXECUTABLE} "--version" OUTPUT_VARIABLE NVCC_OUT)
+  execute_process(COMMAND ${CUDA_NVCC_EXECUTABLE} "--version"
+    OUTPUT_VARIABLE NVCC_OUT
+    RESULT_VARIABLE NVCC_RC)
+  if(NOT (${NVCC_RC} EQUAL 0))
+    message(WARNING "Failed to execute '${CUDA_NVCC_EXECUTABLE} --version'")
+    set(CUDA_FOUND FALSE)
+    return()
+  endif()
   string(REGEX REPLACE ".*release ([0-9]+)\\.([0-9]+).*" "\\1" CUDA_VERSION_MAJOR ${NVCC_OUT})
   string(REGEX REPLACE ".*release ([0-9]+)\\.([0-9]+).*" "\\2" CUDA_VERSION_MINOR ${NVCC_OUT})
   set(CUDA_VERSION "${CUDA_VERSION_MAJOR}.${CUDA_VERSION_MINOR}" CACHE STRING "Version of CUDA as computed from nvcc.")
@@ -778,7 +800,6 @@ else()
   string(REGEX REPLACE "([0-9]+)\\.([0-9]+).*" "\\1" CUDA_VERSION_MAJOR "${CUDA_VERSION}")
   string(REGEX REPLACE "([0-9]+)\\.([0-9]+).*" "\\2" CUDA_VERSION_MINOR "${CUDA_VERSION}")
 endif()
-
 
 # Always set this convenience variable
 set(CUDA_VERSION_STRING "${CUDA_VERSION}")
@@ -1416,8 +1437,8 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
   else()
     set(CUDA_HOST_SHARED_FLAGS)
   endif()
-  
-  macro(_filter_blacklisted_host_flags CUDA_FLAGS)
+
+  macro(_filter_blocklisted_host_flags CUDA_FLAGS)
     string(REGEX REPLACE "[ \t]+" ";" ${CUDA_FLAGS} "${${CUDA_FLAGS}}")
     foreach(_blacklisted ${CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST})
       list(REMOVE_ITEM ${CUDA_FLAGS} "${_blacklisted}")
@@ -1429,7 +1450,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
   # always need to set the SHARED_FLAGS, though.
   if(CUDA_PROPAGATE_HOST_FLAGS)
     set(_cuda_C_FLAGS "${CMAKE_${CUDA_C_OR_CXX}_FLAGS}")
-    _filter_blacklisted_host_flags(_cuda_C_FLAGS)
+    _filter_blocklisted_host_flags(_cuda_C_FLAGS)
     set(_cuda_host_flags "set(CMAKE_HOST_FLAGS ${_cuda_C_FLAGS} ${CUDA_HOST_SHARED_FLAGS})")
   else()
     set(_cuda_host_flags "set(CMAKE_HOST_FLAGS ${CUDA_HOST_SHARED_FLAGS})")
@@ -1455,7 +1476,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         endif()
       endif()
       set(_cuda_C_FLAGS "${CMAKE_${CUDA_C_OR_CXX}_FLAGS_${config_upper}}")
-      _filter_blacklisted_host_flags(_cuda_C_FLAGS)
+      _filter_blocklisted_host_flags(_cuda_C_FLAGS)
       if(_cuda_fix_g3)
         string(REPLACE "-g3" "-g" _cuda_C_FLAGS "${_cuda_C_FLAGS}")
       endif()
@@ -1469,17 +1490,17 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
     string(APPEND _cuda_nvcc_flags_config "\nset(CUDA_NVCC_FLAGS_${config_upper} ${CUDA_NVCC_FLAGS_${config_upper}} ;; ${CUDA_WRAP_OPTION_NVCC_FLAGS_${config_upper}})")
   endforeach()
 
-  # Process the C++11 flag.  If the host sets the flag, we need to add it to nvcc and
+  # Process the C++14 flag.  If the host sets the flag, we need to add it to nvcc and
   # remove it from the host. This is because -Xcompile -std=c++ will choke nvcc (it uses
   # the C preprocessor).  In order to get this to work correctly, we need to use nvcc's
-  # specific c++11 flag.
+  # specific c++14 flag.
   if( "${_cuda_host_flags}" MATCHES "-std=c\\+\\+11")
-    # Add the c++11 flag to nvcc if it isn't already present.  Note that we only look at
+    # Add the c++14 flag to nvcc if it isn't already present.  Note that we only look at
     # the main flag instead of the configuration specific flags.
-    if( NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+11" )
-      list(APPEND nvcc_flags --std c++11)
+    if( NOT "${CUDA_NVCC_FLAGS}" MATCHES "-std=c\\+\\+14" )
+      list(APPEND nvcc_flags --std c++14)
     endif()
-    string(REGEX REPLACE "[-]+std=c\\+\\+11" "" _cuda_host_flags "${_cuda_host_flags}")
+    string(REGEX REPLACE "[-]+std=c\\+\\+14" "" _cuda_host_flags "${_cuda_host_flags}")
   endif()
 
   if(_cuda_build_shared_libs)
@@ -1502,7 +1523,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         set(_cuda_source_format ${format})
       endif()
       # If file isn't a .cu file, we need to tell nvcc to treat it as such.
-      if(NOT ${file} MATCHES "\\.cu$")
+      if(NOT file MATCHES "\\.cu$")
         set(cuda_language_flag -x=cu)
       else()
         set(cuda_language_flag)
@@ -1632,6 +1653,11 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
         set(verbose_output ON)
       elseif(CMAKE_GENERATOR MATCHES "Makefiles")
         set(verbose_output "$(VERBOSE)")
+      # This condition lets us also turn on verbose output when someone
+      # specifies CMAKE_VERBOSE_MAKEFILE, even if the generator isn't
+      # the Makefiles generator (this is important for us, Ninja users.)
+      elseif(CMAKE_VERBOSE_MAKEFILE)
+        set(verbose_output ON)
       else()
         set(verbose_output OFF)
       endif()

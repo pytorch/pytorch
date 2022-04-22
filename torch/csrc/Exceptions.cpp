@@ -4,16 +4,40 @@
 #include <utility>
 #include <vector>
 #include <cstdarg>
+#include <exception>
+#include <sstream>
 
 #include <torch/csrc/THP.h>
 
-PyObject *THPException_FatalError;
+PyObject *THPException_FatalError, *THPException_LinAlgError;
 
 #define ASSERT_TRUE(cond) if (!(cond)) return false
 bool THPException_init(PyObject *module)
 {
   ASSERT_TRUE(THPException_FatalError = PyErr_NewException("torch.FatalError", nullptr, nullptr));
   ASSERT_TRUE(PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
+
+  // Set the doc string here since _add_docstr throws malloc errors if tp_doc is modified
+  // for an error class.
+  ASSERT_TRUE(THPException_LinAlgError = PyErr_NewExceptionWithDoc("torch._C._LinAlgError",
+    "Error raised by torch.linalg function when the cause of error is a numerical inconsistency in the data.\n \
+For example, you can the torch.linalg.inv function will raise torch.linalg.LinAlgError when it finds that \
+a matrix is not invertible.\n \
+\n\
+Example:\n \
+>>> matrix = torch.eye(3, 3)\n \
+>>> matrix[-1, -1] = 0\n \
+>>> matrix\n \
+    tensor([[1., 0., 0.],\n \
+            [0., 1., 0.],\n \
+            [0., 0., 0.]])\n \
+>>> torch.linalg.inv(matrix)\n \
+Traceback (most recent call last):\n \
+File \"<stdin>\", line 1, in <module>\n \
+torch._C._LinAlgError: torch.linalg.inv: The diagonal element 3 is zero, the inversion\n \
+could not be completed because the input matrix is singular.", PyExc_RuntimeError, nullptr));
+  ASSERT_TRUE(PyModule_AddObject(module, "_LinAlgError", THPException_LinAlgError) == 0);
+
   return true;
 }
 
@@ -107,13 +131,23 @@ std::string processErrorMsg(std::string str) {
 
 static std::string formatMessage(const char *format, va_list fmt_args) {
   static const size_t ERROR_BUF_SIZE = 1024;
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char error_buf[ERROR_BUF_SIZE];
   vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
-  
+
   // Ensure that the string is null terminated
   error_buf[sizeof(error_buf) / sizeof(*error_buf) - 1] = 0;
 
   return std::string(error_buf);
+}
+
+void translate_exception_to_python(const std::exception_ptr &e_ptr) {
+  try {
+    TORCH_INTERNAL_ASSERT(e_ptr, "translate_exception_to_python "
+                          "called with invalid exception pointer");
+    std::rethrow_exception(e_ptr);
+  }
+  CATCH_ALL_ERRORS(return)
 }
 
 IndexError::IndexError(const char *format, ...) {
@@ -137,5 +171,95 @@ ValueError::ValueError(const char *format, ...) {
   va_end(fmt_args);
 }
 
-} // namespace torch
+AttributeError::AttributeError(const char* format, ...) {
+  va_list fmt_args;
+  va_start(fmt_args, format);
+  msg = formatMessage(format, fmt_args);
+  va_end(fmt_args);
+}
 
+LinAlgError::LinAlgError(const char* format, ...) {
+  va_list fmt_args;
+  va_start(fmt_args, format);
+  msg = formatMessage(format, fmt_args);
+  va_end(fmt_args);
+}
+
+void PyWarningHandler::InternalHandler::process(
+    const c10::SourceLocation& source_location,
+    const std::string& msg,
+    const bool verbatim) {
+  warning_buffer_.push_back({source_location, msg, verbatim});
+};
+
+PyWarningHandler::PyWarningHandler() noexcept(true):
+      prev_handler_(c10::Warning::get_warning_handler()),
+      in_exception_(false) {
+  c10::Warning::set_warning_handler(&internal_handler_);
+}
+
+/// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
+/// NOLINTNEXTLINE(bugprone-exception-escape)
+PyWarningHandler::~PyWarningHandler() noexcept(false) {
+  c10::Warning::set_warning_handler(prev_handler_);
+  auto &warning_buffer = internal_handler_.warning_buffer_;
+
+  if (warning_buffer.size() > 0) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    PyObject *type, *value, *traceback;
+    pybind11::gil_scoped_acquire gil;
+    auto result = 0;
+    if (in_exception_) {
+      // This (combined with PyErr_Restore below) also works when no python
+      // error has been set yet
+      PyErr_Fetch(&type, &value, &traceback);
+    }
+    for (const auto& warning : warning_buffer) {
+      auto source_location = warning.source_location_;
+      const auto& msg = processErrorMsg(warning.msg_);
+      if (source_location.file == nullptr) {
+        result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
+      } else if (warning.verbatim_) {
+        // Sets the source location from the warning
+        // Note: PyErr_WarnExplicit will disregard Python's warning filter
+        // and always appear. This is in contrast to PyErr_WarnEx,
+        // which respects the warning filter.
+        result = PyErr_WarnExplicit(
+            /*category=*/PyExc_UserWarning,
+            /*message=*/msg.c_str(),
+            /*filename=*/source_location.file,
+            /*lineno=*/source_location.line,
+            /*module=*/nullptr,
+            /*registry=*/nullptr);
+      } else {
+        // Lets Python set the source location and puts the C++ warning
+        // location into the message.
+        std::ostringstream os;
+        os << msg << " (Triggered internally at  " << source_location.file;
+        os << ":" << source_location.line << ".)";
+        result = PyErr_WarnEx(PyExc_UserWarning, os.str().c_str(), 1);
+      }
+      if (result < 0) {
+        if (in_exception_) {
+          // PyErr_Print prints the traceback to sys.stderr and
+          // clears the error indicator
+          PyErr_Print();
+        } else {
+          break;
+        }
+      }
+    }
+    warning_buffer.clear();
+    if ((result < 0) && (!in_exception_)) {
+      /// A warning raised an error, we need to force the parent
+      /// function to return an error code.
+      throw python_error();
+    }
+    if (in_exception_) {
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+      PyErr_Restore(type, value, traceback);
+    }
+  }
+}
+
+} // namespace torch

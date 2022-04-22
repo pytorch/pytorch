@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/function.h>
 
+#include <c10/util/ThreadLocal.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -15,23 +16,30 @@
 
 namespace torch { namespace autograd {
 
-/// Monotonically incrementing (thread local!) counter to supply sequence
-/// numbers.
-thread_local uint64_t Function_next_sequence_nr_ = 0;
+// The current evaluating node. This is useful to assign the current node as a
+// parent of new nodes created during the evaluation of this node in anomaly
+// mode.
+C10_DEFINE_TLS_static(std::shared_ptr<Node>, tls_current_evaluating_node);
+#define current_evaluating_node (tls_current_evaluating_node.get())
 
-uint64_t Function::peek_at_next_sequence_nr() {
-  return Function_next_sequence_nr_;
+NodeGuard::NodeGuard(std::shared_ptr<Node> node) {
+  last_evaluating_node_ = std::move(current_evaluating_node);
+  current_evaluating_node = std::move(node);
+}
+NodeGuard::~NodeGuard() {
+  // restore the previous evaluating node
+  current_evaluating_node = std::move(last_evaluating_node_);
 }
 
-uint64_t& Function::get_next_sequence_nr() {
-  return Function_next_sequence_nr_;
+void Node::assign_parent() {
+  metadata()->assign_parent(current_evaluating_node);
 }
 
-auto Function::name() const -> std::string {
+auto Node::name() const -> std::string {
   return c10::demangle(typeid(*this).name());
 }
 
-AnomalyMetadata* Function::metadata() noexcept {
+AnomalyMetadata* Node::metadata() noexcept {
   if (!anomaly_metadata_) {
     anomaly_metadata_ = Engine::get_default_engine().make_anomaly_metadata();
   }
@@ -39,8 +47,8 @@ AnomalyMetadata* Function::metadata() noexcept {
 }
 
 static void gatherFunctions(
-    Function* func,
-    std::vector<std::shared_ptr<Function>>& stack) {
+    Node* func,
+    std::vector<std::shared_ptr<Node>>& stack) {
   func->release_variables();
 
   for (auto& edge : func->next_edges()) {
@@ -55,29 +63,29 @@ static void gatherFunctions(
 /*
   * Fix for #5534: prevent stack overflow on deletion of deep computation graph
   *
-  * Sometimes one can end up with a very big computation graph of Functions
-  * and Edges. Each std::shared_ptr<Function> contains a list of Edge, and
-  * each Edge contains a std::shared_ptr<Function>. Deleting a
-  * std::shared_ptr<Function> can trigger the recursive deletion of other
-  * std::shared_ptr<Function>'s: this can stack overflow if the graph
+  * Sometimes one can end up with a very big computation graph of Nodes
+  * and Edges. Each std::shared_ptr<Node> contains a list of Edge, and
+  * each Edge contains a std::shared_ptr<Node>. Deleting a
+  * std::shared_ptr<Node> can trigger the recursive deletion of other
+  * std::shared_ptr<Node>'s: this can stack overflow if the graph
   * is deep enough. Here is an example of such a graph:
   *
-  * shared_ptr<Function> -> Edge -> shared_ptr<Function> -> Edge -> ... -> shared_ptr<Function>
+  * shared_ptr<Node> -> Edge -> shared_ptr<Node> -> Edge -> ... -> shared_ptr<Node>
   *
   * The solution here is to detect when we are decrementing away the last
-  * reference to a Function, and when doing so to buffer up the Function's
+  * reference to a Node, and when doing so to buffer up the Node's
   * that will be recursively decremented.  We can then decrement (and free)
-  * the original Function without causing a recursive cascade, before
+  * the original Node without causing a recursive cascade, before
   * draining the buffer applying the same behavior.  This is, in effect,
   * converting recursion to a loop, using a heap buffer in place of the
   * recursive call stack.
   */
-void deleteFunction(Function* function) {
+void deleteNode(Node* function) {
   // To avoid stack overflow on large computational graphs,
   // we need to track reference decrementing and freeing
   // on the heap.
   function->release_variables();
-  std::vector<std::shared_ptr<Function>> stack;
+  std::vector<std::shared_ptr<Node>> stack;
   gatherFunctions(function, stack);
   delete function;
 

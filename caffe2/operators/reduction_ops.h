@@ -6,6 +6,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -19,11 +20,13 @@ class SumElementsOp : public Operator<Context> {
         average_(this->template GetSingleArgument<bool>("average", false)) {}
   explicit SumElementsOp(const OperatorDef& operator_def, Workspace* ws, bool average)
       : Operator<Context>(operator_def, ws), average_(average) {}
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit SumElementsOp(const c10::FunctionSchema& schema, std::vector<c10::IValue> inputs, std::vector<c10::IValue*> outputs)
       : Operator<Context>(schema, std::move(inputs), std::move(outputs)),
         average_(this->template GetSingleArgument<bool>("average", false)) {}
   explicit SumElementsOp(const c10::FunctionSchema& schema, std::vector<c10::IValue> inputs, std::vector<c10::IValue*> outputs, bool average)
       : Operator<Context>(schema, std::move(inputs), std::move(outputs)), average_(average) {}
+#endif
   ~SumElementsOp() {}
 
   bool RunOnDevice() override {
@@ -85,11 +88,13 @@ class SumElementsGradientOp : public Operator<Context> {
         average_(this->template GetSingleArgument<bool>("average", false)) {}
   explicit SumElementsGradientOp(const OperatorDef& operator_def, Workspace* ws, bool average)
       : Operator<Context>(operator_def, ws), average_(average) {}
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit SumElementsGradientOp(const c10::FunctionSchema& schema, std::vector<c10::IValue> inputs, std::vector<c10::IValue*> outputs)
       : Operator<Context>(schema, std::move(inputs), std::move(outputs)),
         average_(this->template GetSingleArgument<bool>("average", false)) {}
   explicit SumElementsGradientOp(const c10::FunctionSchema& schema, std::vector<c10::IValue> inputs, std::vector<c10::IValue*> outputs, bool average)
       : Operator<Context>(schema, std::move(inputs), std::move(outputs)), average_(average) {}
+#endif
   ~SumElementsGradientOp() {}
 
   bool RunOnDevice() override;
@@ -105,7 +110,7 @@ class SumSqrElementsOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, double>>::call(this, Input(0));
   }
 
   template <typename T>
@@ -160,7 +165,7 @@ class MaxReductionOp : public Operator<Context> {
           &context_);
     } else {
       const int input_size = N * M;
-      for (int i = 0; i < batch_size; ++i) {
+      for (const auto i : c10::irange(batch_size)) {
         math::ColwiseMax<T, Context>(
             M,
             N,

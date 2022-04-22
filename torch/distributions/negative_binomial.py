@@ -8,8 +8,8 @@ from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_prope
 class NegativeBinomial(Distribution):
     r"""
     Creates a Negative Binomial distribution, i.e. distribution
-    of the number of independent identical Bernoulli trials
-    needed before :attr:`total_count` failures are achieved. The probability
+    of the number of successful independent and identical Bernoulli trials
+    before :attr:`total_count` failures are achieved. The probability
     of success of each Bernoulli trial is :attr:`probs`.
 
     Args:
@@ -77,8 +77,10 @@ class NegativeBinomial(Distribution):
 
     @lazy_property
     def _gamma(self):
+        # Note we avoid validating because self.total_count can be zero.
         return torch.distributions.Gamma(concentration=self.total_count,
-                                         rate=torch.exp(-self.logits))
+                                         rate=torch.exp(-self.logits),
+                                         validate_args=False)
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():

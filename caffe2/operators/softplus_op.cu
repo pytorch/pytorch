@@ -32,6 +32,8 @@ bool SoftplusOp<float, CUDAContext>::RunOnDevice() {
          0,
          context_.cuda_stream()>>>(
           X.numel(), X.data<float>(), Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -52,6 +54,8 @@ bool SoftplusGradientOp<float, CUDAContext>::RunOnDevice() {
           Y.data<float>(),
           dY.data<float>(),
           dX->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

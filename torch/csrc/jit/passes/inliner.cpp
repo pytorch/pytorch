@@ -1,6 +1,10 @@
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/module.h>
+
+#include <ATen/core/interned_strings.h>
+#include <torch/csrc/jit/api/function_impl.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -9,17 +13,21 @@ namespace prim {
 using namespace ::c10::prim;
 }
 
-static void replace(
-    Node* to_replace,
-    const std::shared_ptr<Function>& fn,
-    at::ArrayRef<Value*> inputs) {
-  WithInsertPoint guard(to_replace);
-  auto new_output =
-      inlineCallTo(*to_replace->owningGraph(), *fn->graph(), inputs).at(0);
-  if (to_replace->output()->hasUniqueName()) {
-    new_output->setUniqueName(to_replace->output()->uniqueName());
+GraphFunction* tryToGraphFunction(Node* n) {
+  if (n->kind() == prim::CallFunction) {
+    AT_ASSERT(n->input(0)->node()->kind() == prim::Constant);
+    auto function_constant = n->input(0)->node();
+    auto fun_type = function_constant->output()->type()->expect<FunctionType>();
+    return tryToGraphFunction(*fun_type->function());
   }
-  to_replace->output()->replaceAllUsesWith(new_output);
+  if (n->kind() == prim::CallMethod) {
+    const std::string& name = n->s(attr::name);
+    if (auto class_type = n->input(0)->type()->cast<ClassType>()) {
+      Function& function = class_type->getMethod(name);
+      return tryToGraphFunction(function);
+    }
+  }
+  return nullptr;
 }
 
 void inlineCalls(Block* block) {
@@ -28,22 +36,49 @@ void inlineCalls(Block* block) {
     Node* cur = *it++;
     switch (cur->kind()) {
       case prim::CallFunction: {
-        AT_ASSERT(cur->inputs().at(0)->node()->kind() == prim::Constant);
-        auto function_constant = cur->inputs().at(0)->node();
-        auto fun_type =
-            function_constant->output()->type()->expect<FunctionType>();
-        replace(cur, fun_type->function(), cur->inputs().slice(1));
-        cur->destroy();
-        if (!function_constant->hasUses()) {
-          function_constant->destroy();
+        if (auto graphFunction = tryToGraphFunction(cur)) {
+          auto function_constant = cur->input(0)->node();
+          auto fun_type =
+              function_constant->output()->type()->expect<FunctionType>();
+
+          cur->removeInput(0);
+          GRAPH_UPDATE(
+              "Inlining function '",
+              fun_type->function()->name(),
+              "' to ",
+              *cur);
+
+          std::shared_ptr<Graph> g = nullptr;
+          // inline optimized graph for debugging/testing purposes.
+          // we only insert fallback functions in JIT optimized graphs for
+          // execution, not on the Graph that is used for serialization
+          bool fallback =
+              function_constant->hasAttribute(Symbol::attr("fallback"));
+          if (fallback && graphFunction->get_executor().isOptimized()) {
+            auto exec_plans =
+                graphFunction->get_executor().getDebugState().execution_plans;
+            if (exec_plans.size() != 0) {
+              g = exec_plans.begin()->second.graph;
+              // optimized_graph() calls Inline, so we only need to explicitly
+              // invoke inlining on the jit optimized graph with recursive
+              // fallback funciton calls
+              Inline(*g.get());
+            }
+          }
+          if (g == nullptr) {
+            g = graphFunction->optimized_graph();
+          }
+
+          GRAPH_UPDATE("Function body: ", g);
+          inlineCallTo(cur, graphFunction, g.get());
         }
       } break;
       case prim::CallMethod: {
-        const std::string& name = cur->s(attr::name);
-        auto function =
-            cur->inputs().at(0)->type()->expect<ClassType>()->getMethod(name);
-        replace(cur, function, cur->inputs());
-        cur->destroy();
+        if (auto graphFunction = tryToGraphFunction(cur)) {
+          GRAPH_UPDATE("Inlining method '", cur->s(attr::name), "' to ", *cur);
+          GRAPH_UPDATE("Function body: ", graphFunction->optimized_graph());
+          inlineCallTo(cur, graphFunction);
+        }
       } break;
       default: {
         for (auto b : cur->blocks()) {
@@ -55,7 +90,9 @@ void inlineCalls(Block* block) {
 }
 
 void Inline(Graph& graph) {
+  GRAPH_DUMP("Before Inlining: ", &graph);
   inlineCalls(graph.block());
+  GRAPH_DUMP("After Inlining: ", &graph);
 }
 
 } // namespace jit

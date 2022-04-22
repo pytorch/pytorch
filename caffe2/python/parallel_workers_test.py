@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 
@@ -95,7 +95,8 @@ class ParallelWorkersTest(unittest.TestCase):
                 value, b'initialized', 'Got unexpected value ' + str(value)
             )
 
-        self.assertTrue(worker_coordinator.stop())
+        # A best effort attempt at a clean shutdown
+        worker_coordinator.stop()
 
     def testParallelWorkersShutdownFun(self):
         workspace.ResetWorkspace()

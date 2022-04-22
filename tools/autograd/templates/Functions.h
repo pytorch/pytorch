@@ -6,17 +6,17 @@
 #include <ATen/core/functional.h>
 #include <ATen/TensorGeometry.h>
 
-#include "torch/csrc/THP_export.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/saved_variable.h"
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch { namespace autograd { namespace generated {
 
 using at::Scalar;
 using at::Tensor;
 using at::IntArrayRef;
+using at::ArrayRef;
 using at::Type;
 using at::TensorGeometry;
 using at::ScalarType;
@@ -31,18 +31,27 @@ inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs) {
   });
 }
 
+inline c10::List<c10::optional<Tensor>> unpack_opt_list(at::ArrayRef<SavedVariable> xs) {
+  torch::List<c10::optional<Tensor>> result;
+  result.reserve(xs.size());
+  for (const SavedVariable& v : xs) {
+    result.push_back(v.unpack());
+  }
+  return result;
+}
+
 struct TypeAndSize {
-  TypeAndSize() : type(nullptr) {}
+  TypeAndSize() : options(at::TensorOptions()) {}
   /* implicit */
   TypeAndSize(const Tensor & t)
     : sizes(t.sizes().vec())
-    , type(&t.type()) {}
+    , options(t.options()) {}
 
-  Tensor zeros() { return at::zeros(sizes, *type); }
+  Tensor zeros() { return at::zeros(sizes, options); }
 
 private:
   std::vector<int64_t> sizes;
-  at::DeprecatedTypeProperties* type;
+  at::TensorOptions options;
 };
 
 ${autograd_function_declarations}

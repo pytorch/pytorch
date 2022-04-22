@@ -7,6 +7,7 @@ TEST(Converter, Basic) {
   using namespace caffe2::testing;
   caffe2::NetDef net;
   for (auto i = 0; i < 10; ++i) {
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
     if (rand() % 2) {
       NetMutator(&net)
           .newOp("Conv", {"X", "W" + c10::to_string(i)}, {"X"})
@@ -33,6 +34,16 @@ TEST(Converter, UnknownType) {
       .setDeviceOptionName("device_" + c10::to_string(rand() % 2));
   auto nn = caffe2::convertToNNModule(net);
   auto new_netdef = caffe2::convertToCaffe2Proto(nn);
+}
+
+TEST(Converter, SpecializeConverter) {
+  using namespace caffe2::testing;
+  caffe2::NetDef net;
+  NetMutator(&net).newOp("Slice", {"X"}, {"X"}).setDeviceOptionName("abc");
+  EXPECT_EQ(net.op(0).device_option().node_name(), "abc");
+  auto nn = caffe2::convertToNNModule(net);
+  auto new_netdef = caffe2::convertToCaffe2Proto(nn);
+  EXPECT_EQ(new_netdef.op(0).device_option().node_name(), "abc");
 }
 
 caffe2::NetDef fakeNet() {

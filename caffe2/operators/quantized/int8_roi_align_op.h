@@ -9,6 +9,7 @@
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/quantized/int8_utils.h"
 #include "caffe2/utils/math.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -44,13 +45,13 @@ void pre_calc_for_bilinear_interpolate(
   int pre_calc_index = 0;
   // boltnn use a smaller multiplier here. Sometimes w will shrink to 0.
   const float w_multiplier = 255.0;
-  for (int ph = 0; ph < pooled_height; ph++) {
-    for (int pw = 0; pw < pooled_width; pw++) {
-      for (int iy = 0; iy < iy_upper; iy++) {
+  for (const auto ph : c10::irange(pooled_height)) {
+    for (const auto pw : c10::irange(pooled_width)) {
+      for (const auto iy : c10::irange(iy_upper)) {
         const float yy = roi_start_h + ph * bin_size_h +
             static_cast<float>(iy + .5f) * bin_size_h /
                 static_cast<float>(roi_bin_grid_h); // e.g., 0.5, 1.5
-        for (int ix = 0; ix < ix_upper; ix++) {
+        for (const auto ix : c10::irange(ix_upper)) {
           const float xx = roi_start_w + pw * bin_size_w +
               static_cast<float>(ix + .5f) * bin_size_w /
                   static_cast<float>(roi_bin_grid_w);
@@ -146,12 +147,13 @@ void ROIAlignForward(
     const float y_scale,
     const int32_t x_offset,
     const int32_t y_offset,
-    StorageOrder order) {
+    StorageOrder order /* unused */,
+    bool continuous_coordinate) {
   DCHECK(roi_cols == 4 || roi_cols == 5);
 
   int n_rois = nthreads / channels / pooled_width / pooled_height;
 
-  for (int n = 0; n < n_rois; n++) {
+  for (const auto n : c10::irange(n_rois)) {
     int index_n = n * channels * pooled_width * pooled_height;
 
     // roi could have 4 or 5 columns
@@ -163,14 +165,23 @@ void ROIAlignForward(
     }
 
     // Do not using rounding; this implementation detail is critical
-    float roi_start_w = offset_bottom_rois[0] * spatial_scale;
-    float roi_start_h = offset_bottom_rois[1] * spatial_scale;
-    float roi_end_w = offset_bottom_rois[2] * spatial_scale;
-    float roi_end_h = offset_bottom_rois[3] * spatial_scale;
+    float roi_offset = continuous_coordinate ? 0.5 : 0;
+    float roi_start_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
+    float roi_start_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
+    float roi_end_w = offset_bottom_rois[2] * spatial_scale - roi_offset;
+    float roi_end_h = offset_bottom_rois[3] * spatial_scale - roi_offset;
 
-    // Force malformed ROIs to be 1x1
-    float roi_width = std::max(roi_end_w - roi_start_w, (float)1.);
-    float roi_height = std::max(roi_end_h - roi_start_h, (float)1.);
+    float roi_width = roi_end_w - roi_start_w;
+    float roi_height = roi_end_h - roi_start_h;
+    if (continuous_coordinate) {
+      CAFFE_ENFORCE(
+          roi_width >= 0 && roi_height >= 0,
+          "ROIs in ROIAlign do not have non-negative size!");
+    } else { // backward compatibility
+      // Force malformed ROIs to be 1x1
+      roi_width = std::max(roi_width, (float)1.);
+      roi_height = std::max(roi_height, (float)1.);
+    }
     float bin_size_h =
         static_cast<float>(roi_height) / static_cast<float>(pooled_height);
     float bin_size_w =
@@ -214,19 +225,19 @@ void ROIAlignForward(
     const uint8_t* offset_bottom_data =
         bottom_data + roi_batch_ind * channels * height * width;
     int pre_calc_index = 0;
-    for (int ph = 0; ph < pooled_height; ph++) {
-      for (int pw = 0; pw < pooled_width; pw++) {
+    for (const auto ph : c10::irange(pooled_height)) {
+      for (const auto pw : c10::irange(pooled_width)) {
         vector<int32_t> acc_buffer(channels, 0);
 
-        for (int iy = 0; iy < roi_bin_grid_h; iy++) {
-          for (int ix = 0; ix < roi_bin_grid_w; ix++) {
+        for (C10_UNUSED const auto iy : c10::irange(roi_bin_grid_h)) {
+          for (C10_UNUSED const auto ix : c10::irange(roi_bin_grid_w)) {
             PreCalc pc = pre_calc[pre_calc_index];
 
             const uint8_t* data_1 = offset_bottom_data + channels * pc.pos1;
             const uint8_t* data_2 = offset_bottom_data + channels * pc.pos2;
             const uint8_t* data_3 = offset_bottom_data + channels * pc.pos3;
             const uint8_t* data_4 = offset_bottom_data + channels * pc.pos4;
-            for (int c = 0; c < channels; ++c) {
+            for (const auto c : c10::irange(channels)) {
               acc_buffer[c] += (uint32_t)(pc.w1) * (uint32_t)(data_1[c]);
               acc_buffer[c] += (uint32_t)(pc.w2) * (uint32_t)(data_2[c]);
               acc_buffer[c] += (uint32_t)(pc.w3) * (uint32_t)(data_3[c]);
@@ -241,7 +252,7 @@ void ROIAlignForward(
         }
         int index_nhw = index_n + (ph * pooled_width + pw) * channels;
         uint8_t* out_ptr = top_data + index_nhw;
-        for (int c = 0; c < channels; ++c) {
+        for (const auto c : c10::irange(channels)) {
           int32_t a_mul = MultiplyByQuantizedMultiplierSmallerThanOne(
                               acc_buffer[c], Y_multiplier, Y_shift) +
               y_offset;
@@ -268,7 +279,8 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
         pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),
         pooled_width_(this->template GetSingleArgument<int>("pooled_w", 1)),
         sampling_ratio_(
-            this->template GetSingleArgument<int>("sampling_ratio", -1)) {
+            this->template GetSingleArgument<int>("sampling_ratio", -1)),
+        aligned_(this->template GetSingleArgument<bool>("aligned", false)) {
     DCHECK_GT(spatial_scale_, 0);
     DCHECK_GT(pooled_height_, 0);
     DCHECK_GT(pooled_width_, 0);
@@ -325,7 +337,8 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
         Y_scale,
         X.zero_point,
         Y_offset,
-        order_);
+        order_,
+        aligned_);
 
     return true;
   }
@@ -336,6 +349,7 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
   int pooled_height_;
   int pooled_width_;
   int sampling_ratio_;
+  bool aligned_;
 };
 
 } // namespace int8

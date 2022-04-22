@@ -64,10 +64,22 @@ are sorted by the corresponding KEY.
         "RANGES",
         "Tensor of int32/int64 ranges, of dims (N, M, 2). "
         "Where N is number of examples and M is a size of each example. "
-        "Last dimention represents a range in the format (start, lengths)")
+        "Last dimension represents a range in the format (start, lengths)")
     .Input(2, "KEY", "Tensor of rank 1 and type int64.")
     .Output(0, "OUTPUT", "1-D tensor of size sum of range lengths")
     .Arg("lengths", "Expected lengths for ranges")
+    .Arg(
+        "min_observation",
+        "The number of observations needed before deciding that the ratio of "
+        "mismatched ranges is alarming, also determines whether an info "
+        "sumarizing the empty and mismatch ratio will be printed at the end.")
+    .Arg(
+        "max_mismatched_ratio",
+        "An error is raised when ratio of mismatched ranges exceeds this.")
+    .Arg(
+        "max_empty_ratio",
+        "An error is raised when ratio of empty ranges exceeds this (default is"
+        " 1, which means by default no error will be triggered).")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);
@@ -79,6 +91,7 @@ are sorted by the corresponding KEY.
       }
       CAFFE_ENFORCE_GT(lengths.size(), 0, "lengths should be non-empty.");
       std::vector<TensorShape> out(lengths.size());
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < lengths.size(); ++i) {
         out[i].set_data_type(in[0].data_type());
         out[i].add_dims(in[1].dims(0));
@@ -92,3 +105,11 @@ NO_GRADIENT(GatherRangesToDense);
 
 } // namespace
 } // namespace caffe2
+
+using GatherRangesToDenseCPUOp =
+    caffe2::GatherRangesToDenseOp<caffe2::CPUContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    GatherRangesToDense,
+    "_caffe2::GatherRangesToDense(Tensor data, Tensor ranges, Tensor? key, int[] lengths, int min_observation, float max_mismatched_ratio, float max_empty_ratio) -> Tensor[] outputs",
+    GatherRangesToDenseCPUOp);

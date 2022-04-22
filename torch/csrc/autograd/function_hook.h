@@ -1,13 +1,14 @@
 #pragma once
 
 #include <vector>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
+#include <ATen/Tensor.h>
 
 // A hook that's called on gradients
 
 namespace torch { namespace autograd {
 
-struct Variable;
+using Variable = at::Tensor;
 using variable_list = std::vector<Variable>;
 
 struct TORCH_API FunctionPreHook {

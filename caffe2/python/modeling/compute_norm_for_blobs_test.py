@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 from caffe2.python import workspace, brew, model_helper
@@ -39,7 +39,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
                                np.linalg.norm(fc1_w)**2,
                                delta=1e-5)
 
-        self.assertEqual(len(model.net.Proto().op), 8)
+        self.assertEqual(len(model.net.Proto().op), 10)
 
         assert model.net.output_record() is None
 
@@ -71,8 +71,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
                                np.linalg.norm(fc1_w)**2,
                                delta=1e-5)
 
-        self.assertEqual(len(model.net.Proto().op), 8)
-
+        self.assertEqual(len(model.net.Proto().op), 10)
         assert 'fc1_w' + net_modifier.field_name_suffix() in\
             model.net.output_record().field_blobs(),\
             model.net.output_record().field_blobs()
@@ -109,7 +108,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
                                np.linalg.norm(fc1_w)**2 / fc1_w.size,
                                delta=1e-5)
 
-        self.assertEqual(len(model.net.Proto().op), 8)
+        self.assertEqual(len(model.net.Proto().op), 10)
 
     def test_compute_norm_for_blobs_no_print(self):
         model = model_helper.ModelHelper(name="test")
@@ -139,7 +138,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
                                np.linalg.norm(fc1_w)**2,
                                delta=1e-5)
 
-        self.assertEqual(len(model.net.Proto().op), 6)
+        self.assertEqual(len(model.net.Proto().op), 8)
 
     def test_compute_l1_norm_for_blobs(self):
         model = model_helper.ModelHelper(name="test")
@@ -170,7 +169,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
                                np.sum(np.abs(fc1_w)),
                                delta=1e-5)
 
-        self.assertEqual(len(model.net.Proto().op), 8)
+        self.assertEqual(len(model.net.Proto().op), 10)
 
     def test_compute_l1_averaged_norm_for_blobs(self):
         model = model_helper.ModelHelper(name="test")
@@ -202,7 +201,7 @@ class ComputeNormForBlobsTest(unittest.TestCase):
                                np.sum(np.abs(fc1_w)) / fc1_w.size,
                                delta=1e-5)
 
-        self.assertEqual(len(model.net.Proto().op), 8)
+        self.assertEqual(len(model.net.Proto().op), 10)
 
     def test_compute_norm_row_index_for_blobs(self):
         model = model_helper.ModelHelper(name="test")

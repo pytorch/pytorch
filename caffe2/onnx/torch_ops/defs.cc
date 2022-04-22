@@ -5,6 +5,7 @@
 
 namespace ONNX_NAMESPACE {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,bugprone-branch-clone)
 ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     SparseLengthsSumFused8BitRowwise,
     1,
@@ -30,6 +31,7 @@ ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
              "tensor(uint64)"},
             "Constrain index and length to integral tensors."));
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,bugprone-branch-clone)
 ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     SparseLengthsSum,
     1,
@@ -55,6 +57,7 @@ ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
              "tensor(uint64)"},
             "Constrain index and length to integral tensors."));
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,bugprone-branch-clone)
 ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     SparseLengthsWeightedSum,
     1,
@@ -81,6 +84,7 @@ ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
              "tensor(uint64)"},
             "Constrain index and length to integral tensors."));
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,bugprone-branch-clone)
 ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     BatchGather,
     1,
@@ -105,6 +109,7 @@ ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
              "tensor(uint64)"},
             "Constrain index and length to integral tensors."));
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,bugprone-branch-clone)
 ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     DotProduct,
     1,
@@ -118,6 +123,7 @@ ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
             {"tensor(float16)", "tensor(float)", "tensor(double)"},
             "Constrain input and output types to float tensors."));
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,bugprone-branch-clone)
 ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     FCTransposed,
     1,
@@ -132,19 +138,21 @@ ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
             {"tensor(float16)", "tensor(float)", "tensor(double)"},
             "Constrain input and output types to float tensors."));
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,bugprone-branch-clone)
 ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     BatchMatMul,
     1,
     OpSchema()
         .SetDoc("Mirror Caffe2 BatchMatMul operator")
         .Input(0, "X", "tensor of shape (dim0, dim1 ... M, K)", "T")
-        .Input(1, "Y", "tensor of shpae (dim0, dim2 ... K, N)", "T")
+        .Input(1, "Y", "tensor of shape (dim0, dim2 ... K, N)", "T")
         .Output(0, "Z", "tensor of shape (dim0, dim1 ... M, N)", "T")
         .TypeConstraint(
             "T",
             {"tensor(float16)", "tensor(float)", "tensor(double)"},
             "Constrain input and output types to float tensors."));
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,bugprone-branch-clone)
 ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     ExpandDims,
     1,

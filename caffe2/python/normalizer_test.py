@@ -1,6 +1,6 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 from caffe2.python.normalizer_context import UseNormalizer, NormalizerContext
 from caffe2.python.normalizer import BatchNormalizer

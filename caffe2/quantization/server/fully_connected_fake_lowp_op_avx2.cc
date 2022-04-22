@@ -1,11 +1,15 @@
 #include <immintrin.h>
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 namespace {
 
 // NOTE: clang-format wants to use a different formatting but the
 // current formatting should be easier to read.
+// clang-format off
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 alignas(64) const int ld_st_masks[8][8] = {
   {  0,  0,  0,  0,  0,  0,  0,  0, },
   { -1,  0,  0,  0,  0,  0,  0,  0, },
@@ -16,12 +20,14 @@ alignas(64) const int ld_st_masks[8][8] = {
   { -1, -1, -1, -1, -1, -1,  0,  0, },
   { -1, -1, -1, -1, -1, -1, -1,  0, },
 };
+// clang-format on
 
 } // anonymous namespace
 
 // convert to float16 reducing mantissa, preserving exponent
 void fp32_to_bfp16(const float* source, size_t size, float* dest) {
   // Results on a 1 sign, 8 exponent, 7 mantissa
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   constexpr int mask = 0xFFFF0000;
   __m256 wmask = _mm256_broadcast_ss(reinterpret_cast<const float*>(&mask));
 
@@ -41,6 +47,7 @@ void fp32_to_bfp16(const float* source, size_t size, float* dest) {
 // convert to float24 reducing mantissa, preserving exponent
 void fp32_to_bfp24(const float* source, size_t size, float* dest) {
   // Results on a 1 sign, 8 exponent, 7 mantissa
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   constexpr int mask = 0xFFFFFF00;
   __m256 wmask = _mm256_broadcast_ss(reinterpret_cast<const float*>(&mask));
 
@@ -60,6 +67,7 @@ void fp32_to_bfp24(const float* source, size_t size, float* dest) {
 // convert to float14 reducing mantissa, preserving exponent
 void fp32_to_bfp14(const float* source, size_t size, float* dest) {
   // Results on a 1 sign, 8 exponent, 7 mantissa
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   constexpr int mask = 0xFFFC0000;
   __m256 wmask = _mm256_broadcast_ss((float*)(&mask));
 
@@ -77,8 +85,9 @@ void fp32_to_bfp14(const float* source, size_t size, float* dest) {
 }
 
 void fp32_to_bfp16_scalar(const float* source, size_t size, float* dest) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   constexpr int mask = 0xFFFF0000;
-  for (auto i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     *(int*)(dest + i) = *(int*)(source + i) & mask;
   }
 }
@@ -102,6 +111,7 @@ void fp32_to_fp16(const float* source, size_t size, float* dest) {
 // fp32 -> int32 -> += 1<< 15 -> fp32 -> truncation
 void fp32_to_bfp16_round(const float* source, size_t size, float* dest) {
   constexpr int offset = 0x00008000; // 1 << 15
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   constexpr int mask = 0xFFFF0000;
 
   __m256i woffset = _mm256_set1_epi32(offset);

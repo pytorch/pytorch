@@ -1,7 +1,7 @@
 #pragma once
 #include <unordered_set>
 #include <vector>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 
 namespace c10 {
@@ -86,7 +86,7 @@ inline bool operator==(const AliasInfo& lhs, const AliasInfo& rhs) {
       && lhs.containedTypes() == rhs.containedTypes();
 }
 
-// DEBUG ONLY; this does not match the way things are represented in the schema
+// this does match the way things are represented in the schema
 inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
   out << "(";
   bool first = true;
@@ -98,11 +98,22 @@ inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
     }
     out << set.toUnqualString();
   }
-  out << ")";
-
-  if (!aliasInfo.containedTypes().empty()) {
-    out << " CONTAINS " << aliasInfo.containedTypes()[0];
+  if (aliasInfo.isWrite()) {
+    out << "!";
   }
+  if (aliasInfo.beforeSets() != aliasInfo.afterSets()) {
+    out << " -> ";
+    first = true;
+    for (const auto& set : aliasInfo.afterSets()) {
+      if (first) {
+        first = false;
+      } else {
+        out << "|";
+      }
+      out << set.toUnqualString();
+    }
+  }
+  out << ")";
   return out;
 }
 } // namespace c10

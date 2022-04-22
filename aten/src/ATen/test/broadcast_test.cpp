@@ -8,6 +8,7 @@ using namespace at;
 // can't expand empty tensor
 void TestEmptyTensor(DeprecatedTypeProperties& T) {
   auto empty = randn({0}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(empty.expand({3}));
 }
 
@@ -22,8 +23,7 @@ void TestOut2Basic(DeprecatedTypeProperties& T) {
 
 // with scalar
 void TestOut2WithScalar(DeprecatedTypeProperties& T) {
-  auto aScalar = ones({1}, T);
-  aScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto aScalar = ones({}, T);
   auto b = randn({3, 5}, T);
   ASSERT_TRUE(
       (aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
@@ -33,6 +33,7 @@ void TestOut2WithScalar(DeprecatedTypeProperties& T) {
 void TestOut2OldFallback(DeprecatedTypeProperties& T) {
   auto a = randn({3, 5}, T);
   auto b = randn({5, 3}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a + b);
 }
 
@@ -40,6 +41,7 @@ void TestOut2OldFallback(DeprecatedTypeProperties& T) {
 void TestOut2MismatchedSizes(DeprecatedTypeProperties& T) {
   auto a = randn({3, 5}, T);
   auto b = randn({7, 5}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a + b);
 }
 
@@ -56,8 +58,7 @@ void TestOut3Basic(DeprecatedTypeProperties& T) {
 
 // with scalar
 void TestOut3WithScalar(DeprecatedTypeProperties& T) {
-  auto aTensorScalar = ones({1}, T);
-  aTensorScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto aTensorScalar = ones({}, T);
   auto b = randn({3, 2, 1}, T);
   auto c = randn({1, 2, 5}, T);
   std::vector<int64_t> expanded_sizes = {3, 2, 5};
@@ -71,6 +72,7 @@ void TestOut3OldFallback(DeprecatedTypeProperties& T) {
   auto a = randn({3, 2, 5}, T);
   auto b = randn({2, 3, 5}, T);
   auto c = randn({5, 3, 2}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a.addcmul(b, c));
 }
 
@@ -79,6 +81,7 @@ void TestOut3MismatchedSizes(DeprecatedTypeProperties& T) {
   auto a = randn({3, 2, 5}, T);
   auto b = randn({2, 3, 5}, T);
   auto c = randn({5, 5, 5}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a.addcmul(b, c));
 }
 
@@ -92,8 +95,7 @@ void TestIn2Basic(DeprecatedTypeProperties& T) {
 // with scalar
 void TestIn2WithScalar(DeprecatedTypeProperties& T) {
   auto a = randn({3, 5}, T);
-  auto bScalar = ones({1}, T);
-  bScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto bScalar = ones({}, T);
   ASSERT_TRUE((a + bScalar).equal(a + bScalar.expand(a.sizes())));
 }
 
@@ -101,6 +103,7 @@ void TestIn2WithScalar(DeprecatedTypeProperties& T) {
 void TestIn2ExpandError(DeprecatedTypeProperties& T) {
   auto a = randn({1, 5}, T);
   auto b = randn({3, 1}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a.add_(b));
 }
 
@@ -120,8 +123,7 @@ void TestIn3WithScalar(DeprecatedTypeProperties& T) {
   auto b = randn({3, 1, 2}, T);
   auto c = randn({1, 5, 1}, T);
   auto aClone = a.clone();
-  auto bScalar = ones({1}, T);
-  bScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto bScalar = ones({}, T);
   ASSERT_TRUE(a.addcmul_(bScalar, c)
                   .equal(aClone.addcmul_(
                       bScalar.expand(a.sizes()), c.expand(a.sizes()))));
@@ -132,6 +134,7 @@ void TestIn3ExpandError(DeprecatedTypeProperties& T) {
   auto a = randn({1, 3, 5}, T);
   auto b = randn({4, 1, 1}, T);
   auto c = randn({1, 3, 1}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a.addcmul_(b, c));
 }
 
@@ -148,8 +151,7 @@ void TestExplicitDimWithScalar(DeprecatedTypeProperties& T) {
   auto a = randn({1}, T);
   auto b = randn({5, 3}, T);
   auto c = randn({3, 7}, T);
-  Tensor aScalar = ones({1}, T);
-  aScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  Tensor aScalar = ones({}, T);
   ASSERT_TRUE(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
 }
 
@@ -158,6 +160,7 @@ void TestExplicitDimWithMismatchedSizes(DeprecatedTypeProperties& T) {
   auto b = randn({5, 3}, T);
   auto c = randn({3, 7}, T);
   auto a = randn({3, 3}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a.addmm(b, c));
 }
 

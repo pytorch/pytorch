@@ -7,7 +7,7 @@
 #include <sstream>
 #include <thread>
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
 
@@ -28,7 +28,7 @@ const char* get_env_var(
 size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   try {
     if (auto* value = std::getenv(var_name)) {
-      int nthreads = std::stoi(value);
+      int nthreads = c10::stoi(value);
       TORCH_CHECK(nthreads > 0);
       return nthreads;
     }
@@ -56,7 +56,7 @@ std::string get_parallel_info() {
 #endif
 
   ss << at::get_mkl_version() << std::endl;
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
   ss << "\tmkl_get_max_threads() : " << mkl_get_max_threads() << std::endl;
 #endif
 
@@ -71,13 +71,16 @@ std::string get_parallel_info() {
   ss << "\tMKL_NUM_THREADS : "
      << get_env_var("MKL_NUM_THREADS", "[not set]") << std::endl;
 
-  ss << "Parallel backend: ";
+  ss << "ATen parallel backend: ";
   #if AT_PARALLEL_OPENMP
   ss << "OpenMP";
   #elif AT_PARALLEL_NATIVE
   ss << "native thread pool";
   #elif AT_PARALLEL_NATIVE_TBB
   ss << "native thread pool and TBB";
+  #endif
+  #ifdef C10_MOBILE
+  ss << " [mobile]";
   #endif
   ss << std::endl;
 
@@ -89,12 +92,19 @@ std::string get_parallel_info() {
 }
 
 int intraop_default_num_threads() {
+#ifdef C10_MOBILE
+  // Intraop thread pool size should be determined by mobile cpuinfo.
+  // We should hook up with the logic in caffe2/utils/threadpool if we ever need
+  // call this API for mobile.
+  TORCH_CHECK(false, "Undefined intraop_default_num_threads on mobile.");
+#else
   size_t nthreads = get_env_num_threads("OMP_NUM_THREADS", 0);
   nthreads = get_env_num_threads("MKL_NUM_THREADS", nthreads);
   if (nthreads == 0) {
     nthreads = TaskThreadPoolBase::defaultNumThreads();
   }
   return nthreads;
+#endif
 }
 
 } // namespace at

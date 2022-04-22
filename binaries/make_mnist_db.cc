@@ -64,7 +64,7 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   image_file.read(reinterpret_cast<char*>(&magic), 4);
   magic = swap_endian(magic);
   if (magic == 529205256) {
-    LOG(FATAL) << 
+    LOG(FATAL) <<
         "It seems that you forgot to unzip the mnist dataset. You should "
         "first unzip them using e.g. gunzip on Linux.";
   }
@@ -89,9 +89,8 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   char label_value;
   std::vector<char> pixels(rows * cols);
   int count = 0;
-  const int kMaxKeyLength = 10;
+  const int kMaxKeyLength = 11;
   char key_cstr[kMaxKeyLength];
-  string value;
 
   TensorProtos protos;
   TensorProto* data = protos.add_protos();
@@ -119,11 +118,10 @@ void convert_dataset(const char* image_filename, const char* label_filename,
     }
     label->set_int32_data(0, static_cast<int>(label_value));
     snprintf(key_cstr, kMaxKeyLength, "%08d", item_id);
-    protos.SerializeToString(&value);
     string keystr(key_cstr);
 
     // Put in db
-    transaction->Put(keystr, value);
+    transaction->Put(keystr, protos.SerializeAsString());
     if (++count % 1000 == 0) {
       transaction->Commit();
     }

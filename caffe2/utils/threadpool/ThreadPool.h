@@ -3,6 +3,7 @@
 
 #include "ThreadPoolCommon.h"
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -28,32 +29,37 @@ constexpr size_t kCacheLineSize = 64;
 // misaligned intrinsics, no SSE instructions shall be involved in
 // the ThreadPool implementation.
 // Note: alignas is disabled because some compilers do not deal with
-// CAFFE2_API and alignas annotations at the same time.
-class CAFFE2_API /*alignas(kCacheLineSize)*/ ThreadPool {
+// TORCH_API and alignas annotations at the same time.
+class TORCH_API /*alignas(kCacheLineSize)*/ ThreadPool {
  public:
+  static ThreadPool* createThreadPool(int numThreads);
   static std::unique_ptr<ThreadPool> defaultThreadPool();
-  ThreadPool(int numThreads);
-  ~ThreadPool();
+  virtual ~ThreadPool() = default;
   // Returns the number of threads currently in use
-  int getNumThreads() const;
+  virtual int getNumThreads() const = 0;
+  virtual void setNumThreads(size_t numThreads) = 0;
 
   // Sets the minimum work size (range) for which to invoke the
   // threadpool; work sizes smaller than this will just be run on the
   // main (calling) thread
-  void setMinWorkSize(size_t size);
-  size_t getMinWorkSize() const { return minWorkSize_; }
-  void run(const std::function<void(int, size_t)>& fn, size_t range);
+  void setMinWorkSize(size_t size) {
+    std::lock_guard<std::mutex> guard(executionMutex_);
+    minWorkSize_ = size;
+  }
+
+  size_t getMinWorkSize() const {
+    return minWorkSize_;
+  }
+  virtual void run(const std::function<void(int, size_t)>& fn, size_t range) = 0;
 
   // Run an arbitrary function in a thread-safe manner accessing the Workers
   // Pool
-  void withPool(const std::function<void(WorkersPool*)>& fn);
+  virtual void withPool(const std::function<void(WorkersPool*)>& fn) = 0;
 
- private:
+ protected:
+  static size_t defaultNumThreads_;
   mutable std::mutex executionMutex_;
   size_t minWorkSize_;
-  size_t numThreads_;
-  std::shared_ptr<WorkersPool> workersPool_;
-  std::vector<std::shared_ptr<Task>> tasks_;
 };
 
 } // namespace caffe2

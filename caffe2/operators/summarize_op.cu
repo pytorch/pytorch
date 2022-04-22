@@ -48,7 +48,7 @@ struct summary_stats_unary_op {
 // summary_stats_binary_op is a functor that accepts two SummaryStatsData
 // structs and returns a new SummaryStatsData which are an
 // approximation to the summary_stats for
-// all values that have been agregated so far
+// all values that have been aggregated so far
 template <typename T>
 struct summary_stats_binary_op
     : public thrust::binary_function<const SummaryStatsData<T>&,

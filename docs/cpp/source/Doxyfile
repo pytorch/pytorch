@@ -33,7 +33,6 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/Backend.h \
                          ../../../aten/src/ATen/core/ivalue.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
-                         ../../../aten/src/ATen/core/Tensor.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
                          ../../../aten/src/ATen/cudnn/Descriptors.h \
                          ../../../aten/src/ATen/cudnn/Handles.h \
@@ -44,21 +43,31 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/mkl/Descriptors.h \
                          ../../../aten/src/ATen/Scalar.h \
                          ../../../aten/src/ATen/TensorOptions.h \
+                         ../../../aten/src/ATen/core/Tensor.h \
+                         ../../../aten/src/ATen/native/TensorShape.h \
                          ../../../build/aten/src/ATen/Functions.h \
+                         ../../../build/aten/src/ATen/core/TensorBody.h \
                          ../../../c10/core/Device.h \
                          ../../../c10/core/DeviceType.h \
                          ../../../c10/util/Half.h \
                          ../../../c10/util/ArrayRef.h \
+                         ../../../c10/util/OptionalArrayRef.h \
                          ../../../c10/util/Exception.h \
                          ../../../c10/util/Optional.h \
                          ../../../c10/cuda/CUDAGuard.h \
                          ../../../c10/cuda/CUDAStream.h \
                          ../../../torch/csrc/api/include \
                          ../../../torch/csrc/api/src \
+                         ../../../torch/csrc/autograd/autograd.h \
+                         ../../../torch/csrc/autograd/custom_function.h \
+                         ../../../torch/csrc/autograd/function.h \
+                         ../../../torch/csrc/autograd/variable.h \
                          ../../../torch/csrc/autograd/generated/variable_factories.h \
-                         ../../../torch/csrc/jit/custom_operator.h \
-                         ../../../torch/csrc/jit/import.h \
-                         ../../../torch/csrc/jit/script/module.h
+                         ../../../torch/csrc/jit/runtime/custom_operator.h \
+                         ../../../torch/csrc/jit/serialization/import.h \
+                         ../../../torch/csrc/jit/api/module.h \
+                         ../../../torch/library.h \
+                         ../../../torch/custom_class.h
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
 # If you need this to be YES, exhale will probably break.
@@ -67,9 +76,11 @@ CREATE_SUBDIRS         = NO
 FULL_PATH_NAMES        = YES
 # Nested folders will be ignored without this.
 RECURSIVE              = YES
-# Blacklist certain file patterns from the INPUT section.
+# Exclude certain file patterns from the INPUT section.
 EXCLUDE = ../../../torch/csrc/api/include/torch/nn/pimpl-inl.h \
           ../../../torch/csrc/api/include/torch/detail
+# Increase the max node size for our large files
+DOT_GRAPH_MAX_NODES    = 100
 ################################################################################
 # Output formats for Doxygen to create.                                        #
 ################################################################################
@@ -97,7 +108,6 @@ PREDEFINED            += DOXYGEN_SHOULD_SKIP_THIS
 SEARCH_INCLUDES        = YES
 INCLUDE_PATH           = ../../.. \
                          ../../../torch/csrc/api/include \
-                         ../../../aten/src \
                          ../../../build/aten/src
 ################################################################################
 # Compound extraction control.                                                 #
@@ -106,7 +116,8 @@ EXTRACT_ALL            = YES
 EXTRACT_PACKAGE        = YES
 EXTRACT_STATIC         = YES
 CASE_SENSE_NAMES       = NO
-EXCLUDE_SYMBOLS        = c10::* caffe2::* cereal* DL* TH* cudnn* std::*
+EXCLUDE_SYMBOLS        = caffe2::* cereal* DL* TH* cudnn* std::*
+# EXCLUDE_SYMBOLS        = c10::* caffe2::* cereal* DL* TH* cudnn* std::*
 ################################################################################
 # Docstring control / customization.                                           #
 ################################################################################

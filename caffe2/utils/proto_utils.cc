@@ -7,16 +7,22 @@
 #include <fstream>
 #include <unordered_set>
 
+#if defined(_MSC_VER)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <google/protobuf/io/coded_stream.h>
 
 #ifndef CAFFE2_USE_LITE_PROTO
-#include <google/protobuf/text_format.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
+#include <google/protobuf/text_format.h>
 #else
 #include <google/protobuf/io/zero_copy_stream_impl_lite.h>
-#endif  // !CAFFE2_USE_LITE_PROTO
+#endif // !CAFFE2_USE_LITE_PROTO
 
-#include "caffe2/core/logging.h"
+#include <c10/util/Logging.h>
 
 using ::google::protobuf::MessageLite;
 
@@ -24,6 +30,15 @@ namespace caffe2 {
 
 C10_EXPORT std::string DeviceTypeName(const int32_t& d) {
   return at::DeviceTypeName(static_cast<at::DeviceType>(d));
+}
+
+void setTotalBytesLimit(::google::protobuf::io::CodedInputStream& stream, int bytes_limit, int warning_threshold) {
+  #if GOOGLE_PROTOBUF_VERSION >= 3011000
+    // Only take one parameter since protobuf 3.11
+    stream.SetTotalBytesLimit(bytes_limit);
+  #else
+    stream.SetTotalBytesLimit(bytes_limit, warning_threshold);
+  #endif
 }
 
 C10_EXPORT int DeviceId(const DeviceOption& option) {
@@ -53,7 +68,6 @@ C10_EXPORT bool IsCPUDeviceType(int device_type) {
       PROTO_CPU,
       PROTO_MKLDNN,
       PROTO_IDEEP,
-      PROTO_ONLY_FOR_TEST,
   };
   return cpu_types.count(device_type);
 }
@@ -104,7 +118,9 @@ class IfstreamInputStream : public ::google::protobuf::io::CopyingInputStream {
  public:
   explicit IfstreamInputStream(const string& filename)
       : ifs_(filename.c_str(), std::ios::in | std::ios::binary) {}
-  ~IfstreamInputStream() { ifs_.close(); }
+  ~IfstreamInputStream() {
+    ifs_.close();
+  }
 
   int Read(void* buffer, int size) {
     if (!ifs_) {
@@ -117,7 +133,7 @@ class IfstreamInputStream : public ::google::protobuf::io::CopyingInputStream {
  private:
   std::ifstream ifs_;
 };
-}  // namespace
+} // namespace
 
 C10_EXPORT string ProtoDebugString(const MessageLite& proto) {
   string serialized = proto.SerializeAsString();
@@ -135,7 +151,7 @@ C10_EXPORT bool ParseProtoFromLargeString(
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -148,7 +164,7 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
   // Total bytes hard limit / warning limit are set to 2GB and 512MB
   // respectively.
   ::google::protobuf::io::CodedInputStream coded_stream(&stream);
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -158,17 +174,17 @@ C10_EXPORT void WriteProtoToBinaryFile(
   LOG(FATAL) << "Not implemented yet.";
 }
 
-#else  // CAFFE2_USE_LITE_PROTO
+#else // CAFFE2_USE_LITE_PROTO
 
 // Full protocol buffer.
 
+using ::google::protobuf::Message;
+using ::google::protobuf::io::CodedInputStream;
+using ::google::protobuf::io::CodedOutputStream;
 using ::google::protobuf::io::FileInputStream;
 using ::google::protobuf::io::FileOutputStream;
 using ::google::protobuf::io::ZeroCopyInputStream;
-using ::google::protobuf::io::CodedInputStream;
 using ::google::protobuf::io::ZeroCopyOutputStream;
-using ::google::protobuf::io::CodedOutputStream;
-using ::google::protobuf::Message;
 
 namespace TextFormat {
 C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
@@ -178,8 +194,7 @@ C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
     auto num_replaced = c10::ReplaceAll(bc_spec, "cuda_gpu_id", "device_id");
     if (num_replaced) {
       LOG(ERROR) << "Your model was serialized in Protobuf TextFormat and "
-                 << "it has "
-                 << num_replaced
+                 << "it has " << num_replaced
                  << " places using the deprecated field name 'cuda_gpu_id'!\n"
                  << spec
                  << "\nPlease re-export your model in Protobuf binary format "
@@ -187,7 +202,9 @@ C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
     }
   }
 
-  return ::google::protobuf::TextFormat::ParseFromString(std::move(bc_spec), proto);
+  return ::google::protobuf::TextFormat::ParseFromString(
+      // NOLINTNEXTLINE(performance-move-const-arg)
+      std::move(bc_spec), proto);
 }
 } // namespace TextFormat
 
@@ -199,7 +216,7 @@ C10_EXPORT bool ParseProtoFromLargeString(const string& str, Message* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
   // Set PlanDef message size limit to 2G.
-  coded_stream.SetTotalBytesLimit(2147483647, 512LL << 20);
+  setTotalBytesLimit(coded_stream, 2147483647, 512LL << 20);
   return proto->ParseFromCodedStream(&coded_stream);
 }
 
@@ -215,10 +232,17 @@ C10_EXPORT bool ReadProtoFromTextFile(const char* filename, Message* proto) {
 
 C10_EXPORT void WriteProtoToTextFile(
     const Message& proto,
-    const char* filename) {
+    const char* filename,
+    bool throwIfError) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   FileOutputStream* output = new FileOutputStream(fd);
-  CAFFE_ENFORCE(google::protobuf::TextFormat::Print(proto, output));
+  if(!google::protobuf::TextFormat::Print(proto, output)) {
+     if (throwIfError) {
+       CAFFE_THROW("Cannot write proto to text file: ", filename);
+     } else {
+       LOG(ERROR) << "Cannot write proto to text file: " << filename;
+     }
+  }
   delete output;
   close(fd);
 }
@@ -226,7 +250,7 @@ C10_EXPORT void WriteProtoToTextFile(
 C10_EXPORT bool ReadProtoFromBinaryFile(
     const char* filename,
     MessageLite* proto) {
-#if defined (_MSC_VER)  // for MSC compiler binary flag needs to be specified
+#if defined(_MSC_VER) // for MSC compiler binary flag needs to be specified
   int fd = open(filename, O_RDONLY | O_BINARY);
 #else
   int fd = open(filename, O_RDONLY);
@@ -236,7 +260,13 @@ C10_EXPORT bool ReadProtoFromBinaryFile(
   std::unique_ptr<CodedInputStream> coded_input(
       new CodedInputStream(raw_input.get()));
   // A hack to manually allow using very large protocol buffers.
-  coded_input->SetTotalBytesLimit(2147483647, 536870912);
+  #if GOOGLE_PROTOBUF_VERSION >= 3011000
+    // Only take one parameter since protobuf 3.11
+    coded_input->SetTotalBytesLimit(2147483647);
+  #else
+    // Total bytes hard limit / warning limit are set to 2GB and 512MB respectively.
+    coded_input->SetTotalBytesLimit(2147483647, 536870912);
+  #endif
   bool success = proto->ParseFromCodedStream(coded_input.get());
   coded_input.reset();
   raw_input.reset();
@@ -259,7 +289,7 @@ C10_EXPORT void WriteProtoToBinaryFile(
   close(fd);
 }
 
-#endif  // CAFFE2_USE_LITE_PROTO
+#endif // CAFFE2_USE_LITE_PROTO
 
 C10_EXPORT ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
   for (auto& arg : def.arg()) {
@@ -274,8 +304,7 @@ C10_EXPORT ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
             ProtoDebugString(def));
       } else {
         LOG(WARNING) << "Duplicated argument name [" << arg.name()
-                     << "] found in operator def: "
-                     << ProtoDebugString(def);
+                     << "] found in operator def: " << ProtoDebugString(def);
       }
     }
     arg_map_[arg.name()] = arg;
@@ -286,14 +315,20 @@ C10_EXPORT ArgumentHelper::ArgumentHelper(const NetDef& netdef) {
   for (auto& arg : netdef.arg()) {
     CAFFE_ENFORCE(
         arg_map_.count(arg.name()) == 0,
-        "Duplicated argument name [", arg.name(), "] found in net def: ",
+        "Duplicated argument name [",
+        arg.name(),
+        "] found in net def: ",
         ProtoDebugString(netdef));
     arg_map_[arg.name()] = arg;
   }
 }
 
-C10_EXPORT bool ArgumentHelper::HasArgument(const string& name) const {
+C10_EXPORT bool ArgumentHelper::HasArgument(c10::string_view name) const {
+#ifdef CAFFE2_ENABLE_REDUCED_STRINGS_IN_ARGUMENT_LOOKUP
   return arg_map_.count(name);
+#else
+  return arg_map_.count(std::string(name));
+#endif
 }
 
 namespace {
@@ -303,12 +338,20 @@ template <typename InputType, typename TargetType>
 bool SupportsLosslessConversion(const InputType& value) {
   return static_cast<InputType>(static_cast<TargetType>(value)) == value;
 }
-}
+} // namespace
 bool operator==(const TensorProto& l, const TensorProto& r) {
   return l.SerializeAsString() == r.SerializeAsString();
 }
 
 std::ostream& operator<<(std::ostream& output, const TensorProto& n) {
+  output << n.SerializeAsString();
+  return output;
+}
+bool operator==(const QTensorProto& l, const QTensorProto& r) {
+  return l.SerializeAsString() == r.SerializeAsString();
+}
+
+std::ostream& operator<<(std::ostream& output, const QTensorProto& n) {
   output << n.SerializeAsString();
   return output;
 }
@@ -325,18 +368,19 @@ std::ostream& operator<<(std::ostream& output, const NetDef& n) {
     T, fieldname, enforce_lossless_conversion)                         \
   template <>                                                          \
   C10_EXPORT T ArgumentHelper::GetSingleArgument<T>(                   \
-      const string& name, const T& default_value) const {              \
-    if (arg_map_.count(name) == 0) {                                   \
+      c10::string_view name, const T& default_value) const {           \
+    auto it = CAFFE2_ARG_MAP_FIND(arg_map_, name);                     \
+    if (it == arg_map_.end()) {                                        \
       VLOG(1) << "Using default parameter value " << default_value     \
               << " for parameter " << name;                            \
       return default_value;                                            \
     }                                                                  \
     CAFFE_ENFORCE(                                                     \
-        arg_map_.at(name).has_##fieldname(),                           \
+        it->second.has_##fieldname(),                                  \
         "Argument ",                                                   \
         name,                                                          \
         " does not have the right field: expected field " #fieldname); \
-    auto value = arg_map_.at(name).fieldname();                        \
+    const auto& value = it->second.fieldname();                        \
     if (enforce_lossless_conversion) {                                 \
       auto supportsConversion =                                        \
           SupportsLosslessConversion<decltype(value), T>(value);       \
@@ -352,11 +396,12 @@ std::ostream& operator<<(std::ostream& output, const NetDef& n) {
   }                                                                    \
   template <>                                                          \
   C10_EXPORT bool ArgumentHelper::HasSingleArgumentOfType<T>(          \
-      const string& name) const {                                      \
-    if (arg_map_.count(name) == 0) {                                   \
+      c10::string_view name) const {                                   \
+    auto it = CAFFE2_ARG_MAP_FIND(arg_map_, name);                     \
+    if (it == arg_map_.end()) {                                        \
       return false;                                                    \
     }                                                                  \
-    return arg_map_.at(name).has_##fieldname();                        \
+    return it->second.has_##fieldname();                               \
   }
 
 INSTANTIATE_GET_SINGLE_ARGUMENT(float, f, false)
@@ -376,13 +421,14 @@ INSTANTIATE_GET_SINGLE_ARGUMENT(NetDef, n, false)
 #define INSTANTIATE_GET_REPEATED_ARGUMENT(                             \
     T, fieldname, enforce_lossless_conversion)                         \
   template <>                                                          \
-  C10_EXPORT vector<T> ArgumentHelper::GetRepeatedArgument<T>(         \
-      const string& name, const std::vector<T>& default_value) const { \
-    if (arg_map_.count(name) == 0) {                                   \
+  C10_EXPORT std::vector<T> ArgumentHelper::GetRepeatedArgument<T>( \
+      c10::string_view name, const std::vector<T>& default_value) const { \
+    auto it = CAFFE2_ARG_MAP_FIND(arg_map_, name);                      \
+    if (it == arg_map_.end()) {                                         \
       return default_value;                                            \
     }                                                                  \
-    vector<T> values;                                                  \
-    for (const auto& v : arg_map_.at(name).fieldname()) {              \
+    std::vector<T> values;                                           \
+    for (const auto& v : it->second.fieldname()) {                     \
       if (enforce_lossless_conversion) {                               \
         auto supportsConversion =                                      \
             SupportsLosslessConversion<decltype(v), T>(v);             \
@@ -412,6 +458,7 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(size_t, ints, true)
 INSTANTIATE_GET_REPEATED_ARGUMENT(string, strings, false)
 INSTANTIATE_GET_REPEATED_ARGUMENT(NetDef, nets, false)
 INSTANTIATE_GET_REPEATED_ARGUMENT(TensorProto, tensors, false)
+INSTANTIATE_GET_REPEATED_ARGUMENT(QTensorProto, qtensors, false)
 #undef INSTANTIATE_GET_REPEATED_ARGUMENT
 
 #define CAFFE2_MAKE_SINGULAR_ARGUMENT(T, fieldname)                      \
@@ -426,9 +473,18 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(TensorProto, tensors, false)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(bool, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(float, f)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(int, i)
+CAFFE2_MAKE_SINGULAR_ARGUMENT(int16_t, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(int64_t, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
+
+template <>
+C10_EXPORT Argument MakeArgument(const string& name, const NetDef& value) {
+  Argument arg;
+  arg.set_name(name);
+  *arg.mutable_n() = value;
+  return arg;
+}
 
 template <>
 C10_EXPORT bool ArgumentHelper::RemoveArgument(OperatorDef& def, int index);
@@ -446,7 +502,7 @@ C10_EXPORT Argument MakeArgument(const string& name, const MessageLite& value) {
 #define CAFFE2_MAKE_REPEATED_ARGUMENT(T, fieldname) \
   template <>                                       \
   C10_EXPORT Argument MakeArgument(                 \
-      const string& name, const vector<T>& value) { \
+      const string& name, const std::vector<T>& value) { \
     Argument arg;                                   \
     arg.set_name(name);                             \
     for (const auto& v : value) {                   \
@@ -482,7 +538,7 @@ C10_EXPORT bool HasInput(const OperatorDef& op, const std::string& input) {
 // Return the argument index or -1 if it does not exist.
 C10_EXPORT int GetArgumentIndex(
     const google::protobuf::RepeatedPtrField<Argument>& args,
-    const string& name) {
+    c10::string_view name) {
   int index = 0;
   for (const Argument& arg : args) {
     if (arg.name() == name) {
@@ -495,7 +551,7 @@ C10_EXPORT int GetArgumentIndex(
 
 C10_EXPORT const Argument& GetArgument(
     const OperatorDef& def,
-    const string& name) {
+    c10::string_view name) {
   int index = GetArgumentIndex(def.arg(), name);
   if (index != -1) {
     return def.arg(index);
@@ -508,7 +564,7 @@ C10_EXPORT const Argument& GetArgument(
   }
 }
 
-C10_EXPORT const Argument& GetArgument(const NetDef& def, const string& name) {
+C10_EXPORT const Argument& GetArgument(const NetDef& def, c10::string_view name) {
   int index = GetArgumentIndex(def.arg(), name);
   if (index != -1) {
     return def.arg(index);
@@ -521,12 +577,35 @@ C10_EXPORT const Argument& GetArgument(const NetDef& def, const string& name) {
   }
 }
 
+C10_EXPORT const Argument* GetArgumentPtr(
+    const OperatorDef& def,
+    c10::string_view name) {
+  int index = GetArgumentIndex(def.arg(), name);
+  if (index != -1) {
+    return &def.arg(index);
+  } else {
+    return nullptr;
+  }
+}
+
+C10_EXPORT const Argument* GetArgumentPtr(
+    const NetDef& def,
+    c10::string_view name) {
+  int index = GetArgumentIndex(def.arg(), name);
+  if (index != -1) {
+    return &def.arg(index);
+  } else {
+    return nullptr;
+  }
+}
+
 C10_EXPORT bool GetFlagArgument(
     const google::protobuf::RepeatedPtrField<Argument>& args,
-    const string& name,
+    c10::string_view name,
     bool default_value) {
   int index = GetArgumentIndex(args, name);
   if (index != -1) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto arg = args.Get(index);
     CAFFE_ENFORCE(
         arg.has_i(), "Can't parse argument as bool: ", ProtoDebugString(arg));
@@ -537,20 +616,21 @@ C10_EXPORT bool GetFlagArgument(
 
 C10_EXPORT bool GetFlagArgument(
     const OperatorDef& def,
-    const string& name,
+    c10::string_view name,
     bool default_value) {
   return GetFlagArgument(def.arg(), name, default_value);
 }
 
 C10_EXPORT bool
-GetFlagArgument(const NetDef& def, const string& name, bool default_value) {
+GetFlagArgument(const NetDef& def, c10::string_view name, bool default_value) {
   return GetFlagArgument(def.arg(), name, default_value);
 }
 
-C10_EXPORT Argument* GetMutableArgument(
+template <typename Def>
+Argument* GetMutableArgumentImpl(
     const string& name,
     const bool create_if_missing,
-    OperatorDef* def) {
+    Def* def) {
   for (int i = 0; i < def->arg_size(); ++i) {
     if (def->arg(i).name() == name) {
       return def->mutable_arg(i);
@@ -564,6 +644,20 @@ C10_EXPORT Argument* GetMutableArgument(
   } else {
     return nullptr;
   }
+}
+
+C10_EXPORT Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    OperatorDef* def) {
+  return GetMutableArgumentImpl(name, create_if_missing, def);
+}
+
+C10_EXPORT Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    NetDef* def) {
+  return GetMutableArgumentImpl(name, create_if_missing, def);
 }
 
 C10_EXPORT void cleanupExternalInputsAndOutputs(NetDef* net) {

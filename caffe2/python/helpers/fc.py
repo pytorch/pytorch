@@ -1,9 +1,9 @@
 ## @package fc
 # Module caffe2.python.helpers.fc
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from caffe2.python.modeling import initializers
@@ -186,7 +186,7 @@ def fc_sparse(
     model, blob_in, blob_out, w_csr, iw, jw, bias,
     **kwargs
 ):
-    """FC_Sparse: Only takes in alocated weights"""
+    """FC_Sparse: Only takes in allocated weights"""
     if not (w_csr and iw and jw and bias):
         print("Warning...")
     model.AddParameter(w_csr)

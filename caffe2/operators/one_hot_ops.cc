@@ -2,6 +2,7 @@
 
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/types.h"
 
 namespace caffe2 {
 
@@ -78,12 +79,21 @@ OpSchema::Cost CostInferenceForBatchOneHot(
   const auto& length = in[1];
   const auto& values = in[2];
 
-  uint64_t nBytesData = nElemFromDim(data) * sizeof(data.data_type());
-  uint64_t nBytesLength = nElemFromDim(length) * sizeof(length.data_type());
-  uint64_t nBytesValues = nElemFromDim(values) * sizeof(values.data_type());
+  auto const& data_element_size_byte =
+      DataTypeToTypeMeta(data.data_type()).itemsize();
+  auto const& length_element_size_byte =
+      DataTypeToTypeMeta(length.data_type()).itemsize();
+  auto const& values_element_size_byte =
+      DataTypeToTypeMeta(values.data_type()).itemsize();
+  auto const& output_element_size_byte =
+      DataTypeToTypeMeta(output.data_type()).itemsize();
+
+  uint64_t nBytesData = nElemFromDim(data) * data_element_size_byte;
+  uint64_t nBytesLength = nElemFromDim(length) * length_element_size_byte;
+  uint64_t nBytesValues = nElemFromDim(values) * values_element_size_byte;
   c.flops = 0;
   c.bytes_read = nBytesData + nBytesLength + nBytesValues;
-  c.bytes_written = nElemFromDim(output) * sizeof(output.data_type());
+  c.bytes_written = nElemFromDim(output) * output_element_size_byte;
   c.params_bytes = 0;
   return c;
 }
@@ -145,15 +155,15 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
     for (int64_t j = 0; j < D; j++) {
       // here we assume the boundary values for each feature are sorted
       int64_t lower_bucket_idx = std::lower_bound(
-                                    boundaries_offset,
-                                    boundaries_offset + lens_data[j],
-                                    input_data[pos]) -
+                                     boundaries_offset,
+                                     boundaries_offset + lens_data[j],
+                                     input_data[pos]) -
           boundaries_offset;
 
       int64_t upper_bucket_idx = std::upper_bound(
-                                    boundaries_offset,
-                                    boundaries_offset + lens_data[j],
-                                    input_data[pos]) -
+                                     boundaries_offset,
+                                     boundaries_offset + lens_data[j],
+                                     input_data[pos]) -
           boundaries_offset;
 
       int64_t bucket_idx = (lower_bucket_idx + upper_bucket_idx) / 2;
@@ -357,3 +367,8 @@ NO_GRADIENT(OneHot);
 NO_GRADIENT(SegmentOneHot);
 NO_GRADIENT(BucketBatchOneHot);
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    BatchBucketOneHot,
+    "_caffe2::BatchBucketOneHot(Tensor data, Tensor lengths, Tensor boundaries) -> Tensor output",
+    caffe2::BatchBucketOneHotOp<caffe2::CPUContext>);

@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, schema, muji
 from caffe2.python.modeling.net_modifier import NetModifier
@@ -49,9 +49,7 @@ class ComputeNormForBlobs(NetModifier):
         blob_to_device = blob_to_device or {}
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
-            if not net.BlobIsDefined(blob):
-                raise Exception('blob {0} is not defined in net {1}'.format(
-                    blob, net.Name()))
+            assert net.BlobIsDefined(blob), 'blob {} is not defined in net {} whose proto is {}'.format(blob, net.Name(), net.Proto())
             if blob in blob_to_device:
                 device = blob_to_device[blob]
             else:
@@ -76,6 +74,7 @@ class ComputeNormForBlobs(NetModifier):
                 norm = net.LpNorm(
                     cast_blob, norm_name, p=p, average=compute_averaged_norm
                 )
+                norm_stop_gradient = net.StopGradient(norm, net.NextScopedBlob(norm_name + "_stop_gradient"))
 
                 if self._logging_frequency >= 1:
                     net.Print(norm, [], every_n=self._logging_frequency)

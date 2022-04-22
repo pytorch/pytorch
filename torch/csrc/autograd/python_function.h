@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -18,33 +19,31 @@
 namespace torch { namespace jit { struct Graph; }}
 namespace torch { namespace autograd {
 
-struct VariableInfo {
-  explicit VariableInfo(const Variable& var);
-
-  Variable zeros(at::OptionalDeviceGuard& device_guard) const;
-
-  at::Type* type;
-  at::Device device = at::kCPU;
-  at::ScalarType scalar_type = at::kFloat;
-  std::vector<int64_t> size;
-  bool requires_grad;
-};
-
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
-struct PyFunction : public Function {
-  PyFunction(PyObject* obj) : obj(obj) {}
+struct PyNode : public Node {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list legacy_apply(const variable_list& inputs);
 
   void release_variables() override;
   std::string name() const override;
-  std::shared_ptr<Function> get_shared_ptr() override;
   bool is_traceable() override;
 
-  // THPFunction this Function is wrapping.
+  // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
+
+  ~PyNode() override {
+    // Can't use THPObjectPtr as a field in this class; destructor won't take
+    // out GIL!  When I forgot to do this by hand
+    // TestAutograd.test_inplace_view_python called me out about it.
+    // If python is already dead, leak the wrapped python objects
+    if (Py_IsInitialized()) {
+      pybind11::gil_scoped_acquire gil;
+      Py_DECREF(obj);
+    }
+  }
 };
 
 /**
@@ -64,6 +63,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 
 }} // namespace torch::autograd
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPFunction {
     PyObject_HEAD
 
@@ -82,6 +82,11 @@ struct THPFunction {
     // modified inplace.
     PyObject *dirty_tensors;
 
+    // boolean indicating whether to materialize undefined output grad tensors
+    // into tensors full of zeros. Set by Python with 'set_materialize_grads'.
+    // Default is true.
+    bool materialize_grads;
+
     std::vector<torch::autograd::VariableInfo> output_info;
     std::vector<torch::autograd::VariableInfo> input_info;
     std::vector<torch::autograd::SavedVariable> saved_variables;
@@ -89,17 +94,24 @@ struct THPFunction {
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
 
-    // The C++ wrapper for this Python function.
-    // See a comment in THPFunction_asFunction for details about this field.
-    torch::autograd::PyFunction cdata;
+    PyObject *saved_for_forward;
+    // The actual PyNode (in the autograd graph) that this data was
+    // saved for.  This field may be NULL (because a user can construct
+    // a THPFunction directly from Python), but when this field is non-NULL,
+    // it is guaranteed that cdata.lock()->obj == this
+    //
+    // In most ordinary use, this field should always be non-NULL; e.g.,
+    // when we allocate a THPFunction because we are running Node.apply,
+    // after constructing a THPFunction, we immediately allocate a PyNode
+    // for it.  We can't enforce this directly in the constructor of
+    // THPFunction though, because there's no way to keep it live long enough
+    // to save an owning reference to PyNode into the grad_fn of a Variable.
+    std::weak_ptr<torch::autograd::PyNode> cdata;
 };
 
 bool THPFunction_initModule(PyObject *module);
 extern PyTypeObject THPFunctionType;
 extern PyObject *THPFunctionClass;
-
-// XXX: this function requires the GIL (it can have side effects).
-std::shared_ptr<torch::autograd::PyFunction> THPFunction_asFunction(THPFunction* self);
 
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);

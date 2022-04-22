@@ -1,8 +1,19 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/index_select.h>
+#include <ATen/ops/sparse_mask_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at { namespace native {
 
@@ -12,20 +23,20 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   TORCH_CHECK(mask.is_coalesced(), "sparse_mask: mask is uncoalesced");
   TORCH_CHECK(mask.sizes().equals(t.sizes()), "sparse_mask: operands have incompatible sizes; self has size ",
       t.sizes(), " but mask has size ", mask.sizes());
-  AT_ASSERT(t.is_cuda());  // dispatch argument
+  TORCH_CHECK(t.is_cuda(), "sparse_mask: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(mask.is_cuda(), "sparse_mask: expected 'mask' to be CUDA, but got CPU");
   TORCH_CHECK(r.is_cuda(), "sparse_mask: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r, t, mask}),
       "sparse_mask: arguments are located on different devices; self is on device ", t.get_device(),
       ", mask is on device ", mask.get_device(), ", out is on device ", r.get_device());
-  resize_as_sparse_(r, mask);
+  r.resize_as_(mask);
   if (mask._nnz() == 0) {
     return r.zero_();
   }
-  LongTensor mask_indices = mask._indices();
+  Tensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
   Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
-  alias_into_sparse(r, mask_indices.clone(), r_values);
+  alias_into_sparse(r, mask_indices.clone(at::MemoryFormat::Contiguous), r_values);
   r._coalesced_(mask.is_coalesced());
   if (t.numel() == 0) {  // if t is an empty tensor, there is no need to mask its elements
     return r;
@@ -33,8 +44,8 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
 
   // Get a flattened sparse indices, similar to NOTE [ Flatten Sparse Indices ].
   // Keeping this implementation because it is faster than flatten_indices()
-  LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
-  for (int64_t d = 0; d < mask.sparse_dim(); d++) {
+  Tensor indices = at::zeros({mask._nnz()}, mask_indices.options());
+  for (const auto d : c10::irange(mask.sparse_dim())) {
     indices.mul_(mask.size(d));
     // This used to use a buffer but I deoptimized it
     indices.add_(mask_indices.select(0, d));
@@ -42,11 +53,15 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
 
   std::vector<int64_t> view_size(1 + mask.dense_dim());
   view_size[0] = -1;
-  for (int64_t d = 0; d < mask.dense_dim(); d++) {
+  for (const auto d : c10::irange(mask.dense_dim())) {
     view_size[d + 1] = mask.size(mask.sparse_dim() + d);
   }
 
-  Tensor t_view = t.view(view_size);
+  Tensor t_view;
+  if (t.is_contiguous())
+      t_view = t.view(view_size);
+  else
+      t_view = t.contiguous().view(view_size);
   // TODO: Re-audit this; it used to be an indexSelect directly into r_values
   at::index_select_out(r_values, t_view, 0, indices);
 

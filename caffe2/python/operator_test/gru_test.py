@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import workspace, core, scope, gru_cell
 from caffe2.python.model_helper import ModelHelper
@@ -16,7 +16,6 @@ from hypothesis import settings as ht_settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
-import os
 
 
 def gru_unit(*args, **kwargs):
@@ -258,7 +257,6 @@ class GRUCellTest(serial.SerializedTestCase):
         sequence_lengths=st.booleans(),
         **hu.gcs
     )
-    @ht_settings(max_examples=15)
     def test_gru_unit_op(self, seed, input_tensor, fwd_only,
                          drop_states, sequence_lengths, gc, dc):
         np.random.seed(seed)
@@ -320,7 +318,7 @@ class GRUCellTest(serial.SerializedTestCase):
         linear_before_reset=st.booleans(),
         **hu.gcs
     )
-    @ht_settings(max_examples=20)
+    @ht_settings(max_examples=20, deadline=None)
     def test_gru_main(self, seed, **kwargs):
         np.random.seed(seed)
         for outputs_with_grads in [[0], [1], [0, 1]]:

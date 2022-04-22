@@ -1,10 +1,10 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, utils, workspace
-from hypothesis import given
+from hypothesis import given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -15,16 +15,18 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
     @given(
         channels_per_group=st.integers(min_value=1, max_value=5),
         groups=st.sampled_from([1, 4, 8, 9]),
-        n=st.integers(min_value=1, max_value=2),
+        n=st.integers(0, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_channel_shuffle(self, channels_per_group, groups, n, order, gc, dc):
         X = np.round(np.random.rand(n, channels_per_group * groups, 5, 6) * 255).astype(
             np.float32
         )
-        X[0, 0, 0, 0] = 0
-        X[0, 0, 0, 1] = 255
+        if n != 0:
+            X[0, 0, 0, 0] = 0
+            X[0, 0, 0, 1] = 255
         if order == "NHWC":
             X = utils.NCHW2NHWC(X)
 
@@ -66,17 +68,19 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
 
     @given(
         channels_per_group=st.integers(min_value=32, max_value=128),
-        n=st.integers(min_value=1, max_value=2),
+        n=st.integers(0, 2),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_channel_shuffle_fast_path(self, channels_per_group, n, gc, dc):
         order = "NHWC"
         groups = 4
         X = np.round(np.random.rand(n, channels_per_group * groups, 5, 6) * 255).astype(
             np.float32
         )
-        X[0, 0, 0, 0] = 0
-        X[0, 0, 0, 1] = 255
+        if n != 0:
+            X[0, 0, 0, 0] = 0
+            X[0, 0, 0, 1] = 255
         X = utils.NCHW2NHWC(X)
 
         net = core.Net("test_net")

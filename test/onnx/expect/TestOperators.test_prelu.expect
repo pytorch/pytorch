@@ -1,33 +1,25 @@
-ir_version: 4
+ir_version: 7
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "weight"
-    output: "2"
-    op_type: "Unsqueeze"
-    attribute {
-      name: "axes"
-      ints: 1
-      ints: 2
-      type: INTS
-    }
-  }
-  node {
-    input: "input"
-    input: "2"
-    output: "3"
+    input: "onnx::PRelu_0"
+    input: "onnx::PRelu_5"
+    output: "4"
+    name: "PRelu_0"
     op_type: "PRelu"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 2
+    dims: 1
+    dims: 1
     data_type: 1
-    name: "weight"
+    name: "onnx::PRelu_5"
     raw_data: "\000\000\200>\000\000\200>"
   }
   input {
-    name: "input"
+    name: "onnx::PRelu_0"
     type {
       tensor_type {
         elem_type: 1
@@ -49,7 +41,7 @@ graph {
     }
   }
   input {
-    name: "weight"
+    name: "onnx::PRelu_5"
     type {
       tensor_type {
         elem_type: 1
@@ -57,12 +49,18 @@ graph {
           dim {
             dim_value: 2
           }
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 1
+          }
         }
       }
     }
   }
   output {
-    name: "3"
+    name: "4"
     type {
       tensor_type {
         elem_type: 1
@@ -85,5 +83,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

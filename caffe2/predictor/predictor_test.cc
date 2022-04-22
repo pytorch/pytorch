@@ -159,16 +159,16 @@ MetaNetDef parseMetaNetDef(const std::string& value) {
       value);
   return def;
 }
-}
+} // namespace
 
 class PredictorTest : public testing::Test {
  public:
   void SetUp() override {
     DeviceOption op;
     op.set_random_seed(1701);
-    ctx_ = caffe2::make_unique<CPUContext>(op);
+    ctx_ = std::make_unique<CPUContext>(op);
     NetDef init, run;
-    p_ = caffe2::make_unique<Predictor>(
+    p_ = std::make_unique<Predictor>(
         makePredictorConfig(parseNetDef(initSpec), parseNetDef(predictSpec)));
   }
 
@@ -187,7 +187,7 @@ TEST_F(PredictorTest, SimpleBatchSized) {
   EXPECT_EQ(output.front().sizes().size(), 2);
   EXPECT_EQ(output.front().size(0), 1);
   EXPECT_EQ(output.front().size(1), 10);
-  EXPECT_NEAR(output.front().data<float>()[4], 0.1209, 1E-4);
+  EXPECT_NEAR(output.front().data<float>()[4], 4.9556, 1E-4);
 }
 
 TEST_F(PredictorTest, SimpleBatchSizedMapInput) {
@@ -202,7 +202,7 @@ TEST_F(PredictorTest, SimpleBatchSizedMapInput) {
   EXPECT_EQ(output.front().sizes().size(), 2);
   EXPECT_EQ(output.front().size(0), 1);
   EXPECT_EQ(output.front().size(1), 10);
-  EXPECT_NEAR(output.front().data<float>()[4], 0.1209, 1E-4);
+  EXPECT_NEAR(output.front().data<float>()[4], 4.9556, 1E-4);
 }
 
 } // namespace caffe2

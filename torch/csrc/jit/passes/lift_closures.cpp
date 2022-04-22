@@ -1,12 +1,12 @@
 #include <torch/csrc/jit/passes/lift_closures.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/compiler.h>
+
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
-// Closures are initially emitted as prim::Function nodes with a single block.
+// Closures are initially emitted as prim::Closure nodes with a single block.
 // Here, we convert the block to a subgraph, adding all closed over variables
 // as a context tuple input to the closure node.
 // At this point the closure has already undergone conversion to SSA,
@@ -51,7 +51,7 @@ void liftClosure(Node* closure) {
       TupleType::create({closure->output()->type(), context_type}));
   closure->eraseBlock(0);
   closure->g_(attr::Subgraph, std::move(subgraph));
-  runCleanupPasses(closure->g(attr::Subgraph), /*convert_to_ssa*/ false);
+  runCleanupPasses(closure->g(attr::Subgraph));
 }
 
 void liftClosures(Block* block) {
@@ -59,7 +59,7 @@ void liftClosures(Block* block) {
     Node* n = *it;
     it++;
     switch (n->kind()) {
-      case prim::Function: {
+      case prim::Closure: {
         liftClosure(n);
       } break;
       default: {
@@ -75,6 +75,5 @@ void liftClosures(const std::shared_ptr<Graph>& to_clean) {
   liftClosures(to_clean->block());
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

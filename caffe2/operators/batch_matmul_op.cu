@@ -11,7 +11,8 @@ bool BatchMatMulOp<CUDAContext, DefaultEngine>::RunOnDevice() {
 
 REGISTER_CUDA_OPERATOR(BatchMatMul, BatchMatMulOp<CUDAContext>);
 
-#if CUDA_VERSION >= 9000
+
+#if !defined(USE_ROCM)
 
 template <>
 bool BatchMatMulOp<CUDAContext, TensorCoreEngine>::RunOnDevice() {

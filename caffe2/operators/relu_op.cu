@@ -33,7 +33,7 @@ __global__ void ReluCUDAKernel<half>(const int N, const half* X, half* Y) {
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
     const half kZero = __float2half(0.0f);
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 || TORCH_HIP_VERSION >= 300
     Y[i] = __hgt(__ldg(X + i), kZero) ? __ldg(X + i) : kZero;
 #else
     Y[i] = (__half2float(X[i]) > 0) ? X[i] : kZero;
@@ -46,12 +46,17 @@ __global__ void ReluCUDAKernel<half2>(const int N, const half2* X, half2* Y) {
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
     const half2 kZero = __float2half2_rn(0.0f);
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 || TORCH_HIP_VERSION >= 300
     Y[i] = __hmul2(__hgt2(__ldg(X + i), kZero), __ldg(X + i));
 #else
     const float2 xx = __half22float2(X[i]);
-    Y[i] =
-        __floats2half2_rn(xx.x > 0.0f ? xx.x : 0.0f, xx.y > 0.0f ? xx.y : 0.0f);
+    // There are explicit cast to float here, because it may otherwise cause ambiguity on ROCm and can be triggered
+    // sometimes:
+    //
+    //   error: conditional expression is ambiguous; 'const hip_impl::Scalar_accessor<float, Native_vec_, 0>' can be
+    //   converted to 'float' and vice versa
+    Y[i] = __floats2half2_rn(xx.x > 0.0f ? static_cast<float>(xx.x) : 0.0f,
+                             xx.y > 0.0f ? static_cast<float>(xx.y) : 0.0f);
 #endif
   }
 }
@@ -61,7 +66,7 @@ __global__ void
 ReluGradientCUDAKernel(const int N, const T* dY, const T* Y, T* dX) {
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || TORCH_HIP_VERSION >= 300
     dX[i] = __ldg(Y + i) > T(0) ? __ldg(dY + i) : T(0);
 #else
     dX[i] = Y[i] > T(0) ? dY[i] : T(0);
@@ -78,7 +83,7 @@ __global__ void ReluGradientCUDAKernel<half>(
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
     const half kZero = __float2half(0.0f);
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 || TORCH_HIP_VERSION >= 300
     dX[i] = __hgt(__ldg(Y + i), kZero) ? __ldg(dY + i) : kZero;
 #else
     dX[i] = (__half2float(Y[i]) > 0) ? dY[i] : kZero;
@@ -95,13 +100,19 @@ __global__ void ReluGradientCUDAKernel<half2>(
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
     const half2 kZero = __float2half2_rn(0.0f);
-#if __CUDA_ARCH__ >= 530
+#if __CUDA_ARCH__ >= 530 || TORCH_HIP_VERSION >= 300
     dX[i] = __hmul2(__hgt2(__ldg(Y + i), kZero), __ldg(dY + i));
 #else
     const float2 dy = __half22float2(dY[i]);
     const float2 yy = __half22float2(Y[i]);
-    dX[i] =
-        __floats2half2_rn(yy.x > 0.0f ? dy.x : 0.0f, yy.y > 0.0f ? dy.y : 0.0f);
+    // There are explicit cast to float here, because it may otherwise cause ambiguity on ROCm and can be triggered
+    // sometimes:
+    //
+    //   error: conditional expression is ambiguous; 'const hip_impl::Scalar_accessor<float, Native_vec_, 1>' can be
+    //   converted to 'float' and vice versa
+
+     dX[i] = __floats2half2_rn(yy.x > 0.0f ? static_cast<float>(dy.x) : 0.0f,
+                               yy.y > 0.0f ? static_cast<float>(dy.y) : 0.0f);
 #endif
   }
 }
@@ -116,6 +127,7 @@ operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
     const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
     ReluCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(N, X, Y);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -137,11 +149,13 @@ bool ReluFunctor<CUDAContext>::operator()<at::Half>(
             N / 2,
             reinterpret_cast<const half2*>(X),
             reinterpret_cast<half2*>(Y));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
     ReluCUDAKernel<half>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
             N, reinterpret_cast<const half*>(X), reinterpret_cast<half*>(Y));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -162,6 +176,7 @@ bool ReluGradientFunctor<CUDAContext>::Forward(
     ReluGradientCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
             N, dY, Y, dX);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -188,6 +203,7 @@ bool ReluGradientFunctor<CUDAContext>::Forward<at::Half>(
             reinterpret_cast<const half2*>(dY),
             reinterpret_cast<const half2*>(Y),
             reinterpret_cast<half2*>(dX));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
     ReluGradientCUDAKernel<half>
@@ -196,6 +212,7 @@ bool ReluGradientFunctor<CUDAContext>::Forward<at::Half>(
             reinterpret_cast<const half*>(dY),
             reinterpret_cast<const half*>(Y),
             reinterpret_cast<half*>(dX));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

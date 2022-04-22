@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include <torch/csrc/jit/ir_views.h>
+
+#include <c10/util/irange.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 
 namespace torch {
 namespace jit {
@@ -19,20 +21,20 @@ std::shared_ptr<Graph> Canonicalize(
     auto* r_input = r->addInput();
     r_input->copyMetadata(input);
     if (!keep_unique_names)
-      r_input->setUniqueName("");
+      r_input->setDebugName("");
     rn_env[input] = r_input;
   }
   for (auto* node : graph->nodes()) {
     auto* r_node = r->createClone(node, rn_fn);
     if (!keep_unique_names) {
       for (auto* output : r_node->outputs()) {
-        output->setUniqueName("");
+        output->setDebugName("");
       }
     }
     r->appendNode(r_node);
     auto outputs = node->outputs();
     auto r_outputs = r_node->outputs();
-    for (size_t i = 0; i < outputs.size(); i++) {
+    for (const auto i : c10::irange(outputs.size())) {
       rn_env[outputs.at(i)] = r_outputs.at(i);
     }
     if (node->hasAttribute(attr::Subgraph)) {
@@ -60,15 +62,6 @@ size_t blockIndex(const Block* b) {
   AT_ASSERT(false);
 }
 
-size_t blocksFromGraphBlock(Node* n) {
-  size_t dist = 0;
-  while (n->owningBlock()->owningNode()) {
-    n = n->owningBlock()->owningNode();
-    ++dist;
-  }
-  return dist;
-}
-
 /*
  * This establishes a canonical ordering of nodes.
  * If n1 and n2 are in the same block, whichever node appears first
@@ -85,8 +78,8 @@ bool isBefore(Node* n1, Node* n2) {
   AT_ASSERT(n1 != n2);
 
   // Set n1 and n2 to be the number of blocks from the Graph block
-  size_t d_1 = blocksFromGraphBlock(n1);
-  size_t d_2 = blocksFromGraphBlock(n2);
+  size_t d_1 = n1->blocksFromGraphBlock();
+  size_t d_2 = n2->blocksFromGraphBlock();
 
   for (; d_1 > d_2; --d_1) {
     n1 = n1->owningBlock()->owningNode();
@@ -138,20 +131,36 @@ bool isBefore(const Use& a, const Use& b) {
   return isBefore(a.user, b.user);
 }
 
-std::vector<c10::optional<Use>> gatherFirstUses(at::ArrayRef<Value*> values) {
-  return fmap(values, [](Value* v) -> c10::optional<Use> {
-    if (v->uses().size() == 0) {
-      return c10::nullopt;
-    }
-    Use first_use = v->uses()[0];
-    for (size_t i = 1; i < v->uses().size(); ++i) {
-      auto n_use = v->uses()[i];
-      if (!isBefore(first_use, n_use)) {
-        first_use = n_use;
-      }
-    }
+bool isAfter(const Use& a, const Use& b) {
+  if (a.user == b.user && a.offset == b.offset) {
+    return false;
+  }
+  return !isBefore(a, b);
+}
 
-    return first_use;
+bool isBeforeOrAfter(const Use& a, const Use& b, bool checking_before) {
+  return checking_before ? isBefore(a, b) : isAfter(a, b);
+}
+
+c10::optional<const Use> firstOrLastUse(Value* v, bool find_first) {
+  if (v->uses().size() == 0) {
+    return c10::nullopt;
+  }
+  Use extreme_use = v->uses()[0];
+  for (size_t i = 1; i < v->uses().size(); ++i) {
+    auto n_use = v->uses()[i];
+    if (!isBeforeOrAfter(extreme_use, n_use, find_first)) {
+      extreme_use = n_use;
+    }
+  }
+
+  return extreme_use;
+}
+
+std::vector<c10::optional<const Use>> gatherFirstUses(
+    at::ArrayRef<Value*> values) {
+  return fmap(values, [&](Value* v) -> c10::optional<const Use> {
+    return firstOrLastUse(v, true);
   });
 }
 
@@ -160,7 +169,7 @@ std::vector<size_t> sort_indexes(at::ArrayRef<Value*> values) {
   std::vector<size_t> idx(values.size());
   std::iota(idx.begin(), idx.end(), 0);
 
-  std::vector<c10::optional<Use>> first_uses = gatherFirstUses(values);
+  std::vector<c10::optional<const Use>> first_uses = gatherFirstUses(values);
 
   // Sort values based on canonical ordering of their first usage
   std::sort(idx.begin(), idx.end(), [&first_uses](size_t i1, size_t i2) {
@@ -218,7 +227,7 @@ void CanonicalizeOutputs(Block* block) {
 
 // Canonicalize a graph's control flow node outputs. We do this to solve jitter
 // issues with outputs added to control flow nodes after the first pass of
-// compilation in compiler.cpp
+// compilation in ir_emitter.cpp
 void CanonicalizeOutputs(std::shared_ptr<Graph>& graph) {
   CanonicalizeOutputs(graph->block());
 }

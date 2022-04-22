@@ -2,7 +2,7 @@
 set -eux -o pipefail
 
 # Set up CircleCI GPG keys for apt, if needed
-curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
+curl --retry 3 -s -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
 
 # Stop background apt updates.  Hypothetically, the kill should not
 # be necessary, because stop is supposed to send a kill signal to
@@ -33,10 +33,18 @@ systemctl list-units --all | cat
 sudo pkill apt-get || true
 
 # For even better luck, purge unattended-upgrades
-sudo apt-get purge -y unattended-upgrades
+sudo apt-get purge -y unattended-upgrades || true
 
 cat /etc/apt/sources.list
 
-# Bail out early if we detect apt/dpkg is stuck
-ps auxfww | (! grep '[a]pt')
-ps auxfww | (! grep '[d]pkg')
+# For the bestest luck, kill again now
+sudo pkill apt || true
+sudo pkill dpkg || true
+
+# Try to detect if apt/dpkg is stuck
+if ps auxfww | grep '[a]pt'; then
+  echo "WARNING: There are leftover apt processes; subsequent apt update will likely fail"
+fi
+if ps auxfww | grep '[d]pkg'; then
+  echo "WARNING: There are leftover dpkg processes; subsequent apt update will likely fail"
+fi

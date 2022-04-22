@@ -55,7 +55,7 @@ class DummyTransform : public Transform {
       return false;
     }
     // which index are we trying to append the new node to?
-    int pattern_idx = subgraph.size();
+    auto pattern_idx = subgraph.size();
     // type doesn't match
     if (g.node(idx).op.type() != pattern_chain[pattern_idx]) {
       return false;
@@ -366,6 +366,7 @@ OPERATOR_SCHEMA(TransformSleepSlowOp)
 class TypeSwapTransform : public Transform {
  public:
   // Determine the actual strings through inheriting from derived type.
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   explicit TypeSwapTransform(string old_type, string new_type)
       : old_type(old_type), new_type(new_type) {}
 
@@ -418,7 +419,7 @@ REGISTER_TRANSFORM(SlowToFast, SlowToFastTransform);
 
 TEST(TransformTest, TestApplyTransformIfFasterIsFaster) {
   NetDef init_netdef;
-  auto* op = AddOp(&init_netdef, "ConstantFill", {}, {"in"});
+  AddOp(&init_netdef, "ConstantFill", {}, {"in"});
 
   NetDef netdef;
   AddOp(&netdef, "TransformDummyOp1", {"in"}, {"mid"});
@@ -437,7 +438,7 @@ TEST(TransformTest, TestApplyTransformIfFasterIsFaster) {
 
 TEST(TransformTest, TestApplyTransformIfFasterButSlower) {
   NetDef init_netdef;
-  auto* op = AddOp(&init_netdef, "ConstantFill", {}, {"in"});
+  AddOp(&init_netdef, "ConstantFill", {}, {"in"});
 
   NetDef netdef;
   AddOp(&netdef, "TransformDummyOp1", {"in"}, {"mid"});
@@ -456,4 +457,4 @@ TEST(TransformTest, TestApplyTransformIfFasterButSlower) {
 
 } // namespace
 
-} // namespace Caffe2
+} // namespace caffe2

@@ -20,6 +20,7 @@ namespace nn {
 /// `clone()` method. We do not want to use this pattern in the base class,
 /// because then storing a module would always require templatizing it.
 template <typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class Cloneable : public virtual Module {
  public:
   using Module::Module;
@@ -47,10 +48,11 @@ class Cloneable : public virtual Module {
         "parameters as the original module after calling reset(). "
         "Are you sure you called register_parameter() inside reset() "
         "and not the constructor?");
-    for (const auto& parameter : parameters_) {
-      auto data = autograd::Variable(*parameter).clone();
-      copy->parameters_[parameter.key()].set_data(
-          device ? data.to(*device) : data);
+    for (const auto& parameter : named_parameters(/*recurse=*/false)) {
+      auto& tensor = *parameter;
+      auto data = device && tensor.device() != *device ?
+          tensor.to(*device) : autograd::Variable(tensor).clone();
+      copy->parameters_[parameter.key()].set_data(data);
     }
     TORCH_CHECK(
         copy->buffers_.size() == buffers_.size(),
@@ -58,9 +60,11 @@ class Cloneable : public virtual Module {
         "buffers as the original module after calling reset(). "
         "Are you sure you called register_buffer() inside reset() "
         "and not the constructor?");
-    for (const auto& buffer : buffers_) {
-      auto data = autograd::Variable(*buffer).clone();
-      copy->buffers_[buffer.key()].set_data(device ? data.to(*device) : data);
+    for (const auto& buffer : named_buffers(/*recurse=*/false)) {
+      auto& tensor = *buffer;
+      auto data = device && tensor.device() != *device ?
+          tensor.to(*device) : autograd::Variable(tensor).clone();
+      copy->buffers_[buffer.key()].set_data(data);
     }
     TORCH_CHECK(
         copy->children_.size() == children_.size(),

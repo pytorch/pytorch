@@ -21,6 +21,7 @@
 #include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
 #include <thrust/unique.h>
+#include <thrust/version.h>
 #include "caffe2/core/context_gpu.h"
 
 namespace caffe2 {
@@ -126,6 +127,7 @@ bool UniqueOp<CUDAContext>::DoRunWithType() {
         0,
         context_.cuda_stream()>>>(
         order2.data(), order1.data(), remapping, N, K);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

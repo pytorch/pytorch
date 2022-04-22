@@ -9,9 +9,7 @@
 namespace caffe2 {
 namespace predictor_utils {
 
-CAFFE2_API const NetDef& getNet(
-    const MetaNetDef& def,
-    const std::string& name) {
+TORCH_API const NetDef& getNet(const MetaNetDef& def, const std::string& name) {
   for (const auto& n : def.nets()) {
     if (n.key() == name) {
       return n.value();
@@ -37,7 +35,7 @@ std::unique_ptr<MetaNetDef> extractMetaNetDef(
     Blob blob;
     DeserializeBlob(proto, &blob);
     CAFFE_ENFORCE(blob.template IsType<string>());
-    auto def = caffe2::make_unique<MetaNetDef>();
+    auto def = std::make_unique<MetaNetDef>();
     CAFFE_ENFORCE(def->ParseFromString(blob.template Get<string>()));
     return def;
   }
@@ -60,6 +58,7 @@ std::unique_ptr<MetaNetDef> runGlobalInitialization(
   }
   VLOG(1) << "Extracted meta net def";
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   const auto globalInitNet = getNet(
       *metaNetDef, PredictorConsts::default_instance().global_init_net_type());
   VLOG(1) << "Global init net: " << ProtoDebugString(globalInitNet);

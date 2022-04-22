@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
-#include <torch/csrc/jit/script/compiler.h>
+
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // Closure nodes are emitted as a tuple of (function %, context tuple %)
 // Inside the closure the closure is then unpacked so that all closed over
@@ -20,7 +20,7 @@ void inlineForkedClosure(Node* fork_closure) {
   Node* function_context_node = fork_closure->input()->node();
 
   if (function_context_node->inputs().size() != 2 ||
-      function_context_node->inputs().at(0)->node()->kind() != prim::Function ||
+      function_context_node->inputs().at(0)->node()->kind() != prim::Closure ||
       function_context_node->inputs().at(1)->node()->kind() !=
           prim::TupleConstruct) {
     throw ErrorReport(fork_closure->sourceRange()) << "Cannot fork this value";
@@ -55,7 +55,7 @@ void inlineForkedClosure(Node* fork_closure) {
   fork_closure->output()->replaceAllUsesWith(fork_node->output());
   fork_closure->destroy();
   fork_node->g_(attr::Subgraph, fork_graph);
-  runCleanupPasses(fork_graph, /*convert_to_ssa */ false);
+  runCleanupPasses(fork_graph);
 }
 
 void inlineForkedClosures(Block* block) {
@@ -79,6 +79,5 @@ void inlineForkedClosures(std::shared_ptr<Graph>& to_clean) {
   inlineForkedClosures(to_clean->block());
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

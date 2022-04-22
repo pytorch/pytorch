@@ -2,15 +2,8 @@
 
 set -ex
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
-# TODO: Migrate all centos jobs to use proper devtoolset
-if [[ "$BUILD_ENVIRONMENT" == *py2-cuda9.0-cudnn7-centos7* ]]; then
-  # There is a bug in pango packge on Centos7 that causes undefined
-  # symbols, upgrading glib2 to >=2.56.1 solves the issue. See
-  # https://bugs.centos.org/view.php?id=15495
-  sudo yum install -y -q glib2-2.56.1
-fi
 
 # CMAKE_ARGS are only passed to 'cmake' and the -Dfoo=bar does not work with
 # setup.py, so we build a list of foo=bars and then either convert it to
@@ -26,49 +19,6 @@ build_to_cmake () {
 
 
 SCCACHE="$(which sccache)"
-if [ "$(which gcc)" != "/root/sccache/gcc" ]; then
-  # Setup SCCACHE
-  ###############################################################################
-  # Setup sccache if SCCACHE_BUCKET is set
-  if [ -n "${SCCACHE_BUCKET}" ]; then
-    mkdir -p ./sccache
-
-    SCCACHE="$(which sccache)"
-    if [ -z "${SCCACHE}" ]; then
-      echo "Unable to find sccache..."
-      exit 1
-    fi
-
-    # Setup wrapper scripts
-    wrapped="cc c++ gcc g++ x86_64-linux-gnu-gcc"
-    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-        wrapped="$wrapped nvcc"
-    fi
-    for compiler in $wrapped; do
-      (
-        echo "#!/bin/sh"
-
-        # TODO: if/when sccache gains native support for an
-        # SCCACHE_DISABLE flag analogous to ccache's CCACHE_DISABLE,
-        # this can be removed. Alternatively, this can be removed when
-        # https://github.com/pytorch/pytorch/issues/13362 is fixed.
-        #
-        # NOTE: carefully quoted - we want `which compiler` to be
-        # resolved as we execute the script, but SCCACHE_DISABLE and
-        # $@ to be evaluated when we execute the script
-        echo 'test $SCCACHE_DISABLE && exec '"$(which $compiler)"' "$@"'
-
-        echo "exec $SCCACHE $(which $compiler) \"\$@\""
-      ) > "./sccache/$compiler"
-      chmod +x "./sccache/$compiler"
-    done
-
-    export CACHE_WRAPPER_DIR="$PWD/sccache"
-
-    # CMake must find these wrapper scripts
-    export PATH="$CACHE_WRAPPER_DIR:$PATH"
-  fi
-fi
 
 # Setup ccache if configured to use it (and not sccache)
 if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
@@ -79,7 +29,8 @@ if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   ln -sf "$(which ccache)" ./ccache/g++
   ln -sf "$(which ccache)" ./ccache/x86_64-linux-gnu-gcc
   if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-    ln -sf "$(which ccache)" ./ccache/nvcc
+    mkdir -p ./ccache/cuda
+    ln -sf "$(which ccache)" ./ccache/cuda/nvcc
   fi
   export CACHE_WRAPPER_DIR="$PWD/ccache"
   export PATH="$CACHE_WRAPPER_DIR:$PATH"
@@ -112,7 +63,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   build_args+=("BUILD_TEST=ON")
   build_args+=("USE_OBSERVERS=ON")
   build_args+=("USE_ZSTD=ON")
-  "${ROOT_DIR}/scripts/build_android.sh" $(build_to_cmake ${build_args[@]}) "$@"
+  BUILD_CAFFE2_MOBILE=1 "${ROOT_DIR}/scripts/build_android.sh" $(build_to_cmake ${build_args[@]}) "$@"
   exit 0
 fi
 
@@ -134,20 +85,6 @@ build_args+=("BUILD_TEST=ON")
 build_args+=("INSTALL_TEST=ON")
 build_args+=("USE_ZSTD=ON")
 
-if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
-  # removing http:// duplicate in favor of nvidia-ml.list
-  # which is https:// version of the same repo
-  sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
-  curl -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-  sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-  sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
-  sudo apt-get -qq update
-  sudo apt-get install -y --no-install-recommends libnvinfer5=5.0.2-1+cuda9.0 libnvinfer-dev=5.0.2-1+cuda9.0
-  rm ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-
-  build_args+=("USE_TENSORRT=ON")
-fi
-
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   build_args+=("USE_CUDA=ON")
   build_args+=("USE_NNPACK=OFF")
@@ -156,7 +93,10 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   build_args+=("TORCH_CUDA_ARCH_LIST=Maxwell")
 
   # Explicitly set path to NVCC such that the symlink to ccache or sccache is used
-  build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/nvcc")
+  if [ -n "${CACHE_WRAPPER_DIR}" ]; then
+    build_args+=("CUDA_NVCC_EXECUTABLE=${CACHE_WRAPPER_DIR}/cuda/nvcc")
+    build_args+=("CMAKE_CUDA_COMPILER_LAUNCHER=${CACHE_WRAPPER_DIR}/ccache")
+  fi
 
   # Ensure FindCUDA.cmake can infer the right path to the CUDA toolkit.
   # Setting PATH to resolve to the right nvcc alone isn't enough.
@@ -167,25 +107,25 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   export PATH="/usr/local/cuda/bin:$PATH"
 fi
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
-  build_args+=("USE_ROCM=ON")
+  if [[ -n "$IN_CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
+      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds, if user doesn't override.
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
+      export PYTORCH_ROCM_ARCH="gfx900;gfx906"
+  fi
   # This is needed to enable ImageInput operator in resnet50_trainer
   build_args+=("USE_OPENCV=ON")
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   build_args+=("USE_LMDB=ON")
-  # When hcc runs out of memory, it silently exits without stopping
-  # the build process, leaving undefined symbols in the shared lib
-  # which will cause undefined symbol errors when later running
-  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
-  export MAX_JOBS=4
+  # hcc used to run out of memory, silently exiting without stopping
+  # the build process, leaving undefined symbols in the shared lib,
+  # causing undefined symbol errors when later running tests.
+  # We used to set MAX_JOBS to 4 to avoid, but this is no longer an issue.
+  if [ -z "$MAX_JOBS" ]; then
+    export MAX_JOBS=$(($(nproc) - 1))
+  fi
 
   ########## HIPIFY Caffe2 operators
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"
-fi
-
-# building bundled nccl in this config triggers a bug in nvlink. For
-# more, see https://github.com/pytorch/pytorch/issues/14486
-if [[ "${BUILD_ENVIRONMENT}" == *-cuda8*-cudnn7* ]]; then
-    build_args+=("USE_SYSTEM_NCCL=ON")
 fi
 
 # Try to include Redis support for Linux builds
@@ -193,7 +133,7 @@ if [ "$(uname)" == "Linux" ]; then
   build_args+=("USE_REDIS=ON")
 fi
 
-# Use a speciallized onnx namespace in CI to catch hardcoded onnx namespace
+# Use a specialized onnx namespace in CI to catch hardcoded onnx namespace
 build_args+=("ONNX_NAMESPACE=ONNX_NAMESPACE_FOR_C2_CI")
 
 ###############################################################################
@@ -255,9 +195,11 @@ else
 
   # sccache will be stuck if  all cores are used for compiling
   # see https://github.com/pytorch/pytorch/pull/7361
-  if [[ -n "${SCCACHE}" ]]; then
+  if [[ -n "${SCCACHE}" && $BUILD_ENVIRONMENT != *rocm* ]]; then
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
+
+  pip install --user dataclasses typing_extensions
 
   $PYTHON setup.py install --user
 
@@ -269,6 +211,21 @@ fi
 ###############################################################################
 
 # Install ONNX into a local directory
-pip install --user -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
+pip install --user "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
 
 report_compile_cache_stats
+
+if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
+  # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
+  sudo rm -f /opt/cache/bin/cc
+  sudo rm -f /opt/cache/bin/c++
+  sudo rm -f /opt/cache/bin/gcc
+  sudo rm -f /opt/cache/bin/g++
+  pushd /opt/rocm/llvm/bin
+  if [[ -d original ]]; then
+    sudo mv original/clang .
+    sudo mv original/clang++ .
+  fi
+  sudo rm -rf original
+  popd
+fi

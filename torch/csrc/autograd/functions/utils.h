@@ -1,11 +1,13 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <functional>
 #include <memory>
@@ -13,7 +15,7 @@
 
 namespace torch { namespace autograd {
 
-using function_constructor = std::function<std::shared_ptr<Function>(edge_list&&)>;
+using function_constructor = std::function<std::shared_ptr<Node>(edge_list&&)>;
 
 /**
  * Wraps the tensor outputs in variables and creates the grad_fn and sets the
@@ -24,7 +26,7 @@ TORCH_API variable_list wrap_outputs(const variable_list& inputs, tensor_list&& 
 
 ///  Checks that inputs contains exactly `args` items and that the first `required_args`
 /// items are not nullptr. If not specified, `required_args` defaults to `args`.
-TORCH_API void check_input_variables(const char* name, const variable_list& inputs, int args, int required_args=-1);
+TORCH_API void check_input_variables(const char* name, const variable_list& inputs, int args, int required_args=-1, bool allow_undefined=false);
 
 struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
   bool out = false;
@@ -33,6 +35,11 @@ struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
     const auto& var = static_cast<const Variable&>(tensor);
     if (var.defined() && var.requires_grad()) {
       out = true;
+    }
+  }
+  void operator()(const c10::optional<at::Tensor>& tensor) {
+    if (tensor.has_value()) {
+      (*this)(*tensor);
     }
   }
   bool short_circuit() {
@@ -50,20 +57,23 @@ inline bool compute_requires_grad(Args&&... args) {
 
 inline void set_history(
     at::Tensor& variable,
-    const std::shared_ptr<Function>& grad_fn) {
+    const std::shared_ptr<Node>& grad_fn) {
   AT_ASSERT(grad_fn);
   if (variable.defined()) {
+    // If the codegen triggers this, you most likely want to add your newly added function
+    // to the DONT_REQUIRE_DERIVATIVE list in tools/autograd/gen_variable_type.py
+    TORCH_INTERNAL_ASSERT(isDifferentiableType(variable.scalar_type()));
     auto output_nr =
         grad_fn->add_input_metadata(variable);
-    as_variable_ref(variable).set_gradient_edge({grad_fn, output_nr});
+    impl::set_gradient_edge(variable, {grad_fn, output_nr});
   } else {
-    grad_fn->add_input_metadata(Function::undefined_input());
+    grad_fn->add_input_metadata(Node::undefined_input());
   }
 }
 
 inline void set_history(
     std::vector<Variable>&& variables,
-    const std::shared_ptr<Function>& grad_fn) {
+    const std::shared_ptr<Node>& grad_fn) {
   for (auto& variable : variables) {
     set_history(variable, grad_fn);
   }
@@ -71,9 +81,14 @@ inline void set_history(
 
 inline void set_history(
     std::vector<Variable>& variables,
-    const std::shared_ptr<Function>& grad_fn) {
+    const std::shared_ptr<Node>& grad_fn) {
   for (auto& variable : variables) {
     set_history(variable, grad_fn);
   }
 }
+
+inline bool isFwGradDefined(const c10::optional<at::Tensor>& t) {
+  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
+}
+
 }}

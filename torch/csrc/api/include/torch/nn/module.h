@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/nn/modules/container/any_module_holder.h>
+#include <torch/nn/modules/container/any_value.h>
 #include <torch/nn/pimpl.h>
 #include <torch/ordered_dict.h>
 #include <torch/serialize/archive.h>
@@ -57,7 +59,7 @@ namespace nn {
 ///
 /// Parameters are registered with a `Module` via `register_parameter`. Buffers
 /// are registered separately via `register_buffer`. These methods are part of
-/// the protected API of `Module` and are typically invoked from within a
+/// the public API of `Module` and are typically invoked from within a
 /// concrete `Module`s constructor.
 class TORCH_API Module : public std::enable_shared_from_this<Module> {
  public:
@@ -230,8 +232,8 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// \endrst
   std::vector<std::shared_ptr<Module>> modules(bool include_self = true) const;
 
-  /// Returns an `OrderedDict` of he submodules of this `Module` (the entire
-  /// submodule hierarchy) and thei keys, and if `include_self` is true, also
+  /// Returns an `OrderedDict` of the submodules of this `Module` (the entire
+  /// submodule hierarchy) and their keys, and if `include_self` is true, also
   /// inserts a `shared_ptr` to this module in the first position. If
   /// `name_prefix` is given, it is prepended to every key as
   /// `<name_prefix>.<key>` (and just `name_prefix` for the module itself).
@@ -300,7 +302,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   virtual void to(torch::Device device, bool non_blocking = false);
 
   /// Recursively zeros out the `grad` value of each registered parameter.
-  virtual void zero_grad();
+  virtual void zero_grad(bool set_to_none = false);
 
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///
@@ -406,12 +408,14 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Returns whether the `Module` is serializable.
   virtual bool is_serializable() const;
 
- protected:
   /// Registers a parameter with this `Module`.
   ///
   /// A parameter should be any gradient-recording tensor used in the
   /// implementation of your `Module`. Registering it makes it available to
   /// methods such as `parameters()`, `clone()` or `to().`
+  ///
+  /// Note that registering an undefined Tensor (e.g. `module.register_parameter("param", Tensor())`)
+  /// is allowed, and is equivalent to `module.register_parameter("param", None)` in Python API.
   ///
   /// \rst
   /// .. code-block:: cpp
@@ -476,11 +480,77 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
       std::string name,
       ModuleHolder<ModuleType> module_holder);
 
+  /// Replaces a registered submodule with this `Module`.
+  ///
+  /// This takes care of the registration, if you used submodule members, you should
+  //  assign the submodule as well, i.e. use as
+  ///     module->submodule_ = module->replace_module("linear", torch::nn::Linear(3, 4));
+  /// It only works when a module of the name is already registered.
+  ///
+  /// This is useful for replacing a module after initialization, e.g.
+  /// for finetuning.
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> replace_module(
+      const std::string& name,
+      std::shared_ptr<ModuleType> module);
+
+  /// Replaces a registered submodule with this `Module`.
+  /// This method deals with `ModuleHolder`s.
+  ///
+  /// This takes care of the registration, if you used submodule members, you should
+  //  assign the submodule as well, i.e. use as
+  ///     module->submodule_ = module->replace_module("linear", linear_holder);
+  /// It only works when a module of the name is already registered.
+  ///
+  /// This is useful for replacing a module after initialization, e.g.
+  /// for finetuning.
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> replace_module(
+      const std::string& name,
+      ModuleHolder<ModuleType> module_holder);
+
+  /// Unregisters a submodule from this `Module`. If there is no such module
+  /// with `name` an exception is thrown.
+  void unregister_module(const std::string& name);
+
+ protected:
+  /// The following three functions allow a module with default arguments in its
+  /// forward method to be used in a Sequential module.
+  /// You should NEVER override these functions manually. Instead, you should use the
+  /// `FORWARD_HAS_DEFAULT_ARGS` macro.
+  virtual bool _forward_has_default_args() {
+    return false;
+  }
+
+  virtual unsigned int _forward_num_required_args() {
+    TORCH_CHECK(
+      false,
+      "torch::nn::Module subclass that has default arguments in `forward` method ",
+      "must override `_forward_num_required_args` method. Please use ",
+      "`FORWARD_HAS_DEFAULT_ARGS` macro to do so.");
+  }
+
+  virtual std::vector<AnyValue> _forward_populate_default_args(std::vector<AnyValue>&& arguments) {
+    TORCH_CHECK(
+      false,
+      "torch::nn::Module subclass that has default arguments in `forward` method ",
+      "must override `_forward_populate_default_args` method. Please use ",
+      "`FORWARD_HAS_DEFAULT_ARGS` macro to do so.");
+  }
+
+  /// The registered parameters of this `Module`.
+  /// Inorder to access parameters_ in ParameterDict and ParameterList
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  OrderedDict<std::string, Tensor> parameters_;
+
  private:
   // Friend classes.
 
   template <typename Derived>
   friend class Cloneable;
+
+  template <typename ModuleType, typename... ArgumentTypes>
+  friend struct AnyModuleHolder;
 
   /// Pretty prints the given `Module` into the `ostream`.
   TORCH_API friend std::ostream& operator<<(
@@ -517,9 +587,6 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
 
   /// Returns a shared_ptr to `this` in a safe (checked) way.
   std::shared_ptr<Module> shared_from_this_checked() const;
-
-  /// The registered parameters of this `Module`.
-  OrderedDict<std::string, Tensor> parameters_;
 
   /// The registered buffers of this `Module`.
   OrderedDict<std::string, Tensor> buffers_;
@@ -591,6 +658,21 @@ std::shared_ptr<ModuleType> Module::register_module(
   return register_module(std::move(name), module_holder.ptr());
 }
 
+template <typename ModuleType>
+std::shared_ptr<ModuleType> Module::replace_module(
+    const std::string& name,
+    std::shared_ptr<ModuleType> module) {
+  auto& base_module = (children_[name] = std::move(module));
+  return std::dynamic_pointer_cast<ModuleType>(base_module);
+}
+
+template <typename ModuleType>
+std::shared_ptr<ModuleType> Module::replace_module(
+    const std::string& name,
+    ModuleHolder<ModuleType> module_holder) {
+  return replace_module(name, module_holder.ptr());
+}
+
 template <typename... Ts>
 void Module::to_impl(Ts&&... ts) {
   // First call `to()` on every child module.
@@ -598,11 +680,11 @@ void Module::to_impl(Ts&&... ts) {
     child.value()->to(ts...);
   }
   // Then move every parameter to the new dtype/device.
-  for (auto& parameter : parameters_) {
+  for (auto& parameter : named_parameters(/*recurse=*/false)) {
     parameter->set_data(autograd::Variable(*parameter).to(ts...));
   }
   // Then move every buffer to the new dtype/device.
-  for (auto& buffer : buffers_) {
+  for (auto& buffer : named_buffers(/*recurse=*/false)) {
     buffer->set_data(autograd::Variable(*buffer).to(ts...));
   }
 }

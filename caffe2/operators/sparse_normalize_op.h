@@ -6,7 +6,7 @@
 namespace caffe2 {
 
 template <typename T, class Context>
-class CAFFE2_API SparseNormalizeOp final : public Operator<Context> {
+class TORCH_API SparseNormalizeOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   template <class... Args>
@@ -26,7 +26,7 @@ class CAFFE2_API SparseNormalizeOp final : public Operator<Context> {
  protected:
   bool use_max_norm_;
   float norm_;
-  INPUT_TAGS(PARAM, INDICES, GRAD);
+  INPUT_TAGS(PARAM, INDICES);
   OUTPUT_TAGS(OUTPUT_PARAM);
 };
 

@@ -1,12 +1,10 @@
+from typing import Optional
 import warnings
-from .._jit_internal import weak_script
 
 # NB: Keep this file in sync with enums in aten/src/ATen/core/Reduction.h
 
 
-@weak_script
-def get_enum(reduction):
-    # type: (str) -> int
+def get_enum(reduction: str) -> int:
     if reduction == 'none':
         ret = 0
     elif reduction == 'mean':
@@ -18,7 +16,7 @@ def get_enum(reduction):
         ret = 2
     else:
         ret = -1  # TODO: remove once JIT exceptions support control flow
-        raise ValueError(reduction + " is not a valid value for reduction")
+        raise ValueError("{} is not a valid value for reduction".format(reduction))
     return ret
 
 # In order to support previous versions, accept boolean size_average and reduce
@@ -26,9 +24,7 @@ def get_enum(reduction):
 
 
 # We use these functions in torch/legacy as well, in which case we'll silence the warning
-@weak_script
-def legacy_get_string(size_average, reduce, emit_warning=True):
-    # type: (Optional[bool], Optional[bool], bool) -> str
+def legacy_get_string(size_average: Optional[bool], reduce: Optional[bool], emit_warning: bool = True) -> str:
     warning = "size_average and reduce args will be deprecated, please use reduction='{}' instead."
 
     if size_average is None:
@@ -47,7 +43,5 @@ def legacy_get_string(size_average, reduce, emit_warning=True):
     return ret
 
 
-@weak_script
-def legacy_get_enum(size_average, reduce, emit_warning=True):
-    # type: (Optional[bool], Optional[bool], bool) -> int
+def legacy_get_enum(size_average: Optional[bool], reduce: Optional[bool], emit_warning: bool = True) -> int:
     return get_enum(legacy_get_string(size_average, reduce, emit_warning))

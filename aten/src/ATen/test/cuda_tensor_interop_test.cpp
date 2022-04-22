@@ -1,7 +1,8 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/util/irange.h>
 #include <caffe2/core/init.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/core/context_gpu.h>
@@ -30,12 +31,11 @@ TEST(CUDACaffe2ToPytorch, SimpleLegacy) {
     caffe2::math::Set<int64_t>(16, 777, data, &context);
   }
   at::Tensor at_tensor(c2_tensor);
-  ASSERT_TRUE(&at_tensor.dispatch_type() != nullptr);
   ASSERT_TRUE(at_tensor.is_cuda());
 
   auto at_cpu = at_tensor.cpu();
-  auto it = at_cpu.data<int64_t>();
-  for (int64_t i = 0; i < 16; i++) {
+  auto it = at_cpu.data_ptr<int64_t>();
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(it[i], 777);
   }
 }
@@ -50,12 +50,11 @@ TEST(CUDACaffe2ToPytorch, Simple) {
     caffe2::math::Set<int64_t>(16, 777, data, &context);
   }
   at::Tensor at_tensor(c2_tensor);
-  ASSERT_TRUE(&at_tensor.dispatch_type() != nullptr);
   ASSERT_TRUE(at_tensor.is_cuda());
 
   auto at_cpu = at_tensor.cpu();
-  auto it = at_cpu.data<int64_t>();
-  for (int64_t i = 0; i < 16; i++) {
+  auto it = at_cpu.data_ptr<int64_t>();
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(it[i], 777);
   }
 }
@@ -86,6 +85,8 @@ TEST(CUDAPytorchToCaffe2, Op) {
 
   auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
   auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
+  (void)c2_tensor_a;
+  (void)c2_tensor_b;
 
   // Test Alias
   {
@@ -109,7 +110,7 @@ TEST(CUDAPytorchToCaffe2, Op) {
   ASSERT_EQ(result.GetDeviceType(), caffe2::CUDA);
 
   auto data = result.data<float>();
-  for (int64_t i = 0; i < 25; i++) {
+  for (const auto i : c10::irange(25)) {
     ASSERT_EQ(cuda_get(data + i), 3.0);
   }
   at::Tensor at_result(result);

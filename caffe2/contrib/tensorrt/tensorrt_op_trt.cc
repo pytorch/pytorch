@@ -1,11 +1,12 @@
 #include "caffe2/contrib/tensorrt/tensorrt_op_trt.h"
 
-#include <numeric>
-#include <unordered_map>
-
+#include <c10/util/accumulate.h>
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
 #include "caffe2/core/logging.h"
 #include "onnx/onnx_pb.h"
+
+#include <unordered_map>
+#include <numeric>
 
 namespace caffe2 {
 
@@ -134,13 +135,8 @@ void TensorRTOp::MaybeAdjustOutputShape(
   const auto it = output_size_hints_.find(output_idx);
   if (it != output_size_hints_.end()) {
     const auto& dims_hint = it->second;
-    auto total_trt = std::accumulate(
-        dims->begin(), dims->end(), (int64_t)(1), std::multiplies<int64_t>());
-    auto total_c2 = std::accumulate(
-        dims_hint.begin(),
-        dims_hint.end(),
-        (int64_t)(1),
-        std::multiplies<int64_t>());
+    const auto total_trt = c10::multiply_integers(*dims);
+    const auto total_c2 = c10::multiply_integers(dims_hint);
     CAFFE_ENFORCE_EQ(
         total_trt,
         total_c2,
@@ -178,7 +174,7 @@ bool TensorRTOp::RunOnDevice() {
   }
 
   // We need to do the binding at RunOnDevice time because we only know the
-  // exact shapes of the tensors now. In addtion, since TensorRT engine has
+  // exact shapes of the tensors now. In addition, since TensorRT engine has
   // max_batch_size, we need to call that multiple times if input batch size
   // exceeeds this limit.
   CAFFE_ENFORCE_EQ(is_input_.size(), nv_dims_.size());

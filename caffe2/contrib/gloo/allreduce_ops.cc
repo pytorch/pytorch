@@ -10,7 +10,7 @@
 
 namespace {
 /**
- * This is a helper function which attemtps to get a base value depending on the
+ * This is a helper function which attempts to get a base value depending on the
  * # of nodes. Larger the base the better performance (up to 4) is what we have
  * observed in gloo benchmarks. At the moment bcube works only if # nodes = base
  * ^ x. Where x is some constant. So, if # node don't match our expectation
@@ -80,6 +80,9 @@ void AllreduceOp<Context>::initializeHalvingDoubling() {
     CAFFE_ENFORCE(false, "Unhandled type: ", init_.meta.name());
   }
 }
+
+// Used outside of the translation unit
+template void AllreduceOp<CPUContext>::initializeHalvingDoubling();
 
 template <class Context>
 void AllreduceOp<Context>::initializeRingFull() {

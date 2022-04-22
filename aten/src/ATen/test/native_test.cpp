@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 using namespace at;
 
@@ -16,13 +17,13 @@ using namespace at;
 
 void requireEqualTensorList(TensorList t1, TensorList t2) {
   ASSERT_EQ(t1.size(), t2.size());
-  for (size_t i = 0; i < t1.size(); ++i) {
+  for (const auto i : c10::irange(t1.size())) {
     ASSERT_EQUAL(t1[i], t2[i]);
   }
 }
 
 // split: test method, namespace give same result
-void TestSplit(DeprecatedTypeProperties& T, Tensor& t) {
+void TestSplit(TensorOptions T, Tensor& t) {
   auto splitMethod = t.split(1, 0);
   auto splitNs = at::split(t, 1, 0);
   requireEqualTensorList(splitMethod, splitNs);
@@ -32,7 +33,7 @@ void TestSplit(DeprecatedTypeProperties& T, Tensor& t) {
 }
 
 // chunk: test method, namespace give same result
-void TestChunk(DeprecatedTypeProperties& T, Tensor& t) {
+void TestChunk(TensorOptions T, Tensor& t) {
   // test method, type, namespace give same result
   auto chunkMethod = t.chunk(3, 0);
   auto chunkNs = at::chunk(t, 3, 0);
@@ -42,38 +43,80 @@ void TestChunk(DeprecatedTypeProperties& T, Tensor& t) {
   ASSERT_EQUAL(at::cat(chunkMethod, 0), t);
 }
 
-void TestStack(DeprecatedTypeProperties& T, Tensor& t) {
-  auto x = rand({2, 3, 4});
-  auto y = rand({2, 3, 4});
-  auto z = rand({2, 3, 4});
-  for (int64_t dim = 0; dim < 4; ++dim) {
-    auto res = at::stack({x, y, z}, dim);
-    auto res_neg = at::stack({x, y, z}, dim - 4);
-    std::vector<int64_t> expected_size;
-    expected_size.insert(
-        expected_size.end(), x.sizes().begin(), x.sizes().begin() + dim);
-    expected_size.insert(expected_size.end(), 3);
-    expected_size.insert(
-        expected_size.end(), x.sizes().begin() + dim, x.sizes().end());
+typedef Tensor StackFunc (TensorList, int64_t);
 
-    ASSERT_EQUAL(res, res_neg);
-    ASSERT_TRUE(res.sizes().equals(expected_size));
-    ASSERT_EQUAL(res.select(dim, 0), x);
-    ASSERT_EQUAL(res.select(dim, 1), y);
-    ASSERT_EQUAL(res.select(dim, 2), z);
+// helper function for TestStack
+void _test_stack(TensorList inputs, int64_t dim, StackFunc stack_func) {
+  auto const &x = inputs[0];
+
+  auto res = stack_func(inputs, dim);
+  auto res_neg = stack_func(inputs, dim - x.dim() - 1);
+  std::vector<int64_t> expected_size;
+  expected_size.insert(
+      expected_size.end(), x.sizes().begin(), x.sizes().begin() + dim);
+  expected_size.insert(expected_size.end(), inputs.size());
+  expected_size.insert(
+      expected_size.end(), x.sizes().begin() + dim, x.sizes().end());
+
+  ASSERT_EQUAL(res, res_neg);
+  ASSERT_TRUE(res.sizes().equals(expected_size));
+
+  int d = 0;
+  for (auto& t : inputs) {
+    ASSERT_EQUAL(res.select(dim, d), t);
+    d++;
+  }
+}
+
+void TestStack(TensorOptions T, Tensor& t) {
+  { // at::stack
+    auto x = rand({2, 3, 4});
+    auto y = rand({2, 3, 4});
+    auto z = rand({2, 3, 4});
+
+    auto inputs = {x, y, z};
+    for (const auto dim : c10::irange(4)) {
+      _test_stack(inputs, dim, at::stack);
+    }
+  }
+
+  { // at::native::_stack
+    auto x = rand({2, 3, 4});
+    auto y = rand({2, 3, 4});
+    auto z = rand({2, 3, 4});
+
+    auto inputs = {x, y, z};
+    for (const auto dim : c10::irange(4)) {
+      _test_stack(inputs, dim, at::native::_stack);
+    }
+  }
+
+  { // at::native::_stack_cpu
+    auto x = rand({2, 3, 4});
+    auto y = rand({2, 3, 4});
+    auto z = rand({2, 3, 4});
+
+    auto inputs = {x, y, z};
+    for (const auto dim : c10::irange(4)) {
+      _test_stack(inputs, dim, at::native::_stack_cpu);
+    }
   }
 }
 
 // size / stride
-void TestSize(DeprecatedTypeProperties& T, Tensor& t) {
+void TestSize(TensorOptions T, Tensor& t) {
   auto scalar = randn({}, T);
   // Throw StartsWith("dimension specified as 0 but tensor has no dimensions")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(scalar.size(0));
   // Throw StartsWith("dimension specified as -1 but tensor has no dimensions")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(scalar.size(-1));
   // Throw StartsWith("dimension specified as 0 but tensor has no dimensions")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(scalar.stride(0));
   // Throw StartsWith("dimension specified as -1 but tensor has no dimensions")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(scalar.stride(-1));
 
   auto empty = randn({0}, T);
@@ -83,15 +126,17 @@ void TestSize(DeprecatedTypeProperties& T, Tensor& t) {
   ASSERT_EQ(empty.stride(-1), 1);
 }
 
-void TestMatmul(DeprecatedTypeProperties& T, Tensor& t, DeprecatedTypeProperties& AccT) {
+void TestMatmul(TensorOptions T, Tensor& t, TensorOptions AccT) {
   auto scalar = randn({}, T);
   auto d1 = randn({3}, T);
   auto d2 = randn({2, 3}, T);
 
   // 0-d
   // Throw StartsWith("both arguments to matmul need to be at least 1D")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(scalar.matmul(d2));
   // Throw StartsWith("both arguments to matmul need to be at least 1D")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(d2.matmul(scalar));
 
   // 1-d
@@ -129,10 +174,10 @@ void TestMatmul(DeprecatedTypeProperties& T, Tensor& t, DeprecatedTypeProperties
   double rtol = 1e-06;
   d2 = randn({3, 4}, T);
   d2o = randn({4, 2}, T);
-  auto result = d5.matmul(d2).toType(AccT);
+  auto result = d5.matmul(d2).to(AccT);
 
-  auto d5Acc = d5.toType(AccT);
-  auto d2Acc = d2.toType(AccT);
+  auto d5Acc = d5.to(AccT);
+  auto d2Acc = d2.to(AccT);
   auto acc_result = d5Acc.view({24, 2, 3})
                         .bmm(d2Acc.expand({24, 3, 4}))
                         .view({3, 2, 4, 2, 4});
@@ -153,10 +198,11 @@ void TestMatmul(DeprecatedTypeProperties& T, Tensor& t, DeprecatedTypeProperties
   // non-expandable case
   auto d5wrong = randn({2, 4, 2, 4, 3, 2}, T);
   // Throw Contains("must match the size")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(d5.matmul(d5wrong));
 }
 
-void TestStandardGammaGrad(DeprecatedTypeProperties& T, Tensor& t) {
+void TestStandardGammaGrad(TensorOptions T, Tensor& t) {
   // check empty
   auto empty = ones({0}, T);
   ASSERT_EQUAL(empty, at::_standard_gamma_grad(empty, empty));
@@ -172,13 +218,14 @@ void TestStandardGammaGrad(DeprecatedTypeProperties& T, Tensor& t) {
   auto t1 = randn({3, 4}, T);
   auto t2 = randn({3, 4}, T).toType(kDouble);
   // Throw StartsWith("expected scalar type")
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(at::_standard_gamma_grad(t1, t2));
 }
 
-void TestWhere(DeprecatedTypeProperties& T, Tensor& t) {
+void TestWhere(TensorOptions T, Tensor& t) {
   // empty
   auto empty = ones({0}, T);
-  auto& bT = T.toScalarType(ScalarType::Byte);
+  auto bT = T.dtype(kByte);
   auto empty_byte = ones({0}, bT);
   ASSERT_EQUAL(empty, at::where(empty_byte, empty, empty));
 
@@ -194,7 +241,7 @@ void TestWhere(DeprecatedTypeProperties& T, Tensor& t) {
       at::where(cond_1d, x_1d, y_1d));
 }
 
-void test(DeprecatedTypeProperties& T, DeprecatedTypeProperties& AccT) {
+void test(TensorOptions T, TensorOptions AccT) {
   auto t = randn({3, 3}, T);
   TestSplit(T, t);
   TestChunk(T, t);
@@ -208,13 +255,15 @@ void test(DeprecatedTypeProperties& T, DeprecatedTypeProperties& AccT) {
 TEST(TestNative, NativeTestCPU) {
   manual_seed(123);
 
-  test(CPU(kFloat), CPU(kDouble));
+  test(at::device(kCPU).dtype(kFloat),
+       at::device(kCPU).dtype(kDouble));
 }
 
 TEST(TestNative, NativeTestGPU) {
   manual_seed(123);
 
   if (at::hasCUDA()) {
-    test(CUDA(kFloat), CUDA(kDouble));
+    test(at::device(kCUDA).dtype(kFloat),
+         at::device(kCUDA).dtype(kDouble));
   }
 }

@@ -4,6 +4,7 @@
 #include "caffe2/operators/batch_gather_ops.h"
 // Shared batch kernel
 #include "caffe2/operators/gather_op.cuh"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 namespace caffe2 {
 
@@ -18,7 +19,7 @@ template <typename TInd>
 bool BatchGatherOp<CUDAContext>::DoRunWithType() {
   // BatchGather is a special-case of Gather with Axis = 1, wrap = false.
   return gather_helper::gather_impl_cuda<TInd>(
-      this, DATA, INDICES, 0, 1, false);
+      this, DATA, INDICES, 0, 1, false, match_outer_);
 }
 
 template <typename T_INDEX, typename TData>
@@ -47,7 +48,7 @@ __global__ void BatchGatherGradientKernel(
     const float* src_offset =
         grad_data + i * gathered_batch_size + j * block_size;
     float* dst_offset = out + i * data_batch_size + idx * block_size;
-    atomicAdd(dst_offset + k, src_offset[k]);
+    gpu_atomic_add(dst_offset + k, src_offset[k]);
   }
 }
 
@@ -68,10 +69,12 @@ bool BatchGatherGradientOp<CUDAContext>::DoRunWithType() {
 template <>
 template <typename TInd, typename TData>
 bool BatchGatherGradientOp<CUDAContext>::DoRunWithType2() {
+  CAFFE_ENFORCE(
+      !match_outer_, "match_outer=true is currently only supported for CPU");
+
   auto& data = Input(DATA);
   auto& indices = Input(INDICES);
   auto& grad = Input(GRAD);
-  
 
   // ONNX allows negative axis to index from the back, valid range: [-r, r].
   int axis = axis_;
@@ -117,7 +120,8 @@ bool BatchGatherGradientOp<CUDAContext>::DoRunWithType2() {
       gathered_batch_size,
       block_size,
       src_indexing_axis_dim,
-      false); // TBD: Add proper index wrapping support to Gather gradients.
+      false);
+  C10_CUDA_KERNEL_LAUNCH_CHECK(); // TBD: Add proper index wrapping support to Gather gradients.
 
   return true;
 }

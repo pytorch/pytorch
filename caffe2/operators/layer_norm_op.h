@@ -5,8 +5,8 @@
 #include <vector>
 
 #include "caffe2/core/context.h"
-#include "caffe2/core/operator.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 
@@ -52,6 +52,11 @@ class LayerNormOp final : public Operator<Context> {
     T* sigma_data = sigma->template mutable_data<T>();
     T* scale_data = scale_.template mutable_data<T>();
     T* bias_data = bias_.template mutable_data<T>();
+
+    if (M == 0) {
+      return true;
+    }
+
     const std::array<int, 2> X_dims = {M, N};
     const std::array<int, 2> Y_dims = {M, 1};
     math::Moments<T, Context>(
@@ -127,7 +132,6 @@ class LayerNormGradientOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& dY = Input(0);
-    const auto& Y = Input(1);
     const auto& mean = Input(2);
     const auto& sigma = Input(3);
     const auto& X = Input(4);
@@ -174,6 +178,16 @@ class LayerNormGradientOp final : public Operator<Context> {
       g_scale_data = g_scale_.template mutable_data<T>();
     }
 
+    if (M == 0) {
+      if (N > 0 && dgamma_data != nullptr) {
+        math::Set<T, Context>(N, T(0), dgamma_data, &context_);
+      }
+      if (N > 0 && dbeta_data != nullptr) {
+        math::Set<T, Context>(N, T(0), dbeta_data, &context_);
+      }
+      return true;
+    }
+
     ComputeInternalGradients<T>(
         M, N, dY_data, X_data, gamma_data, dX_data, ds_data, db_data);
     ComputeFusedParams<T>(
@@ -196,8 +210,7 @@ class LayerNormGradientOp final : public Operator<Context> {
           rstd_data,
           g_scale_data,
           dgamma_data,
-          dbeta_data,
-          dX_data);
+          dbeta_data);
     }
     LayerNormBackward<T>(
         M,
@@ -259,8 +272,7 @@ class LayerNormGradientOp final : public Operator<Context> {
       const T* rstd,
       const T* g_scale,
       T* dgamma,
-      T* dbeta,
-      T* scratch);
+      T* dbeta);
 
   const int axis_;
   const bool elementwise_affine_;

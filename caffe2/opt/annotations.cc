@@ -1,3 +1,5 @@
+#include <utility>
+
 #include "caffe2/opt/annotations.h"
 
 namespace caffe2 {
@@ -94,7 +96,7 @@ const NNGraph::NodeRef& Caffe2Annotation::getLengthNode() const {
 }
 
 void Caffe2Annotation::setComponentLevels(std::vector<std::string> components) {
-  component_levels_ = components;
+  component_levels_ = std::move(components);
 }
 std::vector<std::string> Caffe2Annotation::getComponentLevels() const {
   return component_levels_;

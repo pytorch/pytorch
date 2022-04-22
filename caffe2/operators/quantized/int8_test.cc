@@ -341,8 +341,8 @@ TEST(Int8, SumRelu) {
 }
 
 void setq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
-  CHECK_EQ(vs.size(), dst->t.numel());
-  for (auto i = 0; i < vs.size(); ++i) {
+  CHECK_EQ(vs.size(), static_cast<size_t>(dst->t.numel()));
+  for (auto i = 0U; i < vs.size(); ++i) {
     uint8_t vq = std::max(
         std::numeric_limits<uint8_t>::min(),
         std::min(
@@ -354,8 +354,8 @@ void setq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
 }
 
 void biassetq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
-  CHECK_EQ(vs.size(), dst->t.numel());
-  for (auto i = 0; i < vs.size(); ++i) {
+  CHECK_EQ(vs.size(), static_cast<size_t>(dst->t.numel()));
+  for (auto i = 0U; i < vs.size(); ++i) {
     int32_t vq = std::max(
         std::numeric_limits<int32_t>::min(),
         std::min(
@@ -999,6 +999,25 @@ TEST(Int8, Slice) {
   const auto& YE = ws.GetBlob("Y")->Get<TensorCPU>();
   EXPECT_TENSOR_EQ(*YA, YE);
   EXPECT_EQ(YQ.t.sizes(), (vector<int64_t>{1, 2, 25, 16}));
+  EXPECT_EQ(YQ.scale, XQ->scale);
+  EXPECT_EQ(YQ.zero_point, XQ->zero_point);
+}
+
+TEST(Int8, DISABLED_Transpose) {
+  auto XQ = q({1, 50, 25, 16});
+  auto xop = CreateOperatorDef(
+      "Int8Transpose",
+      "",
+      {"XQ"},
+      {"YQ"},
+      {MakeArgument("axes", vector<int64_t>{0, 3, 1, 2}),
+       MakeArgument<float>("Y_scale", XQ->scale),
+       MakeArgument<int32_t>("Y_zero_point", XQ->zero_point)});
+  Workspace ws;
+  int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
+  ws.RunOperatorOnce(xop);
+  const auto& YQ = ws.GetBlob("YQ")->Get<int8::Int8TensorCPU>();
+  EXPECT_EQ(YQ.t.sizes(), (vector<int64_t>{1, 16, 50, 25}));
   EXPECT_EQ(YQ.scale, XQ->scale);
   EXPECT_EQ(YQ.zero_point, XQ->zero_point);
 }

@@ -1,10 +1,10 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from caffe2.python import core, workspace
-from hypothesis import given
+
+
+
+
+from caffe2.python import core
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -59,6 +59,7 @@ class TestExpandOp(serial.SerializedTestCase):
                              np.ones([1, 4, 1, 2]),
                              np.ones([4, 1, 2])]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_expand_nonrand_shape2(self, X, gc, dc):
         self._run_expand_op_test(X, [4, 1, 2, 2], gc, dc)
         self._run_expand_op_test(X, [4, -1, 2, 2], gc, dc)

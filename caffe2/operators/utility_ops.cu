@@ -8,6 +8,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/flatten_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -26,14 +27,8 @@ bool WeightedSumOp<CUDAContext>::RunOnDevice() {
 
 template <>
 bool SumOp<CUDAContext>::RunOnDevice() {
-  if (Input(0).IsType<float>()) {
-    return DoRunWithType<float, float>();
-  } else if (Input(0).IsType<at::Half>()) {
-    return DoRunWithType<at::Half, at::Half>();
-  } else {
-    CAFFE_THROW("Unsupported inputs");
-  }
-  return false;
+  return DispatchHelper<TensorTypes<float, at::Half, int32_t, int64_t>>::call(
+      this, Input(0));
 }
 
 REGISTER_CUDA_OPERATOR(Print, PrintOp<CUDAContext>);
@@ -43,8 +38,6 @@ REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<CUDAContext>);
-
-CAFFE_KNOWN_TYPE(const float*);
 
 REGISTER_CUDA_OPERATOR(EnsureDense, EnsureDenseOp<CUDAContext>);
 
@@ -78,6 +71,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       N, X.data<float>(), scratch_.mutable_data<bool>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   bool result = false;
   {
@@ -100,7 +94,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
     for (int j = 0; j < InputSize(); j++) {
       Tensor cpu_X(CPU);
       cpu_X.ResizeLike(Input(j));
-      // Hack to cause allocaiton happen here, so it won't happen
+      // Hack to cause allocation happen here, so it won't happen
       // when we do CopyFrom. We need the mutex then because host->gpu
       // copies seem to possibly lock with NCCL.
       cpu_X.mutable_data<float>();
@@ -164,20 +158,47 @@ __global__ void AxpySliceKernel(
       float a = *alpha[b];
       const float* x_offset = X[b] + (i * slice_size);
       for (int j = threadIdx.x; j < slice_size; j += blockDim.x) {
-        atomicAdd(&y_offset[j], a * x_offset[j]);
+        gpu_atomic_add(&y_offset[j], a * x_offset[j]);
       }
     }
   }
 }
 
-template <>
-bool ScatterWeightedSumOp<float, CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(2));
+// this kernel is a custom version of AxpySliceKernel
+// to be used when there is only one weighted X to update
+// slice of Y.
+template <typename T_INDEX>
+__global__ void AxpySliceKernel2(
+    const float* weight0,
+    const int64_t N,
+    const int64_t slice_size,
+    const float* alpha,
+    const float* X,
+    const T_INDEX* Indices,
+    float* Y,
+    const int64_t M) {
+  // This implementation requires that the first weight is 1.0
+  CUDA_KERNEL_ASSERT(weight0[0] == 1.0);
+  for (int i = blockIdx.x; i < N; i += gridDim.x) {
+    T_INDEX idx = Indices[i];
+    float* y_offset = Y + (idx * slice_size);
+    for (int j = threadIdx.x; j < slice_size; j += blockDim.x) {
+      gpu_atomic_add(&y_offset[j], alpha[0] * X[(i * slice_size) + j]);
+    }
+  }
 }
 
 template <>
-template <typename Index>
-bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
+bool ScatterWeightedSumOp<CUDAContext>::RunOnDevice() {
+  const auto& x0 = Input(0);
+  const auto x0Type = TypeMetaToDataType(x0.dtype());
+  CAFFE_ENFORCE_EQ(x0Type, TensorProto_DataType_FLOAT, "Only float type is allowed for X0 on GPU.");
+  return ScatterWeightedSumOp<CUDAContext>::template DoRun<float>();
+}
+
+template <>
+template <typename T, typename Index>
+bool ScatterWeightedSumOp<CUDAContext>::DoRunWithType() {
   CAFFE_ENFORCE_EQ(InputSize() % 2, 1);
   auto& X0 = Input(0);
   auto& weight0 = Input(1);
@@ -196,51 +217,73 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
 
   float* data = output->template mutable_data<float>();
 
-  // In order to have all device pointers of x_i (and weight_i similarly)
-  // consecutively in device memory, copy pointers to a host vector and then
-  // copy back into a device array.
   const int64_t B = (InputSize() - 3) / 2;
-  ReinitializeTensor(&x_data_host_, {B}, at::dtype<const float*>().device(CPU));
-  ReinitializeTensor(&weights_host_, {B}, at::dtype<const float*>().device(CPU));
-  ReinitializeTensor(&x_data_device_, {B}, at::dtype<const float*>().device(CUDA));
-  ReinitializeTensor(&weights_device_, {B}, at::dtype<const float*>().device(CUDA));
+  if (B > 1) {
+    // In order to have all device pointers of x_i (and weight_i similarly)
+    // consecutively in device memory, copy pointers to a host vector and then
+    // copy back into a device array.
+    ReinitializeTensor(&x_data_host_, {B}, at::dtype<float*>().device(CPU));
+    ReinitializeTensor(&weights_host_, {B}, at::dtype<float*>().device(CPU));
+    ReinitializeTensor(&x_data_device_, {B}, at::dtype<float*>().device(CUDA));
+    ReinitializeTensor(&weights_device_, {B}, at::dtype<float*>().device(CUDA));
 
-  const float** x_data_host = x_data_host_.mutable_data<const float*>();
-  const float** weights_host = weights_host_.mutable_data<const float*>();
-  const float** x_data_device = x_data_device_.mutable_data<const float*>();
-  const float** weights_device = weights_device_.mutable_data<const float*>();
+    float** x_data_host = x_data_host_.mutable_data<float*>();
+    float** weights_host = weights_host_.mutable_data<float*>();
+    float** x_data_device = x_data_device_.mutable_data<float*>();
+    float** weights_device = weights_device_.mutable_data<float*>();
 
-  for (int inp = 3; inp < InputSize(); inp += 2) {
-    int idx = (inp - 3) / 2;
-    x_data_host[idx] = static_cast<const float*>(Input(inp).raw_data());
-    weights_host[idx] = static_cast<const float*>(Input(inp + 1).raw_data());
+    for (int inp = 3; inp < InputSize(); inp += 2) {
+      int idx = (inp - 3) / 2;
+      x_data_host[idx] = static_cast<float*>(Input(inp).raw_data());
+      weights_host[idx] = static_cast<float*>(Input(inp + 1).raw_data());
+    }
+    context_.Copy<float*, CPUContext, CUDAContext>(
+        B, x_data_host, x_data_device);
+    context_.Copy<float*, CPUContext, CUDAContext>(
+        B, weights_host, weights_device);
+
+    AxpySliceKernel<<<
+        std::min<int64_t>(K, CAFFE_MAXIMUM_NUM_BLOCKS),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context_.cuda_stream()>>>(
+        weight0.template data<float>(),
+        K,
+        B,
+        block_size,
+        const_cast<const float**>(weights_device),
+        const_cast<const float**>(x_data_device),
+        indices.template data<Index>(),
+        data,
+        M);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  } else {
+    // when only one input exists to update data buffer,
+    // avoid copying pointers to device array to prevent
+    // copy overhead
+    auto& X1 = Input(3);
+    auto& weight1 = Input(4);
+    AxpySliceKernel2<<<
+        std::min<int64_t>(K, CAFFE_MAXIMUM_NUM_BLOCKS),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context_.cuda_stream()>>>(
+        weight0.template data<float>(),
+        K,
+        block_size,
+        weight1.template data<float>(),
+        X1.template data<float>(),
+        indices.template data<Index>(),
+        data,
+        M);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  context_.Copy<const float*, CPUContext, CUDAContext>(
-      B, x_data_host, x_data_device);
-  context_.Copy<const float*, CPUContext, CUDAContext>(
-      B, weights_host, weights_device);
-
-  AxpySliceKernel<<<
-      std::min<int64_t>(K, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      weight0.template data<float>(),
-      K,
-      B,
-      block_size,
-      weights_device,
-      x_data_device,
-      indices.template data<Index>(),
-      data,
-      M);
-
   return true;
 }
 
 REGISTER_CUDA_OPERATOR(
     ScatterWeightedSum,
-    ScatterWeightedSumOp<float, CUDAContext>);
+    ScatterWeightedSumOp<CUDAContext>);
 
 namespace {
 
@@ -279,6 +322,7 @@ void ScatterAssignOp<CUDAContext>::DoScatterAssign(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(data, idxs, slicesData, N, K, block_size);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(ScatterAssign, ScatterAssignOp<CUDAContext>);
@@ -305,6 +349,8 @@ bool RangeOp<CUDAContext>::DoRunOnDevice(
       0,
       context_.cuda_stream()>>>(
       N, output->template mutable_data<T>(), start, step);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
