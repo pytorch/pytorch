@@ -146,12 +146,16 @@ class strict_fusion(object):
     This class errors if not all nodes have been fused in
     inference, or symbolically differentiated in training.
 
-    Example (Freezing a module with Conv->Batchnorm)
+    Example:
+
+    Forcing fusion of additions.
+
     .. code-block:: python
 
-        import torch
-        with torch.jit.strict_fusion():
-            return x + x + x
+        @torch.jit.script
+        def foo(x):
+            with torch.jit.strict_fusion():
+                return x + x + x
 
     """
 
