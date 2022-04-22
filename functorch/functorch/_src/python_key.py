@@ -64,9 +64,8 @@ class PythonTensor(torch.Tensor):
         return r
 
     def __repr__(self):
-        # This is a bit goofy but whatever.  Should fix up _tensor_str.py to
-        # work on subclasses when it calls tolist
-        return f"PythonTensor({torch.Tensor._make_subclass(torch.Tensor, self)})"
+        with no_dispatch():
+            return f"PythonTensor({self.as_subclass(torch.Tensor)})"
 
     __torch_function__ = _disabled_torch_function_impl
 
