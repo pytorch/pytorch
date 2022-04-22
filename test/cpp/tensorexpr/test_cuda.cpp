@@ -37,9 +37,9 @@ static void testCudaTestVectorAdd01_impl() {
   Tensor c = Compute(
       "c",
       {
-          {num_iter, "n"},
-          {block_count, "b_id"},
-          {block_size, "t_id"},
+          num_iter,
+          block_count,
+          block_size,
       },
       [&](const VarHandle& n, const VarHandle& b_id, const VarHandle& t_id) {
         return a_buf.load(n, b_id, t_id) + b_buf.load(n, b_id, t_id);
@@ -101,9 +101,9 @@ TEST(Cuda, Sigmoid_CUDA) {
   Tensor c = Compute(
       "c",
       {
-          {num_iter, "n"},
-          {block_count, "b_id"},
-          {block_size, "t_id"},
+          num_iter,
+          block_count,
+          block_size,
       },
       [&](const VarHandle& n, const VarHandle& b_id, const VarHandle& t_id) {
         return sigmoid(sigmoid(a_buf.load(n, b_id, t_id)));
@@ -163,12 +163,9 @@ TEST(Cuda, TestVectorAdd01_CUDA) {
 static void testCudaTestVectorAdd02_impl(int64_t N, int64_t block_size) {
   BufHandle a_buf("a", {N}, kFloat);
   BufHandle b_buf("b", {N}, kFloat);
-  Tensor c = Compute(
-      "c",
-      {
-          {N, "N"},
-      },
-      [&](const VarHandle& n) { return a_buf.load(n) + b_buf.load(n); });
+  Tensor c = Compute("c", {N}, [&](const VarHandle& n) {
+    return a_buf.load(n) + b_buf.load(n);
+  });
   LoopNest l({c});
   ForPtr n_inner;
   std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
@@ -222,7 +219,7 @@ TEST(Cuda, TestVectorAdd02_CUDA) {
 TEST(Cuda, HalfCast_CUDA) {
   auto half = ToDtype<at::Half>();
   BufHandle a("a", {4}, half);
-  Tensor b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor b = Compute("b", {4}, [&](const VarHandle& i) {
     return Cast::make(kFloat, a.load(i));
   });
 
@@ -263,8 +260,8 @@ TEST(Cuda, DynamicShape2D_CUDA) {
     VarHandle n("n", kInt);
     BufHandle a("a", {m, n}, kFloat);
     BufHandle b("b", {m, n}, kFloat);
-    Tensor c = Compute(
-        "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
+    Tensor c =
+        Compute("c", {m, n}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
         });
     LoopNest l({c});
@@ -326,9 +323,9 @@ TEST(Cuda, TestRand01_CUDA) {
   Tensor c = Compute(
       "c",
       {
-          {num_iter, "n"},
-          {block_count, "b_id"},
-          {block_size, "t_id"},
+          num_iter,
+          block_count,
+          block_size,
       },
       [&](const VarHandle& n, const VarHandle& b_id, const VarHandle& t_id) {
         return Intrinsics::make(IntrinsicsOp::kRand, kFloat);
@@ -381,8 +378,8 @@ TEST(Cuda, DynamicShapeSplit_CUDA) {
   constexpr int64_t N = 4096;
   VarHandle n("n", kLong);
   BufHandle a("a", {n}, kFloat);
-  Tensor b = Compute(
-      "b", {{n, "n"}}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
+  Tensor b =
+      Compute("b", {n}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
   LoopNest l({b});
   ForPtr inner;
   std::vector<ForPtr> loops = l.getLoopStmtsFor(b);
@@ -914,15 +911,15 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
 TEST(Cuda, HalfSupport_CUDA) {
   auto half = ToDtype<at::Half>();
   BufHandle a("a", {4}, half);
-  Tensor b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor b = Compute("b", {4}, [&](const VarHandle& i) {
     return Cast::make(half, ExprHandle(2.0f) * a.load(i));
   });
 
-  Tensor c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor c = Compute("c", {4}, [&](const VarHandle& i) {
     return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b.load(i));
   });
 
-  Tensor d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor d = Compute("d", {4}, [&](const VarHandle& i) {
     return Cast::make(half, c.load(i));
   });
 
@@ -971,7 +968,7 @@ TEST(Cuda, HalfSupport_CUDA) {
 TEST(Cuda, HalfPropagation_CUDA) {
   auto half = ToDtype<at::Half>();
   BufHandle a("a", {4}, half);
-  Tensor relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor relu = Compute("relu", {4}, [&](const VarHandle& i) {
     return Max::make(a.load(i), ExprHandle(alloc<HalfImm>(0)), true);
   });
 
@@ -987,8 +984,8 @@ TEST(Cuda, HalfPropagation_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (
-# CHECK:  float v = float(a[n]);
-# CHECK:  relu[n] = half(Max(v, 0.f
+# CHECK:  float v = float(a[i]);
+# CHECK:  relu[i] = half(Max(v, 0.f
 # CHECK: })IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1020,7 +1017,7 @@ TEST(Cuda, UnusedHalfArgument_CUDA) {
   BufHandle a("a", {4}, kFloat);
   auto half = ToDtype<at::Half>();
   BufHandle b("b", {4}, half);
-  Tensor relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
+  Tensor relu = Compute("relu", {4}, [&](const VarHandle& i) {
     return Max::make(a.load(i), ExprHandle(alloc<FloatImm>(0)), true);
   });
 
@@ -1036,8 +1033,8 @@ TEST(Cuda, UnusedHalfArgument_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (
-# CHECK:  float v = a[n];
-# CHECK:  relu[n] = Max(v, 0.f
+# CHECK:  float v = a[i];
+# CHECK:  relu[i] = Max(v, 0.f
 # CHECK: })IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1150,10 +1147,9 @@ TEST(Cuda, MaskBlockDim_CUDA) {
   int B_SIZE = 50;
   BufHandle a_buf("a", {A_SIZE}, kFloat);
   BufHandle b_buf("b", {B_SIZE}, kFloat);
-  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
-    return a_buf.load(i) + 10;
-  });
-  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute(
+      "c", {A_SIZE}, [&](const VarHandle& i) { return a_buf.load(i) + 10; });
+  Tensor d = Compute("d", {B_SIZE}, [&](const VarHandle& i) {
     return a_buf.load(i) + b_buf.load(i);
   });
 
@@ -1242,10 +1238,9 @@ TEST(Cuda, MaskThreadDim_CUDA) {
   int B_SIZE = 100;
   BufHandle a_buf("a", {A_SIZE}, kFloat);
   BufHandle b_buf("b", {B_SIZE}, kFloat);
-  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
-    return a_buf.load(i) + 10;
-  });
-  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute(
+      "c", {A_SIZE}, [&](const VarHandle& i) { return a_buf.load(i) + 10; });
+  Tensor d = Compute("d", {B_SIZE}, [&](const VarHandle& i) {
     return a_buf.load(i / 2) + b_buf.load(i);
   });
 
@@ -1336,10 +1331,9 @@ TEST(Cuda, MaskMultiBlockDim_CUDA) {
   int B_SIZE = 50;
   BufHandle a_buf("a", {A_SIZE}, kFloat);
   BufHandle b_buf("b", {B_SIZE}, kFloat);
-  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
-    return a_buf.load(i) + 10;
-  });
-  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute(
+      "c", {A_SIZE}, [&](const VarHandle& i) { return a_buf.load(i) + 10; });
+  Tensor d = Compute("d", {B_SIZE}, [&](const VarHandle& i) {
     return a_buf.load(i) + b_buf.load(i);
   });
 
@@ -1429,10 +1423,9 @@ TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
   int B_SIZE = 50;
   BufHandle a_buf("a", {A_SIZE}, kFloat);
   BufHandle b_buf("b", {B_SIZE}, kFloat);
-  Tensor c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
-    return a_buf.load(i) + 10;
-  });
-  Tensor d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute(
+      "c", {A_SIZE}, [&](const VarHandle& i) { return a_buf.load(i) + 10; });
+  Tensor d = Compute("d", {B_SIZE}, [&](const VarHandle& i) {
     return a_buf.load(i) + b_buf.load(i);
   });
 
@@ -1522,15 +1515,11 @@ TEST(Cuda, MaskMultiDim_CUDA) {
   BufHandle a_buf("a", {OUTER_SIZE, A_SIZE}, kFloat);
   BufHandle b_buf("b", {OUTER_SIZE, B_SIZE}, kFloat);
   Tensor c = Compute(
-      "C",
-      {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {OUTER_SIZE, A_SIZE}, [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
   Tensor d = Compute(
-      "D",
-      {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "D", {OUTER_SIZE, B_SIZE}, [&](const VarHandle& i, const VarHandle& j) {
         return c.load(i, j * 2) + b_buf.load(i, j);
       });
 
@@ -1651,15 +1640,11 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   BufHandle a_buf("a", {OUTER_SIZE, A_SIZE}, kFloat);
   BufHandle b_buf("b", {OUTER_SIZE, B_SIZE}, kFloat);
   Tensor c = Compute(
-      "C",
-      {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {OUTER_SIZE, A_SIZE}, [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
   Tensor d = Compute(
-      "D",
-      {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "D", {OUTER_SIZE, B_SIZE}, [&](const VarHandle& i, const VarHandle& j) {
         return c.load(i, j * 2) + b_buf.load(i, j);
       });
 
@@ -2062,15 +2047,11 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   BufHandle a_buf("a", {OUTER_SIZE, A_SIZE}, kFloat);
   BufHandle b_buf("b", {OUTER_SIZE, B_SIZE}, kFloat);
   Tensor c = Compute(
-      "C",
-      {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {OUTER_SIZE, A_SIZE}, [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
   Tensor d = Compute(
-      "D",
-      {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "D", {OUTER_SIZE, B_SIZE}, [&](const VarHandle& i, const VarHandle& j) {
         return c.load(i, j * 2) + b_buf.load(i, j);
       });
 
@@ -2192,15 +2173,11 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   BufHandle a_buf("a", {OUTER_A_SIZE, A_SIZE}, kFloat);
   BufHandle b_buf("b", {OUTER_B_SIZE, B_SIZE}, kFloat);
   Tensor c = Compute(
-      "C",
-      {{OUTER_A_SIZE, "i"}, {A_SIZE, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "C", {OUTER_A_SIZE, A_SIZE}, [&](const VarHandle& i, const VarHandle& j) {
         return ExprHandle(2) * a_buf.load(i, j);
       });
   Tensor d = Compute(
-      "D",
-      {{OUTER_B_SIZE, "i"}, {B_SIZE, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+      "D", {OUTER_B_SIZE, B_SIZE}, [&](const VarHandle& i, const VarHandle& j) {
         return c.load(i, j * 2) + b_buf.load(i, j);
       });
 

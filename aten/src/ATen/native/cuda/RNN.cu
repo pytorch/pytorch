@@ -1,10 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <c10/macros/Macros.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_native.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_backward_native.h>
+#include <ATen/ops/_thnn_fused_gru_cell_native.h>
+#include <ATen/ops/_thnn_fused_gru_cell_backward_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -362,6 +375,7 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
 
   dim3 block, grid;
   int64_t numel = cx.numel();
+  if (numel == 0) return;
   getLaunchConfig(&block, &grid, numel);
 
   auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
@@ -399,6 +413,7 @@ void lstm_backward_impl(const Tensor& grad_hy, const Tensor& grad_cy,
   dim3 block, grid;
   int64_t numel = cx.numel();
   getLaunchConfig(&block, &grid, numel);
+  if (numel == 0) return;
 
   auto grad_hyI = tryGetTensorInfo<scalar_t, index_type>(grad_hy);
   auto grad_cyI = tryGetTensorInfo<scalar_t, index_type>(grad_cy);
@@ -433,6 +448,7 @@ void gru_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
 
   dim3 block, grid;
   int64_t numel = hx.numel();
+  if (numel == 0) return;
   getLaunchConfig(&block, &grid, numel);
 
   auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
@@ -466,6 +482,7 @@ void gru_backward_impl(const Tensor& grad_hy, const Tensor& workspace,
 
   dim3 block, grid;
   int64_t numel = grad_hy.numel();
+  if (numel == 0) return;
   getLaunchConfig(&block, &grid, numel);
 
   auto grad_hyI = getTensorInfo<scalar_t, index_type>(grad_hy);

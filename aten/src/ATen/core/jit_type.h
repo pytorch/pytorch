@@ -5,6 +5,7 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/symbol.h>
+#include <ATen/core/type_factory.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
@@ -137,7 +138,7 @@ struct TORCH_API UnionType : public SharedType {
 
   bool equals(const Type& rhs) const override;
 
-  bool isUnionType() const {
+  bool isUnionType() const override {
     return true;
   }
 
@@ -220,7 +221,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
-  bool isUnionType() const {
+  bool isUnionType() const override {
     return true;
   }
 
@@ -434,6 +435,17 @@ struct TORCH_API SymbolicShape {
     return dims_;
   }
 
+  c10::optional<std::vector<bool>> symbolicDims() const {
+    if (!dims_) {
+      return c10::nullopt;
+    }
+    auto symbolic_dims = std::vector<bool>();
+    for (const ShapeSymbol& s : *dims_) {
+      symbolic_dims.push_back(!s.is_static());
+    }
+    return symbolic_dims;
+  }
+
   // Checks whether the shape is fully defined/complete, ie. rank and sizes
   // of every dimension are known.
   bool isComplete() const {
@@ -455,6 +467,14 @@ struct TORCH_API SymbolicShape {
   // result will be unranked.
   SymbolicShape merge(const SymbolicShape& other) const;
 
+  friend bool operator==(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return lhs.dims_ == rhs.dims_;
+  }
+
+  friend bool operator!=(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return !(lhs == rhs);
+  }
+
   private:
     c10::optional<std::vector<ShapeSymbol>> dims_;
 };
@@ -465,7 +485,7 @@ inline bool isComplete(const Stride& s) {
 }
 
 template<typename T>
-inline bool isComplete(const T& t) {
+inline bool isComplete(const T& /*t*/) {
   return true;
 }
 }
@@ -865,7 +885,11 @@ struct TORCH_API DictType : public SharedType {
   static const TypeKind Kind = TypeKind::DictType;
 
   static DictTypePtr create(TypePtr key, TypePtr value) {
-    switch (key->kind()) {
+    auto kind = key->kind();
+    if (auto dyn = key->castRaw<DynamicType>()) {
+      kind = dyn->dynamicKind();
+    }
+    switch (kind) {
       case TypeKind::AnyType:
       case TypeKind::IntType:
       case TypeKind::BoolType:
@@ -1172,6 +1196,7 @@ struct TORCH_API NumberType : public Type {
   NumberType(TypeKind kind = TypeKind::NumberType) : Type(kind) {}
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "number"; // technically not a valid python type, but
                      // we need to use it when parsing back in annotations
                      // for implicit conversions
@@ -1199,6 +1224,7 @@ struct TORCH_API FloatType : public NumberType {
  private:
   FloatType() : NumberType(TypeKind::FloatType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "float";
   }
 };
@@ -1224,8 +1250,34 @@ struct TORCH_API ComplexType : public NumberType {
  private:
   ComplexType() : NumberType(TypeKind::ComplexType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "complex";
   }
+};
+
+// We need to introduce `SymIntType` to represent the `SymInt` type
+// used in function schemas e.g. `aten::narrow_copy(... SymInt length)
+// `SymInt` will be used to enable tracing arithmetic operations on
+// dimension values. Please see [SymInt.h] for more information
+struct SymIntType;
+using SymIntTypePtr = SingletonTypePtr<SymIntType>;
+struct TORCH_API SymIntType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymInt";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    // TODO: will become a Union[SymbolicIntNode|int] in the near future
+    return "int";
+  }
+  static const TypeKind Kind = TypeKind::SymIntType;
+  // global singleton
+  static SymIntTypePtr get();
+
+ private:
+  SymIntType() : Type(TypeKind::SymIntType) {}
 };
 
 struct IntType;
@@ -1249,6 +1301,7 @@ struct TORCH_API IntType : public NumberType {
  private:
   IntType() : NumberType(TypeKind::IntType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "int";
   }
 };
@@ -1283,6 +1336,7 @@ struct TORCH_API StringType : public Type {
     return annotation_str();
   }
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "str";
   }
   static const TypeKind Kind = TypeKind::StringType;
@@ -1303,6 +1357,7 @@ struct TORCH_API StorageType : public Type {
     return annotation_str();
   }
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return "Storage";
   }
   static const TypeKind Kind = TypeKind::StorageType;
@@ -1338,6 +1393,7 @@ struct TORCH_API FunctionType : public NamedType {
  private:
   FunctionType(torch::jit::Function* function);
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     const auto& n = name().value();
     return n.qualifiedName();
   }
@@ -1685,6 +1741,13 @@ struct getTypePtr_<int64_t> final {
     return IntType::get();
   }
 };
+
+template <>
+struct getTypePtr_<SymInt> final {
+  static decltype(auto) call() {
+    return SymIntType::get();
+  }
+};
 template <>
 struct getTypePtr_<c10::ScalarType> final {
   static decltype(auto) call() {
@@ -1730,7 +1793,8 @@ struct getTypePtr_<c10::QScheme> final {
 template <>
 struct getTypePtr_<at::Generator> final {
   static decltype(auto) call() {
-    return OptionalType::create(GeneratorType::get());
+    return TypeFactory::create<OptionalType>(
+        TypeFactory::get<GeneratorType>());
   }
 };
 template <>
@@ -1762,6 +1826,13 @@ template <class T>
 struct getTypePtr_<c10::ArrayRef<T>> final {
   static const auto& call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template <>
+struct getTypePtr_<c10::SymIntArrayRef> final {
+  static const auto& call() {
+    static auto type = ListType::create(getTypePtr_<c10::SymInt>::call());
     return type;
   }
 };
@@ -1798,10 +1869,20 @@ struct getTypePtr_<c10::Dict<K, V>> final {
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
   static const auto& call() {
-    static auto type = OptionalType::create(getTypePtr_<T>::call());
+    static auto type = TypeFactory::create<OptionalType>(
+        getTypePtr_<T>::call());
     return type;
   }
 };
+
+template<>
+struct getTypePtr_<at::OptionalIntArrayRef> final {
+  static const auto& call() {
+    static auto type = OptionalType::create(getTypePtr_<IntArrayRef>::call());
+    return type;
+  }
+};
+
 template <class... Contained>
 struct getTypePtr_<std::tuple<Contained...>> final {
   static const auto& call() {
@@ -1919,6 +2000,7 @@ struct TORCH_API InterfaceType : public NamedType {
       std::ostream* why_not);
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     return name()->qualifiedName();
   }
 

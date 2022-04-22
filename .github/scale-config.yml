@@ -30,7 +30,7 @@ runner_types:
   linux.2xlarge:
     instance_type: c5.2xlarge
     os: linux
-    max_available: 500
+    max_available: 750
     disk_size: 150
     is_ephemeral: false
   linux.4xlarge: # for binary-builds

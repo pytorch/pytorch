@@ -22,11 +22,23 @@ def no_dispatch() -> Iterator[None]:
 # 3. Enter dispatcher, wind your way through Autograd
 # 4. Hit Python dispatch key, call __torch_dispatch__
 
+# This Tensor can work with autograd in two ways:
+#  - The wrapped Tensor does not require gradients. In that case, the LoggingTensor
+#    can require gradients if the user asks for it as a constructor kwarg.
+#  - The wrapped Tensor can require gradients. In that case autograd will be tracked
+#    for the wrapped Tensor and the LoggingTensor itself cannot require gradients.
+# WARNING: We allow these two possibilities for testing purposes. You should NEVER use both in a single
+# test or you might get surprising behavior.
+
 # TODO: TensorBase should work
 class LoggingTensor(torch.Tensor):
     elem: torch.Tensor
 
     __slots__ = ['elem']
+
+    context = contextlib.nullcontext
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
@@ -38,29 +50,35 @@ class LoggingTensor(torch.Tensor):
             strides=elem.stride(), storage_offset=elem.storage_offset(),
             # TODO: clone storage aliasing
             dtype=elem.dtype, layout=elem.layout,
-            device=elem.device, requires_grad=elem.requires_grad
+            device=elem.device, requires_grad=kwargs.get("requires_grad", False)
         )
         # ...the real tensor is held as an element on the tensor.
-        r.elem = elem
+        r.elem = elem.detach() if r.requires_grad else elem
         return r
 
     def __repr__(self):
-        return f"LoggingTensor({self.elem})"
+        return f"{self.__class__.__name__}({self.elem})"
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(e):
-            return e.elem if isinstance(e, LoggingTensor) else e
+            return e.elem if isinstance(e, cls) else e
 
         def wrap(e):
-            return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
+            return cls(e) if isinstance(e, torch.Tensor) else e
 
-        # no_dispatch is only needed if you use enable_python_mode.
-        # It prevents infinite recursion.
-        with no_dispatch():
+        with cls.context():
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
         logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
         return rs
+
+class LoggingTensorMode(LoggingTensor):
+    # no_dispatch is only needed if you use enable_python_mode.
+    # It prevents infinite recursion.
+    context = no_dispatch
+
+class LoggingTensorReentrant(LoggingTensor):
+    context = torch.overrides.enable_reentrant_dispatch
 
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
 class LoggingTensorHandler(logging.Handler):
