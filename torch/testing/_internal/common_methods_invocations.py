@@ -9315,12 +9315,8 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True),
     OpInfo('cholesky',
            dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
     OpInfo('cholesky_inverse',
            dtypes=floating_and_complex_types(),
@@ -10365,16 +10361,11 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
            dtypes=floating_and_complex_types(),
-           # TODO: RuntimeError: While computing batched gradients,
-           # got: vmap: Calling Tensor.as_strided is not supported
-           # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
-           check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -10383,7 +10374,6 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.cholesky_ex',
            aten_name='linalg_cholesky_ex',
            dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
@@ -10391,7 +10381,6 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
@@ -11296,7 +11285,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            supports_forward_ad=True,
-           supports_out=False),
+           supports_out=True),
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
            variant_test_name="with_dtype",
@@ -11305,7 +11294,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_forward_ad=True,
-           supports_out=False),
+           supports_out=True),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     # https://github.com/pytorch/pytorch/issues/68752
@@ -15491,7 +15480,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         'log_softmax',
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
-        supports_out=False,
+        supports_out=True,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_softmax_variant,
@@ -15501,7 +15490,7 @@ op_db: List[OpInfo] = [
         'log_softmax',
         variant_test_name='dtype',
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
-        supports_out=False,
+        supports_out=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
         supports_forward_ad=True,
