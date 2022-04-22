@@ -26,7 +26,7 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsuppo
                                  skipIfNoLapack, disableScriptTest, skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Any
 from torch import Tensor
 
 from torchvision import ops
@@ -283,8 +283,13 @@ def _init_test_roi_heads_faster_rcnn():
         box_score_thresh, box_nms_thresh, box_detections_per_img)
     return roi_heads
 
-def _construct_tensor_for_quantization_test(shape, offset=None, max_val=None):
-    """Due to difference in implementation details between PyTorch and ONNXRuntime, randomly generated
+def _construct_tensor_for_quantization_test(shape: Tuple[int],
+                                            offset: Optional[Any[int, float]] = None,
+                                            max_val: Optional[Any[int, float]] = None
+) -> torch.Tensor:
+    """Helper function to generate weights and test inputs in a deterministic way.
+
+    Due to difference in implementation details between PyTorch and ONNXRuntime, randomly generated
     test data for quantization tests can be flaky. To help stablize the test, this helper function is
     used to generate weights and test inputs in a deterministic way.
 
