@@ -19,7 +19,7 @@ graph {
       type: STRING
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "input"
     type {

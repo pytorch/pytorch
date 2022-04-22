@@ -114,7 +114,9 @@ struct ActivityTraceWrapper {
 };
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
-void prepareTrace(const bool cpuOnly, const ActivitySet& activities);
+void prepareTrace(
+    const bool cpuOnly, const ActivitySet& activities,
+    const torch::profiler::impl::ExperimentalConfig& config);
 void startTrace();
 ActivityTraceWrapper stopTrace();
 void pushCorrelationId(uint64_t correlation_id);
@@ -134,6 +136,8 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type);
 TORCH_API void addMetadataJson(
     const std::string& key,
     const std::string& value);
+
+TORCH_API void profilerStep();
 
 } // namespace profiler
 } // namespace autograd
