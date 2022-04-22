@@ -63,11 +63,13 @@ class DispatchKey(Enum):
     Vulkan = auto()
     Metal = auto()
     MKLDNN = auto()
+    ZENDNN = auto()
     OpenGL = auto()
     OpenCL = auto()
     IDEEP = auto()
     CustomRNGKeyId = auto()
     MkldnnCPU = auto()
+    ZendnnCPU = auto()
     Sparse = auto()
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
@@ -204,6 +206,7 @@ dispatch_keys = [
     DispatchKey.SparseCPU,
     DispatchKey.SparseCsrCPU,
     DispatchKey.MkldnnCPU,
+    DispatchKey.ZendnnCPU,
     DispatchKey.CUDA,
     DispatchKey.MPS,
     DispatchKey.SparseCUDA,

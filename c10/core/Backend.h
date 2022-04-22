@@ -51,6 +51,7 @@ enum class Backend {
   QuantizedXPU,
   Undefined,
   MkldnnCPU,
+  ZendnnCPU,
   MPS,
   HPU,
   Lazy,
@@ -97,6 +98,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::SparseCsrCUDA;
   } else if (t == DispatchKey::MkldnnCPU) {
     return Backend::MkldnnCPU;
+  } else if (t == DispatchKey::ZendnnCPU) {
+    return Backend::ZendnnCPU;
   } else if (t == DispatchKey::QuantizedCPU) {
     return Backend::QuantizedCPU;
   } else if (t == DispatchKey::QuantizedCUDA) {
@@ -158,6 +161,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseCsrCUDA;
     case Backend::MkldnnCPU:
       return DispatchKey::MkldnnCPU;
+    case Backend::ZendnnCPU:
+      return DispatchKey::ZendnnCPU;
     case Backend::Vulkan:
       return DispatchKey::Vulkan;
     case Backend::Metal:
@@ -218,6 +223,7 @@ static inline DeviceType backendToDeviceType(Backend b) {
     case Backend::QuantizedXPU:
       return DeviceType::XPU;
     case Backend::MkldnnCPU:
+    case Backend::ZendnnCPU:
     case Backend::QuantizedCPU:
       return DeviceType::CPU;
     case Backend::QuantizedCUDA:
@@ -282,6 +288,8 @@ static inline const char* toString(Backend b) {
       return "SparseCsrCUDA";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
+    case Backend::ZendnnCPU:
+      return "ZendnnCPU";
     case Backend::Vulkan:
       return "Vulkan";
     case Backend::Metal:

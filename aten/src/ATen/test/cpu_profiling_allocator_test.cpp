@@ -175,10 +175,11 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
 int main(int argc, char* argv[]) {
   // Setting the priority high to make sure no other allocator gets used instead of this.
   c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
-  // Need to disable mkldnn for this test since it allocatred memory
+  // Need to disable mkldnn for this test since it allocated memory
   // via raw_allocate inteface which requires context pointer and raw
   // pointer to be the same. Tis is not true for mobile allocator.
   at::globalContext().setUserEnabledMkldnn(false);
+  at::globalContext().setUserEnabledZendnn(false);
   ::testing::InitGoogleTest(&argc, argv);
   at::manual_seed(42);
   return RUN_ALL_TESTS();

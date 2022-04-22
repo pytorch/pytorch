@@ -1178,6 +1178,8 @@ at::IntArrayRef strides_or_error(
         "'");
     if (input.is_mkldnn())
       return IntArrayRef({});
+    if (input.is_zendnn())
+      return IntArrayRef({});
     if (input.is_sparse_csr())
       return IntArrayRef({});
     return input.strides();

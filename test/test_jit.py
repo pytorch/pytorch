@@ -720,6 +720,7 @@ class TestJit(JitTestCase):
                 x.shape,
                 x.is_cuda,
                 x.is_mkldnn,
+                x.is_zendnn,
                 x.is_quantized,
                 x.requires_grad,
                 x.T,

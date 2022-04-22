@@ -657,6 +657,7 @@ Tensor class reference
     Tensor.tile
     Tensor.to
     Tensor.to_mkldnn
+    Tensor.to_zendnn
     Tensor.take
     Tensor.take_along_dim
     Tensor.tan

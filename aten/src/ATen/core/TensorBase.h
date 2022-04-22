@@ -439,6 +439,12 @@ class TORCH_API TensorBase {
     return impl_->is_mkldnn();
   }
 
+  /// Returns if a `Tensor` is zendnn tensor.
+  bool is_zendnn() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_zendnn();
+  }
+  
   /// Returns if a `Tensor` is mps tensor.
   bool is_mps() const {
     // NB: this is not a native function to avoid dispatching overhead.

@@ -14,6 +14,7 @@ These backends include:
 - ``torch.backends.mps``
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
+- ``torch.backends.zendnn``
 - ``torch.backends.openmp``
 - ``torch.backends.xeon``
 
@@ -113,6 +114,11 @@ torch.backends.mkldnn
 .. autofunction::  torch.backends.mkldnn.is_available
 
 .. autoclass::  torch.backends.mkldnn.verbose
+
+
+torch.backends.zendnn
+^^^^^^^^^^^^^^^^^^^^^
+.. autofunction::  torch.backends.zendnn.is_available
 
 
 torch.backends.openmp

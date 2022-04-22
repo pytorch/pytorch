@@ -5445,6 +5445,15 @@ Returns a copy of the tensor in ``torch.mkldnn`` layout.
 )
 
 add_docstr_all(
+    "to_zendnn",
+    r"""
+to_zendnn() -> Tensor
+Returns a copy of the tensor in ``torch.zendnn`` layout.
+
+""",
+)
+
+add_docstr_all(
     "trace",
     r"""
 trace() -> Tensor

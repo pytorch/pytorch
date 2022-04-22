@@ -59,6 +59,7 @@ class TORCH_API Context {
   static bool hasMKL();
   static bool hasLAPACK();
   static bool hasMKLDNN();
+  static bool hasZENDNN() ;
   static bool hasMAGMA() {
     return detail::getCUDAHooks().hasMAGMA();
   }
@@ -119,6 +120,8 @@ class TORCH_API Context {
   void setUserEnabledCuDNN(bool e);
   bool userEnabledMkldnn() const;
   void setUserEnabledMkldnn(bool e);
+  bool userEnabledZendnn() const;
+  void setUserEnabledZendnn(bool e);
   bool benchmarkCuDNN() const;
   void setBenchmarkCuDNN(bool);
   int benchmarkLimitCuDNN() const;
@@ -260,6 +263,7 @@ class TORCH_API Context {
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
+  bool enabled_zendnn = true;
   at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
@@ -369,6 +373,10 @@ static inline bool hasMAGMA() {
 
 static inline bool hasMKLDNN() {
   return globalContext().hasMKLDNN();
+}
+
+static inline bool hasZENDNN() {
+  return globalContext().hasZENDNN();
 }
 
 static inline void manual_seed(uint64_t seed) {

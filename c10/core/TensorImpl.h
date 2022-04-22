@@ -935,6 +935,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has_all(c10::mkldnn_ks);
   }
 
+  bool is_zendnn() const {
+    return key_set_.has_all(c10::zendnn_ks);
+  }
+
   bool is_vulkan() const {
     if (C10_UNLIKELY(custom_device_)) {
       return device_custom().is_vulkan();
@@ -1011,10 +1015,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // strided is also the most common layout type, so we check for
     // strided case first.
     // This keyset must also be kept in sync with the logic in
-    // is_sparse() / is_sparse_csr() / is_mkldnn()
-    constexpr auto sparse_and_sparsecsr_and_mkldnn_ks =
-        c10::sparse_ks | c10::sparse_csr_ks | c10::mkldnn_ks;
-    if (!key_set_.has_any(sparse_and_sparsecsr_and_mkldnn_ks)) {
+    // is_sparse() / is_sparse_csr() / is_mkldnn() / is_zendnn()
+    constexpr auto sparse_and_sparsecsr_and_mkldnn_ks_and_zendnn_ks =
+        c10::sparse_ks | c10::sparse_csr_ks | c10::mkldnn_ks | c10::zendnn_ks;
+    if (!key_set_.has_any(sparse_and_sparsecsr_and_mkldnn_ks_and_zendnn_ks)) {
       return kStrided;
     } else if (is_sparse()) {
       return kSparse;
@@ -1030,6 +1034,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // __torch_dispatch__ users will be able to redefine the
       // layout() method.
       return layout_impl();
+    } else if(is_zendnn()) {
+      return kZendnn;
     } else {
       TORCH_INTERNAL_ASSERT(
           is_mkldnn(), "There is an error in the layout calculation logic.");

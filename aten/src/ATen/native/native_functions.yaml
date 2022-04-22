@@ -1992,6 +1992,7 @@
     MPS: empty_mps
     Meta: empty_meta
     MkldnnCPU: empty_mkldnn
+    ZendnnCPU: empty_zendnn
     SparseCPU, SparseCUDA, SparseMeta: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
@@ -3407,6 +3408,18 @@
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   dispatch:
     CompositeExplicitAutograd: mkldnn_convolution
+
+- func: zendnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: zendnn_convolution
+
+- func: zendnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor
+
+- func: zendnn_convolution_backward_weights(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> (Tensor, Tensor)
+
+- func: zendnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CompositeExplicitAutograd: zendnn_convolution_backward
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -5960,6 +5973,7 @@
     SparseCPU, SparseCUDA: sparse_to_dense
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_dense
     MkldnnCPU: mkldnn_to_dense
+    ZendnnCPU: zendnn_to_dense
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
 
@@ -6162,6 +6176,11 @@
   dispatch:
     CPU: dense_to_mkldnn
 
+- func: to_zendnn(Tensor self, ScalarType? dtype=None) -> Tensor
+  variants: method
+  dispatch:
+    CPU: dense_to_zendnn
+
 - func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
   variants: function
   python_module: nn
@@ -6175,6 +6194,8 @@
     MkldnnCPU: mkldnn_reorder_conv3d_weight
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
+
+- func: to_zendnn_backward(Tensor grad, Tensor input) -> Tensor
 
 - func: quantize_per_tensor_dynamic(Tensor self, ScalarType dtype, bool reduce_range) -> Tensor
   variants: function
@@ -10936,7 +10957,7 @@
 # multiply with the input; this is very memory inefficient!  However,
 # occasionally, we really don't have anything better, so it's helpful
 # to have these fallbacks when there is no more optimized implementation
-# in cudnn or mkldnn, etc.  Both thnn_ and slow_ convolutions fall
+# in cudnn or mkldnn or zendnn, etc.  Both thnn_ and slow_ convolutions fall
 # into this bucket.
 #
 # The difference between these two designations, is that thnn_ refers

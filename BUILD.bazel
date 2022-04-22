@@ -42,6 +42,7 @@ generated_cpu_cpp = [
     # "aten/src/ATen/RegisterFunctionalizationEverything.cpp",
     "aten/src/ATen/RegisterMkldnnCPU.cpp",
     "aten/src/ATen/RegisterNestedTensorCPU.cpp",
+    "aten/src/ATen/RegisterZendnnCPU.cpp",
     "aten/src/ATen/RegisterQuantizedCPU.cpp",
     "aten/src/ATen/RegisterSparseCPU.cpp",
     "aten/src/ATen/RegisterSparseCsrCPU.cpp",
@@ -184,6 +185,11 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_native_zendnn_cpp",
+    srcs = glob(["aten/src/ATen/native/zendnn/*.cpp"]),
+)
+
+filegroup(
     name = "aten_native_xnnpack",
     srcs = glob(["aten/src/ATen/native/xnnpack/*.cpp"]),
 )
@@ -252,6 +258,7 @@ header_template_rule(
     include = "aten/src",
     substitutions = {
         "@AT_MKLDNN_ENABLED@": "1",
+        "@AT_ZENDNN_ENABLED@": "1",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
         "@AT_FFTW_ENABLED@": "0",
@@ -336,6 +343,7 @@ cc_library(
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
         ":aten_native_mkldnn_cpp",
+        ":aten_native_zendnn_cpp",
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_nested_cpp",

@@ -102,7 +102,7 @@ def _iter_tensor(x_tensor):
                 indices = x_indices[i].tolist() + list(x_idx)
                 d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
                 yield x_value, x_idx, d_idx
-    elif x_tensor.layout == torch._mkldnn:  # type: ignore[attr-defined]
+    elif x_tensor.layout in [torch._mkldnn,torch._zendnn]:  # type: ignore[attr-defined]
         for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
             # this is really inefficient, but without indexing implemented, there's
             # not really a better way than converting back and forth
@@ -249,6 +249,12 @@ def _prepare_input(input: torch.Tensor, maybe_perturbed_input: Optional[torch.Te
             return maybe_perturbed_input.to_mkldnn()
         else:
             return input
+    elif input.layout == torch._zendnn:  # type: ignore[attr-defined] # no attr _zendnn
+        # Convert back to zendnn
+        if maybe_perturbed_input is not None:
+            return maybe_perturbed_input.to_zendnn()
+        else:
+            return input
     elif input.layout == torch.sparse_coo:
         if fast_mode and maybe_perturbed_input is not None:
             # entry is already a "cloned" version of the original tensor
@@ -333,6 +339,8 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, check_grad_dtype
             if is_tensor_like(inp) and inp.requires_grad:
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError("MKLDNN inputs are not support for forward AD gradcheck.")
+                if inp.layout == torch._zendnn:  # type: ignore[attr-defined]
+                    raise ValueError("ZENDNN inputs are not support for forward AD gradcheck.")
 
                 inp = fwAD.make_dual(inp.detach(), torch.zeros_like(inp))
                 # If inp is a differentiable view, the dual might not be the tangent given to
@@ -384,6 +392,9 @@ def _get_input_to_perturb(input):
     # operations that require the tensor to have strides. If fast_mode=False,
     # _iter_tensor would handle the below cases:
     if input.layout == torch._mkldnn:  # type: ignore[attr-defined] # no attr _mkldnn
+        # Convert to dense so we can perform operations that require strided tensors
+        input_to_perturb = input.to_dense()
+    if input.layout == torch._zendnn:  # type: ignore[attr-defined] # no attr _zendnn
         # Convert to dense so we can perform operations that require strided tensors
         input_to_perturb = input.to_dense()
     elif input.layout == torch.sparse_coo:
@@ -662,7 +673,7 @@ def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
                 content = inp
             # TODO: To cover more problematic cases, replace stride = 0 check with
             # "any overlap in memory" once we have a proper function to check it.
-            if content.layout is not torch._mkldnn:  # type: ignore[attr-defined]
+            if content.layout not in [torch._mkldnn,torch._zendnn]:  # type: ignore[attr-defined]
                 if not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
                     raise RuntimeError(
                         f'The {idx}th input has a dimension with stride 0. gradcheck only '
@@ -686,6 +697,9 @@ def _check_outputs(outputs) -> None:
                          'Please call to_dense() on the output of fn for gradcheck.')
     if any(t.layout == torch._mkldnn for t in outputs if isinstance(t, torch.Tensor)):  # type: ignore[attr-defined]
         raise ValueError('MKLDNN output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
+    if any(t.layout == torch._zendnn for t in outputs if isinstance(t, torch.Tensor)):  # type: ignore[attr-defined]
+        raise ValueError('ZENDNN output is not supported at gradcheck yet. '
                          'Please call to_dense() on the output of fn for gradcheck.')
 
 

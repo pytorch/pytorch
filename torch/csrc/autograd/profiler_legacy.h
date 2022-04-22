@@ -155,6 +155,9 @@ struct TORCH_API LegacyEvent {
         device.is_cpu() || device.type() == c10::DeviceType::MKLDNN ||
         device.type() == c10::DeviceType::IDEEP) {
       cpu_memory_usage_ = alloc_size;
+    } else if (device.is_cpu() ||
+        device.type() == c10::DeviceType::ZENDNN) {
+      cpu_memory_usage_ = alloc_size;
     } else {
       LOG(WARNING) << "Unsupported memory profiling device: " << device;
     }

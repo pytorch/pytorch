@@ -581,6 +581,9 @@ class TestProfiler(TestCase):
         def create_mkldnn_tensor():
             return torch.rand(10, 10, dtype=torch.float32).to_mkldnn()
 
+        def create_zendnn_tensor():
+            return torch.rand(10, 10, dtype=torch.float32).to_zendnn()
+
         stats = run_profiler(create_cpu_tensor)
         check_metrics(
             stats,
@@ -659,6 +662,23 @@ class TestProfiler(TestCase):
                     "aten::rand",
                     "aten::empty",
                     "aten::to_mkldnn",
+                ],
+                deallocs=[
+                    "test_user_scope_dealloc",
+                ]
+            )
+
+        if torch._C.has_zendnn:
+            create_zendnn_tensor()
+            stats = run_profiler(create_zendnn_tensor, "cpu_memory_usage")
+            check_metrics(
+                stats,
+                "cpu_memory_usage",
+                allocs=[
+                    "test_user_scope_alloc",
+                    "aten::rand",
+                    "aten::empty",
+                    "aten::to_zendnn",
                 ],
                 deallocs=[
                     "test_user_scope_dealloc",

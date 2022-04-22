@@ -120,6 +120,10 @@ else()
     append_torchlib_if_found(dnnl mkldnn)
   endif()
 
+  if(@USE_ZENDNN@)
+    append_torchlib_if_found(zendnn)
+  endif()
+
   append_torchlib_if_found(sleef asmjit)
 endif()
 

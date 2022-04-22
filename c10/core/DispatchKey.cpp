@@ -84,6 +84,8 @@ const char* toString(DispatchKey t) {
       return "CustomRNGKeyId";
     case DispatchKey::MkldnnCPU:
       return "MkldnnCPU";
+    case DispatchKey::ZendnnCPU:
+      return "ZendnnCPU";
 
     case DispatchKey::Sparse:
       return "Sparse";
@@ -249,6 +251,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Quantized", c10::DispatchKey::Quantized},
       {"CustomRNGKeyId", c10::DispatchKey::CustomRNGKeyId},
       {"MkldnnCPU", c10::DispatchKey::MkldnnCPU},
+      {"ZendnnCPU", c10::DispatchKey::ZendnnCPU},
       {"Sparse", c10::DispatchKey::Sparse},
       {"SparseCsrCPU", c10::DispatchKey::SparseCsrCPU},
       {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},

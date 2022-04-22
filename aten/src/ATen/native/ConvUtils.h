@@ -44,6 +44,10 @@ using mkldnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tens
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, std::array<bool,3>);
 DECLARE_DISPATCH(mkldnn_convolution_backward_fn, mkldnn_convolution_backward_stub);
+using zendnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, int64_t, std::array<bool,3>);
+DECLARE_DISPATCH(zendnn_convolution_backward_fn, zendnn_convolution_backward_stub);
 using slow_conv_dilated2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
@@ -107,6 +111,7 @@ struct ConvParams {
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_zendnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight,
                    const at::OptionalIntArrayRef bias_sizes_opt) const;
@@ -125,6 +130,8 @@ enum class ConvBackend {
   MiopenTranspose,
   Mkldnn,
   MkldnnEmpty,
+  Zendnn,
+  ZendnnEmpty,
   NnpackSpatial,
   Overrideable,
   Slow2d,

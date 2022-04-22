@@ -872,6 +872,7 @@ import torch.backends.mps
 import torch.backends.cudnn
 import torch.backends.mkl
 import torch.backends.mkldnn
+import torch.backends.zendnn
 import torch.backends.openmp
 import torch.backends.quantized
 import torch.utils.data

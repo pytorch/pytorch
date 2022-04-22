@@ -51,9 +51,18 @@ bool Context::userEnabledMkldnn() const {
   return enabled_mkldnn;
 }
 
+bool Context::userEnabledZendnn() const {
+  return enabled_zendnn;
+}
+
 void Context::setUserEnabledMkldnn(bool e) {
   enabled_mkldnn = e;
 }
+
+void Context::setUserEnabledZendnn(bool e) {
+   enabled_zendnn = e;
+}
+
 
 bool Context::deterministicCuDNN() const {
   return deterministic_cudnn;
@@ -230,6 +239,14 @@ bool Context::hasMKL() {
 
 bool Context::hasMKLDNN() {
 #if AT_MKLDNN_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool Context::hasZENDNN() {
+#if AT_ZENDNN_ENABLED()
   return true;
 #else
   return false;

@@ -309,6 +309,15 @@ RegisterOperators reg(
                " import");
          },
          aliasAnalysisFromSchema()),
+
+      Operator(
+         "prim::is_zendnn(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_zendnn());
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "aten::wait(Future(t) self) -> t",
          [](Stack& stack) {

@@ -669,6 +669,8 @@ constexpr DispatchKeySet sparse_csr_ks =
 
 constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
 
+constexpr DispatchKeySet zendnn_ks = DispatchKeySet(DispatchKey::ZendnnCPU);
+
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd
 constexpr DispatchKeySet autogradother_backends =
@@ -685,6 +687,7 @@ constexpr DispatchKeySet autogradother_backends =
          DispatchKey::SparseCsrCUDA,
          DispatchKey::CustomRNGKeyId,
          DispatchKey::MkldnnCPU,
+         DispatchKey::ZendnnCPU,
          // Sparse and Quantized backends also live here.
          DispatchKey::Sparse,
          DispatchKey::Quantized})

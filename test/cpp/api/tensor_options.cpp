@@ -102,6 +102,9 @@ TEST(DeviceTest, ParsesCorrectlyFromString) {
   device = Device("mkldnn");
   ASSERT_EQ(device, Device(DeviceType::MKLDNN));
 
+  device = Device("zendnn");
+  ASSERT_EQ(device, Device(DeviceType::ZENDNN));
+
   device = Device("opengl");
   ASSERT_EQ(device, Device(DeviceType::OPENGL));
 

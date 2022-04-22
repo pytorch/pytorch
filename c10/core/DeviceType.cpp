@@ -17,6 +17,8 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "opencl" : "OPENCL";
     case DeviceType::MKLDNN:
       return lower_case ? "mkldnn" : "MKLDNN";
+    case DeviceType::ZENDNN:
+      return lower_case ? "zendnn" : "ZENDNN";
     case DeviceType::IDEEP:
       return lower_case ? "ideep" : "IDEEP";
     case DeviceType::HIP:
@@ -75,6 +77,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::OPENGL:
     case DeviceType::OPENCL:
     case DeviceType::MKLDNN:
+    case DeviceType::ZENDNN:
     case DeviceType::IDEEP:
     case DeviceType::HIP:
     case DeviceType::VE:

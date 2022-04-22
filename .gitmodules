@@ -148,3 +148,9 @@
 [submodule "third_party/nlohmann"]
 	path = third_party/nlohmann
 	url = https://github.com/nlohmann/json.git
+[submodule "third_party/blis"]
+	path = third_party/blis
+	url = https://github.com/amd/blis
+[submodule "third_party/ZenDNN"]
+	path = third_party/ZenDNN
+	url = https://github.com/amd/ZenDNN

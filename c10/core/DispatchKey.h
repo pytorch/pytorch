@@ -207,6 +207,8 @@ enum class DispatchKey : uint16_t {
   MkldnnCPU, // registered at build/aten/src/ATen/RegisterMkldnnCPU.cpp
   // NB: not to be confused with MKLDNN, which is Caffe2 only
 
+  ZendnnCPU,
+
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Sparse,
 

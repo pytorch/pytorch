@@ -38,6 +38,7 @@ namespace c10 {
   _(prim, MKLDNNHardSigmoid)         \
   _(prim, MKLDNNHardTanh)            \
   _(prim, MKLDNNClamp)               \
+  _(prim, zendnn_convolution)        \
   _(prim, StaticRuntimeCopyOuts)     \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
