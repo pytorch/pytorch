@@ -231,13 +231,6 @@ class GenLazyNativeFuncDefinition:
     tensor_class: str
     gen_forced_fallback_code: bool
 
-    def gen_shape_call(self, func: NativeFunction) -> str:
-        metadata = self.backend_index.get_kernel(func)
-        assert metadata is not None
-        schema = LazyIrSchema(func.func)
-        all_args = schema.filtered_args()
-        returns_length = len(schema.returns)
-
     def lazy_tensor_decls(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
         # Generates lazy_{name} variables for LazyTensors wrapping input tensors
@@ -371,8 +364,7 @@ class GenLazyNativeFuncDefinition:
         {self.build_ir_node(func, schema)}
         {self.return_aten_tensor(func, schema)}
     }};\n
-    """
-        ]
+    """]
 
 
 class ComputeShapeSignature:
