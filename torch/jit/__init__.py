@@ -3,7 +3,6 @@ import torch._C
 from contextlib import contextmanager
 from typing import Iterator
 import warnings
-from typing import Any
 
 from torch.utils import set_module
 
@@ -50,7 +49,7 @@ from torch.jit._trace import (
 )
 from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load, jit_module_from_flatbuffer, save_jit_module_to_flatbuffer
-from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy
+from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy, strict_fusion
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
 from torch.jit._ir_utils import _InsertPoint
 
@@ -204,28 +203,3 @@ def _hide_source_ranges() -> Iterator[None]:
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
-
-class strict_fusion(object):
-    """
-    This class errors if not all nodes have been fused in
-    inference, or symbolically differentiated in training.
-
-    Example (Freezing a module with Conv->Batchnorm)
-    .. code-block:: python
-
-        import torch
-        with torch.jit.strict_fusion():
-            return x + x + x
-
-    """
-
-    def __init__(self):
-        if not torch._jit_internal.is_scripting():
-            warnings.warn("Only works in script mode")
-        pass
-
-    def __enter__(self):
-        pass
-
-    def __exit__(self, type: Any, value: Any, tb: Any) -> None:
-        pass
