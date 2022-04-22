@@ -132,7 +132,7 @@ class TORCH_API BackendRegistrar {
   BackendRegistrar(const BackendImplInterface* backend_impl_interface);
 };
 
-TORCH_API bool hasBackend();
+bool hasBackend();
 TORCH_API const BackendImplInterface* getBackend();
 
 TORCH_API const IrBuilder* getIrBuilder();

@@ -4,31 +4,10 @@
 #include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/shape_inference.h>
+#include <torch/csrc/lazy/generated/LazyNonNativeIr.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 #include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/narrow.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/select_view_update.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/as_strided_view_update.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/permute.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/diagonal_view_update.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/resize.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/squeeze.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/diagonal.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/narrow_view_update.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/as_strided.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/unsqueeze.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/select.h>
-#include <torch/csrc/lazy/ts_backend/view_ops/view.h>
-#include <torch/csrc/lazy/ts_backend/ops/cast.h>
-#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/ts_backend/ops/generic.h>
-#include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
-#include <torch/csrc/lazy/ts_backend/ops/to_copy.h>
-#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
-#include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
-#include <torch/csrc/lazy/ts_backend/ops/expand.h>
-
-// This file contains the TorchScript IrBuilder
 
 namespace torch {
 namespace lazy {

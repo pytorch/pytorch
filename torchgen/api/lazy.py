@@ -1,10 +1,13 @@
-from typing import List, Union, Tuple, Optional
+import re
+from typing import Any, Dict, List, Union, Tuple, Optional
+
 from torchgen.model import (
     Type,
     BaseTy,
     BaseType,
     OptionalType,
     ListType,
+    BaseOperatorName,
     OperatorName,
     FunctionSchema,
     Return,
@@ -195,6 +198,26 @@ class LazyArgument:
         return self.lazy_type_
 
 
+class NonNativeLazyArgument(LazyArgument):
+    optional_re = re.compile("optional<(?P<cpp_type>[^>]+)>")
+
+    def __init__(self, name: str, cpp_type: str):
+        self.name = name
+        self.orig_type = Type()
+
+        optional_type = NonNativeLazyArgument.optional_re.findall(cpp_type)
+        if optional_type:
+            self.lazy_type_ = OptionalCType(
+                elem=BaseCType(type=BaseCppType("", optional_type[0]))
+            )
+        else:
+            self.lazy_type_ = BaseCType(type=BaseCppType("", cpp_type))
+
+        self.is_lazy_value = "Value" in cpp_type
+        self.is_generator = False
+        self.is_hashable = "ptr" not in cpp_type
+
+
 # Inspired by a FunctionSchema object, a LazyIrSchema holds the schema of a Lazy IR node.
 # Unlike a FunctionSchema, it has no round-trippable string form (relating to the YAML),
 # but carries type information from a native FunctionSchema modified for use with IR nodes,
@@ -325,3 +348,38 @@ class LazyIrSchema:
         return self.filtered_args(
             positional=False, keyword=True, values=False, scalars=True
         )
+
+
+class NonNativeLazyIrSchema(LazyIrSchema):
+    func_re = re.compile(r"(?P<name>\w+)\((?P<args>[^)]*)\) -> (?P<outputs>.*)")
+
+    def __init__(self, op: Dict[str, Any]):
+        name, args, outputs = NonNativeLazyIrSchema.func_re.findall(op["func"])[0]
+        args = [self.parse_arg(arg.strip()) for arg in args.split(",")]
+        self.inputs = tuple(arg for arg in args if arg.is_lazy_value)
+        self.positional_args: Tuple[LazyArgument, ...] = tuple(args)
+        self.keyword_args: Tuple[LazyArgument, ...] = tuple()
+        num_outputs = len(outputs.split(","))
+        self.returns = tuple(Return.parse(f"Tensor o{i}") for i in range(num_outputs))
+
+        self.name = OperatorName(BaseOperatorName(name, False, False), "")
+        self.opkind: str = op.get("opkind", name)
+        if self.opkind != name and not self.opkind.startswith("at::"):
+            self.ltc_name = self.opkind
+        self.has_shape = op.get("has_shape", True)
+        self.cache_shape = op.get("cache_shape", True)
+
+        self.generator_arg = None
+        self.is_non_native = True
+        self.is_lowerable = op.get("is_lowerable", False)
+        self.lower_declaration_only = op.get("lower_declaration_only", True)
+
+    def parse_arg(self, arg: str) -> NonNativeLazyArgument:
+        cpp_type, name = arg.rsplit(" ", 1)
+        if "Tensor" in cpp_type:
+            cpp_type = "Value"
+        return NonNativeLazyArgument(name.strip(), cpp_type.strip())
+
+    @property
+    def aten_name(self) -> str:
+        return self.opkind

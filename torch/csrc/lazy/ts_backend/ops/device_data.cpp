@@ -1,32 +1,14 @@
-#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
+#include <torch/csrc/lazy/generated/LazyNonNativeIr.h>
 
-#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
-#include <torch/csrc/lazy/core/ir_builder.h>
-
-#include <sstream>
 
 namespace torch {
 namespace lazy {
 
-DeviceData::DeviceData(std::shared_ptr<BackendData> data)
-    : TsNode(
-          ClassOpKind(),
-          data->shape(),
-          /*num_outputs=*/1,
-          /*hash_seed=*/static_cast<uint32_t>(101)),
-      data_(std::move(data)) {}
-
-std::string DeviceData::ToString() const {
-  std::stringstream ss;
-  ss << TsNode::ToString() << ", device=" << data_->device();
-  return ss.str();
+bool DeviceData::CanBeReused(const std::shared_ptr<BackendData>& data) const {
+  return this->data->shape() == data->shape();
 }
 
-const DeviceData* DeviceData::Cast(const Node* node) {
-  return NodeCast<DeviceData>(node);
-}
-
-NodePtr DeviceData::Create(std::shared_ptr<BackendData> data) {
+NodePtr DeviceData::Create(const std::shared_ptr<BackendData>& data) {
   NodePtr node = ReuseOrMakeNode<DeviceData>(data);
   // ReuseOrMakeNode may return a reused node which has the same shape,
   // however, we need to replace the old data_ with the new one.
@@ -34,7 +16,7 @@ NodePtr DeviceData::Create(std::shared_ptr<BackendData> data) {
   // by iteration, and after we lauch the async device execution for the
   // previous iteration, data_ in DeviceData nodes are not needed anymore.
   DeviceData* device_data = static_cast<DeviceData*>(node.get());
-  device_data->SetData(data);
+  device_data->data = data;
   return node;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstring>
+#include <ostream>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 
@@ -56,6 +57,10 @@ class TORCH_API BackendData {
 };
 
 using BackendDataPtr = std::shared_ptr<BackendData>;
+
+static inline std::ostream& operator<<(std::ostream& out, BackendDataPtr data) {
+    return out << "{device=" << data->device() << "}";
+}
 
 } // namespace lazy
 } // namespace torch

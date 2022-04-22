@@ -110,7 +110,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     if (!device_data_node) {
       return nullptr;
     }
-    return device_data_node->data();
+    return device_data_node->data;
   }
 
   std::string GetComputationBackendText(
