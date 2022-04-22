@@ -12,13 +12,10 @@ namespace lazy {
 // TODO(alanwaketan): Use the backend API to get the default device type.
 // In the future, we should also get the default device ordinal.
 BackendDevice::BackendDevice()
-  : type_(std::make_shared<BackendDeviceType>()) {}
+  : type_(std::make_shared<BackendDeviceType>()), ordinal_(-1) {}
 
 BackendDevice::BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int64_t ordinal)
   : type_(std::move(type)), ordinal_(ordinal) {}
-
-// BackendDevice::BackendDevice(const std::string& device_spec)
-//   : BackendDevice::BackendDevice() {}
 
 int8_t BackendDevice::type() const {
   TORCH_INTERNAL_ASSERT(type_);
