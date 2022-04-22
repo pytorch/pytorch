@@ -240,7 +240,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_type_hints",
     "test_openmp",
-] + FSDP_TEST
+]
 
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
