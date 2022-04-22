@@ -229,5 +229,8 @@ def _hide_source_ranges() -> Iterator[None]:
     finally:
         torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
-# dont expose, TODO: define `__all__`
+# dont expose Any, TODO: define `__all__`
 del Any
+
+if not torch._C._jit_init():
+    raise RuntimeError("JIT initialization failed")
