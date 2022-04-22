@@ -1238,7 +1238,7 @@ class IrParser {
       REGISTER_PARSE_RULE(
           ptr_op,
           {
-            MemoryFormat format;
+            MemoryFormat    format;
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
                 c10::nullopt,
