@@ -235,13 +235,13 @@ class GenLazyNativeFuncDefinition:
     backend_index: BackendIndex
     tensor_class: str
     gen_forced_fallback_code: bool
-    backend_namespace: str = "torch::lazy"
-    get_tensorlist: str = "GetTensorList"
-    get_tensor_or_wrap_number: str = "GetLtcTensorOrCreateForWrappedNumber"
-    try_get_tensor: str = "TryGetLtcTensor"
-    metrics_counter: str = 'TORCH_LAZY_FN_COUNTER("lazy::")'
-    create_tensor: str = "LazyTensor::Create"
-    create_from_first_tensor: bool = False
+    backend_namespace: str
+    get_tensorlist: str
+    get_tensor_or_wrap_number: str
+    try_get_tensor: str
+    metrics_counter: str
+    create_tensor: str
+    create_from_first_tensor: bool
 
     def lazy_tensor_decls(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
