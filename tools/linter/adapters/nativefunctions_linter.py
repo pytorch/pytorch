@@ -44,7 +44,8 @@ class LintMessage(NamedTuple):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="native functions linter", fromfile_prefix_chars="@",
+        description="native functions linter",
+        fromfile_prefix_chars="@",
     )
     parser.add_argument(
         "--native-functions-yml",
