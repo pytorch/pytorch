@@ -666,18 +666,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
 ]
 
 def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
-    enable_flatbuffer = bool(native.read_config("fbcode", "caffe2_enable_flatbuffer", None))
-    flatbuffer_serializer_sources = [
-        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
-        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
-    ]
-    if enable_flatbuffer:
-        return (
-            libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources +
-            flatbuffer_serializer_sources
-        )
-    else:
-        return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
+    return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
 
 libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
