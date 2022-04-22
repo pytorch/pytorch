@@ -20,7 +20,6 @@
 #include <torch/csrc/lazy/ts_backend/view_ops/select.h>
 #include <torch/csrc/lazy/ts_backend/view_ops/view.h>
 #include <torch/csrc/lazy/ts_backend/ops/cast.h>
-#include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/ts_backend/ops/generic.h>
 #include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
@@ -42,6 +41,9 @@ struct TorchScriptIrBuilder: IrBuilder {
   NodePtr MakeView(const Value& input0, const std::vector<int64_t>& output_size) const override { return MakeNode<View>(input0, output_size); }
   NodePtr MakeCast(const Value& input0, const at::ScalarType& dtype, const c10::optional<at::ScalarType>& stype = c10::nullopt) const override { return MakeNode<Cast>(input0, dtype, stype); }
   NodePtr MakeTensorList(const OpList& inputs) const override { return MakeNode<TensorList>(inputs); }
+  NodePtr MakeGeneric(const OpKind& op, const OpList& operands, const Shape& shape, const size_t& num_outputs = 1, const hash_t& hash_seed = static_cast<uint32_t>(0x5a2d296e9)) const override { return MakeNode<Generic>(op, operands, shape, num_outputs, hash_seed); }
+
+  // View op nodes
   NodePtr MakeAsStridedViewUpdate(const Value& input0, const Value& input1, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) const override { return MakeNode<AsStridedViewUpdate>(input0, input1, size, stride, storage_offset); }
   NodePtr MakeAsStrided(const Value& input0, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) const override { return MakeNode<AsStrided>(input0, size, stride, storage_offset); }
   NodePtr MakeDiagonalViewUpdate(const Value& input0, const Value& input1, const int64_t& offset, const int64_t& dim1, const int64_t& dim2) const override { return MakeNode<DiagonalViewUpdate>(input0, input1, offset, dim1, dim2); }

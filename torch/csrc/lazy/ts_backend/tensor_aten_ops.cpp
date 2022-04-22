@@ -4,7 +4,7 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
+#include <torch/csrc/lazy/core/ops/arithmetic_ir_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
 #include <torch/csrc/lazy/core/ir_util.h>

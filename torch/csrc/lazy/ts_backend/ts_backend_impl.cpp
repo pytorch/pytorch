@@ -259,12 +259,5 @@ void InitTorchScriptBackend() {
   s_registrar = std::make_unique<BackendRegistrar>(GetTSBackendImpl());
 }
 
-
-// Get IrBuilder from backend. Use TorchScriptIrBuilder by default
-const IrBuilder* getIrBuilder() {
-  static const IrBuilder* builder = hasBackend() ? getBackend()->GetIrBuilder() : new TorchScriptIrBuilder();
-  return builder;
-}
-
 } // namespace lazy
 } // namespace torch

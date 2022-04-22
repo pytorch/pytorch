@@ -13,6 +13,7 @@
 #include <torch/csrc/lazy/core/config.h>
 #if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
+#include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #endif // FBCODE_CAFFE2 || OVRSOURCE
 #include <string>
 #include <vector>

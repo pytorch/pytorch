@@ -15,7 +15,7 @@
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/thread_pool.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
-#include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
+#include <torch/csrc/lazy/core/ops/arithmetic_ir_ops.h>
 
 #include <ATen/ScalarOps.h>
 

@@ -19,6 +19,9 @@ struct IrBuilder {
   virtual NodePtr MakeView(const Value& input0, const std::vector<int64_t>& output_size) const = 0;
   virtual NodePtr MakeCast(const Value& input0, const at::ScalarType& dtype, const c10::optional<at::ScalarType>& stype = c10::nullopt) const = 0;
   virtual NodePtr MakeTensorList(const OpList& inputs) const = 0;
+  virtual NodePtr MakeGeneric(const OpKind& op, const OpList& operands, const Shape& shape, const size_t& num_outputs = 1, const hash_t& hash_seed = static_cast<uint32_t>(0x5a2d296e9)) const = 0;
+
+  // View op nodes
   virtual NodePtr MakeAsStridedViewUpdate(const Value& input0, const Value& input1, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) const = 0;
   virtual NodePtr MakeAsStrided(const Value& input0, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) const = 0;
   virtual NodePtr MakeDiagonalViewUpdate(const Value& input0, const Value& input1, const int64_t& offset, const int64_t& dim1, const int64_t& dim2) const = 0;
@@ -57,6 +60,11 @@ static inline NodePtr MakeCast(const Value& input0, const at::ScalarType& dtype,
 static inline NodePtr MakeTensorList(const OpList& inputs) {
     return getIrBuilder()->MakeTensorList(inputs);
 }
+static inline NodePtr MakeGeneric(const OpKind& op, const OpList& operands, const Shape& shape, const size_t& num_outputs = 1, const hash_t& hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
+    return getIrBuilder()->MakeGeneric(op, operands, shape, num_outputs, hash_seed);
+}
+
+// View op nodes
 static inline NodePtr MakeAsStridedViewUpdate(const Value& input0, const Value& input1, const std::vector<int64_t>& size, const std::vector<int64_t>& stride, const int64_t& storage_offset) {
     return getIrBuilder()->MakeAsStridedViewUpdate(input0, input1, size, stride, storage_offset);
 }
