@@ -17,7 +17,7 @@ namespace {
 bool isStrictFusion(Value* value) {
   const auto class_name = getModuleName(value);
   return class_name.has_value() &&
-      (*class_name == "__torch__.torch.jit._fuser.strict_fusion");
+      (*class_name == "__torch__.torch.jit.strict_fusion");
 }
 
 } // namespace
