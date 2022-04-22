@@ -1,0 +1,158 @@
+name: linux-build
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      docker-image-name:
+        required: true
+        type: string
+        description: Name of the base docker image to build with.
+      build-generates-artifacts:
+        required: false
+        type: boolean
+        default: true
+        description: If set, upload generated build artifacts.
+      build-with-debug:
+        required: false
+        type: boolean
+        default: false
+        description: If set, build in debug mode.
+
+    outputs:
+      docker-image:
+        value: ${{ jobs.build.outputs.docker-image }}
+        description: The docker image containing the built PyTorch.
+
+env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
+  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
+
+jobs:
+  build:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    runs-on: [self-hosted, linux.2xlarge]
+    timeout-minutes: 240
+    outputs:
+      docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+    steps:
+      # [pytorch repo ref]
+      # Use a pytorch/pytorch reference instead of a reference to the local
+      # checkout because when we run this action we don't *have* a local
+      # checkout. In other cases you should prefer a local checkout.
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - name: Check for new workflows
+        run: |
+          if [ ! -f "./.github/actions/setup-linux/action.yml" ]; then
+            echo "::error::Your PR is based on a version of master that is too old for our CI to work. Please rebase your PR on latest master and resubmit."
+            exit 1
+          fi
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: ./.github/actions/calculate-docker-image
+        with:
+          docker-image-name: ${{ inputs.docker-image-name }}
+          xla: ${{ contains(inputs.build-environment, 'xla') }}
+
+      - name: Pull docker image
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
+      - name: Build
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-build
+          # TODO duplicated
+          AWS_DEFAULT_REGION: us-east-1
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          TORCH_CUDA_ARCH_LIST: 5.2
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
+          DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
+        run: |
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
+            -e BUILD_ENVIRONMENT \
+            -e JOB_BASE_NAME \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e AWS_DEFAULT_REGION \
+            -e IS_GHA \
+            -e PR_NUMBER \
+            -e SHA1 \
+            -e BRANCH \
+            -e GITHUB_RUN_ID \
+            -e SCCACHE_BUCKET \
+            -e XLA_CUDA \
+            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e SKIP_SCCACHE_INITIALIZATION=1 \
+            -e TORCH_CUDA_ARCH_LIST \
+            -e PR_LABELS \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --tty \
+            --detach \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c '.jenkins/pytorch/build.sh'
+
+      - name: Display and upload binary build size statistics (Click Me)
+        # temporary hack: set CIRCLE_* vars, until we update
+        # tools/stats/print_test_stats.py to natively support GitHub Actions
+        env:
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: ${{ github.run_id }}
+        run: |
+          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+          export COMMIT_TIME
+          pip3 install requests==2.26 boto3==1.16.34
+          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
+
+      - name: Archive artifacts into zip
+        if: inputs.build-generates-artifacts
+        run: |
+          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
+
+      - name: Store PyTorch Build Artifacts on S3
+        uses: seemethere/upload-artifact-s3@v4
+        if: inputs.build-generates-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip
+
+      - name: Teardown Linux
+        uses: ./.github/actions/teardown-linux
+        if: always()

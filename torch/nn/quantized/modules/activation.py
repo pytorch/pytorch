@@ -62,6 +62,10 @@ class Hardswish(torch.nn.Hardswish):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return Hardswish(float(scale), int(zero_point))
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(float(scale), int(zero_point))
+
 class ELU(torch.nn.ELU):
     r"""This is the quantized equivalent of :class:`~torch.nn.ELU`.
 
@@ -86,6 +90,10 @@ class ELU(torch.nn.ELU):
     def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return ELU(float(scale), int(zero_point), mod.alpha)
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(float(scale), int(zero_point), mod.alpha)
 
 class LeakyReLU(torch.nn.LeakyReLU):
     r"""This is the quantized equivalent of :class:`~torch.nn.LeakyReLU`.
@@ -114,6 +122,10 @@ class LeakyReLU(torch.nn.LeakyReLU):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
 
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
+
 class Sigmoid(torch.nn.Sigmoid):
     r"""This is the quantized equivalent of :class:`~torch.nn.Sigmoid`.
 
@@ -135,6 +147,42 @@ class Sigmoid(torch.nn.Sigmoid):
         output_scale, output_zero_point = mod.activation_post_process.calculate_qparams()
         return cls(float(output_scale), int(output_zero_point))
 
+class Softmax(torch.nn.Softmax):
+    r"""This is the quantized version of :class:`~torch.nn.Softmax`.
+
+    Args:
+        dim: A dimension along which Softmax will be computed (so every slice along dim will sum to 1).
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+    """
+    def __init__(self, dim=None, scale=1.0, zero_point=0):
+        super().__init__()
+        self.dim = dim
+        self.scale = scale
+        self.zero_point = zero_point
+
+    def forward(self, input):
+        dim = self.dim
+        if dim is None:
+            stacklevel = 3
+            # Note: adding the mypy ignore on _get_softmax_dim seems less bad
+            # than making `_get_softmax_dim` an official API.
+            dim = torch.nn.functional._get_softmax_dim(  # type: ignore[attr-defined]
+                "softmax", input.dim(), stacklevel)
+        return torch.ops.quantized.softmax(
+            input, dim, self.scale, self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedSoftmax'
+
+    @staticmethod
+    def from_float(mod):
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        return Softmax(mod.dim, float(scale), int(zero_point))
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(mod.dim, float(scale), int(zero_point))
 
 class MultiheadAttention(torch.nn.quantizable.MultiheadAttention):
     _FLOAT_MODULE = torch.nn.quantizable.MultiheadAttention
