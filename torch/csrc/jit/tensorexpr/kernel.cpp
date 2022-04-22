@@ -208,9 +208,7 @@ std::vector<int64_t> _pair_int(IValue v) {
   }
 }
 
-static bool isContiguous(
-    const torch::jit::Value* v,
-    at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
+static bool isContiguous(const torch::jit::Value* v) {
   auto const& tt = v->type()->cast<TensorType>();
   if (!tt) {
     return false;
@@ -223,15 +221,7 @@ static bool isContiguous(
   if (!sizes || !strides) {
     return false;
   }
-
-  // Check dimension size first
-  int ndims = (*sizes).size();
-  if ((memory_format == at::MemoryFormat::ChannelsLast && ndims != 4) ||
-      (memory_format == at::MemoryFormat::ChannelsLast3d && ndims != 5)) {
-    return false;
-  }
-
-  return *strides == TensorType::contiguousStridesOf(*sizes, memory_format);
+  return *strides == TensorType::contiguousStridesOf(*sizes);
 }
 
 // The fuser only supports conv2d with very specific properties:
@@ -485,25 +475,38 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     hasRandom_ = true;
   }
 
+  // Check whether the node is to create an new tensor
+  // TODO: It is hard to deduce the layout of the generated tensor.
+  bool is_tensor_creation = true;
+
+  // Check if the tensor is a contiguous tensor
   bool is_contiguous = false;
+  // Check if the tensor is a channels-last contiguous tensor
   bool is_channels_last_contiguous = false;
   for (auto input : inputs) {
     if (input->type()->kind() != TypeKind::TensorType)
       continue;
 
+    is_tensor_creation = false;
     TORCH_CHECK(bufs_.count(input) > 0);
     auto buf_ = bufs_.at(input);
-    is_contiguous |= buf_->is_contiguous();
 
-    is_channels_last_contiguous |=
-        (buf_->is_contiguous(at::MemoryFormat::ChannelsLast) ||
-         buf_->is_contiguous(at::MemoryFormat::ChannelsLast3d) ||
-         buf_->is_channels_last_1d_contiguous());
-
-    TORCH_INTERNAL_ASSERT(
-        (is_contiguous xor is_channels_last_contiguous) &&
-        (is_contiguous || is_channels_last_contiguous));
+    auto _is_contiguous = buf_->is_contiguous();
+    if (_is_contiguous) {
+      is_contiguous |= _is_contiguous;
+    } else {
+      is_channels_last_contiguous |=
+          (buf_->is_contiguous(at::MemoryFormat::ChannelsLast) ||
+          buf_->is_contiguous(at::MemoryFormat::ChannelsLast3d) ||
+          buf_->is_channels_last_1d_contiguous());
+    }
   }
+
+  // Does not support mixing the contiguous tensor and channels-last contigous tensor
+  TORCH_INTERNAL_ASSERT(
+      is_tensor_creation ||
+      ((is_contiguous xor is_channels_last_contiguous) &&
+       (is_contiguous || is_channels_last_contiguous)));
 
   auto outputType = findDtypeForValue(v);
   std::vector<ExprHandle> outputShape = sizesForValue(v);
