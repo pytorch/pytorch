@@ -11979,9 +11979,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         # doesn't support grad on target
         sample_inputs_func=partial(sample_inputs_loss, rhs_requires_grad=False),
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-        )
     ),
     OpInfo('nn.functional.upsample_nearest',
            supports_autograd=True,
@@ -12006,7 +12003,10 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_margin_ranking_loss,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True),
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+        )),
     OpInfo(
         "nn.functional.multi_margin_loss",
         ref=_NOTHING,
@@ -12685,7 +12685,9 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            decorators=[onlyCUDA, disablecuDNN],
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
+                            device_type='cpu'),
+           ),
            sample_inputs_func=sample_inputs_batch_norm),
     OpInfo(
         "nn.functional.binary_cross_entropy",
@@ -16673,7 +16675,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
