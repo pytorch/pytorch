@@ -99,6 +99,6 @@ function checkout_install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive -b new_tf_04152022 https://github.com/pytorch/xla.git
+    git clone --recursive -b tf_update_04_2022 https://github.com/pytorch/xla.git
   fi
 }
