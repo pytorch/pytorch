@@ -610,7 +610,7 @@ enum class DispatchKey : uint16_t {
 
 static_assert(
     (static_cast<uint8_t>(BackendComponent::EndOfBackendKeys) +
-     static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys)) <= 64,
+     static_cast<uint16_t>(DispatchKey::EndOfFunctionalityKeys)) <= 64,
     "The BackendComponent and DispatchKey enums (below EndOfFunctionalityKeys)"
     " both map to backend and functionality bits"
     " into a 64-bit bitmask; you must have less than 64 total entries between them");
@@ -709,44 +709,44 @@ constexpr BackendComponent toBackendComponent(DispatchKey k) {
   if (k >= DispatchKey::StartOfDenseBackends &&
       k <= DispatchKey::EndOfDenseBackends) {
     return static_cast<BackendComponent>(
-        static_cast<uint8_t>(k) -
-        static_cast<uint8_t>(DispatchKey::StartOfDenseBackends));
+        static_cast<uint16_t>(k) -
+        static_cast<uint16_t>(DispatchKey::StartOfDenseBackends));
   } else if (
       k >= DispatchKey::StartOfQuantizedBackends &&
       k <= DispatchKey::EndOfQuantizedBackends) {
     return static_cast<BackendComponent>(
-        static_cast<uint8_t>(k) -
-        static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends));
+        static_cast<uint16_t>(k) -
+        static_cast<uint16_t>(DispatchKey::StartOfQuantizedBackends));
   } else if (
       k >= DispatchKey::StartOfSparseBackends &&
       k <= DispatchKey::EndOfSparseBackends) {
     return static_cast<BackendComponent>(
-        static_cast<uint8_t>(k) -
-        static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
+        static_cast<uint16_t>(k) -
+        static_cast<uint16_t>(DispatchKey::StartOfSparseBackends));
   } else if (
       k >= DispatchKey::StartOfSparseCsrBackends &&
       k <= DispatchKey::EndOfSparseCsrBackends) {
     return static_cast<BackendComponent>(
-        static_cast<uint8_t>(k) -
-        static_cast<uint8_t>(DispatchKey::StartOfSparseCsrBackends));
+        static_cast<uint16_t>(k) -
+        static_cast<uint16_t>(DispatchKey::StartOfSparseCsrBackends));
   } else if (
       k >= DispatchKey::StartOfNestedTensorBackends &&
       k <= DispatchKey::EndOfNestedTensorBackends) {
     return static_cast<BackendComponent>(
-        static_cast<uint8_t>(k) -
-        static_cast<uint8_t>(DispatchKey::StartOfNestedTensorBackends));
+        static_cast<uint16_t>(k) -
+        static_cast<uint16_t>(DispatchKey::StartOfNestedTensorBackends));
   } else if (
       k >= DispatchKey::StartOfAutogradBackends &&
       k <= DispatchKey::EndOfAutogradBackends) {
     return static_cast<BackendComponent>(
-        static_cast<uint8_t>(k) -
-        static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
+        static_cast<uint16_t>(k) -
+        static_cast<uint16_t>(DispatchKey::StartOfAutogradBackends));
   } else if (
       k >= DispatchKey::StartOfAutocastBackends &&
       k <= DispatchKey::EndOfAutocastBackends) {
     return static_cast<BackendComponent>(
-        static_cast<uint8_t>(k) -
-        static_cast<uint8_t>(DispatchKey::StartOfAutocastBackends));
+        static_cast<uint16_t>(k) -
+        static_cast<uint16_t>(DispatchKey::StartOfAutocastBackends));
   } else {
     return BackendComponent::InvalidBit;
   }
@@ -786,37 +786,37 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
     BackendComponent backend_k) {
   if (functionality_k == DispatchKey::Dense) {
     return static_cast<DispatchKey>(
-        static_cast<uint8_t>(DispatchKey::StartOfDenseBackends) +
+        static_cast<uint16_t>(DispatchKey::StartOfDenseBackends) +
         static_cast<uint8_t>(backend_k));
   }
   if (functionality_k == DispatchKey::Quantized) {
     return static_cast<DispatchKey>(
-        static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends) +
+        static_cast<uint16_t>(DispatchKey::StartOfQuantizedBackends) +
         static_cast<uint8_t>(backend_k));
   }
   if (functionality_k == DispatchKey::Sparse) {
     return static_cast<DispatchKey>(
-        static_cast<uint8_t>(DispatchKey::StartOfSparseBackends) +
+        static_cast<uint16_t>(DispatchKey::StartOfSparseBackends) +
         static_cast<uint8_t>(backend_k));
   }
   if (functionality_k == DispatchKey::SparseCsr) {
     return static_cast<DispatchKey>(
-        static_cast<uint8_t>(DispatchKey::StartOfSparseCsrBackends) +
+        static_cast<uint16_t>(DispatchKey::StartOfSparseCsrBackends) +
         static_cast<uint8_t>(backend_k));
   }
   if (functionality_k == DispatchKey::NestedTensor) {
     return static_cast<DispatchKey>(
-        static_cast<uint8_t>(DispatchKey::StartOfNestedTensorBackends) +
+        static_cast<uint16_t>(DispatchKey::StartOfNestedTensorBackends) +
         static_cast<uint8_t>(backend_k));
   }
   if (functionality_k == DispatchKey::AutogradFunctionality) {
     return static_cast<DispatchKey>(
-        static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends) +
+        static_cast<uint16_t>(DispatchKey::StartOfAutogradBackends) +
         static_cast<uint8_t>(backend_k));
   }
   if (functionality_k == DispatchKey::AutocastFunctionality) {
     return static_cast<DispatchKey>(
-        static_cast<uint8_t>(DispatchKey::StartOfAutocastBackends) +
+        static_cast<uint16_t>(DispatchKey::StartOfAutocastBackends) +
         static_cast<uint8_t>(backend_k));
   }
   return DispatchKey::Undefined;

@@ -41,7 +41,7 @@ TEST(DispatchKeySet, ShowSemantics) {
   ASSERT_TRUE(autograd_cuda.has_backend(BackendComponent::CUDABit));
 
   // And same thing with Autocast
-  auto autocast_xpu = DispatchKeySet(DispatchKey::AutocastXPU);
+  constexpr auto autocast_xpu = DispatchKeySet(DispatchKey::AutocastXPU);
   ASSERT_TRUE(autocast_xpu.has(DispatchKey::AutocastFunctionality));
   ASSERT_TRUE(autocast_xpu.has_backend(BackendComponent::XPUBit));
 
