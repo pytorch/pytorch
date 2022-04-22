@@ -21,11 +21,10 @@ TORCH_API c10::optional<GraphFunction*> GetDecompositionFunction(
     const FunctionSchema& schema);
 
 // To Embed in C++ Code, invoke as :
-// GraphFunction * func
-// std::once_flag get_func;
-// std::call_once(get_func, [&]()) {
-//    func = GetDecompositionExecutor("aten::var(Tensor self, bool unbiased=True) -> Tensor")
-// });
+// static GraphFunction * func = GetDecompositionExecutor("aten::var(Tensor self, bool unbiased=True) -> Tensor")
+// Stack stack = {at::rand({4, 4}), false};
+// func->run(stack)
+// at::Tensor out = pop(stack).toTensor()
 TORCH_API GraphFunction* GetDecompositionExecutor(const char * schema_literal);
 
 } // namespace jit

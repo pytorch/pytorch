@@ -2987,13 +2987,9 @@ graph(%x.1 : Tensor):
 }
 
 TEST(TestFunctionExecutor, RunDecompositionTest) {
-  GraphFunction* func;
   std::once_flag flag1;
+  static GraphFunction* func = torch::jit::GetDecompositionExecutor("aten::var(Tensor self, bool unbiased=True) -> Tensor");
   for (bool unbiased : {true, false}) {
-    std::call_once(flag1, [&]() {
-      // NB: take reference to schema here, `auto schema =` will not work
-      func = torch::jit::GetDecompositionExecutor("aten::var(Tensor self, bool unbiased=True) -> Tensor");
-    });
     auto input = at::rand({4, 4});
     Stack stack = {input, unbiased};
     func->run(stack);
