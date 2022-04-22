@@ -15,6 +15,20 @@
 namespace at { namespace native {
 
 template<int N>
+static OffsetCalculator<N>* make_input_offset_calculator_ptr(const TensorIteratorBase& iter) {
+  // array size can not be 0, this happens when N == 0
+  constexpr int array_size = std::max<int>(N, 1);
+  TORCH_INTERNAL_ASSERT(N == iter.ntensors() - iter.noutputs());
+  std::array<const int64_t*, array_size> strides;
+  int64_t element_sizes[array_size];
+  for (int i = 0; i < N; i++) {
+    strides[i] = iter.strides(i + iter.noutputs()).data();
+    element_sizes[i] = iter.element_size(i + iter.noutputs());
+  }
+  return new OffsetCalculator<N>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
+}
+
+template<int N>
 static OffsetCalculator<N> make_input_offset_calculator(const TensorIteratorBase& iter) {
   // array size can not be 0, this happens when N == 0
   constexpr int array_size = std::max<int>(N, 1);
