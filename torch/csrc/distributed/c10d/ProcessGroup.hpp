@@ -55,7 +55,7 @@ enum class OpType : std::uint8_t {
 TORCH_API std::string opTypeToString(OpType opType);
 
 // Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
-TORCH_API bool isP2POp(OpType opType);
+TORCH_API bool isP2POp(OpType opType, bool batchP2P = false);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -203,7 +203,12 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   // Subclasses must override this method to return the backend name
-  virtual const std::string getBackendName() const = 0;
+  virtual const std::string getBackendName() const {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "ProcessGroup ", getBackendName(), "does not support getBackendName"));
+  };
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,

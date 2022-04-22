@@ -50,7 +50,8 @@ std::string opTypeToString(OpType opType) {
   return "UNKNOWN";
 }
 
-bool isP2POp(OpType opType) {
+bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
+  if (batchP2P) return false;
   return opType == OpType::SEND || opType == OpType::RECV ||
       opType == OpType::RECVANYSOURCE;
 }
@@ -183,6 +184,13 @@ ProcessGroup::~ProcessGroup() {}
 
 void ProcessGroup::init() {
   C10_LOG_API_USAGE_ONCE(fmt::format("c10d.process_group_{}", getBackendName()));
+}
+
+TORCH_LIBRARY(c10d, m) {
+  m.class_<ProcessGroup>("ProcessGroup")
+    .def(torch::init<int64_t, int64_t>());
+  m.class_<ProcessGroup::Work>("Work")
+    .def(torch::init<>());
 }
 
 } // namespace c10d
