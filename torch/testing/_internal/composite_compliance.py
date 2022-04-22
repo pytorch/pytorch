@@ -109,22 +109,25 @@ def is_inplace(func):
     return name[-1] == '_'
 
 
-def generate_cct(dispatch=False, alias=True):
-
+def generate_cct(enable_torch_dispatch=False,
+                 autograd_view_consistency=True):
     # This function returns a new class CompositeCompliantTensor
     # The two arguments control the behaviour described below.
 
-    # dispatch:
-    #   If True, enable dispatch before calling the func in
+    # enable_torch_dispatch:
+    #   If True, enable __torch_dispatch__ before calling the func in
     #   CCT's __torch_dispatch__ implementation else call
     #   the func under `no_dispatch`.
-    #   NOTE: We need to disable dispatch for checking
+    #   NOTE: We need to disable dispatch under Python Mode,
+    #   to avoid infinite recursion.
+    #   Also, we need to enable dispatch for checking
     #   forward_AD composite compliance
     #   Refer: https://github.com/pytorch/pytorch/issues/75652
 
-    # alias:
+    # autograd_view_consistency:
+    #   If True, alias result using `set_` if func returns a view
+    #   (See Note [Alias Result]).
     #   Since Forward AD doesn't work with `set_`
-    #   used for aliasing result (See Note [Alias Result]),
     #   we disable it by setting alias to False.
 
     class CompositeCompliantTensor(torch.Tensor):
@@ -191,13 +194,13 @@ def generate_cct(dispatch=False, alias=True):
                         'Please try to avoid this in-place operation.')
 
             with enable_reentrant_dispatch():
-                with contextlib.nullcontext() if dispatch else no_dispatch():
+                with contextlib.nullcontext() if enable_torch_dispatch else no_dispatch():
                     unwrapped_args = tree_map(unwrap, args)
                     unwrapped_kwargs = tree_map(unwrap, kwargs)
                     unwrapped_rs = func(*unwrapped_args, **unwrapped_kwargs)
                     rs = tree_map(wrap, unwrapped_rs)
 
-            if is_view_fn(func) and alias:
+            if is_view_fn(func) and autograd_view_consistency:
                 # Note [Alias Result]
                 # Autograd asserts that for B = A.view_fn(...), B and A's storages
                 # are the same. Here we try to make B alias A to avoid those asserts.
@@ -448,7 +451,7 @@ def check_backward_formula(op, args, kwargs):
 def check_forward_ad_formula(op, args, kwargs):
     assert op.supports_forward_ad
 
-    CCT = generate_cct(dispatch=True, alias=False)
+    CCT = generate_cct(enable_torch_dispatch=True, autograd_view_consistency=False)
     # Permutations of arg and kwargs in CCT.
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
