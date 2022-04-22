@@ -357,8 +357,25 @@ def _get_tensor_dim_size(x, dim):
         pass
     return None
 
+
+def _get_dim_for_cross(input, dim):
+    if dim == -1:
+        return dim + _get_tensor_rank(input)
+    # If dim is not given, it defaults to the first dimension found with the size 3
+    if dim is None:
+        sizes = _get_tensor_sizes(input)
+        for index, size in enumerate(sizes):
+            if size is not None and size == 3:
+                return index
+    return dim
+
+
 def _unimplemented(op, msg):
-    warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+    # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
+    if torch.onnx._CAFFE2_ATEN_FALLBACK:
+        warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+    elif _operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+        _onnx_unsupported(f"{op}, {msg}")
 
 
 def _onnx_unsupported(op_name):
@@ -940,7 +957,7 @@ def _handle_reduce_dim_none(g, self, op_name):
     return g.op(op_name, self, keepdims_i=0)
 
 def dequantize_helper(g, qtensor, qdtype=None):
-    """Append to graph `g` with ONNX nodes that dequantizes `qtensor` into `tensor`.
+    """Append to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
 
     Args:
         g: Graph, the ONNX IR graph that is under construction.
@@ -953,7 +970,7 @@ def dequantize_helper(g, qtensor, qdtype=None):
     unpacked_qtensors = _unpack_tuple(qtensor)
     tensor, scale, zero_point = unpacked_qtensors[:3]
     axis = unpacked_qtensors[3] if len(unpacked_qtensors) >= 4 else None
-    axis_i = _get_const(axis, "i", "axis") if axis is not None and not _is_none(axis) else None
+    axis_i = _get_const(axis, "i", "axis")
     input_qdtype = cast_pytorch_to_onnx[tensor.type().scalarType()]
     if qdtype is None:
         if input_qdtype is not None:
@@ -964,16 +981,14 @@ def dequantize_helper(g, qtensor, qdtype=None):
     scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
     zero_point = g.op("Cast", zero_point, to_i=qdtype)
 
-    if _export_onnx_opset_version < 13:
-        if axis_i is not None:
-            _onnx_opset_unsupported_detailed(
-                "DequantizeLinear", _export_onnx_opset_version, 13, "Attribute axis is not supported.")
+    if axis_i is not None and _export_onnx_opset_version < 13:
+        _onnx_opset_unsupported_detailed(
+            "DequantizeLinear", _export_onnx_opset_version, 13, "Attribute axis is not supported.")
 
-    axis_kwargs = {"axis_i": axis_i} if axis_i is not None else {}
-    return g.op("DequantizeLinear", value, scale, zero_point, **axis_kwargs), scale, zero_point, axis
+    return g.op("DequantizeLinear", value, scale, zero_point, axis_i=axis_i), scale, zero_point, axis
 
 def quantize_helper(g, tensor, scale, zero_point, axis=None):
-    """Append to graph `g` with ONNX nodes that quantizes `tensor` based on `scale`, `zero_point` and `axis`.
+    """Append to graph `g` ONNX nodes that quantizes `tensor` based on `scale`, `zero_point` and `axis`.
 
     Args:
         g: Graph, the ONNX IR graph that is under construction.
@@ -985,7 +1000,6 @@ def quantize_helper(g, tensor, scale, zero_point, axis=None):
     """
     if axis is not None and not _is_none(axis) and _export_onnx_opset_version < 13:
         _onnx_opset_unsupported_detailed("QuantizeLinear", _export_onnx_opset_version, 13, "Attribute axis is not supported.")
-    axis_kwargs = {"axis_i": _get_const(axis, "i", "axis")}
 
     assert scale is not None
     if scale.type().scalarType() != "Float":
@@ -994,16 +1008,17 @@ def quantize_helper(g, tensor, scale, zero_point, axis=None):
     assert zero_point is not None
     if zero_point.type().scalarType() not in ("Byte", "Char"):
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
-    output = g.op("QuantizeLinear", tensor, scale, zero_point, **axis_kwargs)
+    output = g.op("QuantizeLinear", tensor, scale, zero_point, axis_i=_get_const(axis, "i", "axis"))
     args = [output, scale, zero_point]
     if axis is not None and not _is_none(axis):
         args.append(axis)
     return g.op("prim::TupleConstruct", *args)
 
 def requantize_bias_helper(g, bias, input_scale, weight_scale, axis=None):
-    """In PyTorch, bias is float and is quantized implicitly inside the quantized ATen op kernel.
+    """In PyTorch, bias is float and is quantized to int32 implicitly inside the quantized ATen op kernel.
     In ONNX we need to make the quantization explicit because operators expect all of their inputs to be quantized.
-    Since int32 is not supported by ONNX operator `QuantizeLinear`, quantization is exported using regular operators.
+    Since int32 is not a supported output type by ONNX operator `QuantizeLinear`, quantization is exported using
+    regular operators.
     """
     bias_scale = g.op("Mul", weight_scale, input_scale)
     bias_scale_shape = g.op("Shape", bias_scale)
