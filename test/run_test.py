@@ -320,7 +320,7 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
-DISTRIBUTED_TESTS.append("lazy/test_ddp.py")
+DISTRIBUTED_TESTS.append("lazy/test_ddp")
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
