@@ -2,19 +2,19 @@ from collections import namedtuple
 from typing import List, Dict, Any
 import operator
 import torch
-from .observation_type import ObservationType
+from torch.ao.quantization.backend_config.observation_type import ObservationType
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
-from ...observer import (
+from ..observer import (
     default_affine_fixed_qparams_observer,
     default_symmetric_fixed_qparams_observer,
 )
-from ...fake_quantize import FixedQParamsFakeQuantize
-from ...fuser_method_mappings import (
+from ..fake_quantize import FixedQParamsFakeQuantize
+from ..fuser_method_mappings import (
     reverse_sequential_wrapper2,
     reverse2,
     reverse3,
@@ -446,7 +446,7 @@ def _get_conv_configs():
 
     return conv_configs
 
-def _get_binary_op_configs():
+def _get_binary_op_configs(dtype_configs):
     binary_op_configs: List[Dict[str, Any]] = []
     num_tensor_args_to_observation_type_mapping = {
         # TODO: this is not used right now since we have extra check in prepare
@@ -456,10 +456,6 @@ def _get_binary_op_configs():
         1: ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
         2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
     }
-    dtype_configs = [
-        weighted_op_int8_dtype_config,
-        default_op_fp16_dtype_config,
-    ]
     for op_with_quantized_bop_scalar_variant in [
             operator.add, torch.add, operator.mul, torch.mul]:
         binary_op_configs.append({
@@ -500,6 +496,7 @@ def _get_fixed_qparams_op_configs():
             (torch.tanh, default_symmetric_fixed_qparams_observer),
             ("tanh", default_symmetric_fixed_qparams_observer),
             ("tanh_", default_symmetric_fixed_qparams_observer),
+            (torch.nn.Softmax, default_affine_fixed_qparams_observer),
     ]:
         fixed_qparams_op_configs.append({
             "pattern": fixed_qparam_op,
@@ -695,6 +692,10 @@ def _get_embedding_op_configs():
 
 def get_native_backend_config_dict():
     """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
+    binary_op_dtype_configs = [
+        weighted_op_int8_dtype_config,
+        default_op_fp16_dtype_config,
+    ]
     return {
         # optional
         "name": "native",
@@ -702,7 +703,7 @@ def get_native_backend_config_dict():
             *_DEFAULT_OP_INT8_CONFIGS,
             *_get_linear_configs(),
             *_get_conv_configs(),
-            *_get_binary_op_configs(),
+            *_get_binary_op_configs(binary_op_dtype_configs),
             *_get_fixed_qparams_op_configs(),
             _CAT_CONFIG,
             *_get_bn_configs(),
@@ -711,3 +712,7 @@ def get_native_backend_config_dict():
             *_get_embedding_op_configs(),
         ],
     }
+
+__all__ = [
+    "get_native_backend_config_dict",
+]

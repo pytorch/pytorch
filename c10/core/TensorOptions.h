@@ -722,6 +722,9 @@ inline DispatchKey computeDispatchKey(
               device_.type());
       }
     case Layout::SparseCsr:
+    case Layout::SparseCsc:
+    case Layout::SparseBsr:
+    case Layout::SparseBsc:
       switch (device_.type()) {
         case DeviceType::CPU:
           return DispatchKey::SparseCsrCPU;
@@ -729,7 +732,9 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::SparseCsrCUDA;
         default:
           AT_ERROR(
-              "Unsupported device type for sparse CSR layout: ",
+              "Unsupported device type for ",
+              layout_,
+              " layout: ",
               device_.type());
       }
     default:
@@ -744,9 +749,14 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     case DispatchKey::SparseHIP:
     case DispatchKey::SparseVE:
     case DispatchKey::SparseXPU:
+      return Layout::Sparse;
     case DispatchKey::SparseCsrCPU:
     case DispatchKey::SparseCsrCUDA:
-      return Layout::Sparse;
+      TORCH_CHECK(
+          false,
+          "Cannot map DispatchKey ",
+          dispatch_key,
+          " to a unique layout.");
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
     default:

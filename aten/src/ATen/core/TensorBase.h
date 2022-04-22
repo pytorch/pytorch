@@ -17,6 +17,7 @@
 
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
+#include <ATen/core/SymIntArrayRef.h>
 #include <ATen/core/TensorAccessor.h>
 
 namespace c10 {
@@ -219,6 +220,9 @@ class TORCH_API TensorBase {
   IntArrayRef sizes() const {
     return impl_->sizes();
   }
+  c10::SymIntArrayRef sym_sizes() const {
+    return c10::SymIntArrayRef(reinterpret_cast<const SymInt*>(sizes().data()), sizes().size());
+  }
   IntArrayRef strides() const {
     return impl_->strides();
   }
@@ -246,7 +250,7 @@ class TORCH_API TensorBase {
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
     // check 0,1 - sized dimension strides.
-    if (!is_mkldnn() && !is_sparse()) {
+    if (layout() == at::kStrided) {
       if (impl_->is_strides_like_channels_last()) {
         if (!channels_last_strides_exact_match ||
             get_channels_last_strides_2d(sizes()) == strides()) {
