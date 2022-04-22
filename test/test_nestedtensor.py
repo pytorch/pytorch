@@ -285,9 +285,10 @@ class TestNestedTensorDeviceType(TestCase):
         nt = torch.nested_tensor(ts, device=device, dtype=dtype)
         pad = 42
         correct_output = []
-        for i in range(len(ts)):
-            correct_output.append(torch.ones_like(ts[2]) * pad)
-            correct_output[i][:ts[i].size(0)].copy_(ts[i])
+        for t in ts:
+            next_output = torch.ones_like(ts[2]) * pad
+            correct_output.append(next_output)
+            next_output[:t.size(0)].copy_(t)
         correct_output = torch.stack(correct_output)
         padded = nt.to_padded_tensor(pad)
         self.assertEqual(padded, correct_output)
@@ -302,9 +303,10 @@ class TestNestedTensorDeviceType(TestCase):
         nt = torch.nested_tensor(ts, device=device, dtype=dtype)
         pad = 42
         correct_output = []
-        for i in range(len(ts)):
-            correct_output.append(torch.ones_like(ts[2]) * pad)
-            correct_output[i][:ts[i].size(0), :ts[i].size(1)].copy_(ts[i])
+        for t in ts:
+            next_output = torch.ones_like(ts[2]) * pad
+            correct_output.append(next_output)
+            next_output[:t.size(0), :t.size(1)].copy_(t)
         correct_output = torch.stack(correct_output)
         padded = nt.to_padded_tensor(pad)
         self.assertEqual(padded, correct_output)

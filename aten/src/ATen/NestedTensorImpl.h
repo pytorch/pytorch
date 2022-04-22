@@ -32,7 +32,10 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   const Tensor& get_nested_size_tensor() const {
     return nested_size_tensor_;
   }
-  c10::optional<int64_t> get_opt_size(int64_t i) const {
+  // Returns nullopt if the ith dimension is irregular. The ith dimension
+  // of a NestedTensor is regular if the unbound tensors match in
+  // size at the (i-1)th dimension.
+  c10::optional<int64_t> opt_size(int64_t i) const {
     if (opt_sizes_[i] == -1) {
       return c10::nullopt;
     }

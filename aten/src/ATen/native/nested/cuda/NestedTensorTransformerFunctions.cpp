@@ -116,12 +116,8 @@ Tensor _collapse_two_dims_3(const Tensor& input, int64_t dim1, int64_t dim2) {
 
   Tensor sizes_dim1 = at::native::narrow(nt_sizes, 1, 0, 1);
   Tensor sizes_dim2 = at::native::narrow(nt_sizes, 1, 1, 1);
+  Tensor new_nt_sizes = sizes_dim1 * sizes_dim2;
 
-  Tensor new_nt_sizes;
-  if (dim1 == 1) {
-    Tensor collapsed_sizes = sizes_dim1 * sizes_dim2;
-    new_nt_sizes = collapsed_sizes.contiguous();
-  }
   Tensor result = at::detail::make_tensor<NestedTensorImpl>(nt_input->get_buffer(), new_nt_sizes);
   TORCH_CHECK(result.dim() == 2, "Expected result to be 2 dimensional.");
   return result;
@@ -150,7 +146,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
     auto* nt_input = get_nested_tensor_impl(t);
     TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
     const auto& nt_buffer = nt_input->get_buffer();
-    const auto nt_input_opt_size_2 = nt_input->get_opt_size(2);
+    const auto nt_input_opt_size_2 = nt_input->opt_size(2);
 
     if (t_dim == 3 && nt_input_opt_size_2) {
       Tensor output = NestedTensor_to_padded_tensor_cuda(
