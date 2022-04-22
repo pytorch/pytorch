@@ -1,8 +1,6 @@
-#include <torch/library.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonModeTLS.h>
-
-#include <stack>
+#include <ATen/core/PythonFallbackKernel.h>
+#include <c10/core/SafePyObject.h>
 
 namespace {
 
@@ -17,27 +15,17 @@ namespace {
 
 thread_local c10::optional<c10::impl::LocalDispatchKeySet> tls_on_entry;
 
-// RAII guard to make working with the above TLS safer.
-struct MaybeSetTLSOnEntryGuard {
-public:
-  MaybeSetTLSOnEntryGuard() {
-    if (tls_on_entry.has_value()) {
-      value_set_ = false;
-    } else {
-      value_set_ = true;
-      tls_on_entry = c10::impl::tls_local_dispatch_key_set();
-    }
-  }
-  ~MaybeSetTLSOnEntryGuard() {
-    if (value_set_) {
-      TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
-      tls_on_entry = c10::nullopt;
-    }
-  }
+c10::impl::LocalDispatchKeySet safe_get_tls_on_entry() {
+  TORCH_CHECK(tls_on_entry.has_value(), "Accessing torch dispatch state outside of '__torch_dispatch__' "
+              "is not allowed.");
+  return tls_on_entry.value();
+}
 
-private:
-  bool value_set_;
-};
+// All the keys below the Python key
+constexpr c10::DispatchKeySet after_Python_keyset = c10::DispatchKeySet(c10::DispatchKeySet::FULL) ^
+  (c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Python) |
+   c10::DispatchKeySet(c10::DispatchKey::Python));
+
 
 // This guard assumes that tls_on_entry has a value.
 struct StashTLSOnEntryGuard {
@@ -57,8 +45,10 @@ private:
 
 void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
-  c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
-  StashTLSOnEntryGuard stash_guard;
+  // c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
+  // StashTLSOnEntryGuard stash_guard;
+  c10::impl::ExcludeDispatchKeyGuard guard(after_Python_keyset);
+
 
   // If Python Mode is active, use its PyInterpreter for dispatch
   const auto& maybe_python_mode_state = at::impl::PythonModeTLS::get_state();
@@ -97,17 +87,48 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(0, "Hit Python dispatch key but no arguments had PyInterpreter (no tensor args?)");
 }
 
-void pythonTLSSnapshotFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+void pythonTLSSnapshotFallback(const c10::OperatorHandle &op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   // It is ok for the tls to be already set here.
   // It means that there are multiple calls into the dispatcher not originating from python code.
   // The guard below will properly ignore such calls.
-  MaybeSetTLSOnEntryGuard guard;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
 
   op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::PythonTLSSnapshot), stack);
 }
 
 
 } // anonymous namespace
+
+namespace at {
+namespace impl {
+
+RestorePythonTLSSnapshot::RestorePythonTLSSnapshot() : saved_(safe_get_tls_on_entry()), guard_(safe_get_tls_on_entry()) {
+  tls_on_entry = c10::nullopt;
+}
+
+RestorePythonTLSSnapshot::~RestorePythonTLSSnapshot() {
+  TORCH_INTERNAL_ASSERT(!tls_on_entry.has_value());
+  tls_on_entry = saved_;
+}
+
+MaybeSetTLSOnEntryGuard::MaybeSetTLSOnEntryGuard() {
+  if (tls_on_entry.has_value()) {
+    value_set_ = false;
+  } else {
+    value_set_ = true;
+    tls_on_entry = c10::impl::tls_local_dispatch_key_set();
+  }
+}
+MaybeSetTLSOnEntryGuard::~MaybeSetTLSOnEntryGuard() {
+  if (value_set_) {
+    TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
+    tls_on_entry = c10::nullopt;
+  }
+}
+
+
+} // namespace impl
+} // namespace at
 
 TORCH_LIBRARY_IMPL(_, Python, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&pythonFallback>());

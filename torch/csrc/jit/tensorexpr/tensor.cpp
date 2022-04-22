@@ -39,9 +39,31 @@ StmtPtr Tensor::constructStmt(
     }
   }
 
-  for (const auto i : c10::irange(ndim)) {
-    // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = ndim - i - 1;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      buf_->is_contiguous() ||
+      buf_->is_contiguous(at::MemoryFormat::ChannelsLast) ||
+      buf_->is_contiguous(at::MemoryFormat::ChannelsLast3d) ||
+      buf_->is_channels_last_1d_contiguous());
+
+  auto loop_order_fn = [&]() {
+    std::vector<int32_t> loop_order;
+    if (buf_->is_contiguous()) {
+      for (int32_t i = args.size() - 1; i >= 0; i--) {
+        loop_order.push_back(i);
+      }
+    } else if (buf_->is_contiguous(c10::MemoryFormat::ChannelsLast)) {
+      loop_order = {1, 3, 2, 0};
+    } else if (buf_->is_contiguous(c10::MemoryFormat::ChannelsLast3d)) {
+      loop_order = {1, 4, 3, 2, 0};
+    } else {
+      loop_order = {1, 2, 0};
+    }
+
+    return loop_order;
+  };
+
+  auto loop_order = loop_order_fn();
+  for (auto dim_index : loop_order) {
     auto const& dim = buf()->dim(dim_index);
     s = alloc<For>(args[dim_index], immLike(dim, 0), dim, s);
   }

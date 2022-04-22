@@ -19,6 +19,63 @@ This file contains some of the auxiliary functions used by both Conv.cpp & Linea
 #include <c10/util/ArrayRef.h>
 #include <cudnn_frontend.h>
 
+struct TORCH_API PackedLinearWeightCudnn : public LinearPackedParamsBase {
+  PackedLinearWeightCudnn(
+      at::Tensor orig_weight,
+      c10::optional<at::Tensor> bias,
+      c10::QScheme q_scheme)
+      : orig_weight(std::move(orig_weight)),
+        bias_(std::move(bias)),
+        q_scheme(std::move(q_scheme)) {}
+
+  at::Tensor apply(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+  at::Tensor apply_relu(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range = false) override {
+    throw std::runtime_error(
+    "apply_relu_out is not implemented for this packed "
+    "parameter type");
+  }
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false) override {
+    throw std::runtime_error(
+    "apply_relu_out is not implemented for this packed "
+    "parameter type");
+  }
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  c10::optional<at::Tensor> bias() override {
+    return bias_;
+  }
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias);
+
+ private:
+  at::Tensor orig_weight;
+  c10::optional<at::Tensor> bias_;
+  c10::QScheme q_scheme;
+
+  template <bool ReluFused>
+  at::Tensor apply_impl(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point);
+
+  template <bool ReluFused>
+  void apply_impl_helper(
+      const at::Tensor& quantized_output,
+      const at::Tensor& input,
+      double output_scale);
+};
+
 template <int kSpatialDim = 2>
 struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightCudnn(
@@ -136,9 +193,24 @@ uint8_t getAlignment(const at::Tensor &t) {
   return alignment;
 }
 
-cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint8_t alignment) {
+// For the two getTensorDescriptor functions, there is a is_virtual parameter. This parameter is used to set the cudnn
+// tensor as virtual or not. Setting the tensor as virtual is expected to have some performance benefits as the cudnn
+// backend cudnn will no longer directly save to the tensor, allowing us to omit this tensor from the variant pack.
+// See third_party/cudnn_frontend/samples/fusion_sample.cpp for other examples
+
+cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint8_t alignment, bool is_virtual = false) {
   auto shape = t.sizes();
   auto strides = t.strides();
+  if (is_virtual) {
+    return cudnn_frontend::TensorBuilder()
+      .setDim(shape.size(), shape.data())
+      .setStrides(strides.size(), strides.data())
+      .setId(id)
+      .setAlignment(alignment)
+      .setVirtual()
+      .setDataType(at::native::getCudnnDataType(t))
+      .build();
+  }
   return cudnn_frontend::TensorBuilder()
     .setDim(shape.size(), shape.data())
     .setStrides(strides.size(), strides.data())
@@ -148,7 +220,17 @@ cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint
     .build();
 }
 
-cudnn_frontend::Tensor getTensorDescriptor(const c10::IntArrayRef& shape, const c10::IntArrayRef& strides, cudnnDataType_t cudnn_dtype, int64_t id, uint8_t alignment) {
+cudnn_frontend::Tensor getTensorDescriptor(const c10::IntArrayRef& shape, const c10::IntArrayRef& strides, cudnnDataType_t cudnn_dtype, int64_t id, uint8_t alignment, bool is_virtual = false) {
+  if (is_virtual) {
+    return cudnn_frontend::TensorBuilder()
+      .setDim(shape.size(), shape.data())
+      .setStrides(strides.size(), strides.data())
+      .setId(id)
+      .setAlignment(alignment)
+      .setVirtual()
+      .setDataType(cudnn_dtype)
+      .build();
+  }
   return cudnn_frontend::TensorBuilder()
     .setDim(shape.size(), shape.data())
     .setStrides(strides.size(), strides.data())

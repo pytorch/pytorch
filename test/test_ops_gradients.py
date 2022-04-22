@@ -1,13 +1,14 @@
 # Owner(s): ["module: unknown"]
 
 from functools import partial, wraps
+from itertools import chain
 import torch
 
 from torch.testing._internal.common_utils import \
-    (TestCase, is_iterable_of_tensors, run_tests, gradcheck, gradgradcheck, first_sample)
+    (TestCase, is_iterable_of_tensors, run_tests, gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, OpDTypes, skipCUDAIfRocm)
+    (instantiate_device_type_tests, ops, OpDTypes)
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -49,24 +50,55 @@ class TestGradients(TestCase):
             if sample.broadcasts_input and is_inplace(variant):
                 continue
 
-            # Note on TensorList inputs
-            #
-            # gradcheck does not support TensorList inputs so here we pass TensorList
-            # inputs of size n as n single Tensor inputs to gradcheck and wrap the op
-            # in a function that puts the n Tensor inputs back into a TensorList
+            # Gradcheck expects tensors as its input, but autograd actually supports tensorlists
+            #   and tensors passed as kwargs. The following creates a function that accepts just
+            #   the tensors that require grad as varargs, and then recomposes them back into the
+            #   original input.
+
+            # Creates gradcheck inputs by identifying tensors requiring grad
+            all_args = None
+            if is_iterable_of_tensors(sample.input):
+                all_args = chain(sample.input, sample.args, sample.kwargs.values())
+            else:
+                all_args = tuple(chain((sample.input,), sample.args, sample.kwargs.values()))
+            gradcheck_args = tuple(x for x in all_args if (isinstance(x, torch.Tensor) and x.requires_grad))
+
+            def _input_recomposition_helper(inputs, inp, input_idx):
+                if is_iterable_of_tensors(inp):
+                    tensor_list = []
+                    for x in inp:
+                        if isinstance(x, torch.Tensor) and x.requires_grad:
+                            tensor_list.append(inputs[input_idx])
+                            input_idx = input_idx + 1
+                        else:
+                            tensor_list.append(x)
+                    return tensor_list, input_idx
+                elif isinstance(inp, torch.Tensor) and inp.requires_grad:
+                    return inputs[input_idx], input_idx + 1
+                else:
+                    return inp, input_idx
+
             def fn(*inputs):
-                # Put tensors back into TensorList since we splat them when passing to gradcheck
-                if is_iterable_of_tensors(sample.input):
-                    n = len(sample.input)
-                    inputs = (inputs[:n], *inputs[n:])
-                output = op.gradcheck_wrapper(variant, *inputs, **sample.kwargs)
+                # Puts inputs back into sample properly
+                positional_args = []
+                input_idx = 0
+                inp, input_idx = _input_recomposition_helper(inputs, sample.input, input_idx)
+                positional_args.append(inp)
+
+                for x in sample.args:
+                    inp, input_idx = _input_recomposition_helper(inputs, x, input_idx)
+                    positional_args.append(inp)
+
+                # Recreates kwargs
+                kwargs = {}
+                for k, v in sample.kwargs.items():
+                    inp, input_idx = _input_recomposition_helper(inputs, v, input_idx)
+                    kwargs[k] = inp
+
+                output = op.gradcheck_wrapper(variant, *positional_args, **kwargs)
                 if sample.output_process_fn_grad is not None:
                     return sample.output_process_fn_grad(output)
                 return output
-
-            # Splat TensorList inputs into single Tensor inputs
-            gradcheck_args = (sample.input,) if isinstance(sample.input, torch.Tensor) else tuple(sample.input)
-            gradcheck_args += sample.args
 
             if check == 'gradcheck':
                 if check_batched_grad is None:
@@ -107,17 +139,19 @@ class TestGradients(TestCase):
                                   check_batched_forward_grad=check_batched_forward_grad)
 
     def _skip_helper(self, op, device, dtype):
+        if dtype not in op.supported_backward_dtypes(torch.device(device).type):
+            self.skipTest("Skipped! Op doesn't support autograd for this dtype.")
         if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
-        if not op.supports_complex_autograd(torch.device(device).type) and dtype.is_complex:
-            self.skipTest("Skipped! Complex autograd not supported.")
 
     # Tests that gradients are computed correctly
-    @skipCUDAIfRocm
     @_gradcheck_ops(op_db)
     def test_fn_grad(self, device, dtype, op):
-        self._skip_helper(op, device, dtype)
-        self._grad_test_helper(device, dtype, op, op.get_op())
+        # This is verified by test_dtypes in test_ops.py
+        if dtype not in op.supported_backward_dtypes(torch.device(device).type):
+            self.skipTest("Skipped! Dtype is not in supported backward dtypes!")
+        else:
+            self._grad_test_helper(device, dtype, op, op.get_op())
 
     # Method grad (and gradgrad, see below) tests are disabled since they're
     #   costly and redundant with function grad (and gradgad) tests
@@ -129,17 +163,29 @@ class TestGradients(TestCase):
     @_gradcheck_ops(op_db)
     def test_inplace_grad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
-        if not op.inplace_variant or not op.supports_inplace_autograd:
-            self.skipTest("Skipped! Operation does not support inplace autograd.")
-        self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
+        if not op.inplace_variant:
+            self.skipTest("Op has no inplace variant!")
+
+        # Verifies an operation doesn't support inplace autograd if it claims not to
+        if not op.supports_inplace_autograd:
+            inplace = self._get_safe_inplace(op.get_inplace())
+            for sample in op.sample_inputs(device, dtype, requires_grad=True):
+                if sample.broadcasts_input:
+                    continue
+                with self.assertRaises(Exception):
+                    result = inplace(sample)
+                    result.sum().backward()
+        else:
+            self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
     # Test that gradients of gradients are computed correctly
     @_gradcheck_ops(op_db)
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if not op.supports_gradgrad:
-            self.skipTest("Skipped! Operation does not support gradgrad")
-        self._check_helper(device, dtype, op, op.get_op(), 'bwgrad_bwgrad')
+            self.skipTest("Op claims it doesn't support gradgrad. This is not verified.")
+        else:
+            self._check_helper(device, dtype, op, op.get_op(), 'bwgrad_bwgrad')
 
     # Test that forward-over-reverse gradgrad is computed correctly
     @_gradcheck_ops(op_db)
@@ -149,7 +195,7 @@ class TestGradients(TestCase):
         if op.supports_fwgrad_bwgrad:
             self._check_helper(device, dtype, op, op.get_op(), "fwgrad_bwgrad")
         else:
-            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            err_msg = r"Trying to use forward AD with .* that does not support it"
             hint_msg = ("Running forward-over-backward gradgrad for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_fwgrad_bwgrad=True.")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
@@ -190,7 +236,7 @@ class TestGradients(TestCase):
         if op.supports_forward_ad:
             call_grad_test_helper()
         else:
-            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            err_msg = r"Trying to use forward AD with .* that does not support it"
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
@@ -210,17 +256,6 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Operation does not support inplace autograd.")
 
         self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()), is_inplace=True)
-
-    # Functions that do not support autograd should not fail in forward mode
-    # Inplace functions (such as "resize_") are expected to fail in forward mode and should be skipped
-    # Test only when supports_autograd=False and for double dtype
-    @ops(filter(lambda op: not op.supports_autograd, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
-    def test_nondifferentiable(self, device, dtype, op):
-        # Expecting no errors
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-        sample = first_sample(self, samples)
-        result = op(sample.input, *sample.args, **sample.kwargs)
-
 
 
 instantiate_device_type_tests(TestGradients, globals())

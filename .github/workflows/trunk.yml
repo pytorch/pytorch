@@ -94,24 +94,27 @@ jobs:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7-no-ops
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
 
-  linux-bionic-rocm4_5-py3_7-distributed-build:
-    name: linux-bionic-rocm4.5-py3.7-distributed
+  linux-bionic-rocm5_0-py3_7-distributed-build:
+    name: linux-bionic-rocm5.0-py3.7-distributed
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-rocm4.5-py3.7
-      docker-image-name: pytorch-linux-bionic-rocm4.5-py3.7
+      build-environment: linux-bionic-rocm5.0-py3.7
+      docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
 
-  linux-bionic-rocm4_5-py3_7-distributed-test:
-    name: linux-bionic-rocm4.5-py3.7-distributed
+  linux-bionic-rocm5_0-py3_7-distributed-test:
+    name: linux-bionic-rocm5.0-py3.7-distributed
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-bionic-rocm4_5-py3_7-distributed-build
+    needs: linux-bionic-rocm5_0-py3_7-distributed-build
     with:
-      build-environment: linux-bionic-rocm4.5-py3.7
-      docker-image: ${{ needs.linux-bionic-rocm4_5-py3_7-distributed-build.outputs.docker-image }}
+      build-environment: linux-bionic-rocm5.0-py3.7
+      docker-image: ${{ needs.linux-bionic-rocm5_0-py3_7-distributed-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
         ]}
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build:
     name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build

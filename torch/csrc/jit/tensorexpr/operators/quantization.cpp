@@ -263,8 +263,6 @@ Tensor computeDequantizeExternalCall(
   }
 
   const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
-  const double qscale = immQScale(qx);
-  const int64_t qzero = immQZero(qx);
   const int64_t qdtype = (int64_t)immQDType(qx);
 
   BufHandle ResultBuf("dequantize", outputShape, dtype);

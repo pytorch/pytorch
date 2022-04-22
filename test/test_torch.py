@@ -34,7 +34,8 @@ from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
-    skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
+    TEST_WITH_CROSSREF,
+    skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     skipIfNotRegistered, bytes_to_scalar, parametrize)
@@ -52,7 +53,8 @@ from torch.testing._internal.common_device_type import (
 from typing import Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
+from torch.testing._internal.common_cuda import (
+    tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types,
@@ -628,6 +630,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
     # Uses mismatched arange out size to trigger a warning
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref perturbs line numbering")
     def test_cpp_warnings_have_python_context(self, device):
         # Creates long string in advance to avoid a too-long Python line
         s = ".+Triggered internally at.+RangeFactories.+"
@@ -1395,6 +1398,56 @@ else:
             res.backward(grad)
 
         backward_func(self, device)
+
+    def test_invalid_shapes_grid_sampler(self, device):
+        make_arg = partial(
+            make_tensor, device=device, dtype=torch.float64, requires_grad=True)
+
+        inputs = (
+            # input, grid
+            ((5, 5, 5, 5, 5,), (1, 1, 1, 4, 4,)),  # 3d
+            ((5, 5, 5, 5,), (1, 1, 4, 4,)),  # 2d
+        )
+
+        interpolation_mode = 0
+        padding_mode = 0
+        align_corners = True
+
+        err = "expected grid and input to have same batch size"
+
+        for input, grid in inputs:
+            input = make_arg(input)
+            grid = make_arg(grid, low=-1, high=1)
+
+            # Wrapper for the 2d, 3d, and cuDNN functions listed below.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch.grid_sampler(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 2d input.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch.grid_sampler_2d(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 3d input.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch.grid_sampler_3d(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 2d input.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch._grid_sampler_2d_cpu_fallback(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 2d input, on CUDA.
+            # Doesn't work on CPU and ROCm.
+            if device != 'cpu' and TEST_CUDNN and not TEST_WITH_ROCM:
+                with self.assertRaisesRegex(RuntimeError, err):
+                    torch.cudnn_grid_sampler(input, grid)
 
     def test_dist(self, device):
         def run_test(x, y):
@@ -3281,8 +3334,6 @@ else:
 
     # FIXME: find a test suite for the masked scatter operator
     #   test_scatter_gather_ops or test_masked_ops?
-    # refer https://github.com/pytorch/pytorch/issues/60190
-    @skipIfRocm
     @onlyCUDA
     @largeTensorTest('30GB')
     def test_masked_scatter_large_tensor(self, device):
@@ -5041,6 +5092,31 @@ else:
                     torch.where(condition, x, scalar_1)
 
         self._test_where_scalar_template(device, dtype, checkRaises)
+
+    @dtypesIfCUDA(torch.float, torch.double, torch.half)
+    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.float, torch.double)
+    def test_multinomial_cpu(self, device, dtype):
+        def make_prob_dist(shape, is_contiguous):
+            if is_contiguous:
+                if dtype == torch.half or dtype == torch.bfloat16:
+                    return torch.zeros(shape, device=device).uniform_().to(dtype=dtype)
+                return torch.zeros(shape, device=device, dtype=dtype).uniform_()
+            elif len(shape) == 1:
+                if dtype == torch.half or dtype == torch.bfloat16:
+                    return torch.zeros((shape + [5]), device=device).uniform_().to(dtype=dtype)[:, 2]
+                return torch.zeros((shape + [5]), device=device, dtype=dtype).uniform_()[:, 2]
+            else:
+                # num dim = 2
+                new_shape = [2, shape[1], 7, 1, shape[0], 1, 10]
+                if dtype == torch.half or dtype == torch.bfloat16:
+                    prob_dist = torch.zeros(new_shape, device=device).uniform_().to(dtype=dtype)
+                else:
+                    prob_dist = torch.zeros(new_shape, device=device, dtype=dtype).uniform_()
+                prob_dist = prob_dist.transpose(1, 4)
+                prob_dist = prob_dist[1, :, 5, 0, :, 0, 4]
+                assert not prob_dist.is_contiguous()  # sanity check
+                return prob_dist
 
     # FIXME: move to elementwise ternary test suite
     @skipCUDAVersionIn([(11, 2)])  # test fails for 11.2, see https://github.com/pytorch/pytorch/issues/51980
@@ -7089,7 +7165,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # FIXME: move these meta tests to their own test suite/class or
     #   distribute them among the appropriate test suites for their ops
-    @noarchTest
     def test_empty_meta(self):
         x = torch.empty(2 ** 20, 2 ** 20, device='meta')
         y = torch.empty(2 ** 20, device='meta')
@@ -7097,12 +7172,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
         self.assertRaises(RuntimeError, lambda: z[0][0].item())
 
-    @noarchTest
     def test_format_scalar_meta(self):
         x = torch.empty((), device='meta')
         self.assertEqual(format(x), repr(x))
 
-    @noarchTest
     def test_upsample_nearest1d_meta(self):
         # TODO: this test should be triggered by test_nn.py but right
         # now meta is not enabled (and even if it was, we are probably
@@ -7126,7 +7199,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
         self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
-    @noarchTest
     def test_upsample_nearest2d_meta(self):
         # TODO: the out tests cannot be triggered by test_nn.py because
         # we don't actually do out= arguments for nn functions, so there
@@ -7167,13 +7239,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             """Expected out tensor to have device meta, but got cpu instead"""
         )
 
-    @noarchTest
     def test_detach_meta(self):
         x = torch.empty(2, device='meta')
         # This used to segfault
         self.assertRaises(RuntimeError, lambda: x.detach().storage())
 
-    @noarchTest
     def test_add_meta_scalar(self):
         # From https://github.com/pytorch/pytorch/issues/53815
         x = torch.empty(2, device='meta')
@@ -7799,6 +7869,22 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(cdouble.dtype, torch.complex128)
         self.assertEqual(cdouble.real, x.double())
         self.assertEqual(cdouble.imag, torch.zeros_like(cdouble.imag))
+        chalf = x.chalf()
+        self.assertEqual(chalf.dtype, torch.complex32)
+        self.assertEqual(chalf.real, x.half())
+        self.assertEqual(chalf.imag, torch.zeros_like(chalf.imag))
+
+    def test_type_alias(self):
+        type_alias_map = {torch.float64: torch.double,
+                          torch.float32: torch.float,
+                          torch.int32: torch.int,
+                          torch.int64: torch.long,
+                          torch.int16: torch.short,
+                          torch.float16: torch.half,
+                          torch.complex32: torch.chalf,
+                          torch.complex64: torch.cfloat}
+        for dtype, alias in type_alias_map.items():
+            self.assertIs(alias, dtype)
 
     # FIXME: Describe this test
     def test_doc_template(self) -> None:
