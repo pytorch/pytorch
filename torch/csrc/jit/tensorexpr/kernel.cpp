@@ -208,7 +208,9 @@ std::vector<int64_t> _pair_int(IValue v) {
   }
 }
 
-static bool isContiguous(const torch::jit::Value* v) {
+static bool isContiguous(
+    const torch::jit::Value* v,
+    at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
   auto const& tt = v->type()->cast<TensorType>();
   if (!tt) {
     return false;
@@ -221,7 +223,15 @@ static bool isContiguous(const torch::jit::Value* v) {
   if (!sizes || !strides) {
     return false;
   }
-  return *strides == TensorType::contiguousStridesOf(*sizes);
+
+  // Check dimension size first
+  int ndims = (*sizes).size();
+  if ((memory_format == at::MemoryFormat::ChannelsLast && ndims != 4) ||
+      (memory_format == at::MemoryFormat::ChannelsLast3d && ndims != 5)) {
+    return false;
+  }
+
+  return *strides == TensorType::contiguousStridesOf(*sizes, memory_format);
 }
 
 // The fuser only supports conv2d with very specific properties:
@@ -475,10 +485,36 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     hasRandom_ = true;
   }
 
+  bool is_contiguous = false;
+  bool is_channels_last_contiguous = false;
+  for (auto input : inputs) {
+    if (input->type()->kind() != TypeKind::TensorType)
+      continue;
+
+    TORCH_CHECK(bufs_.count(input) > 0);
+    auto buf_ = bufs_.at(input);
+    is_contiguous |= buf_->is_contiguous();
+
+    is_channels_last_contiguous |=
+        (buf_->is_contiguous(at::MemoryFormat::ChannelsLast) ||
+         buf_->is_contiguous(at::MemoryFormat::ChannelsLast3d) ||
+         buf_->is_channels_last_1d_contiguous());
+
+    TORCH_INTERNAL_ASSERT(
+        (is_contiguous xor is_channels_last_contiguous) &&
+        (is_contiguous || is_channels_last_contiguous));
+  }
+
   auto outputType = findDtypeForValue(v);
   std::vector<ExprHandle> outputShape = sizesForValue(v);
-  std::vector<ExprHandle> outputStrides =
-      c10::fmap<ExprHandle>(make_channels_last_strides(outputShape));
+  std::vector<ExprHandle> outputStrides;
+  if (is_channels_last_contiguous) {
+    outputStrides =
+        c10::fmap<ExprHandle>(make_channels_last_strides(outputShape));
+  } else {
+    // Default
+    outputStrides = c10::fmap<ExprHandle>(make_contiguous_strides(outputShape));
+  }
 
   std::vector<ArgValue> argInputs;
   if (op == prim::ConstantChunk) {
