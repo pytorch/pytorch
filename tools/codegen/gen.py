@@ -296,7 +296,7 @@ def static_dispatch_ops_header(
 
 
 def static_dispatch_extra_headers(
-        backends: List[BackendIndex]
+    backends: List[BackendIndex]
 ) -> List[str]:
     return [f'#include <ATen/{dispatch_key}Functions.h>'
             for dispatch_key in static_dispatch_keys(backends)]
@@ -325,7 +325,7 @@ def generate_static_dispatch(
             nctype=NamedCType(SpecialArgName.possibly_redundant_memory_format, last_disp_arg.nctype.type),
             name=last_disp_arg.name,
             default=last_disp_arg.default,
-            argument=last_disp_arg,
+            argument=last_disp_arg.argument,
         )
         dp_sig_args.append(mem_format_arg)
     else:
@@ -358,9 +358,9 @@ def static_dispatch(
     *,
     method: bool,
     backend_indices: List[BackendIndex],
-) -> Optional[str]:
+) -> str:
     if len(backend_indices) == 0 or f.manual_kernel_registration:
-        return None
+        return ""
     keys = [b for b in backend_indices if b.has_kernel(f) or f.structured_delegate is not None]
     if len(keys) == 1:
         return generate_static_dispatch(f, sig, method=method, backend_index=keys[0])
@@ -1421,8 +1421,10 @@ def gen_per_operator_headers(
             "Operator.h",
             lambda: {
                 "declarations": list(
-                    mapMaybe(ComputeOperators(Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx),
-                    functions)
+                    mapMaybe(
+                        ComputeOperators(Target.DECLARATION, static_dispatch_backend_indices=static_dispatch_idx),
+                        functions
+                    )
                 ),
             },
         )
