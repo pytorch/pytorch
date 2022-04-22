@@ -1,7 +1,7 @@
 import torch._C
 
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Any
 import warnings
 
 from torch.utils import set_module
@@ -188,19 +188,6 @@ def isinstance(obj, target_type):
     return _isinstance(obj, target_type)
 
 
-# Context manager for globally hiding source ranges when printing graphs.
-# Note that these functions are exposed to Python as static members of the
-# Graph class, so mypy checks need to be skipped.
-@contextmanager
-def _hide_source_ranges() -> Iterator[None]:
-    old_enable_source_ranges = torch._C.Graph.global_print_source_ranges  # type: ignore[attr-defined]
-    try:
-        torch._C.Graph.set_global_print_source_ranges(False)  # type: ignore[attr-defined]
-        yield
-    finally:
-        torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
-
-
 class strict_fusion(object):
     """
     This class errors if not all nodes have been fused in
@@ -227,8 +214,20 @@ class strict_fusion(object):
     def __enter__(self):
         pass
 
-    def __exit__(self, type, value, tb) -> None:
+    def __exit__(self, type: Any, value: Any, tb: Any) -> None:
         pass
 
-if not torch._C._jit_init():
-    raise RuntimeError("JIT initialization failed")
+# Context manager for globally hiding source ranges when printing graphs.
+# Note that these functions are exposed to Python as static members of the
+# Graph class, so mypy checks need to be skipped.
+@contextmanager
+def _hide_source_ranges() -> Iterator[None]:
+    old_enable_source_ranges = torch._C.Graph.global_print_source_ranges  # type: ignore[attr-defined]
+    try:
+        torch._C.Graph.set_global_print_source_ranges(False)  # type: ignore[attr-defined]
+        yield
+    finally:
+        torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
+
+# dont expose, TODO: define `__all__`
+del Any

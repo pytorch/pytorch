@@ -138,3 +138,6 @@ def set_fusion_strategy(strategy: List[Tuple[str, int]]):
     apis for specific fusers.
     """
     return torch._C._jit_set_fusion_strategy(strategy)
+
+if not torch._C._jit_init():
+    raise RuntimeError("JIT initialization failed")
