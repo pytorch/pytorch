@@ -133,6 +133,16 @@ class TestGitHubPR(TestCase):
             non_existing_team = gh_get_team_members("pytorch", "qwertyuiop")
             self.assertEqual(len(non_existing_team), 0)
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_author_many_commits(self, mocked_gql: Any) -> None:
+        """ Tests that authors for all commits can be fetched
+        """
+        pr = GitHubPR("pytorch", "pytorch", 76118)
+        authors = pr.get_authors()
+        self.assertGreater(pr.get_commit_count(), 100)
+        self.assertGreater(len(authors), 50)
+        self.assertTrue("@" in pr.get_author())
+
 
 if __name__ == "__main__":
     main()
