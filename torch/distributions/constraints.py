@@ -16,9 +16,10 @@ The following constraints are implemented:
 - ``constraints.multinomial``
 - ``constraints.nonnegative_integer``
 - ``constraints.one_hot``
-- ``constraints.positive_definite``
 - ``constraints.positive_integer``
 - ``constraints.positive``
+- ``constraints.positive_semidefinite``
+- ``constraints.positive_definite``
 - ``constraints.real_vector``
 - ``constraints.real``
 - ``constraints.simplex``
@@ -51,6 +52,7 @@ __all__ = [
     'multinomial',
     'nonnegative_integer',
     'positive',
+    'positive_semidefinite',
     'positive_definite',
     'positive_integer',
     'real',
@@ -488,11 +490,21 @@ class _Symmetric(_Square):
         return torch.isclose(value, value.mT, atol=1e-6).all(-2).all(-1)
 
 
+class _PositiveSemidefinite(_Symmetric):
+    """
+    Constrain to positive-semidefinite matrices.
+    """
+    def check(self, value):
+        sym_check = super().check(value)
+        if not sym_check.all():
+            return sym_check
+        return torch.linalg.eigvalsh(value).ge(0).all(-1)
+
+
 class _PositiveDefinite(_Symmetric):
     """
     Constrain to positive-definite matrices.
     """
-
     def check(self, value):
         sym_check = super().check(value)
         if not sym_check.all():
@@ -591,6 +603,7 @@ lower_cholesky = _LowerCholesky()
 corr_cholesky = _CorrCholesky()
 square = _Square()
 symmetric = _Symmetric()
+positive_semidefinite = _PositiveSemidefinite()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack

@@ -140,6 +140,56 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
     return Xq, loss
 
 class TestQuantizedTensor(TestCase):
+    def test_per_tensor_qtensor_to_memory_format(self):
+        n = np.random.randint(1, 10)
+        c = np.random.randint(2, 10)
+        h = np.random.randint(2, 10)
+        w = np.random.randint(2, 10)
+        x = torch.rand(n, c, h, w)
+        scale = np.random.uniform(0.1, 1.0)
+        zero_point = np.random.randint(0.0, 10)
+        qints = [torch.qint8, torch.quint8, torch.qint32]
+        dtype = qints[np.random.randint(0, len(qints))]
+        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=dtype)
+        x_nhwc = x.to(memory_format=torch.channels_last)
+        qx_nhwc_using_to = qx.to(memory_format=torch.channels_last)
+        qx_nhwc_using_contiguous = qx.contiguous(memory_format=torch.channels_last)
+        self.assertEqual(qx_nhwc_using_to.stride(), qx_nhwc_using_contiguous.stride())
+        self.assertEqual(qx_nhwc_using_to.stride(), x_nhwc.stride())
+
+        # When the last two dimensions of a 4D tensor are both size 1 or if c == 1, we have a degenerate case
+        # see https://pytorch.org/tutorials/intermediate/memory_format_tutorial.html
+        # In this case, the output of torch.Tensor.to and torch.Tensor.contiguous should not be the same
+        x = torch.rand(10, 2, 1, 1)
+        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=dtype)
+        qx_nhwc_using_to = qx.to(memory_format=torch.channels_last)
+        qx_nhwc_using_contiguous = qx.contiguous(memory_format=torch.channels_last)
+        self.assertNotEqual(qx_nhwc_using_to.stride(), qx_nhwc_using_contiguous.stride())
+
+        x = torch.rand(10, 1, 2, 2)
+        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=dtype)
+        qx_nhwc_using_to = qx.to(memory_format=torch.channels_last)
+        qx_nhwc_using_contiguous = qx.contiguous(memory_format=torch.channels_last)
+        self.assertNotEqual(qx_nhwc_using_to.stride(), qx_nhwc_using_contiguous.stride())
+
+    def test_per_channel_qtensor_to_memory_format(self):
+        n = np.random.randint(1, 10)
+        c = np.random.randint(2, 10)
+        h = np.random.randint(2, 10)
+        w = np.random.randint(2, 10)
+        x = torch.rand(n, c, h, w)
+        x_nhwc = x.to(memory_format=torch.channels_last)
+        scale = np.random.uniform(0.1, 1.0)
+        zero_point = np.random.randint(0.0, 10)
+        qints = [torch.qint8, torch.quint8, torch.qint32]
+        dtype = qints[np.random.randint(0, len(qints))]
+        for axis in range(x.ndim):
+            scales = torch.rand(x.size(axis)) + 0.00001
+            zero_points = torch.randint(low=0, high=10, size=(x.size(axis), ))
+            qx = torch.quantize_per_channel(x, scales=scales, zero_points=zero_points, dtype=dtype, axis=axis)
+            qx_nhwc_using_to = qx.to(memory_format=torch.channels_last)
+            self.assertEqual(qx_nhwc_using_to.stride(), x_nhwc.stride())
+
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_cuda(self):
         self._test_qtensor(torch.device('cuda'))
@@ -256,6 +306,48 @@ class TestQuantizedTensor(TestCase):
             loaded_q = torch.load(f)
             loaded_int_repr = loaded_q.int_repr()
             self.assertEqual(int_repr, loaded_int_repr)
+
+    def test_qtensor_channel_float_assignment(self):
+        t1 = torch.rand(2, 3, 5, 5)
+        t2 = torch.rand(2, 3, 5, 5)
+        for axis in range(t1.ndim):
+            scales = np.random.rand(t1.size()[axis])
+            zero_points = np.random.randint(low=0, high=50, size=t1.size()[axis])
+            for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+                qt1 = torch.quantize_per_channel(t1, scales=torch.tensor(scales),
+                                                 zero_points=torch.tensor(zero_points), dtype=dtype, axis=axis)
+                qt2 = torch.quantize_per_channel(t2, scales=torch.tensor(scales),
+                                                 zero_points=torch.tensor(zero_points), dtype=dtype, axis=axis)
+                i = 0
+                j = 1
+                k = 2
+                l = 4
+                # scalar assignment verification
+                qt1[i][j][k][l] = t2[i][j][k][l]
+                self.assertEqual(qt1[i][j][k][l], qt2[i][j][k][l])
+                # 1D tensor assignment verification
+                qt1[i][j][k][2:l] = t2[i][j][k][2:l]
+                self.assertEqual(qt1[i][j][k][2:l], qt2[i][j][k][2:l])
+                qt1[i][j][k] = t2[i][j][k]
+                self.assertEqual(qt1[i][j][k], qt2[i][j][k])
+                # 2D tensor assignment verification
+                qt1[i][j][k:] = t2[i][j][k:]
+                self.assertEqual(qt1[i][j][k:], qt2[i][j][k:])
+                qt1[i][j] = t2[i][j]
+                self.assertEqual(qt1[i][j], qt2[i][j])
+                # 3D tensor assignment verification
+                qt1[i][j:] = t2[i][j:]
+                self.assertEqual(qt1[i][j:], qt2[i][j:])
+                qt1[i] = t2[i]
+                self.assertEqual(qt1[i], qt2[i])
+                # 4D tensor assignment verification
+                qt1[:1] = t2[:1]
+                self.assertEqual(qt1[:1], qt2[:1])
+                qt1[:] = t2[:]
+                self.assertEqual(qt1[:], qt2[:])
+                # non-contiguous case **this should raise an exception**
+                with self.assertRaisesRegex(RuntimeError, "Quantized copy only works with contiguous Tensors"):
+                    qt1[:, 0] = t2[:, 0]
 
     def test_qtensor_float_assignment(self):
         # Scalar Tensor
@@ -448,7 +540,7 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual('cpu', dqr_cuda.q_per_channel_scales().device.type)
             self.assertEqual('cpu', dqr_cuda.q_per_channel_zero_points().device.type)
 
-    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA is not available')
     def test_compare_per_tensor_device_numerics(self):
         dtypes = [
             torch.quint8,
@@ -469,7 +561,7 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(qtr.int_repr(), qtr_cuda.int_repr())
             self.assertTrue(np.allclose(dqtr, dqtr_cuda.cpu()))
 
-    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA is not available')
     def test_compare_per_channel_device_numerics(self):
         dtype_and_zero_types = [
             (torch.quint8, torch.float),
@@ -813,8 +905,13 @@ class TestQuantizedTensor(TestCase):
                 [numel], scale=scale, zero_point=zero_point,
                 device=device, dtype=dtype)
             per_channel_quantized = torch._empty_per_channel_affine_quantized(
-                [numel], scales=torch.tensor([scale]), zero_points=torch.tensor([zero_point]), axis=0,
-                device=device, dtype=dtype)
+                [numel],
+                scales=torch.tensor([scale] * numel, device=device),
+                zero_points=torch.tensor([zero_point] * numel, device=device),
+                axis=0,
+                device=device,
+                dtype=dtype
+            )
             qtensors = [per_tensor_quantized, per_channel_quantized]
 
             for q in qtensors:
@@ -1054,7 +1151,7 @@ class TestQuantizedTensor(TestCase):
         np.testing.assert_array_almost_equal(X_scale, qparams[0], decimal=3)
         self.assertEqual(X_zp, qparams[1])
 
-    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA is not available')
     def test_cuda_quantization_does_not_pin_memory(self):
         # Context - https://github.com/pytorch/pytorch/issues/41115
         x = torch.randn(3)
@@ -1067,7 +1164,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(x.is_pinned(), False)
 
     # There's no way to actually pin the memory of a quantized tensor
-    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA is not available')
     def test_quant_pin_memory(self):
         x = torch.randn(3).pin_memory()
         self.assertEqual(x.is_pinned(), True)

@@ -1,11 +1,32 @@
-from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
-                                 NativeFunctionsGroup, OptionalType,
-                                 SelfArgument, TensorOptionsArguments, Type)
+from tools.codegen.model import (
+    Argument,
+    BaseTy,
+    BaseType,
+    ListType,
+    NativeFunctionsGroup,
+    OptionalType,
+    SelfArgument,
+    TensorOptionsArguments,
+    Type,
+)
 
-from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
-                                     ConstRefCType, OptionalCType, NamedCType,
-                                     tensorT, scalarT, intArrayRefT, dimnameListT,
-                                     optionalTensorRefT, optionalScalarRefT)
+from tools.codegen.api.types import (
+    ArgName,
+    BaseCType,
+    Binding,
+    ArrayRefCType,
+    ConstRefCType,
+    OptionalCType,
+    NamedCType,
+    tensorT,
+    scalarT,
+    intArrayRefT,
+    dimnameListT,
+    optionalTensorRefT,
+    optionalScalarRefT,
+    optionalIntArrayRefT,
+    iTensorListRefT,
+)
 
 from tools.codegen.api import cpp
 from tools.codegen.utils import assert_never
@@ -37,29 +58,29 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
             return NamedCType(binds, BaseCType(optionalTensorRefT))
         elif t.elem == BaseType(BaseTy.Scalar):
             return NamedCType(binds, BaseCType(optionalScalarRefT))
+        elif isinstance(t.elem, ListType) and str(t.elem.elem) == "int":
+            return NamedCType(binds, BaseCType(optionalIntArrayRefT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         if t.elem == BaseType(BaseTy.Tensor):
-            raise AssertionError(
-                "list of tensor not supported by structured yet; to implement this "
-                "resolve torch::List issue, see "
-                "https://fb.workplace.com/groups/894363187646754/permalink/1149276442155426"
-            )
+            return NamedCType(binds, BaseCType(iTensorListRefT))
         # TODO: delete these special cases; see tools.codegen.api.cpp--these
         # must be changed in tandem, but there are problems; see
         # https://github.com/pytorch/pytorch/pull/51485
-        elif str(t.elem) == 'int':
+        elif str(t.elem) == "int":
             return NamedCType(binds, BaseCType(intArrayRefT))
-        elif str(t.elem) == 'Dimname':
+        elif str(t.elem) == "Dimname":
             return NamedCType(binds, BaseCType(dimnameListT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, ArrayRefCType(elem.type))
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
+
 def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
+
 
 # returns_type intentionally omitted, because structured kernels never "return";
 # instead, they always indirectly report their outputs (in the case of a meta
@@ -69,18 +90,21 @@ def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
 # Structured kernels are never defaulted
 def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[Binding]:
     if isinstance(a, Argument):
-        return [Binding(
-            nctype=argument_type(a, binds=a.name),
-            name=a.name,
-            default=None,
-            argument=a,
-        )]
+        return [
+            Binding(
+                nctype=argument_type(a, binds=a.name),
+                name=a.name,
+                default=None,
+                argument=a,
+            )
+        ]
     elif isinstance(a, SelfArgument):
         return argument(a.argument)
     elif isinstance(a, TensorOptionsArguments):
         raise AssertionError("structured kernels don't support TensorOptions yet")
     else:
         assert_never(a)
+
 
 def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
@@ -89,8 +113,9 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
         # A list of parameters for the impl function with
         # certain parameters replaced with precomputed counterparts
         # as specified in native_functions.yaml.
-        non_out_args_replaced: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
-
+        non_out_args_replaced: List[
+            Union[Argument, TensorOptionsArguments, SelfArgument]
+        ] = []
         for a in g.out.func.arguments.non_out:
             if isinstance(a, Argument) and a.name in g.out.precomputed.replace:
                 # If a is in precompute.replace, append the parameters
@@ -102,16 +127,21 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
                 non_out_args_replaced.append(a)
 
         args.extend(non_out_args_replaced)
+        # g.out.precomputed.add is the list of parameters that are added
+        # without replacement after the non out args and just before the out args
+        args.extend(g.out.precomputed.add)
     else:
         args.extend(g.out.func.arguments.non_out)
 
     args.extend(g.out.func.arguments.out)
     return [r for arg in args for r in argument(arg)]
 
+
 def meta_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(g.functional.func.arguments.non_out)
     return [r for arg in args for r in argument(arg)]
+
 
 def out_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []

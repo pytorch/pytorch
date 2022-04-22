@@ -34,9 +34,9 @@ echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
 fi
 
-is_master_doc=false
+is_main_doc=false
 if [ "$version" == "master" ]; then
-  is_master_doc=true
+  is_main_doc=true
 fi
 
 echo "install_path: $install_path  version: $version"
@@ -65,8 +65,7 @@ cp torch/_utils_internal.py tools/shared
 
 # Generate PyTorch files
 time python tools/setup_helpers/generate_code.py \
-  --native-functions-path aten/src/ATen/native/native_functions.yaml \
-  --nn-path aten/src/
+  --native-functions-path aten/src/ATen/native/native_functions.yaml
 
 # Build the docs
 pushd docs/cpp

@@ -1,8 +1,15 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["module: autograd"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests
-
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+import pkgutil
 import torch
+import sys
+from typing import Callable
+import inspect
+import json
+import os
+import unittest
 
 class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
@@ -138,6 +145,7 @@ class TestPublicBindings(TestCase):
             "InterfaceType",
             "IntStorageBase",
             "IntType",
+            "SymIntType",
             "IODescriptor",
             "is_anomaly_enabled",
             "is_autocast_cache_enabled",
@@ -272,6 +280,104 @@ class TestPublicBindings(TestCase):
         msg = f"torch._C had bindings that are not present in the allowlist:\n{difference}"
         self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
 
+    # AttributeError: module 'torch.distributed' has no attribute '_shard'
+    @unittest.skipIf(IS_WINDOWS, "Distributed Attribute Error")
+    def test_correct_module_names(self):
+        '''
+        An API is considered public, if  its  `__module__` starts with `torch.`
+        and there is no name in `__module__` or the object itself that starts with “_”.
+        Each public package should either:
+        - (preferred) Define `__all__` and all callables and classes in there must have their
+         `__module__` start with the current submodule's path. Things not in `__all__` should
+          NOT have their `__module__` start with the current submodule.
+        - (for simple python-only modules) Not define `__all__` and all the elements in `dir(submod)` must have their
+          `__module__` that start with the current submodule.
+        '''
+        failure_list = []
+        with open(os.path.join(os.path.dirname(__file__), 'allowlist_for_publicAPI.json')) as json_file:
+            # no new entries should be added to this allow_dict.
+            # New APIs must follow the public API guidelines.
+            allow_dict = json.load(json_file)
+
+        def test_module(modname):
+            split_strs = modname.split('.')
+            mod = sys.modules.get(modname)
+            for elem in split_strs:
+                if elem.startswith("_"):
+                    return
+
+            # verifies that each public API has the correct module name and naming semantics
+            def check_one_element(elem, modname, mod, *, is_public, is_all):
+                obj = getattr(mod, elem)
+                if not (isinstance(obj, Callable) or inspect.isclass(obj)):
+                    return
+                elem_module = getattr(obj, '__module__', None)
+                # Only used for nice error message below
+                why_not_looks_public = ""
+                if elem_module is None:
+                    why_not_looks_public = "because it does not have a `__module__` attribute"
+                elem_modname_starts_with_mod = elem_module is not None and \
+                    elem_module.startswith(modname) and '._' not in elem_module
+                if not why_not_looks_public and not elem_modname_starts_with_mod:
+                    why_not_looks_public = f"because its `__module__` attribute (`{elem_module}`) does not " \
+                        f"start with the submodule where it is defined (`{modname}`)"
+                # elem's name must NOT begin with an `_` and it's module name
+                # SHOULD start with it's current module since it's a public API
+                looks_public = not elem.startswith('_') and elem_modname_starts_with_mod
+                if not why_not_looks_public and not looks_public:
+                    why_not_looks_public = f"because it starts with `_` ({elem})"
+
+                if is_public != looks_public:
+                    if modname in allow_dict and elem in allow_dict[modname]:
+                        return
+
+                    if is_public:
+                        why_is_public = f"it is inside the module's ({modname}) `__all__`" if is_all else \
+                            "it is an attribute that does not start with `_` on a module that " \
+                            "does not have `__all__` defined"
+                    else:
+                        assert is_all
+                        why_is_public = f"it is not inside the module's ({modname}) `__all__`"
+
+                    if looks_public:
+                        why_looks_public = "it does look public because it follows the rules from the doc above " \
+                            "(does not start with `_` and has a proper `__module__`)."
+                    else:
+                        why_looks_public = why_not_looks_public
+
+                    failure_list.append(f"# {modname}.{elem}:")
+                    is_public_str = "" if is_public else " NOT"
+                    failure_list.append(f"  - Is{is_public_str} public: {why_is_public}")
+                    looks_public_str = "" if looks_public else " NOT"
+                    failure_list.append(f"  - Does{looks_public_str} look public: {why_looks_public}")
+
+            if hasattr(mod, '__all__'):
+                public_api = mod.__all__
+                all_api = dir(mod)
+                for elem in all_api:
+                    check_one_element(elem, modname, mod, is_public=elem in public_api, is_all=True)
+
+            else:
+                all_api = dir(mod)
+                for elem in all_api:
+                    if not elem.startswith('_'):
+                        check_one_element(elem, modname, mod, is_public=True, is_all=False)
+
+        for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
+            test_module(modname)
+
+        test_module('torch')
+
+        msg = "All the APIs below do not meet our guidelines for public API from " \
+              "https://github.com/pytorch/pytorch/wiki/Public-API-definition-and-documentation.\n"
+        msg += "Make sure that everything that is public is expected (in particular that the module " \
+            "has a properly populated `__all__` attribute) and that everything that is supposed to be public " \
+            "does look public (it does not start with `_` and has a `__module__` that is properly populated)."
+        msg += "\n\nFull list:\n"
+        msg += "\n".join(map(str, failure_list))
+
+        # empty lists are considered false in python
+        self.assertTrue(not failure_list, msg)
 
 if __name__ == '__main__':
     run_tests()

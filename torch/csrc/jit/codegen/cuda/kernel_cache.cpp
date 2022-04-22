@@ -4,9 +4,11 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -25,6 +27,10 @@ int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
       continue;
     }
     const auto& device = input.toTensor().device();
+    // skip cpu scalar tensor as they'll be promoted to scalar later
+    if (device.is_cpu() && is_cpu_scalar(input.toTensor())) {
+      continue;
+    }
     TORCH_CHECK(device.is_cuda(), "nvfuser only supports cuda device");
     auto cur_index = device.index();
     if (index != -1 && index != cur_index) {
@@ -113,7 +119,11 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
 }
 
 FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
-    : fusion_(std::move(fusion)) {}
+    : fusion_(std::move(fusion)) {
+  for (const auto& indices : fusion_->getOutputAliasIndices()) {
+    aliased_output_indices_.insert(indices);
+  }
+}
 
 // Note [ Permutation support in nvfuser ]
 //
@@ -182,6 +192,12 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     outputs[pair.first] = outputs[pair.first].permute(pair.second);
   }
 
+  int offset = 0;
+  for (const auto& v : aliased_output_indices_) {
+    outputs.erase(outputs.begin() + v - offset);
+    offset++;
+  }
+
   return outputs;
 }
 
@@ -202,9 +218,9 @@ FusionKernelRuntime* FusionExecutorCache::getKernelRuntimeFor(
   }
 
   // Access kernels associated with the common device id
-  auto dev_id = getCommonDeviceCUDA(inputs);
-  TORCH_INTERNAL_ASSERT(dev_id >= 0);
-  auto& kernel_runtimes = kernel_runtimes_[dev_id];
+  auto device_index = getCommonDeviceCUDA(inputs);
+  TORCH_CHECK(device_index >= 0, "device is not coherent for fusion inputs");
+  auto& kernel_runtimes = kernel_runtimes_[device_index];
 
   // Check for re-use hit case
   //  a kernel runtime is re-usable if all the compiled
@@ -277,14 +293,6 @@ FusionKernelRuntime::FusionKernelRuntime(
   } else {
     auto complete_fusion_heuristic = maybe_complete_fusion_heuristic.value();
 
-    // Translate welfords if apply
-    if (fusion_copy->hasWelford()) {
-      bool translated = SegmentCandidateFinder::TranslateWelfordInFusion(
-          fusion_copy.get(), inputs);
-      if (translated) {
-        complete_fusion_heuristic = ScheduleHeuristic::Persistent;
-      }
-    }
     // Take ownership of the transformed fusion
     single_kernel_fusion_ = std::move(fusion_copy);
 
@@ -358,7 +366,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
       launch_params = scheduler_entry->pointwiseParams().lparams;
     }
     executors_[group_id].compileFusion(
-        fusion_to_run.get(), options, inputs, launch_params);
+        fusion_to_run.get(), inputs, launch_params, options);
   } else {
     // Load launch params for reduction and normalization kernels
     if (scheduler_entry->hasReductionParam()) {
@@ -453,6 +461,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
         " inputs but expecting ",
         segmented_fusion_->inputs().size());
 
+    c10::Device device(c10::DeviceType::CUDA, 0);
     int extent_index_ = 0;
     // Bind input in the tensor_map
     for (const auto i : c10::irange(inputs.size())) {
@@ -466,6 +475,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
       //      more convenient and safer than replication
       if (inputs[i].isTensor()) {
         auto aten_tensor = inputs[i].toTensor();
+        device = aten_tensor.device();
         for (auto dim_size : aten_tensor.sizes()) {
           runtime_workspace_.tensor_map.emplace(
               runtime_workspace_.group_extent_binding_order[extent_index_++],
@@ -504,14 +514,30 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
       if (iter != runtime_workspace_.tensor_map.end()) {
         fusion_outputs.push_back(iter->second);
       } else {
+        bool empty_type_check = output->getDataType().has_value() &&
+            output->getDataType().value() == DataType::Float;
+
+        // Only support two cases of empty tensor here, since
+        //   this is hot path.
+        auto out_tv = output->as<TensorView>();
+
+        // TODO: should be only one of the two once the "empty"
+        //  definition has been unified throughout the ops.
+        bool empty_tensor_check =
+            out_tv->isZeroDim() || out_tv->isEmptyTensor();
+
         // This is the check for an empty tensor;
         TORCH_INTERNAL_ASSERT(
-            output->as<TensorView>()->nDims() == 0 &&
-                output->getDataType().has_value() &&
-                output->getDataType().value() == DataType::Float,
+            empty_tensor_check && empty_type_check,
             "Non empty tensor cannot be found at tensor_map in ",
             __FUNCTION__);
-        fusion_outputs.emplace_back(at::Tensor());
+
+        // TODO: would need to clean up this part when
+        //   we have a unified and consistent way to generate
+        //   size-0 tensors.
+        const auto tensor_options =
+            at::TensorOptions().dtype(at::kFloat).device(device);
+        fusion_outputs.emplace_back(at::empty({0}, tensor_options));
       }
     }
 
@@ -619,6 +645,8 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
 
   fusion_executor_cache_ =
       std::make_unique<FusionExecutorCache>(parseJitIR(graph));
+
+  num_of_outputs_ = graph->outputs().size();
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -627,6 +655,8 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
   TORCH_INTERNAL_ASSERT(
       IsNewExecutorEnabled(), "legacy executor is not supported by nvfuser");
 
+  GRAPH_DEBUG("GraphCache constructor: ", this);
+  GRAPH_DUMP("GraphCache created for graph", graph);
   createFusion(graph);
 }
 
@@ -634,7 +664,16 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("GraphCache::runGraphWithInputs");
 
-  return fusion_executor_cache_->runFusionWithInputs(inputs);
+  GRAPH_DEBUG("running GraphCache: ", this);
+  auto outputs = fusion_executor_cache_->runFusionWithInputs(inputs);
+  TORCH_INTERNAL_ASSERT(
+      outputs.size() == num_of_outputs_,
+      "FusionExecutorCache returned ",
+      outputs.size(),
+      " outputs, doesn't match computational graph, which requires ",
+      num_of_outputs_);
+
+  return outputs;
 }
 
 } // namespace cuda

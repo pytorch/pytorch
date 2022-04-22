@@ -5,6 +5,12 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
+
 namespace at {
 struct TORCH_API SparseTensorImpl : public TensorImpl {
   // Stored in COO format, indices + values.
