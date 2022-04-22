@@ -1,6 +1,5 @@
 #ifdef USE_KINETO
 #include <libkineto.h>
-#include <caffe2/torch/csrc/api/include/torch/torch.h>
 
 namespace torch {
 namespace profiler {
@@ -8,34 +7,23 @@ namespace impl {
 
 namespace {
 
-using namespace torch::autograd::profiler; 
-
 class LibKinetoClient : public libkineto::ClientInterface {
  public:
-  void init() override {}
+  void init() override {
+    // TODO: implement
+  }
 
   void warmup(bool setupOpInputsCollection) override {
-    reportInputShapes_ = setupOpInputsCollection;
+    // TODO: implement
   }
 
   void start() override {
-    ProfilerConfig cfg{
-      ProfilerState::KINETO_ONDEMAND,
-        reportInputShapes_,
-        false,
-        false,
-        false,
-        false};
-    std::set<ActivityType> activities{ActivityType::CPU};
-    auto scopes = {RecordScope::FUNCTION, RecordScope::USER_SCOPE};
-    enableProfiler(cfg, activities, scopes);
+    // TODO: implement
   }
 
   void stop() override {
-    (void)disableProfiler();
+    // TODO: implement
   }
- private:
-  bool reportInputShapes_{true};
 };
 
 } // namespace
