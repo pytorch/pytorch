@@ -742,8 +742,11 @@ class TestCompositeCompliance(TestCase):
             composite_compliance.check_backward_formula(op, args, kwargs)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
-    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    @ops(op_db, allowed_dtypes=(torch.float,))
     def test_forward_ad(self, device, dtype, op):
+        if torch.float not in op.supported_backward_dtypes(device):
+            raise unittest.SkipTest("Does not support autograd")
+
         if not op.supports_forward_ad:
             raise unittest.SkipTest("Does not support forward_ad")
 
