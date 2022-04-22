@@ -13,6 +13,7 @@ import warnings
 import operator
 from functools import partial
 
+import torch.autograd.forward_ad as fwAD
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, slowTest, iter_indices, TEST_WITH_ASAN, run_tests, gradcheck,
@@ -1807,6 +1808,33 @@ class TestBinaryUfuncs(TestCase):
 
         run_test(torch.maximum, [0., 1., 2.], [1., 1., 1.], [0., 0.5, 1.], [1., 0.5, 0.])
         run_test(torch.minimum, [0., 1., 2.], [1., 1., 1.], [1., 0.5, 0.], [0., 0.5, 1.])
+
+    def test_maximum_minimum_forward_ad_float32(self, device):
+        # TODO: This should really be covered by OpInfo but it isn't. The problem
+        # is that our gradient tests test using float64 but it should also test
+        # float32
+        x = torch.randn(3, device=device, dtype=torch.float32)
+        y = torch.randn(3, device=device, dtype=torch.float32)
+        tx = torch.randn(3, device=device, dtype=torch.float32)
+        ty = torch.randn(3, device=device, dtype=torch.float32)
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(x, tx)
+            y_dual = fwAD.make_dual(y, ty)
+            result = torch.maximum(x_dual, y_dual)
+            _, result_tangent = fwAD.unpack_dual(result)
+
+        expected = torch.where(x > y, tx, ty)
+        self.assertEqual(result_tangent, expected)
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(x, tx)
+            y_dual = fwAD.make_dual(y, ty)
+            result = torch.minimum(x_dual, y_dual)
+            _, result_tangent = fwAD.unpack_dual(result)
+
+        expected = torch.where(x < y, tx, ty)
+        self.assertEqual(result_tangent, expected)
 
     # TODO: tests like this should be generic
     @dtypesIfCUDA(torch.half, torch.float, torch.double)

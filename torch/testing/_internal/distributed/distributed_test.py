@@ -4788,7 +4788,7 @@ class DistributedTest:
             )
             self._barrier()
 
-        def _test_post_localSGD_optimizer_parity(self, averager, grad_is_view):
+        def _test_post_localSGD_optimizer_parity(self, create_averager, grad_is_view):
             learning_rate = 0.03
 
             net = torch.nn.parallel.DistributedDataParallel(
@@ -4796,6 +4796,7 @@ class DistributedTest:
                 device_ids=[self.rank],
                 gradient_as_bucket_view=grad_is_view,
             )
+            averager = create_averager()
             opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
 
             net_using_post_localSGD_opt = torch.nn.parallel.DistributedDataParallel(
@@ -4803,9 +4804,13 @@ class DistributedTest:
                 device_ids=[self.rank],
                 gradient_as_bucket_view=grad_is_view,
             )
+            # Process group cannot be pickled in some environments,
+            # so cannot deep copy an averager. See:
+            # https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496
+            averager2 = create_averager()
             post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
                 optim=torch.optim.SGD(net_using_post_localSGD_opt.parameters(), lr=learning_rate),
-                averager=averager
+                averager=averager2,
             )
 
             input = torch.randn(dist.get_world_size() * 2, 2).cuda()
@@ -4829,6 +4834,12 @@ class DistributedTest:
                 for p1, p2 in zip(net.parameters(), net_using_post_localSGD_opt.parameters()):
                     self.assertEqual(p1.data, p2.data)
 
+            # Also check if the built-in step counters are the same to prevent a bug like #74737.
+            self.assertEqual(averager.step, averager2.step)
+
+        def _create_periodic_model_averager(self):
+            return averagers.PeriodicModelAverager(period=4, warmup_steps=10)
+
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -4836,9 +4847,10 @@ class DistributedTest:
         )
         def test_post_localSGD_optimizer_parity(self):
             torch.cuda.set_device(self.rank)
-
-            averager = averagers.PeriodicModelAverager(period=4, warmup_steps=10)
-            self._test_post_localSGD_optimizer_parity(averager, grad_is_view=False)
+            self._test_post_localSGD_optimizer_parity(
+                self._create_periodic_model_averager,
+                grad_is_view=False,
+            )
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
@@ -4847,9 +4859,16 @@ class DistributedTest:
         )
         def test_post_localSGD_optimizer_parity_grad_is_view(self):
             torch.cuda.set_device(self.rank)
+            self._test_post_localSGD_optimizer_parity(
+                self._create_periodic_model_averager,
+                grad_is_view=True,
+            )
 
-            averager = averagers.PeriodicModelAverager(period=4, warmup_steps=10)
-            self._test_post_localSGD_optimizer_parity(averager, grad_is_view=True)
+        def _create_hierarchical_model_averager(self):
+            period_group_size_dict = OrderedDict([(2, 2), (4, dist.get_world_size())])
+            return hierarchicalSGD.HierarchicalModelAverager(
+                period_group_size_dict=period_group_size_dict, warmup_steps=4
+            )
 
         @skip_if_lt_x_gpu(4)
         @sandcastle_skip_if(
@@ -4858,12 +4877,10 @@ class DistributedTest:
         )
         def test_post_localSGD_optimizer_parity_with_hierarchical_sgd(self):
             torch.cuda.set_device(self.rank)
-
-            period_group_size_dict = OrderedDict([(2, 2), (4, dist.get_world_size())])
-            averager = hierarchicalSGD.HierarchicalModelAverager(
-                period_group_size_dict=period_group_size_dict, warmup_steps=4
+            self._test_post_localSGD_optimizer_parity(
+                self._create_hierarchical_model_averager,
+                grad_is_view=False,
             )
-            self._test_post_localSGD_optimizer_parity(averager, grad_is_view=False)
 
         @skip_if_lt_x_gpu(4)
         @sandcastle_skip_if(
@@ -4872,12 +4889,10 @@ class DistributedTest:
         )
         def test_post_localSGD_optimizer_parity_with_hierarchical_sgd_grad_is_view(self):
             torch.cuda.set_device(self.rank)
-
-            period_group_size_dict = OrderedDict([(2, 2), (4, dist.get_world_size())])
-            averager = hierarchicalSGD.HierarchicalModelAverager(
-                period_group_size_dict=period_group_size_dict, warmup_steps=4
+            self._test_post_localSGD_optimizer_parity(
+                self._create_hierarchical_model_averager,
+                grad_is_view=True,
             )
-            self._test_post_localSGD_optimizer_parity(averager, grad_is_view=True)
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],

@@ -138,6 +138,7 @@ class TestPublicBindings(TestCase):
             "InterfaceType",
             "IntStorageBase",
             "IntType",
+            "SymIntType",
             "IODescriptor",
             "is_anomaly_enabled",
             "is_autocast_cache_enabled",

@@ -60,6 +60,17 @@ TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);
 
 namespace tensorexpr {
 TORCH_API bool isSupported(Node* node);
+
+/// Get the modifiable custom operator set object.
+///
+/// For static shapes, if a custom operator has been added to the custom
+/// operator set, it will be pulled into the NNC fusion group. But it doesn't
+/// work with dynamic shapes unless explicitly register the shape function via
+/// `torch::jit::RegisterShapeComputeGraphForSchema` for the custom operator.
+///
+/// @return Reference of the custome operator set
+///
+TORCH_API OperatorSet& getCustomOperatorSet();
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

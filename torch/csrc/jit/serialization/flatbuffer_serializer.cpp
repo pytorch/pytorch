@@ -386,9 +386,12 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
   }
 
+  const uint32_t bytecode_version =
+      static_cast<uint32_t>(module.bytecode_version());
+
   auto mod = CreateModule(
       fbb,
-      0, /* version */
+      /*bytecode_version=*/bytecode_version,
       extra_files_offset, /* extra_files */
       functions_offset,
       ivalue_index,
@@ -761,26 +764,41 @@ flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
 
 Module parse_and_initialize_jit_module(
     std::shared_ptr<char> data,
-    size_t,
-    c10::optional<at::Device>) {
+    size_t size,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device) {
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
   FlatbufferLoader loader;
   mobile::Module mobilem = loader.parseModule(flatbuffer_module);
+  parseExtraFiles(flatbuffer_module, extra_files);
   ExtraFilesMap files;
   std::vector<IValue> constants;
   loader.extractJitSourceAndConstants(&files, &constants);
   Module m = jitModuleFromSourceAndConstants(
-      mobilem._ivalue(), files, constants, flatbuffer_module->version());
+      mobilem._ivalue(),
+      files,
+      constants,
+      flatbuffer_module->bytecode_version());
   m.set_delete_memory(data);
   return m;
 }
 
 Module load_jit_module_from_file(
     const std::string& filename,
+    ExtraFilesMap& extra_files,
     c10::optional<at::Device> device) {
   auto data = get_file_content(filename.c_str());
   return parse_and_initialize_jit_module(
-      std::move(std::get<0>(data)), std::get<1>(data), device);
+      std::move(std::get<0>(data)), std::get<1>(data), extra_files, device);
+}
+
+Module load_jit_module_from_stream(
+    std::istream& in,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device) {
+  auto data = get_stream_content(in);
+  return parse_and_initialize_jit_module(
+      std::move(std::get<0>(data)), std::get<1>(data), extra_files, device);
 }
 
 void save_jit_module(

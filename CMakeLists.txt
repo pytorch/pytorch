@@ -798,6 +798,8 @@ if(NOT MSVC)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
+    # sign-compare is not part of -Wall, see https://godbolt.org/z/s1YczM41T
+    string(APPEND CMAKE_CXX_FLAGS " -Wsign-compare")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")

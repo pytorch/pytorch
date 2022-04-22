@@ -617,9 +617,7 @@ def convert(
         modules_copy = copy.deepcopy(modules)
         convert_dict_to_ordered_dict(convert_qconfig_dict)
         if model._is_qat:
-            additional_qat_module_mapping = prepare_custom_config_dict.get(
-                "additional_qat_module_mapping", {})
-            convert_qconfig_dict = update_qconfig_for_qat(convert_qconfig_dict, additional_qat_module_mapping)
+            convert_qconfig_dict = update_qconfig_for_qat(convert_qconfig_dict, {})
         convert_qconfig_dict = update_qconfig_for_fusion(model, convert_qconfig_dict)
 
         compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)  # type: ignore[arg-type]

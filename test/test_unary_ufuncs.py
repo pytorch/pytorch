@@ -869,7 +869,7 @@ class TestUnaryUfuncs(TestCase):
 
     # TODO: opinfo hardshrink
     @onlyCPU
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardshrink(self, device, dtype):
         data = torch.tensor([1, 0.5, 0.3, 0.6], dtype=dtype, device=device).view(2, 2)
         self.assertEqual(torch.tensor([1, 0.5, 0, 0.6], dtype=dtype, device=device).view(2, 2),
@@ -885,7 +885,7 @@ class TestUnaryUfuncs(TestCase):
                          data.t().hardshrink(0.3))
 
     @onlyCPU
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardshrink_edge_cases(self, device, dtype) -> None:
         def h(values, l_expected):
             for l, expected in l_expected.items():
@@ -920,8 +920,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(a, b.expand(2 ** 31))
 
     @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardswish(self, device, dtype):
         inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
         expectedOutput = np.multiply(
@@ -942,8 +941,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(inputTensorCpy, expectedOutputTensor)
 
     @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardsigmoid(self, device, dtype):
         inputValues = [-1000, -4, -3, -2, 0, 2, 3, 4, 1000]
         expectedOutput = np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0
@@ -960,8 +958,7 @@ class TestUnaryUfuncs(TestCase):
                          torch.tensor(expectedOutput, dtype=dtype, device=device))
 
     @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_hardsigmoid_backward(self, device, dtype):
         inputValues = [-3.0, 3.0, -2.0, 2.0, -6.0, 6.0]
         expectedValues = [0.0, 0.0, 1.0 / 6.0, 1.0 / 6.0, 0.0, 0.0]

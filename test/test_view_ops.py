@@ -1795,6 +1795,14 @@ class TestOldViewOps(TestCase):
             x.resize_as_(y)
             self.assertEqual(y.shape, x.shape)
 
+    @onlyNativeDeviceTypes
+    def test_resize_overflow(self, device):
+        x = torch.empty((), dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            x.resize_([2, 4, 2**29, 2**29])
+        with self.assertRaisesRegex(RuntimeError, 'overflow'):
+            x.resize_([8, 8, 2**29, 2**29])
+
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)

@@ -47,9 +47,9 @@
 /.github/ @seemethere @janeyx99 @atalman
 
 # Custom Test Infrastructure
-/test/run_test.py @pytorch-dev-infra
+/test/run_test.py @pytorch/pytorch-dev-infra
 /torch/testing/_internal/common_device_type.py @mruberry
-/torch/testing/_internal/common_utils.py @pytorch-dev-infra
+/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano
