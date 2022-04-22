@@ -1,6 +1,6 @@
 #pragma once
 
-#include "tanh.h"
+#include "caffe2/quantization/server/tanh.h"
 
 namespace dnnlowp {
 

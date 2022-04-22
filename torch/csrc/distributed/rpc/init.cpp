@@ -110,11 +110,26 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           // c10::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
           .def(py::detail::hash(py::self)) // NOLINT
-          .def("__repr__", [](const WorkerInfo& workerInfo) {
-            std::ostringstream os;
-            os << workerInfo;
-            return os.str();
-          });
+          .def(
+              "__repr__",
+              [](const WorkerInfo& workerInfo) {
+                std::ostringstream os;
+                os << workerInfo;
+                return os.str();
+              })
+          .def(py::pickle(
+              /* __getstate__ */
+              [](const WorkerInfo& workerInfo) {
+                return py::make_tuple(workerInfo.name_, workerInfo.id_);
+              },
+              /* __setstate__ */
+              [](py::tuple t) {
+                TORCH_CHECK(t.size() == 2, "Invalid WorkerInfo state.");
+
+                WorkerInfo info(
+                    t[0].cast<std::string>(), t[1].cast<worker_id_t>());
+                return info;
+              }));
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
@@ -561,7 +576,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               [](const c10::intrusive_ptr<::c10d::Store>& store,
                  std::string selfName,
                  worker_id_t selfId,
-                 int worldSize,
+                 optional<int> worldSize,
                  TensorPipeRpcBackendOptions opts,
                  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
                  std::vector<c10::Device> devices) {
@@ -617,6 +632,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "_get_device_map",
           (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
               TensorPipeAgent::getDeviceMap,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_backend_options",
+          &TensorPipeAgent::getBackendOptions,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_update_group_membership",
+          &TensorPipeAgent::updateGroupMembership,
           py::call_guard<py::gil_scoped_release>());
 
 #endif // USE_TENSORPIPE

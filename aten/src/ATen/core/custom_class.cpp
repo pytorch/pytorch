@@ -3,6 +3,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/functional.h>
+#include <ATen/core/type_factory.h>
 
 #include <atomic>
 #include <unordered_map>
@@ -102,7 +103,7 @@ class_base::class_base(
 {
     detail::checkValidIdent(namespaceName, "Namespace name");
     detail::checkValidIdent(className, "Class name");
-    classTypePtr->addAttribute("capsule", at::CapsuleType::get());
+    classTypePtr->addAttribute("capsule", c10::TypeFactory::get<c10::CapsuleType>());
     c10::getCustomClassTypeMap().insert(
         {std::type_index(intrusivePtrClassTypeid), classTypePtr});
     c10::getCustomClassTypeMap().insert(
