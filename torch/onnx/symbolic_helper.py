@@ -957,7 +957,7 @@ def _handle_reduce_dim_none(g, self, op_name):
     return g.op(op_name, self, keepdims_i=0)
 
 def dequantize_helper(g, qtensor, qdtype=None):
-    """Append to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
+    """Appends to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
 
     Args:
         g: Graph, the ONNX IR graph that is under construction.
@@ -988,7 +988,7 @@ def dequantize_helper(g, qtensor, qdtype=None):
     return g.op("DequantizeLinear", value, scale, zero_point, axis_i=axis_i), scale, zero_point, axis
 
 def quantize_helper(g, tensor, scale, zero_point, axis=None):
-    """Append to graph `g` ONNX nodes that quantizes `tensor` based on `scale`, `zero_point` and `axis`.
+    """Appends to graph `g` ONNX nodes that quantizes `tensor` based on `scale`, `zero_point` and `axis`.
 
     Args:
         g: Graph, the ONNX IR graph that is under construction.

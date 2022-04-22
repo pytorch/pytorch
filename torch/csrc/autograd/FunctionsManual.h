@@ -119,7 +119,7 @@ at::Tensor mean_backward(at::Tensor grad, const at::IntArrayRef sizes, at::IntAr
 at::Tensor mean_backward(at::Tensor grad, const at::IntArrayRef sizes, int64_t numel);
 at::Tensor var_std_mean_backward(const variable_list& grads, const at::Tensor& self, const at::Tensor& r1, const at::Tensor& r2, at::OptionalIntArrayRef dim, c10::optional<int64_t> correction, bool keepdim, bool is_std);
 at::Tensor masked_scatter_backward(const at::Tensor & grad, const at::Tensor & mask, at::IntArrayRef sizes);
-at::Tensor cholesky_backward(at::Tensor grad, bool upper, at::Tensor L);
+at::Tensor cholesky_backward(const at::Tensor& grad, bool upper, const at::Tensor& L);
 at::Tensor cholesky_jvp(const at::Tensor& input_tangent, const at::Tensor& L, bool upper);
 at::Tensor cholesky_inverse_backward(at::Tensor grad, at::Tensor L, bool upper, at::Tensor inverse);
 at::Tensor cholesky_inverse_jvp(const at::Tensor& F, const at::Tensor& dF, const at::Tensor& X, bool upper);

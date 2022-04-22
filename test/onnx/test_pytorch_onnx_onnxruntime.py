@@ -283,6 +283,25 @@ def _init_test_roi_heads_faster_rcnn():
         box_score_thresh, box_nms_thresh, box_detections_per_img)
     return roi_heads
 
+def _construct_tensor_for_quantization_test(shape, offset=None, max_val=None):
+    """Due to difference in implementation details between PyTorch and ONNXRuntime, randomly generated
+    test data for quantization tests can be flaky. To help stablize the test, this helper function is
+    used to generate weights and test inputs in a deterministic way.
+
+    Args:
+        shape (Tuple[int]): Shape for tensor to construct.
+        offset (Optional[Any[int, float]]): Offset to be added to the generated tensor.
+        max_val (Optional[Any[int, float]]): If any element within tensor has a larger absolute value than
+            max_val, the tensor will be scaled by max_val / tensor.abs().max(). This step is done after
+            applying offset.
+    """
+    tensor = torch.arange(np.prod(shape), dtype=torch.float).view(shape)
+    if offset is not None:
+        tensor = tensor + offset
+    if max_val is not None and tensor.abs().max() > max_val:
+        tensor = tensor * max_val / tensor.abs().max()
+    return tensor
+
 def set_rng_seed(seed):
     torch.manual_seed(seed)
     random.seed(seed)
@@ -10798,12 +10817,12 @@ class _TestONNXRuntime:
         model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         model = torch.quantization.prepare_qat(model)
         # Set fixed weight and bias to avoid flaky test.
-        model.linear.weight = torch.nn.Parameter(torch.arange(12, dtype=torch.float).view(3, 4))
+        model.linear.weight = torch.nn.Parameter(_construct_tensor_for_quantization_test((3, 4)))
         model.linear.bias = torch.nn.Parameter(torch.arange(3, dtype=torch.float))
         model = torch.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
-        input = torch.arange(16, dtype=torch.float).view(4, 4) - 8
+        input = _construct_tensor_for_quantization_test((4, 4), offset=-8)
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(13)
@@ -10847,12 +10866,12 @@ class _TestONNXRuntime:
         model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         model = torch.quantization.prepare_qat(model)
         # Set fixed weight and bias to avoid flaky test.
-        model.conv.weight = torch.nn.Parameter(torch.arange(4 * 2 * 3 * 3, dtype=torch.float).view(2, 4, 3, 3) / 36)
-        model.conv.bias = torch.nn.Parameter(torch.arange(2, dtype=torch.float))
+        model.conv.weight = torch.nn.Parameter(_construct_tensor_for_quantization_test((2, 4, 3, 3), max_val=2))
+        model.conv.bias = torch.nn.Parameter(torch.tensor([0., 1.]))
         model = torch.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
-        input = (torch.arange(3 * 4 * 8 * 8, dtype=torch.float).view(3, 4, 8, 8) - 384) / 32
+        input = _construct_tensor_for_quantization_test((3, 4, 8, 8), offset=-384, max_val=12)
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(13)
@@ -10876,12 +10895,12 @@ class _TestONNXRuntime:
         model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         model = torch.quantization.prepare_qat(model)
         # Set fixed weight and bias to avoid flaky test.
-        model.conv.weight = torch.nn.Parameter(torch.arange(4 * 2 * 3 * 3, dtype=torch.float).view(2, 4, 3, 3) / 36)
-        model.conv.bias = torch.nn.Parameter(torch.arange(2, dtype=torch.float))
+        model.conv.weight = torch.nn.Parameter(_construct_tensor_for_quantization_test((2, 4, 3, 3), max_val=2))
+        model.conv.bias = torch.nn.Parameter(torch.tensor([0., 1.]))
         model = torch.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
-        input = (torch.arange(3 * 4 * 8 * 8, dtype=torch.float).view(3, 4, 8, 8) - 384) / 32
+        input = _construct_tensor_for_quantization_test((3, 4, 8, 8), offset=-384, max_val=12)
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(13)
@@ -10906,12 +10925,12 @@ class _TestONNXRuntime:
         model = torch.quantization.fuse_modules(model.eval(), [["conv", "relu"]])
         model = torch.quantization.prepare_qat(model.train())
         # Set fixed weight and bias to avoid flaky test.
-        model.conv.weight = torch.nn.Parameter(torch.arange(4 * 2 * 3 * 3, dtype=torch.float).view(2, 4, 3, 3) / 36)
-        model.conv.bias = torch.nn.Parameter(torch.arange(2, dtype=torch.float))
+        model.conv.weight = torch.nn.Parameter(_construct_tensor_for_quantization_test((2, 4, 3, 3), max_val=2))
+        model.conv.bias = torch.nn.Parameter(torch.tensor([0., 1.]))
         model = torch.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
-        input = (torch.arange(3 * 4 * 8 * 8, dtype=torch.float).view(3, 4, 8, 8) - 384) / 32
+        input = _construct_tensor_for_quantization_test((3, 4, 8, 8), offset=-384, max_val=12)
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(9)
