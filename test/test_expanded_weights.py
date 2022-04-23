@@ -131,7 +131,7 @@ class TestExpandedWeightHelperFunction(TestCase):
         self.assertEqual(res, input)
 
     def test_repr(self, device):
-        w = ExpandedWeight(torch.zeros(1, 1, device=device), 1)
+        w = ExpandedWeight(torch.zeros(1, 1, device=device, requires_grad=True), 1)
         self.assertTrue("ExpandedWeight" in repr(w))
 
 class TestExpandedWeightFunctional(TestCase):
