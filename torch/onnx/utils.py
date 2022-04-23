@@ -19,7 +19,7 @@ import inspect
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, SymbolicContext, TrainingMode, CheckerError
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
+from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto, Node
 from typing import List, Tuple, Union
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -1128,6 +1128,15 @@ def _need_symbolic_context(symbolic_fn):
     params = list(inspect.signature(symbolic_fn).parameters.values())
     return params and issubclass(params[0].annotation, SymbolicContext)
 
+def _get_aten_op_overload_name(n: Node) -> str:
+    from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
+
+    # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
+    schema = n.schema()
+    if not schema.startswith("aten::") or is_caffe2_aten_fallback():
+        return ""
+    return torch._C.parse_schema(schema).overload_name
+
 def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into
     # the new graph
@@ -1178,12 +1187,18 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
             attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
-            return g.at(op_name, *inputs, **attrs)
+            # `overload_name` is set for non-Caffe2 builds only
+            return g.at(op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs)
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
         if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
+        elif operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and not is_caffe2_aten_fallback():
+            # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+            return g.at(op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs)
+
         raise
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
