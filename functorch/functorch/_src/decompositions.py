@@ -596,12 +596,11 @@ def logical_not(self: Tensor) -> Tensor:
 #                                  self * aten.log(other)))
 
 
-@register_decomposition(aten.var)
-def var_decomposition(x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False):
+@register_decomposition(aten.var.correction)
+def var_decomposition(x: Tensor, dims: Optional[List[int]], correction: int = 0, keepdim: bool = False):
     if dims is None:
         dims = []
-
-    if isinstance(dims, (tuple, list)) and len(dims) == 0:
+    if len(dims) == 0:
         n = x.numel()
     else:
         n = 1
