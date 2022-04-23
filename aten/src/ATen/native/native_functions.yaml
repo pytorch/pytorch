@@ -2821,6 +2821,11 @@
 - func: log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
+- func: log_softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: log_softmax_out
+
 - func: log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
@@ -3867,6 +3872,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: select
+    SparseCsrCPU, SparseCsrCUDA: select_sparse_csr
 
 - func: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
   variants: function
@@ -4131,6 +4137,11 @@
 - func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
+- func: softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: softmax_out
+
 - func: softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
@@ -4287,12 +4298,7 @@
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
-# Overload without center & pad mode, needed for forward-compatibility
-- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
-  variants: function, method
-  cpp_no_default_args: ['hop_length', 'win_length', 'window', 'normalized']
-
-- func: stft.center(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   variants: function, method
 
 - func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
