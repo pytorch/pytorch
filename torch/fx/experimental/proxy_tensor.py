@@ -56,15 +56,20 @@ class ProxyTensor(torch.Tensor):
         # ProxyTensor boundary.
         # assert not elem.requires_grad or not torch.is_grad_enabled()
 
-        r = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+        # Hack to deal with super().__new__ not working for sparse tensors
+        if elem.is_sparse:
+            proxy.node.meta['tensor_meta'] = {}
+            r = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+        else:
+            r = super().__new__(cls, elem)
+            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
         r.proxy = proxy
-        proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
+
         return r
 
     def __repr__(self):
-        # This is a bit goofy but whatever.  Should fix up _tensor_str.py to
-        # work on subclasses when it calls tolist
-        return f"ProxyTensor({torch.Tensor._make_subclass(torch.Tensor, self)})"
+        with no_dispatch():
+            return f"ProxyTensor({self.as_subclass(torch.Tensor)})"
 
     __torch_function__ = _disabled_torch_function_impl
 
