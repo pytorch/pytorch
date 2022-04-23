@@ -12674,6 +12674,12 @@ op_db: List[OpInfo] = [
            skips=(
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+               DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                            device_type="cpu"),
+               # Trying to use forward AD with miopen_batch_norm that does not support it
+               # because it has not been implemented yet.
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
+                            device_type="cuda", active_if=TEST_WITH_ROCM),
            )),
     # This variant tests batch_norm with cuDNN disabled only on CUDA devices
     OpInfo('nn.functional.batch_norm',
