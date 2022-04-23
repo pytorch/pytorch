@@ -2,7 +2,7 @@ from collections import OrderedDict
 import enum
 import functools
 from numbers import Number
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 import warnings
 import copyreg
 from copy import deepcopy
@@ -541,40 +541,6 @@ class Tensor(torch._C._TensorBase):
             return LU, pivots, infos
         else:
             return LU, pivots
-
-    def stft(self, n_fft: int, hop_length: Optional[int] = None,
-             win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
-             center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
-             onesided: Optional[bool] = None, return_complex: Optional[bool] = None):
-        r"""See :func:`torch.stft`
-
-        .. warning::
-          This function changed signature at version 0.4.1. Calling with
-          the previous signature may cause error or return incorrect result.
-        """
-        if has_torch_function_unary(self):
-            return handle_torch_function(
-                Tensor.stft, (self,), self, n_fft, hop_length=hop_length,
-                win_length=win_length, window=window, center=center, pad_mode=pad_mode, normalized=normalized,
-                onesided=onesided, return_complex=return_complex
-            )
-        return torch.stft(self, n_fft, hop_length, win_length, window, center,
-                          pad_mode, normalized, onesided, return_complex=return_complex)
-
-    def istft(self, n_fft: int, hop_length: Optional[int] = None,
-              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
-              center: bool = True, normalized: bool = False,
-              onesided: Optional[bool] = None, length: Optional[int] = None,
-              return_complex: bool = False):
-        r"""See :func:`torch.istft`"""
-        if has_torch_function_unary(self):
-            return handle_torch_function(
-                Tensor.istft, (self,), self, n_fft, hop_length=hop_length, win_length=win_length,
-                window=window, center=center, normalized=normalized, onesided=onesided, length=length,
-                return_complex=return_complex
-            )
-        return torch.istft(self, n_fft, hop_length, win_length, window, center,
-                           normalized, onesided, length, return_complex=return_complex)
 
     def resize(self, *sizes):
         if has_torch_function_unary(self):

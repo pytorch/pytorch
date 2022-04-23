@@ -12,7 +12,7 @@ namespace serialize {
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 
 #if ENABLE_UPGRADERS
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0xAL;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 11;
 #else
 constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 #endif
@@ -83,7 +83,9 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 //     Bump the version number to 10 to update aten::gelu and
 //     and aten::gelu.out to support the new approximate kwarg.
 //     (see: https://github.com/pytorch/pytorch/pull/61439)
-constexpr uint64_t kProducedFileFormatVersion = 0xAL;
+// 4) [02/25/2022]
+//     Bump version number to 11 to update aten::stft to do padding in ATen
+constexpr uint64_t kProducedFileFormatVersion = 11L;
 #else
 constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 #endif

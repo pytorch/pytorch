@@ -540,3 +540,20 @@ class TestSaveLoadForOpVersion(JitTestCase):
             self.assertTrue(output.size(dim=0) == 100)
             # "Upgraded" model should match the new version output
             self.assertEqual(output, output_current)
+
+    def test_versioned_stft_v10(self):
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_stft_v10.ptl"
+        loaded_model = torch.jit.load(model_path)
+        buffer = io.BytesIO(loaded_model._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        v10_mobile_module = _load_for_lite_interpreter(buffer)
+
+        for in_dtype, window_dtype in product(
+                [torch.float32, torch.complex64], repeat=2):
+            input = torch.rand((100,), dtype=in_dtype)
+            window = torch.rand((10,), dtype=window_dtype)
+            n_fft = 10
+            output = v10_mobile_module(input, n_fft, window)
+            output_expected = torch.stft(input, n_fft=n_fft, window=window,
+                                         center=False, return_complex=True)
+            self.assertEqual(output, output_expected)
