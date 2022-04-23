@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 
 _TORCHDISTX_AVAIL = True
 try:
-    from torchdistX import fake, deferred_init
+    from torchdistx import fake, deferred_init
 except ImportError:
     _TORCHDISTX_AVAIL = False
 

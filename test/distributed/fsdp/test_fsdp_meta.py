@@ -24,9 +24,10 @@ from torch.testing._internal.common_distributed import (
 
 _TORCHDISTX_AVAIL = True
 try:
-    from torchdistX import deferred_init
+    from torchdistx import deferred_init
 except ImportError:
     _TORCHDISTX_AVAIL = False
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -44,7 +45,7 @@ def _reset_params_if_meta(is_meta, model):
 # For torchdistX init, we don't need to call reset_params, as
 # deferred_init(model).materialize() is equivalent to model().
     if is_meta:
-        regular.reset_parameters()
+        model.reset_parameters()
 
 class MyLinear(nn.Linear):
     """
@@ -297,6 +298,28 @@ class TestFSDPWithMetaDevice(FSDPTest):
         self._test_nested_model_with_meta_device(
             auto_wrap=auto_wrap, meta_module_fn=meta_module_fn, init_fn=_init_with_torchdistX,
         )
+
+    def _test_bad_arg(self, meta_module_fn):
+        mod = meta_module_fn()
+        with self.assertRaisesRegex(ValueError, "to be callable"):
+            FSDP(mod, param_init_fn=42)
+
+    @skip_if_lt_x_gpu(2)
+    @sandcastle_skip_if(
+        not _TORCHDISTX_AVAIL, "Test requires torchdistX: https://github.com/pytorch/torchdistX"
+    )
+    def test_bad_arg_torchdistx(self):
+        def meta_module_fn():
+            return deferred_init.deferred_init(NestedModel, "cuda")
+
+        self._test_bad_arg(meta_module_fn)
+
+    @skip_if_lt_x_gpu(2)
+    def test_bad_arg_meta(self):
+        def meta_module_fn():
+            return NestedModel(device="meta")
+
+        self._test_bad_arg(meta_module_fn)
 
 
 instantiate_parametrized_tests(TestFSDPWithMetaDevice)
