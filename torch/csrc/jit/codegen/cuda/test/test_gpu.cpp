@@ -32,10 +32,10 @@
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
 #include <test/cpp/jit/test_utils.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
-#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/torch.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -21373,10 +21373,10 @@ graph(%x.1 : Tensor,
       ASSERT_TRUE(at::allclose(t0, ti));
     }
   };
-  
+
   constexpr size_t kNumThreads = 4;
   std::vector<std::thread> threads;
-  for (size_t id=0; id < kNumThreads; ++id) {
+  for (size_t id = 0; id < kNumThreads; ++id) {
     threads.emplace_back(run_kernel);
   }
   for (auto& t : threads) {
@@ -21419,10 +21419,10 @@ TEST_F(NVFuserMultithreadedTest, MultipleFunctions_CUDA) {
       ASSERT_TRUE(at::allclose(t0, ti));
     }
   };
-  
+
   constexpr size_t kNumThreads = 4;
   std::vector<std::thread> threads;
-  for (size_t id=0; id < kNumThreads; ++id) {
+  for (size_t id = 0; id < kNumThreads; ++id) {
     threads.emplace_back(run_kernel);
   }
   for (auto& t : threads) {
