@@ -357,8 +357,25 @@ def _get_tensor_dim_size(x, dim):
         pass
     return None
 
+
+def _get_dim_for_cross(input, dim):
+    if dim == -1:
+        return dim + _get_tensor_rank(input)
+    # If dim is not given, it defaults to the first dimension found with the size 3
+    if dim is None:
+        sizes = _get_tensor_sizes(input)
+        for index, size in enumerate(sizes):
+            if size is not None and size == 3:
+                return index
+    return dim
+
+
 def _unimplemented(op, msg):
-    warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+    # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
+    if torch.onnx._CAFFE2_ATEN_FALLBACK:
+        warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+    elif _operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+        _onnx_unsupported(f"{op}, {msg}")
 
 
 def _onnx_unsupported(op_name):
