@@ -269,6 +269,18 @@ def binary_cross_entropy_backward(grad_output: Tensor, self: Tensor, target: Ten
     return result * grad_output
 
 
+@register_decomposition(aten._euclidean_dist)
+def _euclidean_dist(x1: Tensor, x2: Tensor) -> Tensor:
+    x1_norm = x1.pow(2).sum(-1, True)
+    x1_pad = torch.ones_like(x1_norm, memory_format=torch.contiguous_format)
+    x2_norm = x2.pow(2).sum(-1, True)
+    x2_pad = torch.ones_like(x2_norm, memory_format=torch.contiguous_format)
+    x1_ = torch.cat([x1.mul(-2), x1_norm, x1_pad], -1)
+    x2_ = torch.cat([x2, x2_pad, x2_norm], -1)
+    result = x1_.matmul(x2_.mT)
+    return result.clamp_min(0).sqrt()
+
+
 @register_decomposition(aten.slice_backward)
 def slice_backward(grad_output: Tensor, input_sizes: List[int], dim: int, start: int, end: int, step: int):
     grad_input = grad_output.new_zeros(input_sizes)
