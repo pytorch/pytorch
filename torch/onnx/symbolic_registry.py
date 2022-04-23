@@ -4,11 +4,8 @@ import typing
 import warnings
 from typing import Any, Callable, Dict, Tuple, Union
 
+import torch._C
 from torch.onnx.symbolic_helper import _onnx_main_opset, _onnx_stable_opsets
-
-if typing.TYPE_CHECKING:
-    import torch._C
-
 
 SymbolicFunction = Callable[..., Union[torch._C.Value, Tuple[torch._C.Value]]]
 
