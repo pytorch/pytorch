@@ -88,7 +88,7 @@ std::tuple<Tensor,optional<int64_t>> prelu_batch_rule(
 
     // pads to the left so that the flattened shape matches up with the channel
     if (!weight_bdim) {
-      new_shape.insert(new_shape.begin(), 1); 
+      new_shape.insert(new_shape.begin(), 1);
     } else {
       new_shape.insert(new_shape.begin() + 1, 1);
     }
@@ -97,11 +97,11 @@ std::tuple<Tensor,optional<int64_t>> prelu_batch_rule(
   for (int64_t i = new_shape.size(); i < final_size; i ++) {
     new_shape.push_back(1);
   }
-  TORCH_INTERNAL_ASSERT(new_shape.size() == final_size);
+  TORCH_INTERNAL_ASSERT((int64_t)new_shape.size() == final_size);
   const auto weight_padded = weight_flatten.view(new_shape);
   auto zero_tensor = at::zeros(1, input.options());
 
-  // decomposes function, 
+  // decomposes function,
   auto res = at::maximum(zero_tensor, input_) + weight_padded * at::minimum(zero_tensor, input_);
   return std::make_tuple(res, 0);
 }
@@ -191,7 +191,7 @@ std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> prelu_backward_bat
 
     // pads to the left so that the flattened shape matches up with the channel
     if (!weight_bdim) {
-      new_shape.insert(new_shape.begin(), 1); 
+      new_shape.insert(new_shape.begin(), 1);
     } else {
       new_shape.insert(new_shape.begin() + 1, 1);
     }
