@@ -1,11 +1,5 @@
 
-# If using a recent CMake, use system FindCUDAToolkit.cmake
-# if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.17)
-#     find_package(CUDAToolkit)
-#     return()
-# endif()
-
-# Otherwise, use a back-ported version of FindCUDAToolkit.cmake
+# This module is back-ported from CMake 3.17 and above to work with CMake 3.10
 
 # Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
 # file Copyright.txt or https://cmake.org/licensing for details.
@@ -506,8 +500,6 @@ Result variables
 if(CMAKE_CUDA_COMPILER_TOOLKIT_ROOT)
   set(CUDAToolkit_ROOT_DIR "${CMAKE_CUDA_COMPILER_TOOLKIT_ROOT}")
   set(CUDAToolkit_LIBRARY_ROOT "${CMAKE_CUDA_COMPILER_LIBRARY_ROOT}")
-  set(CUDAToolkit_BIN_DIR "${CUDAToolkit_ROOT_DIR}/bin")
-  set(CUDAToolkit_NVCC_EXECUTABLE "${CUDAToolkit_BIN_DIR}/nvcc${CMAKE_EXECUTABLE_SUFFIX}")
   set(CUDAToolkit_VERSION "${CMAKE_CUDA_COMPILER_TOOLKIT_VERSION}")
 
   if(CUDAToolkit_VERSION MATCHES [=[([0-9]+)\.([0-9]+)\.([0-9]+)]=])
@@ -567,19 +559,6 @@ else()
       set(CUDAToolkit_ROOT_DIR "${CUDAToolkit_ROOT_DIR}" PARENT_SCOPE)
     endif()
 
-  endfunction()
-
-  function(_CUDAToolkit_find_version_file result_variable)
-    # We first check for a non-scattered installation to prefer it over a scattered installation.
-    if(CUDAToolkit_ROOT AND EXISTS "${CUDAToolkit_ROOT}/version.txt")
-      set(${result_variable} "${CUDAToolkit_ROOT}/version.txt" PARENT_SCOPE)
-    elseif(CUDAToolkit_ROOT_DIR AND EXISTS "${CUDAToolkit_ROOT_DIR}/version.txt")
-      set(${result_variable} "${CUDAToolkit_ROOT_DIR}/version.txt" PARENT_SCOPE)
-    elseif(CMAKE_SYSROOT_LINK AND EXISTS "${CMAKE_SYSROOT_LINK}/usr/lib/cuda/version.txt")
-      set(${result_variable} "${CMAKE_SYSROOT_LINK}/usr/lib/cuda/version.txt" PARENT_SCOPE)
-    elseif(EXISTS "${CMAKE_SYSROOT}/usr/lib/cuda/version.txt")
-      set(${result_variable} "${CMAKE_SYSROOT}/usr/lib/cuda/version.txt" PARENT_SCOPE)
-    endif()
   endfunction()
 
   # For NVCC we can easily deduce the SDK binary directory from the compiler path.
@@ -694,6 +673,31 @@ else()
       return()
     endif()
   endif()
+endif()
+
+if(NOT CUDAToolkit_BIN_DIR)
+  set(CUDAToolkit_BIN_DIR "${CUDAToolkit_ROOT_DIR}/bin")
+endif()
+
+if(NOT CUDAToolkit_NVCC_EXECUTABLE)
+  set(CUDAToolkit_NVCC_EXECUTABLE "${CUDAToolkit_BIN_DIR}/nvcc${CMAKE_EXECUTABLE_SUFFIX}")
+endif()
+
+if(CMAKE_CUDA_COMPILER_TOOLKIT_VERSION)
+  set(CUDAToolkit_VERSION "${CMAKE_CUDA_COMPILER_TOOLKIT_VERSION}")
+else()
+  function(_CUDAToolkit_find_version_file result_variable)
+    # We first check for a non-scattered installation to prefer it over a scattered installation.
+    if(CUDAToolkit_ROOT AND EXISTS "${CUDAToolkit_ROOT}/version.txt")
+      set(${result_variable} "${CUDAToolkit_ROOT}/version.txt" PARENT_SCOPE)
+    elseif(CUDAToolkit_ROOT_DIR AND EXISTS "${CUDAToolkit_ROOT_DIR}/version.txt")
+      set(${result_variable} "${CUDAToolkit_ROOT_DIR}/version.txt" PARENT_SCOPE)
+    elseif(CMAKE_SYSROOT_LINK AND EXISTS "${CMAKE_SYSROOT_LINK}/usr/lib/cuda/version.txt")
+      set(${result_variable} "${CMAKE_SYSROOT_LINK}/usr/lib/cuda/version.txt" PARENT_SCOPE)
+    elseif(EXISTS "${CMAKE_SYSROOT}/usr/lib/cuda/version.txt")
+      set(${result_variable} "${CMAKE_SYSROOT}/usr/lib/cuda/version.txt" PARENT_SCOPE)
+    endif()
+  endfunction()
 
   _CUDAToolkit_find_version_file( _CUDAToolkit_version_file )
   if(_CUDAToolkit_version_file)
@@ -827,6 +831,7 @@ include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(CUDAToolkit
   REQUIRED_VARS
     CUDAToolkit_INCLUDE_DIR
+    CUDAToolkit_VERSION
     CUDA_CUDART
     CUDAToolkit_BIN_DIR
   VERSION_VAR
@@ -1004,6 +1009,18 @@ if(CUDAToolkit_FOUND)
   _CUDAToolkit_find_and_add_import_lib(cupti_static
                                        EXTRA_PATH_SUFFIXES ../extras/CUPTI/lib64/
                                                            ../extras/CUPTI/lib/)
+
+  find_path(CUDAToolkit_cupti_INCLUDE_DIR cupti.h PATHS
+      "${CUDAToolkit_LIBRARY_DIR}/../extras/CUPTI/include"
+      "${CUDATookit_INCLUDE_DIR}"
+      NO_DEFAULT_PATH)
+
+  foreach(lib_name cupti cupti_static)
+    set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_cupti_INCLUDE_DIR}")
+    set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_cupti_INCLUDE_DIR}")
+  endforeach()
 
   _CUDAToolkit_find_and_add_import_lib(nvrtc DEPS cuda_driver)
 
