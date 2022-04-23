@@ -3872,6 +3872,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: select
+    SparseCsrCPU, SparseCsrCUDA: select_sparse_csr
 
 - func: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
   variants: function
