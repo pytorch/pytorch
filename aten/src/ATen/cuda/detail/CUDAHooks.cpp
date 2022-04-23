@@ -400,12 +400,27 @@ void CUDAHooks::deviceSynchronize(int64_t device_index) const {
   c10::cuda::device_synchronize();
 }
 
+namespace {
+std::once_flag cuda_hooks_flag;
+} // namespace
+
 // Sigh, the registry doesn't support namespaces :(
-using at::CUDAHooksRegistry;
-using at::RegistererCUDAHooksRegistry;
+void callCUDAHooksRegistration() {
+  using at::CUDAHooksRegistry;
+  using at::RegistererCUDAHooksRegistry;
 
-REGISTER_CUDA_HOOKS(CUDAHooks);
+  std::call_once(cuda_hooks_flag, []() { REGISTER_CUDA_HOOKS(CUDAHooks); });
+}
 
+namespace {
+struct RegistrationCaller {
+  RegistrationCaller() {
+    callCUDAHooksRegistration();
+  }
+};
+
+static RegistrationCaller registration_caller;
+} // namespace
 } // namespace detail
 } // namespace cuda
 } // namespace at

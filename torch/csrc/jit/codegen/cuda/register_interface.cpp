@@ -1,3 +1,5 @@
+#include <aten/src/ATen/cuda/detail/CUDAHooks.h>
+
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
@@ -36,11 +38,12 @@ static RegisterInterface register_interface_;
 class RegisterPass {
  public:
   RegisterPass() {
-    RegisterCudaFuseGraph::registerPass(true, /* check_gpu */ false);
+    at::cuda::detail::callCUDAHooksRegistration();
+    RegisterCudaFuseGraph::registerPass(true);
   }
 };
 
-RegisterPass register_pass_;
+static RegisterPass register_pass_;
 #endif
 
 } // namespace

@@ -49,4 +49,6 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   void deviceSynchronize(int64_t device_index) const override;
 };
 
+void TORCH_CUDA_CPP_API callCUDAHooksRegistration();
+
 }}} // at::cuda::detail
