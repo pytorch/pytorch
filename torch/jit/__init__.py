@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from torch.utils import set_module
+from torch._ops import OpOverload, OpOverloadPacket
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import (
@@ -186,6 +187,10 @@ def isinstance(obj, target_type):
     """
     return _isinstance(obj, target_type)
 
+def _register_decomposition(op: OpOverload, graph):
+    assert not isinstance(op, OpOverloadPacket), f"Must pass specific op overload, not overload packet, found {op}"
+    assert isinstance(op, OpOverload)
+    torch._C._jit_register_decomposition_for_schema(op._schema, graph)
 
 # Context manager for globally hiding source ranges when printing graphs.
 # Note that these functions are exposed to Python as static members of the

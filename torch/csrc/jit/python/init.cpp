@@ -187,14 +187,13 @@ void initJITBindings(PyObject* module) {
       // and passing it in from Python will have a different pointer than the
       // schema that is globally used for caching
       .def(
-          "_jit_register_decomposition_for_node",
-          [](Node* n, std::shared_ptr<Graph>& graph) {
-            if (n->maybeSchema()) {
-              const FunctionSchema& schema = n->schema();
-              RegisterDecomposition(schema, graph);
-            } else {
-              TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
-            }
+          "_jit_register_decomposition_for_schema",
+          [](const FunctionSchema& s, std::shared_ptr<Graph>& graph) {
+            // because this is invoked by python, the function schema *
+            // becomes different, and we need to find and reuse the
+            // one that is used for caching
+            auto op = findOperatorFor(OperatorName(s.name(), s.overload_name()));
+            RegisterDecomposition(op->schema(), graph);
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def(

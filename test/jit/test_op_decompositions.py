@@ -31,8 +31,7 @@ class TestOpDecompositions(JitTestCase):
         def square_decomp(x):
             return torch.pow(x, 2)
 
-        node = foo.graph.findNode("aten::square")
-        torch._C._jit_register_decomposition_for_node(node, square_decomp.graph)
+        torch.jit._register_decomposition(torch.ops.aten.square.default, square_decomp.graph)
         torch._C._jit_pass_run_decompositions(foo.graph)
         FileCheck().check_not("aten::square").check("aten::pow").run(foo.graph)
         x = torch.rand([4])
