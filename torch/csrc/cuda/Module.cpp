@@ -223,11 +223,10 @@ PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
 
   PyObject* op_string_o = nullptr;
   PyObject* optional_name_o = nullptr;
-  PyObject* optional_fusion_class_o = nullptr;
   PyObject* tensors_o = nullptr;
 
-  if(!PyArg_ParseTuple(args, "OOOO",
-      &op_string_o, &optional_name_o, &optional_fusion_class_o, &tensors_o)) {
+  if(!PyArg_ParseTuple(args, "OOO",
+      &op_string_o, &optional_name_o, &tensors_o)) {
     // THPUtils_invalidArguments(
     //     args,
     //     nullptr,
@@ -239,7 +238,6 @@ PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
 
   std::string op_string = THPUtils_unpackString(op_string_o);
   std::string optional_name = THPUtils_unpackString(optional_name_o);
-  std::string optional_fusion_class = THPUtils_unpackString(optional_fusion_class_o);
 
   THPUtils_assert(PyTuple_Check(tensors_o), "tensors argument is expected to "
       "be a tuple, but got %s", THPUtils_typename(tensors_o));
@@ -258,9 +256,8 @@ PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
 
   // std::cout<< op_string << std::endl;
   // std::cout<< optional_name << std::endl;
-  // std::cout<< optional_fusion_class << std::endl;
 
-  at::Tensor output = at::cuda::CompileKernel(op_string, optional_name, optional_fusion_class, tensors);
+  at::Tensor output = at::cuda::CompileKernel(op_string, optional_name, tensors);
 
 
   return THPVariable_Wrap(output);

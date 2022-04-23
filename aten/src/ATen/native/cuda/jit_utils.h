@@ -98,4 +98,28 @@ template <> inline std::string typeName<at::BFloat16>(){
     return "at::BFloat16";
 }
 
+// TODO: maybe this should be in ScalarType.h
+inline std::string typeName(ScalarType t) {
+    switch (t)
+    {
+        case ScalarType::Byte : return "uint8_t";
+        case ScalarType::Char : return "int8_t";
+        case ScalarType::Short : return "int16_t";
+        case ScalarType::Int : return "int";
+        case ScalarType::Long : return "int64_t";
+        case ScalarType::Half : return "at::Half";
+        case ScalarType::Float : return "float";
+        case ScalarType::Double : return "double";
+        case ScalarType::ComplexHalf : return "std::complex<c10::Half>";
+        case ScalarType::ComplexFloat : return "std::complex<float>";
+        case ScalarType::ComplexDouble : return "std::complex<double>";
+        case ScalarType::Bool : return "bool";
+        case ScalarType::BFloat16 : return "at::BFloat16";
+        default:
+            return "void";
+            // TODO
+            // static_assert(delayed_false<T>::value, "invalid type for jiterator");
+    }
+}
+
 }}}  // namespace at::cuda::jit

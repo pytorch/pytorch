@@ -3,23 +3,19 @@ from torch import Tensor
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 
-def create_jit_fn(op_string: str, optional_name: str, optional_fusion_class="elementwise", **kwargs) -> Callable:
+def create_jit_fn(op_string: str, optional_name: str, **kwargs) -> Callable:
 
     class JittedFunction:
-        def __init__(self, op_string: str, optional_name: str, optional_fusion_class, **kwargs):
+        def __init__(self, op_string: str, optional_name: str, **kwargs):
             self.op_string = op_string
             self.optional_name = optional_name
-            self.optional_fusion_class = optional_fusion_class
             self.kwargs_dict = kwargs
             self.jitted_fn = None
 
         def compile(self, *tensors: Tensor, **kwargs):
-            print("calling into C++...")
-
             output = torch._C._cuda_compile_kernel(
                 self.op_string,
                 self.optional_name,
-                self.optional_fusion_class,
                 tensors)
             # TODO: ignoring kwargs for now
             return output
@@ -42,6 +38,6 @@ def create_jit_fn(op_string: str, optional_name: str, optional_fusion_class="ele
 
             # return self.jitted_fn(*tensors, **expanded_kwargs)
 
-    return JittedFunction(op_string, optional_name, optional_fusion_class, **kwargs)
+    return JittedFunction(op_string, optional_name, **kwargs)
 
 
