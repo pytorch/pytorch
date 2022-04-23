@@ -267,6 +267,15 @@ def run_gen_lazy_tensor(
     per_operator_headers: bool = False,
     backend_name: str = default_args.backend_name,
     gen_forced_fallback_code: bool = False,
+    # the following arguments are temporary customization points for xla backend migration.
+    # do not rely on them otherwise, they should be removed once migration is complete
+    backend_namespace: str = "torch::lazy",
+    get_tensorlist: str = "GetTensorList",
+    get_tensor_or_wrap_number: str = "GetLtcTensorOrCreateForWrappedNumber",
+    try_get_tensor: str = "TryGetLtcTensor",
+    metrics_counter: str = 'TORCH_LAZY_FN_COUNTER("lazy::")',
+    create_tensor: str = "LazyTensor::Create",
+    create_from_first_tensor: bool = False,
 ) -> None:
 
     template_dir = os.path.join(aten_path, "templates")
@@ -459,6 +468,13 @@ def run_gen_lazy_tensor(
                         backend_indices[backend_key],
                         tensor_class,
                         gen_forced_fallback_code,
+                        backend_namespace,
+                        get_tensorlist,
+                        get_tensor_or_wrap_number,
+                        try_get_tensor,
+                        metrics_counter,
+                        create_tensor,
+                        create_from_first_tensor,
                     ),
                     grouped_native_functions,
                     codegenInplaceVariant=True,
