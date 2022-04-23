@@ -1146,26 +1146,7 @@ class IrParser {
                 ? *value_map[node->inputs()[2]->unique()]
                 : nullptr;
 
-            Val* out = nullptr;
-            if (min && max) {
-              out = clamp(operand, min, max);
-            } else if (min) {
-              out = binaryOp(
-                  BinaryOpType::Max,
-                  operand,
-                  min,
-                  TypePromotion::default_op_config);
-            } else if (max) {
-              out = binaryOp(
-                  BinaryOpType::Min,
-                  operand,
-                  max,
-                  TypePromotion::default_op_config);
-            } else {
-              TORCH_INTERNAL_ASSERT(
-                  false,
-                  "clamp: At least one of 'min' or 'max' must not be None");
-            }
+            Val* out = clamp(operand, min, max);
             value_map.emplace(node->output()->unique(), out);
           },
           isInputNonSizeZeroTensor,

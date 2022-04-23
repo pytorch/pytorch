@@ -8864,9 +8864,6 @@ op_db: List[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
-                        # 76046
-                        DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                                     dtypes=(torch.bool,)),
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
@@ -9044,9 +9041,6 @@ op_db: List[OpInfo] = [
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               # 76046
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                            dtypes=(torch.int32, torch.int64)),
                # 76047
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                             dtypes=(torch.int8, torch.int16, torch.int32, torch.int64)),
@@ -9417,9 +9411,6 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/54841
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.bfloat16]),
-                       # 76046
-                       DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                                    dtypes=(torch.int32, torch.int64)),
                    ),
                    sample_kwargs=sample_kwargs_clamp_scalar,
                    sample_inputs_func=sample_inputs_clamp_scalar),
@@ -14984,10 +14975,6 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           skips=(
-               # 76046
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.bool,)),
-           ),
            sample_inputs_func=sample_inputs_squeeze),
     OpInfo('fill_',
            op=lambda x, scalar: torch.fill_(x.clone(), scalar),
