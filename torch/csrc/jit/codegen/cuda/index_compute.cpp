@@ -1210,7 +1210,7 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   const auto gpu_lower = GpuLower::current();
 
   // Get a reference tensor replayed as existing loop structure
-  auto reference = IndexReferenceReplay::getReference(loops);
+  auto reference = IndexReferenceReplay::getReference(loops, consumer_tv);
   auto reference_domain = reference.domain;
   auto reference_id_map = reference.concrete_to_id;
 
@@ -1361,12 +1361,16 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
 
     TORCH_INTERNAL_ASSERT(
         root_ind != nullptr,
-        "Couldn't find root mapping for TV",
-        producer_tv->name(),
+        "Couldn't find root mapping for ",
+        producer_tv->toString(),
         " dim: ",
-        i,
+        dim,
         " id: ",
-        root_dom[dim]);
+        root_dom[dim]->toString(),
+        ", reference domain: ",
+        reference_domain->toString(),
+        ", reference root: ",
+        ir_utils::toString(reference_domain->getRootDomain()));
 
     if (producer_tv->domain()->contiguity()[dim]) {
       // If contig, used the stored stride which may be the previous
@@ -1410,7 +1414,11 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
         " dim: ",
         i,
         " id: ",
-        root_dom[i]->toString());
+        root_dom[i]->toString(),
+        ", reference domain: ",
+        reference_domain->toString(),
+        ", reference root: ",
+        ir_utils::toString(reference_domain->getRootDomain()));
 
     auto root_ind = producer_indexing.indexMap().at(root_dom[i]);
 
@@ -1506,7 +1514,7 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   const auto gpu_lower = GpuLower::current();
 
   // Get a reference tensor replayed as existing loop structure
-  auto reference = IndexReferenceReplay::getReference(loops);
+  auto reference = IndexReferenceReplay::getReference(loops, consumer_tv);
   auto reference_domain = reference.domain;
   auto reference_id_map = reference.concrete_to_id;
 
@@ -1725,12 +1733,16 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
 
     TORCH_INTERNAL_ASSERT(
         index_map.find(root_dom[i]) != index_map.end(),
-        "Couldn't find root mapping for TV",
-        producer_tv->name(),
+        "Couldn't find root mapping for ",
+        producer_tv->toString(),
         " dim: ",
         i,
         " id: ",
-        root_dom[i]->toString());
+        root_dom[i]->toString(),
+        ", reference domain: ",
+        reference_domain->toString(),
+        ", reference root: ",
+        ir_utils::toString(reference_domain->getRootDomain()));
 
     auto root_ind_i = index_map.at(root_dom[i]);
 
@@ -1773,12 +1785,16 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
 
       TORCH_INTERNAL_ASSERT(
           index_map.find(root_dom[j]) != index_map.end(),
-          "Couldn't find root mapping for TV",
-          consumer_tv->name(),
+          "Couldn't find root mapping for ",
+          producer_tv->name(),
           " dim: ",
-          i,
+          j,
           " id: ",
-          root_dom[i]);
+          root_dom[j]->toString(),
+          ", reference domain: ",
+          reference_domain->toString(),
+          ", reference root: ",
+          ir_utils::toString(reference_domain->getRootDomain()));
 
       auto root_ext_j = extent_map.find(root_dom[j]) == extent_map.end()
           ? root_dom[j]->extent()
@@ -1832,7 +1848,7 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
   const auto gpu_lower = GpuLower::current();
 
   // Get a reference tensor replayed as existing loop structure
-  auto reference = IndexReferenceReplay::getReference(loops);
+  auto reference = IndexReferenceReplay::getReference(loops, consumer_tv);
   auto reference_domain = reference.domain;
   auto reference_id_map = reference.concrete_to_id;
 
@@ -1910,12 +1926,16 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
 
     TORCH_INTERNAL_ASSERT(
         root_ind != nullptr,
-        "Couldn't find root mapping for TV",
-        consumer_tv->name(),
+        "Couldn't find root mapping for ",
+        consumer_tv->toString(),
         " dim: ",
-        i,
+        dim,
         " id: ",
-        root_dom[dim]);
+        root_dom[dim]->toString(),
+        ", reference domain: ",
+        reference_domain->toString(),
+        ", reference root: ",
+        ir_utils::toString(reference_domain->getRootDomain()));
 
     if (consumer_tv->domain()->contiguity()[dim]) {
       // If contig, used the stored stride which may be the previous
@@ -1953,12 +1973,16 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
     TORCH_INTERNAL_ASSERT(
         consumer_indexing.indexMap().find(root_dom[i]) !=
             consumer_indexing.indexMap().end(),
-        "Couldn't find root mapping for TV",
-        consumer_tv->name(),
+        "Couldn't find root mapping for ",
+        consumer_tv->toString(),
         " dim: ",
         i,
         " id: ",
-        root_dom[i]->toString());
+        root_dom[i]->toString(),
+        ", reference domain: ",
+        reference_domain->toString(),
+        ", reference root: ",
+        ir_utils::toString(reference_domain->getRootDomain()));
 
     auto root_ind = consumer_indexing.indexMap().at(root_dom[i]);
 
@@ -2003,7 +2027,8 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
   const auto gpu_lower = GpuLower::current();
 
   // Get a reference tensor replayed as existing loop structure
-  auto reference = IndexReferenceReplay::getReference(loops);
+  auto reference = IndexReferenceReplay::getReference(loops, consumer_tv);
+
   auto reference_domain = reference.domain;
   auto reference_id_map = reference.concrete_to_id;
 
@@ -2106,12 +2131,16 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
 
     TORCH_INTERNAL_ASSERT(
         index_map.find(root_dom[i]) != index_map.end(),
-        "Couldn't find root mapping for TV",
-        consumer_tv->name(),
+        "Couldn't find root mapping for ",
+        consumer_tv->toString(),
         " dim: ",
         i,
         " id: ",
-        root_dom[i]->toString());
+        root_dom[i]->toString(),
+        ", reference domain: ",
+        reference_domain->toString(),
+        ", reference root: ",
+        ir_utils::toString(reference_domain->getRootDomain()));
 
     auto root_ind_i = index_map.at(root_dom[i]);
     if (root_ind_i->isZeroInt()) {
@@ -2139,12 +2168,16 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
 
       TORCH_INTERNAL_ASSERT(
           index_map.find(root_dom[j]) != index_map.end(),
-          "Couldn't find root mapping for TV",
-          consumer_tv->name(),
+          "Couldn't find root mapping for ",
+          consumer_tv->toString(),
           " dim: ",
-          i,
+          j,
           " id: ",
-          root_dom[i]);
+          root_dom[j]->toString(),
+          ", reference domain: ",
+          reference_domain->toString(),
+          ", reference root: ",
+          ir_utils::toString(reference_domain->getRootDomain()));
 
       auto root_ext_j = extent_map.find(root_dom[j]) == extent_map.end()
           ? root_dom[j]->extent()
@@ -3100,7 +3133,8 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
   }
 
   // Get a reference tensor replayed as existing loop structure
-  ReferenceTensor reference = IndexReferenceReplay::getReference(loops);
+  ReferenceTensor reference =
+      IndexReferenceReplay::getReference(loops, consumer_tv);
 
   // Generate halo information for reference.
   updateHaloInfoForReference(reference, consumer_tv);

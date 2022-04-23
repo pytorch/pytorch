@@ -121,6 +121,56 @@ void IndexReferenceReplay::handle(Expr* e) {
   OptInDispatch::handle(e);
 }
 
+namespace {
+
+bool isMappedWithAny(IterDomain* id, const std::vector<Val*>& ids) {
+  return std::any_of(ids.begin(), ids.end(), [&](Val* val) {
+    return val->isA<IterDomain>() &&
+        GpuLower::current()->caMap()->areMapped(
+            id, val->as<IterDomain>(), IdMappingMode::PERMISSIVE);
+  });
+}
+
+// Get an rfactor IterDomain that is mapped with an IterDomain. If
+// multiple such IDs exist, select one whose input IDs are mapped with
+// the consumer IDs. This is to ensure the path from the leaf
+// IterDomains to the root matches with the consumer tensor.
+IterDomain* getRfactorIDToTraverse(
+    IterDomain* id,
+    const std::vector<Val*>& consumer_all_ids) {
+  const auto& rfactor_ids =
+      GpuLower::current()->caMap()->getViewRfactorDomainsOfIdGroup(
+          id, IdMappingMode::PERMISSIVE);
+
+  if (rfactor_ids.empty()) {
+    return nullptr;
+  }
+
+  for (auto rfactor_id : rfactor_ids) {
+    auto def = rfactor_id->definition();
+    if (def == nullptr) {
+      continue;
+    }
+
+    auto rfactor_id_inputs = ir_utils::filterByType<IterDomain>(def->inputs());
+    if (std::all_of(
+            rfactor_id_inputs.begin(),
+            rfactor_id_inputs.end(),
+            [&](IterDomain* rfactor_id_input) {
+              return isMappedWithAny(rfactor_id_input, consumer_all_ids);
+            })) {
+      return rfactor_id;
+    }
+  }
+
+  // No mapped ID found, which means the consumer is a post-view
+  // tensor. In that case, it shouldn't matter which view path to
+  // traverse, so just return the first one.
+  return rfactor_ids.at(0);
+}
+
+} // namespace
+
 TensorDomain* IndexReferenceReplay::computeReplay() {
   // Throw an error when two loops are mapped with each other, which
   // violates an assumption that unique mappings between concrete
@@ -153,6 +203,12 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
       std::back_inserter(domain_ids),
       [](kir::ForLoop* fl) { return fl->iter_domain(); });
 
+  const auto consumer_all_ids = DependencyCheck::getAllValsBetween(
+      {consumer_tv_->getRootDomain().begin(),
+       consumer_tv_->getRootDomain().end()},
+      {consumer_tv_->domain()->domain().begin(),
+       consumer_tv_->domain()->domain().end()});
+
   // IterVisitor based traversals don't work because we don't have all outputs.
   // backward traversal's traverseFrom(domain_ids) will throw "Invalid backward
   // traversal found. Some output paths were not provided". Therefore manaully
@@ -174,14 +230,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     }
     auto expr = out_id->definition();
 
-    // TODO: Need to thoroughly check this is right
-    auto rfactor_ids =
-        GpuLower::current()->caMap()->getViewRfactorDomainsOfIdGroup(
-            out_id, IdMappingMode::PERMISSIVE);
-    for (auto rfactor_id : rfactor_ids) {
-      // TODO: Why not this line? Surprised it worked without mapping to
-      // concrete but breaks with the following line
-      // to_visit.emplace_front(concreteToRefId(toConcrete(rfactor_id)));
+    if (auto rfactor_id = getRfactorIDToTraverse(out_id, consumer_all_ids)) {
       to_visit.emplace_front(rfactor_id);
     }
 

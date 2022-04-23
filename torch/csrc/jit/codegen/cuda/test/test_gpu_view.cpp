@@ -410,7 +410,7 @@ TEST_F(NVFuserTest, FusionViewPersistentShmoo_CUDA) {
 
   for (auto e : view_examples) {
     persistentViewAddFusion(
-      e.first, e.second, false /* view_before_persistent */);
+        e.first, e.second, false /* view_before_persistent */);
   }
 }
 
@@ -692,8 +692,7 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain2_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
 }
 
-// TODO Repro of issue #1608
-/*
+// Repro of issue #1608
 TEST_F(NVFuserTest, FusionViewConcreteDomain3_CUDA) {
   std::vector<int64_t> input_shape = {14, 12, 8, 100};
   std::vector<int64_t> bcast_shape = {14, 12, 8, 1};
@@ -733,7 +732,6 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain3_CUDA) {
 
   testValidate(&fusion, outputs, aten_inputs, {at_output}, __LINE__, __FILE__);
 }
-*/
 
 TEST_F(NVFuserTest, FusionViewConcreteDomain4_CUDA) {
   std::vector<int64_t> shape1 = {3, 4, 5};
@@ -765,7 +763,8 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain4_CUDA) {
   // concrete root domains of tv1. In other words, it must map with tv4 and tv5
   // with the exact mapping.
   ComputeAtMap map(&fusion);
-  auto concrete_id = map.getConcreteMappedID(tv5->axis(0), IdMappingMode::PERMISSIVE);
+  auto concrete_id =
+      map.getConcreteMappedID(tv5->axis(0), IdMappingMode::PERMISSIVE);
   TORCH_CHECK(
       map.areMapped(concrete_id, tv5->axis(0), IdMappingMode::EXACT),
       "Invalid concrete ID: ",
@@ -837,9 +836,11 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain5_CUDA) {
     ComputeAtMap map(&fusion);
 
     // Make sure the two output tensors are mapped. Note both are 1D.
-    TORCH_CHECK(map.areMapped(path1_out->axis(0), path2_out->axis(0), IdMappingMode::LOOP));
+    TORCH_CHECK(map.areMapped(
+        path1_out->axis(0), path2_out->axis(0), IdMappingMode::LOOP));
 
-    auto concrete_id = map.getConcreteMappedID(path2_out->axis(0), IdMappingMode::LOOP);
+    auto concrete_id =
+        map.getConcreteMappedID(path2_out->axis(0), IdMappingMode::LOOP);
     TORCH_CHECK(
         path2_out->axis(0) == concrete_id,
         "Incorrect concrete ID: ",
