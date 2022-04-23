@@ -11,7 +11,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestMHADeviceType(TestCase):
-    @torch.inference_mode()
+    @torch.no_grad()
     def _test_transform_bias_rescale_qkv_impl(
         self, device, dtype, use_nt, use_padding=False
     ):
@@ -41,7 +41,11 @@ class TestMHADeviceType(TestCase):
                     x = torch.nested_tensor(xs, device=device, dtype=dtype)
                 qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
 
-                with torch.no_grad():
+                # We have to use inference_mode here because q/k/v are
+                # all views of the same Tensor, which autograd doesn't
+                # like. This is fine because this function is only
+                # exposed to Python for purposes of writing this test.
+                with torch.inference_mode():
                     (q, k, v) = torch._transform_bias_rescale_qkv(
                         x, qkv.bias, num_heads=num_heads
                     )
@@ -243,7 +247,7 @@ class TestMHADeviceType(TestCase):
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
     @skipMeta
-    @torch.inference_mode()
+    @torch.no_grad()
     def test_native_multihead_self_attention(self, device, dtype):
         for (use_padding, pad_all) in ((False, False), (True, False), (True, True)):
             for use_nt in (False, True):
@@ -269,7 +273,7 @@ class TestMHADeviceType(TestCase):
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
     @skipMeta
-    @torch.inference_mode()
+    @torch.no_grad()
     def test_native_multihead_encoder_decoder_attention(self, device, dtype):
         self._test_multihead_attention_impl(
             device,
@@ -283,7 +287,7 @@ class TestMHADeviceType(TestCase):
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
     @skipMeta
-    @torch.inference_mode()
+    @torch.no_grad()
     def test_native_multihead_attention(self, device, dtype):
         self._test_multihead_attention_impl(
             device,

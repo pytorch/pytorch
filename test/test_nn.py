@@ -39,8 +39,8 @@ from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, floating_types_and, get_all_math_dtypes, \
     floating_and_complex_types_and
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
-    get_function_arglist, load_tests, \
+    skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
+    download_file, get_function_arglist, load_tests, \
     suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -5827,10 +5827,10 @@ class TestNN(NNTestCase):
         self._test_multihead_attn_invalid_shape_impl(mha)
         # Give the test a chance to hit the fast path. (Right now, it
         # won't, but gating may be less restricted in the future.)
-        with torch.inference_mode():
+        with torch.no_grad():
             self._test_multihead_attn_invalid_shape_impl(mha.eval())
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def test_multihead_attn_fast_path_invalid_shape(self):
         mha = torch.nn.MultiheadAttention(3, 3, batch_first=True).eval()
 
@@ -5899,9 +5899,20 @@ class TestNN(NNTestCase):
     def test_multihead_attn_nested_tensor_outside_fast_path(self):
         mha = torch.nn.MultiheadAttention(3, 3, batch_first=True).eval()
         nt = torch.nested_tensor([torch.randn(3, 3)])
-        msg = "MultiheadAttention does not support NestedTensor outside of its fast path.*grad is enabled and.*or biases requires_grad"
+        # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
+        # or more of these. Take advantage of that to test the torch_function bailout.
+        has_torch_func = torch.overrides.has_torch_function((nt, mha.in_proj_weight, mha.in_proj_bias, mha.out_proj.weight, mha.out_proj.bias))
+        if has_torch_func:
+            msg = "MultiheadAttention does not support NestedTensor.*argument has_torch_function"
+        else:
+            msg = "MultiheadAttention does not support NestedTensor outside of its fast path.*grad is enabled and.*or biases requires_grad"
         with self.assertRaisesRegex(AssertionError, msg):
             mha(nt, nt, nt)
+
+        if has_torch_func:
+            # Just give up, they're all going to fail with the same message.
+            return
+
         with torch.no_grad():
             mha(nt, nt, nt)
         with torch.inference_mode():
@@ -5910,18 +5921,11 @@ class TestNN(NNTestCase):
         nt.requires_grad = False
         with self.assertRaisesRegex(AssertionError, msg):
             mha(nt, nt, nt)
-        # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
-        # or more of these. No idea why.
-        has_torch_func = torch.overrides.has_torch_function((nt, mha.in_proj_weight, mha.in_proj_bias, mha.out_proj.weight, mha.out_proj.bias))
         mha.in_proj_weight.requires_grad = False
         mha.in_proj_bias.requires_grad = False
         mha.out_proj.weight.requires_grad = False
         mha.out_proj.bias.requires_grad = False
-        if has_torch_func:
-            with self.assertRaisesRegex(AssertionError, "MultiheadAttention does not support NestedTensor.*argument has_torch_function"):
-                mha(nt, nt, nt)
-        else:
-            mha(nt, nt, nt)
+        mha(nt, nt, nt)
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
@@ -7960,7 +7964,7 @@ class TestNN(NNTestCase):
                 if training:
                     cm = contextlib.nullcontext()
                 else:
-                    cm = torch.inference_mode()
+                    cm = torch.no_grad()
                 with cm:
                     _test(batch_first, training)
 
@@ -14617,10 +14621,10 @@ class TestNNDeviceType(NNTestCase):
                 encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
                 if not training:
                     encoder_layer = encoder_layer.eval()
-                    with torch.inference_mode():
+                    with torch.no_grad():
                         self._test_module_empty_input(encoder_layer, input, check_size=False, inference=True)
-                    if batch_first:
-                        with torch.inference_mode():
+                    if batch_first and not TEST_WITH_CROSSREF:
+                        with torch.no_grad():
                             # A NestedTensor with no tensors inside it doesn't have dim 3 (or dim
                             # 2, for that matter) so it can't hit the fast path, nor can we give a
                             # result.
@@ -18075,7 +18079,7 @@ class TestNNDeviceType(NNTestCase):
             model = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).cuda().to(dtype)
             if not training:
                 model = model.eval()
-                cm = torch.inference_mode()
+                cm = torch.no_grad()
             else:
                 cm = contextlib.nullcontext()
             with cm:
@@ -20304,7 +20308,7 @@ class TestNNDeviceType(NNTestCase):
             if training:
                 cm = contextlib.nullcontext()
             else:
-                cm = torch.inference_mode()
+                cm = torch.no_grad()
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 

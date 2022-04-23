@@ -1070,7 +1070,7 @@ class MultiheadAttention(Module):
         elif self.bias_v is not None:
             why_not_fast_path = "self.bias_v was not None"
         elif self.dropout:
-            why_not_fast_path = "dropout was not zero"
+            why_not_fast_path = f"dropout was {self.dropout}, required zero"
         elif self.add_zero_attn:
             why_not_fast_path = "add_zero_attn was enabled"
         elif not self._qkv_same_embed_dim:
