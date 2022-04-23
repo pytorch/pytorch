@@ -1683,6 +1683,28 @@ class FullyShardedDataParallel(nn.Module):
                 input_dtype, *args, **kwargs
             )
 
+            cast_fn = self._cast_fp_inputs_to_precision
+            module_to_fwd = {}
+            fwd_memo = set()
+
+            def get_fwd_with_cast(fwd: Callable):
+                def fwd_with_cast(*_args, **_kwargs):
+                    _args, _kwargs = cast_fn(input_dtype, *_args, **_kwargs)
+                    return fwd(*_args, **_kwargs)
+                return fwd_with_cast
+
+            for module in self.module.modules():
+                if module is not self.module and \
+                    not isinstance(module, FullyShardedDataParallel) and \
+                        not isinstance(module, FlattenParamsWrapper):
+                    fwd = getattr(module, "forward", None)
+                    if fwd in fwd_memo:
+                        continue
+                    if callable(fwd):
+                        module_to_fwd[module] = fwd
+                        module.forward = get_fwd_with_cast(fwd)
+                        fwd_memo.add(module.forward)
+
         # All-gather full parameters, moving them to compute_device if
         # necessary.
         self._rebuild_full_params()
@@ -1694,6 +1716,11 @@ class FullyShardedDataParallel(nn.Module):
         # is mutated.
         self._register_post_backward_hooks()
         outputs = self.module(*args, **kwargs)
+
+        if self._is_root and self.mixed_precision is not None:
+            for module in self.module.modules():
+                if module in module_to_fwd:
+                    module.forward = module_to_fwd[module]
 
         if self not in self._fsdp_graph_order:
             self._my_fsdp_idx_in_graph = len(self._fsdp_graph_order)
