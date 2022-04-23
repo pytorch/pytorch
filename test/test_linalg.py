@@ -2867,7 +2867,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    @skipCUDAIfRocm
     def test_inv_ex_singular(self, device, dtype):
         # if the input matrix is not invertible, info with positive integer is returned
         A = torch.eye(3, 3, dtype=dtype, device=device)
@@ -2895,6 +2894,7 @@ class TestLinalg(TestCase):
     @slowTest
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
+    @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
                         torch.float64: 1e-5, torch.complex128: 1e-5})
@@ -5390,7 +5390,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
-    @skipCUDAIfRocm
     def test_lobpcg_basic(self, device, dtype):
         self._test_lobpcg_method(device, dtype, 'basic')
 
@@ -5732,7 +5731,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else [],
-                  *[torch.half] if not TEST_WITH_ROCM else []))
+                  *[torch.half]))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         # have to use torch.randn(...).to(bfloat16) instead of
@@ -5831,7 +5830,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else []))
-    @dtypes(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
@@ -6043,9 +6042,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
-    @skipCUDAIf(torch.version.cuda == "10.1", "flaky on CUDA 10.1")
     @onlyNativeDeviceTypes
-    @dtypes(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_bmm(self, device, dtype):
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
@@ -6157,7 +6155,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @onlyNativeDeviceTypes
-    @dtypes(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_addbmm(self, device, dtype):
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
@@ -6230,7 +6228,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
     @onlyNativeDeviceTypes
-    @dtypes(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_baddbmm(self, device, dtype):
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
@@ -7316,6 +7314,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         if self.device_type == 'cuda':
             sub_test(False)
 
+    @skipCUDAIfRocm  # ROCm: test was exceptionally slow, even for slow tests. Skip until triage.
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
