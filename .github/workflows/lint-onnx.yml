@@ -1,24 +1,6 @@
 name: Lint
 
 on:
-  push:
-    branches:
-      - master
-      - main
-    paths:
-      - "scripts/onnx/**"
-      - "docs/source/onnx.rst"
-      - "test/onnx/**"
-      - "test/jit/test_export_modes.py"
-      - "tools/onnx/**"
-      - "torch/_C/__init__.pyi.in"
-      - "torch/csrc/jit/passes/onnx.*"
-      - "torch/csrc/jit/passes/onnx/**"
-      - "torch/csrc/jit/serialization/export.*"
-      - "torch/csrc/jit/serialization/onnx.*"
-      - "torch/csrc/onnx/**"
-      - "torch/onnx/**"
-
   pull_request:
     paths:
       - "scripts/onnx/**"
