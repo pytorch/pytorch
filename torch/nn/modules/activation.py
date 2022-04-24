@@ -896,7 +896,8 @@ class MultiheadAttention(Module):
     ``forward()`` will use a special optimized implementation if all of the following
     conditions are met:
 
-    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This restriction will be loosened in the future.)
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This
+      restriction will be loosened in the future.)
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
     - dropout is 0
@@ -905,7 +906,8 @@ class MultiheadAttention(Module):
     - ``batch_first`` is ``True`` and the input is batched
     - ``kdim`` and ``vdim`` are equal to ``embed_dim``
     - at most one of ``key_padding_mask`` or ``attn_mask`` is passed
-    - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither ``key_padding_mask`` nor ``attn_mask`` is passed
+    - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither ``key_padding_mask``
+      nor ``attn_mask`` is passed
 
     If the optimized implementation is in use, a
     `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
@@ -1114,7 +1116,8 @@ class MultiheadAttention(Module):
                     need_weights,
                     average_attn_weights)
         any_nested = query.is_nested or key.is_nested or value.is_nested
-        assert not any_nested, f"MultiheadAttention does not support NestedTensor outside of its fast path. The fast path was not hit because {why_not_fast_path}"
+        assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
+                                f"The fast path was not hit because {why_not_fast_path}")
 
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property

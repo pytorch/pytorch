@@ -5901,11 +5901,13 @@ class TestNN(NNTestCase):
         nt = torch.nested_tensor([torch.randn(3, 3)])
         # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
         # or more of these. Take advantage of that to test the torch_function bailout.
-        has_torch_func = torch.overrides.has_torch_function((nt, mha.in_proj_weight, mha.in_proj_bias, mha.out_proj.weight, mha.out_proj.bias))
+        has_torch_func = torch.overrides.has_torch_function(
+            (nt, mha.in_proj_weight, mha.in_proj_bias, mha.out_proj.weight, mha.out_proj.bias))
         if has_torch_func:
             msg = "MultiheadAttention does not support NestedTensor.*argument has_torch_function"
         else:
-            msg = "MultiheadAttention does not support NestedTensor outside of its fast path.*grad is enabled and.*or biases requires_grad"
+            msg = ("MultiheadAttention does not support NestedTensor outside of its fast path.*grad is " +
+                   "enabled and.*or biases requires_grad")
         with self.assertRaisesRegex(AssertionError, msg):
             mha(nt, nt, nt)
 
@@ -14630,9 +14632,11 @@ class TestNNDeviceType(NNTestCase):
                             # result.
                             with self.assertRaisesRegex(
                                     AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
-                                self._test_module_empty_input(encoder_layer, torch.nested_tensor([], device=device), check_size=False, inference=True)
+                                nt = torch.nested_tensor([], device=device)
+                                self._test_module_empty_input(encoder_layer, nt, check_size=False, inference=True)
 
-                            self._test_module_empty_input(encoder_layer, torch.nested_tensor([torch.rand(0, 512, device=device)], device=device), check_size=False, inference=True)
+                            nt = torch.nested_tensor([torch.rand(0, 512, device=device)], device=device)
+                            self._test_module_empty_input(encoder_layer, nt, check_size=False, inference=True)
                 else:
                     self._test_module_empty_input(encoder_layer, input, check_size=False)
 

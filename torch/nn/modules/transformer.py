@@ -294,14 +294,17 @@ class TransformerEncoderLayer(Module):
         forward() will use a special optimized implementation if all of the following
         conditions are met:
 
-        - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
+        - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor
+          argument ``requires_grad``
         - training is disabled (using ``.eval()``)
         - batch_first is ``True`` and the input is batched (i.e., ``src.dim() == 3``)
         - norm_first is ``False`` (this restriction may be loosened in the future)
         - activation is one of: ``"relu"``, ``"gelu"``, ``torch.functional.relu``, or ``torch.functional.gelu``
         - at most one of ``src_mask`` and ``src_key_padding_mask`` is passed
-        - if src is a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_, neither ``src_mask`` nor ``src_key_padding_mask`` is passed
-        - the two ``LayerNorm`` instances have a consistent ``eps`` value (this will naturally be the case unless the caller has manually modified one without modifying the other)
+        - if src is a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_, neither ``src_mask``
+          nor ``src_key_padding_mask`` is passed
+        - the two ``LayerNorm`` instances have a consistent ``eps`` value (this will naturally be the case
+          unless the caller has manually modified one without modifying the other)
 
         If the optimized implementation is in use, a
         `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be
@@ -344,6 +347,7 @@ class TransformerEncoderLayer(Module):
         else:
             self.activation_relu_or_gelu = 0
         self.activation = activation
+
     def __setstate__(self, state):
         if 'activation' not in state:
             state['activation'] = F.relu
@@ -399,7 +403,7 @@ class TransformerEncoderLayer(Module):
                     self.self_attn.out_proj.weight,
                     self.self_attn.out_proj.bias,
                     self.activation_relu_or_gelu == 2,
-                    False, # norm_first, currently not supported
+                    False,  # norm_first, currently not supported
                     self.norm1.eps,
                     self.norm1.weight,
                     self.norm1.bias,
