@@ -140,6 +140,7 @@ ALLOW_LIST = [
     ("aten::_weight_norm_cuda_interface_backward", datetime.date(9999, 1, 1)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
+    ("aten::argsort", datetime.date(2022, 12, 22)),
 ]
 
 ALLOW_LIST_COMPILED = [
