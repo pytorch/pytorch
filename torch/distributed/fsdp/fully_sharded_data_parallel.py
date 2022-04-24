@@ -502,7 +502,7 @@ class FullyShardedDataParallel(nn.Module):
             ``deferred_init`` API. In this case, deferred modules would be initialized
             by a default initialization function that calls torchdistX's
             ``materialize_module``, or the passed in ``param_init_fn``, if it is not
-                ``None``.
+            ``None``.
             The same ``Callable`` is applied to initialize all meta modules. Note that this
             initialization function is applied before doing any FSDP sharding
             logic.
