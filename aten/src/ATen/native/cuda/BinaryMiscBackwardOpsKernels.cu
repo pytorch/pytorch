@@ -110,7 +110,7 @@ void tanh_backward_kernel_cuda(TensorIteratorBase& iter) {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         using comp_t = at::opmath_type<scalar_t>;
         const auto one = comp_t{1.};
-	const auto comp_b = static_cast<comp_t>(b);
+        const auto comp_b = static_cast<comp_t>(b);
         const auto comp_a = static_cast<comp_t>(a);
         return static_cast<scalar_t>(comp_a * std::conj(one - comp_b * comp_b));
       });
