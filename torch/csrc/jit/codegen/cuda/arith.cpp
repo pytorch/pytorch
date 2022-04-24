@@ -752,13 +752,16 @@ TensorView* sum(
     bool keep_dim /*=false*/,
     DataType dtype /* DataType::Null */) {
 
-  if (dtype == DataType::Null && isBooleanType(v1->getDataType().value())) {
-    dtype = DataType::Int;
+  if (dtype == DataType::Null) {
+    auto initial_v1_dtype = v1->getDataType().value();
+    if (isBooleanType(initial_v1_dtype) || isIntegralType(initial_v1_dtype)) {
+      dtype = DataType::Int;
+    }
   }
 
   // Cast input tensor to dtype before the operation is performed
   if (dtype != DataType::Null) {
-    v1 = castOp(dtype, v1);
+    v1 = optionalCastStrict(dtype, v1)->as<TensorView>();
   }
 
   Val* init = nullptr;
