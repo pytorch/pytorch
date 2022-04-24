@@ -53,9 +53,9 @@ class TORCH_CUDA_CU_API Bool : public Val {
   const c10::optional<bool> maybe_value_;
 };
 
-//! A Float64 value. For now we don't have any other type besides
-//! Float64. This value can be a symbolic value (defined after the kernel
-//! is compiled) or a constant value (inlined into the kernel definition).
+//! A Float64 value. This value can be a symbolic value (defined after the
+//! kernel is compiled) or a constant value (inlined into the kernel
+//! definition).
 class TORCH_CUDA_CU_API Double : public Val {
  public:
   using ScalarType = double;
@@ -97,6 +97,39 @@ class TORCH_CUDA_CU_API Int : public Val {
   explicit Int(IrBuilderPasskey passkey, c10::optional<ScalarType> value);
 
   Int(const Int* src, IrCloner* ir_cloner);
+
+  bool isSymbolic() const {
+    return !(maybe_value_.has_value());
+  }
+  bool isConst() const final {
+    return maybe_value_.has_value();
+  }
+  c10::optional<ScalarType> value() const {
+    return maybe_value_;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  const c10::optional<ScalarType> maybe_value_;
+};
+
+//! An c10::complex<double> value. This value can be a symbolic value (defined
+//! after the kernel is compiled) or a constant value (inlined into the kernel
+//! definition).
+class TORCH_CUDA_CU_API ComplexDouble : public Val {
+ public:
+  using ScalarType = c10::complex<double>;
+
+  ComplexDouble(IrBuilderPasskey passkey);
+
+  explicit ComplexDouble(IrBuilderPasskey passkey, ScalarType value);
+
+  explicit ComplexDouble(
+      IrBuilderPasskey passkey,
+      c10::optional<ScalarType> value);
+
+  ComplexDouble(const ComplexDouble* src, IrCloner* ir_cloner);
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -175,6 +208,13 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   TensorDomain* domain() const {
     return domain_;
   }
+
+  //! This is for a TensorView with an rFactor domain that is an input to a
+  //! fusion segment. We convert the rfactor domain into a new root domain.
+  //! Any dynamic-sized rfactor iterDomains are given a new symbolic extent.
+  //! Concrete integer extents are kept. Output TensorViews of any subsequent
+  //! expressions that use this TensorView are also updated.
+  void convertRfactorToRootDomain();
 
   void setContiguity(const std::vector<bool>& contig) {
     domain()->setContiguity(contig);
@@ -399,6 +439,24 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   bool isDoubleBuffered() const {
     return is_double_buffered_;
   }
+
+  //! Fill in mma options in scheduling time.
+  //!  Each mma op in Fusion IR must be configured once before lowering.
+  //!  Mma options are configuration parameters used in lowering to mma
+  //!  instrinsics, mainly the type of mma macro to use and input data layout
+  //!  etc.
+  //!
+  //! TODO: This step will very likely be removed in a follow up PR. All of
+  //!  the options configured here could actually be inferred from fusion IR
+  //!  once we are feature complete.
+  void configureMma(MmaOptions options);
+
+  //! Transforms the innermost iterdomains according to the given mma swizzle,
+  //!  this should be used on the tvs that are either inputs/outputs of an
+  //!  MmaOp, or any tv's that are involved in prolog/epilog fusions and need to
+  //!  have a matching thread swizzle with the mma operand/result.
+  //! More detail on usage see [WarpMmaSwizzler] in scheduler/mma_utils.h .
+  void applyMmaSwizzle(MmaOptions options);
 
   friend TORCH_CUDA_CU_API TransformPropagator;
   friend TORCH_CUDA_CU_API TransformReplay;

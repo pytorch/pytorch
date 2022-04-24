@@ -132,8 +132,15 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "noarch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "crossref", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
+
+  linux-bionic-cuda11_3-py3_7-clang9-build:
+    name: linux-bionic-cuda11.3-py3.7-clang9
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda11.3-py3.7-clang9
+      docker-image-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
 
   linux-vulkan-bionic-py3_7-clang9-build:
     name: linux-vulkan-bionic-py3.7-clang9
@@ -175,25 +182,28 @@ jobs:
           { config: "distributed", shard: 1, num_shards: 1, runner: "linux.8xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-rocm4_5-py3_7-build:
-    name: linux-bionic-rocm4.5-py3.7
+  linux-bionic-rocm5_0-py3_7-build:
+    name: linux-bionic-rocm5.0-py3.7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-rocm4.5-py3.7
-      docker-image-name: pytorch-linux-bionic-rocm4.5-py3.7
+      build-environment: linux-bionic-rocm5.0-py3.7
+      docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
 
-  linux-bionic-rocm4_5-py3_7-test:
-    name: linux-bionic-rocm4.5-py3.7
+  linux-bionic-rocm5_0-py3_7-test:
+    name: linux-bionic-rocm5.0-py3.7
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-bionic-rocm4_5-py3_7-build
+    needs: linux-bionic-rocm5_0-py3_7-build
     with:
-      build-environment: linux-bionic-rocm4.5-py3.7
-      docker-image: ${{ needs.linux-bionic-rocm4_5-py3_7-build.outputs.docker-image }}
+      build-environment: linux-bionic-rocm5.0-py3.7
+      docker-image: ${{ needs.linux-bionic-rocm5_0-py3_7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
         ]}
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   linux-xenial-py3-clang5-mobile-build:
     name: linux-xenial-py3-clang5-mobile-build
@@ -219,6 +229,7 @@ jobs:
       docker-image-name: xla_base
 
   pytorch-xla-linux-bionic-py3_7-clang8-test:
+    if: ${{ false }}
     name: pytorch-xla-linux-bionic-py3.7-clang8
     uses: ./.github/workflows/_linux-test.yml
     needs: pytorch-xla-linux-bionic-py3_7-clang8-build

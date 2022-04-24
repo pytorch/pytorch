@@ -435,6 +435,17 @@ struct TORCH_API SymbolicShape {
     return dims_;
   }
 
+  c10::optional<std::vector<bool>> symbolicDims() const {
+    if (!dims_) {
+      return c10::nullopt;
+    }
+    auto symbolic_dims = std::vector<bool>();
+    for (const ShapeSymbol& s : *dims_) {
+      symbolic_dims.push_back(!s.is_static());
+    }
+    return symbolic_dims;
+  }
+
   // Checks whether the shape is fully defined/complete, ie. rank and sizes
   // of every dimension are known.
   bool isComplete() const {
@@ -455,6 +466,14 @@ struct TORCH_API SymbolicShape {
   // If either of two shapes are of unknown rank or they have unmatching rank,
   // result will be unranked.
   SymbolicShape merge(const SymbolicShape& other) const;
+
+  friend bool operator==(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return lhs.dims_ == rhs.dims_;
+  }
+
+  friend bool operator!=(const SymbolicShape& lhs, const SymbolicShape& rhs) {
+    return !(lhs == rhs);
+  }
 
   private:
     c10::optional<std::vector<ShapeSymbol>> dims_;
@@ -764,15 +783,36 @@ struct TORCH_API TensorType : public SharedType {
 
   static const TypeKind Kind = TypeKind::TensorType;
 
-  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
-    std::vector<int64_t> strides(sizes.size());
-    if (sizes.empty()) // zero-dim case
+  static std::vector<int64_t> contiguousStridesOf(
+      at::IntArrayRef sizes,
+      at::MemoryFormat memory_format = MemoryFormat::Contiguous) {
+    auto contiguous_fn = [](const at::IntArrayRef& sizes,
+                            const std::vector<int64_t>& dim_order) {
+      std::vector<int64_t> strides(sizes.size());
+      if (sizes.empty()) // zero-dim case
+        return strides;
+
+      strides[dim_order[0]] = 1;
+      for (size_t i = 1; i < dim_order.size(); i++) {
+        auto cur_dim = dim_order[i];
+        auto pre_dim = dim_order[i - 1];
+        strides[cur_dim] = strides[pre_dim] * sizes[pre_dim];
+      }
       return strides;
-    strides.back() = 1;
-    for (size_t i = strides.size() - 1; i > 0; i--) {
-      strides[i - 1] = strides[i] * sizes[i];
+    };
+
+    std::vector<int64_t> dim_order(sizes.size());
+    if (memory_format == MemoryFormat::ChannelsLast) {
+      dim_order = {1, 3, 2, 0};
+    } else if (memory_format == MemoryFormat::ChannelsLast3d) {
+      dim_order = {1, 4, 3, 2, 0};
+    } else {
+      auto ndims = sizes.size();
+      for (size_t i = 0; i < ndims; i++) {
+        dim_order[i] = ndims - i - 1; // Reverse
+      }
     }
-    return strides;
+    return contiguous_fn(sizes, dim_order);
   }
 
  private:
@@ -1236,6 +1276,31 @@ struct TORCH_API ComplexType : public NumberType {
   }
 };
 
+// We need to introduce `SymIntType` to represent the `SymInt` type
+// used in function schemas e.g. `aten::narrow_copy(... SymInt length)
+// `SymInt` will be used to enable tracing arithmetic operations on
+// dimension values. Please see [SymInt.h] for more information
+struct SymIntType;
+using SymIntTypePtr = SingletonTypePtr<SymIntType>;
+struct TORCH_API SymIntType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymInt";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    // TODO: will become a Union[SymbolicIntNode|int] in the near future
+    return "int";
+  }
+  static const TypeKind Kind = TypeKind::SymIntType;
+  // global singleton
+  static SymIntTypePtr get();
+
+ private:
+  SymIntType() : Type(TypeKind::SymIntType) {}
+};
+
 struct IntType;
 using IntTypePtr = SingletonTypePtr<IntType>;
 // This type represents a Python int number
@@ -1697,6 +1762,13 @@ struct getTypePtr_<int64_t> final {
     return IntType::get();
   }
 };
+
+template <>
+struct getTypePtr_<SymInt> final {
+  static decltype(auto) call() {
+    return SymIntType::get();
+  }
+};
 template <>
 struct getTypePtr_<c10::ScalarType> final {
   static decltype(auto) call() {
@@ -1775,6 +1847,13 @@ template <class T>
 struct getTypePtr_<c10::ArrayRef<T>> final {
   static const auto& call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template <>
+struct getTypePtr_<c10::SymIntArrayRef> final {
+  static const auto& call() {
+    static auto type = ListType::create(getTypePtr_<c10::SymInt>::call());
     return type;
   }
 };

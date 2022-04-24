@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type_base.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -1380,6 +1381,39 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
       }
     }
   }
+}
+
+TEST(TestSymIntArrayRef, BasicConversion) {
+  const size_t X = 2, Y = 4, Z = 5;
+  std::vector<int64_t> tgt_size_v{2, 4, 5};
+  std::vector<c10::SymInt> tgt_size({X, Y, Z});
+  auto a = at::randn({1, 4, 1}, at::kCPU);
+  auto b = a.expand(tgt_size);
+  auto c = a.expand(tgt_size_v);
+  ASSERT_TRUE(torch::allclose(b, c));
+}
+
+TEST(TestSymInt, NarrowCopyWithSymbolicInt) {
+  static const size_t LENGTH = 5;
+  auto a = at::randn({10}, at::kCPU);
+  c10::SymInt si(LENGTH);
+  auto b = a.narrow_copy(0, 0, si);
+  auto c = a.narrow(0, 0, LENGTH);
+  ASSERT_TRUE(torch::allclose(b, c));
+}
+
+TEST(TestSymInt, NarrowCopy) {
+  static const size_t LENGTH = 5;
+  auto a = at::randn({10}, at::kCPU);
+  auto b = a.narrow_copy(0, 0, LENGTH);
+  auto c = a.narrow(0, 0, LENGTH);
+  ASSERT_TRUE(torch::allclose(b, c));
+}
+
+TEST(TestSymInt, AddSymbolicInt) {
+  c10::SymInt a(5);
+  c10::SymInt b(3);
+  ASSERT_TRUE((a + b).expect_int() == 8);
 }
 
 TEST(FallbackGraphsTest, Basic) {
@@ -2970,6 +3004,20 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
     func->run(stack);
     at::Tensor out = pop(stack).toTensor();
     ASSERT_TRUE(at::allclose(out, input.var(unbiased)));
+  }
+}
+
+TEST(TestShapeGraphLinting, Basic) {
+  auto schemas = RegisteredShapeComputeSchemas();
+  for (const auto& schema : schemas) {
+    // arange does not acually support complex, leave as
+    // union[int, float] for now
+    if (schema->name() == "aten::arange") {
+      continue;
+    }
+    auto g = shapeComputeGraphForSchema(*schema);
+    TORCH_INTERNAL_ASSERT(g);
+    LintShapeComputeGraph(schema, *g);
   }
 }
 

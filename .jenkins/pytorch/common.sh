@@ -8,18 +8,21 @@ set -ex
 # Save the SCRIPT_DIR absolute path in case later we chdir (as occurs in the gpu perf test)
 SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 
+if [[ "${BUILD_ENVIRONMENT}" == *linux* ]]; then
+  # TODO: Remove this once nvidia package repos are back online
+  # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
+  # shellcheck disable=SC2046
+  sudo sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
+fi
+
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
 # Figure out which Python to use for ROCm
-if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
   unset HIP_PLATFORM
-  PYTHON=$(which "python${BASH_REMATCH[1]}")
-  # non-interactive bashs do not expand aliases by default
-  shopt -s expand_aliases
   export PYTORCH_TEST_WITH_ROCM=1
-  alias python='$PYTHON'
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
 fi

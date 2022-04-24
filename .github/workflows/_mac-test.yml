@@ -77,15 +77,24 @@ jobs:
 
       - name: Test
         run: |
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+          export COMMIT_MESSAGES
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@master
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           use-gha: true
-          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Upload test statistics
         if: always()
@@ -94,6 +103,8 @@ jobs:
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -102,11 +113,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         shell: bash
         run: |
           set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
-          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
-          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test

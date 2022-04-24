@@ -8,14 +8,12 @@ from torch._six import nan
 from itertools import permutations, product
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import (
-    all_types, all_types_and, floating_types_and, get_all_dtypes, get_all_int_dtypes, get_all_fp_dtypes,
-)
+from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
+     onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
 
 # TODO: remove this
 SIZE = 100
@@ -133,7 +131,7 @@ class TestSortAndSelect(TestCase):
                                  'random with NaNs')
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
         sizes = (100, 1000, 10000)
         for ncopies in sizes:
@@ -164,6 +162,23 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(iv, torch.zeros_like(iv))
         self.assertEqual(vm, torch.arange(255, dtype=dtype, device=device))
         self.assertEqual(im, t0.sort().indices)
+
+
+    @dtypes(torch.float32)
+    def test_sort_restride(self, device, dtype):
+        # Input: non-contiguous (stride: 5) 3-element array
+        tensor = torch.randn((3, 5), dtype=dtype, device=device)[:, 0]
+        # Outputs: 0-dim tensors
+        # They will need to be resized, which means they will also be
+        # restrided with the input tensor's strides as base.
+        values = torch.tensor(0, dtype=dtype, device=device)
+        indices = torch.tensor(0, dtype=torch.long, device=device)
+        torch.sort(tensor, out=(values, indices))
+        # Check: outputs were restrided to dense strides
+        self.assertEqual(values.stride(), (1,))
+        self.assertEqual(indices.stride(), (1,))
+        # Check: 'tensor'  indexed by 'indices' is equal to 'values'
+        self.assertEqual(tensor[indices], values)
 
     def _test_sort_discontiguous(self, device, dtype):
         # on CUDA 2048 vs >2048 have different code path for the dim being sorted
@@ -226,7 +241,7 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(values, values_cont)
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_stable_sort_against_numpy(self, device, dtype):
         if dtype in floating_types_and(torch.float16, torch.bfloat16):
             inf = float('inf')
@@ -289,7 +304,7 @@ class TestSortAndSelect(TestCase):
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
             self.assertEqual(idx_torch, idx_numpy)
 
-    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_msort(self, device, dtype):
         def test(shape):
             tensor = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
@@ -378,7 +393,6 @@ class TestSortAndSelect(TestCase):
         # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
-    @skipCUDAIfRocm
     def test_unique_dim(self, device):
         self.assertFalse(hasattr(torch, 'unique_dim'))
 
@@ -434,7 +448,7 @@ class TestSortAndSelect(TestCase):
                                                 device=device)
             expected_inverse_dim2 = torch.tensor([0, 1])
             expected_counts_dim2 = torch.tensor([1, 1])
-            expected_unique_empty = torch.tensor([], dtype=dtype, device=device)
+            expected_unique_empty = torch.empty(5, 0, dtype=dtype, device=device)
             expected_inverse_empty = torch.tensor([], dtype=torch.long, device=device)
             expected_counts_empty = torch.tensor([], dtype=torch.long, device=device)
             if dtype in floating_types_and(torch.float16, torch.bfloat16):
@@ -686,7 +700,7 @@ class TestSortAndSelect(TestCase):
         for curr_size in (small, large, verylarge):
             self._test_topk_dtype(device, dtype, False, curr_size)
 
-    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_topk_nonfinite(self, device, dtype):
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
@@ -717,11 +731,8 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
     @onlyNativeDeviceTypes
-    @dtypesIfCUDA(*(get_all_dtypes(include_complex=False,
-                                   include_bool=False,
-                                   include_half=False,
-                                   include_bfloat16=True)))
-    @dtypes(*(get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
+    @dtypesIfCUDA(*all_types_and(torch.bfloat16))
+    @dtypes(*all_types())
     def test_topk_zero(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/49205
         t = torch.rand(2, 2, device=device).to(dtype=dtype)
@@ -775,12 +786,9 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(expected_inverse.view(additional_shape), y_inverse)
                 self.assertEqual(expected_counts, y_counts)
 
-    @dtypesIfCPU(*set(get_all_dtypes()) - {torch.complex64, torch.complex128})
-    @dtypes(*set(get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    @dtypesIfCPU(*all_types_and(torch.bool, torch.bfloat16))
+    @dtypes(*all_types_and(torch.half, torch.bool))
     def test_unique(self, device, dtype):
-        if dtype is torch.half and self.device_type == 'cpu':
-            return  # CPU does not have half support
-
         def ensure_tuple(x):
             if isinstance(x, torch.Tensor):
                 return (x,)
@@ -835,12 +843,9 @@ class TestSortAndSelect(TestCase):
                                 count += 1
                         self.assertEqual(j, count)
 
-    @dtypesIfCPU(*set(get_all_dtypes()) - {torch.complex64, torch.complex128})
-    @dtypes(*set(get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    @dtypesIfCPU(*all_types_and(torch.bool, torch.bfloat16))
+    @dtypes(*all_types_and(torch.half, torch.bool))
     def test_unique_consecutive(self, device, dtype):
-        if dtype is torch.half and self.device_type == 'cpu':
-            return  # CPU does not have half support
-
         if dtype is torch.bool:
             x = torch.tensor([True, False, False, False, True, True, False, False, False], dtype=torch.bool, device=device)
             expected_unique = torch.tensor([True, False, True, False], dtype=torch.bool, device=device)

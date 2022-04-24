@@ -226,6 +226,33 @@ C10_UNUSED void ClipRangesToGatherToOffsets(
   fuse.runOnGraph(graph);
 }
 
+C10_UNUSED void ToLengthsToOffsets(std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
+        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy, %memoryformat)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
+        return (%y1))IR";
+  std::string fused_pattern = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
+        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %includelastoffset, %dtype)
+        return (%y0))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy):
+        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
+        return (%y1))IR";
+  std::string fused_pattern2 = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy):
+        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %includelastoffset, %dtype)
+        return (%y0))IR";
+  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
+  fuse.runOnGraph(graph);
+}
+
 C10_UNUSED
 void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
@@ -335,6 +362,8 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 
     ClipRangesToGatherToOffsets(graph);
   }
+
+  ToLengthsToOffsets(graph);
 #endif
 }
 
@@ -388,7 +417,15 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::select_tensor(Tensor(a) a, Tensor(b) b, bool use_b) -> Tensor(a|b)",
       c10::AliasAnalysisKind::FROM_SCHEMA));
-  m.def(torch::schema("static_runtime::create_owned_ref(...) -> ..."));
+  m.def(torch::schema(
+      "static_runtime::create_owned_ref(...) -> ...",
+      c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
+      "static_runtime::embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -777,7 +814,8 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
           "fb::gather_ranges_to_dense_v2",
           "static_runtime::fused_gather_ranges_to_dense_v2"),
       OP_PAIR(
-          "fb::split_and_squeeze", "static_runtime::fused_split_and_squeeze")};
+          "fb::split_and_squeeze",
+          "static_runtime::fused_split_and_squeeze_copy")};
 
   // replacement contains (old_node, new_node, list_unpack_node)
   std::vector<std::tuple<Node*, Node*, Node*>> replacement;
@@ -1101,7 +1139,8 @@ void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
       continue;
     }
     auto* split_and_squeeze_node = graph->create(
-        c10::Symbol::fromQualString("static_runtime::fused_split_and_squeeze"),
+        c10::Symbol::fromQualString(
+            "static_runtime::fused_split_and_squeeze_copy"),
         num_outputs);
     split_and_squeeze_node->addInput(node->input(0));
     split_and_squeeze_node->addInput(node->input(1));
@@ -1120,6 +1159,37 @@ void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph) {
   for (auto* node : to_erase) {
     node->destroy();
   }
+}
+
+C10_UNUSED void RemoveUnnecessaryOutputs(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  RemoveUnnecessaryEmbeddingBagOutputs(graph);
+}
+
+C10_UNUSED void RemoveUnnecessaryEmbeddingBagOutputs(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        return (%y2, %y1, %y0))IR";
+  std::string transformed_pattern = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor = static_runtime::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        return (%y2, %y1, %y0))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, transformed_pattern);
+  fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx)
+        return (%y2, %y1, %y0))IR";
+  std::string transformed_pattern2 = R"IR(
+    graph(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx):
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor = static_runtime::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset, %padding_idx)
+        return (%y2, %y1, %y0))IR";
+  fuse.RegisterRewritePattern(pattern2, transformed_pattern2);
+  fuse.runOnGraph(graph);
 }
 
 } // namespace jit
