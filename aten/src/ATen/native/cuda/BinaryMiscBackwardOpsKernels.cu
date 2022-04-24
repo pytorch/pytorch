@@ -64,19 +64,37 @@ void logit_backward_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scal
       });
 }
 
+const char tanh_backward_name[] = "tanh_backward";
 void tanh_backward_kernel_cuda(TensorIteratorBase& iter) {
-  if(isComplexType(iter.dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_complex_cuda", [&]() {
+  auto dtype = iter.dtype();
+  if(isComplexType(dtype)) {
+#if AT_USE_JITERATOR()
+    static const auto tanh_backward_string = jiterator_stringify(
+      template <typename T>
+      T tanh_backward(T a, T b) {
+        return a * std::conj(T{1.} - b * b);
+      }
+    ); // tanh_backward_string
+    AT_DISPATCH_COMPLEX_TYPES(dtype, "tanh_backward_complex_cuda", [&]() {
+      jitted_gpu_kernel<
+          /*name=*/ tanh_backward_name,
+          /*return_dtype=*/ scalar_t,
+          /*common_dtype=*/ scalar_t,
+          /*arity=*/ 2>(iter, tanh_backward_string);
+#else
+    AT_DISPATCH_COMPLEX_TYPES(dtype, "tanh_backward_complex_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * std::conj(scalar_t{1.} - b * b);
       });
     });
+#endif
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "tanh_backward_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, dtype, "tanh_backward_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * (scalar_t{1.} - b * b);
       });
     });
+  }
   }
 }
 
