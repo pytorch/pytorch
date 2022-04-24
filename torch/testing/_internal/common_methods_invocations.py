@@ -12708,6 +12708,7 @@ op_db: List[OpInfo] = [
            skips=(
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+               # see https://github.com/pytorch/pytorch/issues/76283
                DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                             device_type="cpu"),
                # Trying to use forward AD with miopen_batch_norm that does not support it
@@ -16269,6 +16270,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
         ),
@@ -16304,6 +16306,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
                          dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),),
+            # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
         ),
@@ -16409,6 +16412,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
         ),
@@ -16436,6 +16440,7 @@ op_db: List[OpInfo] = [
             # can't take variable number of arguments or use
             # keyword-only arguments with defaults
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
         ),
@@ -16461,6 +16466,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
             # 76046
@@ -16498,6 +16504,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
@@ -16525,6 +16532,7 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
         ),
@@ -16540,6 +16548,7 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
         ),
@@ -16559,6 +16568,7 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
         ),
