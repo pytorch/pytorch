@@ -502,9 +502,8 @@ class FullyShardedDataParallel(nn.Module):
             ``deferred_init`` API. In this case, deferred modules would be initialized
             by a default initialization function that calls torchdistX's
             ``materialize_module``, or the passed in ``param_init_fn``, if it is not
-            ``None``.
-            The same ``Callable`` is applied to initialize all meta modules. Note that this
-            initialization function is applied before doing any FSDP sharding
+            ``None``. The same ``Callable`` is applied to initialize all meta modules.
+            Note that this initialization function is applied before doing any FSDP sharding
             logic.
 
             Example::
@@ -518,6 +517,7 @@ class FullyShardedDataParallel(nn.Module):
                 >>> module = deferred_init.deferred_init(MyModule, device="cuda")
                 >>> # Will initialize via deferred_init.materialize_module().
                 >>> fsdp_model = FSDP(module, auto_wrap_policy=default_auto_wrap_policy)
+
     """
 
     def __init__(
