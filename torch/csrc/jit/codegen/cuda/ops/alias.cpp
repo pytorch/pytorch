@@ -90,18 +90,16 @@ TensorView* view(
   auto analyze_view = analyzeView(x, original_sizes, new_sizes);
 
   auto reduction = (!analyze_view.trivial_reduction_axes.empty())
-      ? sum(x, analyze_view.trivial_reduction_axes)
+      ? sum(x, analyze_view.trivial_reduction_axes, false /* keep_dim */, x->getDataType().value())
       : x;
 
   auto view = (!analyze_view.transforms.empty())
       ? applyViewTransforms(reduction, analyze_view.transforms)
       : reduction;
 
-  auto bcast = (analyze_view.has_broadcast)
+  return (analyze_view.has_broadcast)
       ? broadcast(view, analyze_view.broadcast_axes)
       : view;
-
-  return optionalCast(x->getDataType().value(), bcast)->as<TensorView>();
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
@@ -113,8 +111,9 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
       trivial_reduction_axes.push_back(idx);
     }
   }
-  auto reduction = (trivial_reduction_axes.empty()) ? x : sum(x, trivial_reduction_axes);
-  return optionalCast(x->getDataType().value(), reduction)->as<TensorView>();
+  return (trivial_reduction_axes.empty())
+      ? x
+      : sum(x, trivial_reduction_axes, false /* keep_dim */, x->getDataType().value());
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
@@ -123,8 +122,7 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
     dim = (int)(x->nDims()) + dim;
   }
   if (dim >= 0 && dim < x->nDims() && sizes[dim] == 1) {
-    auto reduction = sum(x, {dim});
-    return optionalCast(x->getDataType().value(), reduction)->as<TensorView>();
+    return sum(x, {dim}, false /* keep_dim */, x->getDataType().value());
   } else {
     return set(x);
   }

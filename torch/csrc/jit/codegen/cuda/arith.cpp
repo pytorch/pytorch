@@ -688,7 +688,8 @@ TensorView* reductionOp(
     const std::vector<int>& axes,
     Val* init,
     TensorView* tv,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
   TORCH_CHECK(
       init->isConstScalar(),
       "Cannot create a reduction operation where the initial value is not a const scalar.");
@@ -719,7 +720,7 @@ TensorView* reductionOp(
     uint_axes.push_back((unsigned int)axis);
   }
 
-  TensorView* out = newForReduction(tv, uint_axes);
+  TensorView* out = newForReduction(tv, uint_axes, dtype);
   const auto out_type = out->getDataType().value();
   const auto init_type = init->getDataType().value();
   TORCH_CHECK(
@@ -748,26 +749,36 @@ TensorView* reductionOp(
 TensorView* sum(
     TensorView* v1,
     const std::vector<int>& axes,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+
+  if (dtype == DataType::Null && isBooleanType(v1->getDataType().value())) {
+    dtype = DataType::Int;
+  }
+
+  // Cast input tensor to dtype before the operation is performed
+  if (dtype != DataType::Null) {
+    v1 = castOp(dtype, v1);
+  }
+
   Val* init = nullptr;
-  auto dtype = v1->getDataType().value();
-  if (isFloatingPointType(dtype)) {
+  auto v1_dtype = v1->getDataType().value();
+  if (isFloatingPointType(v1_dtype)) {
     init = IrBuilder::create<Double>(0.0);
-  } else if (isComplexType(dtype)) {
+  } else if (isComplexType(v1_dtype)) {
     init = IrBuilder::create<ComplexDouble>(c10::complex<double>(0.0, 0.0));
-  } else if (isIntegralType(dtype)) {
+  } else if (isIntegralType(v1_dtype)) {
     init = FusionGuard::getCurFusion()->zeroVal();
-  } else if (isBooleanType(dtype)) {
-    v1 = castOp(DataType::Int, v1);
-    init = FusionGuard::getCurFusion()->zeroVal();
+  } else if (isBooleanType(v1_dtype)) {
+    init = IrBuilder::create<Bool>(false);
   } else {
     TORCH_CHECK(
         false,
         "Could not generate a sum op for tensor with type: ",
-        v1->getDataType().value());
+        v1_dtype);
   }
 
-  return reductionOp(BinaryOpType::Add, axes, init, v1, keep_dim);
+  return reductionOp(BinaryOpType::Add, axes, init, v1, keep_dim, dtype);
 }
 
 TensorView* max(
