@@ -49,19 +49,6 @@ jobs:
           # GitHub Status Check won't become failure with a warning.
           level: error
           filter_mode: file
-      - uses: reviewdog/action-flake8@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-check
-          level: error
-          filter_mode: file
-      - name: pyflakes
-        uses: reviewdog/action-pyflakes@v1
-        with:
-          github_token: ${{ secrets.github_token }}
-          reporter: github-pr-check
-          level: warning
-          filter_mode: file
       - name: misspell # Check spellings as well
         uses: reviewdog/action-misspell@v1
         with:
@@ -70,13 +57,6 @@ jobs:
           reporter: github-pr-check
           level: info
           filter_mode: diff_context
-      - name: shellcheck # Static check shell scripts
-        uses: reviewdog/action-shellcheck@v1
-        with:
-          github_token: ${{ secrets.github_token }}
-          reporter: github-pr-check
-          level: info
-          filter_mode: file
       - name: markdownlint
         uses: reviewdog/action-markdownlint@v0.7
         with:
@@ -100,16 +80,3 @@ jobs:
         with:
           options: "--check --diff --color"
       - uses: isort/isort-action@master
-
-  lint-cpp:
-    name: Lint C++
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@master
-      - uses: reviewdog/action-cpplint@master
-        with:
-          github_token: ${{ secrets.github_token }}
-          reporter: github-pr-check
-          level: warning
-          filter_mode: file
-          flags: --linelength=120
