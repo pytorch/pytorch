@@ -112,6 +112,9 @@ jobs:
         { include: [
           { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
         ]}
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build:
     name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build

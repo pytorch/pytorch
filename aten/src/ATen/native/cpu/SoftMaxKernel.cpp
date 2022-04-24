@@ -34,9 +34,9 @@ inline void _vec_log_softmax_lastdim(
     int64_t dim_size) {
   using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
   static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size();
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
-  if (grain_size < 1)
-    grain_size = 1;
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
+  if (grain_size < CHUNK_SIZE)
+    grain_size = CHUNK_SIZE;
 
   parallel_for(
       0,

@@ -327,6 +327,10 @@ SugaredValuePtr ModuleValue::getitem(
           loc, m, idx, type_hint);
     }
   } else if (
+      concreteType_->getIterableModuleKind() == IterableModuleKind::PARAMLIST) {
+    return getSugaredNamedParameterList(loc, m)->getModules()->getitem(
+        loc, m, idx, type_hint);
+  } else if (
       concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (auto ivalue = toIValue(idx)) {
       auto sd = getSugaredDict(loc, m);
@@ -424,6 +428,34 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
   const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     if (selfType->is_buffer(i)) {
+      paramNames.push_back(selfType->getAttributeName(i));
+    }
+  }
+
+  std::vector<SugaredValuePtr> keys;
+  for (const auto& name : paramNames) {
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+    m.graph()->insertGetAttr(self_, name);
+    values.push_back(tryGetAttr(loc, m, name));
+    keys.push_back(name_v);
+  }
+
+  return std::make_shared<SugaredDict>(
+      std::make_shared<ModuleValue>(self_, concreteType_),
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
+}
+
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedParameterList(
+    const SourceRange& loc,
+    GraphFunction& m) {
+  std::vector<std::string> paramNames;
+  std::vector<SugaredValuePtr> values;
+
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+    if (selfType->is_parameter(i)) {
       paramNames.push_back(selfType->getAttributeName(i));
     }
   }
@@ -1279,7 +1311,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
   if (obj.ptr() == py::module::import("math").attr("inf").ptr()) {
-    return toSimple(g.insertConstant(std::numeric_limits<double>::infinity(), loc));
+    return toSimple(
+        g.insertConstant(std::numeric_limits<double>::infinity(), loc));
   }
 
   py::bool_ isMethod = py::module::import("inspect").attr("ismethod")(obj);
