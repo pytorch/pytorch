@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: reviewdog/action-black@v2
+      - uses: reviewdog/action-black@v3
         with:
           github_token: ${{ secrets.github_token }}
           # Change reviewdog reporter if you need [github-pr-check, github-check, github-pr-review].
@@ -56,7 +56,7 @@ jobs:
           level: error
           filter_mode: file
       - name: pyflakes
-        uses: reviewdog/action-pyflakes@master
+        uses: reviewdog/action-pyflakes@v1
         with:
           github_token: ${{ secrets.github_token }}
           reporter: github-pr-check
@@ -78,7 +78,7 @@ jobs:
           level: info
           filter_mode: file
       - name: markdownlint
-        uses: reviewdog/action-markdownlint@v0.1
+        uses: reviewdog/action-markdownlint@v0.7
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-check
