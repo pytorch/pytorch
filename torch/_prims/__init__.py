@@ -1007,7 +1007,7 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     if output_dtype is None:
         output_dtype = inp.dtype
     output_shape = utils.compute_reduction_output_shape(inp.shape, dims)
-    return TensorMeta(shape=output_shape, dtype=output_dtype, device = inp.device)
+    return TensorMeta(shape=output_shape, dtype=output_dtype, device=inp.device)
 
 _sum_doc = """
     Computes the sum of elements in the input tensor over list of dimensions

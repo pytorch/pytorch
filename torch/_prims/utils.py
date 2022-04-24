@@ -17,8 +17,8 @@ class TensorMeta(object):
     ):
 
         if isinstance(tensorlike, Number):
-            assert not shape and (shape == None or isinstance(shape, Sequence))
-            assert not strides and (strides == None or isinstance(strides, Sequence))
+            assert not shape and (shape is None or isinstance(shape, Sequence))
+            assert not strides and (strides is None or isinstance(strides, Sequence))
             self.shape = ()
             self.strides = ()
             self.dtype = type_to_dtype(type(tensorlike))
