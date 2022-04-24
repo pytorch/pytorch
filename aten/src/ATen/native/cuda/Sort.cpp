@@ -138,8 +138,4 @@ void sort_cuda_kernel(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_DISPATCH(sort_stub, &sort_cuda_kernel);
 
-Tensor argsort_cuda_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
-  return std::get<1>(sort_stable_cuda(self, stable, dim, descending));
-}
-
 }}  // namespace at::native

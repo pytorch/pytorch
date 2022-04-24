@@ -8223,8 +8223,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU: argsort_cpu_stable
-    CUDA: argsort_cuda_stable
+    CPU, CUDA: argsort_stable
 
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
   variants: method, function
