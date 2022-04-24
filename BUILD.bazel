@@ -225,6 +225,11 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_native_transformers_cpp",
+    srcs = glob(["aten/src/ATen/native/transformers/*.cpp"]),
+)
+
+filegroup(
     name = "aten_native_mkl_cpp",
     srcs = glob(["aten/src/ATen/native/mkl/*.cpp", "aten/src/ATen/mkl/*.cpp"]),
 )
@@ -274,6 +279,7 @@ filegroup(
             "aten/src/ATen/native/miopen/*.cpp",
             "aten/src/ATen/native/nested/cuda/*.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
+            "aten/src/ATen/native/transformers/cuda/*.cpp",
             "aten/src/THC/*.cpp",
         ],
     ),
@@ -288,6 +294,7 @@ filegroup(
         "aten/src/ATen/native/nested/cuda/*.cu",
         "aten/src/ATen/native/quantized/cuda/*.cu",
         "aten/src/ATen/native/sparse/cuda/*.cu",
+        "aten/src/ATen/native/transformers/cuda/*.cu",
     ]) + aten_ufunc_generated_cuda_sources("aten/src/ATen/{}"),
     # It's a bit puzzling to me why it's not necessary to declare the
     # target that generates these sources...
@@ -389,6 +396,7 @@ cc_library(
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_nested_cpp",
+        ":aten_native_transformers_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
     ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
