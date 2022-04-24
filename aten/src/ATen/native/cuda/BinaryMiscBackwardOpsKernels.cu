@@ -98,16 +98,21 @@ void tanh_backward_kernel_cuda(TensorIteratorBase& iter) {
         return a * std::conj(T{1.} - b * b);
       }
     ); // tanh_backward_string
-    AT_DISPATCH_COMPLEX_TYPES(dtype, "tanh_backward_complex_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "tanh_backward_complex_cuda", [&]() {
       jitted_gpu_kernel<
           /*name=*/ tanh_backward_name,
           /*return_dtype=*/ scalar_t,
           /*common_dtype=*/ scalar_t,
           /*arity=*/ 2>(iter, tanh_backward_string);
+    });
 #else
-    AT_DISPATCH_COMPLEX_TYPES(dtype, "tanh_backward_complex_cuda", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "tanh_backward_complex_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return a * std::conj(scalar_t{1.} - b * b);
+        using comp_t = at::opmath_type<scalar_t>;
+        const auto one = comp_t{1.};
+	const auto comp_b = static_cast<comp_t>(b);
+        const auto comp_a = static_cast<comp_t>(a);
+        return static_cast<scalar_t>(comp_a * std::conj(one - comp_b * comp_b));
       });
     });
 #endif
@@ -117,7 +122,6 @@ void tanh_backward_kernel_cuda(TensorIteratorBase& iter) {
         return a * (scalar_t{1.} - b * b);
       });
     });
-  }
   }
 }
 
