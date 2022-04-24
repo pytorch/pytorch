@@ -98,7 +98,8 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   if(STATIC_DISPATCH_BACKEND)
-    message(STATUS "Custom build with static dispatch backend: ${STATIC_DISPATCH_BACKEND}")
+    message(STATUS "Custom build with static dispatch backends: ${STATIC_DISPATCH_BACKEND}")
+    list(LENGTH STATIC_DISPATCH_BACKEND len)
     list(APPEND CUSTOM_BUILD_FLAGS
       --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
   endif()
