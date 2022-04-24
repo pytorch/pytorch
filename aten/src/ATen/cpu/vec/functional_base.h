@@ -36,7 +36,7 @@ inline scalar_t vec_reduce_all(
 }
 
 // SIMD version on horizontal reduce
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(__AVX512F__) && !defined(_MSC_VER)
 template <typename scalar_t=float, typename Op>
 inline float vec_reduce_all(
     const Op& vec_fun,
@@ -61,7 +61,7 @@ inline float vec_reduce_all(
 }
 #endif
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(__AVX2__) && !defined(_MSC_VER)
 template <typename scalar_t=float, typename Op>
 inline float vec_reduce_all(
     const Op& vec_fun,
