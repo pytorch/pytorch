@@ -2822,6 +2822,28 @@ class TestAutograd(TestCase):
                 found_indices.add(names.index(evt.name))
         self.assertEqual(len(found_indices), len(names))
 
+    def test_profiler_overhead(self):
+        x = torch.randn(10, 10)
+
+        def timeit(func, repeat, *args, **kwargs):
+            start = time.time()
+            for _ in range(repeat):
+                func(*args, **kwargs)
+            return (time.time() - start) / repeat
+
+        def with_profiler(x):
+            with record_function("overhead_detection"):
+                y = x * 2 + 4
+
+        # warmup
+        timeit(lambda x: x * 2 + 4, 100, x)
+        # real test
+        raw_time = timeit(lambda x: x * 2 + 4, 100, x)
+        with_record_time = timeit(with_profiler, 100, x)
+
+        self.assertTrue(with_record_time / raw_time <= 2.0)
+
+
     def test_profiler_seq_nr(self):
         with profile(use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10, requires_grad=True)
