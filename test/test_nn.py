@@ -20176,7 +20176,8 @@ class TestNNDeviceType(NNTestCase):
 
             # NestedTensor is only supported for the fast path
             # currently, which won't be used if training.
-            if batch_first and not training and ('cuda' in str(device) or 'cpu' in str(device)):
+            if (batch_first and not training and
+                    ('cuda' in str(device) or 'cpu' in str(device)) and not TEST_WITH_CROSSREF):
                 encoder_input[0][-1] = torch.zeros_like(encoder_input[0][1])
                 mask = torch.zeros(encoder_input.shape[:-1], device=device, dtype=torch.bool)
                 mask[0][-1] = True
@@ -20224,11 +20225,11 @@ class TestNNDeviceType(NNTestCase):
 
         for batch_first in (True, False):
             for training in (True, False):
-                # Fast path requires inference mode.
                 if training:
                     cm = contextlib.nullcontext()
                 else:
-                    cm = torch.inference_mode()
+                    # Fast path requires inference mode.
+                    cm = torch.no_grad()
                 with cm:
                     _test(batch_first=batch_first, training=training, atol=atol, rtol=rtol)
 
