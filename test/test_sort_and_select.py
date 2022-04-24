@@ -119,6 +119,17 @@ class TestSortAndSelect(TestCase):
             # Test that we still have proper sorting with duplicate keys
             self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
 
+            # Test argument sorting with and without stable
+            x = torch.tensor([1, 1, 2, 2, 3, 3, 4, 4, 5, 5,
+                              6, 6, 7, 7, 8, 8, 9, 9])
+            unstableval = torch.tensor([ 1,  0,  2,  3,  4,  5,  6,
+                                       7,  9,  8, 10, 11, 12, 13, 14, 15, 16, 17])
+            stableval = torch.tensor([ 0,  1,  2,  3,  4,  5,  6,  7,
+                                       8,  9, 10, 11, 12, 13, 14, 15, 16, 17])
+            self.assertEqual(torch.argsort(x, stable=True), stableval)
+            self.assertEqual(torch.argsort(x, stable=False), unstableval)
+
+
             # Test sorting with NaNs
             x = torch.rand(4, SIZE, device=device)
             x[1][2] = float('NaN')
