@@ -758,7 +758,8 @@ TensorView* sum(
   } else if (isIntegralType(dtype)) {
     init = FusionGuard::getCurFusion()->zeroVal();
   } else if (isBooleanType(dtype)) {
-    init = IrBuilder::create<Bool>(false);
+    v1 = castOp(DataType::Int, v1);
+    init = FusionGuard::getCurFusion()->zeroVal();
   } else {
     TORCH_CHECK(
         false,

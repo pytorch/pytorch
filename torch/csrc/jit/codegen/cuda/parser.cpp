@@ -1958,12 +1958,21 @@ class IrParser {
               TORCH_INTERNAL_ASSERT(
                   dim_value.has_value(), "dim in softmax is not valid");
 
+              auto dtype_value = constant_as<c10::ScalarType>(node->input(2));
+              auto data_type = (dtype_value.has_value())
+                  ? aten_to_data_type(dtype_value.value())
+                  : DataType::Null;
+
               bool is_log_softmax = node->kind() ==
                   c10::Symbol::fromQualString("aten::log_softmax");
 
               auto output = (is_log_softmax)
                   ? log_softmax(input, dim_value.value())
                   : softmax(input, dim_value.value());
+
+              output = (data_type != DataType::Null)
+                  ? optionalCastStrict(data_type, output)->as<TensorView>()
+                  : output;
               value_map.emplace(node->output()->unique(), output);
             },
             [](const Node* node) -> bool {

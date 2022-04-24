@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>
+#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
 
 namespace torch {
 namespace jit {
@@ -96,9 +97,11 @@ TensorView* view(
       ? applyViewTransforms(reduction, analyze_view.transforms)
       : reduction;
 
-  return (analyze_view.has_broadcast)
+  auto bcast = (analyze_view.has_broadcast)
       ? broadcast(view, analyze_view.broadcast_axes)
       : view;
+
+  return optionalCast(x->getDataType().value(), bcast)->as<TensorView>();
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
@@ -110,7 +113,8 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
       trivial_reduction_axes.push_back(idx);
     }
   }
-  return (trivial_reduction_axes.empty()) ? x : sum(x, trivial_reduction_axes);
+  auto reduction = (trivial_reduction_axes.empty()) ? x : sum(x, trivial_reduction_axes);
+  return optionalCast(x->getDataType().value(), reduction)->as<TensorView>();
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
@@ -119,7 +123,8 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
     dim = (int)(x->nDims()) + dim;
   }
   if (dim >= 0 && dim < x->nDims() && sizes[dim] == 1) {
-    return sum(x, {dim});
+    auto reduction = sum(x, {dim});
+    return optionalCast(x->getDataType().value(), reduction)->as<TensorView>();
   } else {
     return set(x);
   }

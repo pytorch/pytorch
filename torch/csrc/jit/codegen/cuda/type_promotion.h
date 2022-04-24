@@ -59,7 +59,11 @@ std::vector<Val*> promoteValues(
     DataType common_type);
 
 // Casts value to common dtype if necessary
+// Avoid cast if value's dtype matches its dtype class
 Val* optionalCast(DataType dtype, Val* v);
+
+// Casts value to common dtype if necessary
+Val* optionalCastStrict(DataType dtype, Val* v);
 
 } // namespace cuda
 } // namespace fuser
