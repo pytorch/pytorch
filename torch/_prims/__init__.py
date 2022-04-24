@@ -730,14 +730,14 @@ def _squeeze_meta(a: TensorLike, dimensions: Sequence) -> TensorLike:
 
     new_shape = []
     new_strides = []
-    for idx in range(a.shape):
+    for idx in range(len(a.shape)):
         if idx in dimensions:
             continue
 
         new_shape.append(a.shape[idx])
         new_strides.append(a.stride()[idx])
 
-    return TensorMeta(a, shape=new_shape, stride=new_strides)
+    return TensorMeta(a, shape=new_shape, strides=new_strides)
 
 
 def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
@@ -996,4 +996,28 @@ resize = _make_prim(
     impl_aten=_resize_aten,
     return_type=RETURN_TYPE.INPLACE,
     doc=_resize_doc,
+)
+
+def _reduction_meta(inp, dims, *, output_dtype=None):
+    """
+    Meta function for single output reduction operations
+    Stride logic is incorrect
+    """
+    assert isinstance(inp, TensorLike)
+    if output_dtype is None:
+        output_dtype = inp.dtype
+    output_shape = utils.compute_reduction_output_shape(inp.shape, dims)
+    return TensorMeta(shape=output_shape, dtype=output_dtype, device = inp.device)
+
+_sum_doc = """
+    Computes the sum of elements in the input tensor over list of dimensions
+    specified in the dim argument
+    """
+
+
+sum = _make_prim(
+    meta=_reduction_meta,
+    impl_aten=torch.sum,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_sum_doc
 )

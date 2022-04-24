@@ -17,6 +17,8 @@ class TensorMeta(object):
     ):
 
         if isinstance(tensorlike, Number):
+            assert not shape and (shape == None or isinstance(shape, Sequence))
+            assert not strides and (strides == None or isinstance(strides, Sequence))
             self.shape = ()
             self.strides = ()
             self.dtype = type_to_dtype(type(tensorlike))
@@ -28,14 +30,13 @@ class TensorMeta(object):
             self.device = tensorlike.device
         else:
             assert shape is not None
-            assert strides is not None
+            self.shape = shape
+            if strides is None:
+                self.strides = make_contiguous_strides_for(shape)
             assert dtype is not None
+            self.dtype = dtype
             assert device is not None
-
-        self.shape = self.shape if shape is None else shape
-        self.strides = self.strides if strides is None else strides
-        self.dtype = self.dtype if dtype is None else dtype
-        self.device = self.device if device is None else device
+            self.device = device
 
         assert isinstance(self.shape, Sequence)
         assert isinstance(self.strides, Sequence)
@@ -50,6 +51,9 @@ class TensorMeta(object):
             kwargs = {}
 
         return func.meta(*args, **kwargs)
+
+    def __repr__(self):
+        return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.strides})"
 
     def stride(self):
         return self.strides
@@ -465,6 +469,8 @@ def wrap_device(d: Union[str, torch.device]) -> torch.device:
 
 def make_contiguous_strides_for(shape: Sequence) -> Sequence:
     validate_shape(shape)
+    if not shape:
+        return ()
 
     multiplier = 1
     strides = [multiplier]
@@ -473,3 +479,16 @@ def make_contiguous_strides_for(shape: Sequence) -> Sequence:
         strides.append(multiplier)
 
     return tuple(reversed(strides))
+
+def compute_reduction_output_shape(shape: Sequence, dimensions: Sequence) -> Sequence:
+    for idx in dimensions:
+        validate_idx(shape, idx)
+
+    new_shape = []
+    for idx in range(len(shape)):
+        if idx in dimensions:
+            continue
+
+        new_shape.append(shape[idx])
+
+    return new_shape
