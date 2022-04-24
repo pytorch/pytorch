@@ -1,4 +1,4 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
+# Owner(s): ["oncall: distributed"]
 
 import sys
 
@@ -42,8 +42,8 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 def _reset_params_if_meta(is_meta, model):
-# For torchdistX init, we don't need to call reset_params, as
-# deferred_init(model).materialize() is equivalent to model().
+    # For torchdistX init, we don't need to call reset_params, as
+    # deferred_init(model).materialize() is equivalent to model().
     if is_meta:
         model.reset_parameters()
 
