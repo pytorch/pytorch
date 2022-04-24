@@ -51,7 +51,7 @@ TORCH_META_FUNC(upsample_trilinear3d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options().memory_format(grad_output.suggest_memory_format()));
+  set_output(input_size, grad_output.options());
 }
 
 } // namespace meta

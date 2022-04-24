@@ -426,7 +426,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
   return std::tuple<Tensor, Tensor>{w, norms};
 }
 
-std::tuple<Tensor, Tensor> weight_norm_backward_cuda
+std::tuple<Tensor, Tensor> weight_norm_cuda_backward
   (const Tensor & grad_w,
    const Tensor & saved_v,
    const Tensor & saved_g,
