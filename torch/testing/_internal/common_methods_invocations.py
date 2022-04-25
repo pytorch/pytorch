@@ -11611,7 +11611,6 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.float32,)
             ),
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_gradgrad", dtypes=(torch.float64,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_forward_mode_AD", dtypes=(torch.float64,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_fwgrad_bwgrad", dtypes=(torch.float64,)),
         ),
     ),
