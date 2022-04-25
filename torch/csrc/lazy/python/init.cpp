@@ -236,6 +236,8 @@ void initLazyBindings(PyObject* module){
         });
   // TODO(shunting) revisit this part for XLA
   lazy_ts_backend.def("_run_cached_graph", [](const std::string& hash_str, const std::vector<at::IValue>& graph_inputs) {
+    std::vector<at::Tensor> result;
+#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     TORCH_CHECK(hash_str.size() == sizeof(hash_t));
     hash_t hash = *(hash_t*) (hash_str.c_str());
     auto cachedComputation = LazyGraphExecutor::Get()->GetComputationCache()->Get(hash);
@@ -248,11 +250,13 @@ void initLazyBindings(PyObject* module){
       stack.emplace_back(arg);
     }
     computationPtr->graph_executor().run(stack);
-    std::vector<at::Tensor> result;
     result.reserve(stack.size());
     for (torch::jit::IValue elem : stack) {
       result.push_back(elem.toTensor());
     }
+#else
+    TORCH_CHECK(false, "TorchScript backend not yet supported in FBCODE builds");
+#endif  // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     return result;
   });
 
