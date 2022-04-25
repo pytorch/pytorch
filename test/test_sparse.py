@@ -1001,7 +1001,7 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    def test_index_select_exhaustive(self, device, dtype, coalesced):
+    def test_index_select_exhaustive_index(self, device, dtype, coalesced):
         sizes = [3, 3, 4]
         t = make_tensor(sizes, dtype=dtype, device=device)
         t_sparse = t.to_sparse().coalesce() if coalesced else t.to_sparse()
@@ -1027,6 +1027,22 @@ class TestSparse(TestCase):
                     small_dense_result = t_small.index_select(d, t_idx + sizes[d])
                     small_sparse_result = t_small_sparse.index_select(d, t_idx)
                     self.assertEqual(small_dense_result, small_sparse_result)
+
+    @dtypes(torch.double, torch.cdouble)
+    def test_index_select_non_contiguous_index(self, device, dtype):
+        idx = torch.randint(low=0, high=5, size=(10, 2), device=device)[:, 0]
+
+        # case nnz > size[d]
+        t = make_tensor((5, 5), dtype=dtype, device=device)
+        res_dense = t.index_select(0, idx)
+        res_sparse = t.to_sparse().index_select(0, idx)
+        self.assertEqual(res_dense, res_sparse)
+
+        # case nnz <= size[d]
+        t_small_sparse, _, _ = self._gen_sparse(2, 2, (10, 10), dtype, device, False)
+        res_sparse = t_small_sparse.index_select(0, idx)
+        res_dense = t_small_sparse.to_dense().index_select(0, idx)
+        self.assertEqual(res_dense, res_sparse)
 
     @onlyCPU
     @coalescedonoff
