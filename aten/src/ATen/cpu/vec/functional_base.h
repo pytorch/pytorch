@@ -8,6 +8,80 @@
 
 namespace at { namespace vec {
 
+// slow path
+template <typename scalar_t, typename Op>
+inline scalar_t vec_reduce_all(
+    const Op& vec_fun,
+    vec::Vectorized<scalar_t> acc_vec,
+    int64_t size) {
+  using Vec = vec::Vectorized<scalar_t>;
+  scalar_t acc_arr[Vec::size()];
+  acc_vec.store(acc_arr);
+  for (const auto i : c10::irange(1, size)) {
+    std::array<scalar_t, Vec::size()> acc_arr_next = {0};
+    acc_arr_next[0] = acc_arr[i];
+    Vec acc_vec_next = Vec::loadu(acc_arr_next.data());
+    acc_vec = vec_fun(acc_vec, acc_vec_next);
+  }
+  acc_vec.store(acc_arr);
+  return acc_arr[0];
+}
+
+template <typename scalar_t, typename Op>
+struct VecReduceAllSIMD {
+  static inline scalar_t apply(const Op& vec_fun, Vectorized<scalar_t> acc_vec) {
+    return vec_reduce_all(vec_fun, acc_vec, Vectorized<scalar_t>::size());
+  }
+};
+
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+template <typename Op>
+struct VecReduceAllSIMD<float, Op> {
+  static inline float apply(const Op& vec_fun, Vectorized<float> acc_vec) {
+    using Vec = Vectorized<float>;
+    Vec v = acc_vec;
+    // 128-bit shuffle
+    Vec v1 = _mm256_permute2f128_ps(v, v, 0x1);
+    v = vec_fun(v, v1);
+    // 64-bit shuffle
+    v1 = _mm256_shuffle_ps(v, v, 0x4E);
+    v = vec_fun(v, v1);
+    // 32-bit shuffle
+    v1 = _mm256_shuffle_ps(v, v, 0xB1);
+    v = vec_fun(v, v1);
+    return _mm256_cvtss_f32(v);
+  }
+};
+#endif
+
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+template <typename Op>
+struct VecReduceAllSIMD<float, Op> {
+  static inline float apply(const Op& vec_fun, Vectorized<float> acc_vec) {
+    using Vec = Vectorized<float>;
+    Vec v = acc_vec;
+    // 256-bit shuffle
+    Vec v1 = _mm512_shuffle_f32x4(v, v, 0x4E);
+    v = vec_fun(v, v1);
+    // 128-bit shuffle
+    v1 = _mm512_shuffle_f32x4(v, v, 0xB1);
+    v = vec_fun(v, v1);
+    // 64-bit shuffle
+    v1 = _mm512_shuffle_ps(v, v, 0x4E);
+    v = vec_fun(v, v1);
+    // 32-bit shuffle
+    v1 = _mm512_shuffle_ps(v, v, 0xB1);
+    v = vec_fun(v, v1);
+    return _mm512_cvtss_f32(v);
+  }
+};
+#endif
+
+template <typename scalar_t, typename Op>
+inline scalar_t vec_reduce_all(const Op& vec_fun, Vectorized<scalar_t> acc_vec) {
+  return VecReduceAllSIMD<scalar_t, Op>::apply(vec_fun, acc_vec);
+}
+
 template <typename scalar_t, typename Op>
 inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
   using Vec = vec::Vectorized<scalar_t>;
