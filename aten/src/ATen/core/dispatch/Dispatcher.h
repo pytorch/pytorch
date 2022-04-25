@@ -15,11 +15,6 @@
 
 #include <ATen/core/grad_mode.h>
 
-#if C10_MOBILE
-#define C10_DISPATCHER_INLINE_UNLESS_MOBILE inline
-#else
-#define C10_DISPATCHER_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
-#endif
 namespace c10 {
 
 class TORCH_API OperatorHandle;
@@ -490,52 +485,6 @@ struct CaptureKernelCall<void> {
   void release() && {}
 };
 
-template <class T>
-static inline constexpr size_t boxed_size_one() {
-  static_assert(!std::is_same<std::decay_t<T>, c10::TensorOptions>::value, "need to patch this path to support TensorOptions passed by reference");
-  return 1;
-}
-
-template <>
-inline constexpr size_t boxed_size_one<c10::TensorOptions>() {
-  return 4;
-}
-
-
-// NOTE: this could probably be simplified with C++17 fold expressions.
-template <typename...>
-struct BoxedSize : std::integral_constant<size_t, 0> {};
-template <class T, class... Args>
-struct BoxedSize<T, Args...> : std::integral_constant<size_t, boxed_size_one<T>() + BoxedSize<Args...>::value> {};
-
-template <class... Args>
-static inline constexpr size_t boxed_size() {
-  return BoxedSize<Args...>::value;
-}
-
-using IValueStorage = std::aligned_storage_t<sizeof(IValue), alignof(IValue)>;
-
-template <typename T>
-C10_DISPATCHER_INLINE_UNLESS_MOBILE void box(IValueStorage* dest, T& arg, int& lastIdx) {
-  new (&dest[lastIdx]) IValue(arg);
-  lastIdx++;
-}
-
-C10_DISPATCHER_INLINE_UNLESS_MOBILE void box(IValueStorage* dest, c10::TensorOptions options, int& lastIdx) {
-  new (&dest[lastIdx++]) IValue(c10::typeMetaToScalarType(options.dtype()));
-  new (&dest[lastIdx++]) IValue(options.layout());
-  new (&dest[lastIdx++]) IValue(options.device());
-  new (&dest[lastIdx++]) IValue(options.pinned_memory());
-}
-
-inline void boxArgs(IValueStorage* dest, int& lastIdx) {}
-
-template<typename T, typename... Args>
-C10_DISPATCHER_INLINE_UNLESS_MOBILE void boxArgs(IValueStorage* dest, int& lastIdx, T& arg, Args &... args) {
-  box(dest, arg, lastIdx);
-  boxArgs(dest, lastIdx, args...);
-}
-
 } // namespace detail
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
@@ -548,7 +497,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.operatorDef_->op.isObserved());
   auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
   if (guard.needsInputs()) {
-    constexpr auto num_boxed_args = detail::boxed_size<Args...>();
+    constexpr auto num_boxed_args = impl::boxed_size<Args...>();
     // If we used std::array<IValue, num_boxed_args> here, we would
     // have to spend time default constructing the IValues in
     // boxedArgs. aligned_storage has no such requirement.
@@ -557,7 +506,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
     // that for us and it's nice to have the extra assurance of
     // correctness from our debug builds).
     int lastArgIdx = 0;
-    detail::boxArgs(boxedArgs, lastArgIdx, args...);
+    impl::boxArgsToStack(boxedArgs, lastArgIdx, args...);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(lastArgIdx == num_boxed_args);
     // I don't *think* we need std::launder here, because IValue has
     // no subclasses and no const or reference fields. (We also
@@ -588,7 +537,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
 template<class Return, class... Args>
-C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
+C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(args...);
