@@ -9325,12 +9325,8 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True),
     OpInfo('cholesky',
            dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
     OpInfo('cholesky_inverse',
            dtypes=floating_and_complex_types(),
@@ -9436,16 +9432,21 @@ op_db: List[OpInfo] = [
                    ),
     UnaryUfuncInfo('conj',
                    ref=np.conj,
-                   dtypes=all_types_and_complex_and(torch.bool,
-                                                    torch.bfloat16, torch.half),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
+                                                    torch.half, torch.chalf),
                    supports_sparse=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   supports_out=False),
+                   supports_out=False,
+                   skips=(
+                       # numpy() raises TypeError: Got unsupported ScalarType ComplexHalf
+                       DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_normal",
+                                    dtypes=(torch.complex32,)),
+                   )),
     UnaryUfuncInfo('conj_physical',
                    ref=np.conj,
-                   dtypes=all_types_and_complex_and(torch.bool,
-                                                    torch.bfloat16, torch.half),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
+                                                    torch.half, torch.chalf),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -9457,6 +9458,22 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, )),
                        DecorateInfo(unittest.skip("Skipped! conj_physical_ not implemented for sparse"),
                                     'TestSparseUnaryUfuncs', 'test_inplace'),
+                       # numpy() raises TypeError: Got unsupported ScalarType ComplexHalf
+                       DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_normal",
+                                    dtypes=(torch.complex32,)),
+                       # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, "TestSparseCSR", "test_sparse_csr_consistency",
+                                    dtypes=(torch.complex32,)),
+                       # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, "TestSparseCSR", "test_sparse_csr_unary_inplace",
+                                    dtypes=(torch.complex32,)),
+                       # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, "TestSparseCSR", "test_sparse_csr_unary_out",
+                                    dtypes=(torch.complex32,)),
+                       # RuntimeError: "add_out_op2_sparse_csr" not implemented for 'ComplexHalf'
+                       DecorateInfo(unittest.expectedFailure, "TestSparseCSR",
+                                    "test_zero_to_zero_correspondence_unary",
+                                    dtypes=(torch.complex32,)),
                    )),
     OpInfo('resolve_conj',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -10382,16 +10399,11 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
            dtypes=floating_and_complex_types(),
-           # TODO: RuntimeError: While computing batched gradients,
-           # got: vmap: Calling Tensor.as_strided is not supported
-           # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
-           check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
            ),
@@ -10399,7 +10411,6 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.cholesky_ex',
            aten_name='linalg_cholesky_ex',
            dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
@@ -10407,7 +10418,6 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            ),
@@ -10454,8 +10464,8 @@ op_db: List[OpInfo] = [
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               # fails eager extremal value test
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+               # exits early on eager extremal value test
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
            )),
     OpInfo('linalg.eigh',
            aten_name='linalg_eigh',
@@ -10538,7 +10548,6 @@ op_db: List[OpInfo] = [
            skips=(
                # tests do not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                # At this time ROCm uses magma instead of rocSolver, and the test passes
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', active_if=(not TEST_WITH_ROCM)),
@@ -11301,7 +11310,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            supports_forward_ad=True,
-           supports_out=False),
+           supports_out=True),
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
            variant_test_name="with_dtype",
@@ -11310,7 +11319,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_forward_ad=True,
-           supports_out=False),
+           supports_out=True),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     # https://github.com/pytorch/pytorch/issues/68752
@@ -11391,7 +11400,6 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # AssertionError: False is not true : Scalars failed to compare as equal!
@@ -13864,8 +13872,6 @@ op_db: List[OpInfo] = [
            # explicit backward implementation.
            decorators=[slowTest, skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
-               # lambda impl
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # CUDA runs out of memory
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
@@ -14126,11 +14132,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                    active_if=TEST_WITH_ROCM),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    active_if=TEST_WITH_ROCM),),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 3}, {'n': 3}),
                    # polygamma functions have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
@@ -14362,10 +14364,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # sort does not correctly warn when resizing out= inputs
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Allows unsafe cast
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            )),
     OpInfo('unique',
@@ -14538,6 +14536,31 @@ op_db: List[OpInfo] = [
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
+    OpInfo('chalf',
+           op=lambda x, *args, **kwargs: x.chalf(*args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_conversion,
+           skips=(
+               # autograd tests don't handle operators that change dtype
+               DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+               # use of lambda doesn't work with test_normalize_operator_exhaustive
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # RuntimeError: "index_select" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            dtypes=(torch.float, torch.cfloat)),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               # TypeError: 'int' object is not iterable
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+           )
+           ),
     OpInfo('empty_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
@@ -14929,11 +14952,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # msort does not correctly warn when resizing out= inputs.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Expected RuntimeError when doing an unsafe cast from a result of dtype
-               #   torch.float32 into an out= with dtype torch.long
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            sample_inputs_func=sample_inputs_msort),
@@ -14989,7 +15007,6 @@ op_db: List[OpInfo] = [
            backward_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # JIT has issue when op is passed as lambda
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -15028,7 +15045,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Cannot resize variables that require grad
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
            ),
            sample_inputs_func=sample_inputs_resize_ops),
@@ -15103,8 +15119,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_gradgrad=True,
            skips=(
-               # lambda impl
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_zero_),
@@ -15487,7 +15501,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         'log_softmax',
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
-        supports_out=False,
+        supports_out=True,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_softmax_variant,
@@ -15497,7 +15511,7 @@ op_db: List[OpInfo] = [
         'log_softmax',
         variant_test_name='dtype',
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
-        supports_out=False,
+        supports_out=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
         supports_forward_ad=True,
