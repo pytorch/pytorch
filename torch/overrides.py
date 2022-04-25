@@ -1789,14 +1789,14 @@ def _no_torch_function_mode() -> Iterator[None]:
 
 class TorchFunctionModeInfo(_ModeInfo):
     def __init__(self):
-        super().__init__(mode_type="torch_function", mode_class=TorchFunctionMode,
-                         base_mode_class=BaseTorchFunctionMode, mode_class_name="BaseTorchFunctionMode",
+        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode,
+                         base_mode_class=BaseTorchFunctionMode,
                          required_fn="__torch_function__")
 
     def is_allowed_type(self, mode) -> bool:
         return mode is None or\
-               isinstance(mode, self.mode_class) or\
-               (isinstance(mode, type) and not issubclass(mode, self.mode_class))
+            isinstance(mode, self.mode_class) or\
+            (isinstance(mode, type) and not issubclass(mode, self.mode_class))
 
     def allowed_types_for_error_message(self) -> str:
         return "TorchFunctionMode, Tensor-like class, or None"
@@ -1812,7 +1812,7 @@ class TorchFunctionModeInfo(_ModeInfo):
                 'If you intended to completely override the preexisting mode, '
                 'pass ignore_preexisting=True.  This can result in unexpected '
                 'behavior; please consider rewriting your mode to be a subclass '
-                f'of {self.mode_class_name} to make it compositional!'
+                f'of {self.mode_class.__name__} to make it compositional!'
             )
 
     def set_mode(self, mode):

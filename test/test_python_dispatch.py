@@ -514,17 +514,8 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                 self.assertEqual(z.elem, expected)
 
     def test_nested_enable_python_mode(self) -> None:
-        class ErrorA(RuntimeError):
+        class A(LoggingTensor):
             pass
-
-        class A(torch.Tensor):
-            @staticmethod
-            def __new__(cls, elem):
-                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                raise ErrorA
 
         with self.assertRaisesRegex(ValueError, "there is already an active mode"):
             with enable_python_mode(LoggingTensor):
@@ -546,50 +537,38 @@ $0 = input('x')
 $1 = torch._ops.aten.add.Tensor($0, $0)''')
 
     def test_enable_python_mode_ignore_preexisting(self):
-        class Subclass_41(torch.Tensor):
+        class A(torch.Tensor):
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                return Subclass_41(torch.zeros(()))
+                return cls(torch.zeros(()))
 
-        class Subclass_40(torch.Tensor):
-            @staticmethod
-            def __new__(cls, elem):
-                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+        class B(A):
+            pass
 
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                return Subclass_40(torch.zeros(()))
-
-        with enable_python_mode(Subclass_40):
-            with enable_python_mode(Subclass_41, ignore_preexisting=True):
-                self.assertTrue(isinstance(torch.zeros(()), Subclass_41))
+        with enable_python_mode(A):
+            with enable_python_mode(B, ignore_preexisting=True):
+                self.assertTrue(isinstance(torch.zeros(()), B))
 
     def test_enable_python_mode_replace(self):
-        class Subclass_41(torch.Tensor):
+        class A(torch.Tensor):
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                return Subclass_41(torch.zeros(()))
+                return cls(torch.zeros(()))
 
-        class Subclass_40(torch.Tensor):
-            @staticmethod
-            def __new__(cls, elem):
-                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+        class B(A):
+            pass
 
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                return Subclass_40(torch.zeros(()))
-
-        with enable_python_mode(Subclass_40):
-            with enable_python_mode(Subclass_41, replace=Subclass_40):
-                self.assertTrue(isinstance(torch.zeros(()), Subclass_41))
+        with enable_python_mode(A):
+            with enable_python_mode(B, replace=A):
+                self.assertTrue(isinstance(torch.zeros(()), B))
 
     def test_tolist_numpy_with_python_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))

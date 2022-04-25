@@ -4,13 +4,14 @@ from typing import Iterator
 
 from torch.utils._mode_utils import _enable_mode, _ModeInfo
 from torch._C import _get_python_mode, _set_python_mode
+from dataclasses import dataclass
 
-
+@dataclass
 class PythonModeInfo(_ModeInfo):
     def __init__(self):
         # hacky because torch_function mode and python_mode don't yet have parity
-        super().__init__(mode_type="python", mode_class=type(None),
-                         base_mode_class=type(None), mode_class_name="",
+        super().__init__(mode_name="python", mode_class=type(None),
+                         base_mode_class=type(None),
                          required_fn="__torch_dispatch__")
 
     def is_allowed_type(self, mode) -> bool:
@@ -27,7 +28,7 @@ class PythonModeInfo(_ModeInfo):
             'If you intended to completely override the preexisting mode, '
             'pass ignore_preexisting=True.  This can result in unexpected '
             'behavior; please consider rewriting your mode to be a subclass '
-            f'of {self.mode_class_name} to make it compositional!'
+            f'of {self.mode_class.__name__} to make it compositional!'
         )
 
     def set_mode(self, mode):
@@ -43,12 +44,11 @@ class PythonModeInfo(_ModeInfo):
 def enable_python_mode(mode, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
     """
     Context manager that causes all pytorch operators to dispatch to the passed-in
-    type's __torch_dispatch__ function, including operations that accepts no tensors
-    but returns a tensor.
+    type's __torch_dispatch__ function, including operations that accept no tensors
+    but return a tensor.
 
     This function is non-compositional; if there is already an existing mode,
-    it will raise an error; prefer using :func:`push_python_mode` if your
-    ``__torch_dispatch__`` implementation can defer to an inner mode.
+    it will raise an error
 
     This function is safe to use inside a ``__torch_dispatch__`` mode handler,
     as the mode is guaranteed to be disabled in this context.  You can use
