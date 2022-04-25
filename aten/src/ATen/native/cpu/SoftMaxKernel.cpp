@@ -34,7 +34,7 @@ inline void _vec_log_softmax_lastdim(
     int64_t dim_size) {
   using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
   static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size();
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
   parallel_for(
       0,
       outer_size,
@@ -102,7 +102,7 @@ inline void _vec_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<scalar_t>;
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       scalar_t* input_data = input_data_base + i * dim_size;
@@ -136,7 +136,7 @@ inline void _vec_softmax_lastdim<BFloat16>(
     int64_t dim_size) {
   using bVec = vec::Vectorized<BFloat16>;
   using fVec = vec::Vectorized<float>;
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
   parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
     // thread local temp buffer.
     std::unique_ptr<float []> buffer(new float[dim_size]);
@@ -202,7 +202,7 @@ inline void _vec_host_softmax_backward_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (16 * dim_size), (int64_t)1);
   parallel_for(
       0,
       outer_size,
