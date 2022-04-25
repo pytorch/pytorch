@@ -832,7 +832,7 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the cudnn add and add_relu op
     (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    @unittest.skip("Local only - currently the test_qadd_relu_cudnn op is bulid "
                    "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
                    "after it is built by default")
     def test_qadd_relu_cudnn(self):
@@ -840,11 +840,43 @@ class TestQuantizedOps(TestCase):
         add_relu = torch.ops.quantized.add_relu
         add = torch.ops.quantized.add
 
-        # NB: This is a strange size so that we exercise both the vectorized
-        # implementation (64-element chunks at at time) as well as the scalar
-        # implementation
         A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
         B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+        scale_A = 2.5
+        scale_B = 6.3
+        scale_C = 12.9
+        zero_point = 0
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
+                                       dtype=dtype)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
+                                       dtype=dtype)
+        # Add ground truth
+        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
+        qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
+        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized addition failed.")
+
+        # Add + ReLU ground truth
+        Crelu = C.copy()
+        Crelu[C < 0] = 0
+        qCrelu = _quantize(Crelu, scale_C, zero_point, dtype=np_dtype[dtype])
+        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                "Quantized addition with ReLU failed.")
+
+    """Tests the correctness of the cudnn add and add_relu op for nhwc format"""
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skip("Local only - currently the test_qadd_relu_cudnn_nhwc op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
+    def test_qadd_relu_cudnn_nhwc(self):
+        dtype = torch.qint8
+        add_relu = torch.ops.quantized.add_relu
+        add = torch.ops.quantized.add
+
+        A = torch.rand(16, 8, 4, 12).to(device="cuda")
+        B = torch.rand(16, 8, 4, 12).to(device="cuda")
         scale_A = 2.5
         scale_B = 6.3
         scale_C = 12.9
@@ -1103,37 +1135,50 @@ class TestQuantizedOps(TestCase):
 
 
     """Tests the correctness of the quantized softmax op."""
-    @given(num_dims=st.integers(2, 4),
-           dims=st.lists(st.integers(2, 5), min_size=5, max_size=5))
-    def test_qsoftmax(self, num_dims, dims):
-        size = dims[:num_dims]
-        torch_dtype = torch.quint8
-        np_dtype = np.uint8
-        dim = num_dims - 1
+    @given(dims=st.lists(st.integers(2, 5), min_size=5, max_size=5))
+    def test_qsoftmax(self, dims):
+        for (num_dims, dim, memory_format) in [
+            (2, 1, torch.contiguous_format),  # 2d softmax over last dim
+            (4, 3, torch.contiguous_format),  # >2 dims, softmax along last dim
+            (5, 2, torch.contiguous_format),  # >2 dims, softmax along not last dim (requires permute)
+            (4, 3, torch.channels_last),      # >2 dims, softmax along last dim, but not contiguous
+            (4, 1, torch.channels_last),      # Channels Last, doesn't require permute
+            (5, 1, torch.channels_last_3d),   # Channels Last 3D, doesn't require permute
+        ]:
+            size = dims[:num_dims]
+            torch_dtype = torch.quint8
+            np_dtype = np.uint8
 
-        scale_X = 1.3
-        zero_point_X = 0
-        X = torch.rand(size=size, dtype=torch.float32) * 8 + zero_point_X
+            scale_X = 1.3
+            zero_point_X = 5
+            X = torch.rand(size=size, dtype=torch.float32) * 8 + zero_point_X
+            X = X.to(memory_format=memory_format)
 
-        scale_Y = 1 / 256
-        zero_point_Y = 0
+            scale_Y = 1 / 256
+            zero_point_Y = 0
 
-        qX = torch.quantize_per_tensor(X,
-                                       scale=scale_X,
-                                       zero_point=zero_point_X,
-                                       dtype=torch_dtype)
+            qX = torch.quantize_per_tensor(X,
+                                           scale=scale_X,
+                                           zero_point=zero_point_X,
+                                           dtype=torch_dtype)
 
 
-        # softmax ground truth
-        Y = torch.softmax(qX.dequantize(), dim=dim).numpy()
-        qY = _quantize(Y, scale_Y, zero_point_Y, dtype=np_dtype)
-        qY_hat = torch.ops.quantized.softmax(qX,
-                                             dim=dim,
-                                             output_scale=scale_Y,
-                                             output_zero_point=zero_point_Y)
+            # softmax ground truth
+            Y = torch.softmax(qX.dequantize(), dim=dim).numpy()
+            qY = _quantize(Y, scale_Y, zero_point_Y, dtype=np_dtype)
+            qY_hat = torch.ops.quantized.softmax(qX,
+                                                 dim=dim,
+                                                 output_scale=scale_Y,
+                                                 output_zero_point=zero_point_Y)
 
-        np.testing.assert_equal(qY, qY_hat.int_repr(),
-                                "Quantized softmax failed.")
+            np.testing.assert_equal(qY, qY_hat.int_repr(),
+                                    "Quantized softmax failed.")
+
+    """Tests the correctness of the quantized softmax op using qnnpack."""
+    @skipIfNoQNNPACK
+    def test_qsoftmax_qnnpack(self):
+        with override_quantized_engine('qnnpack'):
+            self.test_qsoftmax()
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_broadcast(self):
@@ -3544,8 +3589,13 @@ class TestQuantizedLinear(TestCase):
                 Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val)
 
     @given(batch_size=st.integers(1, 4),
-           input_channels=st.integers(16, 32),
-           output_channels=st.integers(4, 8),
+           # in cudnn v. 8.4.0, there is a limitation that input channels
+           # should be a multiple of 4 for int8 tensors. in cudnn v.8.3.3
+           # this should be a multiple of 16
+           input_channels=st.sampled_from([4, 8, 12, 16, 32]),
+           # constraints on output channels appear to be relax, as it seems we can use any positive integer here
+           # except 1. It is not clear why 1 will not work. TODO: check with Yang
+           output_channels=st.integers(2, 36),
            use_bias=st.booleans(),
            use_relu=st.booleans(),
            use_multi_dim_input=st.booleans(),
