@@ -13,9 +13,6 @@ class TORCH_API SymbolicIntNode: public std::enable_shared_from_this<SymbolicInt
         c10::SymInt toSymInt();
         virtual ~SymbolicIntNode() {};
         virtual std::ostream& operator<<(std::ostream& os) { return os; };
-    private:
-        int64_t data_;
-
 };
 
 class TORCH_API SymIntTable {
