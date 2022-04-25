@@ -6065,6 +6065,7 @@
   - dim -> int dim
   dispatch:
     CPU: _index_mul_cpu_out
+    CUDA: _index_mul_cuda_out
 
 - func: _index_mul_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor(a!)
   structured_delegate: _index_mul.out
@@ -6081,6 +6082,7 @@
   - dim -> int dim
   dispatch:
     CPU: _index_min_cpu_out
+    CUDA: _index_min_cuda_out
 
 - func: _index_min_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor(a!)
   structured_delegate: _index_min.out
@@ -6097,6 +6099,7 @@
   - dim -> int dim
   dispatch:
     CPU: _index_max_cpu_out
+    CUDA: _index_max_cuda_out
 
 - func: _index_max_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor(a!)
   structured_delegate: _index_max.out
@@ -6113,6 +6116,7 @@
   - dim -> int dim
   dispatch:
     CPU: _index_mean_cpu_out
+    CUDA: _index_mean_cuda_out
 
 - func: _index_mean_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, bool include_self=True) -> Tensor(a!)
   structured_delegate: _index_mean.out

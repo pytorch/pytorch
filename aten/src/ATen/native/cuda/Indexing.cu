@@ -22,8 +22,14 @@
 #else
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/ones_like.h>
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/index_add_native.h>
+#include <ATen/ops/_index_mul_native.h>
+#include <ATen/ops/_index_min_native.h>
+#include <ATen/ops/_index_max_native.h>
+#include <ATen/ops/_index_mean_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
 #endif
@@ -122,6 +128,57 @@ __global__ void indexing_backward_kernel(
 
 
 namespace at { namespace native {
+
+namespace {
+// FIXME: should these be in a header file somewhere so they can be shared across Scatter/Gather and Index?
+
+// Implement as functors since lambdas don't get optimized.
+class ReduceMultiply {
+public:
+  template <typename scalar_t>
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
+    gpuAtomicMul(self_data, *src_data);
+  }
+};
+static ReduceMultiply reduce_multiply;
+
+class ReduceAdd {
+public:
+  template <typename scalar_t>
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
+    gpuAtomicAddNoReturn(self_data, *src_data);
+  }
+};
+static ReduceAdd reduce_add;
+
+class ReduceMean {
+public:
+  template <typename scalar_t>
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
+    gpuAtomicAddNoReturn(self_data, *src_data);
+  }
+};
+static ReduceMean reduce_mean;
+
+class ReduceMinimum {
+public:
+  template <typename scalar_t>
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
+    gpuAtomicMin(self_data, *src_data);
+  }
+};
+static ReduceMinimum reduce_minimum;
+
+class ReduceMaximum {
+public:
+  template <typename scalar_t>
+  constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
+    gpuAtomicMax(self_data, *src_data);
+  }
+};
+static ReduceMaximum reduce_maximum;
+
+}
 
 static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size, bool check_range=true) {
 //we don't need to check range in backward - if there were out of bounds indices forward should already have errored out
@@ -366,17 +423,19 @@ static ptrdiff_t getSliceSize(const Tensor & dst,
 // of indices is a small number.
 // This kernel in fact works for all choices of problem size, but if
 // the number of indices chosen is large, then the
-// indexAddLargeIndex kernel is a better choice to increase
+// indexFuncLargeIndex kernel is a better choice to increase
 // parallelism.
-template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim>
-__global__ void indexAddSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
-                                   cuda::detail::TensorInfo<T, IndexType> src,
-                                   cuda::detail::TensorInfo<IndicesType, IndexType> indices,
-                                   int dstAddDim,
-                                   int srcAddDim,
-                                   IndexType innerSize,
-                                   int64_t dstAddDimSize,
-                                   T alpha) {
+template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          typename func_t, bool use_alpha = false>
+__global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
+                                    cuda::detail::TensorInfo<T, IndexType> src,
+                                    cuda::detail::TensorInfo<IndicesType, IndexType> indices,
+                                    int dstAddDim,
+                                    int srcAddDim,
+                                    IndexType innerSize,
+                                    int64_t dstAddDimSize,
+                                    const func_t& op,
+                                    T alpha) {
   // In order to avoid reloading the index that we are copying, load
   // it once to handle all of the points that are being selected, so
   // it can be reused as much as possible. This kernel is chosen when
@@ -401,8 +460,10 @@ __global__ void indexAddSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
           cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
       srcOffset += srcIndex * src.strides[srcAddDim];
 
-      gpuAtomicAddNoReturn(&dst.data[dstOffset], src.data[srcOffset] * alpha);
+      T val = use_alpha ? src.data[srcOffset] * alpha : src.data[srcOffset];
+      op(&dst.data[dstOffset], &val);
     }
+
   }
 }
 
@@ -410,19 +471,20 @@ __global__ void indexAddSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 // if there are a large number of indices.
 // This kernel in fact works for all choices of problem size, but if
 // the number of indices chosen is small, then the
-// indexAddSmallIndex kernel is a better choice to reduce memory
+// indexFuncSmallIndex kernel is a better choice to reduce memory
 // accesses.
 template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
-          bool IndexIsMajor>
-__global__ void indexAddLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
-                                   cuda::detail::TensorInfo<T, IndexType> src,
-                                   cuda::detail::TensorInfo<IndicesType, IndexType> indices,
-                                   int dstAddDim,
-                                   int srcAddDim,
-                                   IndexType totalSize,
-                                   IndexType innerSize,
-                                   int64_t dstAddDimSize,
-                                   T alpha) {
+          bool IndexIsMajor, typename func_t, bool use_alpha = false>
+__global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
+                                    cuda::detail::TensorInfo<T, IndexType> src,
+                                    cuda::detail::TensorInfo<IndicesType, IndexType> indices,
+                                    int dstAddDim,
+                                    int srcAddDim,
+                                    IndexType totalSize,
+                                    IndexType innerSize,
+                                    int64_t dstAddDimSize,
+                                    const func_t& op,
+                                    T alpha) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -451,7 +513,8 @@ __global__ void indexAddLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcAddDim];
 
-    gpuAtomicAddNoReturn(&dst.data[dstOffset], src.data[srcOffset] * alpha);
+    T val = use_alpha ? src.data[srcOffset] * alpha : src.data[srcOffset];
+    op(&dst.data[dstOffset], &val);
   }
 }
 
@@ -530,22 +593,24 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)  \
-  indexAddSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM> \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                \
-      selfInfo, sourceInfo, indexInfo,                                               \
-      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize, alpha_value);             \
+#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
+  indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM,   \
+                      /*func_t=*/ReduceAdd, /*use_alpha=*/true>                         \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
+      selfInfo, sourceInfo, indexInfo,                                                  \
+      selfAddDim, sourceAddDim, sliceSize, selfAddDimSize, reduce_add, alpha_value);    \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)            \
-  indexAddLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                       \
-                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>           \
+  indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                      \
+                      SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR,          \
+                      /*func_t=*/ReduceAdd, /*use_alpha=*/true>             \
     <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
       selfInfo, sourceInfo, indexInfo,                                      \
       selfAddDim, sourceAddDim, sourceTotalSize,                            \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
-      selfAddDimSize, alpha_value);                                         \
+      selfAddDimSize, reduce_add, alpha_value);                             \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
@@ -635,10 +700,213 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 #undef LARGE_INDEX
 }
 
+template <typename func_t>
+void index_reduce_func_cuda_impl(
+  const Tensor& self,
+  int64_t dim,
+  const Tensor& index,
+  const Tensor& source,
+  bool include_self,
+  const INDEX_OP& reduce,
+  const func_t& reduce_func,
+  const std::string& method_name,
+  const Tensor& result) {
+  if (!result.is_same(self)) result.copy_(self);
+
+  // Scalars are treated as 1-d tensor
+  Tensor self_ = (result.dim() == 0) ? result.view(1) : result;
+  Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
+
+  TORCH_CHECK(result.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
+  TORCH_CHECK(source.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims" );
+  TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
+
+  if (globalContext().deterministicAlgorithms()){
+    TORCH_CHECK(
+      false, method_name, "() does not have a deterministic path. Please file a feature request if you need this.");
+  }
+
+  // FIXME: should I make this a helper function to reduce code duplication?
+  if (!include_self) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      self.scalar_type(), "index_reduce_func_cuda_exclude_input_init", [&] {
+      scalar_t init_val;
+      switch (reduce) {
+        case INDEX_OP::MULTIPLY:
+          init_val = (scalar_t)1;
+          break;
+        case INDEX_OP::MAXIMUM:
+          init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
+                     : std::numeric_limits<scalar_t>::lowest();
+          break;
+        case INDEX_OP::MINIMUM:
+          init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
+                     : std::numeric_limits<scalar_t>::max();
+          break;
+        case INDEX_OP::MEAN:
+          init_val = (scalar_t)0;
+          break;
+        default:
+          break;
+      }
+      // index_fill_ requires index to be a LongTensor
+      self_.index_fill_(dim, index.to(at::ScalarType::Long), init_val);
+    });
+  }
+
+  // The `source` is partitioned into two parts:
+  // -the size of each slice we are indexing, which is the
+  // total size of the tensor ignoring dimension `dim`;
+  // -the number of index we are choosing, which is the total size
+  // of the tensor `index`.
+  ptrdiff_t sliceSize = getSliceSize(self_, dim, index, source_);
+  ptrdiff_t sourceTotalSize = source.numel();
+  int64_t selfReduceDimSize = self_.size(dim);
+  ptrdiff_t numIndex = index.numel();
+
+  if (sliceSize == 0) {
+    return;
+  }
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  bool indContig = index.is_contiguous();
+
+  int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+
+#define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)                  \
+  indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM, func_t>        \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
+      selfInfo, sourceInfo, indexInfo,                                                               \
+      selfReduceDim, sourceReduceDim, sliceSize, selfReduceDimSize, reduce_func, alpha_value);      \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+#define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                                     \
+                    SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)                         \
+  indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                   \
+                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR, func_t>                \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                    \
+      selfInfo, sourceInfo, indexInfo,                                                   \
+      selfReduceDim, sourceReduceDim, sourceTotalSize,                                   \
+      (IDX_IS_MAJOR) ? sliceSize : numIndex,                                             \
+      selfReduceDimSize, reduce_func, alpha_value);                                     \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
+
+  dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexBlock(std::min(sourceTotalSize, (ptrdiff_t)128));
+
+  if (cuda::detail::canUse32BitIndexMath(result) &&
+      cuda::detail::canUse32BitIndexMath(source) &&
+      cuda::detail::canUse32BitIndexMath(index)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "index_reduce", [&] {
+      cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
+          cuda::detail::getTensorInfo<scalar_t, unsigned int>(self_);
+      int selfReduceDim = selfInfo.collapseDims(dim);
+      selfInfo.reduceDim(selfReduceDim);
+      auto alpha_value = (scalar_t) 1;
+      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_reduce_cuda", [&] () {
+        auto sourceInfo =
+          cuda::detail::getTensorInfo<scalar_t, unsigned int>(source_);
+        int sourceReduceDim = sourceInfo.collapseDims(dim);
+        sourceInfo.reduceDim(sourceReduceDim);
+
+        auto indexInfo =
+        cuda::detail::getTensorInfo<index_t, unsigned int>(index);
+        indexInfo.collapseDims();
+
+        // A reasonable choice for when to have each thread iterate over
+        // index to choose
+        if (numIndex <= 16) {
+          if (selfInfo.dims == 1 && sourceInfo.dims == 1 && indContig) {
+            SMALL_INDEX(scalar_t, index_t, unsigned int, 1, 1, -2);
+          } else if (selfInfo.dims == 2 && sourceInfo.dims == 2 && indContig) {
+            SMALL_INDEX(scalar_t, index_t, unsigned int, 2, 2, -2);
+          } else if (selfInfo.dims == 3 && sourceInfo.dims == 3 && indContig) {
+            SMALL_INDEX(scalar_t, index_t, unsigned int, 3, 3, -2);
+          } else {
+            SMALL_INDEX(scalar_t, index_t, unsigned int, -1, -1, -1);
+          }
+        } else {
+          bool indexIsMajor = indexShouldBeMajor(selfInfo, selfReduceDim);
+
+          if (selfInfo.dims == 1 && sourceInfo.dims == 1 && indContig) {
+            LARGE_INDEX(scalar_t, index_t, unsigned int, 1, 1, -2, true);
+          } else if (selfInfo.dims == 2 && sourceInfo.dims == 2 && indContig) {
+            if (indexIsMajor) {
+              LARGE_INDEX(scalar_t, index_t, unsigned int, 2, 2, -2, true);
+            } else {
+              LARGE_INDEX(scalar_t, index_t, unsigned int, 2, 2, -2, false);
+            }
+          } else if (selfInfo.dims == 3 && sourceInfo.dims == 3 && indContig) {
+            if (indexIsMajor) {
+              LARGE_INDEX(scalar_t, index_t, unsigned int, 3, 3, -2, true);
+            } else {
+              LARGE_INDEX(scalar_t, index_t, unsigned int, 3, 3, -2, false);
+            }
+          } else {
+            LARGE_INDEX(scalar_t, index_t, unsigned int, -1, -1, -1, true);
+          }
+        }
+      });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "index_reduce", [&] {
+      cuda::detail::TensorInfo<scalar_t, uint64_t> selfInfo =
+        cuda::detail::getTensorInfo<scalar_t, uint64_t>(self_);
+      int selfReduceDim = selfInfo.collapseDims(dim);
+      selfInfo.reduceDim(selfReduceDim);
+      auto alpha_value = (scalar_t) 1;
+
+      cuda::detail::TensorInfo<scalar_t, uint64_t> sourceInfo =
+        cuda::detail::getTensorInfo<scalar_t, uint64_t>(source_);
+      int sourceReduceDim = sourceInfo.collapseDims(dim);
+      sourceInfo.reduceDim(sourceReduceDim);
+
+      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_reduce_cuda", [&] () {
+        cuda::detail::TensorInfo<index_t, uint64_t> indexInfo =
+          cuda::detail::getTensorInfo<index_t, uint64_t>(index);
+        indexInfo.collapseDims();
+
+        LARGE_INDEX(scalar_t, index_t, uint64_t, -1, -1, -1, true);
+      });
+    });
+  }
+
+#undef SMALL_INDEX
+#undef LARGE_INDEX
+}
+
 TORCH_IMPL_FUNC(index_add_cuda_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
   index_add_cuda_impl(self, dim, index, source, alpha, result);
 }
+
+TORCH_IMPL_FUNC(_index_mul_cuda_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self, const Tensor& result) {
+  index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MULTIPLY, reduce_multiply, "_index_mul", result);
+}
+
+TORCH_IMPL_FUNC(_index_max_cuda_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self, const Tensor& result) {
+  index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MAXIMUM, reduce_maximum, "_index_max", result);
+}
+
+TORCH_IMPL_FUNC(_index_min_cuda_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self, const Tensor& result) {
+  index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MINIMUM, reduce_minimum, "_index_min", result);
+}
+
+TORCH_IMPL_FUNC(_index_mean_cuda_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self, const Tensor& result) {
+  index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MEAN, reduce_add, "_index_mean", result);
+  auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
+  counts.index_add_(dim, index, at::ones_like(source));
+  counts.masked_fill_(counts == 0, 1);
+  result.div_(counts);
+}
+
 
 namespace {
 // We prefer this kernel to avoid reloading index points if the number

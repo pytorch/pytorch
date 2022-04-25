@@ -14,7 +14,7 @@ namespace at { namespace native {
 
 enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_MULTIPLY, REDUCE_MAXIMUM, REDUCE_MINIMUM, REDUCE_MEAN};
 
-enum class INDEX_OP: uint8_t {MULTIPLY, MEAN, MINIMUM, MAXIMUM};
+enum class INDEX_OP: uint8_t {ADD, MULTIPLY, MEAN, MINIMUM, MAXIMUM};
 
 using index_put_with_sort_fn = void(*)(Tensor &, const c10::List<c10::optional<Tensor>> &, const Tensor &, bool accumulate, bool unsafe);
 

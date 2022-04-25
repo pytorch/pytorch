@@ -5636,7 +5636,6 @@ class TestTorch(TestCase):
 
     # FIXME: move to indexing test suite
     def test_index_reductions(self):
-        device = 'cpu'
         reduces = ['mul', 'min', 'max', 'mean']
         size = (3, 4, 5)
         index_dtypes = [torch.int, torch.long]
@@ -5653,44 +5652,45 @@ class TestTorch(TestCase):
             else:
                 return dest._index_mean_(dim, index, src, include_self=include_self)
 
-        for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
-            for dtype, reduce, include_self in product(index_dtypes, reduces, include_selfs):
-                for dim in range(len(size)):
-                    num_src = np.random.randint(10)
-                    num_dest = size[dim]
-                    dest = torch.randn(size, device=device)
-                    if not dest_contig:
-                        dest = make_tensor(size, device=device, dtype=dest.dtype, noncontiguous=True)
-                    src = torch.randn(*size[:dim], num_src, *size[dim + 1:], device=device)
-                    if not src_contig:
-                        src = noncontiguous_like(src)
-                    idx = torch.randint(num_dest, (num_src,), dtype=dtype, device=device)
-                    if not index_contig:
-                        idx = noncontiguous_like(idx)
-                    expected = dest.clone()
-                    index_reduce_(dest, dim, idx, src, reduce, include_self=include_self)
-                    # fill rows in idx with reduction inits if include_self=False
-                    if (not include_self):
-                        expected.index_fill_(dim, idx.long(), reduction_init[reduce])
-                    expected = expected.transpose(0, dim)
-                    src = src.transpose(0, dim)
-                    for i in range(num_src):
-                        if reduce == 'mul':
-                            expected[idx[i]] *= src[i]
-                        elif reduce == 'min':
-                            torch.minimum(expected[idx[i]], src[i], out=expected[idx[i]])
-                        elif reduce == 'max':
-                            torch.maximum(expected[idx[i]], src[i], out=expected[idx[i]])
-                        else:
-                            expected[idx[i]] += src[i]
-                    if reduce == 'mean':
-                        counts = torch.ones_like(expected) if include_self else torch.zeros_like(expected)
-                        counts.index_add_(0, idx, torch.ones_like(src))
-                        counts.masked_fill_(counts == 0, 1)
-                        expected /= counts
-                    expected = expected.transpose(0, dim)
+        for device in get_all_device_types():
+            for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
+                for dtype, reduce, include_self in product(index_dtypes, reduces, include_selfs):
+                    for dim in range(len(size)):
+                        num_src = np.random.randint(10)
+                        num_dest = size[dim]
+                        dest = torch.randn(size, device=device)
+                        if not dest_contig:
+                            dest = make_tensor(size, device=device, dtype=dest.dtype, noncontiguous=True)
+                        src = torch.randn(*size[:dim], num_src, *size[dim + 1:], device=device)
+                        if not src_contig:
+                            src = noncontiguous_like(src)
+                        idx = torch.randint(num_dest, (num_src,), dtype=dtype, device=device)
+                        if not index_contig:
+                            idx = noncontiguous_like(idx)
+                        expected = dest.clone()
+                        index_reduce_(dest, dim, idx, src, reduce, include_self=include_self)
+                        # fill rows in idx with reduction inits if include_self=False
+                        if (not include_self):
+                            expected.index_fill_(dim, idx.long(), reduction_init[reduce])
+                        expected = expected.transpose(0, dim)
+                        src = src.transpose(0, dim)
+                        for i in range(num_src):
+                            if reduce == 'mul':
+                                expected[idx[i]] *= src[i]
+                            elif reduce == 'min':
+                                torch.minimum(expected[idx[i]], src[i], out=expected[idx[i]])
+                            elif reduce == 'max':
+                                torch.maximum(expected[idx[i]], src[i], out=expected[idx[i]])
+                            else:
+                                expected[idx[i]] += src[i]
+                        if reduce == 'mean':
+                            counts = torch.ones_like(expected) if include_self else torch.zeros_like(expected)
+                            counts.index_add_(0, idx, torch.ones_like(src))
+                            counts.masked_fill_(counts == 0, 1)
+                            expected /= counts
+                        expected = expected.transpose(0, dim)
 
-                    self.assertEqual(dest, expected)
+                        self.assertEqual(dest, expected)
 
     # FIXME: resolve comment below and move this to indexing test suite
     # add coverage for issue with atomic add that appeared only for
