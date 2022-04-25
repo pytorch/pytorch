@@ -16,7 +16,7 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   if (sizes.dim() > 0) {
     size_t nested_dim = result.size();
     int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
-    result.resize(nested_dim + sizes.size(1));
+    result.resize(nested_dim + sizes.sizes()[1]);
     int64_t sizes_size_0 = sizes.sizes()[0];
     int64_t sizes_size_1 = sizes.sizes()[1];
     for (const auto i : c10::irange(sizes_size_1)) {

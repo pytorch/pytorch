@@ -408,6 +408,16 @@ void add_padding_kernelLauncher(
   }
 }
 
+template void add_padding_kernelLauncher<double>(
+    double* input,
+    double* output,
+    double padding_value,
+    const int* offsets,
+    const int* input_sizes,
+    int input_dim,
+    const std::vector<int64_t>& output_sizes,
+    const int batch_size);
+
 template void add_padding_kernelLauncher<float>(
     float* input,
     float* output,

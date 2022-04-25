@@ -275,12 +275,12 @@ class TestNestedTensorDeviceType(TestCase):
             self.assertEqual(padded.device, torch.device(device))
             self.assertEqual(padded.dtype, dtype)
 
-    @dtypes(torch.float, torch.float16)
+    @dtypes(torch.float, torch.float16, torch.double)
     def test_to_padded_tensor_dim2(self, device, dtype):
         ts = [
-            torch.randn(1, device=device, dtype=dtype),
-            torch.randn(2, device=device, dtype=dtype),
-            torch.randn(4, device=device, dtype=dtype),
+            torch.randn(16, device=device, dtype=dtype),
+            torch.randn(24, device=device, dtype=dtype),
+            torch.randn(40, device=device, dtype=dtype),
         ]
         nt = torch.nested_tensor(ts, device=device, dtype=dtype)
         pad = 42
@@ -293,12 +293,12 @@ class TestNestedTensorDeviceType(TestCase):
         padded = nt.to_padded_tensor(pad)
         self.assertEqual(padded, correct_output)
 
-    @dtypes(torch.float, torch.float16)
+    @dtypes(torch.float, torch.float16, torch.double)
     def test_to_padded_tensor_dim3(self, device, dtype):
         ts = [
-            torch.randn(1, 2, device=device, dtype=dtype),
-            torch.randn(2, 3, device=device, dtype=dtype),
-            torch.randn(4, 5, device=device, dtype=dtype),
+            torch.randn(16, 21, device=device, dtype=dtype),
+            torch.randn(24, 32, device=device, dtype=dtype),
+            torch.randn(40, 53, device=device, dtype=dtype),
         ]
         nt = torch.nested_tensor(ts, device=device, dtype=dtype)
         pad = 42
@@ -311,17 +311,21 @@ class TestNestedTensorDeviceType(TestCase):
         padded = nt.to_padded_tensor(pad)
         self.assertEqual(padded, correct_output)
 
-    @dtypes(torch.float, torch.float16)
+    @dtypes(torch.float, torch.float16, torch.double)
     def test_to_padded_tensor_dim4(self, device, dtype):
         ts = [
-            torch.randn(1, 2, 3, device=device, dtype=dtype),
-            torch.randn(2, 3, 4, device=device, dtype=dtype),
-            torch.randn(4, 5, 6, device=device, dtype=dtype),
+            torch.randn(16, 21, 13, device=device, dtype=dtype),
+            torch.randn(24, 32, 14, device=device, dtype=dtype),
+            torch.randn(40, 53, 16, device=device, dtype=dtype),
         ]
         nt = torch.nested_tensor(ts, device=device, dtype=dtype)
         pad = 42
-        correct_output = torch.cat(
-            [torch.nn.ConstantPad3d((0, 6 - x.shape[2], 0, 5 - x.shape[1], 0, 4 - x.shape[0]), pad)(x.unsqueeze(0)) for x in ts])
+        correct_output = []
+        for t in ts:
+            next_output = torch.ones_like(ts[2]) * pad
+            correct_output.append(next_output)
+            next_output[:t.size(0), :t.size(1), :t.size(2)].copy_(t)
+        correct_output = torch.stack(correct_output)
         padded = nt.to_padded_tensor(pad)
         self.assertEqual(padded, correct_output)
 

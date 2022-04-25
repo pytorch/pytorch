@@ -103,26 +103,6 @@ Tensor nested_from_padded_cuda(
   }
 }
 
-Tensor _collapse_two_dims_3(const Tensor& input, int64_t dim1, int64_t dim2) {
-  TORCH_CHECK(dim1 > 0, "dim1: Cannot collapse dim 0.");
-  TORCH_CHECK(dim2 > 0, "dim2: Cannot collapse dim 0.");
-  TORCH_CHECK(dim2 - 1 == dim1, "dim2 must be one more than dim1.")
-  TORCH_CHECK(dim1 == 1, "dim1 must be 1.")
-  TORCH_CHECK(input.dim() == 3, "Expected input to be 3 dim.");
-
-  auto* nt_input = get_nested_tensor_impl(input);
-  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
-  Tensor nt_sizes = nt_input->get_nested_size_tensor();
-
-  Tensor sizes_dim1 = at::native::narrow(nt_sizes, 1, 0, 1);
-  Tensor sizes_dim2 = at::native::narrow(nt_sizes, 1, 1, 1);
-  Tensor new_nt_sizes = sizes_dim1 * sizes_dim2;
-
-  Tensor result = at::detail::make_tensor<NestedTensorImpl>(nt_input->get_buffer(), new_nt_sizes);
-  TORCH_CHECK(result.dim() == 2, "Expected result to be 2 dimensional.");
-  return result;
-}
-
 Tensor batch_offsets_from_efficient_size(const Tensor& ef_sizes) {
   int64_t* nt_sizes_ptr = ef_sizes.data_ptr<int64_t>();
   int64_t ef_sizes_size_0 = ef_sizes.sizes()[0];
@@ -142,16 +122,23 @@ Tensor batch_offsets_from_efficient_size(const Tensor& ef_sizes) {
 
 Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
   int64_t t_dim = t.dim();
-  if ((t_dim >= 2 && t_dim <= 4)) {
+  if (t_dim >= 2 && t_dim <= 4 &&
+      (t.dtype() == at::kFloat || t.dtype() == at::kDouble ||
+       t.dtype() == at::kHalf)) {
     auto* nt_input = get_nested_tensor_impl(t);
     TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
     const auto& nt_buffer = nt_input->get_buffer();
     const auto nt_input_opt_size_2 = nt_input->opt_size(2);
 
-    if (t_dim == 3 && nt_input_opt_size_2) {
-      Tensor output = NestedTensor_to_padded_tensor_cuda(
-          _collapse_two_dims_3(t, 1, 2), padding);
-      return output.reshape({output.sizes()[0], -1, *nt_input_opt_size_2});
+    if (t_dim == 3 && nt_input_opt_size_2 && (*nt_input_opt_size_2 > 0)) {
+      Tensor nt_sizes = nt_input->get_nested_size_tensor();
+      Tensor sizes_dim1 = at::native::narrow(nt_sizes, 1, 0, 1);
+      Tensor sizes_dim2 = at::native::narrow(nt_sizes, 1, 1, 1);
+      Tensor result = at::detail::make_tensor<NestedTensorImpl>(
+          nt_input->get_buffer(), sizes_dim1 * sizes_dim2[0]);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.dim() == 2);
+      result = NestedTensor_to_padded_tensor_cuda(result, padding);
+      return result.reshape({result.sizes()[0], -1, *nt_input_opt_size_2});
     }
 
     Tensor nt_sizes = nt_input->get_nested_size_tensor();
@@ -172,30 +159,19 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
     offsets = split[0];
     nt_sizes = split[1];
 
-    if (nt_buffer.dtype() == at::kHalf) {
-      add_padding_kernelLauncher(
-          nt_buffer.data_ptr<c10::Half>(),
-          output.data_ptr<c10::Half>(),
-          (c10::Half)(padding),
-          offsets.data_ptr<int>(),
-          nt_sizes.data_ptr<int>(),
-          input_dim,
-          new_size,
-          batch_size);
-      return output;
-    }
-    if (nt_buffer.dtype() == at::kFloat) {
-      add_padding_kernelLauncher(
-          nt_buffer.data_ptr<float>(),
-          output.data_ptr<float>(),
-          (float)(padding),
-          offsets.data_ptr<int>(),
-          nt_sizes.data_ptr<int>(),
-          input_dim,
-          new_size,
-          batch_size);
-      return output;
-    }
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        nt_buffer.scalar_type(), "NestedTensor_to_padded_tensor_cuda", [&]() {
+          add_padding_kernelLauncher(
+              nt_buffer.data_ptr<scalar_t>(),
+              output.data_ptr<scalar_t>(),
+              (scalar_t)(padding),
+              offsets.data_ptr<int>(),
+              nt_sizes.data_ptr<int>(),
+              input_dim,
+              new_size,
+              batch_size);
+        });
+    return output;
   }
   return NestedTensor_to_padded_tensor_generic(t, padding);
 }
