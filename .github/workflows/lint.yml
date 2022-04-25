@@ -69,7 +69,7 @@ jobs:
                   column: .char,
                   severity: (if .severity == "advice" or .severity == "disabled" then "warning" else .severity end),
                   code: .code,
-                  message: ("["+.code+"] "+ .name + ": " + @uri"\(.description)")
+                  message: @uri"[\(.code)] \(.name): \(.description)"
                 }' -c
   quick-checks:
     name: quick-checks
