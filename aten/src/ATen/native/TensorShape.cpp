@@ -1415,9 +1415,18 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     return t.gather(dim, idx.view(idx_shape).expand(out_shape));
   };
 
-
   // If indexing into sparse dimensions
   if (dim < sparse_dim) {
+    // short-circuit if index is empty
+    if (!index_len) {
+      auto res_indices = index_select(indices, 1, index);
+      res_indices[dim] = index;
+      const auto res_values = index_select(values, 0, index);
+
+      return _sparse_coo_tensor_with_dims_and_tensors(
+          sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
+    }
+
     const auto nneg_index = [&index, index_len, &self, size, dim](void) -> Tensor {
       const auto index_contiguous = index.contiguous();
       auto nneg_index = at::empty_like(index_contiguous);

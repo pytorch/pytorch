@@ -1029,7 +1029,15 @@ class TestSparse(TestCase):
                     self.assertEqual(small_dense_result, small_sparse_result)
 
     @dtypes(torch.double, torch.cdouble)
-    def test_index_select_non_contiguous_index(self, device, dtype):
+    def test_index_select_empty_and_non_contiguous_index(self, device, dtype):
+        # empty index
+        idx_empty = torch.tensor([], dtype=torch.long, device=device)
+        t = make_tensor((5, 5), dtype=dtype, device=device)
+        res_dense = t.index_select(0, idx_empty)
+        res_sparse = t.to_sparse().index_select(0, idx_empty)
+        self.assertEqual(res_dense, res_sparse)
+
+        # non-contigous index
         idx = torch.randint(low=0, high=5, size=(10, 2), device=device)[:, 0]
 
         # case nnz > size[d]
