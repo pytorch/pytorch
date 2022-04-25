@@ -12,6 +12,7 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   if (sizes.dim() == 0) {
     return std::vector<int64_t>();
   }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
   std::vector<int64_t> result(1, sizes.sizes()[0]);
   if (sizes.dim() > 0) {
     size_t nested_dim = result.size();

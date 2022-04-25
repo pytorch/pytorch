@@ -151,7 +151,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
     int64_t batch_size = nt_sizes.sizes()[0];
     // TODO: Remove need for cat here
     at::Tensor metadata = at::cat({offsets, nt_sizes.reshape(-1)});
-    metadata = metadata.to(at::Device(kCUDA), at::kInt, true, true);
+    metadata = metadata.to(at::Device(kCUDA), at::kInt);
 
     std::vector<Tensor> split =
         at::split_with_sizes(metadata, {offsets.numel(), nt_sizes.numel()}, 0);

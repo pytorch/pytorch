@@ -286,7 +286,7 @@ __global__ void add_padding_2(
   for (int ii = 0; ii < (output_numel / grainsize); ii++) {
     const int i = ii * grainsize + tid;
     const int i0 = i / (output_sizes_2);
-    const int i1 = i % output_sizes_2;
+    const int i1 = i - i0 * output_sizes_2;
     if (i0 < sizes_i[0] && i1 < sizes_i[1]) {
       const int input_offset = offset + i0 * sizes_i[1] + i1;
       output[output_offset + i] = input[input_offset];
@@ -297,7 +297,7 @@ __global__ void add_padding_2(
   const int i = (output_numel / grainsize) * grainsize + tid;
   if (i < output_numel) {
     const int i0 = i / (output_sizes_2);
-    const int i1 = i % output_sizes_2;
+    const int i1 = i - i0 * output_sizes_2;
     if (i0 < sizes_i[0] && i1 < sizes_i[1]) {
       const int input_offset = offset + i0 * sizes_i[1] + i1;
       output[output_offset + i] = input[input_offset];
