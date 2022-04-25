@@ -39,14 +39,6 @@ jobs:
           reporter: github-pr-check
           level: error
           filter_mode: file
-      - name: pyflakes
-        uses: reviewdog/action-pyflakes@v1
-        continue-on-error: true
-        with:
-          github_token: ${{ secrets.github_token }}
-          reporter: github-pr-check
-          level: warning
-          filter_mode: file
       - name: misspell # Check spellings as well
         uses: reviewdog/action-misspell@v1
         continue-on-error: true
