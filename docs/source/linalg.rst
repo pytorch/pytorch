@@ -95,6 +95,15 @@ Tensor Operations
     tensorinv
     tensorsolve
 
+Misc
+----
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    vander
+
 Experimental Functions
 ----------------------
 .. autosummary::

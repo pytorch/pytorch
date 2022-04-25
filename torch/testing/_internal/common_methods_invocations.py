@@ -3136,6 +3136,37 @@ def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwa
     for shape in shapes:
         yield SampleInput(make_arg(shape))
 
+def sample_inputs_linalg_vander(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # autograd is not supported for inputs with zero number of elements
+    shapes = ((1,),
+              (S,),
+              (2, S),)
+
+    for shape, increasing in product(shapes, (True, False)):
+        yield SampleInput(make_arg(shape), kwargs=dict(increasing=increasing))
+        n = shape[-1] if len(shape) > 0 else 1
+        for i in range(3):
+            # n-1, n, n+1
+            N = n - (i - 1)
+            if N < 0:
+                continue
+            yield SampleInput(make_arg(shape), kwargs=dict(N=N, increasing=increasing))
+
+def np_vander_batched(x, N=None, increasing=True):
+    # Wrapper around np.vander that supports batches of 1 dimension (enough for the tests)
+    if x.ndim == 0:
+        x = x[np.newaxis]
+    if x.ndim == 1:
+        y = np.vander(x, N, increasing)
+        return y
+    else:
+        if N is None:
+            N = x.shape[-1]
+        y = np.vander(x.ravel(), N, increasing=increasing).reshape((*x.shape, N))
+        return y
+
 def np_sinc_with_fp16_as_fp32(x):
     # Wraps numpy's sinc function so that fp16 values are promoted to fp32
     # before sinc is invoked. Context: numpy's sinc returns NaN when evaluated
@@ -10650,6 +10681,15 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_slogdet,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
+    OpInfo('linalg.vander',
+           aten_name='linalg_vander',
+           ref=np_vander_batched,
+           op=torch.linalg.vander,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False,
+           sample_inputs_func=sample_inputs_linalg_vander),
     OpInfo('linalg.vector_norm',
            op=torch.linalg.vector_norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),

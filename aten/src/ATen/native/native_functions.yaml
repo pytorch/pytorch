@@ -7110,6 +7110,9 @@
   dispatch:
     CPU, CUDA: linalg_solve_triangular
 
+- func: linalg_vander(Tensor x, *, int? N=None, bool increasing=True) -> Tensor
+  python_module: linalg
+
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
     CompositeExplicitAutograd: symeig_out

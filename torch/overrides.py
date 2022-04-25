@@ -1010,6 +1010,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.unsafe_split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsafe_split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsqueeze: lambda input, dim, out=None: -1,
+        torch.linalg.vander: lambda x, N=None, increasing=False: -1,
         torch.var: lambda input, dim=None: -1,
         torch.var_mean: lambda input, dim=None: -1,
         torch.vsplit: lambda input, indices_or_sections: -1,

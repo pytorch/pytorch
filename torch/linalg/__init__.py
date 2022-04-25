@@ -2378,3 +2378,63 @@ Examples::
     >>> torch.dist(Q.mT @ Q, torch.eye(4))
     tensor(6.2158e-07)
 """)
+
+vander = _add_docstr(_linalg.linalg_vander, r"""
+vander(x, N=None, increasing=False) -> Tensor
+
+Generates a Vandermonde matrix.
+
+Returns the Vandermonde matrix :math:`V`
+
+.. math::
+
+    V = \begin{pmatrix}
+            1 & x_1 & x_1^2 & \dots & x_1^{N-1}\\
+            1 & x_2 & x_2^2 & \dots & x_2^{N-1}\\
+            1 & x_3 & x_3^2 & \dots & x_3^{N-1}\\
+            \vdots & \vdots & \vdots & \ddots &\vdots \\
+            1 & x_n & x_n^2 & \dots & x_n^{N-1}
+        \end{pmatrix}.
+
+If :attr:`increasing`\ `= False`, the powers of the columns are returned in decreasing order.
+
+If :attr:`N`\ `= None`, then `N = x.size(-1)` so that the output is a square matrix.
+
+Supports inputs of all dtypes.
+Also supports batches of vectors, and if :attr:`x` is a batch of vectors then
+the output has the same batch dimensions.
+
+Differences with `numpy.vander`:
+
+- Unlike `numpy.vander`, the default value for :attr:`increasing` is `True` rather than `False`.
+
+Args:
+    x (Tensor): tensor of shape `(*, n)` where `*` is zero or more batch dimensions
+                consisting of vectors.
+
+Keyword args:
+    N (int, optional): Number of columns in the output. Default: `x.size(-1)`
+    increasing (bool, optional): Order of the powers of the columns.
+        If `True`, the powers increase from left to right.
+        The order is reversed otherwise.
+        Default: `True`
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3, 5])
+    >>> linalg.vander(x)
+    tensor([[  1,   1,   1,   1],
+            [  1,   2,   4,   8],
+            [  1,   3,   9,  27],
+            [  1,   5,  25, 125]])
+    >>> linalg.vander(x, N=3)
+    tensor([[ 1,  1,  1],
+            [ 1,  2,  4],
+            [ 1,  3,  9],
+            [ 1,  5, 25]])
+    >>> linalg.vander(x, N=3, increasing=False)
+    tensor([[ 1,  1,  1],
+            [ 4,  2,  1],
+            [ 9,  3,  1],
+            [25,  5,  1]])
+""")

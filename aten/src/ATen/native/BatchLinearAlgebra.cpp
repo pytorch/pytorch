@@ -4039,4 +4039,39 @@ Tensor linalg_solve_triangular(
   return out;
 }
 
+Tensor linalg_vander(
+    const Tensor& x,
+    c10::optional<int64_t> N,
+    bool increasing) {
+  const auto x_ = x.dim() == 0 ? x.unsqueeze(-1) : x;
+
+  auto shape = x_.sizes().vec();
+  const auto n = N.value_or(shape.back());
+  TORCH_CHECK(n >= 0, "N must be non-negative.");
+
+  // Get the dtype of cumsum
+  auto dtype = x_.scalar_type();
+  auto options = x_.options()
+                   .dtype(at::isIntegralType(dtype, /*includeBool=*/true) ? kLong : dtype);
+
+  // n = 0 or n = 1 case (Empty or one row case)
+  shape.push_back(std::min<int64_t>(n, 1LL));
+  auto ones =  x_.new_ones(shape, options);
+
+  if (n <= 1) {
+    // new_ones does not propagate requires_grad. UGH
+    ones.requires_grad_(x_.requires_grad());
+    return ones;
+  } else {
+    // Append cumprod of the oher 0...n-1 powers
+    shape.back() = n - 1;
+    auto result = at::cumprod(x_.unsqueeze(-1).expand(shape), -1);
+    result = at::cat({ones, result}, /*dim=*/ -1);
+
+    if (!increasing) {
+      result = at::flip(result, {-1});
+    }
+    return result;
+  }
+}
 }}  // namespace at::native
