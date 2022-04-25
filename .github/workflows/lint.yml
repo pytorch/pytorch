@@ -57,20 +57,10 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           # The easiest way to get annotations is to just run lintrunner again
-          # in JSON mode and add a GitHub problem matcher to pattern match the
-          # output.
-          echo "::add-matcher::.github/lintrunner_problem_matcher.json"
-
-          # Use jq to massage the output to look a little nicer in GitHub.
+          # in JSON mode and use jq to massage the output into GitHub Actions
+          # workflow commands.
           lintrunner --merge-base-with "${PR_BASE_SHA}" --json | \
-            jq '{
-                  file: .path,
-                  line: .line,
-                  column: .char,
-                  severity: (if .severity == "advice" or .severity == "disabled" then "warning" else .severity end),
-                  code: .code,
-                  message: @uri"[\(.code)] \(.name): \(.description)"
-                }' -c
+            jq --raw-output '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name),message=" + @uri"\(.description)"'
   quick-checks:
     name: quick-checks
     runs-on: ubuntu-18.04
