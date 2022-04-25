@@ -16,12 +16,11 @@ def create_jit_fn(op_string: str, optional_name: str, **kwargs) -> Callable:
             output = torch._C._cuda_compile_kernel(
                 self.op_string,
                 self.optional_name,
-                tensors)
-            # TODO: ignoring kwargs for now
+                tensors,
+                kwargs)
             return output
 
         def __call__(self, *tensors: Tensor, **kwargs):
-
             expanded_kwargs = self.kwargs_dict.copy()
             for key, value in kwargs.items():
                 if key in self.kwargs_dict:
@@ -29,9 +28,7 @@ def create_jit_fn(op_string: str, optional_name: str, **kwargs) -> Callable:
                 else:
                     raise KeyError(f"{key} is not declared in function definition")
 
-            tensor_types = [t.dtype for t in tensors]
-
-            return self.compile(*tensors, **kwargs)
+            return self.compile(*tensors, **expanded_kwargs)
 
             # if self.jitted_fn is None:
             #     self.jitted_fn = self.compile(*tensors, **kwargs)

@@ -218,21 +218,35 @@ PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject
   END_HANDLE_TH_ERRORS
 }
 
+at::Scalar as_scalar(PyObject* arg) {
+  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
+  // handle most NumPy scalar types except np.float64.
+  if (THPVariable_Check(arg)) {
+    return THPVariable_Unpack(arg).item();
+  }
+
+  if (THPUtils_checkLong(arg)) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
+  }
+
+  if (PyBool_Check(arg)) {
+    return at::Scalar(THPUtils_unpackBool(arg));
+  }
+
+  if (PyComplex_Check(arg)) {
+    return at::Scalar(THPUtils_unpackComplexDouble(arg));
+  }
+  return at::Scalar(THPUtils_unpackDouble(arg));
+}
+
 PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
   HANDLE_TH_ERRORS
 
   PyObject* op_string_o = nullptr;
   PyObject* optional_name_o = nullptr;
   PyObject* tensors_o = nullptr;
-
-  if(!PyArg_ParseTuple(args, "OOO",
-      &op_string_o, &optional_name_o, &tensors_o)) {
-    // THPUtils_invalidArguments(
-    //     args,
-    //     nullptr,
-    //     "caching_allocator_alloc",
-    //     1,
-    //     "(ssize_t size, intptr_t stream);");
+  PyObject* kwargs_o = nullptr;
+  if(!PyArg_ParseTuple(args, "OOO|O", &op_string_o, &optional_name_o, &tensors_o, &kwargs_o)) {
     return nullptr;
   }
 
@@ -250,23 +264,19 @@ PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
         "tuple is not a Tensor", i);
 
     tensors.emplace_back(THPVariable_Unpack(_tensor));
-    // std::cout<<"tensor "<< i <<": "<< tensor.toString() <<std::endl;
-    // tensor should be proper at::Tensor now!!!
   }
 
-  // std::cout<< op_string << std::endl;
-  // std::cout<< optional_name << std::endl;
+  std::vector<at::Scalar> extra_args;
+  PyObject *key = nullptr;
+  PyObject *value  = nullptr;
+  Py_ssize_t pos = 0;
+  while (PyDict_Next(kwargs_o, &pos, &key, &value)) {
+    extra_args.emplace_back(as_scalar(value));
+  }
 
-  at::Tensor output = at::cuda::CompileKernel(op_string, optional_name, tensors);
-
+  at::Tensor output = at::cuda::CompileKernel(op_string, optional_name, tensors, extra_args);
 
   return THPVariable_Wrap(output);
-
-  // // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  // cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
-  // // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  // void* mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
-  // return PyLong_FromVoidPtr(mem);
   END_HANDLE_TH_ERRORS
 }
 

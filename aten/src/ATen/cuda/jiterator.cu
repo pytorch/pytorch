@@ -16,6 +16,14 @@
 namespace at {
 namespace native {
 
+c10::SmallVector<std::string> get_extra_args_typenames(const std::vector<at::Scalar>& extra_args) {
+  c10::SmallVector<std::string> args_typenames(extra_args.size());
+  for (auto i = 0; i < extra_args.size(); ++i) {
+    args_typenames[i] = at::cuda::jit::typeName(extra_args[i].type());
+  }
+  return args_typenames;
+}
+
 static void* make_input_offset_calculator(const TensorIteratorBase& iter) {
   void* ic_ptr;
   int N = iter.ninputs();
@@ -78,15 +86,15 @@ static void* make_load_with_cast(const TensorIteratorBase& iter) {
   }
 }
 
-template<typename ... Args>
 static inline void launch_jitted_vectorized_kernel(
   const std::string& name, TensorIteratorBase& iter,
   DeviceIndex dev_idx, int64_t N, const std::string& f, void* data_ptr,
-  std::tuple<Args...> extra_args) {
+  const std::vector<at::Scalar>& extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   // N is still int64_t for the computation, but it's always safe to cast result to int
   const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
 
+  // TODO: fix hard code here
   //const int vec_size = memory::jitted_can_vectorize_up_to<result_type, f_inputs_type, arity>(data);
   const int vec_size = 4;
 
@@ -128,7 +136,7 @@ static inline void launch_jitted_vectorized_kernel(
 
       std::cout<<"launch_jitted_vectorized_kernel_raw_ptr"<<std::endl;
 
-      c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>();
+      c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames(extra_args);
       auto code = at::cuda::jit::generate_code(nTensors, f, name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
@@ -142,9 +150,8 @@ static inline void launch_jitted_vectorized_kernel(
     }
   }
 
-  // size of `extra_args` is known at compile-time
-  constexpr auto extra_args_size = sizeof...(Args);
-  auto extra_args_array = tuple_to_array(extra_args);
+  // size of `extra_args` is unknown at compile-time
+  auto extra_args_size = extra_args.size();
 
   float scalar_val = 0;
 
@@ -158,7 +165,7 @@ static inline void launch_jitted_vectorized_kernel(
 
     for (const auto i : c10::irange(extra_args_size)) {
       // since 3 slots are already filled in `args`
-      args[i + 3] = extra_args_array[i];
+      args[i + 3] = const_cast<void*>(extra_args[i].data_ptr());
     }
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   } else {
@@ -181,19 +188,18 @@ static inline void launch_jitted_vectorized_kernel(
 
     for (const auto i : c10::irange(extra_args_size)) {
       // since 7 slots are already filled in `args`
-      args[i + 7] = extra_args_array[i];
+      args[i + 7] = const_cast<void*>(extra_args[i].data_ptr());
     }
 
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   }
 }
 
-template<typename ... Args>
 static inline void launch_jitted_unrolled_kernel(
   const std::string& name, TensorIteratorBase& iter,
   DeviceIndex dev_idx, int64_t N, const std::string& f, void* data_ptr,
-  void* ic_ptr, void* oc_ptr, void* l_ptr, void* s_ptr, bool contiguous,
-  bool dynamic_casting, std::tuple<Args...> extra_args) {
+  void* ic_ptr, void* oc_ptr, void* l_ptr, void* s_ptr, bool contiguous, bool dynamic_casting,
+  const std::vector<at::Scalar>& extra_args) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   //casting result to int is always safe, intermediate is int64 and won't overflow
@@ -217,7 +223,7 @@ static inline void launch_jitted_unrolled_kernel(
 
       std::cout<<"launch_jitted_unrolled_kernel_raw_ptr\n";
 
-      c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>();
+      c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames(extra_args);
       auto code = at::cuda::jit::generate_code(nTensors, f, name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                contiguous, dynamic_casting,
@@ -231,8 +237,8 @@ static inline void launch_jitted_unrolled_kernel(
 
   // pack args for kernel launch
   constexpr int kernel_args = 7;
-  // size of `extra_args` is known at compile-time
-  constexpr auto extra_args_size = sizeof...(Args);
+  // size of `extra_args` is unknown at compile-time
+  auto extra_args_size = extra_args.size();
   void* args[kernel_args + extra_args_size];
   args[0] = static_cast<void*>(&N);
   args[1] = data_ptr;
@@ -242,23 +248,20 @@ static inline void launch_jitted_unrolled_kernel(
   args[5] = s_ptr;
   args[6] = static_cast<void*>(&scalar_val);
 
-  auto extra_args_array = tuple_to_array(extra_args);
   for (const auto i : c10::irange(extra_args_size)) {
     // since 7 slots are already filled in `args`
-    args[i + 7] = extra_args_array[i];
+    args[i + 7] = const_cast<void*>(extra_args[i].data_ptr());
   }
   at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1u, 1u},
   {num_threads(), 1u, 1u});
 }
 
-
-template <typename ... Args>
 void jitted_gpu_kernel_dynamic_impl(
     const std::string& kernel_name,
     TensorIteratorBase& iter,
     const std::string& f,
     const bool dynamic_casting,
-    std::tuple<Args...> extra_args) {
+    const std::vector<at::Scalar>& extra_args) {
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
@@ -289,7 +292,7 @@ void jitted_gpu_kernel_dynamic_impl(
     if (contiguous) {
       // Case 1: no dynamic casting and contiguous
       launch_jitted_vectorized_kernel(kernel_name, iter,
-         iter.device().index(),  numel, f, data_ptr,  extra_args);
+         iter.device().index(), numel, f, data_ptr, extra_args);
       return;
     }
 
@@ -308,7 +311,7 @@ void jitted_gpu_kernel_dynamic_impl(
 
     launch_jitted_unrolled_kernel(
       kernel_name, iter, iter.device().index(), numel, f, data_ptr,
-      ic_ptr, oc_ptr, l_ptr, s_ptr,  contiguous, dynamic_casting, extra_args);
+      ic_ptr, oc_ptr, l_ptr, s_ptr, contiguous, dynamic_casting, extra_args);
 
     return;
   }
@@ -332,8 +335,6 @@ void jitted_gpu_kernel_dynamic_impl(
   if (contiguous) {
     // Case 3: dynamic casting and contiguous
     void* ic_ptr = make_trivial_offset_calculator(iter.ninputs());
-
-    // auto input_offset_calculator = TrivialOffsetCalculator<arity>();
     auto output_offset_calculator = TrivialOffsetCalculator<1>();
     void* oc_ptr = static_cast<void*>(&output_offset_calculator);
 
@@ -353,12 +354,11 @@ void jitted_gpu_kernel_dynamic_impl(
       ic_ptr, oc_ptr, l_ptr, s_ptr, contiguous, dynamic_casting, extra_args);
 }
 
-template <typename... Args>
 void jitted_gpu_kernel_dynamic(
     const std::string& kernel_name,
     TensorIteratorBase& iter,
     const std::string& f,
-    std::tuple<Args...> extra_args = std::make_tuple()) {
+    const std::vector<at::Scalar>& extra_args) {
 
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
@@ -401,11 +401,11 @@ void jitted_gpu_kernel_dynamic(
 
 namespace cuda {
 
-// const char name[] = "python_jitted";
 at::Tensor CompileKernel(
   const std::string& op_string,
   const std::string& optional_name,
-  const std::vector<at::Tensor>& tensors) {
+  const std::vector<at::Tensor>& tensors,
+  const std::vector<at::Scalar>& extra_args) {
 
   Tensor output;
   // TODO: double check if any other flags needs to be set
@@ -423,13 +423,7 @@ at::Tensor CompileKernel(
   }
   TensorIterator iter = config.build();
 
-  // at::native::jitted_gpu_kernel<
-  //       /*name=*/ name,
-  //       /*return_dtype=*/ float,
-  //       /*common_dtype=*/ float,
-  //       /*arity=*/ 2>(iter, op_string);
-
-  at::native::jitted_gpu_kernel_dynamic(optional_name, iter, op_string);
+  at::native::jitted_gpu_kernel_dynamic(optional_name, iter, op_string, extra_args);
 
   return iter.output();
 }

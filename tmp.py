@@ -2,13 +2,11 @@ import torch
 from torch.cuda.jiterator import create_jit_fn
 from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, instantiate_parametrized_tests
 
-code_string = "template <typename T> T python_jitted(T x, T y) { return  -x * y + x - y; }"
-jitted_fn = create_jit_fn(code_string, "python_jitted", alpha=1, beta=2)
+code_string = "template <typename T> T python_jitted(T x, T y, T alpha, T beta) { return  -x * y + x - y + alpha - beta; }"
+jitted_fn = create_jit_fn(code_string, "python_jitted", alpha=0, beta=0)
 
-# c = fn(a, b, beta=3, alpha=-1)
-
-def ref_fn(x, y):
-    return -x * y + x - y
+def ref_fn(x, y, alpha=0, beta=0):
+    return -x * y + x - y + alpha - beta
 
 class TestPythonJiterator(TestCase):
     @parametrize("dtype", [
@@ -18,7 +16,7 @@ class TestPythonJiterator(TestCase):
                            torch.complex64, torch.complex128,
                             #    torch.bool,
                            ])
-    def test_all_types(self, dtype):
+    def test_all_dtypes(self, dtype):
         a = torch.rand(3, device='cuda').mul(10).type(dtype)
         b = torch.rand(3, device='cuda').mul(10).type(dtype)
 
@@ -95,6 +93,32 @@ class TestPythonJiterator(TestCase):
 
         rtol =  0.00001
         if a_dtype is torch.half or b_dtype is torch.half:
+            rtol = 1e-2
+        assert torch.allclose(expected, result, rtol=rtol)
+
+    @parametrize("dtype", [
+                           torch.float, torch.double, torch.half,
+                        #    output type is mismatching for following cases
+                        #    torch.uint8, torch.int8, torch.int16, torch.int, torch.long,
+                            #    torch.bfloat16,  failing due to numerical difference
+                           ])
+    @parametrize("alpha", [-1, 2.0, None])
+    @parametrize("beta", [3, -4.2, None])
+    def test_extra_args(self, dtype, alpha, beta):
+        a = torch.rand(3, device='cuda').mul(10).type(dtype)
+        b = torch.rand(3, device='cuda').mul(10).type(dtype)
+
+        extra_args = {}
+        if alpha is not None:
+            extra_args["alpha"] = alpha
+        if beta is not None:
+            extra_args["beta"] = beta
+
+        expected = ref_fn(a, b, **extra_args)
+        result = jitted_fn(a, b, **extra_args)
+
+        rtol =  0.00001
+        if dtype is torch.half:
             rtol = 1e-2
         assert torch.allclose(expected, result, rtol=rtol)
 
