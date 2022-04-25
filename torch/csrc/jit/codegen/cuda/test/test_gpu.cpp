@@ -22262,6 +22262,89 @@ TEST_F(NVFuserTest, FusionRAWSyncInsertionPlace3_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
+// Test serial write and parallel read of shared mem: mapped case
+TEST_F(NVFuserTest, FusionSerialSmemWriteParallelRead1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeConcreteTensor({128, 6});
+  TensorView* tv1 = makeConcreteTensor({128, 6});
+  TensorView* tv2 = makeConcreteTensor({128, 6});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addInput(tv2);
+
+  TensorView* tv3 = add(tv0, tv1);
+  TensorView* tv4 = add(tv3, tv2);
+
+  fusion.addOutput(tv4);
+
+  //  Use shared memory
+  tv3->setMemoryType(MemoryType::Shared);
+
+  // Parallelize t4, in this case dim 0 on tv3 will
+  //  not be parallelized but dim0 of t4 will be.
+  // We will need to make sure a sync is inserted
+  //  even if these dimensions are mapped.
+  tv4->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({128, 6}, options);
+  at::Tensor t1 = at::randn({128, 6}, options);
+  at::Tensor t2 = at::randn({128, 6}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1, t2});
+  auto cg_outputs = fe.runFusion({t0, t1, t2});
+
+  auto ref = t0 + t1 + t2;
+
+  testValidate(&fusion, cg_outputs, {t0, t1, t2}, {ref}, __LINE__, __FILE__);
+}
+
+// Test serial write and parallel read of shared mem: un-mapped case
+TEST_F(NVFuserTest, FusionSerialSmemWriteParallelRead2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeConcreteTensor({128, 6});
+  TensorView* tv1 = makeConcreteTensor({128, 6});
+  TensorView* tv2 = makeConcreteTensor({128, 6});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addInput(tv2);
+
+  TensorView* tv3 = add(tv0, tv1);
+  TensorView* tv4 = add(tv3, tv2);
+
+  fusion.addOutput(tv4);
+
+  //  Use shared memory
+  tv3->setMemoryType(MemoryType::Shared);
+
+  // Split and parallelize t4,
+  //  the parallelized dimension in t4 will not
+  // map across to the shared mem tensor, t3. So
+  // there will need to be a sync before use of t3.
+  tv4->split(0, 2);
+  tv4->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({128, 6}, options);
+  at::Tensor t1 = at::randn({128, 6}, options);
+  at::Tensor t2 = at::randn({128, 6}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1, t2});
+  auto cg_outputs = fe.runFusion({t0, t1, t2});
+
+  auto ref = t0 + t1 + t2;
+
+  testValidate(&fusion, cg_outputs, {t0, t1, t2}, {ref}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionPropagateParallelTypesToSiblings_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

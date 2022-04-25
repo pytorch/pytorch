@@ -126,6 +126,18 @@ void SyncMap::build(Fusion* fusion) {
       // Tracking for quick check later
       std::unordered_set<IterDomain*> producer_within_compute_at;
 
+      // Get the parallel types that producer will be predicated off in producer
+      // writes.
+      //  In this case we need a sync whether the producer-consumer axes are
+      //  mapped or not since the predicate pass will generate pattern like
+      //  below to eliminate redundant writes: if(threadIdx.x == 0)
+      //    shared[threadIdx.x + i] = ...
+      // We will need a raw sync after this pattern for correctness.
+      auto producer_redundant_types = GpuLower::current()
+                                          ->threadPredMap()
+                                          .getPredicateInfo(producer)
+                                          .redundant_types;
+
       for (const auto producer_i : c10::irange(producer->nDims())) {
         auto producer_axis = producer->axis(producer_i);
         auto producer_ptype =
@@ -197,6 +209,14 @@ void SyncMap::build(Fusion* fusion) {
 
           auto p_id = producer_parallel_ids[parallel_type_i];
           auto c_id = consumer_parallel_ids[parallel_type_i];
+
+          // If consumer is parallelized with this type but producer is
+          //  predicated redundant on this type. This parallel dimension
+          //  is a RAW dimension. See test: FusionSeriaSmemWriteParallelRead1/2
+          if (c_id != nullptr && producer_redundant_types.get(parallel_type)) {
+            raw_dims.set(parallel_type);
+            continue;
+          }
 
           if (p_id == nullptr && c_id == nullptr) {
             continue;
