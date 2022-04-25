@@ -184,6 +184,18 @@ $4 = torch._ops.aten.slice_copy.Tensor($3, 0, 2, 4)
 $5 = torch._ops.aten.slice_copy.Tensor($4, 1, 2, 4)
 $6 = torch._ops.aten.expand_copy.default($0, [2, 2])""")
 
+    def test_cat(self):
+        def f(x):
+            out = torch.empty(0)
+            torch.cat((x,), out=out)
+            return out
+        self.assert_functionalization(f, torch.ones(2, 2))
+        logs = self.get_logs(f, torch.ones(2, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.cat.default([LoggingTensor(tensor([[1., 1.],
+        [1., 1.]]))])""")
+
     def test_diagonal(self):
         def f(x):
             # test: view ops that take a subset of the original tensor (select/diagonal)
