@@ -8,7 +8,7 @@ import unittest
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp.utils import (
+from torch.distributed.fsdp._utils import (
     _apply_to_tensors,
     _replace_by_prefix,
 )

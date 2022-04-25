@@ -26,7 +26,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from .utils import _replace_by_prefix
+from ._utils import _replace_by_prefix
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
