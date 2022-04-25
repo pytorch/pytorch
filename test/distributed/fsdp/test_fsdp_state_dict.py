@@ -62,17 +62,18 @@ STATE_DICT_MAPPING = {
 }
 
 _BUFFER_DIM = 42
+_BUFFER_NAME = "buffer"
 
 
 class Model(Module):
     def __init__(self, wrap_fsdp):
         super().__init__()
         self.inner = Linear(*INNER_SHAPE)
-        self.inner.register_buffer("buffer", torch.ones(_BUFFER_DIM, device="cuda"))
+        self.inner.register_buffer(_BUFFER_NAME, torch.ones(_BUFFER_DIM, device="cuda"))
         if wrap_fsdp:
             self.inner = FSDP(self.inner)
         self.outer = Linear(*OUTER_SHAPE)
-        self.register_buffer("buffer", torch.ones(_BUFFER_DIM, device="cuda"))
+        self.register_buffer(_BUFFER_NAME, torch.ones(_BUFFER_DIM, device="cuda"))
 
     def forward(self, x):
         # Forward twice.
@@ -96,7 +97,7 @@ class TestFSDPStateDict(FSDPTest):
             FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs),
             nn.Linear(10, 10, bias=False).cuda(),
         )
-        model.register_buffer("buffer", torch.ones(_BUFFER_DIM, device="cuda"))
+        model.register_buffer(_BUFFER_NAME, torch.ones(_BUFFER_DIM, device="cuda"))
 
         model = FSDP(
             model,
@@ -107,7 +108,7 @@ class TestFSDPStateDict(FSDPTest):
 
     def _get_simple_model(self, *fsdp_args, **fsdp_kwargs):
         model = nn.Linear(10, 10, bias=False).cuda()
-        model.register_buffer("buffer", torch.ones(_BUFFER_DIM, device="cuda"))
+        model.register_buffer(_BUFFER_NAME, torch.ones(_BUFFER_DIM, device="cuda"))
         model = FSDP(model, *fsdp_args, **fsdp_kwargs)
         return model
 
@@ -121,23 +122,27 @@ class TestFSDPStateDict(FSDPTest):
             )
         )
 
-    def _validate_buffers(self, buffer_names, state_dict):
+    def _validate_buffers(self, state_dict):
+        "buffer"
+        "inner.buffer"
         buffer_tensors = [
-            t for n, t in state_dict.items() if n in buffer_names
+            t for n, t in state_dict.items() if _BUFFER_NAME in n
         ]
-        self.assertNotEqual([], buffer_tensors)
         for b in buffer_tensors:
             self.assertNotEqual(b.device, torch.device("cpu"))
             self.assertEqual(_BUFFER_DIM, b.numel())
 
     def _validate_state_dict_contents(
-        self, fsdp_state_dict, state_dict_rank0_and_offload, buffer_names, ignore_keys=None
+        self, fsdp_state_dict, state_dict_rank0_and_offload, ignore_keys=None
     ):
         if state_dict_rank0_and_offload:
             if self.rank == 0:
                 self.assertNotEqual(fsdp_state_dict, {})
                 for key, tensor in fsdp_state_dict.items():
-                    if key in buffer_names or ignore_keys is not None and key in ignore_keys:
+                    if (
+                        _BUFFER_NAME in key or ignore_keys is not None
+                        and key in ignore_keys
+                    ):
                         continue
                     self.assertEqual(
                         tensor.device, torch.device("cpu"),
@@ -175,15 +180,12 @@ class TestFSDPStateDict(FSDPTest):
                 model, cpu_offload.offload_params, fp16
             )
 
-        with model.summon_full_params(model):
-            buffer_names = dict(model.named_buffers()).keys()
-
         self._validate_state_dict_contents(
-            fsdp_state_dict, state_dict_rank0_and_offload, buffer_names
+            fsdp_state_dict, state_dict_rank0_and_offload
         )
 
         if not state_dict_rank0_and_offload or self.rank == 0:
-            self._validate_buffers(buffer_names, fsdp_state_dict)
+            self._validate_buffers(fsdp_state_dict)
 
         # buffers are always on GPU and unsharded.
         if fp16:
@@ -258,14 +260,11 @@ class TestFSDPStateDict(FSDPTest):
         with fsd_mgr:
             state_dict = {k: v.clone() for k, v in model.state_dict().items()}
 
-        with model.summon_full_params(model):
-            buffer_names = dict(model.named_buffers()).keys()
-
         self._validate_state_dict_contents(
-            state_dict, state_dict_rank0_and_offload, buffer_names=buffer_names
+            state_dict, state_dict_rank0_and_offload,
         )
         if not state_dict_rank0_and_offload or self.rank == 0:
-            self._validate_buffers(buffer_names, state_dict)
+            self._validate_buffers(state_dict)
 
         _zero_model(model)
 
@@ -386,15 +385,12 @@ class TestFSDPStateDict(FSDPTest):
         with sd_mgr:
             fsdp_state_dict = model.state_dict()
 
-        with model.summon_full_params(model):
-            buffer_names = dict(model.named_buffers()).keys()
-
         self._validate_state_dict_contents(
-            fsdp_state_dict, state_dict_rank0_and_offload, buffer_names=buffer_names
+            fsdp_state_dict, state_dict_rank0_and_offload,
         )
 
         if not state_dict_rank0_and_offload or self.rank == 0:
-            self._validate_buffers(buffer_names, fsdp_state_dict)
+            self._validate_buffers(fsdp_state_dict)
 
         # Create zeroed local model
         blank_local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
@@ -529,10 +525,7 @@ class TestFSDPStateDict(FSDPTest):
         with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
             sd = fsdp_model.state_dict()
 
-        with fsdp_model.summon_full_params(fsdp_model):
-            buffer_names = dict(fsdp_model.named_buffers()).keys()
-
-        self._validate_buffers(buffer_names, sd)
+        self._validate_buffers(sd)
 
         with FSDP.summon_full_params(fsdp_model):
             fsdp_params = deepcopy(list(fsdp_model.parameters()))

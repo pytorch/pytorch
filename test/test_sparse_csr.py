@@ -255,6 +255,50 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int64, device=device), sparse.col_indices())
             self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=dtype, device=device), sparse.values())
 
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    def test_sparse_csr_select(self, device, dtype):
+        batch_shape = (2, 3)
+        crow_indices = torch.tensor([0, 2, 4], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        col_indices = torch.tensor([0, 1, 0, 1], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        values = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(6, 1).reshape(*batch_shape, -1)
+        sparse = torch.sparse_csr_tensor(crow_indices,
+                                         col_indices,
+                                         values,
+                                         size=(*batch_shape, 2, 10),
+                                         dtype=dtype,
+                                         device=device)
+
+        # select from batch dimensions
+        sparse_selected12 = sparse.select(1, 2)
+        expected_sparse_selected12 = torch.sparse_csr_tensor(crow_indices.select(1, 2).contiguous(),
+                                                             col_indices.select(1, 2).contiguous(),
+                                                             values.select(1, 2).contiguous(),
+                                                             size=(2, 2, 10),
+                                                             dtype=dtype,
+                                                             device=device)
+        self.assertEqual(expected_sparse_selected12, sparse_selected12)
+
+        # select from rows or columns
+        sparse_non_batched = sparse[0, 0]
+        for selects_args in [(0, 0), (1, 1)]:
+            sparse_selected = sparse_non_batched.select(*selects_args)
+            dense_selected = sparse_non_batched.to_dense().select(*selects_args)
+            self.assertEqual(dense_selected, sparse_selected)
+
+        # index a single element
+        self.assertEqual(sparse[0, 0, 0, 0], sparse.to_dense()[0, 0, 0, 0])
+
+        # selecting from rows or columns for batched CSR is not yet implemented
+        with self.assertRaisesRegex(RuntimeError, "selecting rows or columns is not implemented for batched"):
+            sparse.select(-2, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "selecting rows or columns is not implemented for batched"):
+            sparse.select(-1, 0)
+
+        # assigning to sparse trhough indexing is disabled
+        with self.assertRaisesRegex(TypeError, "Cannot assign to a sparse tensor"):
+            sparse[0, 0, 0, 0] = 99.0
+
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
     def test_empty(self, device, dtype):
