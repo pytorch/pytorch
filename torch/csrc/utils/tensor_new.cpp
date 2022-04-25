@@ -17,6 +17,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/DLConvertor.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/dlpack.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
@@ -268,6 +269,7 @@ Tensor internal_new_from_data(
   // autograd code doesn't really matter, because requires_grad is always false
   // here.
   Tensor tensor;
+  Tensor data_tensor;
   {
     at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
@@ -292,7 +294,29 @@ Tensor internal_new_from_data(
           "Expected a Storage of type ", scalar_type,
           " or an _UntypedStorage, but got ", storage_scalar_type);
       tensor = at::empty(sizes, at::initialTensorOptions().dtype(is_typed_storage ? storage_scalar_type : inferred_scalar_type).pinned_memory(pin_memory).device(storage.device()));
-      tensor.set_(storage);
+
+      // See Note [Functionalization <> torch.Tensor Constructor]
+      // Functionalization has the same wrapper-tensor problem that functorch has with the torch.Tensor ctr.
+      // It can't deal with it in the same way as easily, though (skip wrapping during empty(), wrap in the .to() call).
+      // Why? My argument goes:
+      // - We can't easily get at::empty(..., device=kXLA) to avoid returning a wrapper tensor
+      //   In functorch land with grad() and functionalize(), we can rely on TLS to toggle whether or not
+      //   our factory functions get wrapped in a tensor wrapper object.
+      // - With functional backends like XLA/LTC though, we *also* want torch.empty calls to return a wrapper,
+      //   but we don't have some outer python context to set TLS with.
+      // - We could potentially make some invasive changes to BackendSelect kernels to get that routing to work,
+      //   but instead the current plan is to let it be the responsibility of the backend factory kernels:
+      //   LazyNativeFunctions::empty is explicitly responsible for wrapping its output into a FunctionalTensorWrapper.
+      // - That leaves us with the problem described here though: at::empty() is going to return a wrapper.
+      //   One way to generalize this would be to make "wrapper tensor" a first class concept,
+      //   e.g. by giving TensorImpl a virtual unwrap() function (guarded to error on normal TensorImpls).
+      if (at::functionalization::impl::isFunctionalTensor(tensor)) {
+        at::functionalization::impl::from_functional_tensor(tensor).set_(storage);
+      } else {
+        data_tensor = tensor;
+        tensor.set_(storage);
+      }
+
 
     } else {
       TensorOptions opts = at::initialTensorOptions().dtype(inferred_scalar_type);
@@ -303,10 +327,19 @@ Tensor internal_new_from_data(
         return at::empty(sizes, opts.device(device));
       }
       tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
-      if (c10::multiply_integers(tensor.sizes()) != 0) {
+
+      // See Note [Functionalization <> torch.Tensor Constructor]
+      at::Tensor data_tensor;
+      if (at::functionalization::impl::isFunctionalTensor(tensor)) {
+        data_tensor = at::functionalization::impl::from_functional_tensor(tensor);
+      } else {
+        data_tensor = tensor;
+      }
+
+      if (c10::multiply_integers(data_tensor.sizes()) != 0) {
         recursive_store(
-            (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-            inferred_scalar_type, tensor.dtype().itemsize(), data);
+            (char*)data_tensor.data_ptr(), data_tensor.sizes(), data_tensor.strides(), 0,
+            inferred_scalar_type, data_tensor.dtype().itemsize(), data);
       }
     }
   }
