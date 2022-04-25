@@ -1426,7 +1426,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       at::parallel_for(0, index_len, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
           const auto* src = ptr_index + start;
           auto* dst = ptr_nneg_index + start;
-          for (const auto i : c10::irange(start, end)) {
+          for (const auto _ : c10::irange(start, end)) {
             auto idx = *src++;
             if (idx < -size || idx >= size) {
               TORCH_CHECK_INDEX(false,
@@ -1586,7 +1586,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
             auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
 
-            for (const auto ii : c10::irange(start, end)) {
+            for (const auto _ : c10::irange(start, end)) {
               const auto count = *ptr_tid_int_counts++;
               const auto i = *ptr_tid_src_int_idx++;
               const auto j = *ptr_tid_sorted_int_idx++;
@@ -1656,7 +1656,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         else {
           auto* ptr_counts = counts.data_ptr<int64_t>();
           const auto* ptr_vals = t.data_ptr<int64_t>();
-          for (const auto i : c10::irange(t.numel())) {
+          for (const auto _ : c10::irange(t.numel())) {
             ++ptr_counts[*ptr_vals++];
           }
         }
