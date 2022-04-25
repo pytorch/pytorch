@@ -1209,6 +1209,11 @@ def _wrap_all_tensors_to_functional(tensor_pytree, level):
 def _maybe_unwrap_functional_tensor(maybe_tensor, *, reapply_views: bool):
     if not isinstance(maybe_tensor, torch.Tensor):
         return maybe_tensor
+    if not torch._is_functional_tensor(maybe_tensor):
+        # If it's not a functional tensor, just return it.
+        # This can happen if we functionalize a fn that returns a global,
+        # which was never wrapped properly.
+        return maybe_tensor
     return _unwrap_functional_tensor(maybe_tensor, reapply_views)
 
 
