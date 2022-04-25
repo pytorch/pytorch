@@ -48,7 +48,7 @@ class TestDTypeInfo(TestCase):
             self.assertEqual(xinfo.max, xninfo.max)
             self.assertEqual(xinfo.min, xninfo.min)
             self.assertEqual(xinfo.eps, xninfo.eps)
-            self.assertEqual(xinfo.smallest_normal, xninfo.smallest_normal)
+            self.assertEqual(xinfo.tiny, xninfo.tiny)
             self.assertEqual(xinfo.resolution, xninfo.resolution)
             self.assertEqual(xinfo.dtype, xninfo.dtype)
             if not dtype.is_complex:
@@ -62,7 +62,8 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(xinfo.max, 3.38953e+38)
         self.assertEqual(xinfo.min, -3.38953e+38)
         self.assertEqual(xinfo.eps, 0.0078125)
-        self.assertEqual(xinfo.smallest_normal, 1.17549e-38)
+        self.assertEqual(xinfo.tiny, 1.17549e-38)
+        self.assertEqual(xinfo.tiny, xinfo.smallest_normal)
         self.assertEqual(xinfo.resolution, 0.01)
         self.assertEqual(xinfo.dtype, "bfloat16")
         torch.set_default_dtype(x.dtype)

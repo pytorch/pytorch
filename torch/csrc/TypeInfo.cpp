@@ -175,6 +175,11 @@ static PyObject* THPFInfo_smallest_normal(THPFInfo* self, void*) {
   });
 }
 
+static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
+  // see gh-70909, essentially the array_api prefers smallest_normal over tiny
+  return THPFInfo_smallest_normal(self, nullptr);
+}
+
 static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::kHalf, at::ScalarType::BFloat16, self->type, "digits10", [] {
     return PyFloat_FromDouble(
@@ -198,6 +203,7 @@ PyObject* THPFInfo_str(THPFInfo* self) {
   oss << ", max=" << PyFloat_AsDouble(THPFInfo_max(self, nullptr));
   oss << ", eps=" << PyFloat_AsDouble(THPFInfo_eps(self, nullptr));
   oss << ", smallest_normal=" << PyFloat_AsDouble(THPFInfo_smallest_normal(self, nullptr));
+  oss << ", tiny=" << PyFloat_AsDouble(THPFInfo_tiny(self, nullptr));
   oss << ", dtype=" << PyUnicode_AsUTF8(THPFInfo_dtype(self, nullptr)) << ")";
 
   return THPUtils_packString(oss.str().c_str());
@@ -223,6 +229,7 @@ static struct PyGetSetDef THPFInfo_properties[] = {
     {"max", (getter)THPFInfo_max, nullptr, nullptr, nullptr},
     {"min", (getter)THPFInfo_min, nullptr, nullptr, nullptr},
     {"smallest_normal", (getter)THPFInfo_smallest_normal, nullptr, nullptr, nullptr},
+    {"tiny", (getter)THPFInfo_tiny, nullptr, nullptr, nullptr},
     {"resolution", (getter)THPFInfo_resolution, nullptr, nullptr, nullptr},
     {"dtype", (getter)THPFInfo_dtype, nullptr, nullptr, nullptr},
     {nullptr}};

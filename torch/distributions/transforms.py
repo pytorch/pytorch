@@ -575,7 +575,7 @@ class PowerTransform(Transform):
 
 def _clipped_sigmoid(x):
     finfo = torch.finfo(x.dtype)
-    return torch.clamp(torch.sigmoid(x), min=finfo.smallest_normal, max=1. - finfo.eps)
+    return torch.clamp(torch.sigmoid(x), min=finfo.tiny, max=1. - finfo.eps)
 
 
 class SigmoidTransform(Transform):
@@ -595,7 +595,7 @@ class SigmoidTransform(Transform):
 
     def _inverse(self, y):
         finfo = torch.finfo(y.dtype)
-        y = y.clamp(min=finfo.smallest_normal, max=1. - finfo.eps)
+        y = y.clamp(min=finfo.tiny, max=1. - finfo.eps)
         return y.log() - (-y).log1p()
 
     def log_abs_det_jacobian(self, x, y):
@@ -924,7 +924,7 @@ class StickBreakingTransform(Transform):
         sf = 1 - y_crop.cumsum(-1)
         # we clamp to make sure that sf is positive which sometimes does not
         # happen when y[-1] ~ 0 or y[:-1].sum() ~ 1
-        sf = torch.clamp(sf, min=torch.finfo(y.dtype).smallest_normal)
+        sf = torch.clamp(sf, min=torch.finfo(y.dtype).tiny)
         x = y_crop.log() - sf.log() + offset.log()
         return x
 

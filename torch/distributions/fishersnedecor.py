@@ -65,7 +65,7 @@ class FisherSnedecor(Distribution):
         #   Y = df2 * df1 * X1 / (df1 * df2 * X2) = X1 / X2 ~ F(df1, df2)
         X1 = self._gamma1.rsample(sample_shape).view(shape)
         X2 = self._gamma2.rsample(sample_shape).view(shape)
-        tiny = torch.finfo(X2.dtype).smallest_normal
+        tiny = torch.finfo(X2.dtype).tiny
         X2.clamp_(min=tiny)
         Y = X1 / X2
         Y.clamp_(min=tiny)

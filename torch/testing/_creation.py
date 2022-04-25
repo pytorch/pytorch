@@ -151,10 +151,10 @@ def make_tensor(
         if dtype in _integral_types or dtype is torch.bool:
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in _floating_types:
-            replace_with = torch.tensor(torch.finfo(dtype).smallest_normal, device=device, dtype=dtype)
+            replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
         else:  # dtype in _complex_types:
             float_dtype = torch.float if dtype is torch.cfloat else torch.double
-            float_eps = torch.tensor(torch.finfo(float_dtype).smallest_normal, device=device, dtype=float_dtype)
+            float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
         result[result == 0] = replace_with
 

@@ -26,6 +26,7 @@ bits            int     The number of bits occupied by the type.
 eps             float   The smallest representable number such that ``1.0 + eps != 1.0``.
 max             float   The largest representable number.
 min             float   The smallest representable number (typically ``-max``).
+tiny            float   The smallest positive normal number. Equivalent to ``smallest_normal``.
 smallest_normal float   The smallest positive normal number. See notes.
 resolution      float   The approximate decimal resolution of this type, i.e., ``10**-precision``.
 ==========      =====   ========================================

@@ -94,7 +94,7 @@ class LKJCholesky(Distribution):
         u_hypersphere[..., 0, :].fill_(0.)
         w = torch.sqrt(y) * u_hypersphere
         # Fill diagonal elements; clamp for numerical stability
-        eps = torch.finfo(w.dtype).smallest_normal
+        eps = torch.finfo(w.dtype).tiny
         diag_elems = torch.clamp(1 - torch.sum(w**2, dim=-1), min=eps).sqrt()
         w += torch.diag_embed(diag_elems)
         return w

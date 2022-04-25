@@ -876,7 +876,7 @@ class TestUnaryUfuncs(TestCase):
                max: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, inf, -inf],
                inf: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]})
 
-        test_helper(torch.finfo(dtype).smallest_normal, torch.finfo(dtype).max)
+        test_helper(torch.finfo(dtype).tiny, torch.finfo(dtype).max)
 
     @onlyCPU
     @slowTest
@@ -977,7 +977,7 @@ class TestUnaryUfuncs(TestCase):
         # We also need to be careful when we are very close to 0, as the
         # derivative's denominator is squared, and there are some floats
         # that are positive and whose squares are zero.
-        a = torch.tensor([0.0, torch.finfo(torch.double).smallest_normal, 1.0],
+        a = torch.tensor([0.0, torch.finfo(torch.double).tiny, 1.0],
                          dtype=dtype,
                          requires_grad=True,
                          device=device)
@@ -1216,7 +1216,7 @@ class TestUnaryUfuncs(TestCase):
 
         # NaN, inf, -inf are tested in reference_numerics tests.
         info = torch.finfo(dtype)
-        min, max, eps, tiny = info.min, info.max, info.eps, info.smallest_normal
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
         t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
         check_equal(t, torch.i0, scipy.special.i0)
         check_equal(t, torch.special.i0e, scipy.special.i0e)
@@ -1239,7 +1239,7 @@ class TestUnaryUfuncs(TestCase):
 
         # Skip testing NaN, inf, -inf since they are tested in reference_numerics tests.
         info = torch.finfo(dtype)
-        min, max, eps, tiny = info.min, info.max, info.eps, info.smallest_normal
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
         t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
         check_equal(t)
 
@@ -1254,7 +1254,7 @@ class TestUnaryUfuncs(TestCase):
 
         # Skip testing NaN, inf, -inf since they are tested in reference_numerics tests.
         info = torch.finfo(dtype)
-        min, max, eps, tiny = info.min, info.max, info.eps, info.smallest_normal
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
         t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
         check_equal(t)
 
