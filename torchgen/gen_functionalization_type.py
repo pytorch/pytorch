@@ -20,7 +20,6 @@ from torchgen.context import (
 from torchgen.model import (
     Argument,
     NativeFunction,
-    SchemaKind,
     BackendIndex,
     Tag,
     FunctionSchema,
@@ -93,23 +92,7 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
 
 
 def modifies_arguments(f: NativeFunction) -> bool:
-    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
-
-
-# This function constructs the return statement for the kernels that contain mutations
-# It mostly just needs to special case multi-output returns to wrap the result in a tuple
-def return_str(f: NativeFunction) -> str:
-    # Need to check both # outs and # returns. Why?
-    # out= ops with a mutable Tensor(a!)[] argument are expected to have a void return type.
-    if len(f.func.arguments.out) != 0 and len(f.func.returns) != 0:
-        if len(f.func.arguments.out) > 1:
-            return_names = ", ".join(a.name for a in f.func.arguments.out)
-            return f"return {DispatcherSignature.from_schema(f.func).returns_type().cpp_type()}({return_names});"
-        else:
-            return f"return {f.func.arguments.out[0].name}"
-    if f.func.arguments.self_arg is not None and len(f.func.returns) != 0:
-        return f"return {f.func.arguments.self_arg.argument.name}"
-    return ""
+    return any(a.annotation is not None and a.annotation.is_write for a in f.func.arguments.flat_all)
 
 
 def wrapper_name(func: FunctionSchema) -> str:
@@ -351,6 +334,95 @@ def emit_view_functionalization_body(
     }}
 """
 
+def maybe_create_output(f: NativeFunction, var_name: str) -> str:
+    if len(f.func.returns) == 0:
+        return ''
+    return_type = dispatcher.returns_type(f.func.returns).remove_const_ref().cpp_type()
+    return f'{return_type} {var_name} = '
+
+def wrap_propagate_mutations_and_return(f: NativeFunction, functional_op: Optional[NativeFunction], inner_out_name: str) -> str:
+    if len(f.func.returns) > 1:
+        # Some assertions: We don't want any functions with a return type of "-> (Tensor(a!), Tensor)",
+        # because:
+        # (1) It's more annoying to handle properly
+        # (2) It's unnecessary - you can't method-chain on the first (mutated) output because it's part of a tuple.
+        # Instead, we expect the (a!) argument to not be returned.
+        mutable_rets = [r for r in f.func.returns if r.annotation is not None and r.annotation.is_write]
+        immutable_rets = [r for r in f.func.returns if r.annotation is None]
+        assert len(mutable_rets) == 0 or len(immutable_rets) == 0, f"""\
+Found a mutating operator ({f.func.name}) which returns multiple outputs, some of which alias the inputs and some that do not.
+ Instead, only the non-aliased outputs should be a part of the return type (and the mutations will happen by side effect)."""
+
+    # And with the above assumption, we can assume that returns are either aliased or not.
+    returns_are_aliased = any(r.annotation is not None for r in f.func.returns)
+    updates = []
+    return_names = []
+
+    if functional_op is None:
+        if returns_are_aliased:
+            # Returns are aliased, so we can just return the original inputs
+            for r in f.func.returns:
+                aliased_name = next(a for a in f.func.arguments.flat_all
+                                    if a.annotation is not None and a.annotation == r.annotation)
+                return_names.append(aliased_name.name)
+        else:
+            # Need to wrap and return the fresh outputs
+            return_is_tuple = len(f.func.returns) > 1
+            for (i, r) in enumerate(f.func.returns):
+                inner_ret: str = f'std::get<{i}>({inner_out_name})' if return_is_tuple else inner_out_name
+                updates.append(f"""\
+      auto output_{i} = at::functionalization::impl::to_functional_tensor({inner_ret});""")
+                return_names.append(f'output_{i}')
+    else:
+        # More assertions:
+        # We have some native functions that mutate their inputs, and also return fresh outputs
+        # (this applies to "running-average" type operators, like batch norm).
+        # If an operator has a schema like this:
+        #     foo(Tensor(a!) input) -> Tensor
+        # Then if a corresponding out-of-place version exists, we expect it to have the following schema:
+        #     foo.functional(Tensor input) -> (Tensor, Tensor)
+        # The first tensor(s) in the output should all correspond to the newly updated inputs.
+        # The last tensor(s) in the output should correspond to the original outputs of the function.
+        assert len(functional_op.func.returns) != 0
+        mutable_inputs = [a for a in f.func.arguments.flat_all if a.annotation is not None and a.annotation.is_write]
+        immutable_rets = [r for r in f.func.returns if r.annotation is None]
+        assert len(mutable_inputs) + len(immutable_rets) == len(functional_op.func.returns), f"""\
+Found a mutating operator ({f.func.name}) with {len(mutable_inputs)} mutable inputs
+ and {len(immutable_rets)} non-aliased return arguments
+ but found a corresponding out-of-place operator ({functional_op.func.name}) that had an incorrect number of return arguments.
+ Expected {len(mutable_inputs) + len(immutable_rets)} returns, but found {len(functional_op.func.returns)}."""
+
+        inner_return_is_tuple = len(functional_op.func.returns) > 1
+        for (i, a) in enumerate(mutable_inputs):
+            inner_ret = f'std::get<{i}>({inner_out_name})' if inner_return_is_tuple else inner_out_name
+            updates.append(f"""\
+      at::functionalization::impl::replace_({a.name}, {inner_ret});
+      at::functionalization::impl::commit_update({a.name});""")
+            if returns_are_aliased:
+                # If returns are aliased, we can directly return the inputs
+                return_names.append(a.name)
+
+        # If returns are not aliased, we need to return (and wrap) the output from the inner call
+        if not returns_are_aliased:
+            for (i, r) in enumerate(immutable_rets):
+                inner_ret = f'std::get<{len(mutable_inputs) + i}>({inner_out_name})' if inner_return_is_tuple else inner_out_name
+                updates.append(f"""\
+      auto output_{i} = at::functionalization::impl::to_functional_tensor({inner_ret});""")
+                return_names.append(f'output_{i}')
+
+    if len(f.func.returns) == 0:
+        return_str = ''
+    elif len(f.func.returns) == 1:
+        assert len(return_names) == 1
+        return_str = f'return {return_names[0]};'
+    else:
+        ret_names_str = ", ".join(return_names)
+        return_str = f"return {dispatcher.returns_type(f.func.returns).cpp_type()}({ret_names_str});"
+    updates_str = '\n'.join(updates)
+    return f"""\
+{updates_str}
+{return_str}"""
+
 
 # Generates the Functionalization kernel for:
 # - mutation ops (inplace and out= ops)
@@ -416,8 +488,8 @@ If this causes problems in your program, consider upstreaming the out-of-place o
       {unwrap_tensor_args_str}
       at::AutoDispatchSkipFunctionalize guard;
       // Redispatch as normally otherwise, since XLA has its own lowerings for special inplace ops.
-      at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
-      {return_str(f)};
+      {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
+      {wrap_propagate_mutations_and_return(f, None, 'tmp_output')};
     }}
 """
     else:
@@ -465,8 +537,8 @@ If this causes problems in your program, consider upstreaming the out-of-place o
         }} else {{
          // case 2: arguments are not functional tensors, so we no-op and redispatch.
          at::AutoDispatchSkipFunctionalize guard;
-         at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
-        {return_str(f)};
+         {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
+         {wrap_propagate_mutations_and_return(f, None, 'tmp_output')};
         }}
       }} else {{
         {return_type} tmp_output;
@@ -474,8 +546,7 @@ If this causes problems in your program, consider upstreaming the out-of-place o
           at::AutoDispatchSkipFunctionalize guard;
           tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});
         }}
-        {mutable_input_post_processing}
-        {return_str(f)};
+        {wrap_propagate_mutations_and_return(f, functional_op, 'tmp_output')}
       }}
     }}"""
 

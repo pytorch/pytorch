@@ -5784,6 +5784,10 @@
     CPU: fused_moving_avg_obs_fake_quant_cpu
     CUDA: fused_moving_avg_obs_fake_quant_cuda
 
+# out-of-place variant of _fused_moving_avg_obs_fq_helper, returning the updates running mins/maxs as outputs.
+- func: _fused_moving_avg_obs_fq_helper.functional(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor running_min, Tensor running_max, Tensor scale, Tensor zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor running_min, Tensor running_max, Tensor scale, Tensor zero_point, Tensor output, Tensor mask)
+  dispatch:
+    CompositeExplicitAutograd: fused_moving_avg_obs_fake_quant_functional
 
 - func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
   variants: function

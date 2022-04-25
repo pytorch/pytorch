@@ -2001,22 +2001,55 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
 
     # We need to easily map from [inplace_op_name] -> [functional_op] for the functionalization pass,
     # so here I generate a mapping from every operator name to its corresponding functional NativeFunction (if it exist).
+    def group_native_fns_by_mutability(
+        native_functions: Sequence[NativeFunction],
+    ) -> Dict[FunctionSchema, List[NativeFunction]]:
+        pre_grouped_native_functions: Dict[
+            FunctionSchema, List[NativeFunction]
+        ] = defaultdict(list)
+        for f in native_functions:
+            d = pre_grouped_native_functions[f.func.mutation_agnostic_signature()]
+            d.append(f)
+        return pre_grouped_native_functions
+
     pre_grouped_d: Dict[
-        FunctionSchema, Dict[SchemaKind, NativeFunction]
-    ] = pre_group_native_functions(native_functions)
-    to_functional_op: Dict[OperatorName, Optional[NativeFunction]] = {
-        k: v
-        for d in [
-            {
-                f.func.name: pre_grouped_d[func][SchemaKind.functional]
-                if SchemaKind.functional in pre_grouped_d[func].keys()
-                else None
-                for f in pre_grouped_d[func].values()
-            }
-            for func in pre_grouped_d.keys()
+        FunctionSchema, List[NativeFunction]
+    ] = group_native_fns_by_mutability(native_functions)
+    to_functional_op: Dict[OperatorName, Optional[NativeFunction]] = defaultdict(None)
+    for schema, funcs in pre_grouped_d.items():
+        # We can't use schemaKind() to detect mutability, because we have some mutable ops
+        # that are neither inplace nor out= ops (because they have mutable non-self, positional args)
+        immutable_funcs = [
+            f
+            for f in funcs
+            if not any(
+                a
+                for a in f.func.arguments.flat_all
+                if a.annotation is not None and a.annotation.is_write
+            )
         ]
-        for k, v in d.items()
-    }
+        mutable_funcs = [
+            f
+            for f in funcs
+            if any(
+                a
+                for a in f.func.arguments.flat_all
+                if a.annotation is not None and a.annotation.is_write
+            )
+        ]
+        if len(immutable_funcs) == 0:
+            # These ops collectively don't have an out-of-place op that we can use to functionalize
+            continue
+        elif len(immutable_funcs) == 1:
+            immutable_f = immutable_funcs[0]
+            for f in mutable_funcs:
+                to_functional_op[f.func.name] = immutable_f
+        else:
+            raise RuntimeError(
+                f"""\
+The following functions are ambiguous, because they share the same schema but are all functional: "\
+{', '.join(str(f.func.name) for f in immutable_funcs)}"""
+            )
 
     def functionalization_env_callable(
         g: Union[NativeFunction, NativeFunctionsViewGroup]

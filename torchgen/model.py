@@ -1137,8 +1137,8 @@ class FunctionSchema:
         modifies the self argument inplace; an out schema writes
         the result into an explicitly provided out argument.
         """
-        is_inplace = self.name.name.inplace
         is_out = bool(self.arguments.out)
+        is_inplace = self.name.name.inplace
         assert not (is_inplace and is_out)
         if is_inplace:
             return SchemaKind.inplace
@@ -1148,7 +1148,11 @@ class FunctionSchema:
             return SchemaKind.functional
 
     def signature(
-        self, *, strip_default: bool = False, strip_view_copy_name: bool = False
+        self,
+        *,
+        strip_default: bool = False,
+        convert_mutable_inputs_to_returns: bool = False,
+        strip_view_copy_name: bool = False,
     ) -> "FunctionSchema":
         """
         Certain schemas are 'related', in that they are simply
@@ -1183,6 +1187,20 @@ class FunctionSchema:
         if strip_view_copy_name and base_name.endswith("_copy"):
             base_name = base_name.replace("_copy", "")
 
+        if convert_mutable_inputs_to_returns:
+            # find mutable inputs that are not originally returned, and conver them to returns
+            returns_from_mutable_inputs = tuple(
+                Return(name=None, type=a.type, annotation=None)
+                for a in self.arguments.flat_all
+                if a.annotation is not None
+                and a.annotation.is_write
+                and not any(a.annotation == r.annotation for r in self.returns)
+            )
+            original_returns = tuple(map(strip_ret_annotation, self.returns))
+            returns = returns_from_mutable_inputs + original_returns
+        else:
+            returns = tuple(map(strip_ret_annotation, self.returns))
+
         return FunctionSchema(
             name=OperatorName(
                 name=BaseOperatorName(
@@ -1193,11 +1211,17 @@ class FunctionSchema:
                 overload_name="",  # stripped
             ),
             arguments=self.arguments.signature(strip_default=strip_default),
-            returns=tuple(map(strip_ret_annotation, self.returns)),
+            returns=returns,
         )
 
     def view_signature(self) -> "FunctionSchema":
         return self.signature(strip_view_copy_name=True)
+
+    def mutation_agnostic_signature(self) -> "FunctionSchema":
+        # This is used to group all mutable ops with their functional equivalents.
+        # We "convert mutable inputs to returns" because some mutable ops might modify their inputs inplace
+        # without returning them, while their functional equivalents need to return the new values
+        return self.signature(convert_mutable_inputs_to_returns=True)
 
     @property
     def modifies_arguments(self) -> bool:

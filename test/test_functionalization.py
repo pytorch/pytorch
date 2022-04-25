@@ -174,6 +174,17 @@ $2 = torch._ops.aten.add.Tensor($0, tensor([[1., 1.],
         [1., 1.],
         [1., 1.]]))""")
 
+    # Some ops that are mutable are neither inplace nor out= ops.
+    # They also need special handling.
+    def test_mutable_op_not_inplace_or_other(self):
+        def f(x):
+            return torch._fused_moving_avg_obs_fq_helper(x, x, x, x, x, x, x, 1.0, 1, 1, 0)
+
+        logs = self.get_logs(f, torch.ones(1))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1, $2, $3, $4, $5, $6 = torch._ops.aten._fused_moving_avg_obs_fq_helper.functional($0, $0, $0, $0, $0, $0, $0, 1.0, 1, 1, 0)""")
+
     def test_tensor_list_composite(self):
         def f(x):
             # Test an op with TensorList input
