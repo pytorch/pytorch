@@ -73,7 +73,6 @@ jobs:
           github_token: ${{ secrets.github_token }}
           reporter: github-pr-check
           level: warning
-          filter_mode: file
           flags: --linelength=120
 
 concurrency:
