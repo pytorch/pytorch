@@ -107,7 +107,7 @@ class TestUtils(TestCase):
         x, h = rnn(x)
         x = _apply_to_tensors(fill_fn, x)
         x, _ = nn.utils.rnn.pad_packed_sequence(x)
-        assert torch.sum(x) == 0
+        self.assertEqual(torch.sum(x), 0)
 
 
 instantiate_parametrized_tests(TestUtils)
