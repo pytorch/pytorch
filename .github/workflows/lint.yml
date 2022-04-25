@@ -49,7 +49,7 @@ jobs:
           echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
           echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
 
-      - name: Store annotatations
+      - name: Store annotations
         if: always() && github.event_name == 'pull_request'
         # Don't show this as an error; the above step will have already failed.
         continue-on-error: true
@@ -62,9 +62,15 @@ jobs:
           echo "::add-matcher::.github/lintrunner_problem_matcher.json"
 
           # Use jq to massage the output to look a little nicer in GitHub.
-          lintrunner --merge-base-with "${PR_BASE_SHA}" --json \
-            | jq '{file: .path, line: .line, column: .char, severity: .severity, code: .code, message: ("["+.code+"] "+ .name + ": " +.description)}' -c
-
+          lintrunner --merge-base-with "${PR_BASE_SHA}" --json | \
+            jq '{
+                  file: .path,
+                  line: .line,
+                  column: .char,
+                  severity: (if .severity == "advice" or .severity == "disabled" then "warning" else .severity end),
+                  code: .code,
+                  message: ("["+.code+"] "+ .name + ": " +.description)
+                }' -c
   quick-checks:
     name: quick-checks
     runs-on: ubuntu-18.04
