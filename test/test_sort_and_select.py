@@ -120,11 +120,9 @@ class TestSortAndSelect(TestCase):
             self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
 
             # Test argument sorting with and without stable
-            x = torch.tensor([1, 10, 2, 2, 3, 7, 7, 8, 9, 9] * 2)
-            ustable = torch.tensor([0, 10, 2, 3, 12, 13, 4, 14, 5, 6, 16, 15, 7, 17, 19, 18, 9, 8, 11, 1])
-            stablesort = torch.tensor([0, 10, 2, 3, 12, 13, 4, 14, 5, 6, 15, 16, 7, 17, 8, 9, 18, 19, 1, 11])
-            self.assertEqual(torch.argsort(x, stable=True), stablesort)
-            self.assertEqual(torch.argsort(x, stable=False), ustable)
+            x = torch.tensor([1, 10, 2, 2, 3, 7, 7, 8, 9, 9] * 3)
+            self.assertEqual(torch.argsort(x, stable=True), torch.sort(x, stable=True).indices)
+            self.assertEqual(torch.argsort(x, stable=False), torch.sort(x, stable=False).indices)
 
 
             # Test sorting with NaNs
