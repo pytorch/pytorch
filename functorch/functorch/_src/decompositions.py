@@ -39,11 +39,8 @@ def get_decompositions(aten_ops: List[torch._ops.OpOverload]):
     decompositions = {}
     for op in aten_ops:
         if op in packets_to_overloads:
-            if len(packets_to_overloads[op]) == 1:
-                op_overload = packets_to_overloads[op][0]
+            for op_overload in packets_to_overloads[op]:
                 decompositions[op_overload] = decomposition_table[op_overload]
-            else:
-                raise RuntimeError(f"Multiple decompositions for overloads found for {op}: {packets_to_overloads[op]}, please specify")
         elif op in decomposition_table:
             decompositions[op] = decomposition_table[op]
     return decompositions
