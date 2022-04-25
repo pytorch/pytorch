@@ -130,10 +130,7 @@ __global__ void indexing_backward_kernel(
 namespace at { namespace native {
 
 namespace {
-// FIXME: should these be in a header file somewhere so they can be shared across Scatter/Gather and Index?
 
-// Implement as functors since lambdas don't get optimized.
-class ReduceMultiply {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
@@ -744,10 +741,8 @@ void index_reduce_func_cuda_impl(
           init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::max();
           break;
-        case INDEX_OP::MEAN:
-          init_val = (scalar_t)0;
-          break;
         default:
+          init_val = (scalar_t)0;
           break;
       }
       // index_fill_ requires index to be a LongTensor
