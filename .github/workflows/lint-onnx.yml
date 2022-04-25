@@ -23,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: reviewdog/action-black@v3
+        continue-on-error: true
         with:
           github_token: ${{ secrets.github_token }}
           # Change reviewdog reporter if you need [github-pr-check, github-check, github-pr-review].
@@ -32,6 +33,7 @@ jobs:
           level: error
           filter_mode: file
       - uses: reviewdog/action-flake8@v3
+        continue-on-error: true
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-check
@@ -39,6 +41,7 @@ jobs:
           filter_mode: file
       - name: pyflakes
         uses: reviewdog/action-pyflakes@v1
+        continue-on-error: true
         with:
           github_token: ${{ secrets.github_token }}
           reporter: github-pr-check
@@ -46,6 +49,7 @@ jobs:
           filter_mode: file
       - name: misspell # Check spellings as well
         uses: reviewdog/action-misspell@v1
+        continue-on-error: true
         with:
           github_token: ${{ secrets.github_token }}
           locale: "US"
@@ -54,6 +58,7 @@ jobs:
           filter_mode: diff_context
       - name: markdownlint
         uses: reviewdog/action-markdownlint@v0.7
+        continue-on-error: true
         with:
           github_token: ${{ secrets.github_token }}
           reporter: github-pr-check
