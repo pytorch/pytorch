@@ -1120,8 +1120,9 @@ class FunctionSchema:
                 "Did you forget to mark an out argument as keyword-only?"
             )
         if self.arguments.out:
-            assert len(self.arguments.out) == len(self.returns) or len(self.returns) == 0, \
-                "Must return as many arguments as there are out arguments, or no return at all"
+            assert (
+                len(self.arguments.out) == len(self.returns) or len(self.returns) == 0
+            ), "Must return as many arguments as there are out arguments, or no return at all"
         if self.name.name.inplace:
             # TODO: fixme
             if not is_foreach_op(str(self.name)):
