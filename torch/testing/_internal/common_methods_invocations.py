@@ -7831,7 +7831,7 @@ def sample_inputs_binary_cross_entropy_with_logits(
         *[((S, S), dict(reduction=reduction)) for reduction in reductions],
         *make_weight_shape_kwargs(),
         *[((S, S), dict(reduction=reduction, pos_weight=make((S,), low=0))) for reduction in reductions],
-        *[((S, S), dict(reduction=reduction,  weight=make((S, S)), pos_weight=make((S,), low=0))) for reduction in reductions],
+        *[((S, S), dict(reduction=reduction, weight=make((S, S)), pos_weight=make((S,), low=0))) for reduction in reductions],
     ]
 
     for shape, kwargs in shapes_and_kwargs:
