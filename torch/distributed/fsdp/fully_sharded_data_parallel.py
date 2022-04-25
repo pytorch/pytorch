@@ -308,14 +308,15 @@ class _ExecOrderData():
             only issue warnings throughout the first deviating iteration and no
             longer check thereafter; this tracks the warning status.
     """
-    _all_flat_params: List[FlatParameter] = []
-    _param_to_unflat_param_names: Dict[FlatParameter, List[str]] = []
-    # Modified in the first iteration:
-    is_first_iter: bool = True
-    param_order: List[int] = []
-    # Modified in the subsequent iterations:
-    index: int = 0
-    warn_status: _ExecOrderWarnStatus = _ExecOrderWarnStatus.NONE
+    def __init__(self) -> None:
+        self._all_flat_params: List[FlatParameter] = []
+        self._param_to_unflat_param_names: Dict[FlatParameter, List[str]] = []
+        # Modified in the first iteration:
+        self.is_first_iter: bool = True
+        self.param_order: List[int] = []
+        # Modified in the subsequent iterations:
+        self.index: int = 0
+        self.warn_status: _ExecOrderWarnStatus = _ExecOrderWarnStatus.NONE
 
     def init(self, root_module: "FullyShardedDataParallel"):
         assert root_module._is_root, "This data structure should only be " \
