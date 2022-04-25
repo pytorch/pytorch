@@ -1,4 +1,4 @@
-name: Lint
+name: Lint ONNX
 
 on:
   pull_request:
@@ -42,7 +42,7 @@ jobs:
       - name: markdownlint
         uses: reviewdog/action-markdownlint@v0.7
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.github_token }}
           reporter: github-pr-check
           level: info
           filter_mode: file
@@ -51,7 +51,7 @@ jobs:
   lint-python-format:
     # Separated black/isort from other Python linters because we want this job to
     # fail and not affect other linters
-    name: Python format
+    name: black - isort
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -62,3 +62,16 @@ jobs:
         with:
           options: "--check --diff --color"
       - uses: isort/isort-action@master
+
+  lint-cpp:
+    name: Lint C++
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: reviewdog/action-cpplint@master
+        with:
+          github_token: ${{ secrets.github_token }}
+          reporter: github-pr-check
+          level: warning
+          filter_mode: file
+          flags: --linelength=120
