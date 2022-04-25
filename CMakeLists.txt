@@ -20,7 +20,9 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.15.0)
 endif()
 
 # find_package will respect <Package>_ROOT variables
-cmake_policy(SET CMP0074 NEW)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
+  cmake_policy(SET CMP0074 NEW)
+endif()
 
 # Files in CMAKE_MODULE_PATH are preferred over builtin modules
 cmake_policy(SET CMP0017 OLD)

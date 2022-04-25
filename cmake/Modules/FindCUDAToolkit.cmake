@@ -1016,10 +1016,12 @@ if(CUDAToolkit_FOUND)
       NO_DEFAULT_PATH)
 
   foreach(lib_name cupti cupti_static)
-    set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
-        INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_cupti_INCLUDE_DIR}")
-    set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
-        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_cupti_INCLUDE_DIR}")
+    if (TARGET CUDA::${lib_name})
+      set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+          INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_cupti_INCLUDE_DIR}")
+      set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
+          INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${CUDAToolkit_cupti_INCLUDE_DIR}")
+    endif()
   endforeach()
 
   _CUDAToolkit_find_and_add_import_lib(nvrtc DEPS cuda_driver)
