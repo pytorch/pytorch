@@ -144,6 +144,11 @@ void OptimizeGraph(
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
   UseVariadicStack(graph);
+  UseVariadicOp(
+      graph,
+      fromQualString("fbgemm::tbe_input_combine_with_length"),
+      fromQualString("static_runtime::variadic_tbe_input_combine_with_length"));
+
   EliminateTrivialEquallySplit(graph);
   EliminateExtraPermuteOps(graph);
 

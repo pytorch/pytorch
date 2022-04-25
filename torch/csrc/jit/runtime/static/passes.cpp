@@ -426,6 +426,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor)",
       c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::variadic_tbe_input_combine_with_length(...) -> (Tensor, Tensor, Tensor)",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
