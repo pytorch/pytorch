@@ -570,7 +570,7 @@ std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_cuda_impl( con
   const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
 
   if (!grad_hy.defined() && !grad_cy.defined()) {
-    return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
+    return std::tuple<Tensor, Tensor, Tensor>();
   }
   checkLSTMBackwardSizes({grad_hy, "grad_hy", 1}, {grad_cy, "grad_cy", 2},
                          {cx, "cx", 3}, {cy, "cy", 4},
