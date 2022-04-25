@@ -1369,8 +1369,6 @@ class IrParser {
         REGISTER_PARSE_RULE(
             ptr_op,
             {
-              auto fusion = FusionGuard::getCurFusion();
-
               // TODO: handle channels last
               MemoryFormat format;
               std::list<Val*> list_val;
@@ -2455,12 +2453,8 @@ class IrParser {
             TORCH_INTERNAL_ASSERT(false, "not implemented yet");
           },
           [](const Node* node) -> bool {
-            // We only profile `linear` layer with bias.
-            if (node->input(2)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              return false;
-            }
-            return true;
+            // We only profile `linear` layer but not fusing it.
+            return false;
           });
     }
 
