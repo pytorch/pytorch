@@ -42,7 +42,6 @@ from torch.onnx import (
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
 
-
 def is_in_onnx_export():
     global __IN_ONNX_EXPORT
     return __IN_ONNX_EXPORT
@@ -50,7 +49,6 @@ def is_in_onnx_export():
 
 # Skip check due to cannot import IValue from torch._C
 _params_dict = {}  # type: ignore[var-annotated]
-
 
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode):
@@ -98,8 +96,6 @@ def select_model_mode_for_export(model, mode):
     finally:
         if not isinstance(model, torch.jit.ScriptFunction):
             model.train(is_originally_training)
-
-
 @contextlib.contextmanager
 def disable_apex_o2_state_dict_hook(model):
     # Apex O2 hook state_dict to return fp16 weights as fp32.
