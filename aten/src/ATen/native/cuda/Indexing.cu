@@ -131,6 +131,7 @@ namespace at { namespace native {
 
 namespace {
 
+class ReduceMultiply {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
