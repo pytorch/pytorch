@@ -142,9 +142,9 @@ void RegisterDecomposition(
     std::shared_ptr<Graph> g) {
   loadDecompositionFunctions();
   std::lock_guard<std::mutex> guard(lock);
-  auto * func = new GraphFunction(schema.name(), g, nullptr);
-  user_registered_funcs.emplace(&schema, func);
-  schema_to_function[&schema] = func;
+  user_registered_funcs.emplace(
+      &schema, new GraphFunction(schema.name(), g, nullptr));
+  schema_to_function[&schema] = user_registered_funcs[&schema].get();
   schema_to_decomposition[&schema] = g;
 }
 
