@@ -257,7 +257,7 @@ def broadcast(*args):
             # TODO: add a pass to remove unnecessary broadcast_in_dim calls
             return prims.broadcast_in_dim(x, common_shape, dims)
         else:
-            assert False, "Unexpected type when broadcasting: " + str(type(x)) + "!"
+            raise RuntimeError("Unexpected type when broadcasting: " + str(type(x)) + "!")
 
     return tuple(map(lambda x: _maybe_broadcast(x, common_shape), args))
 
