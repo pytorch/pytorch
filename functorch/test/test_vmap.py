@@ -3261,6 +3261,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu_factor_ex', ''),
         xfail('diagflat', ''),
         xfail('special.log_ndtr'),
+        xfail('block_diag'),  # aten::slice_copy.Tensor hit the vmap fallback which is currently disabled
         xfail('nn.functional.triplet_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
@@ -3281,10 +3282,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('scatter_reduce', 'mean'),
         xfail('nn.functional.max_unpool3d', ''),
-
-        # aten::expand_copy hit the vmap fallback which is currently disabled
-        xfail('block_diag'),
-        xfail('diag_embed'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         def test():
