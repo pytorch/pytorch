@@ -1001,22 +1001,32 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    def test_index_select_exhaustive_nnz_larger_than_dim_size(self, device, dtype, coalesced):
-        sizes = [2, 3, 4]
+    def test_index_select_exhaustive(self, device, dtype, coalesced):
+        sizes = [3, 3, 4]
         t = make_tensor(sizes, dtype=dtype, device=device)
         t_sparse = t.to_sparse().coalesce() if coalesced else t.to_sparse()
+        t_small_sparse, _, _ = self._gen_sparse(len(sizes), 2, sizes, dtype, device, coalesced)
+        t_small = t_small_sparse.to_dense()
         for d in range(len(sizes)):
             # NOTE: indices are negative
             idx_dim_d_range = list(range(-sizes[d], 0))
-            for idx_len in range(d, d + 3):
+            for idx_len in range(sizes[d], sizes[d] + 1):
                 # creates all possible valid indices into dim d of lenght idx_len
                 for idx in itertools.product(*itertools.repeat(idx_dim_d_range, idx_len)):
                     t_idx = torch.tensor(idx, dtype=torch.long, device=device)
+
                     # NOTE: index_select for dense does not support negative indices,
                     # hence + sizes[d]. See https://github.com/pytorch/pytorch/issues/76347
+
+                    # tests the nnz > sizes[d] branch
                     dense_result = t.index_select(d, t_idx + sizes[d])
                     sparse_result = t_sparse.index_select(d, t_idx)
                     self.assertEqual(dense_result, sparse_result)
+
+                    # tests the nnz <= sizes[d] branch
+                    small_dense_result = t_small.index_select(d, t_idx + sizes[d])
+                    small_sparse_result = t_small_sparse.index_select(d, t_idx)
+                    self.assertEqual(small_dense_result, small_sparse_result)
 
     @onlyCPU
     @coalescedonoff
