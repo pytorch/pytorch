@@ -15,14 +15,6 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.15.0)
   cmake_policy(SET CMP0092 NEW)
 endif()
 
-# find_package will respect <Package>_ROOT variables
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
-  cmake_policy(SET CMP0074 NEW)
-endif()
-
-# Files in CMAKE_MODULE_PATH are preferred over builtin modules
-cmake_policy(SET CMP0017 OLD)
-
 if(NOT CMAKE_VERSION VERSION_LESS 3.10)
   set(FIND_CUDA_MODULE_DEPRECATED ON)
 endif()
@@ -1092,10 +1084,6 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(DIRECTORY
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
-      DESTINATION share/cmake/Caffe2/
-      COMPONENT dev)
-  install(FILES
-      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 
