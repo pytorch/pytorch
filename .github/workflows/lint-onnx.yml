@@ -31,6 +31,19 @@ jobs:
           # GitHub Status Check won't become failure with a warning.
           level: error
           filter_mode: file
+      - uses: reviewdog/action-flake8@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check
+          level: error
+          filter_mode: file
+      - name: pyflakes
+        uses: reviewdog/action-pyflakes@v1
+        with:
+          github_token: ${{ secrets.github_token }}
+          reporter: github-pr-check
+          level: warning
+          filter_mode: file
       - name: misspell # Check spellings as well
         uses: reviewdog/action-misspell@v1
         with:
