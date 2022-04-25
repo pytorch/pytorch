@@ -2303,8 +2303,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
       invalidArgument("requires empty output on non-root");
     }
     outputs = {};
-    // append a empty tensor to the list, we don't use it but
-    // collective function requires it to invoke its macros
+    // append a empty tensor to the list, we don't use it but the
+    // `collective` template function requires it to invoke its function
     outputs.emplace_back();
   }
 
@@ -2381,8 +2381,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
       invalidArgument("requires empty input on non-root");
     }
     inputs = {};
-    // append a empty tensor to the list, we don't use it but
-    // collective function requires it to invoke its macros
+    // append a empty tensor to the list, we don't use it but the
+    // `collective` template function requires it to invoke its function
     inputs.emplace_back();
   }
 
