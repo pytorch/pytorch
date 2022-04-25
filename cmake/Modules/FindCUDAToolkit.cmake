@@ -640,9 +640,9 @@ else()
     endforeach()
 
     # Sort numerically in descending order, so we try the newest versions first.
-    if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
       list(SORT versions COMPARE NATURAL ORDER DESCENDING)
-    else()
+    elseif(versions)
       # Alphabetical sort here is not ideal but better than nothing
       list(SORT versions)
       list(REVERSE versions)
@@ -1022,7 +1022,7 @@ if(CUDAToolkit_FOUND)
       NO_DEFAULT_PATH)
 
   foreach(lib_name cupti cupti_static)
-    if (TARGET CUDA::${lib_name})
+    if(TARGET CUDA::${lib_name})
       set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
           INTERFACE_INCLUDE_DIRECTORIES "${CUDAToolkit_cupti_INCLUDE_DIR}")
       set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
