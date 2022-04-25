@@ -37,7 +37,7 @@ jobs:
   test:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    timeout-minutes: 270
+    timeout-minutes: 300
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
@@ -48,7 +48,6 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           no-sudo: true
-          needs-history-and-master: true
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -83,7 +82,7 @@ jobs:
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
-        timeout-minutes: 240
+        timeout-minutes: 270
         run: |
           set -x
 
@@ -164,6 +163,8 @@ jobs:
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}

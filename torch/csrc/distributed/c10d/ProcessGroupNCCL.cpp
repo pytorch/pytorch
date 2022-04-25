@@ -31,8 +31,6 @@ constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
 
 namespace {
 
-constexpr int kBytes = 8;
-
 // RAII helper class to manage NCCL group API and CUDA free mutex.
 // The destructor is allowed to throw since this helper class only
 // manages group and lock lifetimes.
@@ -440,10 +438,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
-    // Use the passed in timeout if provided, otherwise use the default
-    // opTimeout for each WorkNCCL object.
-    std::chrono::milliseconds workTimeout =
-        timeout == kNoTimeout ? opTimeout_ : timeout;
     // Wait for the operation to complete.
     while (!isCompleted()) {
       if (timedOut()) {
@@ -607,6 +601,16 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     }
   });
+
+  if (uccLib_ != nullptr) {
+    LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
+    typedef c10::intrusive_ptr<ProcessGroup> fn(const c10::intrusive_ptr<Store>& store, int rank, int size);
+    auto createProcessGroupUCC = reinterpret_cast<fn*>(uccLib_->sym("createProcessGroupUCC"));
+    if (createProcessGroupUCC != nullptr) {
+      uccPG_ = createProcessGroupUCC(store, rank_, size_);
+      LOG(INFO) << "[Rank " << rank_  << "] ProcessGroupUCC created.";
+    }
+  }
 #endif
 }
 
@@ -2451,6 +2455,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
 #ifdef USE_NCCL_WITH_UCC
 std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
 #endif
+
+bool ProcessGroupNCCL::isUCCAvailable() const {
+#ifdef USE_NCCL_WITH_UCC
+  return (uccPG_ != nullptr);
+#else
+  return false;
+#endif
+}
 
 } // namespace c10d
 
