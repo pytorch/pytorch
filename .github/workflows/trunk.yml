@@ -22,7 +22,6 @@ jobs:
     with:
       build-environment: parallelnative-linux-xenial-py3.7-gcc5.4
       docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
-      needs-viable-strict: true
 
   parallelnative-linux-xenial-py3_7-gcc5_4-test:
     name: parallelnative-linux-xenial-py3.7-gcc5.4
@@ -44,7 +43,6 @@ jobs:
     with:
       build-environment: caffe2-linux-xenial-py3.7-gcc5.4
       docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
-      needs-viable-strict: true
 
   linux-bionic-cuda10_2-py3_9-gcc7-build:
     name: linux-bionic-cuda10.2-py3.9-gcc7
@@ -95,26 +93,28 @@ jobs:
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7-no-ops
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
-      needs-viable-strict: true
 
-  linux-bionic-rocm4_5-py3_7-distributed-build:
+  linux-bionic-rocm5_0-py3_7-distributed-build:
     name: linux-bionic-rocm5.0-py3.7-distributed
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-rocm5.0-py3.7
       docker-image-name: pytorch-linux-bionic-rocm5.0-py3.7
 
-  linux-bionic-rocm4_5-py3_7-distributed-test:
+  linux-bionic-rocm5_0-py3_7-distributed-test:
     name: linux-bionic-rocm5.0-py3.7-distributed
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-bionic-rocm4_5-py3_7-distributed-build
+    needs: linux-bionic-rocm5_0-py3_7-distributed-build
     with:
       build-environment: linux-bionic-rocm5.0-py3.7
-      docker-image: ${{ needs.linux-bionic-rocm4_5-py3_7-distributed-build.outputs.docker-image }}
+      docker-image: ${{ needs.linux-bionic-rocm5_0-py3_7-distributed-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
         ]}
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build:
     name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
