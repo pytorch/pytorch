@@ -2944,6 +2944,23 @@ def forward(self, x_1) -> torch.Tensor:
     return view_1
     """)
 
+    def test_functionalize_nonfunctional_output(self, device):
+
+        global_out = torch.ones(2, device=device)
+
+        def f() -> torch.Tensor:
+            return global_out
+
+        out = make_fx(functionalize(f))()
+        self.assertExpectedInline(out.code, """\
+
+
+
+def forward(self) -> torch.Tensor:
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
+    """)
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(
