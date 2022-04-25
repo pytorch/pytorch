@@ -67,6 +67,15 @@ TORCH_API void EliminateNoOpSlice(std::shared_ptr<Graph>& graph);
 
 TORCH_API void UseSplitAndSqueeze(std::shared_ptr<Graph>& graph);
 
+// [Remove unnecessary outputs]]
+// Removes outputs to reduce compute when it is not used later in the graph.
+// Currently used to remove the max_indices output of embedding_bag, which
+// isn't necessary to compute the main output.
+TORCH_API void RemoveUnnecessaryOutputs(std::shared_ptr<Graph>& graph);
+
+TORCH_API void RemoveUnnecessaryEmbeddingBagOutputs(
+    std::shared_ptr<Graph>& graph);
+
 TORCH_API void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph);
 
 } // namespace jit

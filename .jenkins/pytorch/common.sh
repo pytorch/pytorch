@@ -19,14 +19,10 @@ fi
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
 # Figure out which Python to use for ROCm
-if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
   unset HIP_PLATFORM
-  PYTHON=$(which "python${BASH_REMATCH[1]}")
-  # non-interactive bashs do not expand aliases by default
-  shopt -s expand_aliases
   export PYTORCH_TEST_WITH_ROCM=1
-  alias python='$PYTHON'
   # temporary to locate some kernel issues on the CI nodes
   export HSAKMT_DEBUG_LEVEL=4
 fi

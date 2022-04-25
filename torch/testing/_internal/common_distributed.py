@@ -47,6 +47,7 @@ TEST_SKIPS = {
         72, "Skipped because distributed backend is not available."
     ),
     "small_worldsize": TestSkip(73, "Skipped due to small world size."),
+    "odd_worldsize": TestSkip(87, "Skipped due to odd world size."),
     "no_cuda": TestSkip(74, "CUDA is not available."),
     "multi-gpu-1": TestSkip(75, "Need at least 1 CUDA device"),
     "multi-gpu-2": TestSkip(77, "Need at least 2 CUDA devices"),
@@ -108,6 +109,15 @@ def skip_if_small_worldsize(func):
 
     return wrapper
 
+def skip_if_odd_worldsize(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if (os.environ["BACKEND"] != "mpi") and int(os.environ["WORLD_SIZE"]) % 2 == 1:
+            sys.exit(TEST_SKIPS["odd_worldsize"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
 
 def require_n_gpus_for_nccl_backend(n, backend):
     def decorator(func):
