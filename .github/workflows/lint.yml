@@ -62,7 +62,7 @@ jobs:
           echo "::add-matcher::.github/lintrunner_problem_matcher.json"
 
           # Use jq to massage the output to look a little nicer in GitHub.
-          lintrunner --merge-base-with "${PR_BASE_SHA}" --json \
+          lintrunner --merge-base-with "${PR_BASE_SHA}" --json | \
             jq '{
                   file: .path,
                   line: .line,
