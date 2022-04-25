@@ -629,6 +629,7 @@ class OpInfo(object):
                                                    # defaults to the value of `supports_forward_ad`
                  check_inplace_batched_forward_grad=None,   # whether to check batched forward grad when doing gradcheck
                                                             # defaults to the value of `check_batched_forward_grad`
+                 check_decomp=False,  # whether to check against torch._decomp
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
@@ -791,6 +792,8 @@ class OpInfo(object):
         self.check_batched_gradgrad = check_batched_gradgrad
         self.check_batched_forward_grad = check_batched_forward_grad
         self.check_inplace_batched_forward_grad = check_inplace_batched_forward_grad
+
+        self.check_decomp = check_decomp
 
         # Autograd flags that depend on both forward AD and backward AD
         if supports_inplace_autograd is None:
@@ -8904,6 +8907,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           check_decomp=True,
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -8918,6 +8922,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           check_decomp=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1),
@@ -9038,6 +9043,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           check_decomp=True,
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),),
@@ -9047,6 +9053,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           check_decomp=True,
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.expectedFailure,
@@ -10770,6 +10777,7 @@ op_db: List[OpInfo] = [
                                                   torch.float16: 5e-1}),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    supports_autograd=False,
+                   check_decomp=True,
                    skips=(
                        # The function variant always returns BoolTensor
                        # while the inplace variant preserves the input dtype.
@@ -11170,20 +11178,35 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('logical_and',
                     ref=np.logical_and,
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    check_decomp=True,
                     supports_autograd=False,
                     always_returns_bool=True,
+                    skips=(
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_decomp',
+                                    dtypes=[torch.complex128]),
+                    ),
                     supports_rhs_python_scalar=False),
     BinaryUfuncInfo('logical_or',
                     ref=np.logical_or,
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    check_decomp=True,
                     supports_autograd=False,
                     always_returns_bool=True,
+                    skips=(
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_decomp',
+                                    dtypes=[torch.complex128]),
+                    ),
                     supports_rhs_python_scalar=False),
     BinaryUfuncInfo('logical_xor',
                     ref=np.logical_xor,
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    check_decomp=True,
                     supports_autograd=False,
                     always_returns_bool=True,
+                    skips=(
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_decomp',
+                                    dtypes=[torch.complex128]),
+                    ),
                     supports_rhs_python_scalar=False),
     BinaryUfuncInfo('bitwise_or',
                     ref=np.bitwise_or,
@@ -11718,6 +11741,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           check_decomp=True,
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
@@ -12395,6 +12419,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_out=False,
+        check_decomp=True,
         inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
         decorators=[
             DecorateInfo(
@@ -13210,6 +13235,7 @@ op_db: List[OpInfo] = [
            variant_test_name='list_args',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=True),
+           check_decomp=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -13218,6 +13244,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_split_with_sizes,
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
+           check_decomp=True,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -15629,6 +15656,8 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        # TODO: fused dropout isn't invoked in all conditions
+        # check_decomp=True,
         # https://github.com/pytorch/pytorch/issues/66357
         check_batched_forward_grad=False,
         supports_out=False,

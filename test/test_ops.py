@@ -6,12 +6,15 @@ import warnings
 import unittest
 import itertools
 import torch
+from torch.utils._python_dispatch import enable_python_mode
+from torch.testing._internal.logging_tensor import no_dispatch
+from torch._decomp import decomposition_table
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_and_complex_types_and, all_types_and_complex_and
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
-     IS_IN_CI, suppress_warnings, noncontiguous_like,
+     IS_IN_CI, suppress_warnings, noncontiguous_like, skipIfCrossRef,
      TEST_WITH_ASAN, IS_WINDOWS, IS_FBCODE, first_sample)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
@@ -36,6 +39,10 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
 #   and Spectral Functions (separately implemented for only 1D as of now, in test/test_spectral_ops.py)
 _ref_test_ops = list(filter(lambda op: not isinstance(op, (UnaryUfuncInfo, ReductionOpInfo,
                      SpectralFuncInfo)) and op.ref is not None and op.ref is not _NOTHING, op_db))
+
+
+# All operators that can have decomp tests
+_decomp_test_ops = [op for op in op_db if op.check_decomp]
 
 
 # Tests that apply to all operators and aren't related to any particular
@@ -230,6 +237,36 @@ class TestCommon(TestCase):
                 self.compare_with_reference(op, op.ref, sample_input, exact_dtype=(dtype is not torch.long))
         finally:
             torch.set_default_dtype(cur_default)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @suppress_warnings
+    @ops(_decomp_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
+    def test_decomp(self, device, dtype, op):
+        hit = False
+
+        class DecompMode(torch.Tensor):  # TODO: don't subclass from tensor
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                # TODO: this no_dispatch call shouldn't be necessary after
+                # https://github.com/pytorch/pytorch/pull/75965
+                with no_dispatch():
+                    if func in decomposition_table:
+                        nonlocal hit
+                        hit = True
+                        return decomposition_table[func](*args, **kwargs)
+                    else:
+                        return func(*args, **kwargs)
+
+        reference_inputs = op.reference_inputs(device, dtype)
+        for sample_input in reference_inputs:
+            hit = False
+            with enable_python_mode(DecompMode):
+                actual = op(sample_input.input, *sample_input.args, **sample_input.kwargs)
+            self.assertTrue(hit)
+            expected = op(sample_input.input, *sample_input.args, **sample_input.kwargs)
+            self.assertEqual(actual, expected, exact_device=True)
 
     @skipMeta
     @onlyNativeDeviceTypes
