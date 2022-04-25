@@ -603,7 +603,7 @@ If ``V = polyvander2d(x, y, [xdeg, ydeg])``, then the columns of `V` correspond 
 .. math::
     c_{00}, c_{01}, c_{02} ... , c_{10}, c_{11}, c_{12} ...
 
-and ``np.dot(V, c.flat)`` and ``polyval2d(x, y, c)`` will be the same up to roundoff. This equivalence is useful both for least squares fitting and for the evaluation of a large number of two-dimensional polynomials of the same degrees and sample points.
+and ``torch.p.dot(V, c.flat)`` and ``polyval2d(x, y, c)`` will be the same up to roundoff. This equivalence is useful both for least squares fitting and for the evaluation of a large number of two-dimensional polynomials of the same degrees and sample points.
 """ + """
 Args:
     x, y : Arrays of point coordinates, all of the same shape. The dtypes will be converted to either float64 or complex128 depending on whether any of the elements are complex. Scalars are converted to one-dimensional arrays. degrees : List of maximum degrees of the form [x_deg, y_deg].
@@ -632,7 +632,7 @@ If ``V = polyvander3d(x, y, z, [xdeg, ydeg, zdeg])``, then the columns of ``V`` 
 .. math::
     c_{000}, c_{001}, c_{002},... , c_{010}, c_{011}, c_{012},...
 
-and ``np.dot(V, c.flat)`` and ``polyval3d(x, y, z, c)`` will be the same up to roundoff. This equivalence is useful both for least squares fitting and for the evaluation of a large number of three-dimensional polynomials of the same degrees and sample points.
+and ``torch.dot(V, c.flat)`` and ``polyval3d(x, y, z, c)`` will be the same up to roundoff. This equivalence is useful both for least squares fitting and for the evaluation of a large number of three-dimensional polynomials of the same degrees and sample points.
 """ + """
 Args:
     x, y, z: Arrays of point coordinates, all of the same shape. The dtypes will be converted to either float64 or complex128 depending on whether any of the elements are complex. Scalars are converted to one-dimensional arrays.
