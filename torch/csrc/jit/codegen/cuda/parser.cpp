@@ -65,6 +65,7 @@ const auto& intAttr = Symbol::attr("profiled_int");
 const auto& boolListAttr = Symbol::attr("profiled_bool_list");
 const auto& boolAttr = Symbol::attr("profiled_bool");
 const auto& strAttr = Symbol::attr("profiled_str");
+const auto& ivalAttr = Symbol::attr("profiled_ival");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
@@ -3158,16 +3159,33 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, frame_id);
     IValue value;
     pop(stack, value);
+
+    if (value.isInt()) {
+      if (!pn->hasAttribute(intAttr)) {
+        pn->i_(intAttr, value.toInt());
+      } else {
+        auto profiled_int = pn->i(intAttr);
+        auto input_int = value.toInt();
+        TORCH_INTERNAL_ASSERT(
+            input_int == profiled_int, "profiling ivalue doesn't support merge");
+      }
+    } else if (value.isNone()) {
+      if (!pn->hasAttribute(ivalAttr)) {
+        pn->ival_(ivalAttr, value);
+      } else {
+        auto profiled_ival = pn->ival(ivalAttr);
+        TORCH_INTERNAL_ASSERT(
+            profiled_ival.isNone(), "profiling ivalue doesn't support merge");
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "profileInt does not support data type: ",
+          value.tagKind());
+    }
+
     TORCH_INTERNAL_ASSERT(
         value.isInt(), "profiling seeing the wrong data type");
-    if (!pn->hasAttribute(intAttr)) {
-      pn->i_(intAttr, value.toInt());
-    } else {
-      auto profiled_int = pn->i(intAttr);
-      auto input_int = value.toInt();
-      TORCH_INTERNAL_ASSERT(
-          input_int == profiled_int, "profiling ivalue doesn't support merge");
-    }
     push(stack, value);
   };
 
@@ -3564,6 +3582,25 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   if (node->matches(to_dtype_schema)) {
     switch (offset) {
       case 1:
+        profileInt(pr, node, offset);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  static auto log_softmax_data_schema =
+      getOperatorForLiteral(
+          "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor")
+          ->schema();
+  static auto softmax_data_schema =
+      getOperatorForLiteral(
+          "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor")
+          ->schema();
+  if (node->matches(log_softmax_data_schema) ||
+      node->matches(softmax_data_schema)) {
+    switch (offset) {
+      case 2:
         profileInt(pr, node, offset);
         return true;
       default:
