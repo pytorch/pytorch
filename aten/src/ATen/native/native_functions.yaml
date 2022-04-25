@@ -10345,6 +10345,139 @@
 - func: _remove_batch_dim(Tensor self, int level, int batch_size, int out_dim) -> Tensor
   variants: function
 
+## Functions related to the `torch.polynomial` namespace.
+# Note [polynomial namespace binding]
+# Functions in the polynomial Python module should have their names start with
+#   "polynomial_" and be bound to the desired Python name in
+#   torch/polynomial/__init__.py, and the desired C++ name in
+#   torch/csrc/api/include/torch/special.h. The "polynomial_" names should be
+#   hidden from the user and not documented.
+
+- func: polynomial_polyadd(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyadd.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polycompanion(Tensor self) -> Tensor
+  structured_delegate: polynomial_polycompanion.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyder(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyder.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polydiv(Tensor self) -> Tensor
+  structured_delegate: polynomial_polydiv.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polydomain(Tensor self) -> Tensor
+  structured_delegate: polynomial_polydomain.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyfit(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyfit.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyfromroots(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyfromroots.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polygrid2d(Tensor self) -> Tensor
+  structured_delegate: polynomial_polygrid2d.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polygrid3d(Tensor self) -> Tensor
+  structured_delegate: polynomial_polygrid3d.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyint(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyint.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyline(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyline.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polymul(Tensor self) -> Tensor
+  structured_delegate: polynomial_polymul.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polymulx(Tensor self) -> Tensor
+  structured_delegate: polynomial_polymulx.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyone(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyone.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polypow(Tensor self) -> Tensor
+  structured_delegate: polynomial_polypow.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyroots(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyroots.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polysub(Tensor self) -> Tensor
+  structured_delegate: polynomial_polysub.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polytrim(Tensor self) -> Tensor
+  structured_delegate: polynomial_polytrim.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyval(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyval.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyval2d(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyval2d.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyval3d(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyval3d.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyvalfromroots(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyvalfromroots.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyvander(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyvander.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyvander2d(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyvander2d.out
+  python_module: polynomial
+  variants: function
+
+- func: polynomial_polyvander3d(Tensor self) -> Tensor
+  structured_delegate: polynomial_polyvander3d.out
+  python_module: polynomial
+  variants: function
+
 ## Functions related to the `torch.special` namespace
 # Note [special namespace binding]
 # Functions in the special python module should have their names start with
