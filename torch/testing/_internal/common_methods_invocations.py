@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import \
     (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, precisionOverride,
      toleranceOverride, tol, has_cusolver)
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off
+from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -9252,6 +9252,7 @@ op_db: List[OpInfo] = [
                # Problem; should be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            sample_inputs_func=sample_inputs_block_diag),
     BinaryUfuncInfo('bitwise_and',
@@ -9343,6 +9344,7 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_triangular_input_real_positive_diagonal,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Strides are not the same! Original strides were ((4, 2, 1),) and strides are now ((4, 1, 2),)
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),)),
     OpInfo('cholesky_solve',
@@ -10117,6 +10119,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped! stft does not match the native function"),
                             'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ],
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_stft,
@@ -10408,6 +10411,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
            ),
@@ -10422,6 +10426,7 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            ),
@@ -10449,6 +10454,7 @@ op_db: List[OpInfo] = [
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Forward-over-reverse gradgrad might be incorrect
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
            ),
@@ -10468,6 +10474,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('linalg.eigh',
            aten_name='linalg_eigh',
@@ -10485,6 +10492,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
                             dtypes=complex_types()),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
@@ -10500,6 +10508,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('linalg.householder_product',
            aten_name='linalg_householder_product',
@@ -10517,6 +10526,7 @@ op_db: List[OpInfo] = [
                skipCUDAIfNoCusolver, skipCPUIfNoLapack,
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ]),
     OpInfo('linalg.lstsq',
            aten_name='linalg_lstsq',
@@ -10553,6 +10563,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
                # At this time ROCm uses magma instead of rocSolver, and the test passes
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', active_if=(not TEST_WITH_ROCM)),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
+                            active_if=(not TEST_WITH_ROCM)),
            )),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),
@@ -10615,6 +10627,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
                             dtypes=[torch.complex128]),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
@@ -10633,6 +10646,7 @@ op_db: List[OpInfo] = [
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
 
@@ -10665,6 +10679,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
@@ -10933,6 +10948,7 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            supports_out=False,
@@ -11032,6 +11048,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # Division by zero, may be related to above?
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad'))),
@@ -11057,6 +11074,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # Division by zero, may be related to above?
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad'))),
@@ -11122,6 +11140,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            # See https://github.com/pytorch/pytorch/issues/66357
            # Relies on copy_ to broadcast, but the forward AD path calls broadcast_to which
@@ -11133,6 +11152,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            # See https://github.com/pytorch/pytorch/issues/66357
@@ -11566,6 +11586,10 @@ op_db: List[OpInfo] = [
                 "test_backward",
                 dtypes=(torch.float32,)
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                'TestCompositeCompliance',
+                'test_forward_ad'),
             # Pos Weight is required to be positve
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -11662,6 +11686,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped! 75029"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.skip("Skipped! RuntimeError: bias tensor has to be contiguous"), 'TestGradients',
                             'test_forward_mode_AD', device_type='cuda', active_if=TEST_WITH_ROCM),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
+                            active_if=(not TEST_CUDNN)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv1d',
@@ -11738,7 +11764,9 @@ op_db: List[OpInfo] = [
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
+                            active_if=TEST_WITH_ROCM)
            ],
            sample_inputs_func=sample_inputs_instance_norm,
            supports_expanded_weight=True,),
@@ -12002,7 +12030,10 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_margin_ranking_loss,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True),
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+        )),
     OpInfo(
         "nn.functional.multi_margin_loss",
         ref=_NOTHING,
@@ -12266,6 +12297,7 @@ op_db: List[OpInfo] = [
                # Problem, needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # 76046
@@ -12679,6 +12711,13 @@ op_db: List[OpInfo] = [
            skips=(
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
+               # see https://github.com/pytorch/pytorch/issues/76283
+               DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                            device_type="cpu"),
+               # Trying to use forward AD with miopen_batch_norm that does not support it
+               # because it has not been implemented yet.
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
+                            device_type="cuda", active_if=TEST_WITH_ROCM),
            )),
     # This variant tests batch_norm with cuDNN disabled only on CUDA devices
     OpInfo('nn.functional.batch_norm',
@@ -12689,6 +12728,10 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            decorators=[onlyCUDA, disablecuDNN],
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
+                            device_type='cpu'),
+           ),
            sample_inputs_func=sample_inputs_batch_norm),
     OpInfo(
         "nn.functional.binary_cross_entropy",
@@ -13039,6 +13082,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     UnaryUfuncInfo('rad2deg',
@@ -13531,6 +13575,7 @@ op_db: List[OpInfo] = [
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            sample_inputs_func=sample_inputs_tensor_split,),
     OpInfo('hsplit',
@@ -13942,6 +13987,7 @@ op_db: List[OpInfo] = [
                # Fixme, forward over backward gives a numerical error
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('linalg.svd',
            op=torch.linalg.svd,
@@ -13959,6 +14005,7 @@ op_db: List[OpInfo] = [
                # FIXME forward over backward gives a numerical error
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('linalg.svdvals',
            op=torch.linalg.svdvals,
@@ -13970,6 +14017,9 @@ op_db: List[OpInfo] = [
            # We're using at::allclose, which does not have a batching rule
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_svdvals,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+           ),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off]),
     OpInfo('svd_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -13993,6 +14043,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('pca_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -14016,6 +14067,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     BinaryUfuncInfo('polar',
                     dtypes=floating_types(),
@@ -15013,6 +15065,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_inplace_gradgrad'),
                DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ),
            sample_inputs_func=sample_inputs_fill_),
     OpInfo('resize_',
@@ -15597,6 +15650,7 @@ op_db: List[OpInfo] = [
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # RuntimeError not raised :
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -15619,6 +15673,7 @@ op_db: List[OpInfo] = [
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # Arguments for call are not valid.
@@ -16212,6 +16267,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-03, rtol=1e-03)}),
@@ -16244,7 +16302,10 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
-                         dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),)
+                         dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-02)}),
@@ -16348,6 +16409,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
@@ -16373,6 +16437,9 @@ op_db: List[OpInfo] = [
             # can't take variable number of arguments or use
             # keyword-only arguments with defaults
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
         ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -16396,6 +16463,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
             # 76046
             DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
         ),
@@ -16431,6 +16501,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
                          dtypes=(torch.float16,)),
         ),
@@ -16456,6 +16529,9 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
@@ -16469,6 +16545,9 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1e-02)}),
@@ -16486,6 +16565,9 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # see https://github.com/pytorch/pytorch/issues/76227
+            DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
+                         device_type='cpu'),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
@@ -16578,6 +16660,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_gaussian_nll_loss,
         skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
             # JIT does not support variadic tensors.
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
@@ -16597,6 +16680,9 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_hinge_embedding_loss,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+        )
     ),
     OpInfo(
         "nn.functional.huber_loss",
