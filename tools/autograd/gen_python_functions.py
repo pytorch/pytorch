@@ -153,6 +153,8 @@ _SKIP_PYTHON_BINDINGS = [
     "replace_",  # only used by the functionalization pass, doesn't need to be exposed to python
     "zero",  # only used by the functionalization pass, doesn't need to be exposed to python
     "copy",  # only used by the functionalization pass
+    "fill.Tensor",  # only used by the functionalization pass
+    "fill.Scalar",  # only used by the functionalization pass
 ]
 
 SKIP_PYTHON_BINDINGS = list(
