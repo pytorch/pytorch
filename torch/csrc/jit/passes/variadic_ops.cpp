@@ -166,12 +166,17 @@ class VariadicUpdater {
       }
     }
 
-    auto var_op_node = op_node->owningGraph()->create(variadic_op_, inputs);
-    var_op_node->output()->setType(op_node->output()->type());
+    auto var_op_node = op_node->owningGraph()->create(
+        variadic_op_, inputs, op_node->outputs().size());
+    for (size_t i = 0; i < var_op_node->outputs().size(); ++i) {
+      var_op_node->output(i)->setType(op_node->output(i)->type());
+    }
     GRAPH_UPDATE("Adding\n", *var_op_node);
     var_op_node->insertBefore(op_node);
     GRAPH_UPDATE("Replacing\n", *op_node, "with\n", *var_op_node);
-    op_node->output()->replaceAllUsesWith(var_op_node->output());
+    for (size_t i = 0; i < op_node->outputs().size(); ++i) {
+      op_node->output(i)->replaceAllUsesWith(var_op_node->output(i));
+    }
     deleteOpNodeAndLists(op_node);
     return true;
   }

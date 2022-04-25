@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -2712,9 +2713,60 @@ TORCH_LIBRARY(static_runtime_tests, m) {
       "static_runtime_tests::maybe_throw(bool throw) -> ()",
       at::AliasAnalysisKind::CONSERVATIVE));
   m.impl("maybe_throw", maybe_throw);
+
+  m.def(torch::schema(
+      "static_runtime_tests::varargs_return_single_output(...) -> Tensor",
+      at::AliasAnalysisKind::CONSERVATIVE));
+
+  m.def(torch::schema(
+      "static_runtime_tests::varargs_return_two_outputs(...) -> (Tensor, Tensor)",
+      at::AliasAnalysisKind::CONSERVATIVE));
 }
 
 } // namespace
+
+TEST(StaticRuntime, VarargsSingleOutput) {
+  const auto src = R"JIT(
+    graph(%in1: Tensor, %in2: Tensor):
+      %none : NoneType = prim::Constant()
+      %dim : int = prim::Constant[value=0]()
+      %list: Tensor[] = prim::ListConstruct(%in1, %in2)
+      %1 : Tensor = aten::cat(%list, %dim)
+      %2 : Tensor = aten::clone(%1, %none)
+      return (%2)
+  )JIT";
+  auto graph = getGraphFromIR(src);
+  UseVariadicOp(
+      graph,
+      c10::Symbol::fromQualString("aten::cat"),
+      c10::Symbol::fromQualString(
+          "static_runtime_tests::varargs_return_single_output"));
+  EXPECT_TRUE(hasNodeWithKind(
+      graph, "static_runtime_tests::varargs_return_single_output"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::cat"));
+}
+
+TEST(StaticRuntime, VarargsTwoOutputs) {
+  const auto src = R"JIT(
+    graph(%in1: Tensor, %in2: Tensor):
+      %none : NoneType = prim::Constant()
+      %num_bins : int = prim::Constant[value=0]()
+      %bin_spacing: str = prim::Constant[value='linear']()
+      %apply_abs: bool = prim::Constant[value=0]()
+      %list: Tensor[] = prim::ListConstruct(%in1, %in2)
+      %1, %2 = fb::self_binning_histogram(%list, %num_bins, %bin_spacing, %none, %apply_abs)
+      return (%1, %2)
+  )JIT";
+  auto graph = getGraphFromIR(src);
+  UseVariadicOp(
+      graph,
+      c10::Symbol::fromQualString("fb::self_binning_histogram"),
+      c10::Symbol::fromQualString(
+          "static_runtime_tests::varargs_return_two_outputs"));
+  EXPECT_TRUE(hasNodeWithKind(
+      graph, "static_runtime_tests::varargs_return_two_outputs"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "fb::self_binning_histogram"));
+}
 
 TEST(StaticRuntime, ModelCrashOnFirstRun) {
   const auto src = R"JIT(
