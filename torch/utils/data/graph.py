@@ -3,10 +3,11 @@ import pickle
 
 from torch.utils.data import IterDataPipe, MapDataPipe
 
-from typing import Any, Dict, Set
+from typing import Any, Dict, Set, Tuple, Type, Union
 
 __all__ = ["traverse", ]
 
+DataPipe = Union[IterDataPipe, MapDataPipe]
 reduce_ex_hook = None
 
 
@@ -16,7 +17,6 @@ def _stub_unpickler():
 
 # TODO(VitalyFedyunin): Make sure it works without dill module installed
 def _list_connected_datapipes(scan_obj, only_datapipe, cache):
-
     f = io.BytesIO()
     p = pickle.Pickler(f)  # Not going to work for lambdas, but dill infinite loops on typing and can't be used as is
 
@@ -39,33 +39,37 @@ def _list_connected_datapipes(scan_obj, only_datapipe, cache):
             captured_connections.append(obj)
             return _stub_unpickler, ()
 
+    datapipe_classes: Tuple[Type[DataPipe]] = (IterDataPipe, MapDataPipe)  # type: ignore[assignment]
+
     try:
-        IterDataPipe.set_reduce_ex_hook(reduce_hook)
-        if only_datapipe:
-            IterDataPipe.set_getstate_hook(getstate_hook)
+        for cls in datapipe_classes:
+            cls.set_reduce_ex_hook(reduce_hook)
+            if only_datapipe:
+                cls.set_getstate_hook(getstate_hook)
         p.dump(scan_obj)
     except AttributeError:  # unpickable DataPipesGraph
-        pass  # TODO(VitalyFedyunin): We need to tight this requirement after migrating from old DataLoader
+        pass  # TODO(VitalyFedyunin): We need to tighten this requirement after migrating from old DataLoader
     finally:
-        IterDataPipe.set_reduce_ex_hook(None)
-        if only_datapipe:
-            IterDataPipe.set_getstate_hook(None)
+        for cls in datapipe_classes:
+            cls.set_reduce_ex_hook(None)
+            if only_datapipe:
+                cls.set_getstate_hook(None)
     return captured_connections
 
 
 def traverse(datapipe, only_datapipe=False):
-    cache: Set[IterDataPipe] = set()
+    cache: Set[DataPipe] = set()
     return _traverse_helper(datapipe, only_datapipe, cache)
 
 
 # Add cache here to prevent infinite recursion on DataPipe
 def _traverse_helper(datapipe, only_datapipe, cache):
-    if not isinstance(datapipe, IterDataPipe):
-        raise RuntimeError("Expected `IterDataPipe`, but {} is found".format(type(datapipe)))
+    if not isinstance(datapipe, (IterDataPipe, MapDataPipe)):
+        raise RuntimeError("Expected `IterDataPipe` or `MapDataPipe`, but {} is found".format(type(datapipe)))
 
     cache.add(datapipe)
     items = _list_connected_datapipes(datapipe, only_datapipe, cache)
-    d: Dict[IterDataPipe, Any] = {datapipe: {}}
+    d: Dict[DataPipe, Any] = {datapipe: {}}
     for item in items:
         # Using cache.copy() here is to prevent recursion on a single path rather than global graph
         # Single DataPipe can present multiple times in different paths in graph
