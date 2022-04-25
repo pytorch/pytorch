@@ -17,16 +17,18 @@ struct hash<std::tuple<std::string, c10::TypePtr, c10::TypePtr>> {
   size_t operator()(std::tuple<std::string, c10::TypePtr, c10::TypePtr> const& t) const {
     // This hashing is all hidden behind a static initializer so it
     // doesn't have to be optimal
-    return std::hash<std::string>()(std::get<0>(t))
-      ^ std::hash<c10::TypePtr>()(std::get<1>(t))
-      ^ std::hash<c10::TypePtr>()(std::get<2>(t));
+    auto hash = std::hash<std::string>()(std::get<0>(t));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<2>(t)));
+    return hash;
   }
 };
 template<>
 struct hash<std::tuple<std::string, c10::TypePtr>> {
   size_t operator()(std::tuple<std::string, c10::TypePtr> const& t) const {
-    return std::hash<std::string>()(std::get<0>(t))
-      ^ std::hash<c10::TypePtr>()(std::get<1>(t));
+    auto hash = std::hash<std::string>()(std::get<0>(t));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
+    return hash;
   }
 };
 } // namespace std
@@ -265,7 +267,7 @@ TypePtr OptionalType::get(TypePtr inner) {
   std::lock_guard<std::mutex> lock(mutex);
   if (containerTypePtrs.find(inner) == containerTypePtrs.end()) {
     TypePtr t = TypeFactory::create<OptionalType>(inner);
-    containerTypePtrs.emplace(inner, t);
+    containerTypePtrs.emplace(inner, std::move(t));
   }
   return containerTypePtrs[inner];
 }
@@ -279,7 +281,7 @@ TypePtr ListType::get(std::string identifier, TypePtr inner) {
   std::lock_guard<std::mutex> lock(mutex);
   if (containerTypePtrs.find(key) == containerTypePtrs.end()) {
     TypePtr t = ListType::create(inner);
-    containerTypePtrs.emplace(key, t);
+    containerTypePtrs.emplace(key, std::move(t));
   }
   return containerTypePtrs[key];
 }
@@ -293,7 +295,7 @@ TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
   std::lock_guard<std::mutex> lock(mutex);
   if (containerTypePtrs.find(map_key) == containerTypePtrs.end()) {
     TypePtr t = DictType::create(key, value);
-    containerTypePtrs.emplace(map_key, t);
+    containerTypePtrs.emplace(map_key, std::move(t));
   }
   return containerTypePtrs[map_key];
 }
