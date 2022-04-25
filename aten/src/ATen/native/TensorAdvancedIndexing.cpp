@@ -923,7 +923,7 @@ void index_reduce_func_impl(
           init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::max();
           break;
-        case INDEX_OP::MEAN:
+        default:
           init_val = (scalar_t)0;
           break;
       }
@@ -966,9 +966,6 @@ void index_reduce_func_impl(
         iter.unsafe_replace_operand(2, source_data);
 
         switch (op) {
-          case INDEX_OP::MEAN :
-            add_stub(iter.device_type(), iter, 1);
-            break;
           case INDEX_OP::MULTIPLY :
             mul_stub(iter.device_type(), iter);
             break;
@@ -977,6 +974,9 @@ void index_reduce_func_impl(
             break;
           case INDEX_OP::MAXIMUM :
             maximum_stub(iter.device_type(), iter);
+            break;
+          default :
+            add_stub(iter.device_type(), iter, 1);
             break;
         }
       }
@@ -1028,6 +1028,8 @@ void index_reduce_func_impl(
               case INDEX_OP::MAXIMUM :
                 val = *(source_ptr + i * source_stride);
                 *self_ip = at::_isnan<scalar_t>(val) ? val : std::max(*self_ip, val);
+                break;
+              default:
                 break;
             }
         }
