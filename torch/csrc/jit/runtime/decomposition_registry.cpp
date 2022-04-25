@@ -23,7 +23,7 @@ std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     schema_to_decomposition;
 
 // Holds User-Registered Functions and keeps them alive
-std::unordered_map<const FunctionSchema*, std::shared_ptr<Function>>
+std::unordered_map<const FunctionSchema*, std::unique_ptr<Function>>
     user_registered_funcs;
 
 std::unordered_map<const FunctionSchema*, Function*> schema_to_function;
@@ -142,10 +142,8 @@ void RegisterDecomposition(
     std::shared_ptr<Graph> g) {
   loadDecompositionFunctions();
   std::lock_guard<std::mutex> guard(lock);
-  std::shared_ptr<Function> shared_fn =
-      std::make_shared<Function>(new GraphFunction(schema.name(), g, nullptr));
-  user_registered_funcs[&schema] = shared_fn;
-  Function* func = shared_fn.get();
+  auto * func = new GraphFunction(schema.name(), g, nullptr);
+  user_registered_funcs.emplace(&schema, func);
   schema_to_function[&schema] = func;
   schema_to_decomposition[&schema] = g;
 }
