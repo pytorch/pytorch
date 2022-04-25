@@ -5,6 +5,13 @@ from torch.utils.data.datapipes._typing import _DataPipeMeta
 from torch.utils.data._utils.serialization import serialize_fn, SerializationType, deserialize_fn, DILL_AVAILABLE
 from torch.utils.data.dataset import Dataset, IterableDataset
 
+__all__ = [
+    "DataChunk",
+    "DFIterDataPipe",
+    "IterDataPipe",
+    "MapDataPipe",
+]
+
 T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
 
@@ -59,8 +66,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         [2, 4, 6, 8, 10]
     """
     functions: Dict[str, Callable] = {}
-    reduce_ex_hook : Optional[Callable] = None
+    reduce_ex_hook: Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
+    str_hook: Optional[Callable] = None
+    repr_hook: Optional[Callable] = None
 
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
@@ -132,6 +141,18 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
             raise Exception("Attempt to override existing reduce_ex_hook")
         IterDataPipe.reduce_ex_hook = hook_fn
 
+    def __repr__(self):
+        if self.repr_hook is not None:
+            return self.repr_hook(self)
+        # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
+
+    def __str__(self):
+        if self.str_hook is not None:
+            return self.str_hook(self)
+        # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
+
 
 class DFIterDataPipe(IterDataPipe):
     def _is_dfpipe(self):
@@ -171,6 +192,10 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
     """
     functions: Dict[str, Callable] = {}
+    reduce_ex_hook: Optional[Callable] = None
+    getstate_hook: Optional[Callable] = None
+    str_hook: Optional[Callable] = None
+    repr_hook: Optional[Callable] = None
 
     def __getattr__(self, attribute_name):
         if attribute_name in MapDataPipe.functions:
@@ -196,6 +221,8 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         cls.functions[function_name] = function
 
     def __getstate__(self):
+        if MapDataPipe.getstate_hook is not None:
+            return MapDataPipe.getstate_hook(self)
         # TODO: Fix `dill` circular dependency - https://github.com/pytorch/data/issues/237
         if DILL_AVAILABLE:
             state_dict = {}
@@ -215,6 +242,37 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
             else:
                 self.__dict__[k] = v
 
+    def __reduce_ex__(self, *args, **kwargs):
+        if MapDataPipe.reduce_ex_hook is not None:
+            try:
+                return MapDataPipe.reduce_ex_hook(self)
+            except NotImplementedError:
+                pass
+        return super().__reduce_ex__(*args, **kwargs)
+
+    @classmethod
+    def set_getstate_hook(cls, hook_fn):
+        if MapDataPipe.getstate_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing getstate_hook")
+        MapDataPipe.getstate_hook = hook_fn
+
+    @classmethod
+    def set_reduce_ex_hook(cls, hook_fn):
+        if MapDataPipe.reduce_ex_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing reduce_ex_hook")
+        MapDataPipe.reduce_ex_hook = hook_fn
+
+    def __repr__(self):
+        if self.repr_hook is not None:
+            return self.repr_hook(self)
+        # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
+
+    def __str__(self):
+        if self.str_hook is not None:
+            return self.str_hook(self)
+        # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
+        return str(self.__class__.__qualname__)
 
 class DataChunk(list, Generic[T]):
     def __init__(self, items):

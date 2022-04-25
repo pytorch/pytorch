@@ -19,7 +19,7 @@ import inspect
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, SymbolicContext, TrainingMode, CheckerError
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
+from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto, Node
 from typing import List, Tuple, Union
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -190,7 +190,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_fuse_addmm(graph)
     torch._C._jit_pass_lint(graph)
-    from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version
+    from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version, is_caffe2_aten_fallback
 
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lower_all_tuples(graph)
@@ -212,13 +212,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_onnx_remove_print(graph)
     torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
-    # Caffe2-specific optimization
-    is_caffe2_aten_fallback = (operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and
-                               torch.onnx._CAFFE2_ATEN_FALLBACK)
     torch.onnx.symbolic_helper._quantized_ops.clear()
     # Unpack quantized weights for conv and linear ops and insert into graph.
-    torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict, is_caffe2_aten_fallback)
-    if is_caffe2_aten_fallback:
+    torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict, is_caffe2_aten_fallback())
+    if is_caffe2_aten_fallback():
         # Insert permutes before and after each conv op to ensure correct order.
         torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
 
@@ -289,7 +286,7 @@ def warn_on_static_input_change(input_states):
 
 def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
     # This helper method resolves the arguments that are ignored when export_type != operator_export_type.ONNX
-    if operator_export_type is not operator_export_type.ONNX:
+    if operator_export_type is not operator_export_type.ONNX and torch.onnx._CAFFE2_ATEN_FALLBACK:
         if arg_value is True:
             warnings.warn("`{}' can be set to True only when 'operator_export_type' is "
                           "`ONNX`. Since 'operator_export_type' is not set to 'ONNX', "
@@ -498,6 +495,18 @@ def unpack_quantized_tensor(value):
         return (value,)
 
 
+def _pre_trace_quant_model(model, args):
+    r"""Returns `torch.jit.trace(model, args)` if model is quantized. Otherwise do nothing and return
+    original model.
+
+    This is due to https://github.com/pytorch/pytorch/issues/75761.
+    """
+    if (any(hasattr(m, "_packed_params") for m in getattr(model, "modules", lambda: [])()) or
+            any(getattr(arg, "is_quantized", False) for arg in args)):
+        return torch.jit.trace(model, args)
+    return model
+
+
 def _assign_onnx_node_name(graph, node_names):
     r"""Takes in ONNX graph, and mapping from torch._C.Node to node name in exported ONNX ModelProto.
 
@@ -541,6 +550,7 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args, )
 
+    model = _pre_trace_quant_model(model, args)
     graph, params, torch_out, module = _create_jit_graph(model, args)
 
     params_dict = _get_named_param_dict(graph, params)
@@ -576,7 +586,11 @@ def _model_to_graph(model, args, verbose=False,
             output_wrapped = torch_out  # type: ignore[assignment]
 
         output_tensors, out_desc = torch._C._jit_flatten(tuple(output_wrapped))
-        torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
+        # assign_output_shape pass is not compatible with quantized outputs.
+        # Quantized outputs are flattened to 3 values in ONNX, while packed as
+        # single value in PyTorch.
+        if not any(getattr(out, "is_quantized", False) for out in output_tensors):
+            torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
 
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)
@@ -959,7 +973,8 @@ def _add_attribute(node, key, value, aten):
     name, kind = m.group(1), m.group(2)
     if _is_onnx_list(value):
         kind += "s"
-    if aten:
+    from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
+    if aten and is_caffe2_aten_fallback():
         if isinstance(value, torch.Tensor):
             # Caffe2 proto does not support tensor attribute.
             if value.numel() > 1:
@@ -1113,20 +1128,28 @@ def _need_symbolic_context(symbolic_fn):
     params = list(inspect.signature(symbolic_fn).parameters.values())
     return params and issubclass(params[0].annotation, SymbolicContext)
 
+def _get_aten_op_overload_name(n: Node) -> str:
+    from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
+
+    # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
+    schema = n.schema()
+    if not schema.startswith("aten::") or is_caffe2_aten_fallback():
+        return ""
+    return torch._C.parse_schema(schema).overload_name
+
 def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into
     # the new graph
     try:
         import torch
         from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
+        from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
         import torch.onnx.symbolic_registry as sym_registry
 
         sym_registry.register_version("", opset_version)
 
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
-        is_caffe2_aten_fallback = (operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and
-                                   torch.onnx._CAFFE2_ATEN_FALLBACK)
-        if is_caffe2_aten_fallback and opset_version == 9:
+        if is_caffe2_aten_fallback() and opset_version == 9:
             import torch.onnx.symbolic_caffe2
             torch.onnx.symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
@@ -1137,11 +1160,10 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         else:
             ns_op_name = n.kind()
         ns, op_name = ns_op_name.split("::")
-
         domain = ns
         if ns == "aten":
             domain = ""
-        elif ns == "quantized" and is_caffe2_aten_fallback:
+        elif ns == "quantized" and is_caffe2_aten_fallback():
             domain = "caffe2"
 
         if sym_registry.is_registered_op(op_name, domain, opset_version):
@@ -1165,12 +1187,18 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
             attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
-            return g.at(op_name, *inputs, aten=True, **attrs)
+            # `overload_name` is set for non-Caffe2 builds only
+            return g.at(op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs)
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
         if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
+        elif operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and not is_caffe2_aten_fallback():
+            # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+            return g.at(op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs)
+
         raise
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
@@ -1181,6 +1209,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
 
 # Generate an ONNX ATen op node.
 def _aten_op(g, operator, *args, overload_name="", **kwargs):
+    kwargs["aten"] = True
     return g.op("ATen", *args, operator_s=operator, overload_name_s=overload_name, **kwargs)
 
 
@@ -1315,7 +1344,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
 
 
 torch._C.Graph.op = _graph_op  # type: ignore[attr-defined]
-torch._C.Graph.at = _aten_op  # type: ignore[attr-defined]
+torch._C.Graph.at = _aten_op   # type: ignore[attr-defined]
 torch._C.Block.op = _block_op  # type: ignore[attr-defined]
 torch._C.Graph.constant = _graph_constant  # type: ignore[attr-defined]
 torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc, assignment]

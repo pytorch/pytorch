@@ -818,6 +818,9 @@ class TestIndexing(TestCase):
         value = torch.randn(2, 2)
         out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
         out_cpu = t2.index_put_(indices, value, accumulate=True)
+        self.assertTrue(not t1.is_contiguous())
+        self.assertTrue(not t2.is_contiguous())
+
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyCUDA

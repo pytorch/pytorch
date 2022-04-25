@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
+#include <torch/csrc/jit/testing/file_check.h>
 #include <stdexcept>
 
 #include "deep_wide_pt.h"
@@ -393,6 +395,99 @@ TEST(StaticRuntime, EmbeddingBagWithManagedOutput) {
 
   testStaticRuntime(embedding_bag_managed_output, args);
   testStaticRuntime(embedding_bag_managed_output, args, args2);
+}
+
+TEST(StaticRuntime, EmbeddingBagWithExtraneousOutput) {
+  const std::string embedding_bag_default_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=0]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  auto graph = getGraphFromIR(embedding_bag_default_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_mean_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=1]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_mean_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_max_last_offset_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=2]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=1]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res : Tensor = aten::clone(%y0, %none)
+        return (%res)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_max_last_offset_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  const std::string embedding_bag_normal_ir = R"IR(
+    graph(%weight, %indices, %offsets):
+        %scale_grad_by_freq : bool = prim::Constant[value=0]()
+        %mode : int = prim::Constant[value=0]()
+        %sparse : bool = prim::Constant[value=0]()
+        %per_sample_weights : NoneType = prim::Constant()
+        %include_last_offset : bool = prim::Constant[value=0]()
+        %y0 : Tensor, %y1 : Tensor, %y2 : Tensor, %y3 : Tensor = aten::embedding_bag(%weight, %indices, %offsets, %scale_grad_by_freq, %mode, %sparse, %per_sample_weights, %include_last_offset)
+        %none : NoneType = prim::Constant()
+        %res0 : Tensor = aten::clone(%y0, %none)
+        %res1 : Tensor = aten::clone(%y1, %none)
+        %res2 : Tensor = aten::clone(%y2, %none)
+        %res3 : Tensor = aten::clone(%y3, %none)
+        return (%res0, %res1, %res2, %res3)
+  )IR";
+  graph = getGraphFromIR(embedding_bag_normal_ir);
+  RemoveUnnecessaryOutputs(graph);
+  torch::jit::testing::FileCheck()
+      .check_not("static_runtime::embedding_bag")
+      ->run(*graph);
+
+  at::Tensor weight = torch::randn({3, 11}, at::ScalarType::Float);
+  at::Tensor input = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset = torch::tensor({0, 2, 4});
+  std::vector<IValue> args{weight, input, offset};
+  testStaticRuntime(embedding_bag_default_ir, args);
+  testStaticRuntime(embedding_bag_mean_ir, args);
+  testStaticRuntime(embedding_bag_max_last_offset_ir, args);
+
+  at::Tensor weight2 = torch::randn({10, 11}, at::ScalarType::Float);
+  at::Tensor input2 = torch::tensor({0, 1, 0, 2, 1});
+  at::Tensor offset2 = torch::tensor({0, 1, 2, 3, 4, 5});
+  std::vector<IValue> args2{weight2, input2, offset2};
+  testStaticRuntime(embedding_bag_default_ir, args, args2);
+  testStaticRuntime(embedding_bag_mean_ir, args, args2);
+  testStaticRuntime(embedding_bag_max_last_offset_ir, args, args2);
 }
 
 TEST(StaticRuntime, LayerNorm) {
@@ -3148,4 +3243,34 @@ TEST(StaticRuntime, MoveCtor) {
   torch::jit::StaticRuntime new_runtime(std::move(runtime));
   auto actual = new_runtime(args);
   compareResults(expected, actual);
+}
+
+TEST(StaticRuntime, SingleBlockIfReturnList) {
+  const auto src = R"JIT(
+    def forward(self, a, b, cond: bool):
+        lst = []
+        if cond:
+            lst.append(a + b)
+        return lst
+  )JIT";
+  std::vector<IValue> args1{at::randn({1}), at::randn({1}), true};
+  std::vector<IValue> args2{at::randn({42, 42}), at::randn({42, 42}), false};
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, NestedBlockIfReturnList) {
+  const auto src = R"JIT(
+    def forward(self, a, b, cond1: bool, cond2: bool):
+        if cond1:
+            lst = []
+            if cond2:
+                lst.append(a + b)
+            lst.append(a * b)
+            return lst
+        return []
+  )JIT";
+  std::vector<IValue> args1{at::randn({1}), at::randn({1}), true, true};
+  std::vector<IValue> args2{
+      at::randn({42, 42}), at::randn({42, 42}), true, false};
+  testStaticRuntime(src, args1, args2);
 }
