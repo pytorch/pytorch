@@ -961,7 +961,11 @@ class DistributedDataParallel(Module, Joinable):
 
         if self.device_ids:
             inputs, kwargs = _to_kwargs(
-                inputs, kwargs, self.device_ids[0], self.use_side_stream_for_tensor_copies
+                inputs,
+                kwargs,
+                self.device_ids[0],
+                self.use_side_stream_for_tensor_copies
+            )
         else:
             return module_to_run(*inputs, **kwargs)
 
