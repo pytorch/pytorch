@@ -227,6 +227,9 @@ struct TORCH_API OptionalType : public UnionType {
 
   // common cast Optional[Tensor] for undefined tensor type
   static TypePtr ofTensor();
+  //
+  // global singleton
+  static TypePtr get(TypePtr inner);
 
  private:
   explicit OptionalType(TypePtr contained);
@@ -859,6 +862,14 @@ struct TORCH_API ListType
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
+  // global singleton
+  // Given an inner type T and an identifier,
+  // this function wil return the global singleton type pointer
+  // the type List<T>.
+  // The extra "identifier" argument is needed beccause we have multiple container types
+  // that all re-use this function (List<T>, array<T, N>, etc.)
+  static TypePtr get(std::string identifier, TypePtr inner);
+
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
   static ListTypePtr ofOptionalTensors();
@@ -946,6 +957,14 @@ struct TORCH_API DictType : public SharedType {
     }
     return false;
   }
+
+  // global singleton
+  // Given an inner type T and an identifier,
+  // this function wil return the global singleton type pointer
+  // the type List<T>.
+  // The extra "identifier" argument is needed beccause we have multiple container types
+  // that all re-use this function (Dict<K, V> and unordered_map<K, V>)
+  static TypePtr get(std::string identifier, TypePtr key, TypePtr val);
 
  private:
   DictType(TypePtr key, TypePtr value)
@@ -1818,14 +1837,20 @@ struct getTypePtr_<at::Dimname> final {
 template <class T>
 struct getTypePtr_<std::vector<T>> final {
   static const auto& call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    // The "per vector<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = ListType::get("vector", inner_type);
     return type;
   }
 };
 template <class T>
 struct getTypePtr_<c10::ArrayRef<T>> final {
   static const auto& call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    // The "per ArrayRef<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = ListType::get("ArrayRef", inner_type);
     return type;
   }
 };
@@ -1839,41 +1864,59 @@ struct getTypePtr_<c10::SymIntArrayRef> final {
 template <class T>
 struct getTypePtr_<c10::List<T>> final {
   static const auto& call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    // The "per List<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = ListType::get("List", inner_type);
     return type;
   }
 };
 template <class T, size_t N>
 struct getTypePtr_<std::array<T, N>> final {
   static const auto& call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    // The "per array<T, N>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    // (Concatenating the length onto the end of the string because we want a unique
+    // type_ptr created for every std::array<T, N> type).
+    static auto type = ListType::get(std::string("array") + std::to_string(N), inner_type);
     return type;
   }
 };
 template <class K, class V>
 struct getTypePtr_<std::unordered_map<K, V>> final {
   static const auto& call() {
-    static auto type =
-        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
+    static auto inner_key_type = getTypePtr_<K>::call();
+    static auto inner_val_type = getTypePtr_<V>::call();
+    // The "per unordered_map<K, V>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = DictType::get("unordered_map", inner_key_type, inner_val_type);
     return type;
   }
 };
 template <class K, class V>
 struct getTypePtr_<c10::Dict<K, V>> final {
   static const auto& call() {
-    static auto type =
-        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
+    static auto inner_key_type = getTypePtr_<K>::call();
+    static auto inner_val_type = getTypePtr_<V>::call();
+    // The "per Dict<K, V>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = DictType::get("Dict", inner_key_type, inner_val_type);
     return type;
   }
 };
+
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
   static const auto& call() {
-    static auto type = TypeFactory::create<OptionalType>(
-        getTypePtr_<T>::call());
+    static auto inner_type = getTypePtr_<T>::call();
+    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = OptionalType::get(inner_type);
     return type;
   }
 };
+
 
 template<>
 struct getTypePtr_<at::OptionalIntArrayRef> final {
