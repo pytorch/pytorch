@@ -44,6 +44,7 @@ tensors of coefficients from lowest order term to highest order term, i.e.,
 .. math::
     [1, 2, 3] = 1 + 2x + 3x^{2}.
 """ + """
+
 Args:
     c1: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
     c2: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
@@ -63,6 +64,7 @@ Returns the companion matrix of `c`.
 The companion matrix for a power series cannot be made symmetric by scaling the 
 basis, so this function differs from those for the orthogonal polynomials.
 """ + """
+
 Args:
     c: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
 
@@ -93,6 +95,7 @@ while
 
 if `dim = 0` is :math:`x` and `dim = 1` is :math`y`.
 """ + """
+
 Args:
     c: polynomial coefficients. If `c` is multi-dimensional `dim` corresponds to different variables with the degree in each dimension given by the corresponding index.
     order: number of derivatives taken, must be non-negative. Default: 1.
@@ -129,6 +132,7 @@ order term, i.e.,
 .. math::
     [1, 2, 3] = 1 + 2x + 3x^{2}.
 """ + """
+
 Args:
     c1: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
     c2: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
@@ -203,6 +207,7 @@ Note:
     points and the smoothness of the data. If the quality of the fit is 
     inadequate, splines may be a good alternative.
 """ + """
+
 Args:
     x: :math:`x`-coordinates of the `M` sample (data) points ``(x[i], y[i])``.
     y: :math:`y`-coordinates of the sample points. Several sets of sample points sharing the same :math`x`-coordinates can be (independently) fit with one call to `polyfit` by passing in for `y` a two-dimensional tensor that contains one data set per column.
@@ -238,13 +243,6 @@ If the returned coefficients are `c`, then:
     p(x) = c_{0} + c_{1}x + \\ldots +  x^{n}
 
 The coefficient of the last term is 1 for monic polynomials in this form.
-""" + """
-Args:
-    roots: sequence containing the roots.
-
-Returns:
-    one-dimensional tensor of the polynomial’s coefficients If all the roots 
-    are real, then `out` is also real, otherwise it is complex.
 
 Note:
     The coefficients are determined by multiplying together linear factors of 
@@ -255,6 +253,14 @@ Note:
 
     where ``n == len(roots) - 1``; note that this implies that ``1`` is always 
     returned for :math:`a_n`.
+""" + """
+
+Args:
+    roots: sequence containing the roots.
+
+Returns:
+    one-dimensional tensor of the polynomial’s coefficients If all the roots 
+    are real, then `out` is also real, otherwise it is complex.
 
 Example:
     >>> polyfromroots(torch.tensor([-1, 0, 1]))
@@ -286,6 +292,7 @@ If :math:`c` has fewer than two dimensions, ones are implicitly appended to its
 shape to make it two-dimensional. The shape of the result will be 
 c.shape[2:] + x.shape + y.shape.
 """ + """
+
 Args:
     x: one-dimensional series.
     y: one-dimensional series.
@@ -318,6 +325,7 @@ If :math:`c` has fewer than three dimensions, ones are implicitly appended to
 its shape to make it two-dimensional. The shape of the result will be 
 c.shape[3:] + x.shape + y.shape + z.shape.
 """ + """
+
 Args:
     x: one-dimensional series.
     y: one-dimensional series.
@@ -360,6 +368,7 @@ Note:
     dx = \\frac{du}{a}, so one will need to set scl equal to  - perhaps not 
     what one would have first thought.
 """ + """
+
 Args:
     c: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
     m: order of integration, must be positive. Default: 1.
@@ -380,6 +389,7 @@ polyline(input, *, out=None) -> Tensor
 
 Returns a tensor representing a linear polynomial.
 """ + """
+
 Args:
     offset, scale: the "y-intercept" and "slope" of the line, respectively.
 
@@ -401,6 +411,7 @@ polymul(input, *, out=None) -> Tensor
 
 Multiply one polynomial by another.
 """ + """
+
 Args:
     c1: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
     c2: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
@@ -419,6 +430,7 @@ Multiply a polynomial by x.
 
 Multiply the polynomial `c` by x, where x is the independent variable.
 """ + """
+
 Args:
     c: one-dimensional tensor of polynomial coefficients ordered from low to high.
 
@@ -446,6 +458,7 @@ Returns the polynomial `c` raised to the power `pow`. The argument `c` is a
 sequence of coefficients ordered from low to high. i.e., [1,2,3] is the series 
 ``1 + 2*x + 3*x**2.``
 """ + """
+
 Args:
     coefficients: one-dimensional tensor of tensor of series coefficients ordered from low to high degree.
     exponent : power to which the series will be raised
@@ -477,6 +490,7 @@ Note:
     roots. Isolated roots near the origin can be improved by a few iterations 
     of Newton’s method.
 """ + """
+
 Args:
     c: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
 
@@ -499,6 +513,7 @@ i.e.,
 .. math::
     [1, 2, 3] = 1 + 2x + 3x^{2}.
 """ + """
+
 Args:
     c1: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
     c2: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
@@ -537,6 +552,7 @@ Note:
     Trailing zeros in the coefficients will be used in the evaluation, so they 
     should be avoided if efficiency is a concern.
 """ + """
+
 Args:
     x: points.
     c: one-dimensional polynomial coefficients ordered so that the coefficients for terms of degree :math:`n` are contained in :math:`c[n]`. If :math:`c` is multi-dimensional the remaining indices enumerate multiple polynomials. In the two-dimensional case the coefficients may be thought of as stored in the columns of :math:`c`.
@@ -563,6 +579,7 @@ If `c` has fewer than two dimensions, ones are implicitly appended to its shape
 to make it two-dimensional. The shape of the result will be 
 c.size()[2:] + x.size().
 """ + """
+
 Args:
     x, y: two-dimensional series evaluated at the points :math:`(x, y)`, where `x` and `y` must have the same shape.
     c: coefficients ordered so that the coefficient of the term of multi-degree :math:`i`, :math:`j` is contained in :math:`c_ij`. If `c` has a dimension greater than two the remaining indices enumerate multiple sets of coefficients.
@@ -594,6 +611,7 @@ If `c` has fewer than 3 dimensions, ones are implicitly appended to its shape
 to make it three-dimensional. The shape of the result will be 
 c.shape[3:] + x.shape.
 """ + """
+
 Args:
     x, y, z: The three dimensional series is evaluated at the points `(x, y, z)`, where `x`, `y`, and `z` must have the same shape.  If any of `x`, `y`, or `z` is a list or tuple, it is first converted to an ndarray, otherwise it is left unchanged and if it isn't an ndarray it is  treated as a scalar.
     c: Array of coefficients ordered so that the coefficient of the term of multi-degree i,j,k is contained in ``c[i,j,k]``. If `c` has dimension greater than 3 the remaining indices enumerate multiple sets of coefficients.
@@ -628,6 +646,7 @@ r.shape[1:] + x.shape; that is, each polynomial is evaluated at every value of
 polynomial is evaluated only for the corresponding broadcast value of `x`. Note 
 that scalars have shape (,).
 """ + """
+
 Args:
     x: If `x` is a list or tuple, it is converted to an ndarray, otherwise it is left unchanged and treated as a scalar. In either case, `x` or its elements must support addition and multiplication with with themselves and with the elements of `r`.
     r: Array of roots. If `r` is multidimensional the first index is the root index, while the remaining indices enumerate multiple polynomials. For instance, in the two dimensional case the roots of each polynomial may be thought of as stored in the columns of `r`.
@@ -665,6 +684,7 @@ If :math:`c` is a one-dimensional tensor of coefficients of length
 equivalence is useful both for least squares fitting and for the evaluation of 
 a large number of polynomials of the same degree and sample points.
 """ + """
+
 Args:
     x: Array of points. The dtype is converted to float64 or complex128 depending on whether any of the elements are complex. If `x` is scalar it is converted to a one-dimensional tensor.
     degree: Degree of the resulting matrix.
@@ -702,6 +722,7 @@ to roundoff. This equivalence is useful both for least squares fitting and for
 the evaluation of a large number of two-dimensional polynomials of the same 
 degrees and sample points.
 """ + """
+
 Args:
     x, y : Arrays of point coordinates, all of the same shape. The dtypes will be converted to either float64 or complex128 depending on whether any of the elements are complex. Scalars are converted to one-dimensional arrays. degrees : List of maximum degrees of the form [x_deg, y_deg].
 
@@ -740,6 +761,7 @@ to roundoff. This equivalence is useful both for least squares fitting and for
 the evaluation of a large number of three-dimensional polynomials of the same 
 degrees and sample points.
 """ + """
+
 Args:
     x, y, z: Arrays of point coordinates, all of the same shape. The dtypes will be converted to either float64 or complex128 depending on whether any of the elements are complex. Scalars are converted to one-dimensional arrays.
     degrees: List of maximum degrees of the form [x_deg, y_deg, z_deg].
