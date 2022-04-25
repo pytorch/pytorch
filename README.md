@@ -235,7 +235,7 @@ collect2: error: ld returned 1 exit status
 error: command 'g++' failed with exit status 1
 ```
 
-This is caused by `ld` from Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.6.10+, 3.7.6+ and 3.8.1+.
+This is caused by `ld` from Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.7.6+ and 3.8.1+.
 
 On macOS
 ```bash
