@@ -63,8 +63,14 @@ jobs:
 
           # Use jq to massage the output to look a little nicer in GitHub.
           lintrunner --merge-base-with "${PR_BASE_SHA}" --json \
-            | jq '{file: .path, line: .line, column: .char, severity: .severity, code: .code, message: ("["+.code+"] "+ .name + ": " +.description)}' -c
-
+            jq '{
+                  file: .path,
+                  line: .line,
+                  column: .char,
+                  severity: (if .severity == "advice" or .severity == "disabled" then "warning" else .severity end),
+                  code: .code,
+                  message: ("["+.code+"] "+ .name + ": " +.description)
+                }' -c
   quick-checks:
     name: quick-checks
     runs-on: ubuntu-18.04
