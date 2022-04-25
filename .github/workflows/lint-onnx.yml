@@ -1,0 +1,81 @@
+name: Lint ONNX
+
+on:
+  pull_request:
+    paths:
+      - "scripts/onnx/**"
+      - "docs/source/onnx.rst"
+      - "test/onnx/**"
+      - "test/jit/test_export_modes.py"
+      - "tools/onnx/**"
+      - "torch/_C/__init__.pyi.in"
+      - "torch/csrc/jit/passes/onnx.*"
+      - "torch/csrc/jit/passes/onnx/**"
+      - "torch/csrc/jit/serialization/export.*"
+      - "torch/csrc/jit/serialization/onnx.*"
+      - "torch/csrc/onnx/**"
+      - "torch/onnx/**"
+
+jobs:
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: reviewdog/action-black@v3
+        with:
+          github_token: ${{ secrets.github_token }}
+          # Change reviewdog reporter if you need [github-pr-check, github-check, github-pr-review].
+          reporter: github-pr-check
+          # Change reporter level if you need.
+          # GitHub Status Check won't become failure with a warning.
+          level: error
+          filter_mode: file
+      - name: misspell # Check spellings as well
+        uses: reviewdog/action-misspell@v1
+        with:
+          github_token: ${{ secrets.github_token }}
+          locale: "US"
+          reporter: github-pr-check
+          level: info
+          filter_mode: diff_context
+      - name: markdownlint
+        uses: reviewdog/action-markdownlint@v0.7
+        with:
+          github_token: ${{ secrets.github_token }}
+          reporter: github-pr-check
+          level: info
+          filter_mode: file
+          markdownlint_flags: ". --disable MD013 MD041 MD033 MD034"
+
+  lint-python-format:
+    # Separated black/isort from other Python linters because we want this job to
+    # fail and not affect other linters
+    name: black - isort
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+        with:
+          python-version: "3.10"
+      - uses: psf/black@stable
+        with:
+          options: "--check --diff --color"
+      - uses: isort/isort-action@master
+
+  lint-cpp:
+    name: Lint C++
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: reviewdog/action-cpplint@master
+        with:
+          github_token: ${{ secrets.github_token }}
+          reporter: github-pr-check
+          level: warning
+          filter_mode: file
+          flags: --linelength=120
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
