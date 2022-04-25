@@ -35,6 +35,12 @@ Tensor nested_from_padded_cuda(
     const Tensor& sizes,
     bool do_transform_0213) {
   if (padded.dim() > 1 && padded.dim() < 5) {
+    if (padded.dtype() != kFloat && padded.dtype() != kHalf) {
+      TORCH_WARN_ONCE(
+          "nested_from_padded CUDA kernels only support fp32/fp16; falling "
+          "back to slower generic kernel");
+      return at::native::nested_from_padded_generic(padded, sizes, do_transform_0213);
+    }
     TORCH_CHECK(
         (padded.dim() == 4 && do_transform_0213) ||
             (padded.dim() == 3 && !do_transform_0213),
