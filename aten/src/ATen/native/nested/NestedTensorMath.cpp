@@ -1,3 +1,5 @@
+#include <ATen/native/nested/NestedTensorMath.h>
+
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/NamedTensorUtils.h>
