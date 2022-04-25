@@ -20,7 +20,6 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-gcc5.4
       docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
-      needs-viable-strict: true
 
   linux-xenial-py3_7-gcc5_4-test:
     name: linux-xenial-py3.7-gcc5.4
@@ -53,7 +52,6 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-py3.7-gcc7
-      needs-viable-strict: true
 
   linux-xenial-py3_7-gcc7-test:
     name: linux-xenial-py3.7-gcc7
@@ -74,7 +72,6 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-clang7-asan
       docker-image-name: pytorch-linux-xenial-py3-clang7-asan
-      needs-viable-strict: true
 
   linux-xenial-py3_7-clang7-asan-test:
     name: linux-xenial-py3.7-clang7-asan
@@ -83,7 +80,6 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-clang7-asan
       docker-image: ${{ needs.linux-xenial-py3_7-clang7-asan-build.outputs.docker-image }}
-      needs-viable-strict: true
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
@@ -97,7 +93,6 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-gcc7-no-ops
       docker-image-name: pytorch-linux-xenial-py3.7-gcc7
-      needs-viable-strict: true
 
   linux-xenial-py3_7-clang7-onnx-build:
     name: linux-xenial-py3.7-clang7-onnx
@@ -105,7 +100,6 @@ jobs:
     with:
       build-environment: linux-xenial-py3.7-clang7-onnx
       docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
-      needs-viable-strict: true
 
   linux-xenial-py3_7-clang7-onnx-test:
     name: linux-xenial-py3.7-clang7-onnx
@@ -173,7 +167,6 @@ jobs:
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
-      needs-viable-strict: true
 
   linux-xenial-cuda11_3-py3_7-gcc7-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7
@@ -236,6 +229,7 @@ jobs:
       docker-image-name: xla_base
 
   pytorch-xla-linux-bionic-py3_7-clang8-test:
+    if: ${{ false }}
     name: pytorch-xla-linux-bionic-py3.7-clang8
     uses: ./.github/workflows/_linux-test.yml
     needs: pytorch-xla-linux-bionic-py3_7-clang8-build
@@ -323,7 +317,6 @@ jobs:
     with:
       build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
-      needs-viable-strict: true
 
   deploy-linux-xenial-cuda11_3-py3_7-gcc7-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7
