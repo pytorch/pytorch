@@ -88,6 +88,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
