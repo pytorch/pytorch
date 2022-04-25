@@ -883,15 +883,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
         xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('nn.functional.max_unpool1d', 'grad'),
-
-
-        # aten::expand_copy hit the vmap fallback which is currently disabled
-        xfail('diag_embed'),
-        xfail('linalg.cond'),
-        xfail('linalg.svd'),
-        xfail('linalg.svdvals'),
-        xfail('norm', 'nuc'),
-        xfail('svd'),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1008,6 +999,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('svd_lowrank', ''),
         xfail('linalg.lu_factor_ex', ''),
+
         xfail('nn.functional.max_unpool2d', ''),
         xfail('nn.functional.multi_margin_loss', ''),
         xfail('nn.functional.multilabel_margin_loss', ''),
@@ -1025,12 +1017,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
-        xfail('combinations'),  # aten::masked_select_backward hit the vmap fallback which is currently disabled
-
-        # aten::expand_copy hit the vmap fallback which is currently disabled
-        xfail('diag_embed'),
-        xfail('linalg.svd'),
-        xfail('svd'),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
