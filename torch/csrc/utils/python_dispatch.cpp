@@ -58,13 +58,6 @@ class PythonKernelHolder : public c10::OperatorKernel {
   SafePyObject* func_;
 public:
   PythonKernelHolder(py::object func) : func_(new SafePyObject(func.release().ptr(), getPyInterpreter())) {}
-  // This is a generally useful pattern and safer than directly using pybind11's
-  // py::object destructor.  This is because this object may outlive
-  // libtorch_python, so we want to disarm the deallocation if that happens.
-  // PyInterpreter does this correctly, pybind11 does not.
-  ~PythonKernelHolder() {
-    getPyInterpreter()->decref(func_->ptr(getPyInterpreter()), /*is_tensor*/ false);
-  }
 
   void operator()(const c10::OperatorHandle& op, c10::DispatchKeySet keyset, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
