@@ -23,7 +23,7 @@ def generate_code(
 ) -> None:
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
-    from tools.codegen.selective_build.selector import SelectiveBuilder
+    from torchgen.selective_build.selector import SelectiveBuilder
 
     # Build ATen based Variable classes
     if install_dir is None:
@@ -83,7 +83,7 @@ def get_selector_from_legacy_operator_selection_list(
     is_root_operator = True
     is_used_for_training = True
 
-    from tools.codegen.selective_build.selector import SelectiveBuilder
+    from torchgen.selective_build.selector import SelectiveBuilder
 
     selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
         selected_op_list,
@@ -101,7 +101,7 @@ def get_selector(
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
-    from tools.codegen.selective_build.selector import SelectiveBuilder
+    from torchgen.selective_build.selector import SelectiveBuilder
 
     assert not (
         selected_op_list_path is not None and operators_yaml_path is not None
@@ -186,8 +186,8 @@ def main() -> None:
         assert os.path.isfile(
             ts_native_functions
         ), f"Unable to access {ts_native_functions}"
-        from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
-        from tools.codegen.dest.lazy_ir import GenTSLazyIR
+        from torchgen.gen_lazy_tensor import run_gen_lazy_tensor
+        from torchgen.dest.lazy_ir import GenTSLazyIR
 
         run_gen_lazy_tensor(
             aten_path=aten_path,

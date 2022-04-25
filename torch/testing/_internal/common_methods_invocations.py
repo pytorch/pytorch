@@ -39,6 +39,8 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
+import torch._refs as refs  # noqa: F401
+
 from distutils.version import LooseVersion
 
 has_scipy_fft = False
@@ -184,6 +186,7 @@ class SampleInput(object):
                 return t
 
         sample_tt_input, tt_args, tt_kwargs = tt(self.input), tt(self.args), tt(self.kwargs)
+        # TODO update this return to be a named tuple consistent with SampleInput
         return (sample_tt_input, tt_args, tt_kwargs)
 
     # Returns the NumPy version of the sample input object in the form of a tuple: (input, args, kwargs)
@@ -656,10 +659,11 @@ class OpInfo(object):
                  test_neg_view=True,
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  # the following metadata relates to ExpandedWeights support and is checked in test_expanded_weights.py
-                 supports_expanded_weight=False,
-                 ):
+                 supports_expanded_weight=False):
 
         assert dtypes is not None, "OpInfo for {0} has no dtypes!".format(name)
+
+        self._original_args = locals().copy()
 
         dtypes_args = (dtypes, dtypesIfCUDA, dtypesIfROCM)
         # Validates the dtypes are generated from the dispatch-related functions
@@ -1172,7 +1176,6 @@ def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs
             inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
-
 
 # NOTE [Reductions]:
 #
@@ -2332,6 +2335,8 @@ class BinaryUfuncInfo(OpInfo):
                  supports_two_python_scalars=False,  # Whether the operator allows scalar x scalar inputs
                  **kwargs):
 
+        self._original_binary_ufunc_args = locals().copy()
+
         # Elementwise binary operations perform the equivalent of test_reference_testing
         #   in test_binary_ufuncs, but with additional test granularity. So the
         #   generic test_ops.py test is skipped because it's redundant.
@@ -2341,7 +2346,7 @@ class BinaryUfuncInfo(OpInfo):
                          'test_reference_testing'),
         )
         kwargs['skips'] = kwargs.get('skips', tuple()) + common_skips
-        super().__init__(
+        super(BinaryUfuncInfo, self).__init__(
             name,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
@@ -16784,7 +16789,87 @@ op_db: List[OpInfo] = [
     ),
 ]
 
+# NOTE [Python References]
+# Python References emulate existing PyTorch operations, but can ultimately
+#   be expressed in terms of "primitive" operations from torch._prims.
+#
+# These references are experimental.
+# See https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-0/577
+#   for additional context.
+#
+# Python Reference OpInfos should be added to the python_ref_db list below.
+#   Tests can opt-into running on these references by including
+#   that list in the Sequence they pass to the @ops decorator.
+
+class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
+    '''
+    An OpInfo for a Python reference to an elementwise binary operation.
+
+    When constructing this OpInfo a pointer to an existing OpInfo must be
+    provided using the torch_opinfo_name kwarg. An OpInfo with the same
+    name as that string (and no variant) will be found to inherit from.
+
+    Instead of just inheriting the existing OpInfo's metadata, this
+    will actually reconstruct the appropriate OpInfo metadata by
+    inheriting the existing OpInfo's initialization arguments. These
+    arguments can be overridden by adding kwargs to the constructor.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        # TODO: extract this into a common helper
+        self.torch_opinfo_name = torch_opinfo_name
+
+        # finds the corresponding opinfo
+        self.torch_opinfo = None
+        for opinfo in op_db:
+            if opinfo.name == torch_opinfo_name and opinfo.variant_test_name == '':
+                assert self.torch_opinfo is None
+                self.torch_opinfo = opinfo
+
+        assert isinstance(self.torch_opinfo, BinaryUfuncInfo)
+
+        # inherits metadata
+        common_kwargs = {
+            'name': name,
+            'op': op,
+            'aliases': None,  # TODO add a check for alias coverage
+            'method_variant': None,
+            'inplace_variant': None,  # TODO: add a check for inplace coverage
+            'supports_scripting': False,
+        }
+
+        ukwargs = self.torch_opinfo._original_binary_ufunc_args.copy()
+
+        # Fixes metadata
+        original_kwargs = ukwargs['kwargs']
+        del ukwargs['kwargs']
+        del ukwargs['self']
+        del ukwargs['__class__']
+        ukwargs.update(original_kwargs)
+
+        # Overrides metadata
+        ukwargs.update(common_kwargs)
+        ukwargs.update(kwargs)
+
+        super(ElementwiseBinaryPythonRefInfo, self).__init__(**ukwargs)
+
+
+# Separate registry for experimental Python Reference OpInfos.
+python_ref_db = [
+    ElementwiseBinaryPythonRefInfo(
+        '_refs.add',
+        torch_opinfo_name='add',
+    ),
+]
+
 # Common operator groupings
+ops_and_refs = op_db + python_ref_db
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
