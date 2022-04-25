@@ -96,23 +96,25 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
         (char*)allWorkerInfosKeyVector.data(), allWorkerInfosKeyVector.size());
     // workerInfos are comma separated with a comma at the end (e.g.
     // "Name1-Rank1,Name2-Rank2,Name3-Rank2,") parse list of workers.
-    for (const std::string& workerInfoString : splitString(
-             allWorkerInfos.substr(0, allWorkerInfos.size() - 1), ",")) {
-      auto workerInfoVec = splitString(workerInfoString, "-");
-      std::string workerName = workerInfoVec.at(0);
-      int workerId = std::stoi(workerInfoVec.at(1));
+    if (!allWorkerInfos.empty()) {
+      for (const std::string& workerInfoString : splitString(
+               allWorkerInfos.substr(0, allWorkerInfos.size() - 1), ",")) {
+        auto workerInfoVec = splitString(workerInfoString, "-");
+        std::string workerName = workerInfoVec.at(0);
+        int workerId = std::stoi(workerInfoVec.at(1));
 
-      TORCH_CHECK(
-          nameToId.find(workerName) == nameToId.end(),
-          "RPC worker name ",
-          workerName,
-          " is not unique. Workers ",
-          nameToId.find(workerName)->second,
-          " and ",
-          workerId,
-          " share the same name.");
+        TORCH_CHECK(
+            nameToId.find(workerName) == nameToId.end(),
+            "RPC worker name ",
+            workerName,
+            " is not unique. Workers ",
+            nameToId.find(workerName)->second,
+            " and ",
+            workerId,
+            " share the same name.");
 
-      nameToId.emplace(workerName, workerId);
+        nameToId.emplace(workerName, workerId);
+      }
     }
   }
   // Add own name to worker list
