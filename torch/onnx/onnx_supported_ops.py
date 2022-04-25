@@ -1,16 +1,16 @@
-from inspect import signature, _empty  # type: ignore[attr-defined]
-from torch._C import _jit_get_all_schemas, FunctionSchema
-from torch.onnx.symbolic_registry import _registry, register_version
-from torch.onnx.symbolic_helper import _onnx_main_opset, _onnx_stable_opsets
+import inspect
 from typing import Dict, List, Union
 
+import torch._C
+from torch.onnx import symbolic_helper, symbolic_registry
 
-for v in _onnx_stable_opsets + [_onnx_main_opset]:
-    register_version("", v)
+for v in symbolic_helper._onnx_stable_opsets + [symbolic_helper._onnx_main_opset]:
+    symbolic_registry.register_version("", v)
+
 
 class _TorchSchema:
-    def __init__(self, schema: Union[FunctionSchema, str]) -> None:
-        if isinstance(schema, FunctionSchema):
+    def __init__(self, schema: Union[torch._C.FunctionSchema, str]) -> None:
+        if isinstance(schema, torch._C.FunctionSchema):
             self.name: str = schema.name
             self.overload_name: str = schema.overload_name
             self.arguments: List[str] = [arg.name for arg in schema.arguments]
@@ -36,13 +36,13 @@ class _TorchSchema:
         return s
 
     def __hash__(self):
-        # TODO: handle overload_name?
+        # TODO(thiagocrepaldi): handle overload_name?
         return hash((self.name))
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, _TorchSchema):
             return False
-        # TODO: handle overload_name?
+        # TODO(thiagocrepaldi): handle overload_name?
         return self.name == other.name
 
     def is_aten(self) -> bool:
@@ -53,8 +53,8 @@ class _TorchSchema:
 
 
 def _all_aten_forward_schemas():
-    """ Creates a list of _TorchSchema for all aten schemas"""
-    torch_schemas = [_TorchSchema(s) for s in _jit_get_all_schemas()]
+    """Creates a list of _TorchSchema for all aten schemas."""
+    torch_schemas = [_TorchSchema(s) for s in torch._C._jit_get_all_schemas()]
     torch_schemas = sorted(torch_schemas, key=lambda x: x.name)
     aten_schemas = [s for s in torch_schemas if s.is_aten() and not s.is_backward()]
     return aten_schemas
@@ -62,7 +62,7 @@ def _all_aten_forward_schemas():
 
 def _symbolic_argument_count(func):
     params = []
-    sig = signature(func)
+    sig = inspect.signature(func)
     optional_params = []
     has_var = False
     for name, p in sig.parameters.items():
@@ -70,7 +70,7 @@ def _symbolic_argument_count(func):
             has_var = True
         elif name == "_outputs" or name == "g":
             continue
-        elif p.default != _empty:
+        elif p.default != inspect._empty:
             optional_params.append(p)
         else:
             params.append(str(p))
@@ -80,8 +80,8 @@ def _symbolic_argument_count(func):
 def _all_symbolics_schemas():
     symbolics_schemas: Dict[str, _TorchSchema] = dict()
 
-    for domain, version in _registry:
-        for opname, sym_func in _registry[(domain, version)].items():
+    for domain, version in symbolic_registry._registry:
+        for opname, sym_func in symbolic_registry._registry[(domain, version)].items():
             symbolics_schema = _TorchSchema("aten::" + opname)
             symbolics_schema.arguments = _symbolic_argument_count(sym_func)
             if opname in symbolics_schemas:
