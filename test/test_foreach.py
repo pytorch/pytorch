@@ -422,21 +422,6 @@ class TestForeach(TestCase):
         self._minmax_test(op, inputs, True, 1)
 
     def _reduce_test(self, device, dtype, opinfo, is_fastpath):
-<<<<<<< HEAD
-        for N, ord in itertools.product(N_values, (-2, -1, 0, 1, 2)):
-            if is_fastpath:
-                # note (mkozuki): Currently, only `ord` of 1 & 2 can go to the fast path, a.k.a. multi tensor apply
-                if ord in (1, 2) and dtype in (torch.bfloat16, torch.float16, torch.float32, torch.float64):
-                    # The number of cuda kernel launches by fast path.
-                    # 1 for tensor to store intermediate results, another for multi_tensor_apply, and the other for clean up kernel.
-                    n_expected_cudaLaunchKernels = 3
-                else:
-                    # TODO (mkozuki): Enable test  `n_expected_cudaLaunchKernels`.
-                    if opinfo.name == "_foreach_norm":
-                        n_expected_cudaLaunchKernels = 0
-                    else:
-                        n_expected_cudaLaunchKernels = N
-=======
 
         def calc_n_expected_cudaLaunchKernels(n, ord, dtype, is_fastpath, is_foreach_global_norm):
             if not is_fastpath:
@@ -446,7 +431,6 @@ class TestForeach(TestCase):
                 # The number of cuda kernel launches by fast path.
                 # 1 for tensor to store intermediate results, another for multi_tensor_apply, and the other for clean up kernel.
                 return 3
->>>>>>> f99dc87d53... fix n_expected_cudaLaunchKernels
             else:
                 if is_foreach_global_norm:
                     # for each tensor, slow path generally calculates the norm, applies power of ord, and accumulates before
