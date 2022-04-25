@@ -189,7 +189,8 @@ void initJITBindings(PyObject* module) {
             // because this is invoked by python, the function schema *
             // becomes different, and we need to find and reuse the
             // one that is used for caching
-            auto op = findOperatorFor(OperatorName(s.name(), s.overload_name()));
+            auto op =
+                findOperatorFor(OperatorName(s.name(), s.overload_name()));
             RegisterDecomposition(op->schema(), graph);
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
