@@ -59,7 +59,7 @@ class Gamma(ExponentialFamily):
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(shape)
-        value.detach().clamp_(min=torch.finfo(value.dtype).tiny)  # do not record in autograd graph
+        value.detach().clamp_(min=torch.finfo(value.dtype).smallest_normal)  # do not record in autograd graph
         return value
 
     def log_prob(self, value):

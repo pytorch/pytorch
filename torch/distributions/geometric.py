@@ -85,7 +85,7 @@ class Geometric(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        tiny = torch.finfo(self.probs.dtype).tiny
+        tiny = torch.finfo(self.probs.dtype).smallest_normal
         with torch.no_grad():
             if torch._C._get_tracing_state():
                 # [JIT WORKAROUND] lack of support for .uniform_()

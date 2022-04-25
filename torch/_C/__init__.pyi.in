@@ -86,7 +86,7 @@ class finfo:
     min: _float
     max: _float
     eps: _float
-    tiny: _float
+    smallest_normal: _float
     resolution: _float
     dtype: str
 
