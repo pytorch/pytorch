@@ -58,6 +58,7 @@ def is_fixed_qparams_node(node, modules):
         torch.nn.Hardsigmoid,
         torch.nn.Sigmoid,
         torch.nn.Tanh,
+        torch.nn.Softmax,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
@@ -236,6 +237,7 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
     nn.InstanceNorm3d: nnq.InstanceNorm3d,
     nn.LayerNorm: nnq.LayerNorm,
     nn.Dropout: nnq.Dropout,
+    nn.Softmax: nnq.Softmax,
     nni.BNReLU2d: nniq.BNReLU2d,
     nni.BNReLU3d: nniq.BNReLU3d,
 }
