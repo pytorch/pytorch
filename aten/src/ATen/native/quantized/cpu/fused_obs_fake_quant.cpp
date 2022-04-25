@@ -129,6 +129,62 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
 namespace at {
 namespace native {
 
+std::tuple<
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor
+> fused_moving_avg_obs_fake_quant_functional(
+    const at::Tensor& self,
+    const at::Tensor& observer_on,
+    const at::Tensor& fake_quant_on,
+    const at::Tensor& running_min,
+    const at::Tensor& running_max,
+    const at::Tensor& scale,
+    const at::Tensor& zero_point,
+    const double averaging_const,
+    const int64_t quant_min,
+    const int64_t quant_max,
+    const int64_t ch_axis,
+    bool per_row_fake_quant,
+    bool symmetric_quant) {
+  // make local copies of all of the mutable inputs
+  auto running_min_copy = running_min.clone();
+  auto running_max_copy = running_max.clone();
+  auto scale_copy = scale.clone();
+  auto zero_point_copy = zero_point.clone();
+  // call into the mutable version of the op
+  auto out = at::_fused_moving_avg_obs_fq_helper(
+    self,
+    observer_on,
+    fake_quant_on,
+    // Careful - the functional and non-functional version of this operator have the same C++ API name.
+    // The only difference in their C++ schemas is that the non-functional version takes in non-const tensors.
+    // (If we call into the funtional version, we'll infinite loop).
+    const_cast<Tensor&>(running_min),
+    const_cast<Tensor&>(running_max),
+    const_cast<Tensor&>(scale),
+    const_cast<Tensor&>(zero_point),
+    averaging_const,
+    quant_min,
+    quant_max,
+    ch_axis,
+    per_row_fake_quant,
+    symmetric_quant);
+  // return the outputs, and the mutated inputs
+  return std::make_tuple(
+    running_min_copy,
+    running_max_copy,
+    scale_copy,
+    zero_point_copy,
+    std::get<0>(out),
+    std::get<1>(out)
+  );
+}
+
+
 std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     const at::Tensor& self,
     const at::Tensor& observer_on,
