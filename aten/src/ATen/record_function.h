@@ -509,7 +509,7 @@ TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
 
 namespace detail {
 template <typename Inputs, typename F, typename... Args>
-void record_function_with_scope(RecordScope scope, F fn, Inputs&& inputs, Args&&... args) {
+void record_function_with_scope(RecordScope scope, F fn, const Inputs& inputs, Args&&... args) {
   at::RecordFunction guard(scope);
   if (guard.isActive()) {
     if (guard.needsInputs()) {
@@ -521,7 +521,7 @@ void record_function_with_scope(RecordScope scope, F fn, Inputs&& inputs, Args&&
 }
 
 template <typename Inputs, typename F, typename... Args>
-void record_function_with_scope_and_debug_handle(RecordScope scope, F fn, int64_t debug_handle, Inputs&& inputs, Args&&... args) {
+void record_function_with_scope_and_debug_handle(RecordScope scope, F fn, int64_t debug_handle, const Inputs& inputs, Args&&... args) {
   at::RecordFunction guard(scope);
   if (guard.isActive()) {
     if (guard.needsInputs()) {
@@ -532,6 +532,17 @@ void record_function_with_scope_and_debug_handle(RecordScope scope, F fn, int64_
     }
   }
 }
+
+template <typename F, typename... Args>
+void record_function_with_scope(RecordScope scope, F fn, c10::ArrayRef<const c10::IValue> inputs, Args&&... args) {
+  return record_function_with_scope<c10::ArrayRef<const c10::IValue>, F, Args...>(scope, std::move(fn), inputs, std::forward<Args>(args)...);
+}
+
+template <typename F, typename... Args>
+void record_function_with_scope_and_debug_handle(RecordScope scope, F fn, int64_t debug_handle, c10::ArrayRef<const c10::IValue> inputs, Args&&... args) {
+  return record_function_with_scope_and_debug_handle<c10::ArrayRef<const c10::IValue>, F, Args...>(scope, std::move(fn), debug_handle, inputs, std::forward<Args>(args)...);
+}
+
 } // namespace detail
 
 // optional argument - function's seq_no
