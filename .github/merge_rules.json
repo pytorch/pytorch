@@ -104,7 +104,7 @@
       "patterns": [
          "torch/csrc/lazy/**",
          "test/cpp/lazy/**",
-         "/test/lazy/**",
+         "test/lazy/**",
          "codegen/api/lazy.py",
          "codegen/dest/lazy_ir.py",
          "codegen/dest/lazy_ts_lowering.py",
