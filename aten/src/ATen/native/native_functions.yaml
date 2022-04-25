@@ -3885,6 +3885,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: select
+    SparseCsrCPU, SparseCsrCUDA: select_sparse_csr
 
 - func: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
   variants: function
@@ -4674,6 +4675,12 @@
 - func: trapz.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
 
 - func: trapz.dx(Tensor y, *, float dx=1, int dim=-1) -> Tensor
+
+# Fused implementation detail for transformers. Adds in-projection bias to QKV and divides Q by sqrt(D/num_heads).
+- func: _transform_bias_rescale_qkv(Tensor qkv, Tensor qkv_bias, int num_heads) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU, NestedTensorCPU: transform_bias_rescale_qkv_cpu
+    CUDA, NestedTensorCUDA: transform_bias_rescale_qkv_cuda
 
 - func: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   device_check: NoCheck # cpu_nested_shape_example will always be on CPU
@@ -11625,3 +11632,14 @@
   variants: method
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_layer_norm
+
+# Apparently, putting "forward" in the name will cause Python bindings to be skipped, so "fwd" it is.
+- func: _transformer_encoder_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: transformer_encoder_layer_forward
+
+- func: _native_multi_head_attention(Tensor query, Tensor key, Tensor value, int embed_dim, int num_head, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None, bool need_weights=True, bool average_attn_weights=True) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: native_multi_head_attention
