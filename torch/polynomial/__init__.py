@@ -38,10 +38,11 @@ polyadd(input, *, out=None) -> Tensor
 
 Adds one polynomial to another.
 
-Returns the sum of two polynomials :math:`c_{1} + c_{2}`. The arguments are tensors of coefficients from lowest order term to highest order term, i.e.,
+Returns the sum of two polynomials :math:`c_{1} + c_{2}`. The arguments are 
+tensors of coefficients from lowest order term to highest order term, i.e.,
 
-    .. math::
-        [1, 2, 3] = 1 + 2x + 3x^{2}.
+.. math::
+    [1, 2, 3] = 1 + 2x + 3x^{2}.
 """ + """
 Args:
     c1: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
@@ -59,7 +60,8 @@ polycompanion(input, *, out=None) -> Tensor
 
 Returns the companion matrix of `c`.
 
-The companion matrix for a power series cannot be made symmetric by scaling the basis, so this function differs from those for the orthogonal polynomials.
+The companion matrix for a power series cannot be made symmetric by scaling the 
+basis, so this function differs from those for the orthogonal polynomials.
 """ + """
 Args:
     c: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
@@ -76,7 +78,10 @@ polyder(input, *, out=None) -> Tensor
 
 Differentiate a polynomial.
 
-Returns the polynomial coefficients `c` differentiated `m` times along `dim`. At each iteration the result is multiplied by `scaling_factor` (for use in a linear change of variable). The argument `c` is a tensor of coefficients from lowest order term to highest order term, i.e.,
+Returns the polynomial coefficients `c` differentiated `m` times along `dim`. 
+At each iteration the result is multiplied by `scaling_factor` (for use in a 
+linear change of variable). The argument `c` is a tensor of coefficients from 
+lowest order term to highest order term, i.e.,
 
 .. math::
     [1, 2, 3] = 1 + 2x + 3x^{2}.
@@ -117,7 +122,9 @@ polydiv(input, *, out=None) -> Tensor
 
 Divides one polynomial by another.
 
-Returns the quotient and remainder of two polynomials :math:`\\frac{c1}{c2}`. The arguments are tensors of coefficients from lowest order term to highest order term, i.e.,
+Returns the quotient and remainder of two polynomials :math:`\\frac{c1}{c2}`. 
+The arguments are tensors of coefficients from lowest order term to highest 
+order term, i.e.,
 
 .. math::
     [1, 2, 3] = 1 + 2x + 3x^{2}.
@@ -152,7 +159,12 @@ polyfit = _add_docstr(
     r"""
 Least-squares fit of a polynomial to data.
 
-Return the coefficients of a polynomial of `degree` that is the least squares fit to the data values `y` given at points `x`. If `y` is one-dimensional the returned coefficients will also be one-dimensional. If `y` is two-dimensional multiple fits are done, one for each column of `y`, and the resulting coefficients are stored in the corresponding columns of a two-dimensional tensor.
+Return the coefficients of a polynomial of `degree` that is the least squares 
+fit to the data values `y` given at points `x`. If `y` is one-dimensional the 
+returned coefficients will also be one-dimensional. If `y` is two-dimensional 
+multiple fits are done, one for each column of `y`, and the resulting 
+coefficients are stored in the corresponding columns of a two-dimensional 
+tensor.
 
 The fitted polynomials are in the form:
 
@@ -162,17 +174,34 @@ The fitted polynomials are in the form:
 where :math:`n` is `degree`.
 
 Note:
-    The solution is the coefficients of the polynomial :math:`p` that minimizes the sum of the weighted squared errors:
+    The solution is the coefficients of the polynomial :math:`p` that minimizes 
+    the sum of the weighted squared errors:
 
-    where the :math:`w_{j}` are the weights. This problem is solved by setting up the typically over-determined matrix equation:
+    where the :math:`w_{j}` are the weights. This problem is solved by setting 
+    up the typically over-determined matrix equation:
     
-    where :math:`V` is the weighted pseudo Vandermonde matrix of :math:`x`, :math:`c` are the coefficients to be solved for, :math:`w` are the weights, and :math:`y` are the observed values. This equation is then solved using the singular value decomposition of :math:`V`.
+    where :math:`V` is the weighted pseudo Vandermonde matrix of :math:`x`, 
+    :math:`c` are the coefficients to be solved for, :math:`w` are the weights, 
+    and :math:`y` are the observed values. This equation is then solved using 
+    the singular value decomposition of :math:`V`.
 
 Note:
-    If some of the singular values of :math:`V` are so small that they are neglected, a `RankWarning` exception is raised. This means that the coefficient values may be poorly determined. Fitting to a lower order polynomial will usually get rid of the warning (but may not be what you want, of course; if you have independent reasons for choosing the degree which isn’t working, you may have to: a.) reconsider those reasons, and/or b.) reconsider the quality of your data). The `rcond` parameter can also be set to a value smaller than its default, but the resulting fit may be spurious and have large contributions from roundoff error.
+    If some of the singular values of :math:`V` are so small that they are 
+    neglected, a `RankWarning` exception is raised. This means that the 
+    coefficient values may be poorly determined. Fitting to a lower order 
+    polynomial will usually get rid of the warning (but may not be what you 
+    want, of course; if you have independent reasons for choosing the degree 
+    which isn’t working, you may have to: a.) reconsider those reasons, and/or 
+    b.) reconsider the quality of your data). The `rcond` parameter can also be 
+    set to a value smaller than its default, but the resulting fit may be 
+    spurious and have large contributions from roundoff error.
 
 Note:
-    Polynomial fits using double precision tend to “fail” at about (polynomial) degree 20. Fits using Chebyshev or Legendre series are generally better conditioned, but much can still depend on the distribution of the sample points and the smoothness of the data. If the quality of the fit is inadequate, splines may be a good alternative.
+    Polynomial fits using double precision tend to “fail” at about (polynomial) 
+    degree 20. Fits using Chebyshev or Legendre series are generally better 
+    conditioned, but much can still depend on the distribution of the sample 
+    points and the smoothness of the data. If the quality of the fit is 
+    inadequate, splines may be a good alternative.
 """ + """
 Args:
     x: :math:`x`-coordinates of the `M` sample (data) points ``(x[i], y[i])``.
@@ -198,7 +227,10 @@ Return the coefficients of the polynomial:
 .. math::
     p(x) = (x - r_{0}) \\times \\ldot \\times (x - r_{n})
 
-where :math:`r_{n}` are the `roots`. If a zero has multiplicity :math:`n`, then it must appear in `roots` :math:`n` times. For instance, if 2 is a root of multiplicity three and 3 is a root of multiplicity 2, then `roots` looks something like `tensor([2, 2, 2, 3, 3])`. The roots can appear in any order.
+where :math:`r_{n}` are the `roots`. If a zero has multiplicity :math:`n`, then 
+it must appear in `roots` :math:`n` times. For instance, if 2 is a root of 
+multiplicity three and 3 is a root of multiplicity 2, then `roots` looks 
+something like `tensor([2, 2, 2, 3, 3])`. The roots can appear in any order.
 
 If the returned coefficients are `c`, then:
 
@@ -211,15 +243,18 @@ Args:
     roots: sequence containing the roots.
 
 Returns:
-    one-dimensional tensor of the polynomial’s coefficients If all the roots are real, then `out` is also real, otherwise it is complex.
+    one-dimensional tensor of the polynomial’s coefficients If all the roots 
+    are real, then `out` is also real, otherwise it is complex.
 
 Note:
-    The coefficients are determined by multiplying together linear factors of the form ``(x - r_i)``, i.e.
+    The coefficients are determined by multiplying together linear factors of 
+    the form ``(x - r_i)``, i.e.
 
     .. math::
         p(x) = (x - r_0) (x - r_1) ... (x - r_n)
 
-    where ``n == len(roots) - 1``; note that this implies that ``1`` is always returned for :math:`a_n`.
+    where ``n == len(roots) - 1``; note that this implies that ``1`` is always 
+    returned for :math:`a_n`.
 
 Example:
     >>> polyfromroots(torch.tensor([-1, 0, 1]))
@@ -235,16 +270,21 @@ polygrid2d = _add_docstr(
     r"""
 polygrid2d(input, *, out=None) -> Tensor
 
-Evaluates a two-dimensional polynomial on the Cartesian product of :math:`x` and :math:`y`.
+Evaluates a two-dimensional polynomial on the Cartesian product of :math:`x` 
+and :math:`y`.
 
 This function returns the values:
 
 .. math::
     p(a, b) = \\sum_{i, j} c_{i, j} a^{i} b^{j}
 
-where the points :math:`(a, b)` consist of all pairs formed by taking :math:`a` from :math:`x` and :math:`b` from :math:`y`. The resulting points form a grid with :math:`x` in the first dimension and :math:`y` in the second dimension.
+where the points :math:`(a, b)` consist of all pairs formed by taking :math:`a` 
+from :math:`x` and :math:`b` from :math:`y`. The resulting points form a grid 
+with :math:`x` in the first dimension and :math:`y` in the second dimension.
 
-If :math:`c` has fewer than two dimensions, ones are implicitly appended to its shape to make it two-dimensional. The shape of the result will be c.shape[2:] + x.shape + y.shape.
+If :math:`c` has fewer than two dimensions, ones are implicitly appended to its 
+shape to make it two-dimensional. The shape of the result will be 
+c.shape[2:] + x.shape + y.shape.
 """ + """
 Args:
     x: one-dimensional series.
@@ -261,16 +301,22 @@ polygrid3d = _add_docstr(
     r"""
 polygrid3d(input, *, out=None) -> Tensor
 
-Evaluates a three-dimensional polynomial on the Cartesian product of :math:`x`, :math:`y`, and  :math:`z`.
+Evaluates a three-dimensional polynomial on the Cartesian product of :math:`x`, 
+:math:`y`, and  :math:`z`.
 
 This function returns the values:
 
 .. math::
     p(a,b,c) = \\sum_{i, j, k} c_{i, j, k} a^{i} b^{j} c^{k}
 
-where the points :math:`(a, b, c)` consist of all triples formed by taking :math:`a` from :math:`x`, :math:`b` from :math:`y`, and :math:`c` from :math:`z`. The resulting points form a grid with :math:`x` in the first dimension, `y` in the second dimension, and `z` in the third dimension.
+where the points :math:`(a, b, c)` consist of all triples formed by taking 
+:math:`a` from :math:`x`, :math:`b` from :math:`y`, and :math:`c` from 
+:math:`z`. The resulting points form a grid with :math:`x` in the first 
+dimension, `y` in the second dimension, and `z` in the third dimension.
 
-If :math:`c` has fewer than three dimensions, ones are implicitly appended to its shape to make it two-dimensional. The shape of the result will be c.shape[3:] + x.shape + y.shape + z.shape.
+If :math:`c` has fewer than three dimensions, ones are implicitly appended to 
+its shape to make it two-dimensional. The shape of the result will be 
+c.shape[3:] + x.shape + y.shape + z.shape.
 """ + """
 Args:
     x: one-dimensional series.
@@ -290,7 +336,11 @@ polyint(input, *, out=None) -> Tensor
 
 Integrate a polynomial.
 
-Returns the polynomial coefficients `c` integrated `m` times from `lower_bound` along `dim`. At each iteration the resulting series is multiplied by `scaling_factor` and an integration constant, `k`, is added. The scaling factor is for use in a linear change of variable. The argument `c` is a tensor of coefficients, from low to high degree along each axis:
+Returns the polynomial coefficients `c` integrated `m` times from `lower_bound` 
+along `dim`. At each iteration the resulting series is multiplied by 
+`scaling_factor` and an integration constant, `k`, is added. The scaling factor 
+is for use in a linear change of variable. The argument `c` is a tensor of 
+coefficients, from low to high degree along each axis:
 
 .. math::
     [1, 2, 3] = 1 + 2x + 3x^{2}`
@@ -303,9 +353,12 @@ while
 if `dim = 0` is :math:`x` and `dim = 1` is :math`y`.
 
 Note:
-    Note that the result of each integration is multiplied by `scaling_factor`. Why is this important to note? Say one is making a linear change of variable in an integral relative to `x`. Then
+    Note that the result of each integration is multiplied by `scaling_factor`. 
+    Why is this important to note? Say one is making a linear change of 
+    variable in an integral relative to `x`. Then
 
-    dx = \\frac{du}{a}, so one will need to set scl equal to  - perhaps not what one would have first thought.
+    dx = \\frac{du}{a}, so one will need to set scl equal to  - perhaps not 
+    what one would have first thought.
 """ + """
 Args:
     c: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
@@ -389,7 +442,9 @@ polypow(input, *, out=None) -> Tensor
 
 Raise a polynomial to a power.
 
-Returns the polynomial `c` raised to the power `pow`. The argument `c` is a sequence of coefficients ordered from low to high. i.e., [1,2,3] is the series  ``1 + 2*x + 3*x**2.``
+Returns the polynomial `c` raised to the power `pow`. The argument `c` is a 
+sequence of coefficients ordered from low to high. i.e., [1,2,3] is the series 
+``1 + 2*x + 3*x**2.``
 """ + """
 Args:
     coefficients: one-dimensional tensor of tensor of series coefficients ordered from low to high degree.
@@ -408,13 +463,19 @@ polyroots(input, *, out=None) -> Tensor
 
 Compute the roots of a polynomial.
 
-    Return the roots (a.k.a. “zeros”) of the polynomial:
+Return the roots (a.k.a. “zeros”) of the polynomial:
 
-    .. math::
-        p(x) = \\sum_i c_{i}x^{i}.
+.. math::
+    p(x) = \\sum_i c_{i}x^{i}.
 
-    Note:
-        The root estimates are obtained as the eigenvalues of the companion matrix, roots far from the origin of the complex plane may have large errors due to the numerical instability of the power series for such values. Roots with multiplicity greater than 1 will also show larger errors as the value of the series near such points is relatively insensitive to errors in the roots. Isolated roots near the origin can be improved by a few iterations of Newton’s method.
+Note:
+    The root estimates are obtained as the eigenvalues of the companion matrix, 
+    roots far from the origin of the complex plane may have large errors due to 
+    the numerical instability of the power series for such values. Roots with 
+    multiplicity greater than 1 will also show larger errors as the value of 
+    the series near such points is relatively insensitive to errors in the 
+    roots. Isolated roots near the origin can be improved by a few iterations 
+    of Newton’s method.
 """ + """
 Args:
     c: one-dimensional polynomial coefficients ordered from lowest order term to highest order term.
@@ -431,7 +492,9 @@ polysub(input, *, out=None) -> Tensor
 
 Subtracts one polynomial from another.
 
-Returns the difference of two polynomials :math:`c_{1} - c_{2}`. The arguments are sequences of coefficients from lowest order term to highest order term, i.e.,
+Returns the difference of two polynomials :math:`c_{1} - c_{2}`. The arguments 
+are sequences of coefficients from lowest order term to highest order term, 
+i.e.,
 
 .. math::
     [1, 2, 3] = 1 + 2x + 3x^{2}.
@@ -465,10 +528,14 @@ If :math:`c` is of length :math:`n + 1`, this function returns the value:
 .. math::
     p(x) = c_{0} + c_{1} x + ... + c_{n} x^{n}
 
-If :math:`c` is a one-dimensional tensor, then :math:`p(x)` will have the same shape as :math:`x`. If :math:`c` is multi-dimensional, then the shape of the result depends on the value of `expand`. If `expand` is true the shape will be c.size()[1:] + x.size(). If `expand` is `False` the shape will be c.size()[1:].
+If :math:`c` is a one-dimensional tensor, then :math:`p(x)` will have the same 
+shape as :math:`x`. If :math:`c` is multi-dimensional, then the shape of the 
+result depends on the value of `expand`. If `expand` is true the shape will be 
+c.size()[1:] + x.size(). If `expand` is `False` the shape will be c.size()[1:].
 
 Note:
-    Trailing zeros in the coefficients will be used in the evaluation, so they should be avoided if efficiency is a concern.
+    Trailing zeros in the coefficients will be used in the evaluation, so they 
+    should be avoided if efficiency is a concern.
 """ + """
 Args:
     x: points.
@@ -492,7 +559,9 @@ This function returns the value
 .. math::
     p(x,y) = \\sum_{i,j} c_{i,j} * x^i * y^j
 
-If `c` has fewer than two dimensions, ones are implicitly appended to its shape to make it two-dimensional. The shape of the result will be c.size()[2:] + x.size().
+If `c` has fewer than two dimensions, ones are implicitly appended to its shape 
+to make it two-dimensional. The shape of the result will be 
+c.size()[2:] + x.size().
 """ + """
 Args:
     x, y: two-dimensional series evaluated at the points :math:`(x, y)`, where `x` and `y` must have the same shape.
@@ -515,9 +584,15 @@ This function returns the values:
 .. math::
     p(x, y, z) = \\sum_{i, j, k} c_{i, j, k}x^{i}y^{j}z^{k}
 
-The parameters `x`, `y`, and `z` are converted to tensors only if they are tuples or a lists, otherwise they are treated as a scalars and they must have the same shape after conversion. In either case, either `x`, `y`, and `z` or their elements must support multiplication and addition both with themselves and with the elements of `c`.
+The parameters `x`, `y`, and `z` are converted to tensors only if they are 
+tuples or a lists, otherwise they are treated as a scalars and they must have 
+the same shape after conversion. In either case, either `x`, `y`, and `z` or 
+their elements must support multiplication and addition both with themselves 
+and with the elements of `c`.
 
-If `c` has fewer than 3 dimensions, ones are implicitly appended to its shape to make it three-dimensional. The shape of the result will be c.shape[3:] + x.shape.
+If `c` has fewer than 3 dimensions, ones are implicitly appended to its shape 
+to make it three-dimensional. The shape of the result will be 
+c.shape[3:] + x.shape.
 """ + """
 Args:
     x, y, z: The three dimensional series is evaluated at the points `(x, y, z)`, where `x`, `y`, and `z` must have the same shape.  If any of `x`, `y`, or `z` is a list or tuple, it is first converted to an ndarray, otherwise it is left unchanged and if it isn't an ndarray it is  treated as a scalar.
@@ -540,9 +615,18 @@ If `r` is of length `N`, this function returns the value
 .. math::
     p(x) = \\prod_{n=1}^{N} (x - r_n)
 
-The parameter `x` is converted to an tensor only if it is a tuple or a list, otherwise it is treated as a scalar. In either case, either `x` or its elements must support multiplication and addition both with themselves and with the elements of `r`.
+The parameter `x` is converted to an tensor only if it is a tuple or a list, 
+otherwise it is treated as a scalar. In either case, either `x` or its elements 
+must support multiplication and addition both with themselves and with the 
+elements of `r`.
 
-If `r` is a one-dimensional tensor, then `p(x)` will have the same shape as `x`.  If `r` is multidimensional, then the shape of the result depends on the value of `tensor`. If `tensor is ``True`` the shape will be r.shape[1:] + x.shape; that is, each polynomial is evaluated at every value of `x`. If `tensor` is ``False``, the shape will be r.shape[1:]; that is, each polynomial is evaluated only for the corresponding broadcast value of `x`. Note that scalars have shape (,).
+If `r` is a one-dimensional tensor, then `p(x)` will have the same shape as 
+`x`.  If `r` is multidimensional, then the shape of the result depends on the 
+value of `tensor`. If `tensor is ``True`` the shape will be 
+r.shape[1:] + x.shape; that is, each polynomial is evaluated at every value of 
+`x`. If `tensor` is ``False``, the shape will be r.shape[1:]; that is, each 
+polynomial is evaluated only for the corresponding broadcast value of `x`. Note 
+that scalars have shape (,).
 """ + """
 Args:
     x: If `x` is a list or tuple, it is converted to an ndarray, otherwise it is left unchanged and treated as a scalar. In either case, `x` or its elements must support addition and multiplication with with themselves and with the elements of `r`.
@@ -561,7 +645,8 @@ polyvander(input, *, out=None) -> Tensor
 
 Vandermonde matrix of given degree.
 
-Returns the Vandermonde matrix of degree :math:`degree` and sample points :math:`x`. The Vandermonde matrix is defined by:
+Returns the Vandermonde matrix of degree :math:`degree` and sample points 
+:math:`x`. The Vandermonde matrix is defined by:
 
 .. math::
     V[..., i] = x^{i},
@@ -571,9 +656,14 @@ where:
 .. math::
     0 <= i <= deg.
 
-The leading indices of :math:`V` index the elements of :math:`x` and the last index is the power of :math:`x`.
+The leading indices of :math:`V` index the elements of :math:`x` and the last 
+index is the power of :math:`x`.
 
-If :math:`c` is a one-dimensional tensor of coefficients of length :math:`n + 1` and :math:`V` is the tensor ``V = polyvander(x, n)``, then ``torch.dot(V, c)`` and ``polyval(x, c)`` are the same up to roundoff. This equivalence is useful both for least squares fitting and for the evaluation of a large number of polynomials of the same degree and sample points.
+If :math:`c` is a one-dimensional tensor of coefficients of length 
+:math:`n + 1` and :math:`V` is the tensor ``V = polyvander(x, n)``, then 
+``torch.dot(V, c)`` and ``polyval(x, c)`` are the same up to roundoff. This 
+equivalence is useful both for least squares fitting and for the evaluation of 
+a large number of polynomials of the same degree and sample points.
 """ + """
 Args:
     x: Array of points. The dtype is converted to float64 or complex128 depending on whether any of the elements are complex. If `x` is scalar it is converted to a one-dimensional tensor.
@@ -591,19 +681,26 @@ polyvander2d(input, *, out=None) -> Tensor
 
 Pseudo-Vandermonde matrix of given degrees.
 
-Returns the pseudo-Vandermonde matrix of degrees `deg` and sample points `(x, y)`. The pseudo-Vandermonde matrix is defined by:
+Returns the pseudo-Vandermonde matrix of degrees `deg` and sample points 
+`(x, y)`. The pseudo-Vandermonde matrix is defined by:
 
 .. math::
     V[..., (deg[1] + 1)*i + j] = x^i * y^j,
 
-where `0 <= i <= deg[0]` and `0 <= j <= deg[1]`. The leading indices of `V` index the points `(x, y)` and the last index encodes the powers of `x` and `y`.
+where `0 <= i <= deg[0]` and `0 <= j <= deg[1]`. The leading indices of `V` 
+index the points `(x, y)` and the last index encodes the powers of `x` and `y`.
 
-If ``V = polyvander2d(x, y, [xdeg, ydeg])``, then the columns of `V` correspond to the elements of a two-dimensional coefficient tensor `c` of shape (xdeg + 1, ydeg + 1) in the order
+If ``V = polyvander2d(x, y, [xdeg, ydeg])``, then the columns of `V` correspond 
+to the elements of a two-dimensional coefficient tensor `c` of shape 
+(xdeg + 1, ydeg + 1) in the order
 
 .. math::
     c_{00}, c_{01}, c_{02} ... , c_{10}, c_{11}, c_{12} ...
 
-and ``torch.p.dot(V, c.flat)`` and ``polyval2d(x, y, c)`` will be the same up to roundoff. This equivalence is useful both for least squares fitting and for the evaluation of a large number of two-dimensional polynomials of the same degrees and sample points.
+and ``torch.p.dot(V, c.flat)`` and ``polyval2d(x, y, c)`` will be the same up 
+to roundoff. This equivalence is useful both for least squares fitting and for 
+the evaluation of a large number of two-dimensional polynomials of the same 
+degrees and sample points.
 """ + """
 Args:
     x, y : Arrays of point coordinates, all of the same shape. The dtypes will be converted to either float64 or complex128 depending on whether any of the elements are complex. Scalars are converted to one-dimensional arrays. degrees : List of maximum degrees of the form [x_deg, y_deg].
@@ -620,19 +717,28 @@ polyvander3d(input, *, out=None) -> Tensor
 
 Pseudo-Vandermonde matrix of given degrees.
 
-Returns the pseudo-Vandermonde matrix of degrees ``degrees`` and sample points ``(x, y, z)``. If ``l, m, n`` are the given degrees in ``x, y, z``, then the pseudo-Vandermonde matrix is defined by:
+Returns the pseudo-Vandermonde matrix of degrees ``degrees`` and sample points 
+``(x, y, z)``. If ``l, m, n`` are the given degrees in ``x, y, z``, then the 
+pseudo-Vandermonde matrix is defined by:
 
 .. math::
     V[..., (m+1)(n+1)i + (n+1)j + k] = x^i * y^j * z^k,
 
-where `0 <= i <= l`, `0 <= j <= m`, and `0 <= j <= n`.  The leading indices of ``V`` index the points ``(x, y, z)`` and the last index encodes the powers of ``x``, ``y``, and ``z``.
+where `0 <= i <= l`, `0 <= j <= m`, and `0 <= j <= n`.  The leading indices of 
+``V`` index the points ``(x, y, z)`` and the last index encodes the powers of 
+``x``, ``y``, and ``z``.
 
-If ``V = polyvander3d(x, y, z, [xdeg, ydeg, zdeg])``, then the columns of ``V`` correspond to the elements of a three-dimensional coefficient tensor ``c`` of shape (xdeg + 1, ydeg + 1, zdeg + 1) in the order:
+If ``V = polyvander3d(x, y, z, [xdeg, ydeg, zdeg])``, then the columns of ``V`` 
+correspond to the elements of a three-dimensional coefficient tensor ``c`` of 
+shape (xdeg + 1, ydeg + 1, zdeg + 1) in the order:
 
 .. math::
     c_{000}, c_{001}, c_{002},... , c_{010}, c_{011}, c_{012},...
 
-and ``torch.dot(V, c.flat)`` and ``polyval3d(x, y, z, c)`` will be the same up to roundoff. This equivalence is useful both for least squares fitting and for the evaluation of a large number of three-dimensional polynomials of the same degrees and sample points.
+and ``torch.dot(V, c.flat)`` and ``polyval3d(x, y, z, c)`` will be the same up 
+to roundoff. This equivalence is useful both for least squares fitting and for 
+the evaluation of a large number of three-dimensional polynomials of the same 
+degrees and sample points.
 """ + """
 Args:
     x, y, z: Arrays of point coordinates, all of the same shape. The dtypes will be converted to either float64 or complex128 depending on whether any of the elements are complex. Scalars are converted to one-dimensional arrays.
