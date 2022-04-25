@@ -133,7 +133,7 @@ public:
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(T);
   }
-  Vectorized() : values{0} {}
+  Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
     for (int i = 0; i != size(); i++) {
       values[i] = val;
@@ -978,6 +978,26 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
     src++;
     dst++;
   }
+}
+
+template <typename T, typename Op>
+inline T vec_reduce_all(const Op& vec_fun, Vectorized<T> acc_vec, int64_t size) {
+  using Vec = Vectorized<T>;
+  T acc_arr[Vec::size()];
+  acc_vec.store(acc_arr);
+  for (const auto i : c10::irange(1, size)) {
+    std::array<T, Vec::size()> acc_arr_next = {0};
+    acc_arr_next[0] = acc_arr[i];
+    Vec acc_vec_next = Vec::loadu(acc_arr_next.data());
+    acc_vec = vec_fun(acc_vec, acc_vec_next);
+  }
+  acc_vec.store(acc_arr);
+  return acc_arr[0];
+}
+
+template <typename T, typename Op>
+inline T vec_reduce_all(const Op& vec_fun, Vectorized<T> acc_vec) {
+  return vec_reduce_all(vec_fun, acc_vec, Vectorized<T>::size());
 }
 
 }}}
