@@ -20,8 +20,8 @@ class SerializationType(Enum):
 
 def serialize_fn(fn):
     """
-    If `fn` is a lambda function, use `dill` if `pickle` fails and DILL_AVAILABLE.
-    Returns a tuple of serialized function and SerializationType indicating the serialization method.
+    If `fn` is a lambda function, use `dill` if DILL_AVAILABLE.
+    Returns a tuple of serialized function and `SerializationType` indicating the serialization method.
     """
     if callable(fn) and fn.__name__ == "<lambda>" and DILL_AVAILABLE:
         return dill.dumps(fn), SerializationType("dill")
@@ -31,7 +31,7 @@ def serialize_fn(fn):
 
 def deserialize_fn(serialized_fn_with_method):
     """
-    Given a tuple of function and SerializationType, deserializes the function based on the given SerializationType.
+    Given a tuple of function and `SerializationType`, deserializes the function based on the given `SerializationType`.
     """
     serialized_fn, method = serialized_fn_with_method
     if method == SerializationType("pickle"):

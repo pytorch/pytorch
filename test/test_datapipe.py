@@ -310,7 +310,7 @@ class TestIterableDataPipeBasic(TestCase):
         # The output order should be always the same.
         self.assertEqual(list(datapipe), list(datapipe))
 
-    def test_readfilesfromdisk_iterable_datapipe(self):
+    def test_openfilesfromdisk_iterable_datapipe(self):
         # test import datapipe class directly
         from torch.utils.data.datapipes.iter import (
             FileLister,
@@ -329,6 +329,22 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertEqual(rec[1].read(), f.read())
                 rec[1].close()
         self.assertEqual(count, len(self.temp_files))
+
+        # functional API
+        datapipe2 = datapipe1.open_files(mode='b')
+
+        count = 0
+        for rec in datapipe2:
+            count = count + 1
+            self.assertTrue(rec[0] in self.temp_files)
+            with open(rec[0], 'rb') as f:
+                self.assertEqual(rec[1].read(), f.read())
+                rec[1].close()
+        self.assertEqual(count, len(self.temp_files))
+
+        # __len__ Test
+        with self.assertRaises(TypeError):
+            len(datapipe2)
 
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
@@ -468,6 +484,7 @@ class TestCaptureDataFrame(TestCase):
         self.compare_capture_and_eager(operations)
 
 
+@skipIf(True, "Fix DataFramePipes Tests")
 class TestDataFramesPipes(TestCase):
     """
         Most of test will fail if pandas instaled, but no dill available.
@@ -1331,20 +1348,12 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_filter_datapipe(self):
         input_ds = dp.iter.IterableWrapper(range(10))
 
-        def _filter_fn(data, val, clip=False):
-            if clip:
-                return data >= val
-            return True
+        def _filter_fn(data, val):
+            return data >= val
 
         # Functional Test: filter works with partial function
         filter_dp = input_ds.filter(partial(_filter_fn, val=5))
-        for data, exp in zip(filter_dp, range(10)):
-            self.assertEqual(data, exp)
-
-        # Functional Test: filter works with partial function with keyword args
-        filter_dp = input_ds.filter(partial(_filter_fn, val=5, clip=True))
-        for data, exp in zip(filter_dp, range(5, 10)):
-            self.assertEqual(data, exp)
+        self.assertEqual(list(filter_dp), list(range(5, 10)))
 
         def _non_bool_fn(data):
             return 1
@@ -1354,12 +1363,26 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(ValueError):
             temp = list(filter_dp)
 
+        # Funtional Test: Specify input_col
+        tuple_input_ds = dp.iter.IterableWrapper([(d - 1, d, d + 1) for d in range(10)])
+
+        # Single input_col
+        input_col_1_dp = tuple_input_ds.filter(partial(_filter_fn, val=5), input_col=1)
+        self.assertEqual(list(input_col_1_dp), [(d - 1, d, d + 1) for d in range(5, 10)])
+
+        # Multiple input_col
+        def _mul_filter_fn(a, b):
+            return a + b < 10
+
+        input_col_2_dp = tuple_input_ds.filter(_mul_filter_fn, input_col=[0, 2])
+        self.assertEqual(list(input_col_2_dp), [(d - 1, d, d + 1) for d in range(5)])
+
         # __len__ Test: DataPipe has no valid len
         with self.assertRaisesRegex(TypeError, r"has no len"):
             len(filter_dp)
 
         # Reset Test: DataPipe resets correctly
-        filter_dp = input_ds.filter(partial(_filter_fn, val=5, clip=True))
+        filter_dp = input_ds.filter(partial(_filter_fn, val=5))
         n_elements_before_reset = 3
         res_before_reset, res_after_reset = reset_after_n_next_calls(filter_dp, n_elements_before_reset)
         self.assertEqual(list(range(5, 10))[:n_elements_before_reset], res_before_reset)
@@ -1380,6 +1403,24 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp_nolen = IDP_NoLen(range(10))
         with self.assertRaises(AssertionError):
             sampled_dp = dp.iter.Sampler(input_dp_nolen)
+
+    def test_stream_reader_iterdatapipe(self):
+        from io import StringIO
+
+        input_dp = dp.iter.IterableWrapper([("f1", StringIO("abcde")), ("f2", StringIO("bcdef"))])
+        expected_res = ["abcde", "bcdef"]
+
+        # Functional Test: Read full chunk
+        dp1 = input_dp.read_from_stream()
+        self.assertEqual([d[1] for d in dp1], expected_res)
+
+        # Functional Test: Read full chunk
+        dp2 = input_dp.read_from_stream(chunk=1)
+        self.assertEqual([d[1] for d in dp2], [c for s in expected_res for c in s])
+
+        # `__len__` Test
+        with self.assertRaises(TypeError):
+            len(dp1)
 
     def test_shuffle_iterdatapipe(self):
         exp = list(range(20))
@@ -2008,6 +2049,20 @@ class TestGraph(TestCase):
                                   dp2: {dp2.main_datapipe: {dp2.main_datapipe.main_datapipe: {}}}}}
         self.assertEqual(expected, graph)
 
+    def test_traverse_mapdatapipe(self):
+        source_dp = dp.map.SequenceWrapper(range(10))
+        map_dp = source_dp.map(partial(_fake_add, 1))
+        graph = torch.utils.data.graph.traverse(map_dp)
+        expected: Dict[Any, Any] = {map_dp: {source_dp: {}}}
+        self.assertEqual(expected, graph)
+
+    def test_traverse_mixdatapipe(self):
+        source_map_dp = dp.map.SequenceWrapper(range(10))
+        iter_dp = dp.iter.IterableWrapper(source_map_dp)
+        graph = torch.utils.data.graph.traverse(iter_dp)
+        expected: Dict[Any, Any] = {iter_dp: {source_map_dp: {}}}
+        self.assertEqual(expected, graph)
+
 
 class TestCircularSerialization(TestCase):
 
@@ -2047,6 +2102,7 @@ class TestCircularSerialization(TestCase):
             return 0
 
         def __init__(self, fn, source_dp=None):
+            self.container = [lambda x: x + 1, ]
             self.fn = fn
             self.lambda_fn = lambda x: x + 1
             self.source_dp = source_dp if source_dp else dp.iter.IterableWrapper([1, 2, 4])
@@ -2065,7 +2121,7 @@ class TestCircularSerialization(TestCase):
 
         dp1 = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn)
         dp2 = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn, source_dp=dp1)
-        self.assertTrue(list(dp2) == list(dill.loads(pickle.dumps(dp2))))
+        self.assertTrue(list(dp2) == list(dill.loads(dill.dumps(dp2))))
         _ = traverse(dp2, only_datapipe=True)
         _ = traverse(dp2, only_datapipe=False)
 

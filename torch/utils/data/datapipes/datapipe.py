@@ -101,12 +101,17 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         cls.functions[function_name] = function
 
     def __getstate__(self):
+        """
+        This contains special logic to serialize `lambda` functions when `dill` is available.
+        If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
+        `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
+        """
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
         if DILL_AVAILABLE:
             state_dict = {}
             for k, v in self.__dict__.items():
-                if isfunction(v) and not ismethod(v):
+                if isfunction(v) and not ismethod(v):  # only applied to non-method functions
                     state_dict[k] = serialize_fn(v)
                 else:
                     state_dict[k] = v
@@ -115,6 +120,9 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
             return self.__dict__
 
     def __setstate__(self, state_dict):
+        """
+        This contains special logic to deserialize `lambda` functions but the process requires the package `dill`.
+        """
         for k, v in state_dict.items():
             if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
                 self.__dict__[k] = deserialize_fn(v)
@@ -192,6 +200,8 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
     """
     functions: Dict[str, Callable] = {}
+    reduce_ex_hook: Optional[Callable] = None
+    getstate_hook: Optional[Callable] = None
     str_hook: Optional[Callable] = None
     repr_hook: Optional[Callable] = None
 
@@ -219,10 +229,17 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         cls.functions[function_name] = function
 
     def __getstate__(self):
+        """
+        This contains special logic to serialize `lambda` functions when `dill` is available.
+        If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
+        `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
+        """
+        if MapDataPipe.getstate_hook is not None:
+            return MapDataPipe.getstate_hook(self)
         if DILL_AVAILABLE:
             state_dict = {}
             for k, v in self.__dict__.items():
-                if isfunction(v) and not ismethod(v):
+                if isfunction(v) and not ismethod(v):  # only applied to non-method functions
                     state_dict[k] = serialize_fn(v)
                 else:
                     state_dict[k] = v
@@ -231,11 +248,34 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
             return self.__dict__
 
     def __setstate__(self, state_dict):
+        """
+        This contains special logic to deserialize `lambda` functions but the process requires the package `dill`.
+        """
         for k, v in state_dict.items():
             if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
                 self.__dict__[k] = deserialize_fn(v)
             else:
                 self.__dict__[k] = v
+
+    def __reduce_ex__(self, *args, **kwargs):
+        if MapDataPipe.reduce_ex_hook is not None:
+            try:
+                return MapDataPipe.reduce_ex_hook(self)
+            except NotImplementedError:
+                pass
+        return super().__reduce_ex__(*args, **kwargs)
+
+    @classmethod
+    def set_getstate_hook(cls, hook_fn):
+        if MapDataPipe.getstate_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing getstate_hook")
+        MapDataPipe.getstate_hook = hook_fn
+
+    @classmethod
+    def set_reduce_ex_hook(cls, hook_fn):
+        if MapDataPipe.reduce_ex_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing reduce_ex_hook")
+        MapDataPipe.reduce_ex_hook = hook_fn
 
     def __repr__(self):
         if self.repr_hook is not None:
@@ -248,7 +288,6 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
             return self.str_hook(self)
         # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
-
 
 class DataChunk(list, Generic[T]):
     def __init__(self, items):
