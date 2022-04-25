@@ -76,10 +76,8 @@ elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
-if [[ "$OS" == "ubuntu"]]; then
-  if [[ "$image" == *xenial* ]] || [[ "$image" == *bionic* ]]; then
-    CMAKE_VERSION=3.13.5
-  fi
+if [[ "$image" == *xenial* ]] || [[ "$image" == *bionic* ]]; then
+  CMAKE_VERSION=3.13.5
 fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
