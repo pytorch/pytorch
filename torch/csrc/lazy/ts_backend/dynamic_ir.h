@@ -43,7 +43,7 @@ namespace lazy {
  * burned into the Graph.
  */
 
-class TORCH_API DimensionNode : public lazy::Node {
+class TORCH_API DimensionNode : public lazy::TsNode {
  public:
   DimensionNode(OpKind op, OpList operands, hash_t hash_seed = kHashSeed);
   bool isDynamic() {
