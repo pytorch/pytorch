@@ -1892,7 +1892,77 @@ if(USE_KINETO)
   message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
 
-  set(LIBKINETO_DYNAMIC_CUPTI "${USE_CUPTI_SO}" CACHE STRING "" FORCE)
+  if(NOT LIBKINETO_NOCUPTI)
+    set(CUDA_SOURCE_DIR "${CUDA_TOOLKIT_ROOT_DIR}" CACHE STRING "")
+    message(STATUS "  CUDA_SOURCE_DIR = ${CUDA_SOURCE_DIR}")
+    message(STATUS "  CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
+
+    if(NOT MSVC)
+      if(USE_CUPTI_SO)
+        set(CUPTI_LIB_NAME "libcupti.so")
+      else()
+        set(CUPTI_LIB_NAME "libcupti_static.a")
+      endif()
+    else()
+      set(CUPTI_LIB_NAME "cupti.lib")
+    endif()
+
+    find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
+        ${CUDA_SOURCE_DIR}
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
+        ${CUDA_SOURCE_DIR}/lib64
+        NO_DEFAULT_PATH)
+
+    find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
+        ${CUDA_INCLUDE_DIRS}
+        ${CUDA_SOURCE_DIR}
+        ${CUDA_SOURCE_DIR}/include
+        NO_DEFAULT_PATH)
+
+    if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
+      message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
+      set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
+      message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
+      message(STATUS "Found CUPTI")
+      set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
+
+      # I've only tested this sanity check on Linux; if someone
+      # runs into this bug on another platform feel free to
+      # generalize it accordingly
+      if(NOT USE_CUPTI_SO AND UNIX)
+        include(CheckCXXSourceRuns)
+        # rt is handled by the CMAKE_REQUIRED_LIBRARIES set above
+        if(NOT APPLE)
+          set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl")
+        endif()
+        set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUPTI_LIBRARY_PATH},--no-whole-archive")
+        check_cxx_source_runs("#include <stdexcept>
+  int main() {
+    try {
+      throw std::runtime_error(\"error\");
+    } catch (...) {
+      return 0;
+    }
+    return 1;
+  }" EXCEPTIONS_WORK)
+        set(CMAKE_REQUIRED_LINK_OPTIONS "")
+        if(NOT EXCEPTIONS_WORK)
+          message(FATAL_ERROR "Detected that statically linking against CUPTI causes exceptions to stop working.  See https://github.com/pytorch/pytorch/issues/57744 for more details.  Perhaps try: USE_CUPTI_SO=1 python setup.py develop --cmake")
+        endif()
+      endif()
+
+    else()
+      message(STATUS "Could not find CUPTI library, using CPU-only Kineto build")
+      set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)
+    endif()
+  endif()
+
+  if(NOT LIBKINETO_NOROCTRACER)
+    if(NOT ENV{ROCM_SOURCE_DIR})
+      set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
+    endif()
+  endif()
 
   if(NOT TARGET kineto)
     add_subdirectory("${KINETO_SOURCE_DIR}")
