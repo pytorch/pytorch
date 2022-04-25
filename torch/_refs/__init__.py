@@ -4,6 +4,7 @@ from torch._C import _add_docstr  # type: ignore[attr-defined]
 import torch._prims as prims
 import torch._prims.utils as utils
 from torch._prims import TensorLike as TensorLike
+from torch._prims.utils import DimsType
 
 from functools import reduce
 from enum import Enum
@@ -74,7 +75,7 @@ all = [
     #
     # Reduction ops
     #
-    "sum"
+    "sum",
 ]
 
 Tensor = torch.Tensor
@@ -86,11 +87,13 @@ class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     ALWAYS_BOOL = (2,)
     OP_MATH = 3
 
+
 class REDUCTION_OUTPUT_TYPE_KIND(Enum):
     SAME = (0,)
     SAME_OR_REAL = (1,)  # for complex types outputs corresponding real type
     OP_MATH = (2,)  # keep output in opmath type, needed for mean
     ALWAYS_BOOL = (3,)
+
 
 # Maps datatypes to their computation types for elementwise operations
 _computation_dtype_map = {
@@ -144,7 +147,7 @@ def _elementwise_dtypes(*_args, type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND)
     # Determines datatypes for each category
     scalar_args = filter(lambda x: isinstance(x, Number), args)
     scalar_type = reduce(
-        lambda acc, x: utils.get_higher_type(acc, type(x)), scalar_args, bool
+        lambda acc, x: utils.get_higher_type(acc, type(x)), scalar_args
     )
 
     scalar_tensors = filter(lambda t: isinstance(t, TensorLike) and t.ndim == 0, args)
@@ -308,7 +311,7 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Cal
 
         if out is not None:
             out = _maybe_resize_out(out, result.shape)
-            return copy_to(out, result, allow_cross_device=False)
+            return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
         return result
 
@@ -358,7 +361,7 @@ def add(
 
     if out is not None:
         out = _maybe_resize_out(out, result.shape)
-        return copy_to(out, result, allow_cross_device=False)
+        return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
     return result
 
@@ -431,7 +434,7 @@ def float_power(
 
     if out is not None:
         out = _maybe_resize_out(out, result.shape)
-        return copy_to(out, result, allow_cross_device=False)
+        return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
     return result
 
@@ -531,7 +534,7 @@ def sub(
 
     if out is not None:
         out = _maybe_resize_out(out, result.shape)
-        return copy_to(out, result, allow_cross_device=False)
+        return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
     return result
 
@@ -577,7 +580,7 @@ def where(
 
     if out is not None:
         out = _maybe_resize_out(out, result.shape)
-        return copy_to(out, result, allow_cross_device=False)
+        return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
     return result
 
@@ -596,35 +599,43 @@ def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
 
     return prims.copy_to(a, b)
 
+
 #
 # Reduction references
 #
 
-def _reduction(a: Tensor,
-               prim: Callable,
-               *,
-               has_identity: bool = True,
-               accepts_dim_tuple: bool = True,  # to handle min/argmin that accept single dim only
-               dims: Union[Optional[int], Optional[List[int]]] = None,
-               keepdims: bool = False,
-               dtype: Optional[torch.dtype] = None,  # should be specified for ops that support it
-               out: Optional[Tensor] = None,
-               output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND):  # it is usually SAME, but I want
+
+def _reduction(
+    a: Tensor,
+    prim: Callable,
+    *,
+    has_identity: bool = True,
+    accepts_dim_tuple: bool = True,  # to handle min/argmin that accept single dim only
+    dims: Optional[DimsType] = None,
+    keepdims: bool = False,
+    dtype: Optional[torch.dtype] = None,  # should be specified for ops that support it
+    out: Optional[Tensor] = None,
+    output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND
+):  # it is usually SAME, but I want
     # ref writers to actually think about what to put here
     assert isinstance(a, TensorLike)
     if out is not None:
         assert isinstance(out, TensorLike)
         if dtype is not None:
             # TODO - this is true for eager mode currently, but it's wrong behavior for complex norms
-            assert dtype == out.dtype, "dtype argument and out dtype must match in reduction"
+            assert (
+                dtype == out.dtype
+            ), "dtype argument and out dtype must match in reduction"
     if not accepts_dim_tuple:
         assert dims is None or isinstance(dims, int)
     if isinstance(dims, int):
-        dims = (dims,)
+        dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = all(a.shape[i] for i in range(a.ndim) if i in dims)
-        assert valid_shape, "reducing over zero-size dimension for reduction operation without identity"
+        valid_shape = all(a.shape[i] for i in range(a.ndim) if i in dims)  # type: ignore[operator]
+        assert (
+            valid_shape
+        ), "reducing over zero-size dimension for reduction operation without identity"
     # even though some reductions, like amin or amax, don't strictly require type promotion,
     # all the math ops (including comparisons) are still defined only for a computation type,
     # so promotion will still happen. We are doing it explicitly here
@@ -636,31 +647,44 @@ def _reduction(a: Tensor,
     if keepdims:
         output_shape = [a.shape[i] if i in dims else 1 for i in range(a.ndim)]
         broadcast_dims = [i for i in range(a.ndim) if i not in dims]
-        result = broadcast_in_dim(array, output_shape, broadcast_dims)
+        result = prims.broadcast_in_dim(result, output_shape, broadcast_dims)
     if out is not None:
         if dtype is None:
             if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
-                assert out.dtype == a.dtype, "out dtype and output type of reduction must match"
+                assert (
+                    out.dtype == a.dtype
+                ), "out dtype and output type of reduction must match"
             elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.ALWAYS_BOOL:
-                assert out.dtype == torch.bool, "out dtype and output type of reduction must match"
+                assert (
+                    out.dtype == torch.bool
+                ), "out dtype and output type of reduction must match"
         out = _maybe_resize_out(out, result.shape)
-        return copy_to(out, result, allow_cross_device=False)
+        return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
     if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
         result = prims.convert_element_type(result, a.dtype)
     return result
 
-def sum(a: Tensor,
-        dim: Union[Optional[int], Optional[List[int]]] = None,
-        keepdim: bool = False,
-        *,
-        dtype=None,
-        out: Optional[Tensor] = None):
+
+def sum(
+    a: Tensor,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    dtype=None,
+    out: Optional[Tensor] = None
+):
     if dtype is None:
         if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
             dtype = torch.int64
         else:
             dtype = a.dtype
 
-    return _reduction(a, prims.sum, dims=dim, keepdims=keepdim, dtype=dtype,
-                      output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME)
+    return _reduction(
+        a,
+        prims.sum,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=dtype,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    )

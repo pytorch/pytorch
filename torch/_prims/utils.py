@@ -1,8 +1,12 @@
 import torch
 
 from numbers import Number
-from typing import Union, Sequence, Optional
+from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
 from functools import reduce
+
+ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
+StrideType = Union[List[int], Tuple[int, ...]]
+DimsType = Union[int, List[int], Tuple[int, ...]]
 
 
 class TensorMeta(object):
@@ -13,8 +17,19 @@ class TensorMeta(object):
     """
 
     def __init__(
-        self, tensorlike=None, *, shape=None, strides=None, dtype=None, device=None
+        self,
+        tensorlike: Optional[Union[TensorMeta, Number, torch.Tensor]] = None,
+        *,
+        shape: Optional[ShapeType] = None,
+        strides: Optional[StrideType] = None,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[torch.device] = None,
     ):
+
+        self.shape: Tuple[int, ...]
+        self.strides: Tuple[int, ...]
+        self.dtype: torch.dtype
+        self.device: torch.device
 
         if isinstance(tensorlike, Number):
             assert not shape and (shape is None or isinstance(shape, Sequence))
@@ -24,13 +39,14 @@ class TensorMeta(object):
             self.dtype = type_to_dtype(type(tensorlike))
             self.device = torch.device("cpu")
         elif tensorlike is not None:
-            self.shape = tensorlike.shape
-            self.strides = tensorlike.stride()
+            assert isinstance(tensorlike, (TensorMeta, torch.Tensor))
+            self.shape = tuple(tensorlike.shape)
+            self.strides = tuple(tensorlike.stride())
             self.dtype = tensorlike.dtype
             self.device = tensorlike.device
         else:
             assert shape is not None
-            self.shape = shape
+            self.shape = tuple(shape)
             if strides is None:
                 self.strides = make_contiguous_strides_for(shape)
             assert dtype is not None
@@ -38,19 +54,23 @@ class TensorMeta(object):
             assert device is not None
             self.device = device
 
-        assert isinstance(self.shape, Sequence)
-        assert isinstance(self.strides, Sequence)
-        assert isinstance(self.dtype, torch.dtype)
-        assert isinstance(self.device, torch.device)
-
         self.ndim = len(self.shape)
 
     @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
+    def __torch_function__(
+        cls,
+        func: Callable,
+        types: Sequence,
+        args: Sequence[Any] = (),
+        kwargs: Optional[Dict] = None,
+    ):
         if kwargs is None:
             kwargs = {}
 
-        return func.meta(*args, **kwargs)
+        if not hasattr(func, "meta"):
+            raise ValueError("Callable {0} has no meta function!".format(func.__name__))
+
+        return func.meta(*args, **kwargs)  # type: ignore[attr-defined]
 
     def __repr__(self):
         return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.strides})"
@@ -65,18 +85,35 @@ class TensorMeta(object):
         return reduce(lambda x, acc: x * acc, self.shape, 1)
 
 
+TensorLikeType = Union[torch.Tensor, TensorMeta]
 TensorLike = (torch.Tensor, TensorMeta)
 
 
-def compare_tensor_meta(a, b):
+# TODO: look at using torch.testing.assert_close instead with an option
+#   to just compare metadata
+def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
+    """
+    Checks that two tensor likes have the same shape,
+    dtype, and device.
+
+    In the future this will validate additional metadata, like
+    strides.
+    """
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
     for x, y in zip(a.shape, b.shape):
-        assert x == y
+        if x != y:
+            msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
+            raise AssertionError(msg)
 
-    assert a.dtype == b.dtype
-    assert a.device == b.device
+    if a.dtype != b.dtype:
+        msg = "Dtypes {0} and {1} are not equal!".format(a.dtype, b.dtype)
+        raise AssertionError(msg)
+
+    if a.device != b.device:
+        msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
+        raise AssertionError(msg)
 
 
 #
@@ -122,11 +159,13 @@ def validate_exclusive_idx(shape: Sequence, ex_idx: int):
     assert isinstance(ex_idx, int)
     assert ex_idx > 0 and ex_idx <= len(shape)
 
+
 def canonicalize_idx(shape: Sequence, idx: int):
     validate_idx(shape, idx)
     if idx < 0:
         idx = idx + len(shape)
     return idx
+
 
 def validate_permutation(rank: int, perm: Sequence):
     """
@@ -314,7 +353,7 @@ def get_higher_dtype(
     assert isinstance(a, (torch.dtype, torch.Tensor, Number))
     assert isinstance(b, (torch.dtype, torch.Tensor, Number))
 
-    def _extract_dtype(x):
+    def _extract_dtype(x: Union[torch.dtype, torch.Tensor, Number]) -> torch.dtype:
         if isinstance(x, torch.dtype):
             return x
         if isinstance(x, torch.Tensor):
@@ -349,6 +388,8 @@ def get_higher_dtype(
             return b
         if b in dtypes:
             return a
+
+    raise RuntimeError("Unexpected termination!")
 
 
 def is_lesser_type(a: type, b: type) -> bool:
@@ -472,7 +513,7 @@ def wrap_device(d: Union[str, torch.device]) -> torch.device:
     return d
 
 
-def make_contiguous_strides_for(shape: Sequence) -> Sequence:
+def make_contiguous_strides_for(shape: Sequence) -> Tuple[int, ...]:
     validate_shape(shape)
     if not shape:
         return ()
@@ -485,7 +526,10 @@ def make_contiguous_strides_for(shape: Sequence) -> Sequence:
 
     return tuple(reversed(strides))
 
-def compute_reduction_output_shape(shape: Sequence, dimensions: Sequence) -> Sequence:
+
+def compute_reduction_output_shape(
+    shape: ShapeType, dimensions: Sequence
+) -> Tuple[int, ...]:
     for idx in dimensions:
         validate_idx(shape, idx)
 
@@ -496,9 +540,10 @@ def compute_reduction_output_shape(shape: Sequence, dimensions: Sequence) -> Seq
 
         new_shape.append(shape[idx])
 
-    return new_shape
+    return tuple(new_shape)
 
-def reduction_dims(shape: Sequence, dims: Optional[Sequence]) -> Sequence:
+
+def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...]:
     if dims is None:
         return tuple(range(len(shape)))
     dims = tuple(canonicalize_idx(shape, idx) for idx in dims)

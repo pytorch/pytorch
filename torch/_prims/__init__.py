@@ -1,12 +1,11 @@
 import torch
 from torch import Tensor
-from torch._C import _add_docstr  # type: ignore[attr-defined]
 
 import torch._prims.utils as utils
-from torch._prims.utils import TensorLike, TensorMeta
+from torch._prims.utils import TensorLike, TensorLikeType, TensorMeta, ShapeType
 from torch.overrides import has_torch_function, handle_torch_function
 
-from typing import Sequence, Optional, Union, Callable
+from typing import Sequence, Optional, Union, Callable, List, Tuple
 from numbers import Number
 from functools import reduce
 from enum import Enum
@@ -135,9 +134,6 @@ def _make_prim(
     """
 
     def _prim(*args, **kwargs):
-        # TODO: refactor this to not incur such a latency hit
-        # ezyang: not sure what you mean by "latency hit" here
-        #
         # TODO: allow dispatch to be overridden here
         if has_torch_function(args):
             return handle_torch_function(_prim, args, *args, **kwargs)
@@ -149,15 +145,16 @@ def _make_prim(
         return impl_aten(*args, **kwargs)
 
     _prim.__doc__ = doc
-    _prim.meta = meta
-    _prim.return_type = return_type
+    _prim.meta = meta  # type: ignore[attr-defined]
+    _prim.return_type = return_type  # type: ignore[attr-defined]
 
     return _prim
 
 
 def _elementwise_meta(*args):
     """
-    Meta function for elementwise operations.
+    Meta function for elementwise operations that produce outputs in the same dtype
+    as their inputs.
 
     Stride logic is currently incorrect.
     """
@@ -537,7 +534,7 @@ sub = _make_elementwise_binary_prim(
 # View operations
 #
 def _broadcast_in_dim_meta(
-    a: TensorLike, shape: Sequence[int], broadcast_dimensions: Sequence[int]
+    a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
 ):
     # Type checks
     assert isinstance(a, TensorLike)
@@ -610,7 +607,7 @@ broadcast_in_dim = _make_prim(
 )
 
 
-def _collapse_view_meta(a: TensorLike, start: int, end: int) -> TensorLike:
+def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
     shape = a.shape
@@ -631,8 +628,8 @@ def _collapse_view_meta(a: TensorLike, start: int, end: int) -> TensorLike:
         length = length * shape[idx]
         stride = stride * strides[idx]
 
-    new_shape = shape[:start] + [length] + shape[end:]
-    new_strides = strides[:start] + [stride] + shape[end:]
+    new_shape = shape[:start] + (length,) + shape[end:]
+    new_strides = strides[:start] + (stride,) + shape[end:]
 
     return TensorMeta(a, shape=new_shape, strides=new_strides)
 
@@ -676,21 +673,22 @@ collapse_view = _make_prim(
 )
 
 
-def _split_dim_meta(a: TensorLike, dim: int, outer_length: int) -> TensorLike:
+def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     utils.validate_idx(a.shape, dim)
     utils.validate_dim_length(outer_length)
 
     # Verifies the dim can be split with the specified lhs_length
-    inner_length = a.shape[dim] / outer_length
-    assert int(inner_length) == inner_length
+    _inner_length = a.shape[dim] / outer_length
+    inner_length: int = int(_inner_length)
+    assert inner_length == _inner_length
 
-    new_shape = []
-    new_strides = []
-    for idx in range(a.shape):
+    new_shape: List[int] = []
+    new_strides: List[int] = []
+    for idx in a.shape:
         if idx == dim:
             new_shape.extend((outer_length, inner_length))
-            new_strides.extend((a.stride[idx] * inner_length, a.stride[idx]))
+            new_strides.extend((a.stride()[idx] * inner_length, a.stride()[idx]))
         else:
             new_shape.append(a.shape[idx])
             new_strides.append(a.stride()[idx])
@@ -721,7 +719,7 @@ split_dim = _make_prim(
 )
 
 # Note: allows dimensions to be specified redundantly
-def _squeeze_meta(a: TensorLike, dimensions: Sequence) -> TensorLike:
+def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
     for idx in dimensions:
@@ -779,14 +777,14 @@ def collapse(a: Tensor, start: int, end: int) -> Tensor:
 
 
 # TODO: review stride logic
-def _concatenate_meta(tensors: Sequence, dim: int) -> TensorLike:
+def _concatenate_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     assert len(tensors) > 0
 
     for tensor in tensors:
         assert isinstance(tensor, TensorLike)
 
     utils.check_same_dtype(tensors)
-    utils.check_same_device(tensors)
+    utils.check_same_device(tensors, allow_scalars=False)
 
     shape = tensors[0].shape
     utils.validate_idx(shape, dim)
@@ -800,14 +798,18 @@ def _concatenate_meta(tensors: Sequence, dim: int) -> TensorLike:
             else:
                 assert length == common_length
 
-    new_shape = tensors[0].shape
+    new_shape = list(tensors[0].shape).copy()
     new_shape[dim] = concat_length
     return TensorMeta(
-        tensors[0], shape=new_shape, strides=make_contiguous_strides_for(new_shape)
+        tensors[0],
+        shape=new_shape,
+        strides=utils.make_contiguous_strides_for(new_shape),
     )
 
 
-def _concatenate_aten(tensors: Sequence, dim: int) -> Tensor:
+def _concatenate_aten(
+    tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int
+) -> Tensor:
     return torch.cat(tensors, dim)
 
 
@@ -825,7 +827,8 @@ concatenate = _make_prim(
 )
 
 
-def _reshape_meta(a: TensorLike, shape: Sequence):
+# TODO: needs to return the proper meta tensor
+def _reshape_meta(a: TensorLikeType, shape: Sequence):
     assert isinstance(a, TensorLike)
     utils.validate_shape(shape)
 
@@ -835,8 +838,9 @@ def _reshape_meta(a: TensorLike, shape: Sequence):
     assert a.numel() == numel
 
 
-def _reshape_aten(a: Tensor, shape: Sequence) -> Tensor:
-
+def _reshape_aten(
+    a: Tensor, shape: Union[torch.Size, List[int], Tuple[int, ...]]
+) -> Tensor:
     return a.clone().reshape(shape).contiguous()
 
 
@@ -856,7 +860,9 @@ reshape = _make_prim(
 #
 
 
-def _select_meta(pred: TensorLike, a: TensorLike, b: TensorLike) -> TensorLike:
+def _select_meta(
+    pred: TensorLikeType, a: TensorLikeType, b: TensorLikeType
+) -> TensorLikeType:
     utils.check_same_device(pred, a, b, allow_scalars=True)
     utils.check_same_shape(pred, a, b)
     assert pred.dtype is torch.bool
@@ -887,7 +893,7 @@ select = _make_prim(
 #
 
 
-def _convert_element_type_meta(a: TensorLike, dtype: torch.dtype) -> TensorLike:
+def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     # Type checks
     assert isinstance(a, TensorLike)
     assert isinstance(dtype, torch.dtype)
@@ -911,7 +917,9 @@ convert_element_type = _make_prim(
 )
 
 
-def _device_put_meta(a: TensorLike, device: Union[str, torch.device]) -> TensorLike:
+def _device_put_meta(
+    a: TensorLikeType, device: Union[str, torch.device]
+) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     assert isinstance(device, (str, torch.device))
 
@@ -938,7 +946,7 @@ device_put = _make_prim(
 #
 
 
-def _copy_to_meta(a: TensorLike, b: TensorLike):
+def _copy_to_meta(a: TensorLikeType, b: TensorLikeType):
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
@@ -975,12 +983,14 @@ copy_to = _make_prim(
 )
 
 
-def _resize_meta(a: TensorLike, shape: Sequence):
+def _resize_meta(
+    a: TensorLikeType, shape: Union[torch.Size, List[int], Tuple[int, ...]]
+):
     assert a.numel() == 0
-    return TensorMeta(a, shape=shape, strides=make_contiguous_strides_for(shape))
+    return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
 
 
-def _resize_aten(a: Tensor, shape: Sequence) -> Tensor:
+def _resize_aten(a: Tensor, shape: ShapeType) -> Tensor:
     return a.resize_(shape)
 
 
@@ -998,6 +1008,7 @@ resize = _make_prim(
     doc=_resize_doc,
 )
 
+
 def _reduction_meta(inp, dims, *, output_dtype=None):
     """
     Meta function for single output reduction operations
@@ -1009,8 +1020,10 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     output_shape = utils.compute_reduction_output_shape(inp.shape, dims)
     return TensorMeta(shape=output_shape, dtype=output_dtype, device=inp.device)
 
+
 def _bool_return_reduction_meta(inp, dims):
     return _reduction_meta(inp, dims, output_dtype=torch.bool)
+
 
 _sum_doc = """
     Computes the sum of elements in the input tensor over the list of dimensions
@@ -1027,43 +1040,40 @@ _amin_doc = """
 
 
 sum = _make_prim(
-    meta=_reduction_meta,
-    impl_aten=torch.sum,
-    return_type=RETURN_TYPE.NEW,
-    doc=_sum_doc
+    meta=_reduction_meta, impl_aten=torch.sum, return_type=RETURN_TYPE.NEW, doc=_sum_doc
 )
 
 prod = _make_prim(
     meta=_reduction_meta,
     impl_aten=torch.prod,
     return_type=RETURN_TYPE.NEW,
-    doc=_sum_doc
+    doc=_sum_doc,
 )
 
 amax = _make_prim(
     meta=_reduction_meta,
     impl_aten=torch.amax,
     return_type=RETURN_TYPE.NEW,
-    doc=_amax_doc
+    doc=_amax_doc,
 )
 
 amin = _make_prim(
     meta=_reduction_meta,
     impl_aten=torch.amin,
     return_type=RETURN_TYPE.NEW,
-    doc=_amin_doc
+    doc=_amin_doc,
 )
 
 all = _make_prim(
     meta=_bool_return_reduction_meta,
     impl_aten=torch.all,
     return_type=RETURN_TYPE.NEW,
-    doc=""
+    doc="",
 )
 
 any = _make_prim(
     meta=_bool_return_reduction_meta,
     impl_aten=torch.any,
     return_type=RETURN_TYPE.NEW,
-    doc=""
+    doc="",
 )
