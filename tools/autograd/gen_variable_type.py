@@ -97,7 +97,6 @@ from typing import Callable, List, Optional, Sequence, Tuple, Union, Dict
 DONT_REQUIRE_DERIVATIVE = {
     # These only depend on the input Tensor's shape and device, not the data
     "ones_like",
-    "zeros_like",
     "rand_like",
     "randn_like",
     # These are only implemented on integral types
@@ -171,6 +170,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "triu",
     "chunk",
     "zero_",
+    "zeros_like",
     "eq_",
     "ne_",
     "add",
