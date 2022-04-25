@@ -640,7 +640,13 @@ else()
     endforeach()
 
     # Sort numerically in descending order, so we try the newest versions first.
-    list(SORT versions COMPARE NATURAL ORDER DESCENDING)
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
+      list(SORT versions COMPARE NATURAL ORDER DESCENDING)
+    else()
+      # Alphabetical sort here is not ideal but better than nothing
+      list(SORT versions)
+      list(REVERSE versions)
+    endif()
 
     # With a descending list of versions, populate possible paths to search.
     set(search_paths)
