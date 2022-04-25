@@ -548,7 +548,7 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
   FUSER_PERF_SCOPE("FusionExecutor::AllocGlobalVals");
   GlobalBuffers global_buffers;
   const auto kernel = lowered_->kernel();
-  const auto& kernel_summary = lowered_->kernel()->summary();
+  const auto& kernel_summary = kernel->summary();
   for (auto alloc : kernel_summary.global_allocations) {
     TORCH_INTERNAL_ASSERT(
         alloc->buffer()->isA<TensorView>(),
