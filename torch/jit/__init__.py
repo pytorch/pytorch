@@ -4,7 +4,6 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from torch.utils import set_module
-from torch._ops import OpOverload, OpOverloadPacket
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import (
@@ -48,6 +47,7 @@ from torch.jit._trace import (
     _get_trace_graph,
 )
 from torch.jit._async import fork, wait
+from torch.jit._decomposition_utils import _register_decomposition
 from torch.jit._serialization import save, load, jit_module_from_flatbuffer, save_jit_module_to_flatbuffer
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
@@ -186,11 +186,6 @@ def isinstance(obj, target_type):
         m(y)
     """
     return _isinstance(obj, target_type)
-
-def _register_decomposition(op: OpOverload, graph):
-    assert not isinstance(op, OpOverloadPacket), f"Must pass specific op overload, not overload packet, found {op}"
-    assert isinstance(op, OpOverload)
-    torch._C._jit_register_decomposition_for_schema(op._schema, graph)
 
 # Context manager for globally hiding source ranges when printing graphs.
 # Note that these functions are exposed to Python as static members of the
