@@ -477,7 +477,7 @@ class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
-        skip('nn.functional.max_unpool2d'), # Flaky
+        skip('nn.functional.max_unpool2d'),  # Flaky
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('nn.functional.binary_cross_entropy'),  # testing problem
         xfail('nn.functional.max_unpool1d', '', device_type='cpu'),
