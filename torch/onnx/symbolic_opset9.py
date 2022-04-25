@@ -3330,10 +3330,8 @@ def remainder(g, input, other):
     return g.op("Sub", input, quo)
 
 @parse_args("v", "s")
-def gelu(g, self, approximate):
-    # none approximate : onnx::Constant[value={0}]
-    # tanh approximate : onnx::Constant[value={1}]
-    if approximate == 'tanh':
+def gelu(g, self: torch._C.Value, approximate: str = "none"):
+    if approximate == "tanh":
         kBeta = math.sqrt(2 / math.pi)
         kKappa = 0.044715
 

@@ -163,10 +163,13 @@ Tensor _pad_enum(const Tensor &self, IntArrayRef pad, int64_t mode_int, c10::opt
   if (mode == at::padding_mode::constant) {
     return at::constant_pad_nd(self, pad, value.value_or(0.0));
   }
-  TORCH_CHECK(
-      !value.has_value(), "Padding mode \"",
-      padding_mode_string(mode),
-      "\" doesn't take in value argument");
+  if (value.has_value()) {
+    auto err_msg = c10::str("Padding mode \"", padding_mode_string(mode),
+                            "\" doesn't take in value argument");
+    // Emit error if value != 0, otherwise just warn
+    TORCH_CHECK(*value == 0, err_msg);
+    TORCH_WARN(err_msg);
+  }
 
   if (pad.size() == 2 && (input_dim == 2 || input_dim == 3)) {
     switch (mode) {
