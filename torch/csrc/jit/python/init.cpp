@@ -183,9 +183,6 @@ void initJITBindings(PyObject* module) {
               TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
             }
           })
-      // using Node* here instead of Schema because looking up the schema
-      // and passing it in from Python will have a different pointer than the
-      // schema that is globally used for caching
       .def(
           "_jit_register_decomposition_for_schema",
           [](const FunctionSchema& s, std::shared_ptr<Graph>& graph) {
