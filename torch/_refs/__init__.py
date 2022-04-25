@@ -147,7 +147,7 @@ def _elementwise_dtypes(*_args, type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND)
     # Determines datatypes for each category
     scalar_args = filter(lambda x: isinstance(x, Number), args)
     scalar_type = reduce(
-        lambda acc, x: utils.get_higher_type(acc, type(x)), scalar_args
+        lambda acc, x: utils.get_higher_type(acc, type(x)), scalar_args, bool  # type: ignore[arg-type, return-value]
     )
 
     scalar_tensors = filter(lambda t: isinstance(t, TensorLike) and t.ndim == 0, args)
@@ -257,7 +257,9 @@ def broadcast(*args):
             # TODO: add a pass to remove unnecessary broadcast_in_dim calls
             return prims.broadcast_in_dim(x, common_shape, dims)
         else:
-            raise RuntimeError("Unexpected type when broadcasting: " + str(type(x)) + "!")
+            raise RuntimeError(
+                "Unexpected type when broadcasting: " + str(type(x)) + "!"
+            )
 
     return tuple(map(lambda x: _maybe_broadcast(x, common_shape), args))
 

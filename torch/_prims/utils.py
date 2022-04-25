@@ -1,8 +1,10 @@
-import torch
+from __future__ import annotations
 
 from numbers import Number
 from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
 from functools import reduce
+
+import torch
 
 ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
@@ -45,15 +47,21 @@ class TensorMeta(object):
             self.dtype = tensorlike.dtype
             self.device = tensorlike.device
         else:
+            # If no tensorlike "example" is given then all metadata
+            # must be provided explicitly
             assert shape is not None
-            self.shape = tuple(shape)
-            if strides is None:
-                self.strides = make_contiguous_strides_for(shape)
+            assert strides is not None
             assert dtype is not None
-            self.dtype = dtype
             assert device is not None
-            self.device = device
 
+        # Sets metadata from kwargs, possibly overriding metadata from
+        # the example tensorlike
+        self.shape = self.shape if shape is None else tuple(shape)
+        self.strides = self.strides if strides is None else tuple(strides)
+        self.dtype = self.dtype if dtype is None else dtype
+        self.device = self.device if device is None else device
+
+        # Computes derived properties
         self.ndim = len(self.shape)
 
     @classmethod
