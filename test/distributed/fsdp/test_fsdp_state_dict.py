@@ -3,7 +3,6 @@
 import sys
 from contextlib import suppress
 from copy import deepcopy
-from functools import partial
 from typing import Any, Dict
 
 import torch
