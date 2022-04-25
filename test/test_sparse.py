@@ -999,6 +999,22 @@ class TestSparse(TestCase):
                 test_shape(len(sizes) // 2, 10, sizes, d, index)
                 test_shape(len(sizes), 10, sizes, d, index)
 
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_index_select_exhaustive_nnz_larger_than_dim_size(self, device, dtype, coalesced):
+        sizes = [2, 3, 4]
+        t = make_tensor(sizes, dtype=dtype, device=device)
+        t_sparse = t.to_sparse().coalesce() if coalesced else t.to_sparse()
+        for d in range(len(sizes)):
+            idx_dim_d_range = list(range(sizes[d]))
+            for idx_len in range(d, d + 3):
+                # creates all possible valid indices into dim d of lenght idx_len
+                for idx in itertools.product(*itertools.repeat(idx_dim_d_range, idx_len)):
+                    t_idx = torch.tensor(idx, dtype=torch.long, device=device)
+                    dense_result = t.index_select(d, t_idx)
+                    sparse_result = t_sparse.index_select(d, t_idx)
+                    self.assertEqual(dense_result, sparse_result)
+
     @onlyCPU
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
