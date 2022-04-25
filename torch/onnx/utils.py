@@ -15,6 +15,8 @@ import re
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import unused_module
+
 import torch
 import torch.autograd
 import torch.jit

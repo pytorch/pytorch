@@ -26,7 +26,7 @@ TORCH_API void buildParamsMapFromValueToParamsMap(
     const ValueToParamPairMap& valsToParamsMap,
     ParamMap& paramsDict);
 TORCH_API ValueToParamPairMap
-buildValueToParamsMap(Block* b, const ParamMap& paramsDict);
+buildValueToParamsMap(Block* b, ParamMap& paramsDict);
 TORCH_API void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap);
 TORCH_API void eraseUnusedBlockInputs(Block* b);
 TORCH_API void buildParamsMapFromValueToParamsMap(
@@ -64,7 +64,7 @@ Node* transformToONNXConcatNode(
 
 class ScalarTypeHashFunction {
  public:
-  size_t operator()(const c10::ScalarType& type) const {
+  size_t operator()(c10::ScalarType& type) const {
     return static_cast<size_t>(type);
   }
 };

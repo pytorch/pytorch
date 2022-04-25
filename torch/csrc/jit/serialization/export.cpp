@@ -1192,7 +1192,7 @@ std::string pretty_print_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool google_printer,
     bool keep_initializers_as_inputs,
-    const std::map<std::string, int>& custom_opsets,
+    std::map<std::string, int>& custom_opsets,
     bool add_node_names) {
   auto graph_encoder = GraphEncoder(
       graph,
