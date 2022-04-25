@@ -394,6 +394,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
+    "torch/csrc/utils/cpp_stacktraces.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
 ]
@@ -422,7 +423,6 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/debug_util.cpp",
-    "torch/csrc/lazy/core/dynamic_ir.cpp",
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/helpers.cpp",
     "torch/csrc/lazy/core/ir.cpp",
@@ -471,6 +471,7 @@ lazy_tensor_core_sources = [
 lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/ops/batch_norm_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
+    "torch/csrc/lazy/ts_backend/dynamic_ir.cpp",
     "torch/csrc/lazy/ts_backend/ts_autograd_functions.cpp",
     "torch/csrc/lazy/ts_backend/ts_backend_impl.cpp",
     "torch/csrc/lazy/ts_backend/ts_lowering_context.cpp",

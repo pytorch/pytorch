@@ -695,8 +695,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.native_norm: lambda input, p=2: -1,
         torch.native_norm: lambda input, p=2, dim=None, keepdim=False, dtype=None: -1,
         torch.native_channel_shuffle: lambda input, groups : -1,
-        torch._native_pixel_shuffle: lambda input, upscale_factor: -1,
-        torch._native_pixel_unshuffle: lambda input, downscale_factor: -1,
         torch.ne: lambda input, other, out=None: -1,
         torch.not_equal: lambda input, other, out=None: -1,
         torch.neg: lambda input, out=None: -1,

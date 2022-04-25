@@ -2032,12 +2032,12 @@
   input: _upsample_nearest_exact3d_backward(grad, output_size, input.sizes(), scale_factors)
   result: auto_linear
 
-- name: _native_pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
-  self: _native_pixel_unshuffle(grad, upscale_factor)
+- name: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
+  self: pixel_unshuffle(grad, upscale_factor)
   result: auto_linear
 
-- name: _native_pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
-  self: _native_pixel_shuffle(grad, downscale_factor)
+- name: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
+  self: pixel_shuffle(grad, downscale_factor)
   result: auto_linear
 
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor

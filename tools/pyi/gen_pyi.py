@@ -2,14 +2,14 @@ import argparse
 import collections
 from pprint import pformat
 
-from tools.codegen.model import Variant
-from tools.codegen.api.python import (
+from torchgen.model import Variant
+from torchgen.api.python import (
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
     returns_named_tuple_pyi,
 )
-from tools.codegen.gen import parse_native_yaml
-from tools.codegen.utils import FileManager
+from torchgen.gen import parse_native_yaml
+from torchgen.utils import FileManager
 from typing import Sequence, List, Dict
 
 from tools.autograd.gen_python_functions import (
@@ -267,8 +267,6 @@ def gen_nn_functional(fm: FileManager) -> None:
         "rrelu_",
         "pixel_shuffle",
         "pixel_unshuffle",
-        "_native_pixel_shuffle",
-        "_native_pixel_unshuffle",
         "channel_shuffle",
         "native_channel_shuffle",
         "pdist",
