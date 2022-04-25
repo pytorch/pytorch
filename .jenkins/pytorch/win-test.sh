@@ -75,6 +75,8 @@ run_tests() {
             "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat
             "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
             "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+        elif [[ "${JOB_BASE_NAME}" == *-test2 || ($NUM_TEST_SHARDS -gt 1) ]]; then
+            "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat
         fi
     fi
 }

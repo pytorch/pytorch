@@ -4,6 +4,8 @@ import os
 import subprocess
 
 from tools.stats.s3_stat_parser import (
+    _get_stripped_CI_job,
+    cats_logging_helper,
     get_previous_reports_for_branch,
     get_previous_reports_for_pr,
     Report,
@@ -47,12 +49,13 @@ def _get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
 def _calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
     """Compute test runtime by filename: ("test_file_name" -> (current_avg, # values))"""
     jobs_to_times: Dict[str, Tuple[float, int]] = dict()
+    print("cats logging _calculate_job_times")
+    print(cats_logging_helper(reports))
     for report in reports:
         v_report = cast(Version2Report, report)
-        assert (
-            "format_version" in v_report.keys() and v_report.get("format_version") == 2
-        ), "S3 format currently handled is version 2 only"
-        files: Dict[str, Any] = v_report["files"]
+        assert 'format_version' in v_report.keys() and v_report.get('format_version') == 2, \
+            "S3 format currently handled is version 2 only"
+        files: Dict[str, Any] = v_report['files']
         for name, test_file in files.items():
             if name not in jobs_to_times:
                 jobs_to_times[name] = (test_file["total_seconds"], 1)
@@ -92,18 +95,28 @@ def calculate_shards(
             curr_shard_time + filtered_job_times[job],
             curr_shard_jobs,
         )
+    print("cats logging")
+    print(f"job times\n{job_times}")
+    print(f"sorted_jobs\n{sorted_jobs}")
+    for i, (time, jobs) in enumerate(sharded_jobs):
+        print(f'{i} {time} {jobs}')
 
     # Round robin the unknown jobs starting with the smallest shard
     index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
     for job in unknown_jobs:
         sharded_jobs[index][1].append(job)
         index = (index + 1) % num_shards
+    print(f"unknown_jobs \n{unknown_jobs}")
+    for i, (time, jobs) in enumerate(sharded_jobs):
+        print(f'{i} {jobs}')
     return sharded_jobs
 
 
 def _pull_job_times_from_S3() -> Dict[str, float]:
     if HAVE_BOTO3:
+        print(f"cats logging _pull_job_times_from_S3 {_get_stripped_CI_job()}")
         ci_job_prefix = _get_stripped_CI_job()
+        print(f"cats logging {ci_job_prefix}")
         s3_reports: List["Report"] = get_previous_reports_for_branch(
             "origin/viable/strict", ci_job_prefix
         )
@@ -144,9 +157,8 @@ def _query_past_job_times(test_times_file: Optional[str] = None) -> Dict[str, fl
             print(f"Current test times file is for different CI job {file_ci_job}.")
         else:
             print(
-                f"Found stats for current commit: {curr_commit} and job: {curr_ci_job}. Proceeding with those values."
-            )
-            return test_times_json.get("job_times", {})
+                f'Found stats for current commit: {curr_commit} and job: {curr_ci_job}. Proceeding with those values.')
+            return test_times_json.get('job_times', {})
 
         # Found file, but commit or CI job in JSON doesn't match
         print(
@@ -202,8 +214,8 @@ def get_shard_based_on_S3(
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
-        print("Gathered no stats from S3. Proceeding with default sharding plan.")
-        return tests[which_shard - 1 :: num_shards]
+        print('Gathered no stats from S3. Proceeding with default sharding plan.')
+        return tests[which_shard - 1:: num_shards]
 
     shards = calculate_shards(num_shards, tests, jobs_to_times)
     _, tests_from_shard = shards[which_shard - 1]
@@ -290,7 +302,7 @@ def get_reordered_tests(tests: List[str], is_reordering_by_pr: bool) -> List[str
         prioritized_tests = [
             f for f in changed_files if f.startswith(prefix) and f.endswith(".py")
         ]
-        prioritized_tests = [f[len(prefix) :] for f in prioritized_tests]
+        prioritized_tests = [f[len(prefix):] for f in prioritized_tests]
         prioritized_tests = [f[: -len(".py")] for f in prioritized_tests]
         print("Prioritized test from test file changes.")
 
