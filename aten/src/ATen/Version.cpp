@@ -205,7 +205,6 @@ std::string show_config() {
 
   // TODO: do HIP
   // TODO: do XLA
-  // TODO: do MPS
 
   return ss.str();
 }
