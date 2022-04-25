@@ -1,7 +1,7 @@
 import torch
 
 from numbers import Number
-from typing import Union, Sequence
+from typing import Union, Sequence, Optional
 from functools import reduce
 
 
@@ -122,6 +122,11 @@ def validate_exclusive_idx(shape: Sequence, ex_idx: int):
     assert isinstance(ex_idx, int)
     assert ex_idx > 0 and ex_idx <= len(shape)
 
+def canonicalize_idx(shape: Sequence, idx: int):
+    validate_idx(shape, idx)
+    if idx < 0:
+        idx = idx + len(shape)
+    return idx
 
 def validate_permutation(rank: int, perm: Sequence):
     """
@@ -492,3 +497,10 @@ def compute_reduction_output_shape(shape: Sequence, dimensions: Sequence) -> Seq
         new_shape.append(shape[idx])
 
     return new_shape
+
+def reduction_dims(shape: Sequence, dims: Optional[Sequence]) -> Sequence:
+    if dims is None:
+        return tuple(range(len(shape)))
+    dims = tuple(canonicalize_idx(shape, idx) for idx in dims)
+    assert len(dims) == len(set(dims)), "duplicate value in dims"
+    return dims

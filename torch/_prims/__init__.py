@@ -1009,8 +1009,19 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     output_shape = utils.compute_reduction_output_shape(inp.shape, dims)
     return TensorMeta(shape=output_shape, dtype=output_dtype, device=inp.device)
 
+def _bool_return_reduction_meta(inp, dims):
+    return _reduction_meta(inp, dims, output_dtype=torch.bool)
+
 _sum_doc = """
-    Computes the sum of elements in the input tensor over list of dimensions
+    Computes the sum of elements in the input tensor over the list of dimensions
+    specified in the dim argument
+    """
+_amax_doc = """
+    Computes the maximum value of elements in the input tensor over the list of dimensions
+    specified in the dim argument
+    """
+_amin_doc = """
+    Computes the minimum value of elements in the input tensor over the list of dimensions
     specified in the dim argument
     """
 
@@ -1018,6 +1029,41 @@ _sum_doc = """
 sum = _make_prim(
     meta=_reduction_meta,
     impl_aten=torch.sum,
-    return_type=RETURN_TYPE.VIEW,
+    return_type=RETURN_TYPE.NEW,
     doc=_sum_doc
+)
+
+prod = _make_prim(
+    meta=_reduction_meta,
+    impl_aten=torch.prod,
+    return_type=RETURN_TYPE.NEW,
+    doc=_sum_doc
+)
+
+amax = _make_prim(
+    meta=_reduction_meta,
+    impl_aten=torch.amax,
+    return_type=RETURN_TYPE.NEW,
+    doc=_amax_doc
+)
+
+amin = _make_prim(
+    meta=_reduction_meta,
+    impl_aten=torch.amin,
+    return_type=RETURN_TYPE.NEW,
+    doc=_amin_doc
+)
+
+all = _make_prim(
+    meta=_bool_return_reduction_meta,
+    impl_aten=torch.all,
+    return_type=RETURN_TYPE.NEW,
+    doc=""
+)
+
+any = _make_prim(
+    meta=_bool_return_reduction_meta,
+    impl_aten=torch.any,
+    return_type=RETURN_TYPE.NEW,
+    doc=""
 )
