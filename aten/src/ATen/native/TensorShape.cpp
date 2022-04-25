@@ -1419,9 +1419,10 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   // If indexing into sparse dimensions
   if (dim < sparse_dim) {
     const auto nneg_index = [&index, index_len, &self, size, dim](void) -> Tensor {
-      auto nneg_index = at::empty_like(index);
+      const auto index_contiguous = index.contiguous();
+      auto nneg_index = at::empty_like(index_contiguous);
       // nneg_index = ((index < 0) * index + size) + (index >= 0) * index
-      auto* ptr_index = index.data_ptr<int64_t>();
+      auto* ptr_index = index_contiguous.data_ptr<int64_t>();
       auto* ptr_nneg_index = nneg_index.data_ptr<int64_t>();
       at::parallel_for(0, index_len, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
           const auto* src = ptr_index + start;
@@ -1700,19 +1701,19 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         );
 
         auto index_counts_per_thread = counts_per_thread(
-            index,
+            nneg_index,
             /*is_sorted=*/false
             /*grain_size = at::internal::GRAIN_SIZE*/
         );
 
         return search_in_dim_indices
           ? std::make_tuple(
-              index, index_counts_per_thread, index_counts_per_thread.cumsum(0),
+              nneg_index, index_counts_per_thread, index_counts_per_thread.cumsum(0),
               dim_indices, dim_indices_counts_per_thread, dim_indices_counts_per_thread.cumsum(0)
             )
           : std::make_tuple(
               dim_indices, dim_indices_counts_per_thread, dim_indices_counts_per_thread.cumsum(0),
-              index, index_counts_per_thread, index_counts_per_thread.cumsum(0)
+              nneg_index, index_counts_per_thread, index_counts_per_thread.cumsum(0)
             );
       }();
 
