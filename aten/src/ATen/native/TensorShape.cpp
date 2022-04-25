@@ -1773,83 +1773,55 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         return std::make_tuple(src_idx, src_idx_offsets);
       }();
 
-      auto dim_indices_counts_per_thread = counts_per_thread(
-          dim_indices,
-          /*is_sorted=*/self.is_coalesced() && dim == 0
-          /*grain_size = at::internal::GRAIN_SIZE*/
-      );
-      auto dim_indices_offset_counts_per_thread = dim_indices_counts_per_thread.cumsum(0);
-
-      auto index_offset_counts_per_thread = counts_per_thread(
-          index,
-          /*is_sorted=*/false
-          /*grain_size = at::internal::GRAIN_SIZE*/
-      ).cumsum_(0);
-
-      const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1).clone();
-      const auto index_counts = index_offset_counts_per_thread.select(0, -1).clone();
-
-      auto dim_indices_order_idx = src_idx;
-      std::cout << "intersection_counts " << intersection_counts << std::endl;
-      std::cout << "dim_indices " << dim_indices << std::endl;
-      std::cout << "dim_indices_order_idx " << dim_indices_order_idx << std::endl;
-      std::cout << std::endl;
-
-      const auto index_from_intersection = [
-        &intersection_counts,
-        &intersection_offsets,
-        res_len
-      ](
-          const Tensor& idx,
-          Tensor& idx_offset_counts_per_thread,
-          const Tensor& other_idx_counts,
+      Tensor idx_selected, src_selected;
+      std::tie(idx_selected, src_selected) = [&](
           int64_t grain_size = at::internal::GRAIN_SIZE
-      ) -> Tensor {
-        auto res_index = at::empty({res_len}, idx.options());
-        auto idx_offsets_per_thread = idx_offset_counts_per_thread.mul_(other_idx_counts);
+      ) -> std::tuple<Tensor, Tensor> {
+        const auto thread_offset = [&]() {
+          // we do not need idx_counts_per_thread anymore,
+          // so it is safe to do in-place intersection.
+          auto counts_per_thread = idx_counts_per_thread.mul_(src_counts).sum(-1);
+          return counts_per_thread.cumsum(0).sub_(counts_per_thread);
+        }();
+        const auto* ptr_thread_offset = thread_offset.data_ptr<int64_t>();
 
-        const auto idx_len = idx.numel();
+        auto idx_selected = at::empty({res_len}, idx.options());
+        auto src_selected = at::empty({res_len}, src.options());
+
         const auto* ptr_idx = idx.data_ptr<int64_t>();
+        const auto* ptr_src_counts = src_counts.data_ptr<int64_t>();
         const auto* ptr_intersection_counts = intersection_counts.data_ptr<int64_t>();
-        const auto* ptr_intersection_offsets = intersection_offsets.data_ptr<int64_t>();
-        const auto* ptr_other_idx_counts = other_idx_counts.data_ptr<int64_t>();
-        auto* ptr_res_index = res_index.data_ptr<int64_t>();
+        const auto* ptr_src_idx = src_idx.data_ptr<int64_t>();
+        const auto* ptr_src_idx_offsets = src_idx_offsets.data_ptr<int64_t>();
+        auto* ptr_idx_selected = idx_selected.data_ptr<int64_t>();
+        auto* ptr_src_selected = src_selected.data_ptr<int64_t>();
 
-        at::parallel_for(0, idx_len, grain_size, [&](int64_t start, int64_t end){
+        at::parallel_for(0, idx.numel(), grain_size, [&](int64_t start, int64_t end) {
             const auto tid = at::get_thread_num();
-            const auto* ptr_tid_idx = ptr_idx + start;
-            auto* tid_offsets = idx_offsets_per_thread.select(0, tid).data_ptr<int64_t>();
+            const auto tid_offset = ptr_thread_offset[tid];
+            const auto* ptr_idx_tid = ptr_idx + start;
+            auto* ptr_idx_selected_tid = ptr_idx_selected + tid_offset;
+            auto* ptr_src_selected_tid = ptr_src_selected + tid_offset;
+
             for (const auto i : c10::irange(start, end)) {
-              const auto val = *ptr_tid_idx++;
-              const auto intersection_counts = ptr_intersection_counts[val];
-              if (!intersection_counts) continue;
-              const auto intersection_offset = ptr_intersection_offsets[val];
-              const auto val_count = ptr_other_idx_counts[val];
-              auto& val_tid_offset = tid_offsets[val];
-              val_tid_offset -= val_count;
-              auto* out_location = ptr_res_index
-                + (intersection_offset - intersection_counts)
-                + val_tid_offset;
-              std::fill_n(out_location, val_count, i);
+              const auto idx_val = *ptr_idx_tid++;
+              // skip if idx_val is not in the intersection
+              if (!ptr_intersection_counts[idx_val]) continue;
+              const auto count = ptr_src_counts[idx_val];
+              const auto j = ptr_src_idx_offsets[idx_val];
+              std::fill_n(ptr_idx_selected_tid, count, i);
+              std::copy_n(ptr_src_idx + j, count, ptr_src_selected_tid);
+              ptr_idx_selected_tid += count;
+              ptr_src_selected_tid += count;
             }
         });
 
-        return res_index;
-      };
+        return std::make_tuple(idx_selected, src_selected);
+      }();
 
-      const auto selected_dim_indices = index_from_intersection(
-          dim_indices,
-          dim_indices_offset_counts_per_thread,
-          index_counts
-      );
-
-      const auto res_dim_indices = index_from_intersection(
-          index,
-          index_offset_counts_per_thread,
-          dim_indices_counts
-      );
-
-      return std::make_tuple(selected_dim_indices, res_dim_indices);
+      return search_in_dim_indices
+        ? std::make_tuple(src_selected, idx_selected)
+        : std::make_tuple(idx_selected, src_selected);
     };
 
 
