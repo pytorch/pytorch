@@ -71,7 +71,8 @@ from .composite_compliance import no_dispatch
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.nn import ModuleList, ModuleDict, Sequential, ParameterList, ParameterDict
 from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
-
+from torch.onnx import (register_custom_op_symbolic,
+                        unregister_custom_op_symbolic)
 torch.backends.disable_global_flags()
 
 FILE_SCHEMA = "file://"
@@ -766,7 +767,7 @@ TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa')
 
-BUILD_WITH_CAFFE2 = _check_module_exists("caffe2.python.caffe2_pybind11_state")
+BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
@@ -2424,6 +2425,19 @@ class TestCase(expecttest.TestCase):
         msg = self._formatMessage(msg, standardMsg)
         raise self.failureException(msg)
 
+    def assertAtenOp(self, onnx_model, operator, overload_name=""):
+        all_aten_nodes = [p for p in onnx_model.graph.node
+                          if p.op_type == "ATen" and p.domain == "org.pytorch.aten"]
+        self.assertTrue(all_aten_nodes)
+
+        for op in all_aten_nodes:
+            attrs = {attr.name: attr.s.decode() for attr in op.attribute}
+            if attrs.get("operator") == operator:
+                break
+
+        self.assertEqual(attrs["operator"], operator)
+        self.assertEqual(attrs.get("overload_name", ""), overload_name)
+
     # run code in subprocess and capture exceptions.
     @staticmethod
     def run_process_no_exception(code, env=None):
@@ -3232,3 +3246,12 @@ def clone_input_helper(input):
         return tuple(map(clone_input_helper, input))
 
     return input
+
+@contextmanager
+def custom_op(opname, symbolic_fn, opset_version):
+    """Context manager/decorator to test ONNX export with custom oeprator"""
+    try:
+        register_custom_op_symbolic(opname, symbolic_fn, opset_version)
+        yield
+    finally:
+        unregister_custom_op_symbolic(opname, opset_version)

@@ -190,6 +190,27 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
                         _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b));
 }
 
+template <typename T=float, typename Op>
+inline float vec_reduce_all(const Op& vec_fun, Vectorized<T> acc_vec) {
+  using Vec = Vectorized<float>;
+  Vec v = acc_vec;
+
+  // 256-bit shuffle
+  Vec v1 = _mm512_shuffle_f32x4(v, v, 0x4E);
+  v = vec_fun(v, v1);
+  // 128-bit shuffle
+  v1 = _mm512_shuffle_f32x4(v, v, 0xB1);
+  v = vec_fun(v, v1);
+  // 64-bit shuffle
+  v1 = _mm512_shuffle_ps(v, v, 0x4E);
+  v = vec_fun(v, v1);
+  // 32-bit shuffle
+  v1 = _mm512_shuffle_ps(v, v, 0xB1);
+  v = vec_fun(v, v1);
+
+  return _mm512_cvtss_f32(v);
+}
+
 #endif // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
 }}}
