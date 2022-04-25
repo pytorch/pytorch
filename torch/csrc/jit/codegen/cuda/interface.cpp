@@ -564,6 +564,24 @@ RegisterOperators view_guard({
         aliasAnalysisFromSchema()),
 });
 
+RegisterOperators ivalue_guard({
+    Operator(
+        "prim::CudaFusionIvalGuard(...) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::ArrayRef<IValue> inputs = last(stack, 2);
+            drop(stack, 2);
+            if (!fuser::cuda::getCudaFusionGuardMode()) {
+              push(stack, IValue(true));
+              return;
+            }
+            push(stack, inputs[0].equals(inputs[1]));
+            return;
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_add_optional({
     Operator(

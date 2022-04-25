@@ -1635,6 +1635,16 @@ void guardFusionGroup(
             versioning_if,
             view,
             profiled_ival);
+      } else if (fusion->input(offset)->node()->hasAttribute(
+                     Symbol::attr("profiled_ival"))) {
+        ivalue_check =
+            fusion->owningGraph()
+                ->create(
+                    c10::Symbol::fromQualString("prim::CudaFusionIvalGuard"),
+                    {profiled_ival, const_o},
+                    1)
+                ->insertBefore(versioning_if)
+                ->output();
       } else {
         ivalue_check = fusion->owningGraph()
                            ->create(aten::eq, {profiled_ival, const_o}, 1)

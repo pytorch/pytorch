@@ -3159,33 +3159,41 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
     pop(stack, frame_id);
     IValue value;
     pop(stack, value);
-
-    if (value.isInt()) {
-      if (!pn->hasAttribute(intAttr)) {
-        pn->i_(intAttr, value.toInt());
-      } else {
-        auto profiled_int = pn->i(intAttr);
-        auto input_int = value.toInt();
-        TORCH_INTERNAL_ASSERT(
-            input_int == profiled_int, "profiling ivalue doesn't support merge");
-      }
-    } else if (value.isNone()) {
-      if (!pn->hasAttribute(ivalAttr)) {
-        pn->ival_(ivalAttr, value);
-      } else {
-        auto profiled_ival = pn->ival(ivalAttr);
-        TORCH_INTERNAL_ASSERT(
-            profiled_ival.isNone(), "profiling ivalue doesn't support merge");
-      }
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "profileInt does not support data type: ",
-          value.tagKind());
-    }
-
     TORCH_INTERNAL_ASSERT(
         value.isInt(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(intAttr)) {
+      pn->i_(intAttr, value.toInt());
+    } else {
+      auto profiled_int = pn->i(intAttr);
+      auto input_int = value.toInt();
+      TORCH_INTERNAL_ASSERT(
+          input_int == profiled_int, "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
+void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    if (!pn->hasAttribute(ivalAttr)) {
+      pn->ival_(ivalAttr, value);
+    } else {
+      auto profiled_ival = pn->ival(ivalAttr);
+      TORCH_INTERNAL_ASSERT(
+          value == profiled_ival, "profiling ivalue doesn't support merge");
+    }
     push(stack, value);
   };
 
@@ -3601,7 +3609,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       node->matches(softmax_data_schema)) {
     switch (offset) {
       case 2:
-        profileInt(pr, node, offset);
+        profileIval(pr, node, offset);
         return true;
       default:
         return false;
