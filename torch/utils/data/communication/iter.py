@@ -5,6 +5,16 @@ from torch.utils.data import IterDataPipe, communication
 
 DEFAULT_NON_BLOCKING_SLEEP = 0.001
 
+__all__ = [
+    "DataPipeBehindQueues",
+    "EnsureNonBlockingDataPipe",
+    "InvalidStateResetRequired",
+    "NonBlocking",
+    "NotAvailable",
+    "QueueWrapper",
+    "default_not_available_hook",
+]
+
 
 def default_not_available_hook():
     time.sleep(DEFAULT_NON_BLOCKING_SLEEP)
