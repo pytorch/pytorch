@@ -222,24 +222,6 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
                         _mm256_permute2f128_ps(a_grouped, b_grouped, 0b0110001)); // 1, 3.   4 bits apart
 }
 
-template <typename T=float, typename Op>
-inline float vec_reduce_all(const Op& vec_fun,Vectorized<float> acc_vec) {
-  using Vec = Vectorized<float>;
-  Vec v = acc_vec;
-
-  // 128-bit shuffle
-  Vec v1 = _mm256_permute2f128_ps(v, v, 0x1);
-  v = vec_fun(v, v1);
-  // 64-bit shuffle
-  v1 = _mm256_shuffle_ps(v, v, 0x4E);
-  v = vec_fun(v, v1);
-  // 32-bit shuffle
-  v1 = _mm256_shuffle_ps(v, v, 0xB1);
-  v = vec_fun(v, v1);
-
-  return _mm256_cvtss_f32(v);
-}
-
 #endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 }}}
