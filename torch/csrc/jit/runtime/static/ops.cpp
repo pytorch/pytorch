@@ -1634,79 +1634,67 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
   return nullptr;
 });
 
-REGISTER_OPERATOR_FUNCTOR(aten::embedding_bag, aten_embedding_bag, [](Node* n) -> SROperator {
-  // TODO: Support only 9 args once the old signature has been removed.
-  if (!n->matches(torch::schema(
-          "aten::embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)")) &&
-      !n->matches(torch::schema(
-          "aten::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor, Tensor)"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
-  }
-  return [](ProcessedNode* p_node) {
-    const auto& weight = p_node->Input(0).toTensor();
-    const auto& indices = p_node->Input(1).toTensor();
-    const auto& offsets = p_node->Input(2).toTensor();
-    auto scale_grad_by_freq = p_node->Input(3).toBool();
-    auto mode = p_node->Input(4).to<int64_t>();
-    auto sparse = p_node->Input(5).toBool();
-    auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
-    auto include_last_offset = p_node->Input(7).toBool();
-    c10::optional<int64_t> padding_idx;
-    if (p_node->num_inputs() == 9) {
-      if (p_node->Input(8).isNone()) {
-        padding_idx = c10::nullopt;
-      } else {
-        padding_idx = p_node->Input(8).toInt();
-      }
-    }
-
-    at::native::check_arguments(
-        weight,
-        indices,
-        offsets,
-        mode,
-        per_sample_weights,
-        include_last_offset);
-
-    std::ignore = scale_grad_by_freq;
-    std::ignore = sparse;
-
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::empty(
-          {include_last_offset ? offsets.sizes()[0] - 1 : offsets.sizes()[0],
-           weight.sizes()[1]},
-          weight.options());
+namespace {
+void prepare_embedding_bag(ProcessedNode* p_node, bool use_max_indices) {
+  const auto& weight = p_node->Input(0).toTensor();
+  const auto& indices = p_node->Input(1).toTensor();
+  const auto& offsets = p_node->Input(2).toTensor();
+  auto scale_grad_by_freq = p_node->Input(3).toBool();
+  auto mode = p_node->Input(4).to<int64_t>();
+  auto sparse = p_node->Input(5).toBool();
+  auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
+  auto include_last_offset = p_node->Input(7).toBool();
+  c10::optional<int64_t> padding_idx;
+  if (p_node->num_inputs() == 9) {
+    if (p_node->Input(8).isNone()) {
+      padding_idx = c10::nullopt;
     } else {
-      at::native::resize_(
-          p_node->Output(0).toTensor(),
-          {include_last_offset ? offsets.sizes()[0] - 1 : offsets.sizes()[0],
-           weight.sizes()[1]},
-          c10::nullopt);
+      padding_idx = p_node->Input(8).toInt();
     }
-    at::Tensor& output = p_node->Output(0).toTensor();
+  }
 
-    if (p_node->Output(1).isNone()) {
-      p_node->Output(1) = at::empty({0}, offsets.options());
-    }
-    at::Tensor& offset2bag = p_node->Output(1).toTensor();
-    at::native::make_offset2bag_out(
-        offset2bag,
-        output,
-        weight,
-        indices,
-        offsets,
-        mode,
-        per_sample_weights,
-        padding_idx.value_or(-1));
+  at::native::check_arguments(
+      weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
-    if (p_node->Output(2).isNone()) {
-      p_node->Output(2) = at::empty(offsets.sizes(), offsets.options());
-    }
-    at::Tensor& bag_size = p_node->Output(2).toTensor();
-    at::native::make_bag_size_out(
-        bag_size, offsets, indices, mode, include_last_offset, false);
+  std::ignore = scale_grad_by_freq;
+  std::ignore = sparse;
 
+  if (p_node->Output(0).isNone()) {
+    p_node->Output(0) = at::empty(
+        {include_last_offset ? offsets.sizes()[0] - 1 : offsets.sizes()[0],
+         weight.sizes()[1]},
+        weight.options());
+  } else {
+    at::native::resize_(
+        p_node->Output(0).toTensor(),
+        {include_last_offset ? offsets.sizes()[0] - 1 : offsets.sizes()[0],
+         weight.sizes()[1]},
+        c10::nullopt);
+  }
+  at::Tensor& output = p_node->Output(0).toTensor();
+
+  if (p_node->Output(1).isNone()) {
+    p_node->Output(1) = at::empty({0}, offsets.options());
+  }
+  at::Tensor& offset2bag = p_node->Output(1).toTensor();
+  at::native::make_offset2bag_out(
+      offset2bag,
+      output,
+      weight,
+      indices,
+      offsets,
+      mode,
+      per_sample_weights,
+      padding_idx.value_or(-1));
+
+  if (p_node->Output(2).isNone()) {
+    p_node->Output(2) = at::empty(offsets.sizes(), offsets.options());
+  }
+  at::Tensor& bag_size = p_node->Output(2).toTensor();
+  at::native::make_bag_size_out(
+      bag_size, offsets, indices, mode, include_last_offset, false);
+
+  if (use_max_indices) {
     if (p_node->Output(3).isNone()) {
       p_node->Output(3) = at::empty(bag_size.sizes(), offsets.options());
     }
@@ -1724,7 +1712,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::embedding_bag, aten_embedding_bag, [](Node* n) -
         output,
         offset2bag,
         bag_size,
-        max_indices,
+        &max_indices,
         weight,
         indices,
         offsets,
@@ -1732,8 +1720,51 @@ REGISTER_OPERATOR_FUNCTOR(aten::embedding_bag, aten_embedding_bag, [](Node* n) -
         per_sample_weights,
         include_last_offset,
         padding_idx.value_or(-1));
+  } else {
+    at::native::_embedding_bag_cpu_impl_out(
+        output,
+        offset2bag,
+        bag_size,
+        nullptr,
+        weight,
+        indices,
+        offsets,
+        mode,
+        per_sample_weights,
+        include_last_offset,
+        padding_idx.value_or(-1));
+  }
+}
+} // namespace
+
+REGISTER_OPERATOR_FUNCTOR(aten::embedding_bag, aten_embedding_bag, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)")) &&
+      !n->matches(torch::schema(
+          "aten::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor, Tensor)"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    prepare_embedding_bag(p_node, /*use_max_indices*/ true);
   };
 });
+
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::embedding_bag,
+    static_runtime_embedding_bag,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "static_runtime::embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor)")) &&
+          !n->matches(torch::schema(
+              "static_runtime::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        prepare_embedding_bag(p_node, /*use_max_indices*/ false);
+      };
+    });
 
 REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
