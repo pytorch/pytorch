@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
 namespace torch {
@@ -187,6 +188,27 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   constexpr int kSleefWidth = 8;
   wrap = wrapTECompute(wrap, B, {A, N}, kSleefWidth);
   updateNNCCache(aten::sigmoid, wrap);
+  return wrap;
+}
+
+std::shared_ptr<TEWrapper> createClamp() {
+  static auto clamp_symbol = c10::Symbol::fromQualString("aten::clamp");
+  auto wrap = lookupNNCCache(clamp_symbol);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  auto min_handle = VarHandle("min", kFloat);
+  auto max_handle = VarHandle("max", kFloat);
+
+  BufHandle A("A", {N}, kFloat);
+  Tensor result = Compute("aten_clamp", {N}, [&](const VarHandle& i) {
+    auto a = A.load(i);
+    return tensorexpr::clamp(min_handle, max_handle, a);
+  });
+  wrap = wrapTECompute(wrap, result, {A, min_handle, max_handle, N});
+  updateNNCCache(clamp_symbol, wrap);
   return wrap;
 }
 

@@ -607,7 +607,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
 REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
+    return [te = createClamp()](ProcessedNode* p_node) {
       const auto& in0_t = p_node->Input(0).toTensor();
       if (p_node->Output(0).isNone()) {
         p_node->Output(0) = create_empty_from(in0_t);
@@ -616,7 +616,17 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
       auto in2_s = p_node->Input(2).toOptional<at::Scalar>();
-      at::cpu::clamp_out(out_t, in0_t, in1_s, in2_s);
+      if (!te->checkInput<float>(in0_t)) {
+        at::cpu::clamp_out(out_t, in0_t, in1_s, in2_s);
+        return;
+      }
+      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+      auto output_size = in0_t.numel();
+      auto min = in1_s.has_value() ? in1_s->toFloat()
+                                   : std::numeric_limits<float>::lowest();
+      auto max = in2_s.has_value() ? in2_s->toFloat()
+                                   : std::numeric_limits<float>::max();
+      te->call({out_t.data_ptr(), in0_t.data_ptr(), &min, &max, &output_size});
     };
   }
   if (n->matches(
