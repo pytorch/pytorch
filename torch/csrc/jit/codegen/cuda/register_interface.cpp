@@ -39,7 +39,9 @@ class RegisterPass {
  public:
   RegisterPass() {
     at::cuda::detail::callCUDAHooksRegistration();
-    RegisterCudaFuseGraph::registerPass(true);
+    if (RegisterCudaFuseGraph::canRegisterPass()) {
+      RegisterCudaFuseGraph::registerPass(true);
+    }
   }
 };
 
