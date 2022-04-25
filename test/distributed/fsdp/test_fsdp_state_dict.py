@@ -3,6 +3,7 @@
 import sys
 from contextlib import suppress
 from copy import deepcopy
+from functools import partial
 from typing import Any, Dict
 
 import torch
@@ -68,11 +69,15 @@ class Model(Module):
     def __init__(self, wrap_fsdp):
         super().__init__()
         self.inner = Linear(*INNER_SHAPE)
-        self.inner.register_buffer(_BUFFER_NAME, torch.ones(_BUFFER_DIM, device="cuda"))
+        self.inner.register_buffer(
+            _BUFFER_NAME, torch.ones(_BUFFER_DIM, device="cuda")
+        )
         if wrap_fsdp:
             self.inner = FSDP(self.inner)
         self.outer = Linear(*OUTER_SHAPE)
-        self.register_buffer(_BUFFER_NAME, torch.ones(_BUFFER_DIM, device="cuda"))
+        self.register_buffer(
+            _BUFFER_NAME, torch.ones(_BUFFER_DIM, device="cuda")
+        )
 
     def forward(self, x):
         # Forward twice.
@@ -92,23 +97,18 @@ class TestFSDPStateDict(FSDPTest):
         return olist[0]
 
     def _get_simple_nested_model(self, *fsdp_args, **fsdp_kwargs):
-        model = nn.Sequential(
-            FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs),
-            nn.Linear(10, 10, bias=False).cuda(),
-        )
-        model.register_buffer(_BUFFER_NAME, torch.ones(_BUFFER_DIM, device="cuda"))
-
         model = FSDP(
-            model,
+            nn.Sequential(
+                FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs),
+                nn.Linear(10, 10, bias=False).cuda(),
+            ),
             *fsdp_args,
             **fsdp_kwargs,
         )
         return model
 
     def _get_simple_model(self, *fsdp_args, **fsdp_kwargs):
-        model = nn.Linear(10, 10, bias=False).cuda()
-        model.register_buffer(_BUFFER_NAME, torch.ones(_BUFFER_DIM, device="cuda"))
-        model = FSDP(model, *fsdp_args, **fsdp_kwargs)
+        model = FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs)
         return model
 
     def _get_full_state_dict_mgr(self, model, state_dict_rank0_and_offload):
@@ -122,13 +122,10 @@ class TestFSDPStateDict(FSDPTest):
         )
 
     def _validate_buffers(self, state_dict):
-        "buffer"
-        "inner.buffer"
         buffer_tensors = [
             t for n, t in state_dict.items() if _BUFFER_NAME in n
         ]
         for b in buffer_tensors:
-            self.assertNotEqual(b.device, torch.device("cpu"))
             self.assertEqual(_BUFFER_DIM, b.numel())
 
     def _validate_state_dict_contents(
@@ -138,10 +135,7 @@ class TestFSDPStateDict(FSDPTest):
             if self.rank == 0:
                 self.assertNotEqual(fsdp_state_dict, {})
                 for key, tensor in fsdp_state_dict.items():
-                    if (
-                        _BUFFER_NAME in key or ignore_keys is not None
-                        and key in ignore_keys
-                    ):
+                    if ignore_keys and key in ignore_keys:
                         continue
                     self.assertEqual(
                         tensor.device, torch.device("cpu"),
@@ -157,73 +151,63 @@ class TestFSDPStateDict(FSDPTest):
     )
     @parametrize("fp16", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
-    @parametrize("model", ["simple", "nested"])
-    def test_basic_save_and_load_state_dict(
-        self, cpu_offload, fp16, state_dict_rank0_and_offload, model
-    ):
+    def test_basic_save_and_load_state_dict(self, cpu_offload, fp16, state_dict_rank0_and_offload):
         """
         Tests that we can save a state_dict and load it into a blank model
         with various configs such as fp16 and cpu offload and parameters
         match as expected.
         """
-        model_fn = (
-            self._get_simple_nested_model
-            if model == "nested" else self._get_simple_model
-        )
-        model = model_fn(cpu_offload=cpu_offload)
-        full_state_dict_mgr = self._get_full_state_dict_mgr(
-            model, state_dict_rank0_and_offload
-        )
-        with full_state_dict_mgr:
-            fsdp_state_dict = _get_state_dict(
-                model, cpu_offload.offload_params, fp16
+        for model_call in [
+            partial(self._get_simple_nested_model, cpu_offload=cpu_offload),
+            partial(self._get_simple_model, cpu_offload=cpu_offload),
+        ]:
+            model = model_call()
+            full_state_dict_mgr = self._get_full_state_dict_mgr(
+                model, state_dict_rank0_and_offload
             )
+            with full_state_dict_mgr:
+                fsdp_state_dict = _get_state_dict(model, cpu_offload.offload_params, fp16)
 
-        self._validate_state_dict_contents(
-            fsdp_state_dict, state_dict_rank0_and_offload
-        )
+            self._validate_state_dict_contents(
+                fsdp_state_dict, state_dict_rank0_and_offload
+            )
+            if fp16:
+                # Verify fp16 is the type
+                for tensor in fsdp_state_dict.values():
+                    self.assertEqual(tensor.dtype, torch.float16)
 
-        if not state_dict_rank0_and_offload or self.rank == 0:
-            self._validate_buffers(fsdp_state_dict)
+            model_new = model_call()
+            if not cpu_offload.offload_params:
+                model_new = model_new.cuda()
+            if fp16:
+                model_new.half()
 
-        # buffers are always on GPU and unsharded.
-        if fp16:
-            # Verify fp16 is the type
-            for tensor in fsdp_state_dict.values():
-                self.assertEqual(tensor.dtype, torch.float16)
+            # zero the model to ensure parameters are different.
+            _zero_model(model_new)
 
-        model_new = model_fn(cpu_offload=cpu_offload)
-        if not cpu_offload.offload_params:
-            model_new = model_new.cuda()
-        if fp16:
-            model_new.half()
-
-        # zero the model to ensure parameters are different.
-        _zero_model(model_new)
-
-        with FullyShardedDataParallel.summon_full_params(model):
-            with FullyShardedDataParallel.summon_full_params(model_new):
-                params = list(model.parameters())
-                params_new = list(model_new.parameters())
-                self.assertNotEqual(params, params_new)
-
-        # Verify parameters are the same in the new model.
-        if state_dict_rank0_and_offload:
-            # Broadcast the state dict and move it back to GPU in
-            # preparation for loading.
-            fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
-            for key in fsdp_state_dict.keys():
-                fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
-
-        model_new.load_state_dict(fsdp_state_dict)
-        with FullyShardedDataParallel.summon_full_params(model_new):
             with FullyShardedDataParallel.summon_full_params(model):
-                params = list(model.parameters())
-                params_new = list(model_new.parameters())
-                self.assertEqual(params, params_new)
-                if fp16:
-                    for tensor in model_new.parameters():
-                        self.assertEqual(tensor.dtype, torch.float16)
+                with FullyShardedDataParallel.summon_full_params(model_new):
+                    params = list(model.parameters())
+                    params_new = list(model_new.parameters())
+                    self.assertNotEqual(params, params_new)
+
+            # Verify parameters are the same in the new model.
+            if state_dict_rank0_and_offload:
+                # Broadcast the state dict and move it back to GPU in
+                # preparation for loading.
+                fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
+                for key in fsdp_state_dict.keys():
+                    fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
+
+            model_new.load_state_dict(fsdp_state_dict)
+            with FullyShardedDataParallel.summon_full_params(model_new):
+                with FullyShardedDataParallel.summon_full_params(model):
+                    params = list(model.parameters())
+                    params_new = list(model_new.parameters())
+                    self.assertEqual(params, params_new)
+                    if fp16:
+                        for tensor in model_new.parameters():
+                            self.assertEqual(tensor.dtype, torch.float16)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
@@ -258,13 +242,7 @@ class TestFSDPStateDict(FSDPTest):
         )
         with fsd_mgr:
             state_dict = {k: v.clone() for k, v in model.state_dict().items()}
-
-        self._validate_state_dict_contents(
-            state_dict, state_dict_rank0_and_offload,
-        )
-        if not state_dict_rank0_and_offload or self.rank == 0:
-            self._validate_buffers(state_dict)
-
+        self._validate_state_dict_contents(state_dict, state_dict_rank0_and_offload)
         _zero_model(model)
 
         # Ensure checkpointed params have the full param dtype
@@ -349,10 +327,7 @@ class TestFSDPStateDict(FSDPTest):
     def test_fsdp_state_dict_keys(self, state_dict_type):
         state_dict = self._state_dict(self._initialize_model(True), state_dict_type)
         if state_dict_type == "local_state_dict":
-            self.assertEqual(
-                set(["flat_param", "inner.flat_param", "buffer", "inner.buffer"]),
-                state_dict.keys()
-            )
+            self.assertEqual(set(["flat_param", "inner.flat_param"]), state_dict.keys())
         elif state_dict_type == "state_dict":
             # Keys should match local model.
             local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
@@ -385,12 +360,8 @@ class TestFSDPStateDict(FSDPTest):
             fsdp_state_dict = model.state_dict()
 
         self._validate_state_dict_contents(
-            fsdp_state_dict, state_dict_rank0_and_offload,
+            fsdp_state_dict, state_dict_rank0_and_offload
         )
-
-        if not state_dict_rank0_and_offload or self.rank == 0:
-            self._validate_buffers(fsdp_state_dict)
-
         # Create zeroed local model
         blank_local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
         for param in blank_local_model.parameters():
@@ -511,6 +482,13 @@ class TestFSDPStateDict(FSDPTest):
             with new_model.summon_full_params(new_model):
                 for (p1, p2) in zip(model.parameters(), new_model.parameters()):
                     self.assertEqual(p1, p2)
+
+                orig_buf_dict = dict(model.named_buffers())
+                new_buf_dict = dict(new_model.named_buffers())
+                self.assertNotEqual({}, orig_buf_dict)
+                for k1, k2 in zip(orig_buf_dict.keys(), new_buf_dict.keys()):
+                    self.assertEqual(k1, k2)
+                    self.assertEqual(orig_buf_dict[k1], new_buf_dict[k2])
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_with_ignored_modules(self):
