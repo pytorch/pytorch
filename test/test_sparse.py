@@ -1006,12 +1006,15 @@ class TestSparse(TestCase):
         t = make_tensor(sizes, dtype=dtype, device=device)
         t_sparse = t.to_sparse().coalesce() if coalesced else t.to_sparse()
         for d in range(len(sizes)):
-            idx_dim_d_range = list(range(sizes[d]))
+            # NOTE: indices are negative
+            idx_dim_d_range = list(range(-sizes[d], 0))
             for idx_len in range(d, d + 3):
                 # creates all possible valid indices into dim d of lenght idx_len
                 for idx in itertools.product(*itertools.repeat(idx_dim_d_range, idx_len)):
                     t_idx = torch.tensor(idx, dtype=torch.long, device=device)
-                    dense_result = t.index_select(d, t_idx)
+                    # NOTE: index_select for dense does not support negative indices,
+                    # hence + sizes[d]. See https://github.com/pytorch/pytorch/issues/76347
+                    dense_result = t.index_select(d, t_idx + sizes[d])
                     sparse_result = t_sparse.index_select(d, t_idx)
                     self.assertEqual(dense_result, sparse_result)
 
