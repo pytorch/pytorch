@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: distributed"]
+import io
 
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
@@ -285,3 +286,14 @@ class TestReplicatedTensor(ShardedTensorTestBase):
                     ddp = DDP(model)
                     out = ddp(replica_tensor)
                 self.assertIsInstance(out, ReplicatedTensor)
+
+        # Test save.
+        with _ddp_replicated_tensor(False):
+            ddp = DDP(model)
+            buffer = io.BytesIO()
+            torch.save(ddp, buffer)
+
+        with _ddp_replicated_tensor(True):
+            ddp = DDP(model)
+            buffer = io.BytesIO()
+            torch.save(ddp, buffer)
