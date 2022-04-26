@@ -696,9 +696,11 @@ void gemm_and_bias(
   CuBlasLtMatrixLayout Cdesc(abcType, m, n, result_ld);
 
   CuBlasLtMatmulPreference preference;
-  // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
-  // setting this to 1M.
-  size_t workspaceSize = 1024 * 1024;
+  // See https://github.com/pytorch/pytorch/issues/73328.
+  // Check https://docs.nvidia.com/cuda/cublas/index.html#cublassetworkspace .
+  // Recommended size of user-provided workspace is at least 4MiB (to match
+  // cuBLAS' default workspace pool).
+  size_t workspaceSize = 4 * 1024 * 1024;
   TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
       preference.descriptor(),
       CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
