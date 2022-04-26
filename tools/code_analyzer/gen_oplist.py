@@ -7,7 +7,7 @@ from functools import reduce
 from typing import Set, List, Any
 
 import yaml
-from tools.codegen.selective_build.selector import (
+from torchgen.selective_build.selector import (
     combine_selective_builders,
     SelectiveBuilder,
 )
