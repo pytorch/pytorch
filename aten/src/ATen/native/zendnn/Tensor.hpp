@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/native/zendnn/Attributes.hpp"
-#include "ATen/native/zendnn/Utils.hpp"
+#include <ATen/native/zendnn/Attributes.hpp>
+#include <ATen/native/zendnn/Utils.hpp>
 
 namespace zendnn {
 

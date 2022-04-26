@@ -92,7 +92,7 @@ void setOperatorEngine(caffe2::NetDef* net_def, const string& backend) {
                              : backend == "mkl" ? "MKLDNN"
                                                 : backend == "cuda"
                     ? "CUDA"
-		    : backend == "zendnn" ? "ZENDNN"
+            : backend == "zendnn" ? "ZENDNN"
                     : backend == "dnnlowp" ? "DNNLOWP"
                                            : backend == "dnnlowp_acc16"
                             ? "DNNLOWP_ACC16"

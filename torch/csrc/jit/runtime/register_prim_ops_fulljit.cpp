@@ -310,7 +310,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
 
-      Operator(
+     Operator(
          "prim::is_zendnn(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;

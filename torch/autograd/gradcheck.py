@@ -102,7 +102,7 @@ def _iter_tensor(x_tensor):
                 indices = x_indices[i].tolist() + list(x_idx)
                 d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
                 yield x_value, x_idx, d_idx
-    elif x_tensor.layout in [torch._mkldnn,torch._zendnn]:  # type: ignore[attr-defined]
+    elif x_tensor.layout == torch._mkldnn or x_tensor.layout == torch._zendnn:  # type: ignore[attr-defined]
         for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
             # this is really inefficient, but without indexing implemented, there's
             # not really a better way than converting back and forth
@@ -394,7 +394,7 @@ def _get_input_to_perturb(input):
     if input.layout == torch._mkldnn:  # type: ignore[attr-defined] # no attr _mkldnn
         # Convert to dense so we can perform operations that require strided tensors
         input_to_perturb = input.to_dense()
-    if input.layout == torch._zendnn:  # type: ignore[attr-defined] # no attr _zendnn
+    elif input.layout == torch._zendnn:  # type: ignore[attr-defined] # no attr _zendnn
         # Convert to dense so we can perform operations that require strided tensors
         input_to_perturb = input.to_dense()
     elif input.layout == torch.sparse_coo:
@@ -673,7 +673,7 @@ def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
                 content = inp
             # TODO: To cover more problematic cases, replace stride = 0 check with
             # "any overlap in memory" once we have a proper function to check it.
-            if content.layout not in [torch._mkldnn,torch._zendnn]:  # type: ignore[attr-defined]
+            if content.layout is not torch._mkldnn and content.layout is not torch._zendnn:  # type: ignore[attr-defined]
                 if not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
                     raise RuntimeError(
                         f'The {idx}th input has a dimension with stride 0. gradcheck only '

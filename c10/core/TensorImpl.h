@@ -1034,7 +1034,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // __torch_dispatch__ users will be able to redefine the
       // layout() method.
       return layout_impl();
-    } else if(is_zendnn()) {
+    } else if (is_zendnn()) {
       return kZendnn;
     } else {
       TORCH_INTERNAL_ASSERT(

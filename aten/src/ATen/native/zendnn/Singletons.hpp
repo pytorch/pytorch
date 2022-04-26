@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/native/zendnn/AbstractTypes.hpp"
-#include "ATen/native/zendnn/Tensor.hpp"
+#include <ATen/native/zendnn/AbstractTypes.hpp>
+#include <ATen/native/zendnn/Tensor.hpp>
 
 namespace zendnn {
 namespace utils {

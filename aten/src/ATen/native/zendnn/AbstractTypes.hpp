@@ -8,7 +8,7 @@
 #include <map>
 #include <string>
 #include <vector>
-#include "ATen/native/zendnn/Allocators.hpp"
+#include <ATen/native/zendnn/Allocators.hpp>
 
 namespace zendnn {
 

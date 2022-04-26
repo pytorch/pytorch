@@ -4,8 +4,8 @@
 #include <ATen/Config.h>
 
 #if AT_ZENDNN_ENABLED()
-#include "ATen/native/zendnn/AbstractTypes.hpp"
-#include "ATen/native/zendnn/Tensor.hpp"
+#include <ATen/native/zendnn/AbstractTypes.hpp>
+#include <ATen/native/zendnn/Tensor.hpp>
 
 namespace at {
 namespace native {

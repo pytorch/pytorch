@@ -1,21 +1,13 @@
-import copy
+# Owner(s): ["module: third_party"]
+
 import itertools
 import functools
 import unittest
 
-try:
-    import torchvision
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-
-skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-
 import torch
-import torch.nn.functional as F
 import torch.jit
 import torch.backends.zendnn
-from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName, gradcheck, gradgradcheck
+from torch.testing._internal.common_utils import TestCase, run_tests, gradcheck, gradgradcheck
 
 # batched grad doesn't support zendnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
@@ -28,9 +20,9 @@ types = [torch.float]
 class TestZENDNN(TestCase):
     def test_conversion(self):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),
-                                    dtype=torch.float, device=torch.device('cpu')),
-                        torch.randn((1, 2, 3, 4, 5),
-                                    dtype=torch.float, device=torch.device('cpu'))[:, :, :, :, 1]]:
+                                       dtype=torch.float, device=torch.device('cpu')),
+                           torch.randn((1, 2, 3, 4, 5),
+                                       dtype=torch.float, device=torch.device('cpu'))[:, :, :, :, 1]]:
             cpu_tensor.requires_grad_()
             # float cpu tensor to zendnn float tensor.
             for dtype1 in types:
@@ -54,13 +46,13 @@ class TestZENDNN(TestCase):
                 else:
                     self.assertEqual(zendnn_tensor.element_size(), cpu_tensor.element_size() / 2)
                 self.assertRaisesRegex(RuntimeError,
-                                    "Cannot access data pointer of Tensor that doesn't have storage",
-                                    lambda: zendnn_tensor.data_ptr() != 0)
+                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       lambda: zendnn_tensor.data_ptr() != 0)
 
     def test_unsupported(self):
         # unsupported types
         for dtype in [torch.double, torch.half, torch.uint8, torch.int8,
-                    torch.short, torch.int, torch.long, torch.bfloat16]:
+                      torch.short, torch.int, torch.long, torch.bfloat16]:
             with self.assertRaises(RuntimeError) as context:
                 torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_zendnn()
         # some factory functions
@@ -82,7 +74,7 @@ class TestZENDNN(TestCase):
 
     def test_repr(self):
         self.assertTrue("layout=torch._zendnn" in str(torch.randn((1, 2, 3, 4),
-                                                                dtype=torch.float, device=torch.device('cpu')).to_zendnn()))
+                                                                  dtype=torch.float, device=torch.device('cpu')).to_zendnn()))
 
     def test_is_zendnn(self):
         x = torch.randn(1, dtype=torch.float32)
@@ -135,13 +127,13 @@ class TestZENDNN(TestCase):
             M = torch.randint(1, 3, (1,)).item() * groups
             x = torch.randn(N, C, 224, dtype=torch.float32)
             conv1d = torch.nn.Conv1d(in_channels=C,
-                                    out_channels=M,
-                                    kernel_size=3,
-                                    stride=2,
-                                    padding=1,
-                                    dilation=dilation,
-                                    bias=bias,
-                                    groups=groups).float()
+                                     out_channels=M,
+                                     kernel_size=3,
+                                     stride=2,
+                                     padding=1,
+                                     dilation=dilation,
+                                     bias=bias,
+                                     groups=groups).float()
 
             y_zendnn = conv1d(x)
             with torch.backends.zendnn.flags(enabled=False):
@@ -159,13 +151,13 @@ class TestZENDNN(TestCase):
             M = torch.randint(1, 3, (1,)).item() * groups
             x = torch.randn(N, C, 224, 224, dtype=torch.float32)
             conv2d = torch.nn.Conv2d(in_channels=C,
-                                    out_channels=M,
-                                    kernel_size=3,
-                                    stride=2,
-                                    padding=1,
-                                    dilation=dilation,
-                                    bias=bias,
-                                    groups=groups).float()
+                                     out_channels=M,
+                                     kernel_size=3,
+                                     stride=2,
+                                     padding=1,
+                                     dilation=dilation,
+                                     bias=bias,
+                                     groups=groups).float()
             y_zendnn = conv2d(x)
             with torch.backends.zendnn.flags(enabled=False):
                 y_aten = conv2d(x)
@@ -182,13 +174,13 @@ class TestZENDNN(TestCase):
             M = torch.randint(1, 3, (1,)).item() * groups
             x = torch.randn(N, C, 55, 55, 55, dtype=torch.float32)
             conv3d = torch.nn.Conv3d(in_channels=C,
-                                    out_channels=M,
-                                    kernel_size=3,
-                                    stride=2,
-                                    padding=1,
-                                    bias=bias,
-                                    dilation=dilation,
-                                    groups=groups).float()
+                                     out_channels=M,
+                                     kernel_size=3,
+                                     stride=2,
+                                     padding=1,
+                                     bias=bias,
+                                     dilation=dilation,
+                                     groups=groups).float()
             with torch.backends.zendnn.flags(enabled=False):
                 y_aten = conv3d(x)
             y_zendnn = conv3d(x)
