@@ -16221,7 +16221,7 @@ op_db: List[OpInfo] = [
         'nansum',
         identity=0,
         nan_policy='omit',
-        supports_out=False,
+        supports_out=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.nansum),
