@@ -2383,20 +2383,20 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 fut.wait()
 
     @dist_init
-    def test_async_record_function_legacy(self):
-        # Test the legacy _record_function ops work
-        # Note: These exist for backward compatibility with TorchScript
+    def test_async_record_function_double_end_callbacks_new_signatures(self):
+        # Test the new _record_function ops work
+        # Note: Remove once record_function uses these directly
         num_sleep_seconds = 1
         if self.rank == 1:
             with _profile() as pf:
                 try:
-                    handle = torch.ops.profiler._record_function_enter("foo", None)
+                    record = torch.ops.profiler._record_function_enter_new("foo", None)
                     fut = rpc.rpc_async(
                         worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
                     )
-                    torch.ops.profiler._call_end_callbacks_on_jit_fut(handle, fut)
+                    torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
                 finally:
-                    torch.ops.profiler._record_function_exit(handle)
+                    torch.ops.profiler._record_function_exit(record)
 
                 fut.wait()
 
@@ -2415,7 +2415,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                         worker_name(0), my_script_func, args=(torch.tensor(1),)
                     )
                     # Intentionally calling record_function internals
-                    fut = torch.ops.profiler._call_end_callbacks_on_jit_fut(rf.record, fut)
+                    fut = torch.ops.profiler._call_end_callbacks_on_jit_fut(rf.handle, fut)
                 result = fut.wait()
                 # Validate that the profiling future returns the same value as the RPC
                 # future.
@@ -4331,25 +4331,12 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             rank=self.rank,
             rpc_backend_options=self.rpc_backend_options,
         )
-
-        # TODO: Need to sync before shutdown since ungraceful shutdown is not fully implemented
-        # Using process_group initialization as sync (could also use store based barrier)
-        dist.init_process_group(
-            backend='gloo',
-            init_method=self.file_init_method,
-            rank=self.rank,
-            world_size=self.world_size)
-        rpc.shutdown(graceful=False)
+        rpc.shutdown()
 
     # Dynamic RPC new ranks communicate with existing ranks
     @dist_init(setup_rpc=False)
     def test_without_world_size_new_rank_can_communicated_with_existing_rank(self):
-        # TODO: Using process group for synchronization to ensure rank 0 is created first
-        dist.init_process_group(
-            backend='gloo',
-            init_method=self.file_init_method,
-            rank=self.rank,
-            world_size=self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         if self.rank == 0:
             rpc.init_rpc(
@@ -4373,19 +4360,14 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             result = rpc.rpc_sync(worker_name(0), torch.add, args=(torch.tensor(1), torch.tensor(1)))
             self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
 
-        # TODO: Remove the sync before shutdown and replace with graceful shutdown
+        # Barrier to ensure that all rpc_sync calls are finished
         dist.barrier()
-        rpc.shutdown(graceful=False)
+        rpc.shutdown()
 
     # Dynamic RPC existing ranks can communicate with new ranks
     @dist_init(setup_rpc=False)
     def test_without_world_size_existing_rank_can_communicate_with_new_rank(self):
-        # TODO: Using process group for synchronization to ensure rank 0 is created first
-        dist.init_process_group(
-            backend='gloo',
-            init_method=self.file_init_method,
-            rank=self.rank,
-            world_size=self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         if self.rank == 0:
             rpc.init_rpc(
@@ -4414,20 +4396,15 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 result = rpc.rpc_sync(worker_name(i), torch.add, args=(torch.tensor(1), torch.tensor(1)))
                 self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
 
-        # TODO: Remove the sync before shutdown and replace with graceful shutdown
+        # Barrier to ensure that all rpc_sync calls are finished
         dist.barrier()
-        rpc.shutdown(graceful=False)
+        rpc.shutdown()
 
     # Dynamic RPC existing ranks can communicate with new ranks using CUDA rpc
     @skip_if_lt_x_gpu(2)
     @dist_init(setup_rpc=False)
     def test_without_world_size_existing_rank_can_communicate_with_new_rank_cuda(self):
-        # TODO: Using process group for synchronization to ensure rank 0 is created first
-        dist.init_process_group(
-            backend='gloo',
-            init_method=self.file_init_method,
-            rank=self.rank,
-            world_size=self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         if self.rank == 0:
             options = self.rpc_backend_options
@@ -4466,9 +4443,9 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 self.assertEqual(torch.add(torch.ones(2), 1), result_on_device_1)
                 self.assertEqual(torch.device('cuda:1'), result_on_device_1.device)
 
-        # TODO: Remove the sync before shutdown and replace with graceful shutdown
+        # Barrier to ensure that all rpc_sync calls are finished
         dist.barrier()
-        rpc.shutdown(graceful=False)
+        rpc.shutdown()
 
     @dist_init(setup_rpc=False)
     def test_init_rpc_without_world_size_without_rank(self):
