@@ -545,7 +545,8 @@ command = [
 [[linter]]
 code = 'BLACK'
 include_patterns = [
-    'torchgen/api/**/*.py'
+    'torchgen/**/*.py',
+    'tools/**/*.py',
 ]
 command = [
     'python3',
