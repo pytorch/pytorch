@@ -3129,7 +3129,7 @@ torch.cuda.synchronize()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_capture_oom(self):
-        with self.assertRaisesRegex(RuntimeError, match="out of memory"):
+        with self.assertRaisesRegex(RuntimeError, "out of memory"):
             with torch.cuda.graph(torch.cuda.CUDAGraph()):
                 torch.zeros(2 ** 40, device="cuda")
 
