@@ -193,7 +193,6 @@ bool Context::hasMPS() {
   if (@available(macOS 12.3, *)) {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::MPS);
   } else {
-    TORCH_WARN("MPS device is available macOS 12.3+");
     return false;
   }
 #else
