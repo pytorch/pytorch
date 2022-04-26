@@ -10,19 +10,19 @@ import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import distributed_c10d
-from torch.distributed._shard import (
+from torch.distributed._shard import sharded_tensor
+from torch.distributed._shard.api import (
     shard_parameter,
-    sharded_tensor,
     _shard_tensor,
+    load_with_process_group,
+    _collect_local_shard,
+    _reshard_output,
 )
 from torch.distributed._shard.sharded_tensor import (
     sharded_op_impl,
-    load_with_process_group,
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
-    _collect_local_shard,
-    _reshard_output,
 )
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
@@ -903,7 +903,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         st = sharded_tensor.empty(spec, 10, 20)
         tensor = torch.empty(10, 20)
-        with self.assertRaisesRegex(RuntimeError, "not supported for ShardedTensor!"):
+        with self.assertRaisesRegex(RuntimeError, "not supported yet for ShardedTensor!"):
             torch.add(st, tensor)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])

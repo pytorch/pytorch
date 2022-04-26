@@ -24,6 +24,11 @@
 
 #include <flatbuffers/flatbuffers.h>
 
+#ifndef DISABLE_UPGRADER
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
+#endif
+
 #if defined(HAVE_MMAP)
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -210,6 +215,15 @@ mobile::Module FlatbufferLoader::parseModule(
   module_parsed_ = true;
   return mobile::Module(module_ivalue.toObject(), mcu_);
 }
+namespace {
+void appendUpgraderFunctions(mobile::Function* function) {
+#ifndef DISABLE_UPGRADER
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    function->append_function(byteCodeFunctionWithOperator.function);
+  }
+#endif
+}
+} // namespace
 
 std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     const mobile::serialization::Function* method) {
@@ -227,6 +241,13 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
   }
 
   std::unordered_set<std::string> unsupported_op_names;
+
+  appendUpgraderFunctions(function.get());
+  // 2. Decides if upgrader is needed
+  const uint32_t operator_version = module_->operator_version();
+  bool use_upgrader =
+      (operator_version < caffe2::serialize::kProducedFileFormatVersion);
+
   for (const auto* op : *method->operators()) {
     c10::optional<int> num_args = c10::nullopt;
     if (op->num_args_serialized() > -1) {
@@ -249,6 +270,15 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
 
   for (const auto i : *method->type_annotations()) {
     function->append_type(getOrCreateTypeAnnotations(i));
+  }
+
+  // 3. If upgrader is needed, change change the OP instrunction to CALL
+  // instruction (In next PR, use_upgrader will be parsed to parseInstruction
+  // function and do the actual change)
+  if (use_upgrader) {
+#ifndef DISABLE_UPGRADER
+    applyUpgrader(function.get(), operator_version);
+#endif
   }
 
   function->set_register_size(method->register_size());

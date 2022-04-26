@@ -23,6 +23,13 @@ from . import _utils
 
 import torch.utils.data.graph_settings
 
+__all__ = [
+    "DataLoader",
+    "get_worker_info",
+    "default_collate",
+    "default_convert",
+]
+
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 _worker_init_fn_t = Callable[[int], None]
@@ -103,7 +110,7 @@ class DataLoader(Generic[T_co]):
             mini-batch of Tensor(s).  Used when using batched loading from a
             map-style dataset.
         pin_memory (bool, optional): If ``True``, the data loader will copy Tensors
-            into CUDA pinned memory before returning them.  If your data elements
+            into device/CUDA pinned memory before returning them.  If your data elements
             are a custom type, or your :attr:`collate_fn` returns a batch that is a custom type,
             see the example below.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
@@ -124,6 +131,8 @@ class DataLoader(Generic[T_co]):
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
+        pin_memory_device (str, optional): the data loader will copy Tensors
+            into device pinned memory before returning them if pin_memory is set to true.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -159,19 +168,21 @@ class DataLoader(Generic[T_co]):
     drop_last: bool
     timeout: float
     sampler: Union[Sampler, Iterable]
+    pin_memory_device: str
     prefetch_factor: int
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
-                 shuffle: bool = False, sampler: Union[Sampler, Iterable, None] = None,
+                 shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
                  batch_sampler: Union[Sampler[Sequence], Iterable[Sequence], None] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
                  multiprocessing_context=None, generator=None,
                  *, prefetch_factor: int = 2,
-                 persistent_workers: bool = False):
+                 persistent_workers: bool = False,
+                 pin_memory_device: str = ""):
         torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
@@ -193,6 +204,7 @@ class DataLoader(Generic[T_co]):
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
         self.pin_memory = pin_memory
+        self.pin_memory_device = pin_memory_device
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
@@ -229,8 +241,10 @@ class DataLoader(Generic[T_co]):
             # this, and support custom samplers that specify the assignments to
             # specific workers.
             if isinstance(dataset, IterDataPipe):
-                dataset = torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
-            elif shuffle is not False:
+                if shuffle is not None:
+                    dataset = torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
+            # We cannot check `shuffle is not None` here, since previously `shuffle=False` was the default.
+            elif shuffle not in {False, None}:
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
                     "shuffle option, but got shuffle={}".format(shuffle))
@@ -246,6 +260,7 @@ class DataLoader(Generic[T_co]):
                     "DataLoader with IterableDataset: expected unspecified "
                     "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
         else:
+            shuffle = bool(shuffle)
             self._dataset_kind = _DatasetKind.Map
 
 
@@ -500,7 +515,20 @@ class _BaseDataLoaderIter(object):
         self._index_sampler = loader._index_sampler
         self._num_workers = loader.num_workers
         self._prefetch_factor = loader.prefetch_factor
-        self._pin_memory = loader.pin_memory and torch.cuda.is_available()
+        # for other backends, pin_memory_device need to set. if not set
+        # default behaviour is CUDA device. if pin_memory_device is selected
+        # and pin_memory is not set, the default behaviour false.
+        if (len(loader.pin_memory_device) == 0):
+            self._pin_memory = loader.pin_memory and torch.cuda.is_available()
+            self._pin_memory_device = None
+        else:
+            if not loader.pin_memory:
+                warn_msg = ("pin memory device is set and pin_memory flag is not used then device pinned memory won't be used"
+                            "please set pin_memory to true, if you need to use the device pin memory")
+                warnings.warn(warn_msg)
+
+            self._pin_memory = loader.pin_memory
+            self._pin_memory_device = loader.pin_memory_device
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
@@ -569,7 +597,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         index = self._next_index()  # may raise StopIteration
         data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
         if self._pin_memory:
-            data = _utils.pin_memory.pin_memory(data)
+            data = _utils.pin_memory.pin_memory(data, self._pin_memory_device)
         return data
 
 
@@ -936,7 +964,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(self._worker_result_queue, self._data_queue,
                       torch.cuda.current_device(),
-                      self._pin_memory_thread_done_event))
+                      self._pin_memory_thread_done_event, self._pin_memory_device))
             pin_memory_thread.daemon = True
             pin_memory_thread.start()
             # Similar to workers (see comment above), we only register
