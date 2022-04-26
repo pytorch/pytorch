@@ -17,12 +17,10 @@ import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-import torch.autograd
 import torch.jit
 import torch.onnx
 import torch.serialization
 from torch._six import string_classes
-from torch.jit import _unique_state_dict
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
@@ -500,14 +498,14 @@ def _trace(func, args, operator_export_type, return_outs=False):
 def _trace_and_get_graph_from_model(model, args):
     # A basic sanity check: make sure the state_dict keys are the same
     # before and after running the model.  Fail fast!
-    orig_state_dict_keys = _unique_state_dict(model).keys()
+    orig_state_dict_keys = torch.jit._unique_state_dict(model).keys()
 
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
         model, args, strict=False, _force_outplace=False, _return_inputs_states=True
     )
     warn_on_static_input_change(inputs_states)
 
-    if orig_state_dict_keys != _unique_state_dict(model).keys():
+    if orig_state_dict_keys != torch.jit._unique_state_dict(model).keys():
         raise RuntimeError(
             "state_dict changed after running the tracer; "
             "something weird is happening in your model!"
@@ -559,7 +557,7 @@ def _create_jit_graph(model, args):
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
         torch._C._jit_pass_onnx_lint(graph)
-        state_dict = _unique_state_dict(model)
+        state_dict = torch.jit._unique_state_dict(model)
         params = list(state_dict.values())
         graph_inputs = list(graph.inputs())
         user_input_num = len(graph_inputs) - len(state_dict)
