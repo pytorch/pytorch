@@ -1,14 +1,15 @@
+__all__ = ["init_backend", "backend_registered", "construct_rpc_backend_options", "register_backend", "BackendType", "BackendValue"]
 
 import collections
 import enum
-from typing import Dict, List, Set, Tuple
+from typing import cast, Dict, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
+from ._utils import _group_membership_management, _update_group_membership
 
 from . import api
 from . import constants as rpc_constants
-
 
 BackendValue = collections.namedtuple(
     "BackendValue", ["construct_rpc_backend_options_handler", "init_backend_handler"]
@@ -253,24 +254,21 @@ def _create_reverse_mapping(my_name, all_names, all_device_maps):
             }
     return reverse_device_maps
 
-def _update_group_membership(worker_info, my_devices, reverse_device_map):
-    agent = api._get_current_rpc_agent()
-    ret = agent._update_group_membership(worker_info, my_devices, reverse_device_map, True)
-    return ret
-
 def _get_device_infos():
-    agent = api._get_current_rpc_agent()
+    from . import TensorPipeAgent
+    agent = cast(TensorPipeAgent, api._get_current_rpc_agent())
     opts = agent._get_backend_options()
     device_count = torch.cuda.device_count()
     return device_count, opts.device_maps, opts.devices
 
 def _set_devices_and_reverse_device_map(agent):
+    from . import TensorPipeAgent
+    agent = cast(TensorPipeAgent, agent)
     # Group state is retrieved from local agent
     # On initialization, tensorpipe agent retrieves information from all existing workers, so group state is valid
     my_worker_info = agent.get_worker_info()
     my_name = my_worker_info.name
     all_worker_infos = agent.get_worker_infos()
-
     # One round to get device_maps of all workers and construct reverse device maps
     all_device_counts, all_device_maps, all_devices, all_names = {}, {}, {}, []
     for worker_info in all_worker_infos:
@@ -293,12 +291,12 @@ def _set_devices_and_reverse_device_map(agent):
     for worker_name in all_names:
         # Set device list for each worker
         all_devices[worker_name] = _create_device_list(all_devices[worker_name], all_device_maps[worker_name], reverse_device_maps)
-        api.rpc_sync(worker_name, _update_group_membership, args=(my_worker_info, all_devices[worker_name], reverse_device_maps))
+        api.rpc_sync(worker_name, _update_group_membership,
+                     args=(my_worker_info, all_devices[worker_name], reverse_device_maps, True))
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
-    from . import TensorPipeRpcBackendOptions
     from . import TensorPipeAgent
-
+    from . import TensorPipeRpcBackendOptions
     if not isinstance(store, dist.Store):
         raise TypeError("`store` must be a c10d::Store. {}".format(store))
 
@@ -363,40 +361,29 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         return agent
     # initialization for dynamic rpc (ranks can join and leave)
     else:
-        token_key = "RpcGroupManagementToken"
-        token_location = f"TokenOnWorker{rank}"
-        while True:
-            # Retrieve token from store to signal start of rank join/leave critical section
-            returned = store.compare_set(token_key, "", token_location).decode()
-            if returned == token_location:
-                # Construct TPAgent with empty reverse_device_map and devices
-                # these properties will be updated after initialization
-                agent = TensorPipeAgent(
-                    store,
-                    name,
-                    rank,
-                    world_size,
-                    rpc_backend_options,
-                    {},
-                    [],
-                )
-                api._init_rpc_states(agent)
+        with _group_membership_management(store, name, True):
+            # Construct TPAgent with empty reverse_device_map and devices
+            # these properties will be updated after initialization
+            agent = TensorPipeAgent(
+                store,
+                name,
+                rank,
+                world_size,
+                rpc_backend_options,
+                {},
+                [],
+            )
+            api._init_rpc_states(agent)
 
+            try:
                 # Notify all workers in group this rank has joined and set devices and reverse_device_map
                 # This is a synchronous operation that completes once all existing ranks are updated
                 _set_devices_and_reverse_device_map(agent)
-
-                # Finish initialization
-                break
-            else:
-                # Store will wait for the token to be released based on the timeout set in backend options
-                store.wait([returned])
-
-        # Update from store to signal end of rank join/leave critical section
-        store.set(token_key, "")
-        # Other will wait for this token to be set before they execute
-        store.set(token_location, "Done")
-        return agent
+                pass
+            except Exception:
+                api.shutdown()
+                raise
+            return agent
 
 register_backend(
     "TENSORPIPE",
