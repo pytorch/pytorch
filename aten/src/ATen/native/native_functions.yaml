@@ -1373,6 +1373,9 @@
 
 - func: conv_transpose3d.input(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
 
+- func: copy(Tensor self, Tensor src, bool non_blocking=False) -> Tensor
+  variants: function
+
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
   device_check: NoCheck
@@ -2112,6 +2115,16 @@
 
 - func: unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
   variants: method
+
+- func: fill.Scalar(Tensor self, Scalar value) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: fill
+
+- func: fill.Tensor(Tensor self, Tensor value) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: fill
 
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -4298,7 +4311,12 @@
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+# Overload without center & pad mode, needed for forward-compatibility
+- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+  variants: function, method
+  cpp_no_default_args: ['hop_length', 'win_length', 'window', 'normalized']
+
+- func: stft.center(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   variants: function, method
 
 - func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
@@ -4898,6 +4916,13 @@
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    # Why give zeros_like() a derivative formula?
+    # For the functionalization pass.
+    # zeros_like() runs *underneath* functionalization (we transform zero_ -> zero -> zeros_like),
+    # But the decomposite for zeros_like() calls into more inplace ops!
+    # Instead, we want zeros_like() to be a primitive w.r.t tracing (which we can do by adding an autograd formula).
+    CompositeExplicitAutograd: zeros_like
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   variants: function
@@ -5116,6 +5141,9 @@
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
     SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_csr_
+
+- func: zero(Tensor self) -> Tensor
+  variants: function
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator

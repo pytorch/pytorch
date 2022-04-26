@@ -867,7 +867,7 @@ def _get_should_profile():
     ActiveProfilerType = torch._C._autograd.ActiveProfilerType
     return (
         torch.autograd._profiler_enabled() and
-        torch._C._autograd._profiler_type() == ActiveProfilerType.LEGACY
+        torch._C._autograd._profiler_type() == ActiveProfilerType.LEGACY  # type: ignore[attr-defined]
     )
 
 def _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info):

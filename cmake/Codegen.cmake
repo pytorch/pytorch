@@ -67,7 +67,7 @@ if(INTERN_BUILD_ATEN_OPS)
     set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
   endif()
 
-  file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/*.py")
+  file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
 
   set(GEN_ROCM_FLAG)
   if(USE_ROCM)
@@ -148,13 +148,12 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   set(GEN_COMMAND
-      "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
+      "${PYTHON_EXECUTABLE}" -m torchgen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${CUSTOM_BUILD_FLAGS}
-      ${GEN_VULKAN_FLAGS}
   )
 
   file(GLOB_RECURSE headers_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
