@@ -3,6 +3,7 @@
 import tempfile
 import torch
 from copy import deepcopy
+from functools import partial
 from torch import nn
 from torch.nn.utils.parametrize import register_parametrization, remove_parametrizations
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -33,12 +34,12 @@ class TestSubclass(TestCase):
         x = self._create_tensor(tensor_cls).requires_grad_(tensor_requires_grad)
         param = nn.Parameter(x, requires_grad=(not tensor_requires_grad))
 
-        self.assertTrue(isinstance(param, nn.Parameter))
+        self.assertIsInstance(param, nn.Parameter)
         # Ensure requires_grad passed to Parameter's constructor takes precedence.
         self.assertEqual(param.requires_grad, not tensor_requires_grad)
 
         # Ensure original tensor is not mutated by Parameter construction.
-        self.assertFalse(isinstance(x, nn.Parameter))
+        self.assertNotIsInstance(x, nn.Parameter)
         self.assertEqual(x.requires_grad, tensor_requires_grad)
 
     @parametrize_tensor_cls
@@ -50,13 +51,11 @@ class TestSubclass(TestCase):
         x_copy = deepcopy(x)
         self.assertEqual(x, x_copy)
         self.assertEqual(x.__class__, x_copy.__class__)
-        self.assertFalse(x is x_copy)
+        self.assertIsNot(x, x_copy)
+        self.assertIsInstance(x_copy, tensor_cls)
         if as_param:
             # Deepcopy should preserve both custom type and "parameter-ness".
-            self.assertTrue(isinstance(x_copy, tensor_cls))
-            self.assertTrue(isinstance(x_copy, nn.Parameter))
-        else:
-            self.assertTrue(type(x_copy) is tensor_cls)
+            self.assertIsInstance(x_copy, nn.Parameter)
 
     @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
@@ -70,13 +69,11 @@ class TestSubclass(TestCase):
             x_loaded = torch.load(f)
 
             self.assertEqual(x, x_loaded)
-            self.assertFalse(x is x_loaded)
+            self.assertIsNot(x, x_loaded)
+            self.assertIsInstance(x_loaded, tensor_cls)
             if as_param:
                 # Serialization should preserve both custom type and "parameter-ness".
-                self.assertTrue(isinstance(x_loaded, tensor_cls))
-                self.assertTrue(isinstance(x_loaded, nn.Parameter))
-            else:
-                self.assertTrue(type(x_loaded) is tensor_cls)
+                self.assertIsInstance(x_loaded, nn.Parameter)
 
     @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
@@ -99,13 +96,17 @@ class TestSubclass(TestCase):
         # Call the add operator to produce an output tensor.
         output = x + self._create_tensor(torch.Tensor)
 
-        # Custom type should be propagated across operations, but "parameter-ness" should not be.
-        self.assertTrue(output.__class__ is (tensor_cls if as_param else x.__class__))
+        # Custom type should be propagated across operations if closed under the op, but
+        # "parameter-ness" should not be.
+        if subclass_db[tensor_cls].closed_under_ops:
+            self.assertIsInstance(output, tensor_cls)
+        else:
+            self.assertIsInstance(output, torch.Tensor)
+        self.assertNotIsInstance(output, nn.Parameter)
 
     @parametrize_tensor_cls
     def test_module_optimization(self, tensor_cls):
-        def create_fn():
-            return self._create_tensor(tensor_cls)
+        create_fn = partial(self._create_tensor, tensor_cls)
 
         class MyModule(nn.Module):
             def __init__(self):
@@ -145,15 +146,16 @@ class TestSubclass(TestCase):
         m(create_fn()).sum().backward(torch.tensor(1))
         optimizer.step()
 
-    @parametrize("tensor_cls", [
-        subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()
-        # TODO: Either implement set_() properly for these tensor subclasses or apply a
-        # more general fix to avoid the need for special set_() handling.
-        if tensor_cls not in [LoggingTensor, DiagTensorBelow]])
+    @parametrize_tensor_cls
     @parametrize("leave_parametrized", [False, True])
     def test_parametrization(self, tensor_cls, leave_parametrized):
-        def create_fn():
-            return self._create_tensor(tensor_cls)
+        # TODO: Either implement set_() properly for these tensor subclasses or apply a
+        # more general fix to avoid the need for special set_() handling. For now, skip
+        # testing these as they're expected to fail.
+        if tensor_cls in [LoggingTensor, DiagTensorBelow]:
+            return
+
+        create_fn = partial(self._create_tensor, tensor_cls)
 
         class MyModule(nn.Module):
             def __init__(self):
@@ -170,15 +172,17 @@ class TestSubclass(TestCase):
         m = MyModule()
         self.assertEqual(len(m.state_dict()), 1)
         register_parametrization(m, 'weight', MyParametrization())
-        self.assertIs(type(m.weight), tensor_cls)
+        self.assertIsInstance(m.weight, tensor_cls)
         output = m(self._create_tensor(torch.Tensor))
-        self.assertIs(type(output), tensor_cls)
+        self.assertIsInstance(output, tensor_cls)
         remove_parametrizations(m, 'weight', leave_parametrized=leave_parametrized)
 
     # Lazy modules with custom tensors are not supported yet.
     @expectedFailure
     @parametrize_tensor_cls
     def test_lazy_module(self, tensor_cls):
+        if tensor_cls is torch.Tensor:
+            self.fail('dummy fail for base tensor until the test passes for subclasses')
 
         class MyLazyModule(LazyModuleMixin, nn.Module):
             def __init__(self):
@@ -198,7 +202,7 @@ class TestSubclass(TestCase):
         self.assertTrue(m.has_uninitialized_params())
         output = m(self._create_tensor(tensor_cls))
         self.assertFalse(m.has_uninitialized_params())
-        self.assertIs(type(m.param), tensor_cls)
+        self.assertIsInstance(m.param, tensor_cls)
 
 instantiate_parametrized_tests(TestSubclass)
 
