@@ -16,6 +16,8 @@ from torch.distributed.fsdp import (
     BackwardPrefetch,
     ShardingStrategy,
 )
+from torch.distributed.fsdp.wrap import enable_wrap, wrap
+
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
@@ -42,7 +44,11 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 # Various mixed precision configs to test under.
-default_mp = MixedPrecision()
+default_mp = MixedPrecision(
+    param_dtype=torch.float16,
+    buffer_dtype=torch.float16,
+    reduce_dtype=torch.float16,
+)
 
 nccl_supports_bf16 = (
     CUDA11OrLater and dist.is_nccl_available() and nccl.version() >= (2, 10)
@@ -51,9 +57,21 @@ nccl_supports_bf16 = (
 mp_configs = [default_mp]
 
 if nccl_supports_bf16:
-    mp_diff_reduce = MixedPrecision(reduce_dtype=torch.bfloat16)
-    mp_diff_buffer = MixedPrecision(buffer_dtype=torch.bfloat16)
-    mp_diff_buffer_and_reduce = MixedPrecision(buffer_dtype=torch.bfloat16, reduce_dtype=torch.float32)
+    mp_diff_reduce = MixedPrecision(
+        param_dtype=torch.float16,
+        buffer_dtype=torch.float16,
+        reduce_dtype=torch.bfloat16
+    )
+    mp_diff_buffer = MixedPrecision(
+        param_dtype=torch.float16,
+        buffer_dtype=torch.bfloat16,
+        reduce_dtype=torch.float16,
+    )
+    mp_diff_buffer_and_reduce = MixedPrecision(
+        param_dtype=torch.float16,
+        buffer_dtype=torch.bfloat16,
+        reduce_dtype=torch.float32
+    )
     mp_configs.extend([
         mp_diff_reduce, mp_diff_buffer, mp_diff_buffer_and_reduce,
     ])
