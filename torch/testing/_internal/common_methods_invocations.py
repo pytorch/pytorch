@@ -8875,7 +8875,7 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
-                    dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+                    dtypes=all_types_and_complex_and(torch.chalf, torch.float16, torch.bfloat16, torch.bool),
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
@@ -11611,7 +11611,6 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.float32,)
             ),
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_gradgrad", dtypes=(torch.float64,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_forward_mode_AD", dtypes=(torch.float64,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_fwgrad_bwgrad", dtypes=(torch.float64,)),
         ),
     ),
@@ -15059,10 +15058,6 @@ op_db: List[OpInfo] = [
                # JIT has issue when op is passed as lambda
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # Fails due to a limitation of gradgradcheck
-               # https://github.com/pytorch/pytorch/issues/59137
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_inplace_gradgrad'),
                DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),

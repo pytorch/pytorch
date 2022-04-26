@@ -146,7 +146,7 @@ class _PartialTensor(object):
                 rank_idx = idx  # type: ignore[attr-defined]
             if placement.rank() != idx:  # type: ignore[index, union-attr]
                 rearrange_local_shards = True
-            indices[placement.rank()] = idx
+            indices[placement.rank()] = idx  # type: ignore[index, union-attr]
 
         local_shards = local_shard.chunk(self.process_group.size(), dim=sharding_dim)
         if rearrange_local_shards:

@@ -10,15 +10,11 @@ namespace torch {
 namespace lazy {
 
 // TODO(alanwaketan): Use the backend API to get the default device type.
-// In the future, we should also get the default device ordinal.
 BackendDevice::BackendDevice()
-  : type_(std::make_shared<BackendDeviceType>()) {}
+  : type_(std::make_shared<BackendDeviceType>()), ordinal_(-1) {}
 
 BackendDevice::BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int64_t ordinal)
   : type_(std::move(type)), ordinal_(ordinal) {}
-
-BackendDevice::BackendDevice(const std::string& device_spec)
-  : BackendDevice::BackendDevice() {}
 
 int8_t BackendDevice::type() const {
   TORCH_INTERNAL_ASSERT(type_);
@@ -27,7 +23,11 @@ int8_t BackendDevice::type() const {
 
 std::string BackendDevice::toString() const {
   TORCH_INTERNAL_ASSERT(type_);
-  return c10::str(type_->toString(), ordinal_);
+  std::string str = type_->toString();
+  if (has_index()) {
+    str.append(std::to_string(ordinal_));
+  }
+  return str;
 }
 
 int BackendDevice::compare(const BackendDevice& rhs) const {
@@ -42,10 +42,9 @@ std::ostream& operator<<(std::ostream& os, const BackendDevice& device) {
   return os;
 }
 
-// TODO(whc) refactor this: we need to support non-zero default ordinal for torch/XLA.
 BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
   TORCH_CHECK(device.type() == at::kLazy, device);
-  int64_t ordinal = device.has_index() ? device.index() : 0;
+  int64_t ordinal = device.has_index() ? device.index() : -1;
   return BackendDevice(getBackend()->GetDefaultDeviceType(), ordinal);
 }
 
