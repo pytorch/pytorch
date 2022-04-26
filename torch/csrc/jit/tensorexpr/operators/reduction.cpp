@@ -22,7 +22,6 @@ namespace tensorexpr {
 Tensor computeSum(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   std::vector<size_t> axes;
@@ -73,7 +72,6 @@ Tensor computeSum(
   return Reduce(
       "sum",
       outputDims,
-      outputStrides,
       Sum(),
       [&](ParameterList& indices) {
         // "Squeeze" out indices inserted when keepdim is set.
@@ -107,7 +105,6 @@ Tensor computeSum(
 Tensor computeMean(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
@@ -140,7 +137,6 @@ Tensor computeMean(
 Tensor computeMax(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
@@ -164,7 +160,6 @@ Tensor computeMax(
 Tensor computeAdaptiveAvgPool2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
   Dtype dtype = kFloat;
