@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -167,7 +168,7 @@ void initJITBindings(PyObject* module) {
             if (!n->maybeSchema()) {
               return c10::nullopt;
             }
-            return GetDecomposition(n->schema());
+            return DecompositionGraphForSchema(n->schema());
           })
       .def("_jit_pass_run_decompositions", RunDecompositions)
       // using Node* here instead of Schema because looking up the schema
@@ -182,16 +183,6 @@ void initJITBindings(PyObject* module) {
             } else {
               TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
             }
-          })
-      .def(
-          "_jit_register_decomposition_for_schema",
-          [](const FunctionSchema& s, std::shared_ptr<Graph>& graph) {
-            // because this is invoked by python, the function schema *
-            // becomes different, and we need to find and reuse the
-            // one that is used for caching
-            auto op =
-                findOperatorFor(OperatorName(s.name(), s.overload_name()));
-            RegisterDecomposition(op->schema(), graph);
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def(
@@ -1625,6 +1616,7 @@ void initJITBindings(PyObject* module) {
   initJitBackendBindings(module);
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
+  initNvFuserPythonBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
