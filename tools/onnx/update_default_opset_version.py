@@ -23,9 +23,12 @@ onnx_dir = pytorch_dir / "third_party" / "onnx"
 os.chdir(onnx_dir)
 
 date = datetime.datetime.now() - datetime.timedelta(days=18 * 30)
-onnx_commit = subprocess.check_output(("git", "log", f"--until={date}", "--max-count=1", "--format=%H"),
-                                      encoding="utf-8").strip()
-onnx_tags = subprocess.check_output(("git", "tag", "--list", f"--contains={onnx_commit}"), encoding="utf-8")
+onnx_commit = subprocess.check_output(
+    ("git", "log", f"--until={date}", "--max-count=1", "--format=%H"), encoding="utf-8"
+).strip()
+onnx_tags = subprocess.check_output(
+    ("git", "tag", "--list", f"--contains={onnx_commit}"), encoding="utf-8"
+)
 tag_tups = []
 semver_pat = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
 for tag in onnx_tags.splitlines():
@@ -37,23 +40,31 @@ version_str = "{}.{}.{}".format(*min(tag_tups))
 
 print("Using ONNX release", version_str)
 
-head_commit = subprocess.check_output(("git", "log", "--max-count=1", "--format=%H", "HEAD"),
-                                      encoding="utf-8").strip()
+head_commit = subprocess.check_output(
+    ("git", "log", "--max-count=1", "--format=%H", "HEAD"), encoding="utf-8"
+).strip()
 
 new_default = None
 
-subprocess.check_call(("git", "checkout", f"v{version_str}"), stdout=DEVNULL, stderr=DEVNULL)
+subprocess.check_call(
+    ("git", "checkout", f"v{version_str}"), stdout=DEVNULL, stderr=DEVNULL
+)
 try:
     from onnx import helper  # type: ignore[import]
+
     for version in helper.VERSION_TABLE:
         if version[0] == version_str:
             new_default = version[2]
             print("found new default opset_version", new_default)
             break
     if not new_default:
-        sys.exit(f"failed to find version {version_str} in onnx.helper.VERSION_TABLE at commit {onnx_commit}")
+        sys.exit(
+            f"failed to find version {version_str} in onnx.helper.VERSION_TABLE at commit {onnx_commit}"
+        )
 finally:
-    subprocess.check_call(("git", "checkout", head_commit), stdout=DEVNULL, stderr=DEVNULL)
+    subprocess.check_call(
+        ("git", "checkout", head_commit), stdout=DEVNULL, stderr=DEVNULL
+    )
 
 os.chdir(pytorch_dir)
 
@@ -66,13 +77,19 @@ def read_sub_write(path: str, prefix_pat: str) -> None:
         f.write(content_str)
     print("modified", path)
 
-read_sub_write(os.path.join("torch", "onnx", "symbolic_helper.py"),
-               r"(_default_onnx_opset_version = )\d+")
-read_sub_write(os.path.join("torch", "onnx", "__init__.py"),
-               r"(opset_version \(int, default )\d+")
+
+read_sub_write(
+    os.path.join("torch", "onnx", "symbolic_helper.py"),
+    r"(_default_onnx_opset_version = )\d+",
+)
+read_sub_write(
+    os.path.join("torch", "onnx", "__init__.py"), r"(opset_version \(int, default )\d+"
+)
 
 print("Updating operator .expect files")
-subprocess.check_call(("python", "setup.py", "develop"),
-                      stdout=DEVNULL, stderr=DEVNULL)
-subprocess.check_call(("python", os.path.join("test", "onnx", "test_operators.py"), "--accept"),
-                      stdout=DEVNULL, stderr=DEVNULL)
+subprocess.check_call(("python", "setup.py", "develop"), stdout=DEVNULL, stderr=DEVNULL)
+subprocess.check_call(
+    ("python", os.path.join("test", "onnx", "test_operators.py"), "--accept"),
+    stdout=DEVNULL,
+    stderr=DEVNULL,
+)

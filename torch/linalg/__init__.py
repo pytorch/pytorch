@@ -83,7 +83,7 @@ the **Cholesky decomposition** of a complex Hermitian or real symmetric positive
 
     A = LL^{\text{H}}\mathrlap{\qquad L \in \mathbb{K}^{n \times n}}
 
-where :math:`L` is a lower triangular matrix and
+where :math:`L` is a lower triangular matrix with real positive diagonal (even in the complex case) and
 :math:`L^{\text{H}}` is the conjugate transpose when :math:`L` is complex, and the transpose when :math:`L` is real-valued.
 
 Supports input of float, double, cfloat and cdouble dtypes.
@@ -2380,7 +2380,7 @@ Examples::
 """)
 
 vander = _add_docstr(_linalg.linalg_vander, r"""
-vander(x, N=None, increasing=False) -> Tensor
+vander(x, N=None) -> Tensor
 
 Generates a Vandermonde matrix.
 
@@ -2396,8 +2396,6 @@ Returns the Vandermonde matrix :math:`V`
             1 & x_n & x_n^2 & \dots & x_n^{N-1}
         \end{pmatrix}.
 
-If :attr:`increasing`\ `= False`, the powers of the columns are returned in decreasing order.
-
 If :attr:`N`\ `= None`, then `N = x.size(-1)` so that the output is a square matrix.
 
 Supports inputs of all dtypes.
@@ -2406,7 +2404,8 @@ the output has the same batch dimensions.
 
 Differences with `numpy.vander`:
 
-- Unlike `numpy.vander`, the default value for :attr:`increasing` is `True` rather than `False`.
+- Unlike `numpy.vander`, this function returns the powers of :attr:`x` in ascending order.
+  To get them in the reverse order call ``linalg.vander(x, N).flip(-1)``.
 
 Args:
     x (Tensor): tensor of shape `(*, n)` where `*` is zero or more batch dimensions
@@ -2414,10 +2413,6 @@ Args:
 
 Keyword args:
     N (int, optional): Number of columns in the output. Default: `x.size(-1)`
-    increasing (bool, optional): Order of the powers of the columns.
-        If `True`, the powers increase from left to right.
-        The order is reversed otherwise.
-        Default: `True`
 
 Example::
 
@@ -2432,9 +2427,4 @@ Example::
             [ 1,  2,  4],
             [ 1,  3,  9],
             [ 1,  5, 25]])
-    >>> linalg.vander(x, N=3, increasing=False)
-    tensor([[ 1,  1,  1],
-            [ 4,  2,  1],
-            [ 9,  3,  1],
-            [25,  5,  1]])
 """)
