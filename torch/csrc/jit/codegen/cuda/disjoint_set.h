@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 
 #include <algorithm>
+#include <initializer_list>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -34,6 +35,11 @@ std::string abstractToString(T ref) {
 template <typename T, typename Hash = std::hash<T>>
 class VectorOfUniqueEntries {
  public:
+  VectorOfUniqueEntries() = default;
+
+  VectorOfUniqueEntries(const std::initializer_list<T>& x)
+      : vector_(x), set_(x) {}
+
   // Returns if a node was actually added
   bool pushBack(T entry) {
     if (set_.emplace(entry).second) {
@@ -60,6 +66,19 @@ class VectorOfUniqueEntries {
   // Returns last element in vector
   T back() const {
     return vector_.back();
+  }
+
+  // Remove and returns the last element in vector
+  T popBack() {
+    T v = vector_.back();
+    set_.erase(v);
+    vector_.pop_back();
+    return v;
+  }
+
+  // Returns if this container is empty
+  bool empty() const {
+    return vector_.empty();
   }
 
   // Returns if entry is in this vector
