@@ -45,7 +45,7 @@ def enable_python_mode(mode, *, replace=None, ignore_preexisting=False) -> Itera
     enable_python_mode is affected by _DisableTorchDispatch.
 
     Args:
-        mode (Tensor-like class or None): the
+        mode (:class:`PythonMode`, Tensor-like class, or None): the
             mode to set as current mode.  If you pass a Tensor-like class,
             it will be treated as a non-compositional mode with no state,
             which is convenient if you have an existing tensor subclass
