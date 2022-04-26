@@ -46,7 +46,7 @@ class DevicePlacementSpec(PlacementSpec):
 
 class ShardingSpec(ABC):
 
-    custom_ops: Dict[Type, Dict[str, Callable]] = {}
+    custom_ops: Dict[str, Dict[Callable, Callable]] = {}
 
     """
     Base class representing sharding specifications.

@@ -39,7 +39,7 @@ _sharded_tensor_current_id = 0
 _sharded_tensor_map: Dict[int, 'weakref.ReferenceType[ShardedTensor]'] = {}
 
 # Custom sharded ops
-_SHARDED_OPS: Dict[str, Callable] = {}
+_SHARDED_OPS: Dict[Callable, Callable] = {}
 def _register_sharded_op(op, func):
     from inspect import signature
     if len(signature(func).parameters) != 4:
