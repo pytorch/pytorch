@@ -13,6 +13,17 @@
 namespace at {
 namespace native {
 
+#define AT_FOR_8_INPUTS(_)  \
+  _(0)                      \
+  _(1)                      \
+  _(2)                      \
+  _(3)                      \
+  _(4)                      \
+  _(5)                      \
+  _(6)                      \
+  _(7)
+
+
 c10::SmallVector<std::string> get_extra_args_typenames(const std::vector<at::Scalar>& extra_args) {
   c10::SmallVector<std::string> args_typenames(extra_args.size());
   for (auto i = 0; i < extra_args.size(); ++i) {
@@ -60,14 +71,13 @@ int jitted_can_vectorize_up_to(const TensorIteratorBase& iter) {
   return result;
 }
 
+#define MAKE_INPUT_OFFSET_CALC(index)      \
+  case index : v.v##index = make_input_offset_calculator<index>(iter); break;
 struct OffsetCalculatorContainer {
   OffsetCalculatorContainer(const TensorIteratorBase& iter) {
     int N = iter.ninputs();
     switch(N) {
-      case 0: v.v0 = make_input_offset_calculator<0>(iter); break;
-      case 1: v.v1 = make_input_offset_calculator<1>(iter); break;
-      case 2: v.v2 = make_input_offset_calculator<2>(iter); break;
-      case 3: v.v3 = make_input_offset_calculator<3>(iter); break;
+      AT_FOR_8_INPUTS(MAKE_INPUT_OFFSET_CALC)
       default:
         AT_ERROR("make_input_offset_calculator not implemented for ninputs = ", N);
     }
@@ -82,9 +92,14 @@ private:
     OffsetCalculator<1> v1;
     OffsetCalculator<2> v2;
     OffsetCalculator<3> v3;
+    OffsetCalculator<4> v4;
+    OffsetCalculator<5> v5;
+    OffsetCalculator<6> v6;
+    OffsetCalculator<7> v7;
     v_t() {} // default constructor
   } v;
 };
+#undef MAKE_INPUT_OFFSET_CAL
 
 template<int ...Is>
 auto ArrayType_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<at::detail::Array<char*, Is + 2>...>;
@@ -92,6 +107,8 @@ auto ArrayType_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<at::
 template<int N>
 using ArrayType_List = decltype(ArrayType_List_Impl(std::make_integer_sequence<int, N>{}));
 
+#define MAKE_ARRAY(index)      \
+  case index + 2: array = at::detail::Array<char*, index + 2>{}; break;
 struct ArrayVariant {
   // notice: This would produce c10::variant<at::detail::Array<char*, 2...10>>
   using ArrayTypes = ArrayType_List<8>;
@@ -100,9 +117,7 @@ struct ArrayVariant {
     int N = iter.ntensors();
     switch(N) {
       // jitted kernels must have at least 1 input and 1 output
-      case 2: array = at::detail::Array<char*, 2>{}; break;
-      case 3: array = at::detail::Array<char*, 3>{}; break;
-      case 4: array = at::detail::Array<char*, 4>{}; break;
+      AT_FOR_8_INPUTS(MAKE_ARRAY)
       default:
         AT_ERROR("ArrayVariant not implemented for ninputs = ", N);
     }
@@ -121,6 +136,7 @@ struct ArrayVariant {
 private:
   ArrayTypes array;
 };
+#undef MAKE_ARRAY
 
 template<int ...Is>
 auto TrivialOffsetCalculator_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<TrivialOffsetCalculator<Is>...>;
@@ -128,15 +144,14 @@ auto TrivialOffsetCalculator_List_Impl(std::integer_sequence<int, Is...>) -> c10
 template<int N>
 using TrivialOffsetCalculator_List = decltype(TrivialOffsetCalculator_List_Impl(std::make_integer_sequence<int, N>{}));
 
+#define TRIVIAL_OFFSET_CALCULATOR(index)      \
+  case index: v = TrivialOffsetCalculator<index>(); break;
 struct TrivialOffsetCalculatorVariant {
   using TrivialOffsetCalculatorTypes = TrivialOffsetCalculator_List<8>;
 
   TrivialOffsetCalculatorVariant(int arity) {
     switch(arity) {
-      case 0: v = TrivialOffsetCalculator<0>(); break;
-      case 1: v = TrivialOffsetCalculator<1>(); break;
-      case 2: v = TrivialOffsetCalculator<2>(); break;
-      case 3: v = TrivialOffsetCalculator<3>(); break;
+      AT_FOR_8_INPUTS(TRIVIAL_OFFSET_CALCULATOR)
       default:
         AT_ERROR("TrivialOffsetCalculatorVariant not implemented for ninputs = ", arity);
     }
@@ -149,6 +164,7 @@ struct TrivialOffsetCalculatorVariant {
 private:
   TrivialOffsetCalculatorTypes v;
 };
+#undef TRIVIAL_OFFSET_CALCULATOR
 
 template<int ...Is>
 auto LoadWithCastPtr_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<std::unique_ptr<memory::LoadWithCast<Is>>...>;
@@ -156,16 +172,15 @@ auto LoadWithCastPtr_List_Impl(std::integer_sequence<int, Is...>) -> c10::varian
 template<int N>
 using LoadWithCastPtr_List = decltype(LoadWithCastPtr_List_Impl(std::make_integer_sequence<int, N>{}));
 
+#define LOAD_WITH_CAST(index)      \
+  case index: v = std::make_unique<memory::LoadWithCast<index>>(iter); break;
 struct LoadWithCastVariant {
   using LoadWithCastPtr = LoadWithCastPtr_List<8>;
 
   LoadWithCastVariant(const TensorIteratorBase& iter) {
     int arity = iter.ninputs();
     switch(arity) {
-      case 0: v = std::make_unique<memory::LoadWithCast<0>>(iter); break;
-      case 1: v = std::make_unique<memory::LoadWithCast<1>>(iter); break;
-      case 2: v = std::make_unique<memory::LoadWithCast<2>>(iter); break;
-      case 3: v = std::make_unique<memory::LoadWithCast<3>>(iter); break;
+      AT_FOR_8_INPUTS(LOAD_WITH_CAST)
       default:
         AT_ERROR("make_input_offset_calculator not implemented for ninputs = ", arity);
     }
@@ -178,6 +193,7 @@ struct LoadWithCastVariant {
 private:
   LoadWithCastPtr v;
 };
+#undef LOAD_WITH_CAST
 
 static inline void launch_jitted_vectorized_kernel(
   const std::string& name, TensorIteratorBase& iter,

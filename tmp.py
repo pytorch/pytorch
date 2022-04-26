@@ -122,7 +122,7 @@ class TestPythonJiterator(TestCase):
             rtol = 1e-2
         assert torch.allclose(expected, result, rtol=rtol)
 
-    @parametrize("num_inputs", [1, 2, 3])
+    @parametrize("num_inputs", [1, 2, 3, 4, 5, 6, 7, 8])
     def test_various_num_inputs(self, num_inputs):
         inputs = []
         for i in range(num_inputs):
