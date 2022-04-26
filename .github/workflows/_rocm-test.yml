@@ -181,8 +181,6 @@ jobs:
           python3 -m pip install boto3==1.19.12
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
-      - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
         if: always()
-        with:
-          skip-wait-ssh: true
