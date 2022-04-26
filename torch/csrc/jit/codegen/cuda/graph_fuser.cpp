@@ -2051,12 +2051,14 @@ void decomposeLinearOps(Block* block) {
     auto mat1_size =
         n->input(1)->type()->cast<c10::TensorType>()->sizes().concrete_sizes();
 
-    // TODO: The assert is not necessary when we can handle matmul, right now we
-    // are splitting the linear between matmul & bias_add. Our fuser can only
-    // take the second half and we would need the size information.
-    TORCH_INTERNAL_ASSERT(
-        mat0_size.has_value() && mat1_size.has_value(),
-        "concrete shape for linear input & weight are required");
+    // TODO: Continuing here is not necessary when we can handle matmul, right
+    // now we are splitting the linear between matmul & bias_add. Our fuser can
+    // only take the second half and we would need the size information.
+    if (!mat0_size.has_value() || !mat1_size.has_value()) {
+      TORCH_WARN_ONCE(
+          "concrete shape for linear input & weight are required to decompose into matmul + bias");
+      continue;
+    }
     auto out_size = mat0_size.value();
     TORCH_INTERNAL_ASSERT(
         mat1_size->size() == 2 || mat1_size->size() == 1,
