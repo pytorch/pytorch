@@ -214,7 +214,7 @@ int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
   return *result;
 }
 
-inline std::vector<int64_t> NestedTensor_get_max_size(const NestedTensorImpl& nt) {
+std::vector<int64_t> NestedTensor_get_max_size(const NestedTensorImpl& nt) {
   const auto& sizes = nt.get_nested_size_tensor();
   return NestedTensor_get_max_size_from_size_tensor(sizes);
 }
