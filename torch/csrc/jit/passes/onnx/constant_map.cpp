@@ -1,11 +1,11 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
-
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -205,20 +205,20 @@ c10::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
   return ConstantValueMap::getInstance().shapeValueMap[tensorName];
 }
 
-void ConstantValueMap::SetGeneratedShape(std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> generated_shape) {
-  ConstantValueMap::getInstance().generatedShapeDataByName = generated_shape;
+void ConstantValueMap::SetGeneratedShapeDataByName(std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> generated_shape_data_by_name) {
+  ConstantValueMap::getInstance().generatedShapeDataByName = generated_shape_data_by_name;
 }
 
-std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> ConstantValueMap::GetGeneratedShape() {
+std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>& ConstantValueMap::GetGeneratedShapeDataByName() {
   return ConstantValueMap::getInstance().generatedShapeDataByName;
 }
 
-void ConstantValueMap::SetSymbolMap(SymbolDimMap symbol_map) {
-  ConstantValueMap::getInstance().symbolMap = symbol_map;
+void ConstantValueMap::SetSymbolDimMap(SymbolDimMap symbol_dim_map) {
+  ConstantValueMap::getInstance().symbolDimMap = symbol_dim_map;
 }
 
-SymbolDimMap& ConstantValueMap::GetSymbolMap() {
-  return ConstantValueMap::getInstance().symbolMap;
+SymbolDimMap& ConstantValueMap::GetSymbolDimMap() {
+  return ConstantValueMap::getInstance().symbolDimMap;
 }
 
 template <typename Map>
@@ -264,7 +264,7 @@ void ConstantValueMap::ClearMaps() {
   ConstantValueMap::getInstance().useInferredTypeMap.clear();
   ConstantValueMap::getInstance().shapeValueMap.clear();
   ConstantValueMap::getInstance().generatedShapeDataByName.clear();
-  ConstantValueMap::getInstance().symbolMap.clear();
+  ConstantValueMap::getInstance().symbolDimMap.clear();
 }
 
 // For debug only.

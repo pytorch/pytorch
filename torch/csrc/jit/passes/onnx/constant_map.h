@@ -53,11 +53,11 @@ class ConstantValueMap {
   static c10::optional<c10::SymbolicShape> GetShapeValue(
       const std::string& tensorName);
 
-  static void SetGeneratedShape(std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> generated_shape);
-  static std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> GetGeneratedShape();
+  static void SetGeneratedShapeDataByName(std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> generated_shape);
+  static std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>& GetGeneratedShapeDataByName();
 
-  static void SetSymbolMap(SymbolDimMap symbol_map);
-  static SymbolDimMap& GetSymbolMap();
+  static void SetSymbolDimMap(SymbolDimMap symbol_dim_map);
+  static SymbolDimMap& GetSymbolDimMap();
 
   static void UpdateValueName(
       const std::string& old_name,
@@ -88,12 +88,9 @@ class ConstantValueMap {
   // from a node. shapeValueMap stores the value of the tensor from a node when
   // this tensor represents a shape.
   std::unordered_map<std::string, c10::SymbolicShape> shapeValueMap;
-  // This map indicates the map for storing ONNX data propagation result
-  // which is basically the same as ONNX's
-  // Having this global map to make node-level shape inference here get previous
-  // data propagation result and keep propagating
+  // Stores earlier data propagation results so that they are accessible during future node-level shape inference.
   std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> generatedShapeDataByName;
-  SymbolDimMap symbolMap;
+  SymbolDimMap symbolDimMap;
 };
 
 } // namespace jit
