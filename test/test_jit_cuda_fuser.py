@@ -101,6 +101,10 @@ class CudaFuserTestOptions():
         torch._C._jit_set_autocast_mode(self.old_value)
 
 class TestCudaFuser(JitTestCase):
+    def assertEqual(self, *args, **kwargs):
+        kwargs["exact_layout"] = True
+        super(JitTestCase, self).assertEqual(*args, **kwargs)
+
     def _getSubgraphInFusion(self, graph):
         num_node = 0
         subgraph = None
@@ -221,6 +225,7 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(oo.dtype, jit_oo.dtype)
             self.assertEqual(oo, jit_oo)
         self.assertGraphContains(t_jit.graph_for(x, y, z, alpha), FUSION_GUARD)
+
 
     @unittest.skipIf(not TEST_BF16, "device does not support BFloat16")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -4581,7 +4586,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
 
             val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-            self.assertEqual(ref, val)
+            self.assertEqual(ref, val, exact_layout=True)
 
         # https://github.com/pytorch/pytorch/issues/35600
         # each torch.jit.trace adds state to the _python_cu compilation unit
