@@ -928,7 +928,7 @@ class TestViewOps(TestCase):
 
     def test_view_copy_out(self, device):
         a = torch.randn(2, 2, device=device)
-        out = torch.empty(0, device=device)
+        out = torch.empty(2, device=device)
 
         torch.diagonal_copy(a, out=out)
         expected = torch.diagonal_copy(a)
@@ -936,8 +936,8 @@ class TestViewOps(TestCase):
         self.assertEqual(expected, out)
 
         a = torch.randn(4, device=device)
-        out1 = torch.empty(0, device=device)
-        out2 = torch.empty(0, device=device)
+        out1 = torch.empty(2, device=device)
+        out2 = torch.empty(2, device=device)
 
         torch.split_copy(a, 2, out=(out1, out2))
         expected1, expected2 = torch.split_copy(a, 2)
