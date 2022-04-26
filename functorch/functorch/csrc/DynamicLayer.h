@@ -26,9 +26,19 @@ enum RandomnessType {
     END
 };
 
+enum class TransformType {
+  Torch,  // Unused
+  Vmap,
+  Grad,  // reverse-mode AD, aka vjp
+  Jvp,  // forward-mode AD
+  Functionalize,
+};
+
+std::ostream& operator<<(std::ostream& os, const TransformType& t);
+
 struct FUNCTORCH_API DynamicLayer {
   explicit DynamicLayer(
-      DispatchKey key,
+      TransformType transform_type,
       int64_t layerId,
       optional<int64_t> batchSize = nullopt,
       optional<RandomnessType> randomness = nullopt,
@@ -36,7 +46,7 @@ struct FUNCTORCH_API DynamicLayer {
       optional<bool> pre_fwd_grad_mode = nullopt,
       optional<bool> functionalize_add_back_views = nullopt);
 
-  DispatchKey key() const;
+  TransformType key() const;
   int64_t layerId() const;
 
   // Only valid for vmap
@@ -56,7 +66,7 @@ struct FUNCTORCH_API DynamicLayer {
   // only valid for functionalization
   optional<bool> functionalizeAddBackViews() const;
  private:
-  DispatchKey key_;
+  TransformType transform_type_;
   int64_t layerId_;
 
   // Honestly these should be a union or some extendable metadata class.
@@ -72,7 +82,7 @@ struct FUNCTORCH_API DynamicLayer {
 };
 
 FUNCTORCH_API int64_t initAndPushDynamicLayer(
-    DispatchKey key,
+    TransformType transform_type,
     optional<int64_t> batch_size = nullopt,
     optional<RandomnessType> randomness = nullopt,
     optional<bool> prev_grad_mode = nullopt,

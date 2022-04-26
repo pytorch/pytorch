@@ -19,6 +19,29 @@
 namespace at {
 namespace functorch {
 
+std::ostream& operator<<(std::ostream& os, const TransformType& t) {
+  switch (t) {
+    case TransformType::Torch:
+      os << "Torch";
+      break;
+    case TransformType::Vmap:
+      os << "Vmap";
+      break;
+    case TransformType::Grad:
+      os << "Grad";
+      break;
+    case TransformType::Jvp:
+      os << "Jvp";
+      break;
+    case TransformType::Functionalize:
+      os << "Functionalize";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false);
+  }
+  return os;
+}
+
 constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
   kDynamicLayerFrontModeKey,
   kDynamicLayerBackModeKey,
@@ -36,7 +59,7 @@ void setDynamicLayerFrontBackKeysIncluded(bool included) {
 }
 
 DynamicLayer::DynamicLayer(
-    DispatchKey key,
+    TransformType transform_type,
     int64_t layerId,
     optional<int64_t> batchSize,
     optional<RandomnessType> randomness,
@@ -44,7 +67,7 @@ DynamicLayer::DynamicLayer(
     optional<bool> prev_fwd_grad_mode,
     optional<bool> functionalize_add_back_views)
   :
-    key_(key),
+    transform_type_(transform_type),
     layerId_(layerId),
     batchSize_(batchSize),
     randomness_(randomness),
@@ -52,13 +75,16 @@ DynamicLayer::DynamicLayer(
     prevFwdGradMode_(prev_fwd_grad_mode),
     functionalizeAddBackViews_(functionalize_add_back_views)
 {
-  if (key_ == DispatchKey::Autograd) {
-    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value() || prev_fwd_grad_mode.has_value());
+  if (transform_type == TransformType::Grad) {
+    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
+  }
+  if (transform_type == TransformType::Jvp) {
+    TORCH_INTERNAL_ASSERT(prev_fwd_grad_mode.has_value());
   }
 }
 
-DispatchKey DynamicLayer::key() const {
-  return key_;
+TransformType DynamicLayer::key() const {
+  return transform_type_;
 }
 
 int64_t DynamicLayer::layerId() const {
@@ -211,7 +237,6 @@ static DynamicLayer popDynamicLayer() {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
   auto result = dynamicLayerStack.back();
-  TORCH_INTERNAL_ASSERT(result.key() != DispatchKey::Undefined);
   dynamicLayerStack.pop_back();
 
   if (dynamicLayerStack.size() == 0) {
@@ -245,25 +270,25 @@ static int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
 }
 
 int64_t initAndPushDynamicLayer(
-    DispatchKey key,
+    TransformType transform_type,
     optional<int64_t> batch_size,
     optional<RandomnessType> randomness,
     optional<bool> prev_grad_mode,
     optional<bool> prev_fwd_grad_mode,
     optional<bool> functionalize_add_back_views) {
-  TORCH_INTERNAL_ASSERT(key == DispatchKey::Autograd
-                     || key == kBatchedKey
-                     || key == DispatchKey::Functionalize);
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const auto layerId = 1 + dynamicLayerStack.size();
-  DynamicLayer new_layer(key, layerId, batch_size, randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
+  DynamicLayer new_layer(transform_type, layerId, batch_size, randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
   pushDynamicLayer(std::move(new_layer));
 
   auto& data = getGlobalDynmetaData();
 
   TORCH_INTERNAL_ASSERT(data.find(layerId) == data.end());
-  if (key == DispatchKey::Autograd) {
-    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value() || prev_fwd_grad_mode.has_value());
+  if (transform_type == TransformType::Grad) {
+    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
+  }
+  if (transform_type == TransformType::Jvp) {
+    TORCH_INTERNAL_ASSERT(prev_fwd_grad_mode.has_value());
   }
   data[layerId] = std::make_shared<bool>(true);
   return layerId;
@@ -295,7 +320,7 @@ static Tensor materializeGradWrappers(const Tensor& tensor, const std::vector<Dy
   if (!tensor.defined()) {
     return tensor;
   }
-  if (dynlayerStack.back().key() != DispatchKey::Autograd) {
+  if (dynlayerStack.back().key() != TransformType::Grad && dynlayerStack.back().key() != TransformType::Jvp) {
     return tensor;
   }
   auto cur_level = dynlayerStack.back().layerId();
@@ -465,7 +490,7 @@ static void checkForInvalidMutationOnCaptures(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     const std::vector<DynamicLayer>& dynamicLayerStack) {
-  if (dynamicLayerStack.back().key() != DispatchKey::Autograd) {
+  if (dynamicLayerStack.back().key() != TransformType::Grad && dynamicLayerStack.back().key() != TransformType::Jvp) {
     return;
   }
   if (!isInplaceOp(op.schema())) {
@@ -486,15 +511,15 @@ static void checkForInvalidMutationOnCaptures(
       "as inputs.");
 }
 
-static DispatchKeySet keysForEnteringDynamicLayer(DispatchKey key) {
-  if (key == kBatchedKey) {
+static DispatchKeySet keysForEnteringDynamicLayer(TransformType key) {
+  if (key == TransformType::Vmap) {
     // NB: Does not include kVmapModeKey. We may modulate the key when
     // constructing the DynamicLayer, but we don't control it when entering/exiting
     // the DynamicLayer.
     return DispatchKeySet({kBatchedKey});
-  } else if (key == DispatchKey::Autograd) {
+  } else if (key == TransformType::Grad || key == TransformType::Jvp) {
     return autograd_dispatch_keyset.add(DispatchKey::ADInplaceOrView);
-  } else if (key == DispatchKey::Functionalize) {
+  } else if (key == TransformType::Functionalize) {
     return DispatchKeySet(DispatchKey::Functionalize);
   } else {
     TORCH_INTERNAL_ASSERT(false, "Unsupported key: ", key);
@@ -509,7 +534,7 @@ static void dump_local_tls() {
 }
 #endif
 
-static DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(DispatchKey key) {
+static DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(TransformType key) {
   DispatchKeySet exclude = all_dynlayer_keyset;
   exclude = exclude.remove(kDynamicLayerBackModeKey);
   exclude = exclude - keysForEnteringDynamicLayer(key);
@@ -565,9 +590,9 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   bool functionalization_add_back_views = false;
 
   // hack
-  if (layer.key() == kBatchedKey) {
+  if (layer.key() == TransformType::Vmap) {
     hacky_include = hacky_include.add(kVmapModeKey);
-  } else if (layer.key() == DispatchKey::Functionalize) {
+  } else if (layer.key() == TransformType::Functionalize) {
     // We always want to call the functionalization kernels if functionalize() is on the layer stack.
     // It's the responsibility of the functionalization kernel to no-op and redispatch
     // if none of the input tensors are functional.
@@ -624,8 +649,11 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
   optional<bool> prev_grad_mode = getDynamicLayerStack().back().prevGradMode();
   optional<bool> prev_fwd_grad_mode = getDynamicLayerStack().back().prevFwdGradMode();
-  if (cur_key == DispatchKey::Autograd) {
-    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value() || prev_fwd_grad_mode.has_value());
+  if (cur_key == TransformType::Grad) {
+    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
+  }
+  if (cur_key == TransformType::Jvp) {
+    TORCH_INTERNAL_ASSERT(prev_fwd_grad_mode.has_value());
   }
 
   auto unwrap = [&](const Tensor& tensor) {
@@ -665,7 +693,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
   // Step 1 & 2
   auto args_size = op.schema().arguments().size();
-  if (cur_key == DispatchKey::Autograd) {
+  if (cur_key == TransformType::Grad || cur_key == TransformType::Jvp) {
     auto args_size = op.schema().arguments().size();
     // Step 1
     auto front = stack->size() - args_size;
@@ -674,7 +702,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     }
     // Step 2
     foreachTensorInplace(*stack, stack->size() - args_size, stack->size(), unwrap);
-  } else if (cur_key == DispatchKey::Functionalize) {
+  } else if (cur_key == TransformType::Functionalize) {
     // For now, we don't support nested functionalization calls.
     // This check just enforces that - after the functionalize kernel runs
     // and we hit the BackModeFallback, we'll have unwrapped our FunctionalTensors
@@ -695,11 +723,11 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
   // See NOTE [grad and vjp interaction with no_grad]
   optional<c10::AutoGradMode> grad_guard;
-  if (cur_key == DispatchKey::Autograd && prev_grad_mode.has_value() && *prev_grad_mode == false) {
+  if (cur_key == TransformType::Grad && prev_grad_mode.has_value() && *prev_grad_mode == false) {
     grad_guard.emplace(*prev_grad_mode);
   }
   optional<c10::AutoFwGradMode> fw_grad_guard;
-  if (cur_key == DispatchKey::Autograd &&
+  if (cur_key == TransformType::Jvp &&
       prev_fwd_grad_mode.has_value() && prev_fwd_grad_mode.value() == false) {
     fw_grad_guard.emplace(*prev_fwd_grad_mode);
   }
@@ -712,7 +740,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
   // Step 4, 5, 6
   auto ret_size = op.schema().returns().size();
-  if (cur_key == DispatchKey::Autograd) {
+  if (cur_key == TransformType::Grad || cur_key == TransformType::Jvp) {
     // Step 4
     foreachTensorInplace(*stack, stack->size() - ret_size, stack->size(), wrap);
 
@@ -733,7 +761,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
     // Step 6
     stack->erase(stack->end() - (args_size + ret_size), stack->end() - ret_size);
-  } else if (cur_key == DispatchKey::Functionalize) {
+  } else if (cur_key == TransformType::Functionalize) {
     sanityCheckNotFunctional(op, stack, ret_size);
   }
 }

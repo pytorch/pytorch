@@ -214,44 +214,44 @@ bool get_fwd_grad_enabled() {
 int64_t _grad_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
-  return initAndPushDynamicLayer(at::DispatchKey::Autograd, nullopt, nullopt, prev_grad_mode);
+  return initAndPushDynamicLayer(TransformType::Grad, nullopt, nullopt, prev_grad_mode);
 }
 
 int64_t _grad_decrement_nesting() {
   auto layer = popDynamicLayerAndDeleteMetadata();
-  TORCH_INTERNAL_ASSERT(layer.key() == DispatchKey::Autograd);
+  TORCH_INTERNAL_ASSERT(layer.key() == TransformType::Grad);
   return layer.layerId();
 }
 
 int64_t _jvp_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_fwd_grad_mode = get_fwd_grad_enabled();
-  return initAndPushDynamicLayer(at::DispatchKey::Autograd, nullopt, nullopt, nullopt, prev_fwd_grad_mode);
+  return initAndPushDynamicLayer(TransformType::Jvp, nullopt, nullopt, nullopt, prev_fwd_grad_mode);
 }
 
 int64_t _jvp_decrement_nesting() {
   auto layer = popDynamicLayerAndDeleteMetadata();
-  TORCH_INTERNAL_ASSERT(layer.key() == DispatchKey::Autograd);
+  TORCH_INTERNAL_ASSERT(layer.key() == TransformType::Jvp);
   return layer.layerId();
 }
 
 int64_t _vmap_increment_nesting(int64_t batch_size, const std::string& randomness) {
-  return initAndPushDynamicLayer(kBatchedKey, batch_size, get_randomness_enum(randomness));
+  return initAndPushDynamicLayer(TransformType::Vmap, batch_size, get_randomness_enum(randomness));
 }
 
 int64_t _vmap_decrement_nesting() {
   auto layer = popDynamicLayerAndDeleteMetadata();
-  TORCH_INTERNAL_ASSERT(layer.key() == kBatchedKey);
+  TORCH_INTERNAL_ASSERT(layer.key() == TransformType::Vmap);
   return layer.layerId();
 }
 
 int64_t _func_increment_nesting(bool reapply_views) {
-  return initAndPushDynamicLayer(DispatchKey::Functionalize, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt, /*functionalize_add_back_views=*/reapply_views);
+  return initAndPushDynamicLayer(TransformType::Functionalize, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt, /*functionalize_add_back_views=*/reapply_views);
 }
 
 int64_t _func_decrement_nesting() {
   auto layer = popDynamicLayerAndDeleteMetadata();
-  TORCH_INTERNAL_ASSERT(layer.key() == DispatchKey::Functionalize);
+  TORCH_INTERNAL_ASSERT(layer.key() == TransformType::Functionalize);
   return layer.layerId();
 }
 
