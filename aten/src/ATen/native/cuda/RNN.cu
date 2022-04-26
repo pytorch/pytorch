@@ -15,6 +15,7 @@
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/_thnn_fused_lstm_cell_native.h>
 #include <ATen/ops/_thnn_fused_lstm_cell_backward_native.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_backward_impl.h>
 #include <ATen/ops/_thnn_fused_gru_cell_native.h>
 #include <ATen/ops/_thnn_fused_gru_cell_backward_native.h>
 #endif
@@ -561,7 +562,7 @@ void checkLSTMBackwardSizes(const TensorArg& grad_hy, const TensorArg& grad_cy,
 
 // NB: The composite wrapper below simply duplicates the outputs of this function. The key is that it is registered
 //     as a composite so that we avoid triggering TensorImpl use count asserts in debug mode
-std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_cuda_impl( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_impl_cuda( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -587,13 +588,13 @@ std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_cuda_impl( con
   });
 
   auto grad_bias = has_bias ? grad_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
-  return std::make_tuple(grad_gates, grad_gates, grad_cx, grad_bias, grad_bias);
+  return std::make_tuple(grad_gates, grad_cx, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_cuda( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
-  auto ret = _thnn_fused_lstm_cell_backward_cuda_impl(grad_hy_opt, grad_cy_opt, cx, cy, workspace, has_bias);
+  auto ret = at::_thnn_fused_lstm_cell_backward_impl(grad_hy_opt, grad_cy_opt, cx, cy, workspace, has_bias);
   return std::make_tuple(std::get<0>(ret), std::get<0>(ret), std::get<1>(ret), std::get<2>(ret), std::get<2>(ret));
 }
 

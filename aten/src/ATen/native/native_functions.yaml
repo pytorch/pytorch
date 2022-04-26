@@ -5835,9 +5835,10 @@
 
 # NB: The composite version of this function below is a simple wrapper that duplicates some of the outputs
 #     It is necessary to avoid triggering TensorImpl use count checks in debug mode
+# NB: this is function is NOT differentiable
 - func: _thnn_fused_lstm_cell_backward_impl(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CUDA: _thnn_fused_lstm_cell_backward_cuda_impl
+    CUDA: _thnn_fused_lstm_cell_backward_impl_cuda
 
 - func: _thnn_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
 
