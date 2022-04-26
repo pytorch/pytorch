@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include <iostream>
+#include "c10/core/DeviceType.h"
+
 #include <c10/core/Device.h>
 #include <test/cpp/lazy/test_lazy_ops_util.h>
 #include <torch/csrc/lazy/core/helpers.h>
@@ -8,6 +10,7 @@
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
+#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <torch/torch.h>
 
 namespace torch {
@@ -77,6 +80,18 @@ static inline at::DeviceType DefaultDevice() {
 
 
 }  // namespace
+
+TEST(LazyDynamicOpsTest, NarrowCopy) {
+  auto x = torch::rand({5, 10, 10}).to(kLazy);
+  const size_t Y_DIM = 3;
+  const size_t X_DIM_INDEX = 2;
+  auto y = torch::rand({Y_DIM}).to(kLazy);
+  auto ly = torch::lazy::TryGetLtcTensor(y);
+  auto dim_node = MakeNode<SizeNode>(ly->GetIrValue(), 0);
+  auto lmn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
+  auto z = x.narrow_copy(X_DIM_INDEX, 0, lmn->toSymInt());
+  AllClose(z.cpu(), x.cpu().narrow_copy(X_DIM_INDEX, 0, Y_DIM));
+}
 
 TEST_F(LazyOpsTest, TestScalarTensor) {
   torch::Tensor scalar_tensor = torch::scalar_tensor(
