@@ -4348,11 +4348,10 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
 
   auto LD_ = at::native::borrow_else_clone(
       LD.mT().is_contiguous(), LD, LD, /*row_major=*/false);
+  result.copy_(B);
   auto result_ = at::native::borrow_else_clone(
-      result.mT().is_contiguous(), result, B, /*row_major=*/false);
-  if (result.mT().is_contiguous()) {
-    result_->copy_(B);
-  }
+      result.mT().is_contiguous(), result, result, /*row_major=*/false);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(result) == batchCount(*result_));
 
   ldl_solve_stub(
       B.device().type(), *LD_, *pivots_, *result_, false, hermitian);
