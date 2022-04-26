@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 import contextlib
 
-from torch.utils._mode_utils import _enable_mode, _ModeInfo
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
 
 __all__ = [
     "get_ignored_functions",
@@ -1670,20 +1670,6 @@ def is_tensor_like(inp):
     """
     return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
 
-def _wrap_init(f):
-    undef = object()
-
-    @functools.wraps(f)
-    def wrapped(self, *args, inner=undef, **kwargs):
-        if inner is undef:
-            raise TypeError(
-                "missing inner keyword argument; instead of constructing a TorchModeFunction directly, "
-                "pass the constructor to push_torch_function_mode"
-            )
-        self.inner = inner
-        return f(self, *args, **kwargs)
-    return wrapped
-
 
 def _wrap_torch_function(f):
     @functools.wraps(f)
@@ -1723,7 +1709,7 @@ class TorchFunctionModeMeta(type):
     """
     def __new__(metacls, name, bases, dct):
         if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'])
+            dct['__init__'] = _wrap_init(dct['__init__'], "TorchFunctionMode", "torch_function")
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
@@ -1793,14 +1779,6 @@ class TorchFunctionModeInfo(_ModeInfo):
                          base_mode_class=BaseTorchFunctionMode,
                          required_fn="__torch_function__")
 
-    def is_allowed_type(self, mode) -> bool:
-        return mode is None or\
-            isinstance(mode, self.mode_class) or\
-            (isinstance(mode, type) and not issubclass(mode, self.mode_class))
-
-    def allowed_types_for_error_message(self) -> str:
-        return "TorchFunctionMode, Tensor-like class, or None"
-
     def get_mode(self):
         return _get_torch_function_mode()
 
@@ -1850,7 +1828,6 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
     """
     return _enable_mode(mode, TorchFunctionModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
 
-
 @contextlib.contextmanager
 def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
     """
@@ -1868,25 +1845,6 @@ def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
             non-inner arguments (e.g.,
             ``push_torch_function_mode(partial(MyMode, arg))``)
     """
-    if isinstance(ctor, TorchFunctionMode):
-        raise ValueError(
-            'Expected a TorchFunctionMode constructor function, but got an '
-            f'instance of TorchFunctionMode {ctor}.  Consider using '
-            'enable_torch_function_mode instead.'
-        )
-    old = _get_torch_function_mode()
-    if old is None:
-        inner = BaseTorchFunctionMode(inner=None)
-    else:
-        inner = old
-    mode = ctor(inner=inner)
-    if not isinstance(mode, TorchFunctionMode):
-        raise ValueError(
-            'The callable passed to push_torch_function_mode must return '
-            'a TorchFunctionMode'
-        )
-    _set_torch_function_mode(mode)
-    try:
-        yield mode
-    finally:
-        _set_torch_function_mode(old)
+    mode_info = _ModeInfo(mode_type="torch_function", mode_class=TorchFunctionMode,
+                          base_mode_class=BaseTorchFunctionMode, mode_class_name="TorchFunctionMode")
+    return _push_mode(ctor, mode_info=mode_info)

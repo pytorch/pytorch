@@ -56,6 +56,20 @@ private:
   c10::impl::LocalDispatchKeySet saved_;
 };
 
+struct StashPythonModeGuard {
+public:
+  StashPythonModeGuard() {
+    saved_ = at::impl::PythonModeTLS::get_state();
+    at::impl::PythonModeTLS::set_state(nullptr);
+  }
+
+  ~StashPythonModeGuard() {
+    at::impl::PythonModeTLS::set_state(saved_);
+  }
+private:
+  std::shared_ptr<at::SafePyObject> saved_;
+};
+
 void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
   c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
@@ -66,9 +80,9 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // dispatching
   const auto maybe_python_mode_state = at::impl::PythonModeTLS::get_state();
   if (maybe_python_mode_state) {
-    at::impl::PythonModeTLS::set_state(nullptr);
+    StashPythonModeGuard pythonModeGuard;
+    std::cout << "HERE" << std::endl;
     maybe_python_mode_state->pyinterpreter()->dispatch(op, stack, maybe_python_mode_state);
-    at::impl::PythonModeTLS::set_state(maybe_python_mode_state);
     return;
   }
 
