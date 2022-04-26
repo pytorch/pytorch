@@ -184,7 +184,7 @@ void mul_kernel_cuda(TensorIteratorBase& iter) {
           return a * b;
         }
       );
-      jitted_gpu_kernel<mul_name, scalar_t, scalar_t, 2>(iter, mul_string);
+      opmath_jitted_gpu_kernel_with_scalars<mul_name, scalar_t, scalar_t>(iter, mul_string);
     #else
       using opmath_t = at::opmath_type<scalar_t>;
       opmath_gpu_kernel_with_scalars<scalar_t>(iter, MulFunctor<opmath_t>());
