@@ -11,6 +11,8 @@
 
 #include <ATen/native/cuda/JitLoops.cuh>
 
+#include <c10/util/variant.h>
+
 #include <iostream>
 
 namespace at {
@@ -24,24 +26,65 @@ c10::SmallVector<std::string> get_extra_args_typenames(const std::vector<at::Sca
   return args_typenames;
 }
 
-static void* make_input_offset_calculator(const TensorIteratorBase& iter) {
-  void* ic_ptr;
-  int N = iter.ninputs();
-  switch(N) {
-    case 0:
-      ic_ptr = static_cast<void*>(make_input_offset_calculator_ptr<0>(iter));
-      break;
-    case 1:
-      ic_ptr = static_cast<void*>(make_input_offset_calculator_ptr<1>(iter));
-      break;
-    case 2:
-      ic_ptr = static_cast<void*>(make_input_offset_calculator_ptr<2>(iter));
-      break;
-    default:
-      AT_ERROR("make_input_offset_calculator not implemented for ninputs = ", N);
+struct OffsetCalculatorContainer {
+  OffsetCalculatorContainer(const TensorIteratorBase& iter) {
+    int N = iter.ninputs();
+    switch(N) {
+      case 0: v.v0 = make_input_offset_calculator<0>(iter); break;
+      case 1: v.v1 = make_input_offset_calculator<1>(iter); break;
+      case 2: v.v2 = make_input_offset_calculator<2>(iter); break;
+      case 3: v.v3 = make_input_offset_calculator<3>(iter); break;
+      default:
+        AT_ERROR("make_input_offset_calculator not implemented for ninputs = ", N);
+    }
   }
-  return ic_ptr;
-}
+  void* data_ptr() {
+    return static_cast<void*>(&v);
+  }
+
+private:
+  union v_t {
+    OffsetCalculator<0> v0;
+    OffsetCalculator<1> v1;
+    OffsetCalculator<2> v2;
+    OffsetCalculator<3> v3;
+    v_t() {} // default constructor
+  } v;
+};
+
+struct ArrayVariant {
+  using ArrayTypes = c10::variant<
+    at::detail::Array<char*, 2>,
+    at::detail::Array<char*, 3>,
+    at::detail::Array<char*, 4>>;
+
+  ArrayVariant(const TensorIteratorBase& iter) {
+    int N = iter.ntensors();
+    switch(N) {
+      // jitted kernels must have at least 1 input and 1 output
+      case 2: array = at::detail::Array<char*, 2>{}; break;
+      case 3: array = at::detail::Array<char*, 3>{}; break;
+      case 4: array = at::detail::Array<char*, 4>{}; break;
+      default:
+        AT_ERROR("ArrayVariant not implemented for ninputs = ", N);
+    }
+
+    c10::visit([&](auto& a) {
+      for (auto i = 0; i < N; ++i) {
+        a[i] = (char*)iter.data_ptr(i);
+      }
+    }, array);
+  }
+
+  void* data_ptr() {
+    return c10::visit([](auto & a){ return static_cast<void*>(&a); }, array);
+  }
+
+private:
+  ArrayTypes array;
+};
+
+
 
 static void* make_trivial_offset_calculator(int arity) {
   switch(arity) {
@@ -269,11 +312,8 @@ void jitted_gpu_kernel_dynamic_impl(
   // TODO: assuming supported ninputs <=8, with only one output
   TORCH_INTERNAL_ASSERT(iter.ninputs() <= 8);
 
-  at::detail::Array<char*, 3> data;
-  for (auto i = 0; i < iter.ntensors(); ++i) {
-    data[i] = (char*)iter.data_ptr(i);
-  }
-  void* data_ptr = static_cast<void*>(&data);
+  ArrayVariant data(iter);
+  void* data_ptr = data.data_ptr();
 
   int64_t numel = iter.numel();
   bool contiguous = iter.is_contiguous();
@@ -299,7 +339,9 @@ void jitted_gpu_kernel_dynamic_impl(
     // Case 2: no dynamic casting and noncontiguous
 
     // TODO: fix raw ptr
-    void* ic_ptr = make_input_offset_calculator(iter);
+
+    OffsetCalculatorContainer input_offset_calculator(iter);
+    void* ic_ptr = input_offset_calculator.data_ptr();
 
     auto output_offset_calculator = make_output_offset_calculator(iter);
     auto loader = memory::LoadWithoutCast();
@@ -345,7 +387,9 @@ void jitted_gpu_kernel_dynamic_impl(
   }
 
   // Case 4: dynamic casting and noncontiguous
-  void* ic_ptr = make_input_offset_calculator(iter);
+  OffsetCalculatorContainer input_offset_calculator(iter);
+  void* ic_ptr = input_offset_calculator.data_ptr();
+
   auto output_offset_calculator = make_output_offset_calculator(iter);
   void* oc_ptr = static_cast<void*>(&output_offset_calculator);
 

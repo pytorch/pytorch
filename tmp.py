@@ -58,7 +58,7 @@ class TestPythonJiterator(TestCase):
         expected = ref_fn(a, b)
         result = jitted_fn(a, b)
 
-        rtol =  0.00001
+        rtol = 0.00001
         if dtype is torch.half:
             rtol = 1e-2
         assert torch.allclose(expected, result, rtol=rtol)
@@ -91,7 +91,7 @@ class TestPythonJiterator(TestCase):
         expected = ref_fn(a, b)
         result = jitted_fn(a, b)
 
-        rtol =  0.00001
+        rtol = 0.00001
         if a_dtype is torch.half or b_dtype is torch.half:
             rtol = 1e-2
         assert torch.allclose(expected, result, rtol=rtol)
@@ -117,10 +117,29 @@ class TestPythonJiterator(TestCase):
         expected = ref_fn(a, b, **extra_args)
         result = jitted_fn(a, b, **extra_args)
 
-        rtol =  0.00001
+        rtol = 0.00001
         if dtype is torch.half:
             rtol = 1e-2
         assert torch.allclose(expected, result, rtol=rtol)
+
+    @parametrize("num_inputs", [1, 2, 3])
+    def test_various_num_inputs(self, num_inputs):
+        inputs = []
+        for i in range(num_inputs):
+            inputs.append(torch.rand(3, device='cuda').mul(10))
+
+        input_string = ",".join([f"T i{i}" for i in range(num_inputs)])
+        function_body = "+".join([f"i{i}" for i in range(num_inputs)])
+        code_string = f"template <typename T> T python_jitted({input_string}) {{ return {function_body}; }}"
+        jitted_fn = create_jit_fn(code_string, "python_jitted")
+
+        def ref_fn(*inputs):
+            return torch.sum(torch.stack(inputs), dim=0)
+
+        expected = ref_fn(*inputs)
+        result = jitted_fn(*inputs)
+
+        assert torch.allclose(expected, result)
 
 instantiate_parametrized_tests(TestPythonJiterator)
 

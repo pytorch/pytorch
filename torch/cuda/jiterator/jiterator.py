@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Union
 
 
 def create_jit_fn(op_string: str, optional_name: str, **kwargs) -> Callable:
