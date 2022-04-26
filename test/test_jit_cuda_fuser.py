@@ -18,7 +18,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db, SampleInput
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, slowTest, \
-    is_iterable_of_tensors
+    is_iterable_of_tensors, freeze_rng_state
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
@@ -4610,16 +4610,26 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
             for val in vals:
                 yield _get_extremal_sample(sample, val, dtype)
 
-        for sample in op.sample_inputs(device, dtype, requires_grad=False):
+        variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
-            trace = create_traced_fn(self, op, cache_traced_fn=True)
+        for variant, sample in variant_sample_pairs:
+
+            trace = create_traced_fn(self, variant, cache_traced_fn=True)
             trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
             trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
             for extremal_sample in _get_extremal_samples(sample, dtype):
-                ref = op(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+                try:
+                    with freeze_rng_state():
+                        ref = variant(*clone_inputs((extremal_sample.input, *extremal_sample.args)),
+                                      **extremal_sample.kwargs)
+                except (torch._C._LinAlgError, RuntimeError, ValueError):
+                    # if eager errors out, then don't expect NVFuser to pass
+                    continue
 
-                val = trace(*clone_inputs((extremal_sample.input, *extremal_sample.args)), **extremal_sample.kwargs)
+                with freeze_rng_state():
+                    val = trace(*clone_inputs((extremal_sample.input, *extremal_sample.args)),
+                                **extremal_sample.kwargs)
 
                 self.assertEqual(val, ref, equal_nan=True, exact_device=True)
 
