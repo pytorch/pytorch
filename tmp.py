@@ -68,7 +68,6 @@ class TestPythonJiterator(TestCase):
         ([3,1], [1,3]), # non-contiguous
         # shape: [3, 3]
         ([3,3], [3,1]), # contiguous
-        ([3,3], [1,3]), # non-contiguous
     ]
     dtypes = [
         torch.float, torch.double, torch.half,

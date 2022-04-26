@@ -4,13 +4,11 @@ from typing import Callable, Dict, List, Optional, Union
 
 
 def create_jit_fn(op_string: str, optional_name: str, **kwargs) -> Callable:
-
     class JittedFunction:
         def __init__(self, op_string: str, optional_name: str, **kwargs):
             self.op_string = op_string
             self.optional_name = optional_name
             self.kwargs_dict = kwargs
-            self.jitted_fn = None
 
         def compile(self, *tensors: Tensor, **kwargs):
             output = torch._C._cuda_compile_kernel(
@@ -29,11 +27,6 @@ def create_jit_fn(op_string: str, optional_name: str, **kwargs) -> Callable:
                     raise KeyError(f"{key} is not declared in function definition")
 
             return self.compile(*tensors, **expanded_kwargs)
-
-            # if self.jitted_fn is None:
-            #     self.jitted_fn = self.compile(*tensors, **kwargs)
-
-            # return self.jitted_fn(*tensors, **expanded_kwargs)
 
     return JittedFunction(op_string, optional_name, **kwargs)
 
