@@ -19,17 +19,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.autograd
 import torch.jit
+import torch.onnx
 import torch.serialization
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
-from torch.onnx import (
-    ONNX_ARCHIVE_MODEL_PROTO_NAME,
-    CheckerError,
-    ExportTypes,
-    OperatorExportTypes,
-    SymbolicContext,
-    TrainingMode,
-)
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
@@ -50,7 +43,7 @@ def select_model_mode_for_export(model, mode):
         is_originally_training = model.training
 
         if mode is None:
-            mode = TrainingMode.EVAL
+            mode = torch.onnx.TrainingMode.EVAL
             # if the model is in training mode but the user did not specify
             # to export the model in training mode, export the model in inference
             # mode (default) and warn them
@@ -66,8 +59,8 @@ def select_model_mode_for_export(model, mode):
         is_export_training = False
         # ONNX opset 12 has better support for training amenable models, with updated
         # versions of the dropout and batch_norm operators
-        if mode == TrainingMode.TRAINING or (
-            mode == TrainingMode.PRESERVE and is_originally_training
+        if mode == torch.onnx.TrainingMode.TRAINING or (
+            mode == torch.onnx.TrainingMode.PRESERVE and is_originally_training
         ):
             from torch.onnx.symbolic_helper import _export_onnx_opset_version
 
@@ -151,7 +144,7 @@ def export(
     training=None,
     input_names=None,
     output_names=None,
-    operator_export_type=OperatorExportTypes.ONNX,
+    operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
     opset_version=None,
     do_constant_folding=True,
     dynamic_axes=None,
@@ -217,7 +210,7 @@ def _split_tensor_list_constants(g, block):
 
 def _optimize_graph(
     graph: torch._C.Graph,
-    operator_export_type: OperatorExportTypes,
+    operator_export_type: torch.onnx.OperatorExportTypes,
     _disable_torch_constant_prop: bool = False,
     fixed_batch_size: bool = False,
     params_dict=None,
@@ -390,7 +383,7 @@ def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
 
 def _decide_keep_init_as_input(
     keep_initializers_as_inputs: Optional[bool],
-    operator_export_type: OperatorExportTypes,
+    operator_export_type: torch.onnx.OperatorExportTypes,
     opset_version: int,
 ):
     """Decides whether the initializers in the graph should be listed as ONNX graph inputs.
@@ -425,7 +418,7 @@ def _decide_keep_init_as_input(
     )
     if (
         keep_initializers_as_inputs is None
-        and operator_export_type is OperatorExportTypes.ONNX
+        and operator_export_type is torch.onnx.OperatorExportTypes.ONNX
     ):
         val_keep_init_as_ip = False
     return val_keep_init_as_ip
@@ -442,7 +435,7 @@ def _decide_constant_folding(do_constant_folding, operator_export_type, training
         "do_constant_folding", do_constant_folding, operator_export_type
     )
     if do_constant_folding and (
-        training is not None and training is not TrainingMode.EVAL
+        training is not None and training is not torch.onnx.TrainingMode.EVAL
     ):
         warnings.warn(
             "It is recommended that constant folding be turned off ('do_constant_folding=False') "
@@ -662,7 +655,7 @@ def _model_to_graph(
     verbose=False,
     input_names=None,
     output_names=None,
-    operator_export_type=OperatorExportTypes.ONNX,
+    operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
     do_constant_folding=True,
     _disable_torch_constant_prop=False,
     fixed_batch_size=False,
@@ -747,7 +740,7 @@ def _model_to_graph(
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)
 
-    if training is None or training == TrainingMode.EVAL:
+    if training is None or training == torch.onnx.TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
     from torch.onnx.symbolic_helper import _constant_folding_opset_versions
@@ -791,8 +784,8 @@ def export_to_pretty_string(
     training=None,
     input_names=None,
     output_names=None,
-    operator_export_type=OperatorExportTypes.ONNX,
-    export_type=ExportTypes.PROTOBUF_FILE,
+    operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
+    export_type=torch.onnx.ExportTypes.PROTOBUF_FILE,
     google_printer=False,
     opset_version=None,
     keep_initializers_as_inputs=None,
@@ -851,10 +844,12 @@ def export_to_pretty_string(
         )
 
 
-def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=None):
+def unconvertible_ops(
+    model, args, training=torch.onnx.TrainingMode.EVAL, opset_version=None
+):
     r"""
     Converts the model with operator_export_type set to
-    OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of
+    torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of
     all the ops that are not supported/implemented by the exporter.
 
     Args:
@@ -883,7 +878,7 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
             args,
             # So that if an op connot be converted to ONNX, it will be kept
             # as-is rather than cause a failure.
-            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH,
         )
     unsupported_ops = list()
     supported_namespaces = ("onnx", "prim", "quantized")
@@ -975,8 +970,8 @@ def _export(
     training=None,
     input_names=None,
     output_names=None,
-    operator_export_type=OperatorExportTypes.ONNX,
-    export_type=ExportTypes.PROTOBUF_FILE,
+    operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
+    export_type=torch.onnx.ExportTypes.PROTOBUF_FILE,
     opset_version=None,
     do_constant_folding=True,
     dynamic_axes=None,
@@ -1023,9 +1018,9 @@ def _export(
             opset_version = _default_onnx_opset_version
         if not operator_export_type:
             if torch.onnx._CAFFE2_ATEN_FALLBACK:
-                operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
+                operator_export_type = torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
             else:
-                operator_export_type = OperatorExportTypes.ONNX
+                operator_export_type = torch.onnx.OperatorExportTypes.ONNX
 
         # By default, training=None, (which defaults to TrainingMode.EVAL),
         # which is good because running a model in training mode could result in
@@ -1070,7 +1065,9 @@ def _export(
             )
 
             # TODO: Don't allocate a in-memory string for the protobuf
-            defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
+            defer_weight_export = (
+                export_type is not torch.onnx.ExportTypes.PROTOBUF_FILE
+            )
             if custom_opsets is None:
                 custom_opsets = {}
 
@@ -1126,32 +1123,34 @@ def _export(
                 torch.onnx.log(
                     "Exported graph: ", _assign_onnx_node_name(graph, node_names)
                 )
-            if export_type == ExportTypes.PROTOBUF_FILE:
+            if export_type == torch.onnx.ExportTypes.PROTOBUF_FILE:
                 assert len(export_map) == 0
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
                     opened_file.write(proto)
             elif export_type in [
-                ExportTypes.ZIP_ARCHIVE,
-                ExportTypes.COMPRESSED_ZIP_ARCHIVE,
+                torch.onnx.ExportTypes.ZIP_ARCHIVE,
+                torch.onnx.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
             ]:
                 import zipfile
 
                 compression = (
                     zipfile.ZIP_DEFLATED
-                    if export_type == ExportTypes.COMPRESSED_ZIP_ARCHIVE
+                    if export_type == torch.onnx.ExportTypes.COMPRESSED_ZIP_ARCHIVE
                     else zipfile.ZIP_STORED
                 )
                 with zipfile.ZipFile(f, "w", compression=compression) as z:
-                    z.writestr(ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
+                    z.writestr(torch.onnx.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
                     for k, v in export_map.items():
                         z.writestr(k, v)
-            elif export_type == ExportTypes.DIRECTORY:
+            elif export_type == torch.onnx.ExportTypes.DIRECTORY:
                 if os.path.exists(f):
                     assert os.path.isdir(f)
                 else:
                     os.makedirs(f)
 
-                model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
+                model_proto_file = os.path.join(
+                    f, torch.onnx.ONNX_ARCHIVE_MODEL_PROTO_NAME
+                )
                 with torch.serialization._open_file_like(
                     model_proto_file, "wb"
                 ) as opened_file:
@@ -1171,13 +1170,13 @@ def _export(
             # If large model format export is enabled, proto will only contain data location instead of
             # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto
             # string in memory.
-            if (operator_export_type is OperatorExportTypes.ONNX) and (
+            if (operator_export_type is torch.onnx.OperatorExportTypes.ONNX) and (
                 not val_use_external_data_format
             ):
                 try:
                     torch._C._check_onnx_proto(proto, full_check=True)
                 except RuntimeError as e:
-                    raise CheckerError(e)
+                    raise torch.onnx.CheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
@@ -1420,7 +1419,7 @@ def _find_symbolic_in_registry(
     domain: str,
     op_name: str,
     opset_version: int,
-    operator_export_type: OperatorExportTypes,
+    operator_export_type: torch.onnx.OperatorExportTypes,
 ) -> Optional[Callable]:
     """Looks up for the symbolic function in the registry.
 
@@ -1428,7 +1427,7 @@ def _find_symbolic_in_registry(
         domain: The domain of the symbolic function.
         op_name: The name of the op.
         opset_version: Currect opset used.
-        operator_export_type: An enum in OperatorExportTypes.
+        operator_export_type: An enum in torch.onnx.OperatorExportTypes.
 
     Returns:
         The symbolic function if found, None otherwise.
@@ -1436,7 +1435,7 @@ def _find_symbolic_in_registry(
     import torch.onnx.symbolic_registry as sym_registry
 
     if not sym_registry.is_registered_op(op_name, domain, opset_version):
-        if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
+        if operator_export_type == torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             # Use the original node directly
             return None
     return sym_registry.get_registered_op(op_name, domain, opset_version)
@@ -1446,9 +1445,11 @@ def _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
     import torch.onnx.symbolic_registry as sym_registry
 
     is_exportable_aten_op = sym_registry.is_registered_op(op_name, "", opset_version)
-    is_onnx_aten_export = operator_export_type == OperatorExportTypes.ONNX_ATEN
+    is_onnx_aten_export = (
+        operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN
+    )
     is_aten_fallback_export = (
-        operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK
+        operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
     )
     return is_onnx_aten_export or (
         not is_exportable_aten_op and is_aten_fallback_export
@@ -1458,7 +1459,17 @@ def _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
 def _need_symbolic_context(symbolic_fn):
     """Checks if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`."""
     params = list(inspect.signature(symbolic_fn).parameters.values())
-    return params and issubclass(params[0].annotation, SymbolicContext)
+    return params and issubclass(params[0].annotation, torch.onnx.SymbolicContext)
+
+
+def _get_aten_op_overload_name(n: Node) -> str:
+    from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
+
+    # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
+    schema = n.schema()
+    if not schema.startswith("aten::") or is_caffe2_aten_fallback():
+        return ""
+    return torch._C.parse_schema(schema).overload_name
 
 
 def _run_symbolic_function(
@@ -1467,7 +1478,7 @@ def _run_symbolic_function(
     n: torch._C.Node,
     inputs: Any,
     env: Dict[torch._C.Value, torch._C.Value],
-    operator_export_type=OperatorExportTypes.ONNX,
+    operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
 ) -> Optional[Union[torch._C.Value, Tuple[torch._C.Value, ...]]]:
     """Runs a symbolic function.
 
@@ -1513,7 +1524,7 @@ def _run_symbolic_function(
 
             attrs = {k: n[k] for k in n.attributeNames()}
             if _need_symbolic_context(symbolic_fn):
-                ctx = SymbolicContext(_params_dict, env, n, block)
+                ctx = torch.onnx.SymbolicContext(_params_dict, env, n, block)
                 return symbolic_fn(ctx, g, *inputs, **attrs)
             # PythonOp symbolic need access to the node to resolve the name conflict,
             # this is inconsistent with regular op symbolic.
@@ -1529,12 +1540,25 @@ def _run_symbolic_function(
             attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
-            return g.at(op_name, *inputs, **attrs)
+            # `overload_name` is set for non-Caffe2 builds only
+            return g.at(
+                op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
+            )
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
-        if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
+        if operator_export_type == torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
+        elif (
+            operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+            and not is_caffe2_aten_fallback()
+        ):
+            # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+            return g.at(
+                op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
+            )
+
         raise
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
