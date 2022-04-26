@@ -995,10 +995,28 @@ TensorView* sub_alpha(TensorView* v1, TensorView* v2, Val* v3) {
 }
 // lerp
 Val* lerp(Val* start, Val* end, Val* weight) {
+  auto casted_values =
+      promoteValues(TypePromotion::default_op_config, {start, end, weight});
+  start = casted_values[0];
+  end = casted_values[1];
+  weight = casted_values[2];
+
+  auto out_dtype =
+      promote_type(start->getDataType().value(), end->getDataType().value());
+  auto out_vtype =
+      promote_type(start->getValType().value(), end->getValType().value());
+
   auto vals = maybeBroadcast({start, end, weight});
-  Val* intrm1 = sub(vals[1], vals[0]);
-  Val* intrm2 = mul(vals[2], intrm1);
-  return add(vals[0], intrm2);
+  Val* out = nullptr;
+  if (out_vtype == ValType::TensorView) {
+    out = newOutputTV(vals, out_dtype);
+  } else {
+    out = newScalar(out_vtype, out_dtype);
+  }
+
+  IrBuilder::create<TernaryOp>(
+      TernaryOpType::Lerp, out, vals[0], vals[1], vals[2]);
+  return out;
 }
 TensorView* lerp(TensorView* v1, Val* v2, Val* v3) {
   return arithOpOverloads(lerp, v1, v2, v3);
