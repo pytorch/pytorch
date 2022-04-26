@@ -22262,6 +22262,70 @@ TEST_F(NVFuserTest, FusionRAWSyncInsertionPlace3_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
+// See #1618
+TEST_F(NVFuserTest, FusionRAWSyncInsertionPlace4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({16, 128});
+  auto tv1 = makeConcreteTensor({16, 128});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = set(tv1);
+  auto tv4 = set(tv2);
+  auto tv5 = set(tv3);
+  auto tv6 = add(tv4, tv5);
+  fusion.addOutput(tv6);
+
+  tv2->setMemoryType(MemoryType::Shared);
+  tv3->setMemoryType(MemoryType::Shared);
+
+  tv2->computeAt(tv6, 0);
+  tv3->computeAt(tv6, 1);
+  tv4->computeAt(tv6, 1);
+  tv5->computeAt(tv6, -1);
+  tv2->split(1, 64);
+  tv3->split(1, 64);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv6->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // Check the block sync is inserted at the correct location.
+  //  There is exactly one block sync needed in this test case
+  //    and the sync needs to be after the 2 expressions
+  //    that modify shared memory.
+  class SyncInsertionPointChecker : public kir::IrVisitor {
+   public:
+    using kir::IrVisitor::handle;
+
+   private:
+    void handle(UnaryOp* uop) final {
+      // Record number of unary ops that modifies shared memory.
+      if (uop->out()->isA<kir::TensorIndex>() &&
+          uop->out()->as<kir::TensorIndex>()->view()->getMemoryType() ==
+              MemoryType::Shared) {
+        number_of_writes_++;
+      }
+    }
+    void handle(kir::BlockSync* bsync) final {
+      // Make sure both shared memory modifying expressions
+      //  have been observed at the sync insertion point.
+      TORCH_INTERNAL_ASSERT(
+          number_of_writes_ == 2,
+          "FusionRAWSyncInsertionPlace4 test fail:",
+          "only 1 sync after the 2 shared mem writes is needed in this test,"
+          "either a redundant sync has been inserted or the block sync is not inserted at the right place");
+    }
+
+   private:
+    int number_of_writes_ = 0;
+  } sync_insertion_checker;
+  GpuLower gpulw(&fusion);
+  sync_insertion_checker.handle(gpulw.kernel()->topLevelExprs());
+}
+
 // Test serial write and parallel read of shared mem: mapped case
 TEST_F(NVFuserTest, FusionSerialSmemWriteParallelRead1_CUDA) {
   Fusion fusion;

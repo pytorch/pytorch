@@ -693,7 +693,16 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         bitmap.set(ParallelType::TIDy);
         bitmap.set(ParallelType::TIDz);
         sync_before_.emplace_back(std::make_pair(expr, bitmap));
-        last_writes_.push_back(last_smem_writes);
+
+        // Before clearing `smem`, put all the currently pending smem writes
+        //  in last_writes_. This will make sure all the smem writes will
+        //  be taken into consideration when deciding which loopnest level
+        //  to insert the block sync. see FusionRAWSyncInsertionPlace4.
+        std::unordered_set<Expr*> smem_writes;
+        for (auto it : smem) {
+          smem_writes.insert(it.second);
+        }
+        last_writes_.push_back(smem_writes);
         smem.clear();
       }
 
