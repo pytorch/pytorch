@@ -1,6 +1,7 @@
 #include <ATen/native/vulkan/api/Context.h>
-#include <ATen/vulkan/Context.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Copy.h>
+#include <ATen/vulkan/Context.h>
 
 #include <sstream>
 
