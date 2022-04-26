@@ -498,6 +498,14 @@ std::tuple<Tensor, optional<int64_t>> movedim_batch_rule(const Tensor& self, opt
   return std::make_tuple(self_.movedim(source_, destination_), 0);
 }
 
+std::tuple<Tensor, optional<int64_t>> diag_embed_batch_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  dim1 = maybe_wrap_dim(dim1, logical_rank + 1) + 1;
+  dim2 = maybe_wrap_dim(dim2, logical_rank + 1) + 1;
+  return std::make_tuple(at::diag_embed(self_, offset, dim1, dim2), 0);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(diag, diag_batch_rule);
   VMAP_SUPPORT(chunk, chunk_batching_rule);
@@ -527,6 +535,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT2(movedim, intlist, movedim_batch_rule);
   VMAP_SUPPORT2(slice, Tensor, slice_batch_rule);
   VMAP_SUPPORT2(transpose, int, transpose_int_batch_rule);
+  VMAP_SUPPORT(diag_embed, diag_embed_batch_rule);
 }
 
 }}
