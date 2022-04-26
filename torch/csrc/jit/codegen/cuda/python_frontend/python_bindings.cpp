@@ -1,3 +1,6 @@
+#include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
+
+#ifdef USE_CUDA
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
@@ -512,3 +515,15 @@ void initNvFuserPythonBindings(PyObject* module) {
 
 } // namespace jit
 } // namespace torch
+
+#else
+
+namespace torch {
+namespace jit {
+
+void initNvFuserPythonBindings(PyObject* module) {}
+
+} // namespace jit
+} // namespace torch
+
+#endif // USE_CUDA
