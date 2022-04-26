@@ -113,14 +113,6 @@ class ArrayRef final {
         "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
   }
 
-  template <typename A, typename U=T, typename = std::enable_if_t<std::is_const<U>::value>>
-  /* implicit */ ArrayRef(const std::vector<std::remove_const_t<T>, A>& Vec)
-    : Data(Vec.data()), Length(Vec.size()) {
-    static_assert(
-        !std::is_same<T, bool>::value,
-        "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
-  }
-
   /// Construct an ArrayRef from a std::array
   template <size_t N>
   /* implicit */ constexpr ArrayRef(const std::array<T, N>& Arr)
