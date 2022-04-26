@@ -1041,7 +1041,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         self.assertEqual(self_worker_info.name, worker_name(self.rank))
         self.assertEqual(peer_worker_info.name, worker_name(peer_rank))
 
-        with self.assertRaisesRegex(RuntimeError, "Unknown destination worker"):
+        with self.assertRaisesRegex(RuntimeError, "could not find destination"):
             unknown_worker_id = rpc.get_worker_info("WorkerUnknown")
 
     @dist_init
