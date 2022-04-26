@@ -379,8 +379,6 @@ class TestOperators(TestCase):
         # (check derivatives.yaml).
         xfail('var_mean'),
         xfail('std_mean'),
-        # https://gist.github.com/zou3519/f62a167fb46cda01d7f238f61dd9ccf9
-        xfail('linalg.eigvalsh'),
 
         # =============================================
         # NB: The above failures also fail using PyTorch core's
@@ -391,10 +389,6 @@ class TestOperators(TestCase):
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
-
-        # Some kind of issue with unsymmetric tangent type
-        # Runtime Error: The tangent part of the matrix A should also be symmetric.
-        xfail('linalg.eigh'),
 
         skip('bernoulli'),  # cuda set seed randomness issues
     }))
@@ -684,7 +678,6 @@ class TestOperators(TestCase):
         # the test
         xfail('var_mean'),
         xfail('std_mean'),
-        xfail('linalg.eigvalsh'),
 
         # RuntimeError: expand: the number of sizes provided (1) must be greater or
         # equal to the number of dimensions in the tensor (2)
@@ -773,7 +766,6 @@ class TestOperators(TestCase):
         xfail('quantile'),
         xfail('var_mean'),
         xfail('as_strided'),
-        xfail('linalg.eigvalsh'),
         xfail('fill_'),
         xfail('linalg.cholesky'),
         xfail('nn.functional.gaussian_nll_loss'),
@@ -785,10 +777,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.linear'),
         xfail('view_as_complex'),
         xfail('prod'),
-
-        # Some kind of issue with unsymmetric tangent type
-        # Runtime Error: The tangent part of the matrix A should also be symmetric.
-        xfail('linalg.eigh'),
 
         xfail('linalg.lu_factor', ''),
         skip('nn.functional.dropout2d', ''),
@@ -1147,8 +1135,6 @@ class TestOperators(TestCase):
         xfail('cholesky', ''),
         xfail('eig', ''),
         xfail('linalg.det', ''),
-        xfail('linalg.eigh', ''),
-        xfail('linalg.eigvalsh', ''),
         xfail('linalg.matrix_norm', ''),
         xfail('linalg.slogdet', ''),
         xfail('log_softmax', ''),
