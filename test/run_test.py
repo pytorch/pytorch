@@ -211,6 +211,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "distributed/_shard/test_replicated_tensor",
@@ -231,6 +232,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "distributed/_shard/test_replicated_tensor",
@@ -238,7 +240,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_type_hints",
     "test_openmp",
-] + FSDP_TEST
+]
 
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
