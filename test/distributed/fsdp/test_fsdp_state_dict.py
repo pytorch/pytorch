@@ -135,7 +135,7 @@ class TestFSDPStateDict(FSDPTest):
             if self.rank == 0:
                 self.assertNotEqual(fsdp_state_dict, {})
                 for key, tensor in fsdp_state_dict.items():
-                    if ignore_keys and key in ignore_keys:
+                    if _BUFFER_NAME in key or ignore_keys and key in ignore_keys:
                         continue
                     self.assertEqual(
                         tensor.device, torch.device("cpu"),
@@ -327,7 +327,10 @@ class TestFSDPStateDict(FSDPTest):
     def test_fsdp_state_dict_keys(self, state_dict_type):
         state_dict = self._state_dict(self._initialize_model(True), state_dict_type)
         if state_dict_type == "local_state_dict":
-            self.assertEqual(set(["flat_param", "inner.flat_param"]), state_dict.keys())
+            self.assertEqual(
+                set(["flat_param", "inner.flat_param", "inner.buffer", "buffer"]),
+                state_dict.keys()
+            )
         elif state_dict_type == "state_dict":
             # Keys should match local model.
             local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
