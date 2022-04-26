@@ -142,9 +142,9 @@ class _PartialTensor(object):
         rearrange_local_shards = False
         indices = [0] * self.process_group.size()
         for idx, placement in enumerate(resharding_spec.placements):  # type: ignore[attr-defined]
-            if placement.rank() == current_rank:  # type: ignore[index]
+            if placement.rank() == current_rank:  # type: ignore[index, union-attr]
                 rank_idx = idx  # type: ignore[attr-defined]
-            if placement.rank() != idx:
+            if placement.rank() != idx:  # type: ignore[index, union-attr]
                 rearrange_local_shards = True
             indices[placement.rank()] = idx
 
