@@ -4916,13 +4916,6 @@
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  dispatch:
-    # Why give zeros_like() a derivative formula?
-    # For the functionalization pass.
-    # zeros_like() runs *underneath* functionalization (we transform zero_ -> zero -> zeros_like),
-    # But the decomposite for zeros_like() calls into more inplace ops!
-    # Instead, we want zeros_like() to be a primitive w.r.t tracing (which we can do by adding an autograd formula).
-    CompositeExplicitAutograd: zeros_like
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   variants: function
@@ -5141,9 +5134,6 @@
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
     SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_csr_
-
-- func: zero(Tensor self) -> Tensor
-  variants: function
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
