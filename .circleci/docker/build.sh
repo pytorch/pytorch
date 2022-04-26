@@ -134,8 +134,31 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
+  pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9)
+    CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
+    CUDNN_VERSION=8
+    TENSORRT_VERSION=8.0.1.6
+    ANACONDA_PYTHON_VERSION=3.7
+    CMAKE_VERSION=3.10.3
+    CLANG_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
   pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7)
     CUDA_VERSION=11.5.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.7
+    CMAKE_VERSION=3.10.3
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.6.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.7
     CMAKE_VERSION=3.10.3
@@ -222,14 +245,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-rocm4.3.1-py3.7)
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=4.3.1
-    ;;
   pytorch-linux-bionic-rocm4.5-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
     GCC_VERSION=9
@@ -237,6 +252,14 @@ case "$image" in
     DB=yes
     VISION=yes
     ROCM_VERSION=4.5.2
+    ;;
+  pytorch-linux-bionic-rocm5.0-py3.7)
+    ANACONDA_PYTHON_VERSION=3.7
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=5.0
     ;;
   *)
     # Catch-all for builds that are not hardcoded.

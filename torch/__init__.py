@@ -15,6 +15,7 @@ import platform
 import textwrap
 import ctypes
 import warnings
+import inspect
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
@@ -29,7 +30,7 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING, Union
+from typing import Set, Type, TYPE_CHECKING, Union, Callable
 import builtins
 
 __all__ = [
@@ -228,10 +229,15 @@ except ImportError:
             ''').strip()) from None
     raise  # If __file__ is not None the cause is unknown, so just re-raise.
 
-
-__all__ += [name for name in dir(_C)
-            if name[0] != '_' and
-            not name.endswith('Base')]
+for name in dir(_C):
+    if name[0] != '_' and not name.endswith('Base'):
+        __all__.append(name)
+        obj = getattr(_C, name)
+        if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
+            if (obj.__module__ != 'torch'):
+                # TODO: fix their module from C++ side
+                if name not in ['DisableTorchFunction', 'Generator']:
+                    obj.__module__ = 'torch'
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
@@ -742,8 +748,11 @@ PRIVATE_OPS = (
 for name in dir(_C._VariableFunctions):
     if name.startswith('__') or name in PRIVATE_OPS:
         continue
-    globals()[name] = getattr(_C._VariableFunctions, name)
-    __all__.append(name)
+    obj = getattr(_C._VariableFunctions, name)
+    obj.__module__ = 'torch'
+    globals()[name] = obj
+    if not name.startswith("_"):
+        __all__.append(name)
 
 ################################################################################
 # Import interface functions defined in Python
@@ -820,9 +829,6 @@ import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
 from torch import profiler as profiler
-
-from torch.nested._nestedtensor import NestedTensor
-from torch.nested._nestedtensor import nested_tensor
 
 _C._init_names(list(torch._storage_classes))
 
