@@ -20,7 +20,7 @@ class TestRebase(TestCase):
                  mock.call('rebase', 'master', 'pull/31093/head'),
                  mock.call('push', '-f', 'https://github.com/mingxiaoh/pytorch.git', 'pull/31093/head:master')]
         mocked_run_git.assert_has_calls(calls)
-        self.assertTrue("Successfully rebased master onto master" in mocked_post_comment.call_args[0][3])
+        self.assertTrue("Successfully rebased `master` onto `master`" in mocked_post_comment.call_args[0][3])
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('gitutils.GitRepo._run_git', return_value="Everything up-to-date")
