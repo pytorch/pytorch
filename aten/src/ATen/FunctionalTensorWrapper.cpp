@@ -23,19 +23,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   storage_ = functional_storage;
   storage_access_should_throw_ = false;
   key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize) | value_.key_set();
-  // What's happening here? In general, functional wrappers *should* copy the keys from their inner tensor.
-  // We need this for the backend use case (LTC/XLA), where any functionalities that the backend uses,
-  // like autograd or autocast, need to run *directly* on the wrapper.
-  // However, all of the keys corresponding to functorch transforms should not be copied over.
+  // All of the keys corresponding to functorch transforms should not be copied over.
   // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
   // to participate in the functorch transforms.
-  auto keys_to_not_copy =
-      c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::FuncTorchDynamicLayerFrontMode)
-    - c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::FuncTorchDynamicLayerBackMode)
-    // We still want to copy the Python TLS key - if the inner tensor is a Python tensor, then the wrapper
-    // should do a TLS snapshot.
-    .remove(c10::DispatchKey::PythonTLSSnapshot);
-  key_set_ = key_set_ & keys_to_not_copy;
+  key_set_ = key_set_ & c10::functorch_transforms_ks;
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
