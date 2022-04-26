@@ -92,6 +92,7 @@ ALLOW_LIST = [
     ("aten::miopen_depthwise_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_depthwise_convolution_backward_input", datetime.date(9999, 1, 1)),
     ("aten::miopen_depthwise_convolution_backward_weight", datetime.date(9999, 1, 1)),
+    ("aten::is_mlc", datetime.date(2022, 5, 20)),
     ("aten::_nested_tensor", datetime.date(9999, 1, 1)),
     ("caffe2::", datetime.date(2021, 10, 23)),
     ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
