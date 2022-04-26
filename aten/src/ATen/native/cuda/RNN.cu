@@ -14,7 +14,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/_thnn_fused_lstm_cell_native.h>
-#include <ATen/ops/_thnn_fused_lstm_cell_backward_impl.h>
 #include <ATen/ops/_thnn_fused_lstm_cell_backward_impl_native.h>
 #include <ATen/ops/_thnn_fused_gru_cell_native.h>
 #include <ATen/ops/_thnn_fused_gru_cell_backward_native.h>
