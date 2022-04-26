@@ -992,10 +992,11 @@ Arguments:
           .def(
               "broadcast",
               [](::c10d::ProcessGroup& pg, at::Tensor& x, int rootRank) {
-                ::c10d::BroadcastOptions opts;
-                opts.rootRank = rootRank;
-                std::vector<at::Tensor> xs = {x};
-                return pg.broadcast(xs, opts);
+                auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast", "")
+                    .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                        const c10::intrusive_ptr<::c10d::ProcessGroup>&, at::TensorList, int64_t, int64_t, int64_t)>();
+                // TODO: Can custom C++ ops accept default parameters?
+                return op.call(c10::make_intrusive<::c10d::ProcessGroup>(pg), {x}, rootRank, 0, -1);
               },
               py::arg("tensor"),
               py::arg("root"),
