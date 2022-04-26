@@ -30,7 +30,6 @@ from torchgen.api.types import (
     boolT,
     scalarT,
     tensorListT,
-    iTensorListRefT,
     dimnameListT,
     tensorT,
     voidT,

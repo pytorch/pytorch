@@ -4,6 +4,12 @@
 #include <torch/library.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/to_native.h>
+#endif
+
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
@@ -75,6 +81,23 @@ namespace {
   }
 }
 
+at::Tensor to_device_functionalize(const at::Tensor & self, at::Device device, at::ScalarType dtype, bool non_blocking, bool copy, c10::optional<at::MemoryFormat> memory_format) {
+  if (!at::functionalization::impl::isFunctionalTensor(self)) {
+    // If the input is not a functional tensor, we want to "lift" the output to be functional.
+    // See Note [Functionalization <> torch.Tensor constructor]
+    at::AutoDispatchSkipFunctionalize guard;
+    auto out = self.to(device, dtype, non_blocking, copy, memory_format);
+    return at::functionalization::impl::to_functional_tensor(std::move(out));
+  } else {
+    // otherwise, to.device is a composite op, so let it decompose normally
+    return at::native::to(self, device, dtype, non_blocking, copy, memory_format);
+  }
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
+}
+
+TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
+  m.impl("to.device", TORCH_FN(to_device_functionalize));
 }
