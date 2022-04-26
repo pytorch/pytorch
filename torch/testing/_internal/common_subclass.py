@@ -82,25 +82,20 @@ class DiagTensorBelow(WrapperTensor):
             # on the diag elements and calls the func again.
 
             def unwrap(e):
-                return e.diag if isinstance(e, DiagTensorBelow) else e
+                return e.diag.diag() if isinstance(e, DiagTensorBelow) else e
 
             def wrap(e):
-                return DiagTensorBelow(e) if isinstance(e, torch.Tensor) and e.ndim == 1 else e
+                if isinstance(e, torch.Tensor) and e.ndim == 1:
+                    return DiagTensorBelow(e)
+                if isinstance(e, torch.Tensor) and e.ndim == 2 and e.count_nonzero() == e.diag().count_nonzero():
+                    return DiagTensorBelow(e.diag())
+                return e
 
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})))
             return rs
 
     def __repr__(self):
         return super().__repr__(tensor_contents=f"diag={self.diag}")
-
-
-def DiagTensorBelow_in_place_add(a, b, *, alpha=1.0):
-    # Custom add_ that operates solely on diagonal elements.
-    assert b.dim() == 2 and a.diag.shape[0] == b.shape[0] == b.shape[1]
-    for i in range(a.diag.shape[0]):
-        a.diag[i].add_(b[i, i] * alpha)
-
-DiagTensorBelow.handled_ops['add_.Tensor'] = DiagTensorBelow_in_place_add
 
 
 class SparseTensor(WrapperTensor):
@@ -145,23 +140,6 @@ class SparseTensor(WrapperTensor):
             # Check for zeros and use that to get indices
             return SparseTensor.from_dense(e) if isinstance(e, torch.Tensor) else e
 
-        # Convolution is being reworked to avoid this. But it didn't land yet
-        if func_name == "torch._ops.aten.convolution_overrideable":
-            # Go back to plain convolution to dispatch to the right device now
-            # that the input is a plain cpu tensor
-            func = torch.ops.aten.convolution
-        if func_name == "torch._ops.aten.convolution_backward_overrideable":
-            # There is no generic conv backward (yet) but in colab we always
-            # use mkldnn so that's an easy workaround
-            func = torch.ops.aten.mkldnn_convolution_backward
-            # Re-order the arguments to match the new signature
-            assert args[6] is False
-            assert args[7] == [0, 0]
-            # Undefined Tensors are not properly handled by the pybind layer?
-            grad_mask = [True, True, True]
-            args = (args[1], args[0], args[2], args[4], args[3], args[5], args[8], grad_mask)
-
-
         rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})))
         return rs
 
@@ -187,8 +165,6 @@ class NonWrapperTensor(torch.Tensor):
         }
         return t
 
-    # For any tensor subclass that needs extra state, a proper __torch_function__ implementation
-    # must be provided that handles the extra state.
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         result = super().__torch_function__(func, types, args, kwargs)
@@ -213,11 +189,12 @@ class NonWrapperTensor(torch.Tensor):
 # Class used to store info about subclass tensors used in testing.
 class SubclassInfo:
 
-    __slots__ = ['name', 'create_fn']
+    __slots__ = ['name', 'create_fn', 'closed_under_ops']
 
-    def __init__(self, name, create_fn):
+    def __init__(self, name, create_fn, closed_under_ops=True):
         self.name = name
         self.create_fn = create_fn  # create_fn(shape) -> tensor instance
+        self.closed_under_ops = closed_under_ops
 
 
 # Function for generating a random SparseTensor of the given shape.
@@ -254,10 +231,11 @@ subclass_db = {
     ),
     SparseTensor: SubclassInfo(
         'sparse_tensor',
-        create_fn=_create_sparse_tensor
+        create_fn=lambda shape: SparseTensor.from_dense(torch.randn(shape).relu())
     ),
     DiagTensorBelow: SubclassInfo(
         'diag_tensor_below',
-        create_fn=lambda shape: DiagTensorBelow(torch.randn(shape))
+        create_fn=lambda shape: DiagTensorBelow(torch.randn(shape)),
+        closed_under_ops=False  # sparse semantics
     ),
 }
