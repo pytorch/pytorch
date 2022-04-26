@@ -975,7 +975,16 @@ Arguments:
 
           .def(
               "broadcast",
-              &::c10d::ProcessGroup::broadcast,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& tensors,
+                 ::c10d::BroadcastOptions opts) {
+                auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast", "")
+                    .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                        const c10::intrusive_ptr<::c10d::ProcessGroup>&, at::TensorList, int64_t, int64_t, int64_t)>();
+                // It's awakward to unbox the opts here and box them again in the custom C++ op.
+                // But it's also complicated to make opts as a CustomClassHolder. Leave it as it is now.
+                return op.call(self, tensors, opts.rootRank, opts.rootTensor, opts.timeout.count());
+              },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::BroadcastOptions(),
               py::call_guard<py::gil_scoped_release>())
