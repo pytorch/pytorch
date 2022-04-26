@@ -110,8 +110,10 @@ def isValueType(typ: CType) -> bool:
         return isValueType(typ.elem)
     return False
 
+
 def isSymIntType(typ: Type) -> bool:
     return isinstance(typ, BaseType) and typ.name == BaseTy.SymInt
+
 
 def isWrappedScalarType(typ: Type) -> bool:
     """
