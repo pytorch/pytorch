@@ -15,7 +15,6 @@ from torchgen.api.autograd import (
 )
 from torchgen.api.types import (
     Binding,
-    CppSignatureGroup,
     NamedCType,
     BaseCType,
     VectorCType,
@@ -32,6 +31,7 @@ from torchgen.api.types import (
     stringT,
 )
 from torchgen.api import cpp
+from torchgen.api import dispatcher
 from torchgen.gen import parse_native_yaml, get_grouped_by_view_native_functions
 from torchgen.context import with_native_function
 from torchgen.model import (
@@ -130,8 +130,8 @@ def load_derivatives(
 
 
 @with_native_function
-def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
-    return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
+def dispatcher_arguments(f: NativeFunction) -> Sequence[Binding]:
+    return dispatcher.arguments(f.func)
 
 
 def create_derivative(
@@ -142,7 +142,7 @@ def create_derivative(
 ) -> Derivative:
     original_formula = formula
     arguments: List[NamedCType] = [
-        a.nctype.remove_const_ref() for a in cpp_arguments(f)
+        a.nctype.remove_const_ref() for a in dispatcher_arguments(f)
     ]
 
     return_names = tuple(n if n != "self" else "result" for n in cpp.return_names(f))
@@ -470,7 +470,7 @@ def create_differentiability_info(
         non_differentiable_arg_names: List[str] = []
         args_with_derivatives_set: Set[str] = set()
 
-        all_arg_names = [a.name for a in cpp_arguments(f)]
+        all_arg_names = [a.name for a in dispatcher_arguments(f)]
         all_ret_names = [
             r.name for r in f.func.returns
         ]  # only used for the assert below
@@ -529,7 +529,7 @@ def create_differentiability_info(
         # TODO: do we need eagerly calculate and save it here? Can it be derived
         # from NativeFunction and `derivatives` on callsites instead?
         args_with_derivatives = [
-            a for a in cpp_arguments(f) if a.name in args_with_derivatives_set
+            a for a in dispatcher_arguments(f) if a.name in args_with_derivatives_set
         ]
 
         # Postprocess forward derivatives definitions now that we know the differentiable arguments
@@ -603,14 +603,14 @@ def create_differentiability_info(
         )
 
     canonical = canonical_function(functions, defn_name)
-    if "grad_input_mask" in (a.name for a in cpp_arguments(canonical)):
+    if "grad_input_mask" in (a.name for a in dispatcher_arguments(canonical)):
         raise RuntimeError(
             f"Schema for {defn_name} has an argument named grad_input_mask, "
             "but this name would be shadowed by our codegen. "
             "Please use a different name in native_functions.yaml."
         )
 
-    if "result" in (a.name for a in cpp_arguments(canonical)):
+    if "result" in (a.name for a in dispatcher_arguments(canonical)):
         raise RuntimeError(
             f"Schema for {defn_name} has an argument named result, "
             "but this is only allowed for outputs."

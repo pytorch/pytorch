@@ -649,11 +649,14 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             copy_ranges: List[str] = []
             for i, n in enumerate(var_names):
                 copy_ranges.append(DERIVATIVE_MULTI_COPY_RANGE.substitute(name=n, i=i))
-            return False, DERIVATIVE_MULTI.substitute(
-                idx_ranges=idx_ranges,
-                copy_ranges=copy_ranges,
-                derivative=formula,
-                grad_input_mask=grad_input_mask,
+            return (
+                False,
+                DERIVATIVE_MULTI.substitute(
+                    idx_ranges=idx_ranges,
+                    copy_ranges=copy_ranges,
+                    derivative=formula,
+                    grad_input_mask=grad_input_mask,
+                ),
             )
 
     body.extend(unpack)
