@@ -84,7 +84,7 @@ def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
         empty_impl = f"at::detail::empty_{dispatch}"
         empty_strided_impl = f"at::detail::empty_strided_{dispatch}"
     elif backend_index.dispatch_key in (
-        DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradWithMutations,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
     ):
@@ -302,7 +302,7 @@ class RegisterDispatchKey:
                 "Do not explicitly specify Meta dispatch key on structured "
                 "functions, they will be automatically generated for you"
             )
-        elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+        elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutogradWithMutations:
             assert not self.backend_index.has_kernel(g.out), (
                 "Do not explicitly specify CompositeExplicitAutograd dispatch key on structured "
                 "functions, they will be automatically generated for you"
@@ -528,7 +528,7 @@ void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
     def gen_class_set_output_body(self, k: SchemaKind) -> str:
         if self.backend_index.dispatch_key in [
             DispatchKey.CUDA,
-            DispatchKey.CompositeExplicitAutograd,
+            DispatchKey.CompositeExplicitAutogradWithMutations,
         ]:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
@@ -548,7 +548,7 @@ if (C10_UNLIKELY(current_device.has_value())) {
                 DispatchKey.Meta,
                 DispatchKey.CPU,
                 DispatchKey.CUDA,
-                DispatchKey.CompositeExplicitAutograd,
+                DispatchKey.CompositeExplicitAutogradWithMutations,
             )
             return f"""{maybe_set_guard_line}
 outputs_[output_idx] = create_out(sizes, strides, options);"""
@@ -601,7 +601,7 @@ resize_out(out, sizes, strides, options);"""
                 guard_field = "c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;"
             else:
                 guard_field = "c10::cuda::OptionalCUDAGuard guard_;"
-        elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+        elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutogradWithMutations:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""
@@ -632,7 +632,7 @@ resize_out(out, sizes, strides, options);"""
             return None
 
         # TODO: Now, there is something interesting going on here.  In the code below,
-        # we generate CompositeExplicitAutograd implementations of functional and inplace
+        # we generate CompositeExplicitAutogradWithMutations implementations of functional and inplace
         # based on the out implementation.  But in fact, out is definable by
         # functional too (just not very efficiently), and this is honestly the
         # MORE likely situation for a backend implementor.  How do we pick?
@@ -643,7 +643,7 @@ resize_out(out, sizes, strides, options);"""
         # of work to not register one of these "weak" definitions unless there
         # is a strong definition somewhere in the DAG!  So it's not implemented yet.
         if (
-            self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd
+            self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutogradWithMutations
             and f.func.kind() is SchemaKind.out
         ):
             # Never generate a default implementation for out, that's what you
@@ -699,7 +699,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
                 parent_class = f"at::meta::structured_{meta.name(self.g)}"
             elif (
-                self.backend_index.dispatch_key is DispatchKey.CompositeExplicitAutograd
+                self.backend_index.dispatch_key is DispatchKey.CompositeExplicitAutogradWithMutations
             ):
                 # TODO: dedup this branch
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
@@ -785,7 +785,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             # With the expanded context, do the impl call (if not a meta
             # function)
-            if self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+            if self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutogradWithMutations:
                 # TODO: https://github.com/pytorch/pytorch/issues/53023
                 out_sig_group = CppSignatureGroup.from_native_function(
                     self.g.out, method=False, fallback_binding=f.manual_cpp_binding

@@ -292,7 +292,7 @@ to reuse the same function name in both cases.
 
 Available backend options can be found by searching `dispatch_keys` in
 [codegen](https://github.com/pytorch/pytorch/blob/master/torchgen/gen.py).
-There are also two special "generic" backends:
+There are also three special "generic" backends:
 
   - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):
     implementations of kernels that work for all backends, but require an
@@ -304,6 +304,19 @@ There are also two special "generic" backends:
     kernel to every backend (e.g., `CPU, CUDA`). Note: kernels which call
     DispatchStub should NOT be registered as CompositeExplicitAutograd, as
     DispatchStub only works for `CPU, CUDA`)
+
+  - `CompositeExplicitAutogradWithMutations`:
+    Similar to CompositeExplicitAutograd, but this key should be used if:
+    (1) Your kernel is written for an out-of-place operator
+    (2) *and* it calls internally into any mutation operators.
+    A common example of this type of kernel is for an out-of-place operator
+    that's implemented by creating an empty tensor, and calling into the corresponding out= operator.
+    We would like to distinguish between "ordinary" CompositeExplicitAutograd kernels
+    and these kernels, because some backends would not like
+    to decompose an out-of-place op into an inplace op.
+    LazyTensor + XLA are the two current examples of this - since they operate on a functional IR,
+    they would prefer to directly implement an out-of-place operator with their own kernel,
+    instead of using a decomposition that results in more mutation operators.
 
   - `CompositeImplicitAutograd` (previously known as `Math`): implementations of
     kernels that work for all backends, and also can implicitly support autograd,

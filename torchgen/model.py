@@ -117,7 +117,8 @@ class DispatchKey(Enum):
     Autograd = auto()
     CompositeImplicitAutograd = auto()
     CompositeExplicitAutograd = auto()
-    EndOfAliasKeys = CompositeExplicitAutograd
+    CompositeExplicitAutogradWithMutations = auto()
+    EndOfAliasKeys = CompositeExplicitAutogradWithMutations
 
     CPUTensorId = CPU
     CUDATensorId = CUDA
@@ -154,6 +155,7 @@ dispatch_keys = [
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
     DispatchKey.CompositeExplicitAutograd,
+    DispatchKey.CompositeExplicitAutogradWithMutations,
     DispatchKey.NestedTensorCPU,
     DispatchKey.NestedTensorCUDA,
     # Meta is a magic key: it is automatically generated for structured
@@ -167,6 +169,7 @@ dispatch_keys = [
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
     return dk in {
         DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradWithMutations,
         DispatchKey.CompositeImplicitAutograd,
     }
 
@@ -413,6 +416,7 @@ class NativeFunction:
     # Whether or not the NativeFunction contains a backend-agnostic kernel
     has_composite_implicit_autograd_kernel: bool
     has_composite_explicit_autograd_kernel: bool
+    has_composite_explicit_autograd_with_mutations_kernel: bool
 
     # Tags are used to describe semantic information about (groups of) operators,
     # That aren't easily inferrable directly from the operator's schema.
@@ -571,11 +575,15 @@ class NativeFunction:
                 cpp.name(func), structured=False
             )
 
-        assert not (
-            DispatchKey.CompositeExplicitAutograd in dispatch
-            and DispatchKey.CompositeImplicitAutograd in dispatch
-        ), (
-            "cannot specify both CompositeExplicitAutograd and CompositeImplicitAutograd on a single kernel; each "
+        composites_in_dispatch = [
+            d for d in dispatch if
+            d == DispatchKey.CompositeExplicitAutograd
+            or d == DispatchKey.CompositeExplicitAutogradWithMutations
+            or d == DispatchKey.CompositeImplicitAutograd]
+
+        assert len(composites_in_dispatch) <= 1, (
+            "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradWithMutations, or CompositeImplicitAutograd "
+            "on a single kernel; each "
             "strictly subsumes the other.  If you wanted to provide an explicit autograd "
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
         )
@@ -621,6 +629,9 @@ class NativeFunction:
         has_composite_explicit_autograd_kernel = (
             DispatchKey.CompositeExplicitAutograd in dispatch.keys()
         )
+        has_composite_explicit_autograd_with_mutations_kernel = (
+            DispatchKey.CompositeExplicitAutogradWithMutations in dispatch.keys()
+        )
 
         # We aren't going to store dispatch metadata inline in NativeFunctions;
         # instead it is separately indexed by backend (so other backends can
@@ -662,6 +673,7 @@ class NativeFunction:
                 is_abstract=is_abstract,
                 has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
                 has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
+                has_composite_explicit_autograd_with_mutations_kernel=has_composite_explicit_autograd_with_mutations_kernel,
                 tag=tag,
             ),
             backend_metadata,
@@ -735,6 +747,7 @@ class NativeFunction:
         return (
             self.has_composite_implicit_autograd_kernel
             or self.has_composite_explicit_autograd_kernel
+            or self.has_composite_explicit_autograd_with_mutations_kernel
         )
 
     @property

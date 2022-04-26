@@ -10,6 +10,25 @@ namespace c10 {
 constexpr DispatchKeySet backend_dispatch_keyset =
     autogradother_backends | DispatchKeySet(DispatchKey::Dense);
 
+// See Note [CompositeExplicitAutogradWithMutations Key]
+// We have several types of decompositions in aten, that each have their own alias key.
+// You should register your decomposition to the `CompositeExplicitAutogradWithMutations key` if:
+// (1) It's an out-of-place op
+// (2) It decomposes into one more mutation ops
+// (3) It has a derivative formula
+//     (In theory we could also have a separate key for "CompositeImplicitAutogradWithMutations",
+//     but there isn't much of a use case for it currently).
+// This key is important for "functional" backends like LazyTensor / XLA.
+// If you're a backend that only expects to deal with "functional ops",
+// then you don't want to decompose a functional op into an op that causes mutations.
+// You should just directly write a kernel for that functional op instead!
+constexpr DispatchKeySet functional_backend_dispatch_keyset =
+    backend_dispatch_keyset
+        // XLA and LazyTensor are currently the only 2 backends in core
+        // that use functionalization pass in eager mode.
+        .remove_backend(BackendComponent::XLABit)
+        .remove_backend(BackendComponent::LazyBit);
+
 bool isBackendDispatchKey(DispatchKey t) {
   return t != DispatchKey::Undefined
       // See Note [No Alias Keys in DispatchKeySet]
@@ -41,6 +60,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
     case DispatchKey::CompositeImplicitAutograd:
       return math_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutograd:
+      return functional_backend_dispatch_keyset;
+    case DispatchKey::CompositeExplicitAutogradWithMutations:
       return backend_dispatch_keyset;
     default:
       return DispatchKeySet(t);
@@ -56,6 +77,9 @@ bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor && math_dispatch_keyset.has(k);
     case DispatchKey::CompositeExplicitAutograd:
+      // See Note [NestedTensor Not Included in Backend Keys]
+      return k != DispatchKey::NestedTensor && functional_backend_dispatch_keyset.has(k);
+    case DispatchKey::CompositeExplicitAutogradWithMutations:
       // See Note [NestedTensor Not Included in Backend Keys]
       return k != DispatchKey::NestedTensor && backend_dispatch_keyset.has(k);
     default:

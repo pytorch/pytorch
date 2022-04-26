@@ -520,11 +520,14 @@ enum class DispatchKey : uint16_t {
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
   CompositeExplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeExplicitAutograd.cpp
+  // See Note [CompositeExplicitAutogradWithMutations Key]
+  CompositeExplicitAutogradWithMutations, // registered at
+  // build/aten/src/ATen/RegisterCompositeExplicitAutograd.cpp
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.
   StartOfAliasKeys = Autograd,
-  EndOfAliasKeys = CompositeExplicitAutograd, //
+  EndOfAliasKeys = CompositeExplicitAutogradWithMutations, //
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't

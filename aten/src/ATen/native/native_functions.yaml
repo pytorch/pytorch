@@ -259,7 +259,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CompositeExplicitAutograd: abs
+    CompositeExplicitAutogradWithMutations: abs
     SparseCPU, SparseCUDA: abs_sparse
     SparseCsrCPU, SparseCsrCUDA: abs_sparse_csr
 
@@ -1494,7 +1494,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CompositeExplicitAutograd: cummax
+    CompositeExplicitAutogradWithMutations: cummax
 
 - func: cummax.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
@@ -3298,7 +3298,7 @@
   dispatch:
     CPU: narrow_copy_dense_cpu
     SparseCPU, SparseCUDA: narrow_copy_sparse
-    CompositeExplicitAutograd: narrow_copy_dense
+    CompositeExplicitAutogradWithMutations: narrow_copy_dense
   tags: view_copy
 
 - func: narrow_copy.SymInt(Tensor self, int dim, int start, SymInt length) -> Tensor
@@ -11416,205 +11416,205 @@
 - func: _fw_primal_copy(Tensor self, int level) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _fw_primal_copy
+    CompositeExplicitAutogradWithMutations: _fw_primal_copy
   tags: view_copy
 
 - func: _make_dual_copy(Tensor primal, Tensor tangent, int level) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _make_dual_copy
+    CompositeExplicitAutogradWithMutations: _make_dual_copy
   tags: view_copy
 
 - func: view_as_real_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: view_as_real_copy
+    CompositeExplicitAutogradWithMutations: view_as_real_copy
   tags: view_copy
 
 - func: view_as_complex_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: view_as_complex_copy
+    CompositeExplicitAutogradWithMutations: view_as_complex_copy
   tags: view_copy
 
 - func: _conj_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _conj_copy
+    CompositeExplicitAutogradWithMutations: _conj_copy
   tags: view_copy
 
 - func: _neg_view_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _neg_view_copy
+    CompositeExplicitAutogradWithMutations: _neg_view_copy
   tags: view_copy
 
 - func: as_strided_copy(Tensor self, int[] size, int[] stride, int? storage_offset=None) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: as_strided_copy
+    CompositeExplicitAutogradWithMutations: as_strided_copy
   tags: view_copy
 
 - func: _sparse_broadcast_to_copy(Tensor self, int[] size) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _sparse_broadcast_to_copy
+    CompositeExplicitAutogradWithMutations: _sparse_broadcast_to_copy
   tags: view_copy
 
 - func: diagonal_copy(Tensor self, int offset=0, int dim1=0, int dim2=1) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: diagonal_copy
+    CompositeExplicitAutogradWithMutations: diagonal_copy
   tags: view_copy
 
 - func: expand_copy(Tensor self, int[] size, *, bool implicit=False) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: expand_copy
+    CompositeExplicitAutogradWithMutations: expand_copy
   tags: view_copy
 
 - func: expand_copy.SymInt(Tensor self, SymInt[] size, *, bool implicit=False) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: expand_copy_SymInt
+    CompositeExplicitAutogradWithMutations: expand_copy_SymInt
   tags: view_copy
 
 - func: permute_copy(Tensor self, int[] dims) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: permute_copy
+    CompositeExplicitAutogradWithMutations: permute_copy
   tags: view_copy
 
 - func: _reshape_alias_copy(Tensor self, int[] size, int[] stride) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _reshape_alias_copy
+    CompositeExplicitAutogradWithMutations: _reshape_alias_copy
   tags: view_copy
 
 - func: select_copy.int(Tensor self, int dim, int index) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: select_copy_int
+    CompositeExplicitAutogradWithMutations: select_copy_int
   tags: view_copy
 
 - func: detach_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: detach_copy
+    CompositeExplicitAutogradWithMutations: detach_copy
   tags: view_copy
 
 - func: slice_copy.Tensor(Tensor self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: slice_copy_Tensor
+    CompositeExplicitAutogradWithMutations: slice_copy_Tensor
   tags: view_copy
 
 - func: split_copy.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
   variants: function
   dispatch:
-    CompositeExplicitAutograd: split_copy_Tensor
+    CompositeExplicitAutogradWithMutations: split_copy_Tensor
   tags: view_copy
 
 - func: split_with_sizes_copy(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   variants: function
   dispatch:
-    CompositeExplicitAutograd: split_with_sizes_copy
+    CompositeExplicitAutogradWithMutations: split_with_sizes_copy
   tags: view_copy
 
 - func: squeeze_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: squeeze_copy
+    CompositeExplicitAutogradWithMutations: squeeze_copy
   tags: view_copy
 
 - func: squeeze_copy.dim(Tensor self, int dim) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: squeeze_copy_dim
+    CompositeExplicitAutogradWithMutations: squeeze_copy_dim
   tags: view_copy
 
 - func: t_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: t_copy
+    CompositeExplicitAutogradWithMutations: t_copy
   tags: view_copy
 
 - func: transpose_copy.int(Tensor self, int dim0, int dim1) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: transpose_copy_int
+    CompositeExplicitAutogradWithMutations: transpose_copy_int
   tags: view_copy
 
 - func: unsqueeze_copy(Tensor self, int dim) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: unsqueeze_copy
+    CompositeExplicitAutogradWithMutations: unsqueeze_copy
   tags: view_copy
 
 - func: _indices_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _indices_copy
+    CompositeExplicitAutogradWithMutations: _indices_copy
   tags: view_copy
 
 - func: _values_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _values_copy
+    CompositeExplicitAutogradWithMutations: _values_copy
   tags: view_copy
 
 - func: indices_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: indices_copy
+    CompositeExplicitAutogradWithMutations: indices_copy
   tags: view_copy
 
 - func: values_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: values_copy
+    CompositeExplicitAutogradWithMutations: values_copy
   tags: view_copy
 
 - func: crow_indices_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: crow_indices_copy
+    CompositeExplicitAutogradWithMutations: crow_indices_copy
   tags: view_copy
 
 - func: col_indices_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: col_indices_copy
+    CompositeExplicitAutogradWithMutations: col_indices_copy
   tags: view_copy
 
 - func: unbind_copy.int(Tensor self, int dim=0) -> Tensor[]
   variants: function
   dispatch:
-    CompositeExplicitAutograd: unbind_copy_int
+    CompositeExplicitAutogradWithMutations: unbind_copy_int
   tags: view_copy
 
 - func: view_copy(Tensor self, int[] size) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: view_copy
+    CompositeExplicitAutogradWithMutations: view_copy
   tags: view_copy
 
 - func: view_copy.dtype(Tensor self, ScalarType dtype) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: view_copy_dtype
+    CompositeExplicitAutogradWithMutations: view_copy_dtype
   tags: view_copy
 
 - func: unfold_copy(Tensor self, int dimension, int size, int step) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: unfold_copy
+    CompositeExplicitAutogradWithMutations: unfold_copy
   tags: view_copy
 
 - func: alias_copy(Tensor self) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: alias_copy
+    CompositeExplicitAutogradWithMutations: alias_copy
   tags: view_copy
 
 - func: to_padded_tensor(Tensor self, float padding) -> Tensor
