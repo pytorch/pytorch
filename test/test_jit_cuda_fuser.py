@@ -3611,6 +3611,30 @@ class TestCudaFuser(JitTestCase):
             self._view_test_generator(ndims, self._bias_view_relu_helper)
         self._alias_bias_view_relu_helper([2, 3, 4, 5], [1, 6, 1, 2, 2, 5, 1], torch.float, 'cuda', 1e-6)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_strict_fusion(self):
+        def success(x):
+            with torch.jit.strict_fusion():
+                return x + x + x
+
+        scripted = self.checkScript(success, (torch.rand([4], device='cuda'),))
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_not("aten::add").check("prim::CudaFusionGroup").run(g)
+
+        def failure(x):
+            with torch.jit.strict_fusion():
+                return x + torch.mm(x, x) + x
+
+        with self.assertRaises(Exception) as error_out:
+            foo_s = torch.jit.script(failure)
+            foo_s(torch.rand([4, 4]))
+            foo_s(torch.rand([4, 4]))
+
+        fc = FileCheck().check("Found unfused operators")
+        fc.check("aten::mm").run(str(error_out.exception))
+
     def _ltc_helper(self, shape, dtype, device, error, approximate=True):
         # modeled after LTC linear layer
         class LTC(torch.nn.Module):
@@ -4550,7 +4574,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         for variant, sample in variant_sample_pairs:
-            trace = create_traced_fn(self, variant)
+            trace = create_traced_fn(self, variant, cache_traced_fn=True)
             ref = variant(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
             trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)

@@ -779,10 +779,12 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     return self
 
 
+@quantized_args(True)
 def relu(g, input):
     return op_with_optional_float_cast(g, "Relu", input, opset_before=14)
 
 
+@quantized_args(True)
 def relu6(g, input):
     relu = op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     return clamp_max(g, relu, 6)
@@ -1037,10 +1039,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         if mod != [0] * len(mod):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
-            if sym_help.is_caffe2_aten_fallback():
-                return _unimplemented(name, "output size that are not factor of input size")
-            else:
-                return sym_help._onnx_unsupported(name + ", since output size is not factor of input size")
+            return _unimplemented(name, "output size that are not factor of input size")
         k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
@@ -1100,6 +1099,50 @@ def constant_pad_nd(g, input, padding, value):
     paddings = _prepare_onnx_paddings(sym_help._get_tensor_rank(input), padding)
     return op_with_optional_float_cast(g, "Pad", input, pads_i=paddings, mode_s=mode, value_f=value, opset_before=11)
 
+def _pad_circular(g, input, pad):
+    padding = _convert_padding_node(pad)
+    assert len(padding) % 2 == 0
+    ndim = len(padding) // 2
+
+    cur = input
+    for idx in range(ndim):
+        pad_l = padding[-(2 * idx + 1)]
+        pad_r = padding[-(2 * idx + 2)]
+
+        tensors = []
+        if pad_l > 0:
+            left = sym_help._slice_helper(
+                g,
+                cur,
+                axes=[2 + idx],
+                starts=[-(pad_l + 1)],
+                ends=[-1])
+            tensors.append(left)
+
+        if pad_l < 0 or pad_r < 0:
+            middle = sym_help._slice_helper(
+                g,
+                cur,
+                axes=[2 + idx],
+                starts=[max(0, -pad_l)],
+                ends=[-(1 + max(0, -pad_r))])
+            tensors.append(middle)
+        else:
+            tensors.append(cur)
+
+        if pad_r > 0:
+            right = sym_help._slice_helper(
+                g,
+                cur,
+                axes=[2 + idx],
+                starts=[0],
+                ends=[pad_r])
+            tensors.append(right)
+
+        cur = g.op("Concat", *tensors, axis_i=(2 + idx))
+
+    return cur
+
 
 def reflection_pad(g, input, padding):
     mode = "reflect"
@@ -1122,6 +1165,19 @@ replication_pad1d = replication_pad
 replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
+
+def pad(g, input, pad, mode, value):
+    mode = sym_help._parse_arg(mode, "s")
+    if mode == "replicate":
+        return replication_pad(g, input, pad)
+    elif mode == "reflect":
+        return reflection_pad(g, input, pad)
+    elif mode == "constant":
+        return constant_pad_nd(g, input, pad, value)
+    elif mode == "circular":
+        return _pad_circular(g, input, pad)
+    else:
+        raise RuntimeError(f"Unrecognized padding mode {mode}")
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):
@@ -1658,6 +1714,15 @@ def cosine_similarity(g, x1, x2, dim, eps):
                                        axes_i=[dim], keepdims_i=0)
     div_tens = max(g, sqrt(g, mul(g, x1_l2, x2_l2)), g.op("Constant", value_t=torch.tensor([eps])))
     return div(g, cross, div_tens)
+
+
+def pairwise_distance(g, input1, input2, p, eps, keepdim):
+    if not sym_help._is_value(eps):
+        eps = g.op("Constant", value_t=torch.tensor([eps]))
+    inv_p = div(g, g.op("Constant", value_t=torch.tensor([1], dtype=torch.float)), add(g, p, eps))
+    summation = sym_help._reducesum_helper(g, pow(g, sub(g, input1, input2), p),
+                                           axes_i=[-1], keepdims_i=_parse_arg(keepdim, "i"))
+    return pow(g, summation, inv_p)
 
 
 # ignore clone operators that are inserted by PyTorch autograd
@@ -3205,6 +3270,11 @@ def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
         return result
 
 
+@parse_args("v", "v", "i")
+def linalg_cross(g, input, other, dim=-1):
+    return cross(g, input, other, dim)
+
+
 @parse_args("v", "is", "i")
 def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op("Mul", self, self)
@@ -3262,10 +3332,8 @@ def remainder(g, input, other):
     return g.op("Sub", input, quo)
 
 @parse_args("v", "s")
-def gelu(g, self, approximate):
-    # none approximate : onnx::Constant[value={0}]
-    # tanh approximate : onnx::Constant[value={1}]
-    if approximate == 'tanh':
+def gelu(g, self: torch._C.Value, approximate: str = "none"):
+    if approximate == "tanh":
         kBeta = math.sqrt(2 / math.pi)
         kKappa = 0.044715
 
@@ -3596,6 +3664,37 @@ def roll(g, self, shifts, dims):
         result = g.op("Concat", *shapes, axis_i=dims[i])
 
     return result
+
+
+@parse_args("v", "v", "i")
+def cross(g, input, other, dim=None):
+    dim = sym_help._get_dim_for_cross(input, dim)
+    # If we have two tensors such that
+    # A = [a, b, c], B = [d, e, f], we permute the tensor such that we have
+    # After first roll,
+    # A' = [b, c, a], B' = [f, d, e], so that we calculate (b*f, c*d, a*e)
+    roll_x_1 = roll(g, input, [2], [dim])
+    roll_y_1 = roll(g, other, [1], [dim])
+    # After second roll,
+    # A' = [c, a, b], B' = [e, f, d], so that we calculate (c*e, a*f, b*d)
+    roll_x_2 = roll(g, input, [1], [dim])
+    roll_y_2 = roll(g, other, [2], [dim])
+    # cross product is calculated as
+    # result = [(b*f - c*e), (c*d - a*f), (a*e - b*d)]
+    return sub(g, mul(g, roll_x_1, roll_y_1), mul(g, roll_x_2, roll_y_2))
+
+
+def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
+    # X1.shape = (B * P * D), X2.shape = (B * R * D)
+    # In order to respect numpy style broadcasting as demonstrated in
+    # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
+    # we unsqueeze both input tensors
+    # Currently we ignore the 'compute_mode' variable as we use default to
+    # using matrix multiplication to calculate the euclidean distance
+    rank = sym_help._get_tensor_rank(x1)
+    broadcasted_x1 = sym_help._unsqueeze_helper(g, x1, [rank - 1])
+    broadcasted_x2 = sym_help._unsqueeze_helper(g, x2, [rank - 2])
+    return pairwise_distance(g, broadcasted_x1, broadcasted_x2, p, eps=1e-06, keepdim=False)
 
 
 def broadcast_tensors(g, self):
