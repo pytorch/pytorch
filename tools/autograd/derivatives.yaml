@@ -1694,6 +1694,10 @@
   self: zeros_like(grad)
   result: auto_linear
 
+- name: zero(Tensor self) -> Tensor
+  self: zero(grad)
+  result: auto_linear
+
 - name: sparse_mask(Tensor self, Tensor mask) -> Tensor
   self: grad.to_dense().sparse_mask(mask).to_dense()
   mask: non_differentiable
