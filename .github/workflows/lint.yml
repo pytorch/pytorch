@@ -60,7 +60,7 @@ jobs:
           # in JSON mode and use jq to massage the output into GitHub Actions
           # workflow commands.
           lintrunner --merge-base-with "${PR_BASE_SHA}" --json | \
-            jq --raw-output '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + @uri"\(.description)"'
+            jq --raw-output '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))'
   quick-checks:
     name: quick-checks
     runs-on: ubuntu-18.04
