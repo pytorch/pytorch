@@ -32,6 +32,8 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
                 return f"torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name})"
             elif arg.lazy_type.type is tensorListValueT:
                 return f"lazy_{arg.name}_tensorlist"
+            elif arg.is_symint_or_list:
+                return f"Value(std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>({arg.name}.toSymbolicIntNode())->node_, 0)"
             return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.lazy_type, OptionalCType):
             if arg.is_wrapped_scalar:
@@ -251,6 +253,8 @@ class GenLazyNativeFuncDefinition:
             if arg.is_wrapped_scalar:
                 # no lazy tensor wrapper for scalars that are promoted to IR values
                 continue
+            elif arg.is_symint_or_list:
+                continue  # values are extracted in isValueType
             elif isinstance(arg.lazy_type, BaseCType):
                 if arg.lazy_type.type is tensorListValueT:
                     lazy_tensor_decls.append(
