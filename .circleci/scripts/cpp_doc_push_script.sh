@@ -56,7 +56,7 @@ sudo apt-get -y install doxygen
 # Generate ATen files
 pushd "${pt_checkout}"
 pip install -r requirements.txt
-time python -m tools.codegen.gen \
+time python -m torchgen.gen \
   -s aten/src/ATen \
   -d build/aten/src/ATen
 

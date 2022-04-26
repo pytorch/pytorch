@@ -37,10 +37,10 @@ import yaml
 
 from .gen_trace_type import should_trace
 
-from tools.codegen.code_template import CodeTemplate
-from tools.codegen.api import cpp
-from tools.codegen.api.types import CppSignatureGroup
-from tools.codegen.api.python import (
+from torchgen.code_template import CodeTemplate
+from torchgen.api import cpp
+from torchgen.api.types import CppSignatureGroup
+from torchgen.api.python import (
     PythonArgument,
     PythonSignature,
     PythonSignatureDeprecated,
@@ -57,16 +57,16 @@ from tools.codegen.api.python import (
     namedtuple_fieldnames,
     signature,
 )
-from tools.codegen.gen import cpp_string, parse_native_yaml
-from tools.codegen.context import with_native_function
-from tools.codegen.model import (
+from torchgen.gen import cpp_string, parse_native_yaml
+from torchgen.context import with_native_function
+from torchgen.model import (
     Argument,
     BaseOperatorName,
     NativeFunction,
     Type,
     Variant,
 )
-from tools.codegen.utils import split_name_params, YamlLoader, FileManager
+from torchgen.utils import split_name_params, YamlLoader, FileManager
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
@@ -151,6 +151,10 @@ _SKIP_PYTHON_BINDINGS = [
     "_has_same_storage_numel",  # used for forward AD internals
     "_reshape_alias",
     "replace_",  # only used by the functionalization pass, doesn't need to be exposed to python
+    "zero",  # only used by the functionalization pass, doesn't need to be exposed to python
+    "copy",  # only used by the functionalization pass
+    "fill.Tensor",  # only used by the functionalization pass
+    "fill.Scalar",  # only used by the functionalization pass
 ]
 
 SKIP_PYTHON_BINDINGS = list(
