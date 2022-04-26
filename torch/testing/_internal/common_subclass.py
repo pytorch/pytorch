@@ -1,7 +1,5 @@
-import operator
 import torch
 from copy import deepcopy
-from functools import reduce
 from torch.utils._pytree import tree_map
 
 # TODO: Move LoggingTensor here.
