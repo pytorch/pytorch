@@ -465,10 +465,14 @@ flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
       flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>>
       names_offset = 0;
   c10::QualifiedName setstate_name(*class_ptr->name(), "__setstate__");
+  c10::QualifiedName getstate_name(*class_ptr->name(), "__getstate__");
   const mobile::Function* setstate = mcu_->find_function(setstate_name);
-  if (setstate != nullptr) {
+  const mobile::Function* getstate = mcu_->find_function(getstate_name);
+  if (setstate != nullptr && getstate != nullptr) {
     typetype = mobile::serialization::TypeType::CLASS_WITH_SETSTATE;
-  } else if (class_ptr->findMethod("__setstate__")) {
+  } else if (
+      class_ptr->findMethod("__setstate__") &&
+      class_ptr->findMethod("__getstate__")) {
     typetype = mobile::serialization::TypeType::CUSTOM_CLASS;
   } else {
     size_t num_attr = class_ptr->numAttributes();

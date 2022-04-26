@@ -200,7 +200,9 @@ class GitRepo:
                         # which creates a tracking problem
                         if (
                             "pytorch/pytorch" not in self.remote_url() or
-                            frc.commit_hash != "0a6a1b27a464ba5be5f587cce2ee12ab8c504dbf"
+                            frc.commit_hash not in {"0a6a1b27a464ba5be5f587cce2ee12ab8c504dbf",
+                                                    "6d0f4a1d545a8f161df459e8d4ccafd4b9017dbe",
+                                                    "edf909e58f06150f7be41da2f98a3b9de3167bca"}
                         ):
                             raise RuntimeError(f"Unexpected differences between {frc} and {toc}")
                     from_commits.remove(frc.commit_hash)
@@ -210,10 +212,12 @@ class GitRepo:
                 from_commits.remove(commit)
             for commit in to_values:
                 to_commits.remove(commit)
-        # Another HACK: Patch-id is not stable for commits with binary files
+        # Another HACK: Patch-id is not stable for commits with binary files or for big changes across commits
         # I.e. cherry-picking those from one branch into another will change patchid
         if "pytorch/pytorch" in self.remote_url():
-            for excluded_commit in ["8e09e20c1dafcdbdb45c2d1574da68a32e54a3a5"]:
+            for excluded_commit in {"8e09e20c1dafcdbdb45c2d1574da68a32e54a3a5",
+                                    "5f37e5c2a39c3acb776756a17730b865f0953432",
+                                    "b5222584e6d6990c6585981a936defd1af14c0ba"}:
                 if excluded_commit in from_commits:
                     from_commits.remove(excluded_commit)
 

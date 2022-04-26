@@ -152,7 +152,7 @@ public:
 
 
   template<class Return, class... Args>
-  static Return callWithDispatchKeySlowPath(const TypedOperatorHandle<Return (Args...)>& op, bool pre_sampled, DispatchKeySet dispatchKeySet, const KernelFunction& kernel, Args... args);
+  static Return callWithDispatchKeySlowPath(const TypedOperatorHandle<Return (Args...)>& op, at::StepCallbacks& stepCallbacks, DispatchKeySet dispatchKeySet, const KernelFunction& kernel, Args... args);
 
   // Like call, but intended for use in a redispatch in kernels that have explicitly performed the DispatchKey update calculatulation.
   // This will take the DispatchKeySet completely as is and dispatch to the kernel of the corresponding highest priority key in the set.
@@ -494,33 +494,27 @@ struct CaptureKernelCall<void> {
 
 // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
 template<class Return, class... Args>
-inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<Return(Args...)>& op, bool pre_sampled, DispatchKeySet dispatchKeySet, const KernelFunction& kernel, Args... args) {
-    // Check if we need to run callbacks registered with RecordFunction
-    // If true and callbacks need inputs, we box the arguments and pass
-    // them into the callbacks and also into the kernel call
+inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<Return(Args...)>& op, at::StepCallbacks& stepCallbacks, DispatchKeySet dispatchKeySet, const KernelFunction& kernel, Args... args) {
+  // If callbacks need inputs, we box the arguments and pass them to the guard.
+  // Note: For perf reasons we wouldn't want to prematurely box the arguments.
+  at::RecordFunction guard(std::move(stepCallbacks));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op.operatorDef_->op.isObserved());
+  auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
+  guard.needsInputs()
+      ? runRecordFunction(guard, op, dispatchKey, impl::boxArgs(args...))
+      : runRecordFunction(guard, op, dispatchKey);
 
-    // Note: for perf reasons we wouldn't want to pass arguments into
-    // the function call or prematurely box them
-  at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
-  if (C10_UNLIKELY(guard.isActive())) {
-    auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-    if (op.operatorDef_->op.isObserved()) {
-      if (guard.needsInputs()) {
-        runRecordFunction(guard, op, dispatchKey, impl::boxArgs(args...));
-      } else {
-        runRecordFunction(guard, op, dispatchKey);
-      }
-      if (C10_UNLIKELY(guard.needsOutputs())) {
-        // Calls the kernel and capture the output temporarily to pass to
-        // RecordFunction.
-        detail::CaptureKernelCall<Return> captureKernelCall(
-            kernel, op, dispatchKeySet, std::forward<Args>(args)...);
-        guard.setOutputs(captureKernelCall.getOutputs());
-        // Releases the captured output to return to caller.
-        return std::move(captureKernelCall).release();
-      }
-    }
+  if (C10_UNLIKELY(guard.needsOutputs())) {
+    // Calls the kernel and capture the output temporarily to pass to
+    // RecordFunction.
+    detail::CaptureKernelCall<Return> captureKernelCall(
+        kernel, op, dispatchKeySet, std::forward<Args>(args)...);
+    guard.setOutputs(captureKernelCall.getOutputs());
+    // Releases the captured output to return to caller.
+    return std::move(captureKernelCall).release();
   }
+
   // keeping the guard alive while executing the kernel
   return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
@@ -533,15 +527,9 @@ C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorH
     .template getDispatchKeySetUnboxed<Args...>(args...);
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  // By default, when there're no high-frequency or non-sampled callbacks,
-  // RecordFunction is pre-sampled as a perf optimization;
-  // shouldRunRecordFunction checks whether RecordFunction should be executed,
-  // and sets pre_sampled boolean argument value to whether pre-sampling was used -
-  // this boolean is passed into RecordFunction to adjust the sampling rates of
-  // the callbacks
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    return callWithDispatchKeySlowPath<Return, Args...>(op, pre_sampled, dispatchKeySet, kernel, std::forward<Args>(args)...);
+  auto step_callbacks = at::getStepCallbacks(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(!step_callbacks.empty() && op.operatorDef_->op.isObserved())) {
+    return callWithDispatchKeySlowPath<Return, Args...>(op, step_callbacks, dispatchKeySet, kernel, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
@@ -562,25 +550,18 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    // using already existing stack to record function execution in observers
-    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
-    if (C10_UNLIKELY(guard.isActive())) {
-      auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-      if (entry.isObserved()) {
-        if (guard.needsInputs()) {
-          runRecordFunction(guard, op, dispatchKey, *stack);
-        } else {
-          runRecordFunction(guard, op, dispatchKey);
-        }
-      }
-    }
+  auto step_callbacks = at::getStepCallbacks(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(!step_callbacks.empty() && entry.isObserved())) {
+    at::RecordFunction guard(std::move(step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
+    guard.needsInputs() ? runRecordFunction(guard, op, dispatchKey, *stack)
+                        : runRecordFunction(guard, op, dispatchKey);
+
     // keeping the guard alive while executing the kernel
     kernel.callBoxed(op, dispatchKeySet, stack);
-    // track outputs
-    if (C10_UNLIKELY(
-            guard.isActive() && entry.isObserved() && guard.needsOutputs())) {
+
+    if (C10_UNLIKELY(guard.needsOutputs())) {
       guard.setOutputs(*stack);
     }
     return;
