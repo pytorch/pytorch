@@ -611,9 +611,6 @@ void validateAlignedVectorizedTensors(
 
   // Verify extents of aligned vectorized tensors
   for (const auto& vec_info : kernel->summary().vectorized_set_info) {
-    auto in_tv = vec_info.producer_tv;
-    auto out_tv = vec_info.consumer_tv;
-
     if (vec_info.vectorized_leaf_id->getParallelType() ==
         ParallelType::Vectorize) {
       validateAlignedVectorizeExtents(vec_info, expr_eval);
@@ -1028,6 +1025,7 @@ NvrtcFunction nvrtcCompile(
 
     if (compile_to_sass) {
       max_register_usage += std::to_string(max_register);
+      args.push_back("--ptxas-options");
       args.push_back(max_register_usage.c_str());
     } else {
       options.push_back(CU_JIT_MAX_REGISTERS);
