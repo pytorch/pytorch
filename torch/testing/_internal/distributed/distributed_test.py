@@ -38,6 +38,11 @@ from torch.distributed.distributed_c10d import (
     AllreduceOptions,
     GroupMember,
 )
+from torch.distributed.utils import (
+    _verify_param_shape_across_processes,
+    _sync_params_and_buffers,
+)
+
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 from torch.testing._internal.common_distributed import (
@@ -5890,7 +5895,13 @@ class DistributedTest:
                         # tensor from another rank should be different.
                         self.assertNotEqual(t, tensor)
 
-            net._sync_params_and_buffers(authoritative_rank=rank_to_broadcast)
+            _sync_params_and_buffers(
+                module=net.module,
+                process_group=net.process_group,
+                broadcast_bucket_size=net.broadcast_bucket_size,
+                rank=rank_to_broadcast,
+                params_and_buffers_to_ignore=net.parameters_to_ignore
+            )
             # Now all model params should be the same.
             self.validate_net_equivalence(net)
             # Since the network params were broadcast from rank_to_broadcast, validate that
@@ -7328,7 +7339,7 @@ class DistributedTest:
             )
 
             # Modify the model so that the number of parameters are different for each rank.
-            # This will cause a RuntimeError to be thrown below in dist._verify_params_across_processes,
+            # This will cause a RuntimeError to be thrown below in _verify_param_shape_across_processes,
             # so we can check if the correct error is thrown and is logged.
             # We can't do this in the constructor above otherwise the logger will
             # not be properly initialized.
@@ -7337,9 +7348,16 @@ class DistributedTest:
             # if we pass a logger we can verify that it was logged
             with ctx:
                 if use_logger:
-                    dist._verify_params_across_processes(net.process_group, list(net.parameters()), net.logger)
+                    _verify_param_shape_across_processes(
+                        net.process_group,
+                        list(net.parameters()),
+                        net.logger
+                    )
                 else:
-                    dist._verify_params_across_processes(net.process_group, list(net.parameters()))
+                    _verify_param_shape_across_processes(
+                        net.process_group,
+                        list(net.parameters())
+                    )
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(group_to_use)
