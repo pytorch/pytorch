@@ -524,8 +524,8 @@ template <typename Inputs, typename F, typename... Args>
 void record_function_with_scope_and_debug_handle(RecordScope scope, F fn, int64_t debug_handle, const Inputs& inputs, Args&&... args) {
   at::RecordFunction guard(scope);
   if (guard.isActive()) {
+    guard.setDebugHandle(debug_handle);
     if (guard.needsInputs()) {
-      guard.setDebugHandle(debug_handle);
       guard.before(fn, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()), std::forward<Args>(args)...);
     } else {
       guard.before(fn, std::forward<Args>(args)...);
