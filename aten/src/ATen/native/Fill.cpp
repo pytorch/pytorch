@@ -132,12 +132,6 @@ Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
   return self;
 }
 
-// Needed for functionalization: we need to convert zero_() directly to zero()
-// when removing mutations.
-Tensor zero(const Tensor& self) {
-  return at::zeros_like(self);
-}
-
 Tensor& zero_(Tensor &self) {
   int64_t nelements = c10::multiply_integers(self.sizes());
   if (self.device() == at::kCPU &&
