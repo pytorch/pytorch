@@ -85,12 +85,11 @@ severities = {
 def check_files(
     filenames: List[str],
     config: str,
-    binary: str,
     retries: int,
 ) -> List[LintMessage]:
     try:
         proc = run_command(
-            [binary, f"--config={config}"] + filenames,
+            [sys.executable, "-mmypy", f"--config={config}"] + filenames,
             extra_env={},
             retries=retries,
         )
@@ -131,11 +130,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="mypy wrapper linter.",
         fromfile_prefix_chars="@",
-    )
-    parser.add_argument(
-        "--binary",
-        required=True,
-        help="mypy binary path",
     )
     parser.add_argument(
         "--retries",
@@ -187,7 +181,7 @@ def main() -> None:
         else:
             filenames[filename] = True
 
-    lint_messages = check_files(list(filenames), args.config, args.binary, args.retries)
+    lint_messages = check_files(list(filenames), args.config, args.retries)
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 

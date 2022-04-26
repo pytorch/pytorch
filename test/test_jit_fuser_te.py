@@ -2341,6 +2341,59 @@ class TestTEFuser(JitTestCase):
         scr(x)
         self.assertLastGraphAllFused()
 
+    def test_with_strict_fusion(self):
+
+        def success(x):
+            with torch.jit.strict_fusion():
+                return x + x + x
+
+        scripted = self.checkScript(success, (torch.rand([4]),))
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_not("aten::add").check("prim::TensorExprGroup").run(g)
+
+        def foo(x):
+            with torch.jit.strict_fusion():
+                return x + x + torch.rand([4]) + 3
+
+        with self.assertRaises(Exception) as error_out:
+            foo_s = torch.jit.script(foo)
+            foo_s(torch.rand([4]))
+            foo_s(torch.rand([4]))
+            print(torch.jit.last_executed_optimized_graph())
+        fc = FileCheck().check("Found unfused operators")
+        fc.check("aten::rand(int[] size")
+        fc.check("torch.rand([4]").run(str(error_out.exception))
+
+        with warnings.catch_warnings(record=True) as warns:
+            foo(torch.rand([4]))
+
+        FileCheck().check("Only works in script mode").run(str(warns[0]))
+
+        def test_autodiff(x):
+            with torch.jit.strict_fusion():
+                return torch.rand([4]) + x + x + x
+
+        foo_s = torch.jit.script(test_autodiff)
+        inp = torch.rand([4], requires_grad=True)
+        with self.assertRaises(Exception) as error_out:
+            for _ in range(3):
+                foo_s(inp)
+        f = FileCheck().check("unfused operators").check("aten::rand")
+        f.run(str(error_out.exception))
+
+        def test_separate_fusions(x, y):
+            with torch.jit.strict_fusion():
+                return x + x + x, y + y + y
+
+        inp = torch.rand([4], requires_grad=True)
+        with self.assertRaises(Exception) as error_out:
+            for _ in range(3):
+                foo_s = torch.jit.script(test_separate_fusions)
+                foo_s(inp, inp)
+
+        f = FileCheck().check("Found multiple fusions")
+        f.run(str(error_out.exception))
+
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False
 
@@ -2573,7 +2626,7 @@ def f({', '.join(param_names)}):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         for variant, sample in variant_sample_pairs:
-            trace = create_traced_fn(self, variant)
+            trace = create_traced_fn(self, variant, cache_traced_fn=True)
             ref = variant(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
             trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
