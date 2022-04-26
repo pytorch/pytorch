@@ -137,10 +137,16 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
+          # save container name for later step
+          echo "{container_name}={${container_name}}" >> $GITHUB_ENV
           # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
           docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+
+      - name: Save test results
+        if: always()
+        run:
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
-          docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
+          docker exec -t "${{ env.container_name }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
       - name: Get workflow job id
         id: get-job-id
