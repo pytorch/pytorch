@@ -372,7 +372,7 @@ Found a mutating operator ({f.func.name}) which returns multiple outputs, some o
                 inner_ret: str = f'std::get<{i}>({inner_out_name})' if return_is_tuple else inner_out_name
                 updates.append(f"""\
       auto output_{i} = at::functionalization::impl::to_functional_tensor({inner_ret});""")
-                return_names.append(f'output_{i}')
+                return_names.append(f'std::move(output_{i})')
     else:
         # More assertions:
         # We have some native functions that mutate their inputs, and also return fresh outputs

@@ -202,12 +202,11 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
+        assert not mutable, \
+            "Native functions should never return a mutable tensor list. They should return void."
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
-        if mutable and t.elem == BaseType(BaseTy.Tensor):
-            return BaseCType(iTensorListRefT)
-        else:
-            return VectorCType(elem)
+        return VectorCType(elem)
 
     raise AssertionError(f"unrecognized return type {t}")
 
