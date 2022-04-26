@@ -16211,6 +16211,10 @@ op_db: List[OpInfo] = [
             # FIXME: nansum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: flaky test so skipped instead of xfailed
+            # possibly bad low precision reference in numpy
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
+                         dtypes=[torch.float16]),
         ),
     ),
     ReductionOpInfo(
