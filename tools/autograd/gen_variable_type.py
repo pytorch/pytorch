@@ -52,7 +52,7 @@ from .gen_inplace_or_view_type import (
     AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION,
 )
 
-from tools.codegen.api.types import (
+from torchgen.api.types import (
     Binding,
     DispatcherSignature,
     BaseCType,
@@ -68,7 +68,7 @@ from tools.codegen.api.types import (
     TupleCType,
     VectorCType,
 )
-from tools.codegen.api.autograd import (
+from torchgen.api.autograd import (
     DifferentiableInput,
     NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute,
@@ -76,11 +76,11 @@ from tools.codegen.api.autograd import (
     gen_differentiable_outputs,
     is_differentiable,
 )
-from tools.codegen.api import cpp
-from tools.codegen.code_template import CodeTemplate
-from tools.codegen.context import native_function_manager, with_native_function
-from tools.codegen.utils import mapMaybe, FileManager
-from tools.codegen.model import (
+from torchgen.api import cpp
+from torchgen.code_template import CodeTemplate
+from torchgen.context import native_function_manager, with_native_function
+from torchgen.utils import mapMaybe, FileManager
+from torchgen.model import (
     Argument,
     NativeFunction,
     SchemaKind,
@@ -97,7 +97,6 @@ from typing import Callable, List, Optional, Sequence, Tuple, Union, Dict
 DONT_REQUIRE_DERIVATIVE = {
     # These only depend on the input Tensor's shape and device, not the data
     "ones_like",
-    "zeros_like",
     "rand_like",
     "randn_like",
     # These are only implemented on integral types
@@ -171,6 +170,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "triu",
     "chunk",
     "zero_",
+    "zeros_like",
     "eq_",
     "ne_",
     "add",
