@@ -8,13 +8,20 @@
 namespace torch {
 namespace jit {
 
-TORCH_API c10::optional<std::shared_ptr<Graph>> DecompositionGraphForSchema(
+TORCH_API c10::optional<std::shared_ptr<Graph>> GetDecomposition(
     const FunctionSchema& schema);
+
+TORCH_API void RegisterDecomposition(
+    const FunctionSchema& schema,
+    std::shared_ptr<Graph> g);
 
 TORCH_API void RunDecompositions(std::shared_ptr<Graph> g);
 
 TORCH_API c10::optional<GraphFunction*> GetDecompositionFunction(
     const FunctionSchema& schema);
+
+// For invocation in C++, recommended is to assign to static local variable
+TORCH_API Function* GetDecompositionExecutor(const char* schema_literal);
 
 } // namespace jit
 } // namespace torch
