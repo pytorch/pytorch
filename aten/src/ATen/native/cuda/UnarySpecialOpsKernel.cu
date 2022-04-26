@@ -41,6 +41,36 @@ void exp2_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
+const char airy_ai_name[] = "airy_ai";
+void airy_ai_kernel_cuda(TensorIteratorBase& iterator) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cuda", [&]() {
+      jitted_gpu_kernel<airy_ai_name, scalar_t, scalar_t, 1>(iterator, airy_ai_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cuda", [&]() {
+      gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return airy_ai(a);
+      });
+    });
+  #endif
+}
+
+const char airy_ai_name[] = "airy_bi";
+void airy_bi_kernel_cuda(TensorIteratorBase& iterator) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_bi_cuda", [&]() {
+      jitted_gpu_kernel<airy_bi_name, scalar_t, scalar_t, 1>(iterator, airy_bi_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_bi_cuda", [&]() {
+      gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return airy_bi(a);
+      });
+    });
+  #endif
+}
+
 const char i0_name[] = "i0";
 void i0_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
@@ -375,6 +405,8 @@ void entr_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
+REGISTER_DISPATCH(special_airy_ai_stub, &airy_ai_kernel_cuda);
+REGISTER_DISPATCH(special_airy_bi_stub, &airy_bi_kernel_cuda);
 REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_cuda);
 REGISTER_DISPATCH(special_i1_stub, &i1_kernel_cuda);

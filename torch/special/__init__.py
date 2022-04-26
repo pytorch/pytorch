@@ -2,12 +2,70 @@ import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
-__all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
-           'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
-           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log_ndtr', 'log1p', 'sinc', 'round', 'log_softmax',
-           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
+__all__ = [
+    'airy_ai',
+    'airy_bi',
+    'digamma',
+    'entr',
+    'erf',
+    'erfc',
+    'erfcx',
+    'erfinv',
+    'exp2',
+    'expit',
+    'expm1',
+    'gammainc',
+    'gammaincc',
+    'gammaln',
+    'i0',
+    'i0e',
+    'i1',
+    'i1e',
+    'log1p',
+    'log_ndtr',
+    'log_softmax',
+    'logit',
+    'logsumexp',
+    'multigammaln',
+    'ndtr',
+    'ndtri',
+    'polygamma',
+    'psi',
+    'round',
+    'sinc',
+    'softmax',
+    'xlog1py',
+    'xlogy',
+    'zeta',
+]
 
 Tensor = torch.Tensor
+
+airy_ai = _add_docstr(_special.special_airy_ai,
+                      r"""
+airy_ai(input, *, out=None) -> Tensor
+
+The Airy function :math:`Ai`.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""")
+
+airy_bi = _add_docstr(_special.special_airy_bi,
+                      r"""
+airy_bi(input, *, out=None) -> Tensor
+
+The Airy function :math:`Bi`.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""")
 
 entr = _add_docstr(_special.special_entr,
                    r"""

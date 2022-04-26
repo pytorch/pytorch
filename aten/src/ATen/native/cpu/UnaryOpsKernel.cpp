@@ -511,6 +511,18 @@ static void log_ndtr_kernel(TensorIteratorBase& iter) {
       });
 }
 
+static void airy_ai_kernel(TensorIteratorBase& iterator) {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_ai_cpu", [&]() {
+    cpu_kernel(iterator, [](scalar_t x) { return airy_ai(x); });
+  });
+}
+
+static void airy_bi_kernel(TensorIteratorBase& iterator) {
+  AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_bi_cpu", [&]() {
+    cpu_kernel(iterator, [](scalar_t x) { return airy_bi(x); });
+  });
+}
+
 static void i0e_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
   AT_DISPATCH_FLOATING_TYPES_AND(
@@ -649,6 +661,8 @@ REGISTER_DISPATCH(frexp_stub, &CPU_CAPABILITY::frexp_kernel);
 REGISTER_DISPATCH(special_i0e_stub, &CPU_CAPABILITY::i0e_kernel);
 REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
 REGISTER_DISPATCH(special_log_ndtr_stub, &CPU_CAPABILITY::log_ndtr_kernel);
+REGISTER_DISPATCH(special_airy_ai_stub, &CPU_CAPABILITY::airy_ai_kernel);
+REGISTER_DISPATCH(special_airy_bi_stub, &CPU_CAPABILITY::airy_bi_kernel);
 REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);

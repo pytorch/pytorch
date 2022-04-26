@@ -12,6 +12,8 @@ The torch.special module, modeled after SciPy's `special <https://docs.scipy.org
 Functions
 -----------------------
 
+.. autofunction:: airy_ai
+.. autofunction:: airy_bi
 .. autofunction:: entr
 .. autofunction:: erf
 .. autofunction:: erfc

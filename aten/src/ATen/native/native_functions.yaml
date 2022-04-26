@@ -10365,6 +10365,30 @@
 #   torch/special/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/special.h.
 #   The "special_" names should be hidden from the user and not documented.
 
+- func: special_airy_ai(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_airy_ai.out
+
+- func: special_airy_ai.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_airy_ai_out
+
+- func: special_airy_bi(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_airy_bi.out
+
+- func: special_airy_bi.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_airy_bi_out
+
 - func: special_entr(Tensor self) -> Tensor
   structured_delegate: special_entr.out
   python_module: special
