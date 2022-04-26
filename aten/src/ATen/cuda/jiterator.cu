@@ -1,19 +1,14 @@
-#include <ATen/cuda/jiterator.h>
-
-#include <ATen/native/TensorIterator.h>
-
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <ATen/code_template.h>
-#include <ATen/native/cuda/jit_utils.h>
-#include <ATen/cuda/llvm_jit_strings.h>
-
-#include <ATen/native/cuda/JitLoops.cuh>
-
 #include <c10/util/variant.h>
 
+#include <ATen/cuda/jiterator.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/cuda/jit_utils.h>
+#include <ATen/native/cuda/MemoryAccess.cuh>
+#include <ATen/native/cuda/JitLoops.cuh>
+
 #include <iostream>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -24,6 +19,45 @@ c10::SmallVector<std::string> get_extra_args_typenames(const std::vector<at::Sca
     args_typenames[i] = at::cuda::jit::typeName(extra_args[i].type());
   }
   return args_typenames;
+}
+
+int can_vectorize_up_to(at::ScalarType type, char* pointer) {
+  // uint64_t address = reinterpret_cast<uint64_t>(pointer);
+  // std::cout<<"address " <<address<< "\n";
+  switch(type) {
+    case ScalarType::Byte : return memory::can_vectorize_up_to<uint8_t>(pointer);
+    case ScalarType::Char : return memory::can_vectorize_up_to<int8_t>(pointer);
+    case ScalarType::Short : return memory::can_vectorize_up_to<int16_t>(pointer);
+    case ScalarType::Int : return memory::can_vectorize_up_to<int>(pointer);
+    case ScalarType::Long : return memory::can_vectorize_up_to<int64_t>(pointer);
+    case ScalarType::Half : return memory::can_vectorize_up_to<at::Half>(pointer);
+    case ScalarType::Float : return memory::can_vectorize_up_to<float>(pointer);
+    case ScalarType::Double : return memory::can_vectorize_up_to<double>(pointer);
+    case ScalarType::ComplexHalf : return memory::can_vectorize_up_to<c10::complex<c10::Half>>(pointer);
+    case ScalarType::ComplexFloat : return memory::can_vectorize_up_to<c10::complex<float>>(pointer);
+    case ScalarType::ComplexDouble : return memory::can_vectorize_up_to<c10::complex<double>>(pointer);
+    case ScalarType::Bool : return memory::can_vectorize_up_to<bool>(pointer);
+    case ScalarType::BFloat16 : return memory::can_vectorize_up_to<at::BFloat16>(pointer);
+    default:
+      AT_ERROR("Unsupported type found in can_vectorize_up_to");
+  }
+}
+
+// jitted version of the above
+// See Note [Jiterator], this relies on the assumptions enumerated there
+int jitted_can_vectorize_up_to(const TensorIteratorBase& iter) {
+  const at::ScalarType common_dtype = iter.common_dtype();
+  const at::ScalarType result_dtype = common_dtype;
+
+  // Deals with output
+  int result = can_vectorize_up_to(result_dtype, static_cast<char*>(iter.data_ptr(0)));
+
+  // Incorporates input(s)
+  for (auto i = 1; i < iter.ntensors(); ++i) {
+    result = std::min<int>(result, can_vectorize_up_to(common_dtype, static_cast<char*>(iter.data_ptr(i))));
+  }
+
+  return result;
 }
 
 struct OffsetCalculatorContainer {
@@ -52,11 +86,15 @@ private:
   } v;
 };
 
+template<int ...Is>
+auto ArrayType_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<at::detail::Array<char*, Is + 2>...>;
+
+template<int N>
+using ArrayType_List = decltype(ArrayType_List_Impl(std::make_integer_sequence<int, N>{}));
+
 struct ArrayVariant {
-  using ArrayTypes = c10::variant<
-    at::detail::Array<char*, 2>,
-    at::detail::Array<char*, 3>,
-    at::detail::Array<char*, 4>>;
+  // notice: This would produce c10::variant<at::detail::Array<char*, 2...10>>
+  using ArrayTypes = ArrayType_List<8>;
 
   ArrayVariant(const TensorIteratorBase& iter) {
     int N = iter.ntensors();
@@ -84,50 +122,62 @@ private:
   ArrayTypes array;
 };
 
+template<int ...Is>
+auto TrivialOffsetCalculator_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<TrivialOffsetCalculator<Is>...>;
 
+template<int N>
+using TrivialOffsetCalculator_List = decltype(TrivialOffsetCalculator_List_Impl(std::make_integer_sequence<int, N>{}));
 
-static void* make_trivial_offset_calculator(int arity) {
-  switch(arity) {
-    case 0: return static_cast<void*>(new TrivialOffsetCalculator<0>());
-    case 1: return static_cast<void*>(new TrivialOffsetCalculator<1>());
-    case 2: return static_cast<void*>(new TrivialOffsetCalculator<2>());
-    case 3: return static_cast<void*>(new TrivialOffsetCalculator<3>());
-    default:
-      AT_ERROR("make_trivial_offset_calculator not implemented for ninputs = ", arity);
+struct TrivialOffsetCalculatorVariant {
+  using TrivialOffsetCalculatorTypes = TrivialOffsetCalculator_List<8>;
+
+  TrivialOffsetCalculatorVariant(int arity) {
+    switch(arity) {
+      case 0: v = TrivialOffsetCalculator<0>(); break;
+      case 1: v = TrivialOffsetCalculator<1>(); break;
+      case 2: v = TrivialOffsetCalculator<2>(); break;
+      case 3: v = TrivialOffsetCalculator<3>(); break;
+      default:
+        AT_ERROR("TrivialOffsetCalculatorVariant not implemented for ninputs = ", arity);
+    }
   }
-}
 
-static void* make_load_with_cast(const TensorIteratorBase& iter) {
-  int arity = iter.ninputs();
-  switch(arity) {
-    case 0:
-    {
-      at::detail::Array<ScalarType, 0> dtypes;
-      for (auto i = 0; i < arity; ++i) {
-        dtypes[i] = iter.dtype(i + 1);
-      }
-      return static_cast<void*>(new memory::LoadWithCast<0>(dtypes));
-    }
-    case 1:
-    {
-      at::detail::Array<ScalarType, 1> dtypes;
-      for (auto i = 0; i < arity; ++i) {
-        dtypes[i] = iter.dtype(i + 1);
-      }
-      return static_cast<void*>(new memory::LoadWithCast<1>(dtypes));
-    }
-    case 2:
-    {
-      at::detail::Array<ScalarType, 2> dtypes;
-      for (auto i = 0; i < arity; ++i) {
-        dtypes[i] = iter.dtype(i + 1);
-      }
-      return static_cast<void*>(new memory::LoadWithCast<2>(dtypes));
-    }
-    default:
-      AT_ERROR("make_input_offset_calculator not implemented for ninputs = ", arity);
+  void* data_ptr() {
+    return c10::visit([](auto & v){ return static_cast<void*>(&v); }, v);
   }
-}
+
+private:
+  TrivialOffsetCalculatorTypes v;
+};
+
+template<int ...Is>
+auto LoadWithCastPtr_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<std::unique_ptr<memory::LoadWithCast<Is>>...>;
+
+template<int N>
+using LoadWithCastPtr_List = decltype(LoadWithCastPtr_List_Impl(std::make_integer_sequence<int, N>{}));
+
+struct LoadWithCastVariant {
+  using LoadWithCastPtr = LoadWithCastPtr_List<8>;
+
+  LoadWithCastVariant(const TensorIteratorBase& iter) {
+    int arity = iter.ninputs();
+    switch(arity) {
+      case 0: v = std::make_unique<memory::LoadWithCast<0>>(iter); break;
+      case 1: v = std::make_unique<memory::LoadWithCast<1>>(iter); break;
+      case 2: v = std::make_unique<memory::LoadWithCast<2>>(iter); break;
+      case 3: v = std::make_unique<memory::LoadWithCast<3>>(iter); break;
+      default:
+        AT_ERROR("make_input_offset_calculator not implemented for ninputs = ", arity);
+    }
+  }
+
+  void* data_ptr() {
+    return c10::visit([](auto & v){ return static_cast<void*>(v.get()); }, v);
+  }
+
+private:
+  LoadWithCastPtr v;
+};
 
 static inline void launch_jitted_vectorized_kernel(
   const std::string& name, TensorIteratorBase& iter,
@@ -137,9 +187,16 @@ static inline void launch_jitted_vectorized_kernel(
   // N is still int64_t for the computation, but it's always safe to cast result to int
   const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
 
-  // TODO: fix hard code here
-  //const int vec_size = memory::jitted_can_vectorize_up_to<result_type, f_inputs_type, arity>(data);
-  const int vec_size = 4;
+  // TODO: double check here, only seeing vec_size = 4, even for double
+  const int vec_size = jitted_can_vectorize_up_to(iter);
+
+  // std::cout<<"iter.common_dtype: " << toString(iter.common_dtype()) <<  " vec_size: "<<vec_size<<"\n";
+  // constexpr int vec4_alignment_half = std::alignment_of<memory::aligned_vector<at::Half, 4>>::value;
+  // constexpr int vec4_alignment_float = std::alignment_of<memory::aligned_vector<float, 4>>::value;
+  // constexpr int vec4_alignment_double = std::alignment_of<memory::aligned_vector<double, 4>>::value;
+  // std::cout << "vec4_alignment_half " << vec4_alignment_half << "\n";
+  // std::cout << "vec4_alignment_float " << vec4_alignment_float << "\n";
+  // std::cout << "vec4_alignment_double " << vec4_alignment_double << "\n";
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
   //   fn_ptr is set to the appropriate function based on the vec size and GPU used
@@ -149,7 +206,6 @@ static inline void launch_jitted_vectorized_kernel(
   static std::vector<at::cuda::jit::NvrtcFunction> fns4(c10::cuda::device_count());
   static std::vector<at::cuda::jit::NvrtcFunction> fns2(c10::cuda::device_count());
   static std::vector<at::cuda::jit::NvrtcFunction> fns1(c10::cuda::device_count());
-
 
   at::cuda::jit::NvrtcFunction* fn_ptr;
   if (vec_size == 4) {
@@ -177,7 +233,7 @@ static inline void launch_jitted_vectorized_kernel(
       std::string compute_type_str = at::cuda::jit::typeName(toOpMathType(common_dtype));
       std::string result_type_str = at::cuda::jit::typeName(common_dtype);
 
-      std::cout<<"launch_jitted_vectorized_kernel_raw_ptr"<<std::endl;
+      // std::cout<<"launch_jitted_vectorized_kernel_raw_ptr"<<std::endl;
 
       c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames(extra_args);
       auto code = at::cuda::jit::generate_code(nTensors, f, name,
@@ -212,8 +268,8 @@ static inline void launch_jitted_vectorized_kernel(
     }
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   } else {
-    // TODO: fix raw ptr here
-    void* ic_ptr = make_trivial_offset_calculator(iter.ninputs());
+    TrivialOffsetCalculatorVariant input_offset_calculator(iter.ninputs());
+    void* ic_ptr = input_offset_calculator.data_ptr();
     auto oc = TrivialOffsetCalculator<1>();
     auto l = memory::LoadWithoutCast();
     auto s = memory::StoreWithoutCast();
@@ -264,7 +320,7 @@ static inline void launch_jitted_unrolled_kernel(
       std::string compute_type_str = at::cuda::jit::typeName(toOpMathType(common_dtype));
       std::string result_type_str = at::cuda::jit::typeName(common_dtype);
 
-      std::cout<<"launch_jitted_unrolled_kernel_raw_ptr\n";
+      // std::cout<<"launch_jitted_unrolled_kernel_raw_ptr\n";
 
       c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames(extra_args);
       auto code = at::cuda::jit::generate_code(nTensors, f, name,
@@ -318,8 +374,6 @@ void jitted_gpu_kernel_dynamic_impl(
   int64_t numel = iter.numel();
   bool contiguous = iter.is_contiguous();
 
-  std::cout<<"contiguous: "<< contiguous << " dynamic_casting: "<< dynamic_casting << std::endl;
-
   // Decides which of 4 kernel types to launch
   // Variations are:
   //   - Case 1: no dynamic casting and contiguous
@@ -362,21 +416,19 @@ void jitted_gpu_kernel_dynamic_impl(
   // Cases 3 and 4 are handled below
   // Both require construction of a storer (this asserts 1 output) and one or more loaders
 
+  // Creates load casts from inputs (note offset indexing into the iterators 1...n tensors)
+  LoadWithCastVariant loader(iter);
+  void* l_ptr = loader.data_ptr();
+
   // Creates store cast to output (the zeroth tensor in TensorIterator)
   auto storer = memory::StoreWithCast(iter.dtype(0));
-
-  // Creates load casts from inputs (note offset indexing into the iterators 1...n tensors)
-  // at::detail::Array<ScalarType, arity> dtypes;
-  // for (auto i = decltype(arity){0}; i < arity; ++i) {
-  //   dtypes[i] = iter.dtype(i + 1);
-  // }
-  // auto loader = memory::LoadWithCast<arity>(dtypes);
-  void* l_ptr = make_load_with_cast(iter);
   void* s_ptr = static_cast<void*>(&storer);
 
   if (contiguous) {
     // Case 3: dynamic casting and contiguous
-    void* ic_ptr = make_trivial_offset_calculator(iter.ninputs());
+    TrivialOffsetCalculatorVariant input_offset_calculator(iter.ninputs());
+    void* ic_ptr = input_offset_calculator.data_ptr();
+
     auto output_offset_calculator = TrivialOffsetCalculator<1>();
     void* oc_ptr = static_cast<void*>(&output_offset_calculator);
 

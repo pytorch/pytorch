@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/macros/Export.h>
-
 #include <ATen/core/Tensor.h>
 
 #include <string>
