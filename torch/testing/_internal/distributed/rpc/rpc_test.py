@@ -2095,12 +2095,15 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_profiler_with_autograd_context(self):
         self._run_test_profiler_with_autograd_context()
 
-    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False, dst=None):
+    def _profiler_test_with_rpc(
+        self, rpc_exec_mode, func, args, use_record_function=False, dst=None, kineto_profile=False
+    ):
         dst = dst if dst is not None else (self.rank + 1) % self.world_size
 
         # only run profiler on rank 1.
+        p = _profile if not kineto_profile else torch.profiler.profile  # kineto
         if self.rank == 1:
-            with _profile() as prof:
+            with p() as prof:
                 record_function_ctx_mgr = (
                     contextlib.suppress()
                     if not use_record_function
@@ -2113,6 +2116,15 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                         rpc.rpc_sync(worker_name(dst), func, args=args)
                     elif rpc_exec_mode == RPCExecMode.ASYNC:
                         fut = rpc.rpc_async(worker_name(dst), func, args=args)
+                        if kineto_profile:
+                            # Ensure multiple async RPCs don't cause issues.
+                            # Would have raised
+                            # "RuntimeError: Cannot call
+                            # RemoteProfilerManager::setCurrentKey when current
+                            # key is already set." error if RPC profiling was
+                            # not disabled properly for kineto.
+                            fut2 = rpc.rpc_async(worker_name(dst), func, args=args)
+                            fut2.wait()
                         fut.wait()
                     else:
                         self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
@@ -2124,7 +2136,15 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                         # for recording the profiling event.
                         rref._get_profiling_future().wait()
 
-            events = prof.function_events
+            events = prof.function_events if not kineto_profile else prof.events()
+            if kineto_profile:
+                # RPC profiling is disabled so there should be no rpc related
+                # events.
+                with self.assertRaises(IndexError):
+                    get_function_event(events, rpc_exec_mode.value)
+
+                return
+
             rpc_event = get_function_event(events, rpc_exec_mode.value)
             # verify Node ID for this rpc event.
             self.assertEqual(rpc_event.node_id, self.rank)
@@ -2186,6 +2206,11 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
+        # Test to ensure that kineto profiler enabled in RPC does not enable
+        # RPC profiling (it is unsupported) and does not result in issues.
+        self._profiler_test_with_rpc(
+            RPCExecMode.ASYNC, my_sleep_func, args=(1,), kineto_profile=True
+        )
 
     @dist_init
     def test_profiler_with_async_rpc_udf(self):
