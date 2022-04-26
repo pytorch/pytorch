@@ -134,9 +134,8 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
     auto* nt_input = get_nested_tensor_impl(t);
     TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
     const auto& nt_buffer = nt_input->get_buffer();
-    const auto nt_input_opt_size_2 = nt_input->opt_size(2);
 
-    if (t_dim == 3 && nt_input_opt_size_2 && (*nt_input_opt_size_2 > 0)) {
+    if (t_dim == 3 && nt_input->opt_size(2) && (*nt_input->opt_size(2) > 0)) {
       Tensor nt_sizes = nt_input->get_nested_size_tensor();
       Tensor sizes_dim1 = at::native::narrow(nt_sizes, 1, 0, 1);
       Tensor sizes_dim2 = at::native::narrow(nt_sizes, 1, 1, 1);
@@ -144,7 +143,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(const Tensor& t, double padding) {
           nt_input->get_buffer(), sizes_dim1 * sizes_dim2[0]);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.dim() == 2);
       result = NestedTensor_to_padded_tensor_cuda(result, padding);
-      return result.reshape({result.sizes()[0], -1, *nt_input_opt_size_2});
+      return result.reshape({result.sizes()[0], -1, *nt_input->opt_size(2)});
     }
 
     Tensor nt_sizes = nt_input->get_nested_size_tensor();
