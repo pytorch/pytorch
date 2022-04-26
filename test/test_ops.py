@@ -274,7 +274,8 @@ class TestCommon(TestCase):
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
-            n_inp, n_args, n_kwargs = sample_input.noncontiguous()
+            noncontig_sample = sample_input.noncontiguous()
+            n_inp, n_args, n_kwargs = noncontig_sample.input, noncontig_sample.args, noncontig_sample.kwargs
 
             # Verifies sample input tensors should have no grad or history
             sample_tensor = t_inp if isinstance(t_inp, torch.Tensor) else t_inp[0]
