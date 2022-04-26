@@ -1530,7 +1530,7 @@ TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
   }
 }
 
-TEST(EliminateExtraPermuteOps, FusesCorrectly) {
+TEST(EliminateExtraPermuteOps, FusesSumCorrectly) {
   const auto src = R"JIT(
     def forward(self, x):
         y = torch.permute(x, (0, 2, 1))
@@ -1553,7 +1553,7 @@ TEST(EliminateExtraPermuteOps, FusesCorrectly) {
   EXPECT_EQ(dim->toIntList(), c10::List<int64_t>{1});
 }
 
-TEST(EliminateExtraPermuteOps, DoesNotFuseWrongDim) {
+TEST(EliminateExtraPermuteOps, DoesNotFuseSumWrongDim) {
   const auto src = R"JIT(
     def forward(self, x):
         y = torch.permute(x, (0, 2, 1))
@@ -1571,7 +1571,7 @@ TEST(EliminateExtraPermuteOps, DoesNotFuseWrongDim) {
   EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
 }
 
-TEST(EliminateExtraPermuteOps, DoesNotFuseNonConstantDim) {
+TEST(EliminateExtraPermuteOps, DoesNotFuseSumNonConstantDim) {
   const auto src = R"JIT(
     def forward(self, x, dim: int):
         y = torch.permute(x, (0, 2, 1))
@@ -1586,6 +1586,64 @@ TEST(EliminateExtraPermuteOps, DoesNotFuseNonConstantDim) {
   ConstantPropagation(graph);
   EliminateExtraPermuteOps(graph);
 
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(EliminateExtraPermuteOps, FusesSoftmaxCorrectly) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        a = torch.permute(x, [0, 2, 1])
+        b = torch.softmax(a, 2)
+        c = torch.permute(b, [0, 2, 1])
+        return c.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+  graph->dump();
+
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::permute"));
+  auto* softmax = getNodeWithKind(graph, "aten::softmax");
+  ASSERT_NE(softmax, nullptr);
+  auto dim = toIValue(softmax->input(1));
+  ASSERT_TRUE(dim.has_value() && dim->isInt());
+  EXPECT_EQ(dim->toInt(), 1);
+
+  std::vector<IValue> args{at::randn({3, 4, 5})};
+  testStaticRuntime(src, args, /*args2=*/{}, /*use_allclose=*/true);
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseSoftmaxWrongPermuteDim) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        a = torch.permute(x, [0, 1, 2])
+        b = torch.softmax(a, 2)
+        c = torch.permute(b, [0, 1, 2])
+        return c.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseSoftmaxWrongSoftmaxDim) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        a = torch.permute(x, [0, 2, 1])
+        b = torch.softmax(a, 0)
+        c = torch.permute(b, [0, 2, 1])
+        return c.clone()
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
 }
 

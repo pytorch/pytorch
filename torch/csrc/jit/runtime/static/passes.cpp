@@ -1044,31 +1044,41 @@ void ForceNonEmptyOutputs(Graph& graph) {
   }
 }
 
-void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
-  auto input_is_constant_list =
-      [](Node* node, size_t input_idx, const c10::List<int64_t>& expected) {
-        auto input_opt = toIValue(node->input(input_idx));
-        if (!input_opt.has_value() || !input_opt->isIntList()) {
-          return false;
-        }
-        return input_opt->toIntList() == expected;
-      };
+namespace {
 
+bool inputIsConstantList(
+    Node* node,
+    size_t input_idx,
+    const c10::List<int64_t>& expected) {
+  auto input_opt = toIValue(node->input(input_idx));
+  if (!input_opt.has_value() || !input_opt->isIntList()) {
+    return false;
+  }
+  return input_opt->toIntList() == expected;
+}
+
+bool inputIsConstantInt(Node* node, size_t input_idx, int64_t expected) {
+  auto input_opt = toIValue(node->input(input_idx));
+  if (!input_opt.has_value() || !input_opt->isInt()) {
+    return false;
+  }
+  return input_opt->toInt() == expected;
+}
+
+void eliminatePermuteOpsSumPattern(std::shared_ptr<Graph>& graph) {
   // SubgraphRewriter can't pattern-match on constants, so we use this
   // extra filter to make sure the values of the `dim` arguments are
   // correct.
   auto dims_are_valid_constants =
-      [&input_is_constant_list](
-          const Match& match,
-          const std::unordered_map<std::string, Value*>& vmap) {
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
         // Get the nodes in the real graph from the nodes in the template
         // pattern graph
         const auto& node_map = match.nodes_map;
         auto* sum_node = node_map.at(vmap.at("c")->node());
         auto* permute_node = node_map.at(vmap.at("b")->node());
-        return input_is_constant_list(sum_node, 1, c10::List<int64_t>{-1}) &&
-            input_is_constant_list(
-                   permute_node, 1, c10::List<int64_t>{0, 2, 1});
+        return inputIsConstantList(sum_node, 1, c10::List<int64_t>{-1}) &&
+            inputIsConstantList(permute_node, 1, c10::List<int64_t>{0, 2, 1});
       };
 
   const auto pattern = R"IR(
@@ -1086,6 +1096,48 @@ void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter fuse;
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph, dims_are_valid_constants);
+}
+
+void eliminatePermuteOpsSoftmaxPattern(std::shared_ptr<Graph>& graph) {
+  const auto pattern = R"IR(
+    graph(%a, %permute_dim_1, %permute_dim_2, %softmax_dim, %softmax_dtype):
+        %b = aten::permute(%a, %permute_dim_1)
+        %c = aten::softmax(%b, %softmax_dim, %softmax_dtype)
+        %d = aten::permute(%c, %permute_dim_2)
+        return (%d)
+  )IR";
+
+  const auto fused_pattern = R"IR(
+    graph(%a, %permute_dim_1, %permute_dim_2, %softmax_dim, %softmax_dtype):
+        %new_softmax_dim: int = prim::Constant[value=1]()
+        %e = aten::softmax(%a, %new_softmax_dim, %softmax_dtype)
+        return (%e)
+  )IR";
+
+  // Check that permute_dim is (0, 2, 1) and softmax_dim is 2
+  auto dims_are_valid_constants =
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
+        const auto& node_map = match.nodes_map;
+        auto* permute_node_1 = node_map.at(vmap.at("b")->node());
+        auto* permute_node_2 = node_map.at(vmap.at("d")->node());
+        auto* softmax_node = node_map.at(vmap.at("c")->node());
+        return inputIsConstantInt(softmax_node, 1, 2) &&
+            inputIsConstantList(
+                   permute_node_1, 1, c10::List<int64_t>{0, 2, 1}) &&
+            inputIsConstantList(permute_node_2, 1, c10::List<int64_t>{0, 2, 1});
+      };
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph, dims_are_valid_constants);
+}
+
+} // namespace
+
+void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
+  eliminatePermuteOpsSumPattern(graph);
+  eliminatePermuteOpsSoftmaxPattern(graph);
 }
 
 namespace {
