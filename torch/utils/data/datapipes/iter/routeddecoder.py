@@ -46,7 +46,7 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
         _deprecation_warning(
             type(self).__name__,
             deprecation_version="1.12",
-            removal_version="1.14",
+            removal_version="1.13",
             old_functional_name="routed_decode",
         )
 
