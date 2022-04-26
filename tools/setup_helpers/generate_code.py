@@ -14,7 +14,6 @@ except ImportError:
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
 
 def generate_code(
-    ninja_global: Optional[str] = None,
     native_functions_path: Optional[str] = None,
     install_dir: Optional[str] = None,
     subset: Optional[str] = None,
@@ -122,7 +121,6 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Autogenerate code")
     parser.add_argument("--native-functions-path")
-    parser.add_argument("--ninja-global")
     parser.add_argument("--install_dir")
     parser.add_argument(
         "--subset",
@@ -161,7 +159,6 @@ def main() -> None:
     options = parser.parse_args()
 
     generate_code(
-        options.ninja_global,
         options.native_functions_path,
         options.install_dir,
         options.subset,
