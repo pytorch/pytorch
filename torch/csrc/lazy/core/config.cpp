@@ -51,6 +51,12 @@ C10_DEFINE_string(
     "0.01:0.05:0.1:0.2:0.5:0.8:0.9:0.95:0.99",
     "Metrics percentiles to be collected, using : as the delimiter");
 
+C10_DEFINE_int(
+    torch_lazy_shape_cache_size,
+    4096,
+    "Set the size for the shape cache used for shape inference");
+
+
 namespace torch {
 namespace lazy {
 

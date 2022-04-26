@@ -20,7 +20,6 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
-          needs-history-and-master: true
 
       - name: Install lintrunner
         run: pip install lintrunner==0.6.*
@@ -50,7 +49,7 @@ jobs:
           echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
           echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
 
-      - name: Store annotatations
+      - name: Store annotations
         if: always() && github.event_name == 'pull_request'
         # Don't show this as an error; the above step will have already failed.
         continue-on-error: true
@@ -63,9 +62,15 @@ jobs:
           echo "::add-matcher::.github/lintrunner_problem_matcher.json"
 
           # Use jq to massage the output to look a little nicer in GitHub.
-          lintrunner --merge-base-with "${PR_BASE_SHA}" --json \
-            | jq '{file: .path, line: .line, column: .char, severity: .severity, code: .code, message: ("["+.code+"] "+ .name + ": " +.description)}' -c
-
+          lintrunner --merge-base-with "${PR_BASE_SHA}" --json | \
+            jq '{
+                  file: .path,
+                  line: .line,
+                  column: .char,
+                  severity: (if .severity == "advice" or .severity == "disabled" then "warning" else .severity end),
+                  code: .code,
+                  message: ("["+.code+"] "+ .name + ": " +.description)
+                }' -c
   quick-checks:
     name: quick-checks
     runs-on: ubuntu-18.04
@@ -80,6 +85,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -122,6 +128,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
       - name: Install requirements
         id: requirements
         run: |
@@ -165,6 +172,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -207,7 +215,6 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
-          needs-history-and-master: true
       - name: Install dependencies
         # mypy and boto3 versions copied from
         # .circleci/docker/common/install_conda.sh
@@ -244,6 +251,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
       - name: Install torch
         if: matrix.with_torch == 'with_torch'
         run: |

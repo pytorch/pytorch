@@ -14,11 +14,12 @@ from torch.testing._internal.common_utils import \
      IS_IN_CI, suppress_warnings, noncontiguous_like,
      TEST_WITH_ASAN, IS_WINDOWS, IS_FBCODE, first_sample)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
+    (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo, ops_and_refs,
+     python_ref_db)
 from torch.testing._internal.common_device_type import \
     (deviceCountAtLeast, instantiate_device_type_tests, ops,
      onlyCUDA, onlyNativeDeviceTypes, OpDTypes, skipMeta)
-
+import torch._prims as prims
 
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
@@ -63,7 +64,7 @@ class TestCommon(TestCase):
     #   correctly for CPU and CUDA devices
     @skipMeta
     @onlyNativeDeviceTypes
-    @ops(op_db, dtypes=OpDTypes.none)
+    @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
@@ -90,7 +91,7 @@ class TestCommon(TestCase):
             # tries to acquire samples - failure indicates lack of support
             requires_grad = (dtype in allowed_backward_dtypes)
             try:
-                samples = list(op.sample_inputs(device, dtype, requires_grad=requires_grad))
+                samples = tuple(op.sample_inputs(device, dtype, requires_grad=requires_grad))
             except Exception as e:
                 print(e, "EXCEPTIOn")
                 unsupported(dtype)
@@ -231,6 +232,25 @@ class TestCommon(TestCase):
                 self.compare_with_reference(op, op.ref, sample_input, exact_dtype=(dtype is not torch.long))
         finally:
             torch.set_default_dtype(cur_default)
+
+    # Tests that experimental Python References' can propagate shape, dtype,
+    # and device metadata properly.
+    # TODO: include stride propagation.
+    @onlyNativeDeviceTypes
+    @ops(python_ref_db)
+    def test_python_reference_meta_functions(self, device, dtype, op):
+        def _to_tensormeta(x):
+            if isinstance(x, torch.Tensor):
+                return prims.utils.TensorMeta(x)
+
+        # TODO: iterate over requires_grad true/false
+        for sample in op.reference_inputs(device, dtype, requires_grad=False):
+            result = op(sample.input, *sample.args, **sample.kwargs)
+
+            meta_sample = sample.transform(_to_tensormeta)
+            meta_result = op(meta_sample[0], *meta_sample[1], **meta_sample[2])
+
+            prims.utils.compare_tensor_meta(result, meta_result)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -747,6 +767,21 @@ class TestCompositeCompliance(TestCase):
             kwargs = sample.kwargs
             composite_compliance.check_backward_formula(op, args, kwargs)
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_forward_ad(self, device, dtype, op):
+        if torch.float not in op.supported_backward_dtypes(device):
+            raise unittest.SkipTest("Does not support autograd")
+
+        if not op.supports_forward_ad:
+            raise unittest.SkipTest("Does not support forward_ad")
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            composite_compliance.check_forward_ad_formula(op, args, kwargs)
 
 class TestMathBits(TestCase):
     # Tests that
