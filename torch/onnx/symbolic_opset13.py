@@ -6,7 +6,8 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import (overload_by_arg_count, _maybe_cast_reduce_op_input,
-                                        nonzero, expand, zeros, ones, size)
+                                        nonzero, expand, zeros, ones, size, linear, conv2d,
+                                        relu, unused)
 from torch.onnx.symbolic_opset11 import unsqueeze
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -131,19 +132,40 @@ def where(g, condition, self=None, other=None, _outputs=None):
 
 @parse_args("v", "v", "v", "i", "i", "i")
 def fake_quantize_per_channel_affine(g, inputs, scale, zero_point, axis, quant_min=-128, quant_max=127):
-    if quant_min not in [0, -128] or quant_max not in [127, 255]:
+    # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
+    #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
+    if (quant_min, quant_max) not in [(0, 255), (-128, 127), (0, 127)]:
         raise RuntimeError(
-            "ONNX defines [0, 255] for quint8 and [-128, 127] for qint8, got [{}, {}]".format(quant_min, quant_max))
-
+            "For (quant_min, quant_max), ONNX allows only (0, 127), (0, 255) and (-128, 127). "
+            "Got ({}, {})".format(quant_min, quant_max))
     # ONNX defines zero_point to be int8 or uint8
     if quant_min == 0:
-        zero_point = g.op("Cast", zero_point, to_i=sym_help.cast_pytorch_to_onnx["Byte"])
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
     else:
-        zero_point = g.op("Cast", zero_point, to_i=sym_help.cast_pytorch_to_onnx["Char"])
-    return g.op(
-        "DequantizeLinear",
-        g.op("QuantizeLinear", inputs, scale, zero_point, axis_i=axis),
-        scale, zero_point, axis_i=axis)
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
+    quantized = g.op("QuantizeLinear", inputs, scale, zero_point, axis_i=axis)
+    if (quant_min, quant_max) == (0, 127):
+        quantized = g.op("Clip", quantized, unused(g), g.op("Constant", value_t=torch.tensor(127, dtype=torch.uint8)))
+    return g.op("DequantizeLinear", quantized, scale, zero_point, axis_i=axis)
+
+@parse_args("v", "v", "v", "i", "i")
+def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128, quant_max=127):
+    # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
+    #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
+    if (quant_min, quant_max) not in [(0, 255), (-128, 127), (0, 127)]:
+        raise RuntimeError(
+            "For (quant_min, quant_max), ONNX allows only (0, 127), (0, 255) and (-128, 127). "
+            "Got ({}, {})".format(quant_min, quant_max))
+    if quant_min == 0:
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
+    else:
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.INT8)
+    if scale.type().scalarType() != "Float":
+        scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+    quantized = g.op("QuantizeLinear", inputs, scale, zero_point)
+    if (quant_min, quant_max) == (0, 127):
+        quantized = g.op("Clip", quantized, unused(g), g.op("Constant", value_t=torch.tensor(127, dtype=torch.uint8)))
+    return g.op("DequantizeLinear", quantized, scale, zero_point)
 
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
@@ -403,3 +425,43 @@ def diagonal(g, self, offset, dim1, dim2):
     final_overrun_ = zeros(else_block, gather_shape, 6, None, None)
     _add_output_to_block(else_block, final_overrun_)
     return if_op
+
+class Quantized:
+    """
+    https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+    """
+    domain = "quantized"
+
+    @staticmethod
+    def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
+        input, input_scale, _, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _, axis = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale, axis)
+        bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = linear(g, input, weight, bias)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def conv2d(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
+        input, input_scale, _, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _, axis = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale, axis)
+        bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def conv2d_relu(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
+        input, input_scale, _, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _, axis = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale, axis)
+        bias, _, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+        output = relu(g, output)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)

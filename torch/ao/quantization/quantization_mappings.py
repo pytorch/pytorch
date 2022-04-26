@@ -158,6 +158,7 @@ DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS : Dict[Union[Callable, str], Callab
 DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
     nn.Hardsigmoid: default_affine_fixed_qparams_fake_quant,
     nn.Sigmoid: default_affine_fixed_qparams_fake_quant,
+    nn.Softmax: default_affine_fixed_qparams_fake_quant,
     nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
 }
 

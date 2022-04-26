@@ -518,8 +518,9 @@ def _sparse_coo_scatter_reduction_helper(op,
                                          keepdim: bool,
                                          dtype: Optional[DType] = None) -> Tensor:
     reduce = op.__name__
-    assert reduce in {'sum', 'prod', 'mean', 'amax', 'amin'}, \
-        "op must be one of torch.sum, torch.prod, torch.mean, torch.amax or torch.amin"
+    valid_reductions = ['sum', 'prod', 'mean', 'amax', 'amin']
+    if reduce not in valid_reductions:
+        raise ValueError(f"op must be one of {' '.join(valid_reductions)}, but got {reduce} instead")
 
     output_dtype = dtype
     values, indices = mask_input._values(), mask_input._indices()
@@ -534,9 +535,9 @@ def _sparse_coo_scatter_reduction_helper(op,
         values = values.to(output_dtype)
 
     if keepdim:
-        output_shape = tuple((1 if i in dims else mask_input.shape[i]) for i in range(mask_input.ndim))
+        output_shape = tuple(1 if i in dims else si for (i, si) in enumerate(mask_input.shape))
     else:
-        output_shape = tuple(mask_input.shape[i] for i in range(mask_input.ndim) if i not in dims)
+        output_shape = tuple(si for (i, si) in enumerate(mask_input.shape) if i not in dims)
 
     for d in dims:
         if (d >= input_dims):
@@ -554,7 +555,7 @@ def _sparse_coo_scatter_reduction_helper(op,
             new_values = op(new_values, dim=reduced_dense_dims, keepdim=bool(keepdim))
         else:
             # FIXME: Implement reductions for dense dimensions for ops with non-zero reduction identities
-            raise NotImplementedError(f'{reduce}() does not support reducing dense dims of hybrid sparse coo tensors')
+            return NotImplemented
     else:
         new_values = values.clone()
 
@@ -563,6 +564,7 @@ def _sparse_coo_scatter_reduction_helper(op,
         if reduce in {'amax', 'amin'} and new_values.size(0) == 0:
             # IndexError: amax(): Expected reduction dim 0 to have non-zero size.
             # sum()/prod() return the reduction identity when dim has size 0 but amax()/amin() do not
+            # See https://github.com/pytorch/pytorch/issues/61901
             new_values = _reduction_identity(reduce, new_values)
         else:
             new_values = op(new_values, dim=0)
@@ -573,8 +575,11 @@ def _sparse_coo_scatter_reduction_helper(op,
     else:
         new_indices = indices.clone()
         if keepdim:
+            # zero out reduced sparse dimensions if keepdim = True
+            # ensures that the call to torch.unique folds duplicated indices together while preserving the dimension
             new_indices[reduced_sparse_dims, :] = 0
         else:
+            # remove reduced sparse dimensions if keepdim = False
             if (len(reduced_sparse_dims) > 0):
                 retained_sparse_dims = [i for i in range(num_sparse_dims) if i not in set(reduced_sparse_dims)]
                 new_indices = new_indices.index_select(0, torch.tensor(retained_sparse_dims).to(mask_input.device))
@@ -588,8 +593,8 @@ def _sparse_coo_scatter_reduction_helper(op,
         for _ in range(new_values.ndim - 1):
             inverse_indices = inverse_indices.unsqueeze(-1)
         scatter_indices = inverse_indices.expand(new_values.shape)
-        # FIXME: temporary workaround for issue with bfloat16 remove when acctype is implemented for scatter_reduce
-        if output_dtype in {torch.bfloat16}:
+        # FIXME: temporary workaround for issue with bfloat16/float16 remove when acctype is implemented for scatter_reduce
+        if output_dtype in {torch.bfloat16, torch.float16}:
             new_values = new_values.to(torch.float)
             out = new_values.new_empty(out_shape)
             new_values = out.scatter_reduce_(0, scatter_indices, new_values, reduce=reduce, include_self=False)

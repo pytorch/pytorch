@@ -337,6 +337,31 @@ class _DataPipeMeta(GenericMeta):
         return hash((self.__name__, self.type))
 
 
+def _simplify_obj_name(obj) -> str:
+    """
+    Simplify the display strings of objects for the purpose of rendering within DataPipe error messages.
+    """
+    if inspect.isfunction(obj):
+        return obj.__name__
+    else:
+        return repr(obj)
+
+
+def _generate_input_args_string(obj):
+    """
+    Generate a string for the input arguments of an object.
+    """
+    signature = inspect.signature(obj.__class__)
+    input_param_names = set()
+    for param_name, _ in signature.parameters.items():
+        input_param_names.add(param_name)
+    result = []
+    for name, obj in inspect.getmembers(obj):
+        if name in input_param_names:
+            result.append((name, _simplify_obj_name(obj)))
+    return ', '.join([f'{name}={value}' for name, value in result])
+
+
 def hook_iterator(namespace, profile_name):
 
     def context():
@@ -351,11 +376,17 @@ def hook_iterator(namespace, profile_name):
             return self
 
         def __next__(self):
+            # TODO: Add try-except to in-place reduce traceback from the Exception
+            # See: https://github.com/pytorch/data/issues/284
             with context():
                 return next(self.iterator)
 
+        def __getattr__(self, name):
+            return getattr(self.iterator, name)
+
     func = namespace['__iter__']
 
+    # ``__iter__`` of IterDataPipe is a generator function
     if inspect.isgeneratorfunction(func):
         @functools.wraps(func)
         def wrap_generator(*args, **kwargs):
@@ -369,9 +400,19 @@ def hook_iterator(namespace, profile_name):
                         response = gen.send(request)
             except StopIteration as e:
                 return e.value
+            except Exception as e:
+                # TODO: Simplify the traceback message to skip over `response = gen.send(None)`
+                #       Part of https://github.com/pytorch/data/issues/284
+                datapipe = args[0]
+                msg = "thrown by __iter__ of"
+                full_msg = f"{msg} {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
+                if len(e.args) >= 1 and msg not in e.args[0]:
+                    e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
+                raise
 
         namespace['__iter__'] = wrap_generator
     else:
+        # IterDataPipe is an iterator with both ``__iter__`` and ``__next__``
         if '__next__' in namespace:
             next_func = namespace['__next__']
 
@@ -381,14 +422,15 @@ def hook_iterator(namespace, profile_name):
                     return next_func(*args, **kwargs)
 
             namespace['__next__'] = wrap_next
+        # ``__iter__`` of IterDataPipe returns an iterator other than self
         else:
-            # have the __iter__ but not __next__ like what _ChildDataPipe did.
             @functools.wraps(func)
             def wrap_iter(*args, **kwargs):
                 iter_ret = func(*args, **kwargs)
                 return IteratorDecorator(iter_ret)
 
             namespace['__iter__'] = wrap_iter
+
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # Add function for datapipe instance to reinforce the type
@@ -428,6 +470,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
             if not issubtype(data_type, sub_cls.type.param):
                 raise TypeError("Expected return type of '__iter__' as a subtype of {}, but found {}"
                                 " for {}".format(sub_cls.type, _type_repr(data_type), sub_cls.__name__))
+
 
 def reinforce_type(self, expected_type):
     r"""
