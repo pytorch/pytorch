@@ -75,7 +75,8 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ||  "${SHARD_NUMBER}" == "1" ]]; then
     "$top_dir/test/onnx/test_utility_funs.py" \
     "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
     "$top_dir/test/onnx/test_pytorch_onnx_caffe2_quantized.py" \
-    "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py"
+    "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
+    "$top_dir/test/onnx/test_onnx_export.py"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *ort_test2* || "${SHARD_NUMBER}" == "2" ]]; then
