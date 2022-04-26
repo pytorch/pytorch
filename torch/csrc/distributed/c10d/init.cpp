@@ -1622,6 +1622,8 @@ Example::
       py::arg("logger") = c10::optional<std::shared_ptr<::c10d::Logger>>{},
       py::call_guard<py::gil_scoped_release>());
 
+  // TODO: Route this to the dispatcher as well. test_broadcast_coalesced_nccl
+  // is busted locally, can't easily verify my implementation.
   module.def(
       "_broadcast_coalesced",
       // Define a lambda such that the pybind11 prototype can take a std::vector
