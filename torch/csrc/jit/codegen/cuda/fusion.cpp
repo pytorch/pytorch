@@ -30,6 +30,9 @@ FusionGuard::~FusionGuard() {
 Fusion* FusionGuard::getCurFusion() {
   return ACTIVE_FUSION;
 }
+void FusionGuard::setCurFusion(Fusion* fusion) {
+  ACTIVE_FUSION = fusion;
+}
 
 void swap(Fusion& a, Fusion& b) noexcept {
   FUSER_PERF_SCOPE("Fusion swap");
