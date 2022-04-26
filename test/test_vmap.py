@@ -1869,6 +1869,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         B0, B1 = 5, 7
 
         # Single vmap, various in_dims / out_dims
+        test(lambda x: x.sum(()), [torch.randn([B0])])
         test(lambda x: x.sum(0), [torch.randn([B0])])
         test(lambda x: x.sum(-1), [torch.randn([B0])])
         test(lambda x: x.sum(0), [torch.randn([B0, 3])])
@@ -1876,6 +1877,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(lambda x: x.sum(2), [torch.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
 
         # Doubly nested vmap
+        test(vmap(lambda x: x.sum(())), [torch.randn([B0, B1])])
         test(vmap(lambda x: x.sum(0)), [torch.randn([B0, B1])])
         test(vmap(lambda x: x.sum(-1)), [torch.randn([B0, B1])])
         test(vmap(lambda x: x.sum(-2)), [torch.randn([B1, 2, 5, B0, 3])], in_dims=2)
@@ -2301,7 +2303,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
     @allowVmapFallbackUsage
     def test_binary_cross_entropy(self, device):
-        x = F.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
+        x = torch.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
         target = torch.rand(3, 2, device=device)
 
         op = functools.partial(F.binary_cross_entropy, target=target)

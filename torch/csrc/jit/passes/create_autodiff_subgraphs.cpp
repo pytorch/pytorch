@@ -228,12 +228,32 @@ class SubgraphSlicer {
     return result;
   }
 
+  bool isViewOp(Node* n) {
+    switch (n->kind()) {
+      case aten::view:
+      case aten::view_as:
+      case aten::reshape:
+      case aten::reshape_as:
+      case aten::transpose:
+      case aten::expand:
+      case aten::expand_as:
+        return true;
+    }
+    return false;
+  }
+
   bool shouldConsiderForMerge(Node* node) {
     // if we're already in the process of merging
     if (node->kind() == prim::DifferentiableGraph) {
       return true;
     }
     if (node->kind() == prim::Constant) {
+      return false;
+    }
+
+    // view ops as outputs of differentiable subgraphs can cause incorrect
+    // differentiation for now, do not include them in the subgraph
+    if (isViewOp(node)) {
       return false;
     }
 

@@ -1,56 +1,7 @@
-from cimodel.lib.conf_tree import ConfigNode, X, XImportant
+from cimodel.lib.conf_tree import ConfigNode
 
 
 CONFIG_TREE_DATA = [
-    ("xenial", [
-        ("gcc", [
-            ("5.4", [  # All this subtree rebases to master and then build
-                ("3.6", [
-                    ("important", [X(True)]),
-                ]),
-            ]),
-            # TODO: bring back libtorch test
-        ]),
-        ("cuda", [
-            ("10.2", [
-                ("3.6", [
-                    # Build are needed for slow_gradcheck
-                    ('build_only', [X(True)]),
-                    ("slow_gradcheck", [
-                        # If you update this slow gradcheck, you should
-                        # also update docker_definitions.py to make sure
-                        # the docker image match the config used here
-                        (True, [
-                            ('shard_test', [XImportant(True)]),
-                        ]),
-                    ]),
-                    # UNCOMMENT THE BELOW TO REENABLE LIBTORCH
-                    # ("libtorch", [
-                    #     (True, [
-                    #         ('build_only', [X(True)]),
-                    #     ]),
-                    # ]),
-                ]),
-            ]),
-        ]),
-    ]),
-    ("bionic", [
-        ("clang", [
-            ("9", [
-                ("3.6", [
-                    ("xla", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        # @jithunnair-amd believes Jenkins builds are sufficient
-        # ("rocm", [
-        #     ("3.9", [
-        #         ("3.6", [
-        #             ('build_only', [XImportant(True)]),
-        #         ]),
-        #     ]),
-        # ]),
-    ]),
 ]
 
 
@@ -123,7 +74,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "mlc": MLCConfigNode,
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
-            "noarch": NoarchConfigNode,
+            "crossref": CrossRefConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -220,9 +171,9 @@ class ParallelTBBConfigNode(TreeConfigNode):
         return ImportantConfigNode
 
 
-class NoarchConfigNode(TreeConfigNode):
+class CrossRefConfigNode(TreeConfigNode):
     def init2(self, node_name):
-        self.props["is_noarch"] = node_name
+        self.props["is_crossref"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

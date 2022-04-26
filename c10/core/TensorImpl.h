@@ -1,10 +1,5 @@
 #pragma once
 
-#include <algorithm>
-#include <atomic>
-#include <memory>
-#include <numeric>
-
 #include <c10/core/Backend.h>
 #include <c10/core/CopyBytes.h>
 #include <c10/core/DispatchKeySet.h>
@@ -13,13 +8,22 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
+#include <c10/util/safe_numerics.h>
+
+#include <algorithm>
+#include <atomic>
+#include <limits>
+#include <memory>
+#include <numeric>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -36,6 +40,11 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
+
 namespace at {
 class Tensor;
 class TensorBase;
@@ -43,23 +52,15 @@ class TensorBase;
 
 namespace c10 {
 class Scalar;
-struct IValue;
 struct Storage;
-class OperatorHandle;
 } // namespace c10
-
-namespace torch {
-namespace jit {
-using Stack = std::vector<c10::IValue>;
-}
-} // namespace torch
 
 namespace c10 {
 
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
  */
-inline std::vector<int64_t> ToVectorint64_t(ArrayRef<int> src) {
+inline std::vector<int64_t> ToVectorint64_t(const ArrayRef<int>& src) {
   return std::vector<int64_t>(src.begin(), src.end());
 }
 
@@ -68,7 +69,7 @@ inline std::vector<int64_t> ToVectorint64_t(ArrayRef<int> src) {
  */
 inline int64_t size_from_dim_(int k, IntArrayRef dims) {
   int64_t r = 1;
-  for (size_t i = k; i < dims.size(); ++i) {
+  for (const auto i : c10::irange(k, dims.size())) {
     r *= dims[i];
   }
   return r;
@@ -78,7 +79,7 @@ inline int64_t size_from_dim_(int k, IntArrayRef dims) {
 inline int64_t size_to_dim_(int k, IntArrayRef dims) {
   TORCH_CHECK((unsigned)k <= dims.size());
   int64_t r = 1;
-  for (int i = 0; i < k; ++i) {
+  for (const auto i : c10::irange(k)) {
     r *= dims[i];
   }
   return r;
@@ -162,9 +163,6 @@ struct C10_API AutogradMetaInterface {
   virtual ~AutogradMetaInterface();
 };
 
-// forward declared
-struct TorchDispatchTypeObject;
-
 namespace impl {
 
 // Unfortunately, the definition of AutogradMeta lives in a separate
@@ -188,137 +186,6 @@ struct C10_API AutogradMetaFactoryRegisterer {
   explicit AutogradMetaFactoryRegisterer(AutogradMetaFactory* factory) {
     SetAutogradMetaFactory(factory);
   }
-};
-
-// Note [Python interpreter tag]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// We store a PyObject on TensorImpl so that we can efficiently translate
-// tensors into the Python representations.  However, in some situations
-// (torchdeploy) there may be multiple Python interpreters in a single process
-// and we must take care not to accidentally mix up PyObjects with the wrong
-// interpreters.  Thus, we also tag every TensorImpl with the Python interpreter
-// it corresponds to.
-//
-// With torchdeploy, we have these invariants:
-//  - Any given TensorImpl can be associated with AT MOST one Python
-//  interpreter.
-//    We represent the interpreter tag as a memory address to an instance of
-//    a virtual class that is allocated once per interpreter (this is so that
-//    we can request the interpreter to perform operations for us, if
-//    necessary).
-//  - A given TensorImpl's interpreter tag can only go from uninitialized to
-//    tagged; once tagged, this is a quiescent state (once tagged to an
-//    interpreter, ALWAYS tagged to that interpreter)
-//  - A thread may mutate the PyObject field of a TensorImpl if and only if it
-//    holds the GIL for the interpreter tagged on the TensorImpl.  (If the
-//    TensorImpl is not tagged, it must first atomically claim its tag before it
-//    can validly write)
-
-// The PyInterpreter object itself is a class that contains some function
-// pointers for interacting with the interpreter.  For now this is just for
-// debugging, but if a Tensor can own a PyObject, the interpreter can be used to
-// free it.
-//
-// WARNING: This class has to be written very carefully, because it may be
-// possible for a Tensor to have a reference an interpreter corresponding to
-// a shared library that has ALREADY BEEN UNLOADED.  This makes blindly calling
-// virtual methods very dangerous, because the vtable may be garbage at that
-// point (on a good day, you might get "pure virtual method called").
-//
-// The idea to solve this problem is we always leak PyInterpreters (so they
-// always stay live even after dlclose), and disarm the "virtual methods" by
-// replacing them with function pointers that just no-op.  This can't be done
-// with a traditional C++ vtable, so we have to roll our own.
-//
-// NB: The downside with representing PyInterpreter tags as full objects is that
-// it takes an extra word on TensorImpl.  If tags were instead just integer
-// indices, on 64-bit architectures we could pack the tag and PyObject together
-// into a single atomic word.  On 32-bit architectures we could simply say that
-// only one Python interpreter is supported (erroring if a nontrivial
-// interpreter tag is attempted to be set).
-//
-// The difficulty with this scheme is we need to maintain an out-of-line table
-// to get at the PyInterpreters so that we can do virtual method calls on them,
-// and registration/deregistration to this table must be done in a thread safe
-// manner.  This can be easily done if the number of possible PyInterpreters is
-// small enough (e.g., 8-bit integer) by simply preallocating an array of
-// sufficient size to hold all possible interpreters.  Surely 128 threads is
-// more than enough for anyone!
-//
-// I didn't decide to do this technique at the moment, because the extra word
-// added by the PyInterpreter tag takes us to 24 words, which means that we
-// still fit inside three eight word cache lines.  If you need to penny pinch
-// another word consider doing this!
-
-struct PyInterpreter;
-struct C10_API PyInterpreter {
-  using name_sig = std::string(const PyInterpreter*);
-  using decref_sig = void(const PyInterpreter*, PyObject*, bool);
-  using detach_sig =
-      c10::intrusive_ptr<TensorImpl>(const PyInterpreter*, const TensorImpl*);
-  using dispatch_sig = void(
-      const PyInterpreter*,
-      const c10::OperatorHandle&,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<TorchDispatchTypeObject>& type);
-
-  PyInterpreter(
-      name_sig* name_fn,
-      decref_sig* decref_fn,
-      detach_sig* detach,
-      dispatch_sig* dispatch)
-      : name_fn_(name_fn),
-        decref_fn_(decref_fn),
-        detach_fn_(detach),
-        dispatch_fn_(dispatch) {}
-
-  name_sig* name_fn_;
-  decref_sig* decref_fn_;
-  detach_sig* detach_fn_;
-  dispatch_sig* dispatch_fn_;
-
-  // UBSAN suppression fixes: "call to function
-  // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
-  // _object*) through pointer to incorrect function type 'void (*)(const
-  // c10::impl::PyInterpreter *, _object *)'" See
-  // https://github.com/google/sanitizers/issues/911
-
-  // Report the name of this interpreter
-  __ubsan_ignore_function__ std::string name() const {
-    return (*name_fn_)(this);
-  }
-
-  // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
-  // See NOTE [PyInterpreter::decref takes an `is_tensor` arg]
-  __ubsan_ignore_function__ void decref(PyObject* pyobj, bool is_tensor) const {
-    return (*decref_fn_)(this, pyobj, is_tensor);
-  }
-
-  // Perform a detach by deferring to the __torch_dispatch__ implementation of
-  // detach, which will also arrange for the PyObject to get copied in this
-  // situation
-  __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> detach(
-      const TensorImpl* self) const {
-    return (*detach_fn_)(this, self);
-  }
-
-  // Invoke the Python boxed fallback dispatch to go back into Python
-  __ubsan_ignore_function__ void dispatch(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<TorchDispatchTypeObject>& type) const {
-    return (*dispatch_fn_)(this, op, stack, type);
-  }
-
-  // Disarm this PyInterpreter, making all of its methods noops.
-  // Because the function pointers are raw pointers (not atomics),
-  // a disarm() invocation that is concurrent with active destructors
-  // is not thread safe and will trigger TSAN.  My hope is that this
-  // situations doesn't ever actually happen; tensor destruction should
-  // quiesce when a dlclose happens, and any long lived tensors whose
-  // destructors would be disarmed here only begin the destruction process
-  // on process shutdown (long after the dlclose has occurred).
-  void disarm() noexcept;
 };
 
 // PyInterpreterStatus describes what the state of its interpreter tag
@@ -353,30 +220,6 @@ struct C10_API NamedTensorMetaInterface {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::slow_dim");
   };
-};
-
-// NOTE [What is TorchDispatchTypeObject?]
-// A TorchDispatchTypeObject represents the type of a Tensor subclass that has
-// a __torch_dispatch__ classmethod. Concretely, it holds the class as a
-// PyObject* and a PyInterpreter* that says which python interpreter the class
-// came from.
-//
-// See NOTE [dispatch_fn's type argument] for more details
-struct C10_API TorchDispatchTypeObject {
-  // Steals a reference to type_object
-  TorchDispatchTypeObject(
-      PyObject* type_object,
-      c10::impl::PyInterpreter* pyinterpreter);
-
-  // Releases the stolen reference to type_object
-  ~TorchDispatchTypeObject();
-
-  c10::impl::PyInterpreter* pyinterpreter() const;
-  PyObject* ptr() const;
-
- private:
-  PyObject* data_;
-  c10::impl::PyInterpreter* pyinterpreter_;
 };
 
 // NOTE [ Version Counter Sharing ]
@@ -503,6 +346,24 @@ struct C10_API VariableVersion {
   }
 };
 
+// Forward declaration of TensorImpl needed for forward declaration of
+// C10_TensorImpl_Size_Check_Dummy_Class
+struct C10_API TensorImpl;
+
+// Forward declaration needed because TensorImpl needs to be friends with
+// C10_TensorImpl_Size_Check_Dummy_Class in order to check the size
+// of its private fields.
+template <
+    size_t cplusplus,
+    size_t clang_ver_major,
+    size_t gcc_ver,
+    size_t gcc_ver_minor,
+    size_t nvcc,
+    size_t cuda_version,
+    size_t cuda_version_major,
+    size_t ptr_size>
+class C10_TensorImpl_Size_Check_Dummy_Class;
+
 /**
  * NOTE: Some TensorImpl methods are small and not overridden in the
  * PyTorch codebase itself, but may theoretically need to be
@@ -591,6 +452,7 @@ struct C10_API VariableVersion {
  */
 struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
+  virtual ~TensorImpl() override;
   // Note [Enum ImplType]
   // This enum is temporary. In the followup refactor we should
   // think about how to specialize TensorImpl creation for view
@@ -674,16 +536,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
+   *
+   * NOTE: sizes() is only `TENSORIMPL_MAYBE_VIRTUAL` for backward
+   * compatibility. See `set_sizes_customization_policy` for the
+   * encouraged customization point.
+   *
+   * NOTE: Currently, CustomizableMethodPolicy::CustomBehavior is not
+   * supported due to a lack of use case, but it can easily be added.
    */
   TENSORIMPL_MAYBE_VIRTUAL IntArrayRef sizes() const
 #ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   {
+    if (C10_UNLIKELY(
+            sizes_customization_policy_ !=
+            static_cast<uint8_t>(CustomizableMethodPolicy::Default))) {
+      return sizes_nondefault_policy_impl();
+    }
     return sizes_and_strides_.sizes_arrayref();
   }
 #else
       ;
 #endif
 
+ private:
+  IntArrayRef sizes_nondefault_policy_impl() const;
+
+ public:
   /**
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
@@ -809,107 +687,121 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
 
+  virtual Layout layout_impl() const {
+    TORCH_CHECK(
+        false, "layout_impl is only implemented for TensorImpl subclasses.");
+  }
+
  public:
+  // Whether a tensor is sparse COO or not.
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::SparseCPU) ||
-        key_set_.has(DispatchKey::SparseCUDA) ||
-        key_set_.has(DispatchKey::SparseHIP) ||
-        key_set_.has(DispatchKey::SparseXPU);
+    return key_set_.has_all(c10::sparse_ks);
   }
 
-  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
-  // format.
+  // Whether a tensor is sparse CSR or not.
   bool is_sparse_csr() const {
-    return key_set_.has(DispatchKey::SparseCsrCPU) ||
-        key_set_.has(DispatchKey::SparseCsrCUDA);
+    return layout() == kSparseCsr;
   }
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::QuantizedCPU) ||
-        key_set_.has(DispatchKey::QuantizedCUDA) ||
-        key_set_.has(DispatchKey::QuantizedXPU);
+    constexpr auto quantized_ks = DispatchKeySet(DispatchKey::Quantized);
+    return key_set_.has_all(quantized_ks);
   }
 
   bool is_meta() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::Meta);
+    constexpr auto meta_ks = DispatchKeySet(DispatchKey::Meta);
+    return key_set_.has_all(meta_ks);
   }
 
   bool is_cpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::CPU) ||
-        key_set_.has(DispatchKey::SparseCPU) ||
-        key_set_.has(DispatchKey::SparseCsrCPU) ||
-        key_set_.has(DispatchKey::QuantizedCPU) ||
-        key_set_.has(DispatchKey::MkldnnCPU);
+    constexpr auto cpu_bits_ks = DispatchKeySet(BackendComponent::CPUBit) |
+        DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::MkldnnCPU});
+    return key_set_.has_any(cpu_bits_ks);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::CUDA) ||
-        key_set_.has(DispatchKey::SparseCUDA) ||
-        key_set_.has(DispatchKey::SparseCsrCUDA) ||
-        key_set_.has(DispatchKey::QuantizedCUDA);
+    constexpr auto cuda_bits_ks = DispatchKeySet(BackendComponent::CUDABit) |
+        DispatchKeySet(DispatchKey::SparseCsrCUDA);
+    return key_set_.has_any(cuda_bits_ks);
   }
 
   bool is_xpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::XPU) ||
-        key_set_.has(DispatchKey::SparseXPU) ||
-        key_set_.has(DispatchKey::QuantizedXPU);
+    constexpr auto xpu_ks = DispatchKeySet(BackendComponent::XPUBit);
+    return key_set_.has_all(xpu_ks);
+  }
+
+  bool is_ipu() const {
+    constexpr auto ipu_ks = DispatchKeySet(BackendComponent::IPUBit);
+    return key_set_.has_all(ipu_ks);
   }
 
   bool is_xla() const {
-    return key_set_.has(DispatchKey::XLA);
+    constexpr auto xla_ks = DispatchKeySet(BackendComponent::XLABit);
+    return key_set_.has_all(xla_ks);
   }
 
   bool is_hpu() const {
-    return key_set_.has(DispatchKey::HPU);
+    constexpr auto hpu_ks = DispatchKeySet(BackendComponent::HPUBit);
+    return key_set_.has_all(hpu_ks);
   }
 
   bool is_lazy() const {
-    return key_set_.has(DispatchKey::Lazy);
+    constexpr auto lazy_ks = DispatchKeySet(BackendComponent::LazyBit);
+    return key_set_.has_all(lazy_ks);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::HIP) ||
-        key_set_.has(DispatchKey::SparseHIP);
+    constexpr auto hip_ks = DispatchKeySet(BackendComponent::HIPBit);
+    return key_set_.has_all(hip_ks);
   }
 
   bool is_ve() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::VE) || key_set_.has(DispatchKey::SparseVE);
+    constexpr auto ve_ks = DispatchKeySet(BackendComponent::VEBit);
+    return key_set_.has_all(ve_ks);
   }
 
   bool is_mkldnn() const {
-    return key_set_.has(DispatchKey::MkldnnCPU);
+    return key_set_.has_all(c10::mkldnn_ks);
   }
 
   bool is_vulkan() const {
-    return key_set_.has(DispatchKey::Vulkan);
+    constexpr auto vulkan_ks = DispatchKeySet(DispatchKey::Vulkan);
+    return key_set_.has_all(vulkan_ks);
   }
 
   bool is_metal() const {
-    return key_set_.has(DispatchKey::Metal);
+    constexpr auto metal_ks = DispatchKeySet(DispatchKey::Metal);
+    return key_set_.has_all(metal_ks);
   }
 
   bool is_mlc() const {
-    return key_set_.has(DispatchKey::MLC);
+    constexpr auto mls_ks = DispatchKeySet(DispatchKey::MLC);
+    return key_set_.has_all(mls_ks);
   }
 
   bool is_ort() const {
-    return key_set_.has(DispatchKey::ORT);
+    constexpr auto ort_ks = DispatchKeySet(DispatchKey::ORT);
+    return key_set_.has_all(ort_ks);
+  }
+
+  bool is_nested() const {
+    return key_set_.has(DispatchKey::NestedTensor);
   }
 
   // TODO: remove this once we don't automatically enabled Autograd dispatch
@@ -925,8 +817,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Invariant:
   //   Inference tensor has version_counter_.enabled() == false
   bool is_inference() {
-    bool no_ADInplaceOrView = !key_set_.has(c10::DispatchKey::ADInplaceOrView);
-    bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
+    bool no_ADInplaceOrView = !key_set_.has_any(c10::inplace_or_view_ks);
+    bool no_Autograd = !key_set_.has_any(c10::autograd_dispatch_keyset);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         no_ADInplaceOrView == no_Autograd,
         "ADInplaceOrView and Autograd keys must be on/off at the same time.");
@@ -947,14 +839,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   Layout layout() const {
     // NB: This method is not virtual and avoid dispatches for perf.
-    if (is_sparse()) {
-      return kSparse;
-    } else if (is_sparse_csr()) {
-      return kSparseCsr;
-    } else if (is_mkldnn()) {
-      return kMkldnn;
-    } else {
+    // strided is also the most common layout type, so we check for
+    // strided case first.
+    // This keyset must also be kept in sync with the logic in
+    // is_sparse() / is_sparse_csr() / is_mkldnn()
+    constexpr auto sparse_and_sparsecsr_and_mkldnn_ks =
+        c10::sparse_ks | c10::sparse_csr_ks | c10::mkldnn_ks;
+    if (!key_set_.has_any(sparse_and_sparsecsr_and_mkldnn_ks)) {
       return kStrided;
+    } else if (is_sparse()) {
+      return kSparse;
+    } else if (key_set_.has_any(c10::sparse_csr_ks)) {
+      // Typically, the tensor dispatch keys define the tensor layout
+      // uniquely. This allows using non-virtual layout method for
+      // better performance. However, when tensor's layout depends,
+      // say, on tensor attributes, one must use this execution path
+      // where the corresponding tensor impl class overwrites virtual
+      // layout_impl() method.
+      //
+      // TODO: implement layout() as native function/method so that
+      // __torch_dispatch__ users will be able to redefine the
+      // layout() method.
+      return layout_impl();
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          is_mkldnn(), "There is an error in the layout calculation logic.");
+      return kMkldnn;
     }
   }
 
@@ -1040,7 +950,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Whether or not the imaginary part of the tensor should be negated
    */
   inline bool is_conj() const {
-    return key_set_.has(DispatchKey::Conjugate);
+    constexpr auto conjugate_ks = DispatchKeySet(DispatchKey::Conjugate);
+    return key_set_.has_all(conjugate_ks);
   }
 
   /**
@@ -1057,10 +968,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * Whether or not the tensor is a zerotensor
+   */
+  inline bool _is_zerotensor() const {
+    constexpr auto zerotensor_ks = DispatchKeySet(DispatchKey::ZeroTensor);
+    return key_set_.has_all(zerotensor_ks);
+  }
+
+  /**
+   Set whether or not the tensor is a zero tensor
+  */
+  void _set_zero(bool value) {
+    if (value) {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Please call `torch._efficientzerotensor` if you want to create a tensor with no storage.");
+    } else {
+      key_set_ = key_set_.remove(DispatchKey::ZeroTensor);
+    }
+  }
+
+  /**
    * Whether or not the tensor should be negated
    */
   inline bool is_neg() const {
-    return key_set_.has(DispatchKey::Negative);
+    constexpr auto negative_ks = DispatchKeySet(DispatchKey::Negative);
+    return key_set_.has_all(negative_ks);
   }
 
   /**
@@ -1431,14 +1364,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void set_python_dispatch(bool k) {
     if (k) {
-      key_set_ = key_set_.add(DispatchKey::Python);
+      key_set_ = key_set_.add(c10::python_ks);
     } else {
-      key_set_ = key_set_.remove(DispatchKey::Python);
+      key_set_ = key_set_ - c10::python_ks;
     }
   }
 
   bool is_python_dispatch() const {
-    return key_set_.has(DispatchKey::Python);
+    return key_set_.has_all(c10::python_ks);
   }
 
   /**
@@ -1503,18 +1436,34 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::CPU) || ts.has(DispatchKey::CUDA) ||
-          ts.has(DispatchKey::HIP) || ts.has(DispatchKey::XPU);
+      constexpr auto dense_backends = DispatchKeySet(
+          {BackendComponent::CPUBit,
+           BackendComponent::CUDABit,
+           BackendComponent::HIPBit,
+           BackendComponent::XPUBit});
+      constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
+      return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };
     auto is_sparse = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::SparseCPU) ||
-          ts.has(DispatchKey::SparseCUDA) || ts.has(DispatchKey::SparseHIP) ||
-          ts.has(DispatchKey::SparseXPU);
+      constexpr auto sparse_backends = DispatchKeySet(
+          {BackendComponent::CPUBit,
+           BackendComponent::CUDABit,
+           BackendComponent::HIPBit,
+           BackendComponent::XPUBit});
+      constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
+      return ts.has_any(sparse_k) && ts.has_any(sparse_backends);
     };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) ||
         (is_sparse(key_set_) && is_sparse(from));
   }
 
+ private:
+  template <typename VariableVersion>
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
+      VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const;
+
+ public:
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
@@ -1627,6 +1576,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // we are the ONLY thread that can have gotten to this point.  It is not
     // possible to conflict with another zero interpreter as access is protected
     // by GIL
+    // NB: owns_pyobj tag is initially false
     pyobj_ = pyobj;
   }
 
@@ -1634,6 +1584,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // interpreter.  This is racy!
   impl::PyInterpreter* pyobj_interpreter() {
     return pyobj_interpreter_.load(std::memory_order_acquire);
+  }
+
+  PyObject* _unchecked_untagged_pyobj() const {
+    return reinterpret_cast<PyObject*>(
+        reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
   }
 
   // Test the interpreter tag.  If tagged for the current interpreter, return
@@ -1655,7 +1610,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return c10::nullopt;
     } else if (interpreter == self_interpreter) {
       // NB: pyobj_ could still be null!
-      return c10::make_optional(pyobj_);
+      return c10::make_optional(_unchecked_untagged_pyobj());
     } else {
       TORCH_CHECK(
           false,
@@ -2143,7 +2098,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto old_numel = numel_;
     sizes_and_strides_.resize(src.size());
     int64_t new_numel = 1;
-    for (size_t i = 0; i < src.size(); ++i) {
+    for (const auto i : c10::irange(src.size())) {
       new_numel *= src[i];
       sizes_and_strides_.size_at_unchecked(i) = src[i];
     }
@@ -2192,11 +2147,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Compute the number of elements based on the sizes of a tensor.
    */
   int64_t compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      n *= s;
-    }
-    return n;
+#if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
+    // Use overflow checks if supported by the compiler
+    return safe_compute_numel();
+#else
+    return c10::multiply_integers(sizes());
+#endif
   }
 
   /**
@@ -2205,14 +2161,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * using a sparse layout has multiple dimensions with large sizes.
    */
   int64_t safe_compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      TORCH_CHECK(
-          s == 0 || n <= std::numeric_limits<int64_t>::max() / s,
-          "numel: integer multiplication overflow");
-      n *= s;
-    }
-    return n;
+    uint64_t n = 1;
+    bool overflows = c10::safe_multiplies_u64(sizes(), &n);
+    constexpr auto numel_max = std::min(
+        static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+        static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
+
+    overflows |= (n > numel_max);
+    TORCH_CHECK(!overflows, "numel: integer multiplication overflow");
+    return static_cast<int64_t>(n);
   }
 
   /**
@@ -2346,30 +2303,40 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool owns_pyobj() {
-    return owns_pyobj_;
+    return reinterpret_cast<uintptr_t>(pyobj_) & 1;
   }
 
   void set_owns_pyobj(bool b) {
-    owns_pyobj_ = b;
+    pyobj_ = reinterpret_cast<PyObject*>(
+        reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
   }
 
  protected:
-  // Policy for adjusting the behavior of is_contiguous(). Allows
-  // subclass customization while still being able to inline
-  // is_contiguous() in the common case.
-  enum class HasContiguityPolicy : uint8_t {
-    // Default behavior: check is_contiguous_ and similar bitflags.
+  // Policy for adjusting the behavior of customizable methods like
+  // is_contiguous() and sizes(). Allows subclass customization while
+  // still being able to inline the methods in the common case.
+  enum class CustomizableMethodPolicy : uint8_t {
+    // Default behavior.
     Default,
     // Throw a generic error message that this tensor type does not
-    // support is_contiguous.
-    ContiguityNotSupported,
-    // Call virtual is_contiguous_custom method to implement custom
-    // is_contiguous behavior.
+    // support the method in question.
+    NotSupported,
+    // For backward compatibility.
+    ContiguityNotSupported = NotSupported,
+    // Call virtual foo_custom method to implement custom foo
+    // behavior.
     CustomBehavior,
   };
 
-  void set_has_contiguity_policy(HasContiguityPolicy p) {
+  // For backward compatibility.
+  using HasContiguityPolicy = CustomizableMethodPolicy;
+
+  void set_has_contiguity_policy(CustomizableMethodPolicy p) {
     has_contiguity_ = static_cast<uint8_t>(p);
+  }
+
+  void set_sizes_customization_policy(CustomizableMethodPolicy p) {
+    sizes_customization_policy_ = static_cast<uint8_t>(p);
   }
 
   Storage storage_;
@@ -2429,17 +2396,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // care)
   std::atomic<impl::PyInterpreter*> pyobj_interpreter_;
 
-  // This field contains a weak reference to a PyObject representing
-  // this Tensor.  It MUST NOT be a strong reference, as that would
-  // create a reference cycle between Tensor and the PyObject.  If
-  // pyobj is nullptr, when we transfer Tensor to Python, we allocate
-  // a new PyObject for it and set this field.  This field does not
-  // have to be protected by an atomic as it is only allowed to be
-  // accessed when you hold the GIL.
+  // This field contains a reference to a PyObject representing this Tensor.
+  // If pyobj is nullptr, when we transfer Tensor to Python, we allocate a new
+  // PyObject for it and set this field.  This field does not have to be
+  // protected by an atomic as it is only allowed to be accessed when you hold
+  // the GIL, or during destruction of the tensor.
   //
   // When a PyObject dies, you are obligated to clear this field
   // (otherwise, you will try to use-after-free the pyobj); this currently
   // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
+  //
+  // NB: Ordinarily, this should not be a strong reference, as if the
+  // PyObject owns the Tensor, this would create a reference cycle.
+  // However, sometimes this ownership flips.  To track who owns
+  // who, this has a single pointer tag indicating whether or not the
+  // C++ object owns the PyObject (the common case, zero, means PyObject
+  // owns the C++ object); see _unchecked_untagged_pyobj for raw access
+  // or check_pyobj for checked access.  See references to PyObject
+  // resurrection in torch/csrc/autograd/python_variable.cpp
   PyObject* pyobj_;
 
   c10::impl::SizesAndStrides sizes_and_strides_;
@@ -2482,7 +2456,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // or -std=gnu++2a
   inline void init_bitfields() {
     is_contiguous_ = true;
-    has_contiguity_ = static_cast<uint8_t>(HasContiguityPolicy::Default);
+    has_contiguity_ = static_cast<uint8_t>(CustomizableMethodPolicy::Default);
 
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;
@@ -2492,7 +2466,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_wrapped_number_ = false;
     allow_tensor_metadata_change_ = true;
     reserved_ = false;
-    owns_pyobj_ = false;
+    sizes_customization_policy_ =
+        static_cast<uint8_t>(CustomizableMethodPolicy::Default);
     storage_access_should_throw_ = false;
   }
 
@@ -2546,12 +2521,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ : 1;
 
-  // If pyobj_ is nullptr, this is always false.
-  // Otherwise, this indicates whether or not TensorImpl owns the pyobj_
-  // or vice versa.  Ordinarily, pyobj_ owns TensorImpl, but if the
-  // Python object's refcount goes to zero, we flip the ownership
-  // direction (to make sure the pyobj stays live).
-  bool owns_pyobj_ : 1;
+  // Customization policy for the sizes() virtual method.
+  /* CustomizableMethodPolicy */ uint8_t sizes_customization_policy_ : 2;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
@@ -2560,6 +2531,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // INVARIANT: named_tensor_meta_ != nullptr  <==>
   // key_set_.has(DispatchKey::Named)
   DispatchKeySet key_set_;
+
+ private:
+  // C10_TensorImpl_Size_Check_Dummy_Class needs to be friends with
+  // TensorImpl so it can inspect the size of private fields
+  template <
+      size_t cplusplus,
+      size_t clang_ver_major,
+      size_t gcc_ver,
+      size_t gcc_ver_minor,
+      size_t nvcc,
+      size_t cuda_version,
+      size_t cuda_version_major,
+      size_t ptr_size>
+  friend class C10_TensorImpl_Size_Check_Dummy_Class;
 };
 
 // Note [TensorImpl size constraints]
@@ -2612,9 +2597,185 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 //    data type, device, is_contiguous, storage_access_should_throw_, bitfields
 //    DispatchKeySet
 //
+
+// Various preprocessor macros we use to check that the
+// TensorImpl size hasn't changed unexpectedly. We undef
+// these later.
+#ifndef __NVCC__
+#define C10_NVCC 0
+#else
+#define C10_NVCC __NVCC__
+#endif
+
+#ifndef __CUDA_VER_MAJOR__
+#define C10_CUDA_VERSION_MAJOR 0
+#else
+#define C10_CUDA_VERSION_MAJOR __CUDA_VER_MAJOR__
+#endif
+
+#ifndef CUDA_VERSION
+#define C10_CUDA_VERSION 0
+#else
+#define C10_CUDA_VERSION CUDA_VERSION
+#endif
+
+#ifndef __clang_major__
+#define C10_CLANG_MAJOR_VERSION 0
+#else
+#define C10_CLANG_MAJOR_VERSION __clang_major__
+#endif
+
+#ifndef __GNUC__
+#define C10_GCC_VERSION 0
+#else
+#define C10_GCC_VERSION __GNUC__
+#endif
+
+#ifndef __GNUC_MINOR__
+#define C10_GCC_VERSION_MINOR 0
+#else
+#define C10_GCC_VERSION_MINOR __GNUC_MINOR__
+#endif
+
+// We use a templatized class to both contain the logic of checking the sizes
+// as well as to provide compile-time information that might be useful in
+// figuring out why sizes may have changed.
+// All the compile time information is given by the template fields that are
+// always printed by the compiler when the static_assert fails.
+template <
+    size_t cplusplus = __cplusplus,
+    size_t clang_ver_major = C10_CLANG_MAJOR_VERSION,
+    size_t gcc_ver = C10_GCC_VERSION,
+    size_t gcc_ver_minor = C10_GCC_VERSION_MINOR,
+    size_t nvcc = C10_NVCC,
+    size_t cuda_version = C10_CUDA_VERSION,
+    size_t cuda_version_major = C10_CUDA_VERSION_MAJOR,
+    size_t ptr_size = sizeof(void*)>
+class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
+  // Names of (non-bitfield) fields in TensorImpl; used to provide
+  // compile-time info about fields whose size changes unexpectedly.
+  enum class FieldNameEnum {
+    storage_,
+    autograd_meta_,
+    named_tensor_meta_,
+    version_counter_,
+    pyobj_interpreter_,
+    pyobj_,
+    sizes_and_strides_,
+    storage_offset_,
+    numel_,
+    data_type_,
+    device_opt_,
+    key_set_,
+    TOTAL_SIZE
+  };
+
+  // Provides compile-time equality check that reveals what numbers
+  // were used and on which quantity
+  template <size_t Actual, size_t Expected, FieldNameEnum FiledName>
+  constexpr static bool are_equal() {
+    static_assert(
+        Actual == Expected,
+        "Actual and Expected sizes of a field did not match!");
+    return true;
+  }
+
+  // Provides compile-time <= check that reveals what numbers
+  // were used and on which quantity
+  template <size_t Actual, size_t Expected, FieldNameEnum FiledName>
+  constexpr static bool is_le() {
+    static_assert(
+        Actual <= Expected,
+        "Actual and Expected sizes of a field did not match!");
+    return true;
+  }
+
+ public:
+  // Compile-time check that TensorImpl field sizes are as expected
+  //
+  // Observed total sizes and associated versions
+  // If you find a flag that predicts when unique_ptr has 16 bytes
+  // on 64-bit systems or when sizes_and_strides_ is 84 vs 88 bytes
+  // on 32-bit systems you get a cookie!
+  // Length | LLVM | GCC  |    C++ |  CUDA
+  //    192 |    ? | 11.2 | 201703 | 11040
+  //    208 |    ? | 11.2 | 201703 | 11040
+  //    208 |    ? | 11.2 | 201402 | 11040
+  //    192 |    ? | 11.2 | 201402 | 11040
+  //    160 |   12 |  4.2 | 201703 |     0
+  //
+  // To keep things clean, we split on systems here.
+
+#if UINTPTR_MAX == 0xFFFFFFFF
+  // This is a 32-bit system
+  static constexpr bool check_sizes() {
+    constexpr size_t tsize = 20 * sizeof(int64_t);
+
+    // clang-format off
+    are_equal<sizeof(storage_),            4,  FieldNameEnum::storage_>();
+    are_equal<sizeof(autograd_meta_),      4,  FieldNameEnum::autograd_meta_>();
+    are_equal<sizeof(named_tensor_meta_),  4,  FieldNameEnum::named_tensor_meta_>();
+    are_equal<sizeof(version_counter_),    4,  FieldNameEnum::version_counter_>();
+    are_equal<sizeof(pyobj_interpreter_),  4,  FieldNameEnum::pyobj_interpreter_>();
+    are_equal<sizeof(pyobj_),              4,  FieldNameEnum::pyobj_>();
+    is_le<sizeof(sizes_and_strides_),     88, FieldNameEnum::sizes_and_strides_>();
+    are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
+    are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
+    are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
+    are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
+    are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
+    is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
+    // clang-format on
+
+    return true;
+  }
+#else
+  // This is a 64-bit system
+  static constexpr bool check_sizes() {
+    constexpr size_t tsize = 26 * sizeof(int64_t);
+
+    // clang-format off
+    are_equal<sizeof(storage_),            8,  FieldNameEnum::storage_>();
+    // On some systems involving NVCC the size of unique_ptr is 16 bytes. We haven't
+    // figured out how to detect those via macro preprocessors yet, so we use <=
+    // comparisons for the relevant fields.
+    is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
+    is_le<sizeof(named_tensor_meta_),     16,  FieldNameEnum::named_tensor_meta_>();
+    are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
+    are_equal<sizeof(pyobj_interpreter_),  8,  FieldNameEnum::pyobj_interpreter_>();
+    are_equal<sizeof(pyobj_),              8,  FieldNameEnum::pyobj_>();
+    are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
+    are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
+    are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
+    are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
+    are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
+    are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
+    is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
+    // clang-format on
+
+    return true;
+  }
+#endif
+};
+
+// We use a class to encapsulate size-checking logic with
+// templates to capture sizes and flags. We call this within
+// a static assert to prove there is no run-time behaviour.
+// Since the methods we call return either true or fail their
+// own static_asserts, we should never see the error messages
+// below. We have to provide it though for c++ <17.
 static_assert(
-    sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-        sizeof(TensorImpl) == sizeof(int64_t) * 24,
-    "You changed the size of TensorImpl on 64-bit arch."
-    "See Note [TensorImpl size constraints] on how to proceed.");
+    C10_TensorImpl_Size_Check_Dummy_Class<>::check_sizes(),
+    "You should not see this message.");
+
+// Clean up after ourselves
+#undef C10_NVCC
+#undef C10_CUDA_VERSION_MAJOR
+#undef C10_CUDA_VERSION
+#undef C10_CLANG_MAJOR_VERSION
+#undef C10_GCC_VERSION
+#undef C10_GCC_VERSION_MINOR
+
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()

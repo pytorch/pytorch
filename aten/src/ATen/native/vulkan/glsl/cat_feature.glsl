@@ -1,13 +1,14 @@
 #version 450 core
 #define PRECISION $precision
+#define FORMAT    $format
 
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0, rgba16f) uniform PRECISION           image3D uOutput;
-layout(set = 0, binding = 1)          uniform PRECISION           sampler3D uInput;
-layout(set = 0, binding = 2)          uniform PRECISION restrict  Block {
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION           image3D uOutput;
+layout(set = 0, binding = 1)         uniform PRECISION           sampler3D uInput;
+layout(set = 0, binding = 2)         uniform PRECISION restrict  Block {
   ivec4 size;            // output texture size (x=width,y=height,z=depth,w=unused)
   ivec4 isize;           // input texture size (x=width,y=height,z=depth,w=unused)
   uint batch_size;       // input tensor's batch size

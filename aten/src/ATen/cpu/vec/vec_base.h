@@ -58,8 +58,8 @@
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 // at::Half and at::BFloat16 should be treated as floating point
 template <typename T>
 struct is_floating_point:
@@ -87,7 +87,11 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 // NOTE: If you specialize on a type, you must define all operations!
 
 // emulates Vectorized types
+#if defined(__s390x__)
+template <class T, class TEMP=void>
+#else
 template <class T>
+#endif
 struct Vectorized {
 private:
   __at_align__ T values[VECTOR_WIDTH / sizeof(T)];
@@ -129,7 +133,7 @@ public:
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(T);
   }
-  Vectorized() : values{0} {}
+  Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
     for (int i = 0; i != size(); i++) {
       values[i] = val;
@@ -146,6 +150,10 @@ public:
   // This also implies T& operator[](int idx)
   inline operator T*() {
     return values;
+  }
+  // Return the values as char* for type punning
+  auto as_bytes() const -> const char* {
+    return reinterpret_cast<const char*>(values);
   }
   template <int64_t mask_>
   static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
@@ -736,15 +744,33 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
 
 #else
 
+template <typename T>
+auto load(char const* data) -> T {
+  T ret;
+  std::memcpy(&ret, data, sizeof(ret));
+  return ret;
+}
+
 template<class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
   static constexpr uint32_t element_no = VECTOR_WIDTH / sizeof(intmax_t);
   __at_align__ intmax_t buffer[element_no];
-  const intmax_t *a_ptr = reinterpret_cast<const intmax_t*>((const T*) a);
-  const intmax_t *b_ptr = reinterpret_cast<const intmax_t*>((const T*) b);
-  for (uint32_t i = 0U; i < element_no; ++ i) {
-    buffer[i] = op(a_ptr[i], b_ptr[i]);
+  static_assert(VECTOR_WIDTH % sizeof(intmax_t) == 0, "VECTOR_WIDTH not a multiple of sizeof(intmax_t)");
+  static_assert(sizeof(buffer) == sizeof(Vectorized<T>), "sizeof(buffer) must match sizeof(Vectorized<T>)");
+  // We should be using memcpy in order to respect the strict aliasing rule
+  // see: https://github.com/pytorch/pytorch/issues/66119
+  // Using char* is defined in the C11 standard 6.5 Expression paragraph 7
+  // (http://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
+  const auto* a_data = a.as_bytes();
+  const auto* b_data = b.as_bytes();
+  // load each intmax_t chunk and process; increase pointers by sizeof(intmax_t)
+  for (auto& out : buffer) {
+    out = op(load<intmax_t>(a_data), load<intmax_t>(b_data));
+    a_data += sizeof(intmax_t);
+    b_data += sizeof(intmax_t);
   }
+  assert(a_data == a.as_bytes() + sizeof(a));
+  assert(b_data == b.as_bytes() + sizeof(b));
   return Vectorized<T>::loadu(buffer);
 }
 
@@ -843,25 +869,24 @@ inline mask_gather(const Vectorized<T>& src, T const* base_addr,
 // Vectorized<int64_t> of 512 bits containing all ones (i.e., eight negative 1s).
 // A Vec<double> of 256 bits containing all ones can be cast to a
 // Vec<int64_t> of 256 bits containing all ones (i.e., four negative 1s).
-namespace {
-  // There is a struct here because we don't have static_if and I can't
-  // partially specialize a templated function.
-  template<typename dst_t, typename src_t>
-  struct CastImpl {
-    static inline Vectorized<dst_t> apply(const Vectorized<src_t>& src) {
-      src_t src_arr[Vectorized<src_t>::size()];
-      src.store(static_cast<void*>(src_arr));
-      return Vectorized<dst_t>::loadu(static_cast<const void*>(src_arr));
-    }
-  };
+// There is a struct here because we don't have static_if and I can't
+// partially specialize a templated function.
+template<typename dst_t, typename src_t>
+struct CastImpl {
+  static inline Vectorized<dst_t> apply(const Vectorized<src_t>& src) {
+    src_t src_arr[Vectorized<src_t>::size()];
+    src.store(static_cast<void*>(src_arr));
+    return Vectorized<dst_t>::loadu(static_cast<const void*>(src_arr));
+  }
+};
 
-  template<typename scalar_t>
-  struct CastImpl<scalar_t, scalar_t> {
-    static inline Vectorized<scalar_t> apply(const Vectorized<scalar_t>& src) {
-      return src;
-    }
-  };
-}
+template<typename scalar_t>
+struct CastImpl<scalar_t, scalar_t> {
+  static inline Vectorized<scalar_t> apply(const Vectorized<scalar_t>& src) {
+    return src;
+  }
+};
+
 template<typename dst_t, typename src_t>
 inline Vectorized<dst_t> cast(const Vectorized<src_t>& src) {
   return CastImpl<dst_t, src_t>::apply(src);

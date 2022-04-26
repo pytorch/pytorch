@@ -3,15 +3,22 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <ATen/BatchedTensorImpl.h>
+#include <ATen/TensorOperators.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_sparse_coo_tensor_unsafe.h>
+#endif
 
 #include <mutex>
 
 namespace torch { namespace autograd {
 
 #define CHECK_RESULT(RESULT, VAR) \
-  if (!(RESULT.is_sparse() || VAR.is_sparse())) { \
+  if (!(RESULT.is_sparse() || VAR.is_sparse() || RESULT.is_sparse_csr() || VAR.is_sparse_csr())) { \
     if (!utils::obeys_layout_contract(RESULT, VAR)) { \
       TORCH_WARN_ONCE("grad and param do not obey the gradient layout contract. " \
                       "This is not an error, but may impair performance.\n" \
@@ -98,7 +105,8 @@ struct TORCH_API AccumulateGrad : public Node {
       const T& update_grad) {
     if (!variable_grad.defined()) {
       if (!GradMode::is_enabled() &&
-          !new_grad.is_sparse() &&
+          !new_grad.is_sparse() && !new_grad.is_sparse_csr() &&
+          !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
           new_grad.use_count() <= num_expected_refs &&
           (new_grad.is_mkldnn() || utils::obeys_layout_contract(new_grad, variable))) {
         // we aren't setting up for double-backward
@@ -132,7 +140,7 @@ struct TORCH_API AccumulateGrad : public Node {
             new_grad.sizes(),
             new_grad.options()));
       } else {
-        if (new_grad.is_sparse()) {
+        if (new_grad.is_sparse() || new_grad.is_sparse_csr()) {
           update_grad(new_grad.clone());
         } else {
           if (new_grad.is_mkldnn()) {

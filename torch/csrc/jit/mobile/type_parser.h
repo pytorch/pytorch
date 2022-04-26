@@ -1,15 +1,19 @@
+#pragma once
+
+#include <ATen/core/dynamic_type.h>
 #include <ATen/core/jit_type.h>
 
 namespace c10 {
-class TypeParser {
+
+class TORCH_API TypeParser {
  public:
   explicit TypeParser(std::string pythonStr);
   explicit TypeParser(std::vector<std::string>& pythonStrs);
 
   TypePtr parse();
   std::vector<TypePtr> parseList();
-  static std::unordered_set<std::string> getNonSimpleType();
-  static std::unordered_set<std::string> getCustomType();
+  static const std::unordered_set<std::string>& getNonSimpleType();
+  static const std::unordered_set<std::string>& getCustomType();
   std::unordered_set<std::string> getContainedTypes();
 
  private:
@@ -20,12 +24,13 @@ class TypeParser {
 
   void expect(const char* s);
   void expectChar(char c);
-  template <class T>
-  TypePtr CreateSingleElementType();
+  template <typename T>
+  TypePtr parseSingleElementType();
 
   void lex();
 
   std::string next();
+  c10::string_view nextView();
   void advance();
   C10_NODISCARD c10::string_view cur() const;
 
@@ -44,4 +49,5 @@ class TypeParser {
 TORCH_API TypePtr parseType(const std::string& pythonStr);
 
 TORCH_API std::vector<TypePtr> parseType(std::vector<std::string>& pythonStr);
+
 } // namespace c10

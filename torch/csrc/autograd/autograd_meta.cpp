@@ -1,5 +1,14 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_has_same_storage_numel.h>
+#include <ATen/ops/_new_zeros_with_same_feature_meta.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace torch {
 namespace autograd {
@@ -81,22 +90,16 @@ namespace {
       if (base.sizes()[i] != other.sizes()[i]) {
         return false;
       }
-      if (base.strides()[i] != other.strides()[i]) {
+      if (base.strides()[i] != other.strides()[i] && base.sizes()[i] != 1) {
         return false;
       }
+    }
+    if (!at::_has_same_storage_numel(base, other)) {
+      return false;
     }
     return true;
   }
 
-  Tensor new_with_same_meta(const Variable& base) {
-    // We need to create a storage of the same size to be able to have the same
-    // viewing behavior in all cases
-    // Explicit type here to appease Windows build
-    int64_t nelement_in_storage = base.storage().nbytes() / base.itemsize();
-    auto new_tensor = at::zeros({nelement_in_storage}, base.options());
-    auto res = new_tensor.as_strided(base.sizes(), base.strides(), base.storage_offset());
-    return res;
-  }
 } // anonymous namespace
 
 // This function is will ensure that the fw_grad_ is properly a view of the base for inplace ops on
@@ -156,7 +159,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
             // can be re-used.
             new_base_fw_grad = new_grad;
           } else {
-            new_base_fw_grad = new_with_same_meta(base);
+            new_base_fw_grad = at::_new_zeros_with_same_feature_meta(new_grad, base);
 
             // Update new_grad to be a view of the base
             Tensor new_fw_grad_value;
@@ -177,9 +180,14 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
 
     // Enforce the basic layout constraint
     if (!has_same_meta(new_grad, self)) {
-      Tensor new_grad_with_meta = new_with_same_meta(self);
-      new_grad_with_meta.copy_(new_grad);
-      new_grad = new_grad_with_meta;
+      if (is_view_) {
+        auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
+        TORCH_INTERNAL_ASSERT(!this_view_meta->has_fw_view(),
+            "Expected the output of forward differentiable view operations to have the tangent have the same layout as primal")
+      }
+      auto res = at::_new_zeros_with_same_feature_meta(new_grad, self);
+      res.copy_(new_grad);
+      new_grad = res;
     }
 
     fw_grad_->set_value(new_grad, level);

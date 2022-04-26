@@ -109,7 +109,7 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
   // assert(unpacked_weights.size() == torch.Size([2, 10, 3]))
   const auto packed_weight_sizes = packed_weight.sizes();
   const auto col_dim = packed_weight_sizes.size() - 1;
-  const int32_t input_rows = c10::size_to_dim_(col_dim, packed_weight_sizes);
+  const int64_t input_rows = c10::size_to_dim_(col_dim, packed_weight_sizes);
   const int32_t input_columns = packed_weight_sizes[col_dim];
   // The last 2 values are used to store the FP32 scale and zero_point values
   // per row.
@@ -125,24 +125,21 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
   float* output_data = output.data_ptr<float>();
 
 #ifdef USE_FBGEMM
-    at::parallel_for(
-      0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-        for (const auto row : c10::irange(start_idx, end_idx)) {
-          fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloatOrHalf<float>(
-            input_data + row * input_columns,
-            1,
-            input_columns,
-            output_data + row * output_columns);
-        }
-      });
+  at::parallel_for(0, input_rows, 1, [&](int64_t start_idx, int64_t end_idx) {
+    fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloatOrHalf<float>(
+        input_data + start_idx * input_columns,
+        end_idx - start_idx,
+        input_columns,
+        output_data + start_idx * output_columns);
+  });
 #else
-  for (auto row: c10::irange(input_rows)) {
+  for (auto row : c10::irange(input_rows)) {
     const std::uint8_t* input_row = input_data + row * input_columns;
     const float* input_row_scale_zp =
         reinterpret_cast<const float*>(input_row + output_columns);
     float* output_row = output_data + row * output_columns;
 
-    for(auto col: c10::irange(output_columns)) {
+    for (auto col : c10::irange(output_columns)) {
       output_row[col] =
           input_row[col] * input_row_scale_zp[0] + input_row_scale_zp[1];
     } // output_columns
@@ -172,19 +169,17 @@ Tensor _qembeddingbag_nbit_unpack_helper(
       packed_weight.suggest_memory_format());
   float* output_data = output.data_ptr<float>();
 #ifdef USE_FBGEMM
-    at::parallel_for(
-      0, input_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-        for (const auto row : c10::irange(start_idx, end_idx)) {
-          fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloatOrHalf<float>(BIT_RATE,
-            input_data + row * input_columns,
-            1,
-            input_columns,
-            output_data + row * output_dimensions[1]);
-        }
-      });
+  at::parallel_for(0, input_rows, 1, [&](int64_t start_idx, int64_t end_idx) {
+    fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloatOrHalf<float>(
+        BIT_RATE,
+        input_data + start_idx * input_columns,
+        end_idx - start_idx,
+        input_columns,
+        output_data + start_idx * output_dimensions[1]);
+  });
 #else
   auto output_columns = output_dimensions[1];
-  for (auto row: c10::irange(input_rows)) {
+  for (auto row : c10::irange(input_rows)) {
     float* output_row = output_data + row * output_columns;
     const std::uint8_t* input_row = input_data + row * input_columns;
     const at::Half* input_row_scale_zp = reinterpret_cast<const at::Half*>(

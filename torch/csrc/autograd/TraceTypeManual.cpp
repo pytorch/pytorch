@@ -4,6 +4,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/library.h>
 
@@ -143,6 +144,7 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
   m.impl("requires_grad_", CppFunction::makeFallthrough());
   m.impl("retain_grad", CppFunction::makeFallthrough());
   m.impl("_fw_primal", CppFunction::makeFallthrough());
+  m.impl("_make_dual", CppFunction::makeFallthrough());
 }
 
 }  // namespace
@@ -281,7 +283,9 @@ void general_trace_function(
         AT_ASSERT(iter->isObject());
         tracer::addOutput(node, iter->toObject());
       } else {
-        throw std::runtime_error("unsupported output type: " + type->str());
+        throw std::runtime_error(
+            "unsupported output type: " + type->str() +
+            ", from operator: " + toString(op.operator_name()));
       }
     }
   }

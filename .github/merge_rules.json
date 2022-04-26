@@ -1,0 +1,109 @@
+[
+   {
+      "name": "ONNX exporter",
+      "patterns": [
+         ".jenkins/caffe2/*",
+         "scripts/onnx/**",
+         "docs/source/onnx.rst",
+         "test/onnx/**",
+         "test/jit/test_export_modes.py",
+         "aten/src/ATen/core/interned_strings.h",
+         "tools/onnx/**",
+         "torch/_C/__init__.pyi.in",
+         "torch/csrc/jit/passes/onnx.*",
+         "torch/csrc/jit/passes/onnx/**",
+         "torch/csrc/jit/serialization/export.*",
+         "torch/csrc/jit/serialization/onnx.*",
+         "torch/csrc/onnx/**",
+         "torch/onnx/**"
+      ],
+      "approved_by": ["BowenBao", "garymm"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "NVFuser",
+      "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
+      "approved_by": ["csarofeen", "ngimel", "jjsjann123"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "OSS CI",
+      "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
+      "approved_by": ["ezyang", "pytorch/pytorch-dev-infra"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "Documentation",
+      "patterns": ["docs/**", "torch/*docs.py"],
+      "approved_by": ["mruberry", "ngimel", "janeyx99"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "Mobile",
+      "patterns": ["ios/**", "android/**", "test/mobile/**"],
+      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev", "dreiss"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "Linear Algebra",
+      "patterns": [
+         "aten/src/ATen/native/cuda/linalg/**",
+         "aten/src/ATen/LinalgBackend.h",
+         "aten/src/ATen/native/**/*LinearAlgebra*",
+         "docs/source/linalg.rst",
+         "torch/linalg/**",
+         "torch/_linalg_utils.py",
+         "torch/**/python_linalg_functions.*",
+         "torch/**/linalg.h",
+         "tools/autograd/templates/python_linalg_functions.cpp",
+         "test/test_linalg.py"
+      ],
+      "approved_by": ["nikitaved", "mruberry", "pearu", "Lezcano", "IvanYashchuk"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "FFT",
+      "patterns": [
+         "aten/src/ATen/native/cuda/*FFT*.h",
+         "aten/src/ATen/native/SpectralOps.cpp",
+         "aten/src/ATen/native/mkl/SpectralOps.cpp",
+         "aten/src/ATen/native/cuda/SpectralOps.*",
+         "docs/source/fft.rst",
+         "torch/fft/**",
+         "torch/csrc/api/include/torch/fft.h",
+         "torch/**/python_fft_functions.*",
+         "tools/autograd/templates/python_fft_functions.cpp",
+         "test/cpp/api/fft.cpp"
+      ],
+      "approved_by": ["mruberry", "peterbell10"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "Sparse",
+      "patterns": [
+         "benchmarks/sparse",
+         "c10/util/sparse_bitset.h",
+         "docs/source/sparse.rst",
+         "torch/**/sparse/**",
+         "torch/**/*sparse*",
+         "torch/optim/sparse*",
+         "torch/ao/nn/sparse/**",
+         "torch/utils/benchmark/**/*sparse*",
+         "aten/src/ATen/native/ao_sparse/**",
+         "aten/src/ATen/native/sparse/**",
+         "aten/src/ATen/**/*Sparse*",
+         "aten/src/ATen/*Sparse*",
+         "torch/_masked/**",
+         "test/*_masked*",
+         "test/**/*sparse*"
+      ],
+      "approved_by": ["nikitaved", "cpuhrsch", "pearu", "IvanYashchuk"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   },
+   {
+      "name": "superuser",
+      "patterns": ["*"],
+      "approved_by": ["pytorch/metamates"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
+   }
+]

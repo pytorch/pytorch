@@ -152,10 +152,8 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
       pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
     });
   } else {
-    const auto exp = exp_scalar.to<float>();
-    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
-      pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
-    });
+    TORCH_INTERNAL_ASSERT(false, "invalid combination of type in Pow function, common dtype:", iter.common_dtype(),
+                                 "exp is integral?", exp_scalar.isIntegral(false));
   }
 }
 

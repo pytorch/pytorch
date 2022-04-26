@@ -149,7 +149,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
     }
 
     const int kTensorGrowthPct = 40;
-    for (int i = 0; i < numRecords_; ++i) {
+    for (const auto i : c10::irange(numRecords_)) {
       if (!queue->blockingRead(blobPtrs_)) {
         // if we read at least one record, status is still true
         return i > 0;

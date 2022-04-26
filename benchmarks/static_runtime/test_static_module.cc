@@ -4,8 +4,10 @@
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
+#include <memory>
 
 #include "deep_wide_pt.h"
 #include "test_utils.h"
@@ -13,6 +15,8 @@
 using namespace torch;
 using namespace torch::jit;
 using namespace torch::jit::test;
+
+C10_DECLARE_bool(static_runtime_disable_debug_memory_overlap_check);
 
 namespace {
 
@@ -31,17 +35,6 @@ bool testCanEnableStaticRuntime(const std::string& jit_script) {
 
   // here we do not freeze graph
   return canEnableStaticRuntime(graph);
-}
-
-bool testHasInplaceOp(const std::string& jit_script) {
-  script::Module module("module");
-  module.define(jit_script);
-
-  Method method = module.get_method("forward");
-  auto graph = module.get_method("forward").graph();
-
-  AliasDb alias_db(graph);
-  return HasInplaceOp(graph, alias_db);
 }
 
 bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
@@ -113,7 +106,8 @@ TEST(StaticModule, ValueGroup) {
   torch::jit::StaticModule sm(input_graph);
   const Graph& graph = sm.graph();
   std::vector<const Node*> nodes(graph.nodes().begin(), graph.nodes().end());
-  const auto& value_group = sm.value_group();
+  auto* root_block = sm.root_block();
+  const auto& value_group = sm.block_info(root_block).value_group();
 
   std::vector<const Value*> expected_input_aliases{
       graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
@@ -145,9 +139,11 @@ TEST(StaticModule, IsOptimizableContainerType_NonOptimizableInputs) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(sm.is_optimizable_container_type(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -165,9 +161,11 @@ TEST(StaticModule, IsOptimizableContainerType_WrongType) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(sm.is_optimizable_container_type(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -182,12 +180,14 @@ TEST(StaticModule, IsOptimizableContainerType_CanUseOutVariant) {
     )JIT";
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
     if (n->kind() == c10::prim::ListConstruct) {
-      EXPECT_TRUE(sm.is_optimizable_container_type(n));
+      EXPECT_TRUE(block_info.node_is_optimizable_container_type(n));
     } else {
-      EXPECT_FALSE(sm.is_optimizable_container_type(n));
+      EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
     }
   }
 }
@@ -211,18 +211,92 @@ TEST(StaticModule, RValueInputs) {
   EXPECT_TRUE(expected.toTensor().equal(actual.toTensor()));
 }
 
-TEST(StaticRuntime, InPlace) {
-  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
-  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
-  EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
-  EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
-}
-
 TEST(StaticRuntime, ModuleHasOp) {
   EXPECT_TRUE(testModuleHasOp(reshape_inplace_script, "aten::sigmoid_"));
   EXPECT_TRUE(testModuleHasOp(reshape_inplace_script_1, "aten::reshape"));
   EXPECT_TRUE(testModuleHasOp(sigmoid_inplace_script, "aten::clone"));
   EXPECT_FALSE(testModuleHasOp(reshape_inplace_script_1, "aten::add_"));
+}
+
+TEST(StaticRuntime, ReplaceWithCopy_replaces_reshape) {
+  auto ExpectToReplaceWithCopy = [](const std::string& jit_script) {
+    auto graph = getGraphFromScript(jit_script);
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+
+    ReplaceWithCopy(graph);
+
+    // aten::reshape -> static_runtime::reshape_copy
+    EXPECT_FALSE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_TRUE(graphHasOp(graph, "static_runtime::reshape_copy"));
+  };
+
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        return (a)
+  )JIT");
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp * 2
+        b = inp * 3
+        c = inp.reshape(shape)
+        return (a, b, c)
+  )JIT");
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, cond: bool, x):
+        if cond:
+            y = x.reshape(x.shape)
+        else:
+            y = x.clone()
+        return y.clone()
+  )JIT");
+}
+
+TEST(
+    StaticRuntime,
+    ReplaceWithCopy_does_not_replace_reshape_if_input_has_writters) {
+  auto ExpectNotToReplaceWithCopy = [](const std::string& jit_script) {
+    auto graph = getGraphFromScript(jit_script);
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+
+    ReplaceWithCopy(graph);
+
+    // No Replacement
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+  };
+
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        inp *= 2
+        return (a)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        a *= 2
+        return (a)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, inp2: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        a *= 2
+        b = a.reshape(shape)
+        return (b)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        b = a.reshape(shape)
+        c = b.reshape(shape)
+        d = c.reshape(shape)
+        e = b.sigmoid_()
+        return (d)
+  )JIT");
+  ExpectNotToReplaceWithCopy(reshape_inplace_script);
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
@@ -250,22 +324,34 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
             return a * a
   )JIT";
 
-  const auto is_script = R"JIT(
+  const auto is_script_tensors = R"JIT(
     def forward(self, a: Tensor, b: Tensor):
         return a is b
   )JIT";
 
-  const auto is_not_script = R"JIT(
+  const auto is_script_none = R"JIT(
+    def forward(self, a: Optional[Tensor]):
+        return a is None
+  )JIT";
+
+  const auto is_not_script_tensors = R"JIT(
     def forward(self, a: Tensor, b: Tensor):
         return a is not b
   )JIT";
 
+  const auto is_not_script_none = R"JIT(
+    def forward(self, a: Optional[Tensor]):
+        return a is not None
+  )JIT";
+
   EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(for_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(while_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(if_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(is_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(for_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(while_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(if_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_script_tensors));
+  EXPECT_TRUE(testCanEnableStaticRuntime(is_script_none));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script_tensors));
+  EXPECT_TRUE(testCanEnableStaticRuntime(is_not_script_none));
 }
 
 TEST(StaticRuntime, NestedOutput) {
@@ -483,60 +569,71 @@ TEST(StaticRuntime, KWargsAPI_2) {
   }
 }
 
+TEST(StaticRuntime, KWargsAPI_Optional) {
+  const auto src = R"JIT(
+    def forward(self, x, y, z: Optional[Tensor] = None):
+        return x + y
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+  torch::jit::StaticModule smod(mod);
+  const auto kwargs = std::unordered_map<std::string, IValue>{
+      {"x", at::randn({1})}, {"y", at::randn({1})}};
+
+  auto expected = mod.forward({}, kwargs).toTensor();
+  auto actual = smod({}, kwargs).toTensor();
+
+  EXPECT_TRUE(expected.equal(actual));
+}
+
 TEST(StaticRuntime, CleanUpMemory) {
   const int embedding_size = 32;
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
 
-  for (auto cleanup_activations : {true, false}) {
-    for (auto enable_out_variant : {true, false}) {
-      for (auto optimize_memory : {true, false}) {
-        for (auto manage_output_tensors : {true, false}) {
-          if (manage_output_tensors && !enable_out_variant) {
-            // when manage_output_tensors is enabled, enable_out_variant
-            // must be enabled too
-            continue;
-          }
-          if (optimize_memory && !enable_out_variant) {
-            // when optimize_memory is enabled, enable_out_variant must be
-            // enabled too
-            continue;
-          }
-          VLOG(1) << "cleanup_activations: " << cleanup_activations
-                  << ", enable_out_variant: " << enable_out_variant
-                  << ", optimize_memory: " << optimize_memory
-                  << ", manage_output_tensors: " << manage_output_tensors;
-          torch::jit::StaticModuleOptions opts{
-              cleanup_activations,
-              enable_out_variant,
-              optimize_memory,
-              manage_output_tensors};
-          torch::jit::StaticModule smod(mod, false, opts);
-          torch::jit::StaticRuntime runtime(smod);
+  for (auto enable_out_variant : {true, false}) {
+    for (auto optimize_memory : {true, false}) {
+      for (auto manage_output_tensors : {true, false}) {
+        if (manage_output_tensors && !enable_out_variant) {
+          // when manage_output_tensors is enabled, enable_out_variant
+          // must be enabled too
+          continue;
+        }
+        if (optimize_memory && !enable_out_variant) {
+          // when optimize_memory is enabled, enable_out_variant must be
+          // enabled too
+          continue;
+        }
+        VLOG(1) << "enable_out_variant: " << enable_out_variant
+                << ", optimize_memory: " << optimize_memory
+                << ", manage_output_tensors: " << manage_output_tensors;
+        torch::jit::StaticModuleOptions opts{
+            enable_out_variant, optimize_memory, manage_output_tensors};
+        torch::jit::StaticModule smod(mod, false, opts);
+        torch::jit::StaticRuntime runtime(smod);
 
-          for (int batch_size : {1, 8, 32}) {
-            for (int i = 0; i < 2; ++i) {
-              auto ad_emb_packed =
-                  torch::randn({batch_size, 1, embedding_size});
-              auto user_emb = torch::randn({batch_size, 1, embedding_size});
-              auto wide = torch::randn({batch_size, num_features});
+        for (int batch_size : {1, 8, 32}) {
+          for (int i = 0; i < 2; ++i) {
+            auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
+            auto user_emb = torch::randn({batch_size, 1, embedding_size});
+            auto wide = torch::randn({batch_size, num_features});
 
-              // run jit graph executor
-              std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
-              auto output_1 = getTensor(mod.forward(inputs));
+            // run jit graph executor
+            std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
+            auto output_1 = getTensor(mod.forward(inputs));
 
-              // run static runtime
-              std::vector<c10::IValue> input_tensors(
-                  {ad_emb_packed, user_emb, wide});
-              auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
-              ASSERT_TRUE(outputs.size() > 0);
-              auto output_2 = outputs[0].toTensor();
-              runtime.check_for_memory_leak();
-              EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
-              if (manage_output_tensors) {
-                runtime.deallocateOutputTensors();
-                runtime.checkOutputTensorMemoryLeaks();
-              }
+            // run static runtime
+            std::vector<c10::IValue> input_tensors(
+                {ad_emb_packed, user_emb, wide});
+            auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
+            ASSERT_TRUE(outputs.size() > 0);
+            auto output_2 = outputs[0].toTensor();
+            runtime.check_for_memory_leak();
+            EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+            if (manage_output_tensors) {
+              runtime.deallocateOutputTensors();
+              runtime.checkOutputTensorMemoryLeaks();
             }
           }
         }
@@ -576,7 +673,6 @@ TEST(
   auto g = std::make_shared<torch::jit::Graph>();
   torch::jit::parseIR(test_graph, g.get());
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -624,7 +720,6 @@ TEST(StaticRuntime, ManageOutputTensorsWithDeallocateOutputTensors) {
   torch::jit::Module mod = getDeepAndWideSciptModel();
 
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -649,7 +744,6 @@ TEST(StaticRuntime, ManageOutputTensorsWithoutDeallocateOutputTensors) {
   torch::jit::Module mod = getDeepAndWideSciptModel();
 
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -687,7 +781,6 @@ TEST(StaticRuntime, DisableManageOutputTensors) {
   auto g = std::make_shared<torch::jit::Graph>();
   torch::jit::parseIR(test_graph, g.get());
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -814,17 +907,16 @@ TEST(
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
-  pnode.set_values(values.data());
-  EXPECT_TRUE(pnode.verify_no_memory_overlap());
+  StaticNodeInfo static_node_info(
+      sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
+  ProcessedNode pnode(static_node_info, values.data());
+  EXPECT_TRUE(pnode.verify_no_memory_overlap(/* force_check*/ true));
 
   pnode.Output(0) = values[0];
-  EXPECT_FALSE(pnode.verify_no_memory_overlap());
+  EXPECT_FALSE(pnode.verify_no_memory_overlap(/* force_check*/ true));
 }
 
-TEST(
-    ProcessedNode,
-    VerifyNoMemoryOverlapWithImmutableInputsWithMutableArguments) {
+TEST(ProcessedNode, VerifyNoMemoryOverlapWithImmutableInputsWithInplaceOps) {
   script::Module module("module");
   // Using out= variant.
   module.define(sigmoid_inplace_script);
@@ -835,8 +927,9 @@ TEST(
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
-  pnode.set_values(values.data());
+  StaticNodeInfo static_node_info(
+      sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
+  ProcessedNode pnode(static_node_info, values.data());
 
   ASSERT_EQ(&pnode.Output(0), &values[1]);
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
@@ -862,11 +955,13 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         list_unpack_node,
         /*enable_out_variant=*/true,
         /*check_memory_overlap */ false);
-    ProcessedNode list_unpack_pnode(
+    StaticNodeInfo list_unpack_static_node_info(
         list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
-    list_unpack_pnode.set_values(values.data());
+    ProcessedNode list_unpack_pnode(
+        list_unpack_static_node_info, values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
-    EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
+    EXPECT_TRUE(
+        list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
   }
   {
     std::array<IValue, 3> values = {
@@ -875,13 +970,15 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         list_unpack_node,
         /*enable_out_variant=*/true,
         /*check_memory_overlap */ false);
-    ProcessedNode list_unpack_pnode(
+    StaticNodeInfo list_unpack_static_node_info(
         list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
-    list_unpack_pnode.set_values(values.data());
+    ProcessedNode list_unpack_pnode(
+        list_unpack_static_node_info, values.data());
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
-    EXPECT_FALSE(list_unpack_pnode.verify_no_memory_overlap());
+    EXPECT_FALSE(
+        list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
   }
 }
 
@@ -913,6 +1010,7 @@ TORCH_LIBRARY_IMPL(test, CPU, m) {
 }
 
 TEST(StaticRuntime, BadSchemaAliasInfo) {
+  FLAGS_static_runtime_disable_debug_memory_overlap_check = true;
   const std::string src = R"IR(
       graph(%x: Tensor, %s: int):
           %c0 : int = prim::Constant[value=0]()
@@ -930,6 +1028,7 @@ TEST(StaticRuntime, BadSchemaAliasInfo) {
   // This test doesn't pass yet. This is the corner case mentioned in Step 2 of
   // [Check and correct bad schema alias info at runtime]
   // testStaticRuntime(src, {x1, 10}, {x2, 0});
+  FLAGS_static_runtime_disable_debug_memory_overlap_check = false;
 }
 
 // This test repeats the last test, but with the correct schema alias
@@ -971,7 +1070,6 @@ TEST(ProcessedFunction, ProcessedFunction) {
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  EXPECT_TRUE(sigmoid_fn.f());
   EXPECT_EQ(sigmoid_fn.kind(), ProcessedFunction::Kind::kOutVariant);
   EXPECT_FALSE(sigmoid_fn.checkMemoryOverlap());
 
@@ -980,7 +1078,533 @@ TEST(ProcessedFunction, ProcessedFunction) {
       transpose_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  EXPECT_TRUE(transpose_fn.f());
   EXPECT_EQ(transpose_fn.kind(), ProcessedFunction::Kind::kNativeFunction);
   EXPECT_FALSE(transpose_fn.checkMemoryOverlap());
+}
+
+TEST(ManagedTensorRanges, NoAliases) {
+  const std::string src = R"IR(
+    graph(%x : Tensor):
+        %y : Tensor = aten::mul(%x, %x)
+        %z : Tensor = aten::mul(%y, %x)
+        %output : Tensor = aten::mul(%z, %z)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  auto* y = vmap["y"];
+  auto* z = vmap["z"];
+
+  FastSet<const Value*> managed_tensors = {y, z};
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
+
+  std::vector<Node*> nodes(
+      graph->block()->nodes().begin(), graph->block()->nodes().end());
+  ASSERT_EQ(nodes.size(), 3);
+
+  EXPECT_FALSE(ranges.nodeFreesManagedTensors(nodes[0]));
+
+  EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[1]));
+  EXPECT_EQ(
+      ranges.availableTensorValuesAfterNode(nodes[1]),
+      std::vector<const Value*>{y});
+
+  EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[2]));
+  EXPECT_EQ(
+      ranges.availableTensorValuesAfterNode(nodes[2]),
+      std::vector<const Value*>{z});
+}
+
+TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
+  const std::string src = R"IR(
+    graph(%x : Tensor):
+        %y : Tensor = aten::mul(%x, %x)
+        %y_size : int[] = aten::size(%y)
+        %z1 : Tensor = aten::mul(%y, %y)
+        %y_alias : Tensor = aten::view(%y, %y_size)
+        %z2 : Tensor = aten::mul(%y_alias, %y_alias)
+        %output : Tensor = aten::mul(%z1, %z2)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  auto* y = vmap["y"];
+  auto* z1 = vmap["z1"];
+  auto* z2 = vmap["z2"];
+
+  FastSet<const Value*> managed_tensors = {y, z1, z2};
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
+
+  std::vector<Node*> nodes(
+      graph->block()->nodes().begin(), graph->block()->nodes().end());
+  ASSERT_EQ(nodes.size(), 6);
+
+  for (const auto i : c10::irange(4)) {
+    EXPECT_FALSE(ranges.nodeFreesManagedTensors(nodes[i]));
+  }
+
+  EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[4]));
+  EXPECT_EQ(
+      ranges.availableTensorValuesAfterNode(nodes[4]),
+      std::vector<const Value*>{y});
+
+  EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[5]));
+  const auto& available_after_5 =
+      ranges.availableTensorValuesAfterNode(nodes[5]);
+  // We don't care about the order, so convert to set. But make sure
+  // there are no duplicates.
+  FastSet<const Value*> available_after_5_set(
+      available_after_5.begin(), available_after_5.end());
+  EXPECT_EQ(available_after_5_set.size(), available_after_5.size());
+  EXPECT_EQ(available_after_5_set, FastSet<const Value*>({z1, z2}));
+}
+
+TEST(ManagedTensorRanges, LifetimeOverlap) {
+  const std::string src = R"IR(
+    graph(%a : Tensor):
+        %b : Tensor = aten::mul(%a, %a)
+        %c : Tensor = aten::mul(%b, %b)
+        %c_size : int[] = aten::size(%c)
+        %c_alias : Tensor = aten::view(%c, %c_size)
+        %d : Tensor = aten::mul(%a, %a)
+        %e : Tensor = aten::mul(%c_alias, %c_alias)
+        %output : Tensor = aten::mul(%e, %e)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+  auto* b = vmap["b"];
+  auto* c = vmap["c"];
+  auto* d = vmap["d"];
+  auto* e = vmap["e"];
+
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d, e});
+  const std::vector<std::pair<Value*, Value*>> overlapping_values{
+      {b, c}, {c, d}, {c, e}};
+
+  const std::vector<std::pair<Value*, Value*>> disjoint_values{{b, d}, {b, e}};
+
+  for (const auto& values : overlapping_values) {
+    EXPECT_TRUE(ranges.lifetimesOverlap(values.first, values.second));
+    EXPECT_TRUE(ranges.lifetimesOverlap(values.second, values.first));
+  }
+  for (const auto& values : disjoint_values) {
+    EXPECT_FALSE(ranges.lifetimesOverlap(values.first, values.second));
+    EXPECT_FALSE(ranges.lifetimesOverlap(values.second, values.first));
+  }
+}
+
+TEST(ManagedTensorRanges, OverlappingLifetimesContainers) {
+  const std::string src = R"IR(
+    graph(%a : Tensor):
+        %b : Tensor = aten::mul(%a, %a)
+        %c : Tensor = aten::mul(%b, %b)
+        %tuple : (Tensor, Tensor) = prim::TupleConstruct(%b, %c)
+        %b_alias : Tensor, %c_alias : Tensor = prim::TupleUnpack(%tuple)
+        %d : Tensor = aten::mul(%b_alias, %c_alias)
+        %output : Tensor = aten::mul(%d, %d)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+  auto* b = vmap["b"];
+  auto* c = vmap["c"];
+  auto* d = vmap["d"];
+
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d});
+
+  EXPECT_TRUE(ranges.lifetimesOverlap(b, c));
+  EXPECT_TRUE(ranges.lifetimesOverlap(b, d));
+  EXPECT_TRUE(ranges.lifetimesOverlap(c, d));
+}
+
+TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
+  const std::string src = R"IR(
+    graph(%a : Tensor):
+        %output : Tensor = aten::mul(%a, %a)
+        %b : Tensor = aten::mul(%a, %a)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+  auto* b = vmap["b"];
+  auto* output = vmap["output"];
+
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, output});
+
+  EXPECT_TRUE(ranges.lifetimesOverlap(b, output));
+}
+
+namespace {
+
+// For checking the correctness of assignStorageToManageTensors, the following
+// conditions must hold
+// 1. All managed tensors are assigned to some storage group, and a tensor
+//    may not be assigned to more than 1 storage group.
+// 2. Managed tensors with overlapping lifetimes should not be in the same
+//    storage group.
+// 3. The number of reused tensors is >= min_reused_tensors.
+void checkStorageGroups(
+    const std::vector<StorageGroup>& storage_groups,
+    const ManagedTensorRanges& ranges,
+    const FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor,
+    size_t min_reused_tensors) {
+  // Some extra bookkeeping; construct the set of managed Tensor* and
+  // invert the tensor_value_to_tensor map. StorageGroup stores
+  // Tensor*, so this will make everything a little easier.
+  FastMap<at::Tensor*, const Value*> tensor_to_tensor_value;
+  FastSet<at::Tensor*> managed_tensors;
+  for (auto& key_value : tensor_value_to_tensor) {
+    ASSERT_EQ(
+        tensor_to_tensor_value.find(key_value.second),
+        tensor_to_tensor_value.end());
+    tensor_to_tensor_value.emplace(key_value.second, key_value.first);
+    managed_tensors.insert(key_value.second);
+  }
+
+  // Condition (1)
+  FastSet<at::Tensor*> actual_assigned_tensors;
+  for (const auto& storage_group : storage_groups) {
+    for (auto* tensor : storage_group.group()) {
+      ASSERT_EQ(
+          actual_assigned_tensors.find(tensor), actual_assigned_tensors.end());
+      actual_assigned_tensors.insert(tensor);
+    }
+  }
+  ASSERT_EQ(actual_assigned_tensors, managed_tensors);
+
+  // Condition (2)
+  size_t num_reused = 0;
+  for (const auto& storage_group : storage_groups) {
+    const auto& group = storage_group.group();
+    num_reused += group.size() - 1;
+    for (const auto i : c10::irange(group.size() - 1)) {
+      for (const auto j : c10::irange(i + 1, group.size())) {
+        const auto* v1 = tensor_to_tensor_value.at(group[i]);
+        const auto* v2 = tensor_to_tensor_value.at(group[j]);
+        EXPECT_FALSE(ranges.lifetimesOverlap(v1, v2));
+      }
+    }
+  }
+
+  // Condition (3)
+  EXPECT_GE(num_reused, min_reused_tensors);
+}
+
+// A convenience function for testing assignStorageToManagedTensors. It
+// takes in an IR graph as well as a map from managed tensor name to tensor
+// value. It constructs all of the necessary data structures, invokes
+// assignStorageToManageTensors, and verifies correctness with
+// checkStorageGroups.
+void testAssignStorageToManagedTensors(
+    const std::string& src,
+    FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor,
+    size_t min_reused_tensors) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  FastSet<const Value*> managed_tensor_values;
+  FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
+
+  for (auto& key_value : managed_tensor_name_to_tensor) {
+    const auto& tensor_name = key_value.first;
+    auto vmap_it = vmap.find(tensor_name);
+    ASSERT_TRUE(vmap_it != vmap.end());
+    managed_tensor_values.insert(vmap_it->second);
+    tensor_value_to_tensor.emplace(vmap_it->second, &key_value.second);
+  }
+  ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
+
+  AliasDb alias_db(graph);
+  auto ranges =
+      ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
+  auto groups = assignStorageToManagedTensors(
+      graph->block()->nodes(), ranges, tensor_value_to_tensor);
+
+  checkStorageGroups(
+      groups, ranges, tensor_value_to_tensor, min_reused_tensors);
+}
+
+} // namespace
+
+TEST(AssignStorageToManagedTensors, NoAliases) {
+  const auto src = R"IR(
+    graph(%a : Tensor):
+      %b : Tensor = aten::mul(%a, %a)
+      %c : Tensor = aten::mul(%b, %b)
+      %d : Tensor = aten::mul(%c, %c)
+      %e : Tensor = aten::mul(%b, %d)
+      %output : Tensor = aten::mul(%e, %e)
+      return (%output)
+  )IR";
+  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
+      {"b", at::randn({1})},
+      {"c", at::randn({1})},
+      {"d", at::randn({1})},
+      {"e", at::randn({1})}};
+  const size_t min_reused_tensors = 1;
+  testAssignStorageToManagedTensors(
+      src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
+}
+
+TEST(AssignStorageToManagedTensors, Aliases) {
+  const auto src = R"IR(
+    graph(%a : Tensor):
+      %b : Tensor = aten::mul(%a, %a)
+      %c : Tensor = aten::mul(%b, %b)
+      %d : Tensor = aten::mul(%c, %c)
+      %c_size : int[] = aten::size(%c)
+      %c_alias : Tensor = aten::view(%c, %c_size)
+      %e : Tensor = aten::mul(%b, %d)
+      %f : Tensor = aten::mul(%c_alias, %c_alias)
+      %output : Tensor = aten::mul(%e, %f)
+      return (%output)
+  )IR";
+  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
+      {"b", at::randn({1})},
+      {"c", at::randn({1})},
+      {"d", at::randn({1})},
+      {"e", at::randn({1})},
+      {"f", at::randn({1})}};
+  const size_t min_reused_tensors = 1;
+  testAssignStorageToManagedTensors(
+      src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
+}
+
+namespace {
+TORCH_LIBRARY_FRAGMENT(static_runtime_tests, m) {
+  m.def(torch::schema(
+      "static_runtime_tests::variadic_outputs(Tensor a) -> ...",
+      at::AliasAnalysisKind::PURE_FUNCTION));
+}
+} // namespace
+
+TEST(AssignStorageToManagedTensors, MultipleUnused) {
+  const auto src = R"IR(
+    graph(%a : Tensor):
+        %z : Tensor = aten::mul(%a, %a)
+        %out: Tensor = aten::mul(%z, %z)
+        %x : Tensor, %y : Tensor = static_runtime_tests::variadic_outputs(%a)
+        return (%out)
+  )IR";
+  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
+      {"z", at::randn({1})}, {"x", at::randn({1})}, {"y", at::randn({1})}};
+  const size_t min_reused_tensors = 1;
+  testAssignStorageToManagedTensors(
+      src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
+}
+
+namespace {
+void testStaticModuleThrows(
+    const std::string& src,
+    const std::vector<IValue>& args,
+    const std::unordered_map<std::string, IValue>& kwargs) {
+  auto static_module = makeStaticModuleFromScript(src);
+  EXPECT_THROW(static_module(args, kwargs), c10::Error);
+}
+} // namespace
+
+TEST(StaticModule, IncorrectTypesPassed) {
+  const std::string args_bool_script = R"JIT(
+    def forward(self, x: bool):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_bool_script, {at::randn({1})}, {});
+
+  const std::string args_tensor_script = R"JIT(
+    def forward(self, x: Tensor):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_tensor_script, {false}, {});
+
+  const std::string kwargs_int_script = R"JIT(
+    def forward(self, x: bool = True):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_int_script, {}, {{"x", at::randn({1})}});
+
+  const std::string kwargs_tensor_script = R"JIT(
+    def forward(self, x: Tensor = torch.randn((1, ))):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_tensor_script, {}, {{"x", 1.0}});
+}
+
+TEST(StaticModule, TooManyArgs) {
+  const std::string args_src = R"JIT(
+    def forward(self, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_src, {0, 1}, {});
+
+  const std::string kwargs_src = R"JIT(
+    def forward(self, x: int = 1):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_src, {}, {{"y", 0}, {"x", 1}});
+}
+
+TEST(StaticModule, NotEnoughArgs) {
+  const std::string args_src = R"JIT(
+    def forward(self, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_src, {}, {});
+
+  const std::string kwargs_src = R"JIT(
+    def forward(self, *, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_src, {}, {});
+}
+
+TEST(CreateOwnedRefsForSpecialValues, TopLevel) {
+  const auto src = R"IR(
+    graph():
+        %c: int = prim::Constant[value=42]()
+        return (%c)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefsForSpecialValues(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(CreateOwnedRefsForSpecialValues, ValueFromOuterScope) {
+  const auto src = R"IR(
+    graph(%cond: bool, %1: int):
+        %c: int = aten::add(%1, %1)
+        %x: int = prim::If(%c)
+          block0():
+            -> (%c)
+          block1():
+            -> (%c)
+        return (%x)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefsForSpecialValues(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
+  const auto src = R"IR(
+    graph(%cond: bool):
+        %lst : int[] = prim::ListConstruct()
+        %1 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        prim::If(%cond)
+          block0():
+            aten::append(%lst, %1)
+            -> ()
+          block1():
+            aten::append(%lst, %2)
+            -> ()
+        return (%lst)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  ForceNonEmptyOutputs(*graph);
+
+  for (auto* node : graph->nodes()) {
+    if (node->blocks().empty()) {
+      continue;
+    }
+    EXPECT_EQ(node->outputs().size(), 1);
+    for (auto* sub_block : node->blocks()) {
+      EXPECT_EQ(sub_block->outputs().size(), 1);
+    }
+  }
+}
+
+TEST(EliminateExtraPermuteOps, FusesCorrectly) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=-1)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::permute"));
+  auto* sum = getNodeWithKind(graph, "aten::sum");
+  ASSERT_NE(sum, nullptr);
+  auto dim = toIValue(sum->input(1));
+  ASSERT_TRUE(dim.has_value() && dim->isIntList());
+  EXPECT_EQ(dim->toIntList(), c10::List<int64_t>{1});
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseWrongDim) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=1)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseNonConstantDim) {
+  const auto src = R"JIT(
+    def forward(self, x, dim: int):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=dim)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(UseSplitAndSqueeze, Fusion) {
+  const auto src = R"IR(
+    graph(%x: Tensor):
+      %dim: int = prim::Constant[value=1]()
+      %split_size: int = prim::Constant[value=1]()
+      %split: Tensor[] = aten::split(%x, %split_size, %dim)
+      %a: Tensor, %b: Tensor = prim::ListUnpack(%split)
+      %c: Tensor = aten::squeeze(%a, %dim)
+      %d: Tensor = aten::squeeze(%b, %dim)
+      return (%c, %d)
+  )IR";
+  auto graph = getGraphFromIR(src);
+  UseSplitAndSqueeze(graph);
+  EXPECT_TRUE(
+      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze_copy"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::split"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::squeeze"));
+  EXPECT_FALSE(hasNodeWithKind(graph, "prim::ListUnpack"));
 }

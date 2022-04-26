@@ -40,7 +40,7 @@ Tensor _view_as_real_physical(const Tensor& self) {
   new_sizes.back() = 2;
   auto new_strides = computeStrideForViewAsReal(self.strides());
   auto new_storage_offset = 2 * self.storage_offset();
-  const auto float_type = c10::toValueType(self.scalar_type());
+  const auto float_type = c10::toRealValueType(self.scalar_type());
   auto real_tensor = view_tensor(self, float_type, new_storage_offset, new_sizes, new_strides);
   return real_tensor;
 }

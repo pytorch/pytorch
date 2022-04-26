@@ -6,9 +6,14 @@ from typing import Any, List
 
 import torch.utils.data.backward_compatibility
 
-import torch.utils.data.sharding
+import torch.utils.data.graph_settings
 from torch.utils.data import DataLoader, IterDataPipe, communication
 from torch.utils.data.datapipes.iter import IterableWrapper
+
+__all__ = [
+    "DataLoader2",
+]
+
 
 class _ThreadingDataLoader2:
 
@@ -18,9 +23,9 @@ class _ThreadingDataLoader2:
         self.collate_fn = collate_fn
         for worker_id in range(num_workers):
             (thread, req_queue, res_queue, thread_localdatapipe) = communication.eventloop.SpawnThreadForDataPipeline(datapipe)
-            torch.utils.data.sharding.apply_sharding(thread_localdatapipe, num_workers, worker_id)
+            torch.utils.data.graph_settings.apply_sharding(thread_localdatapipe, num_workers, worker_id)
             thread.start()
-            self.threads.append((thread, req_queue, res_queue))
+            self.threads.append((thread, req_queue, res_queue))  # These queues are independent
             local_datapipe = communication.iter.QueueWrapper(
                 communication.protocol.IterDataPipeQueueProtocolClient(req_queue, res_queue))
             self.datapipes.append(local_datapipe)
@@ -54,12 +59,17 @@ class _ThreadingDataLoader2:
         for thread, req_queue, res_queue in self.threads:
             clean_me(thread, req_queue, res_queue)
 
+def _sharding_worker_init_fn(worker_init_fn, worker_id):
+    if worker_init_fn is not None:
+        worker_init_fn(worker_id)
+    torch.utils.data.backward_compatibility.worker_init_fn(
+        worker_id)
 
 class DataLoader2:
     def __new__(cls,
                 dataset,
                 batch_size=1,
-                shuffle=False,
+                shuffle=None,
                 sampler=None,
                 batch_sampler=None,
                 num_workers=0,
@@ -82,8 +92,7 @@ class DataLoader2:
                 raise Exception(
                     'sampler is not yet supported by DataPipes')
             datapipe = dataset
-            if shuffle:
-                datapipe = datapipe.shuffle()
+            datapipe = torch.utils.data.graph_settings.apply_shuffle_settings(datapipe, shuffle=shuffle)
             if batch_outside_worker and pin_memory:
                 raise Exception(
                     'pin_memory is not yet compatible with batch_outside_worker')
@@ -93,18 +102,14 @@ class DataLoader2:
                     if collate_fn is None:
                         collate_fn = torch.utils.data._utils.collate.default_collate
             if parallelism_mode == 'mp' or num_workers == 0:
-                def sharding_worker_init_fn(worker_init_fn, worker_id):
-                    if worker_init_fn is not None:
-                        worker_init_fn(worker_id)
-                    torch.utils.data.backward_compatibility.worker_init_fn(
-                        worker_id)
-
                 my_worker_init_fn = functools.partial(
-                    sharding_worker_init_fn, worker_init_fn)
+                    _sharding_worker_init_fn, worker_init_fn)
 
+                # Note: It is safe to pass shuffle=True to the old DataLoader, as shuffle does nothing
+                # for Iterable, but required to set Pipes correctly.
                 data_loader = DataLoader(datapipe,
                                          batch_size=None,  # Replaced by .batch DataPipe
-                                         shuffle=False,  # Replaced by .shuffle DataPipe
+                                         shuffle=shuffle,
                                          sampler=None,
                                          batch_sampler=None,
                                          num_workers=num_workers,
@@ -138,10 +143,9 @@ class DataLoader2:
                     batch_size, drop_last=drop_last).map(collate_fn)
                 return datapipe
         else:
-            if parallelism_mode != 'thread':
+            if parallelism_mode == 'thread':
                 raise Exception(
                     'thread parallelism mode is not supported for old DataSets')
-
             return DataLoader(dataset,
                               batch_size=batch_size,
                               shuffle=shuffle,

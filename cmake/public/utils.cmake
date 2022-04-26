@@ -353,6 +353,26 @@ macro(torch_cuda_based_add_library cuda_target)
   endif()
 endmacro()
 
+##############################################################################
+# Get the HIP arch flags specified by PYTORCH_ROCM_ARCH.
+# Usage:
+#   torch_hip_get_arch_list(variable_to_store_flags)
+#
+macro(torch_hip_get_arch_list store_var)
+  if(DEFINED ENV{PYTORCH_ROCM_ARCH})
+    set(_TMP $ENV{PYTORCH_ROCM_ARCH})
+  else()
+    # Use arch of installed GPUs as default
+    execute_process(COMMAND "rocm_agent_enumerator" COMMAND bash "-c" "grep -v gfx000 | sort -u | xargs | tr -d '\n'"
+                    RESULT_VARIABLE ROCM_AGENT_ENUMERATOR_RESULT
+                    OUTPUT_VARIABLE ROCM_ARCH_INSTALLED)
+    if(NOT ROCM_AGENT_ENUMERATOR_RESULT EQUAL 0)
+      message(FATAL_ERROR " Could not detect ROCm arch for GPUs on machine. Result: '${ROCM_AGENT_ENUMERATOR_RESULT}'")
+    endif()
+    set(_TMP ${ROCM_ARCH_INSTALLED})
+  endif()
+  string(REPLACE " " ";" ${store_var} "${_TMP}")
+endmacro()
 
 ##############################################################################
 # Get the NVCC arch flags specified by TORCH_CUDA_ARCH_LIST and CUDA_ARCH_NAME.
@@ -429,7 +449,6 @@ function(torch_compile_options libname)
         -Wall
         -Wextra
         -Wno-unused-parameter
-        -Wno-unused-variable
         -Wno-unused-function
         -Wno-unused-result
         -Wno-unused-local-typedefs
@@ -447,8 +466,10 @@ function(torch_compile_options libname)
         # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
         -Wno-missing-braces
         )
-
-      if(NOT APPLE)
+      if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+        list(APPEND private_compile_options
+          -Wno-range-loop-analysis)
+      else()
         list(APPEND private_compile_options
           # Considered to be flaky.  See the discussion at
           # https://github.com/pytorch/pytorch/pull/9608

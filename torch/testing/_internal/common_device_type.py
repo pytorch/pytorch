@@ -6,14 +6,14 @@ import threading
 from collections import namedtuple
 from enum import Enum
 from functools import wraps
-from typing import List, Any, ClassVar, Optional, Sequence, Tuple
+from typing import List, Any, ClassVar, Optional, Sequence, Tuple, Union, Dict, Set
 import unittest
 import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, DeterministicGuard, TEST_SKIP_NOARCH, \
-    _TestParametrizer, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, DeterministicGuard, \
+    _TestParametrizer, compose_parametrize_fns, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
 
@@ -53,7 +53,7 @@ except ImportError:
 #
 # This framework was built to make it easier to write tests that run on
 #   multiple device types, multiple datatypes (dtypes), and for multiple
-#   operators. It's also useful for controlling which tests are fun. For example,
+#   operators. It's also useful for controlling which tests are run. For example,
 #   only tests that use a CUDA device can be run on platforms with CUDA.
 #   Let's dive in with an example to get an idea for how it works:
 #
@@ -377,6 +377,14 @@ class DeviceTypeTestBase(TestCase):
                 except RuntimeError as rte:
                     # check if rte should stop entire test suite.
                     self._stop_test_suite = self._should_stop_test_suite()
+                    # Check if test has been decorated with `@expectedFailure`
+                    # Using `__unittest_expecting_failure__` attribute, see
+                    # https://github.com/python/cpython/blob/ffa505b580464/Lib/unittest/case.py#L164
+                    # In that case, make it fail with "unexpected success" by suppressing exception
+                    if getattr(test, "__unittest_expecting_failure__", False) and self._stop_test_suite:
+                        import sys
+                        print("Suppressing fatal exception to trigger unexpected success", file=sys.stderr)
+                        return
                     # raise the runtime error as is for the test suite to record.
                     raise rte
                 finally:
@@ -388,29 +396,41 @@ class DeviceTypeTestBase(TestCase):
             assert not hasattr(cls, name), "Redefinition of test {0}".format(name)
             setattr(cls, name, instantiated_test)
 
-        # Handles tests that need parametrization (e.g. those that run across a set of
-        # ops / modules using the @ops or @modules decorators).
+        def default_parametrize_fn(test, generic_cls, device_cls):
+            # By default, no parametrization is needed.
+            yield (test, '', {})
 
-        def default_parametrize_fn(test, generic_cls, cls):
-            # By default, parametrize only over device.
-            test_suffix = cls.device_type
-            yield (test, test_suffix, {})
-
+        # Parametrization decorators set the parametrize_fn attribute on the test.
         parametrize_fn = test.parametrize_fn if hasattr(test, 'parametrize_fn') else default_parametrize_fn
-        for (test, test_suffix, param_kwargs) in parametrize_fn(test, generic_cls, cls):
-            if hasattr(test, 'handles_dtypes') and test.handles_dtypes:
-                full_name = '{}_{}'.format(name, test_suffix)
-                instantiate_test_helper(cls=cls, name=full_name, test=test, param_kwargs=param_kwargs)
-            else:
-                # The parametrize_fn doesn't handle dtypes internally; handle them here instead by generating
-                # a test per dtype.
-                dtypes = cls._get_dtypes(test)
-                dtypes = tuple(dtypes) if dtypes is not None else (None,)
+
+        # If one of the @dtypes* decorators is present, also parametrize over the dtypes set by it.
+        dtypes = cls._get_dtypes(test)
+        if dtypes is not None:
+
+            def dtype_parametrize_fn(test, generic_cls, device_cls, dtypes=dtypes):
                 for dtype in dtypes:
-                    all_param_kwargs = dict(param_kwargs)
-                    _update_param_kwargs(all_param_kwargs, 'dtype', dtype)
-                    full_name = '{}_{}{}'.format(name, test_suffix, _dtype_test_suffix(dtype))
-                    instantiate_test_helper(cls=cls, name=full_name, test=test, param_kwargs=all_param_kwargs)
+                    param_kwargs: Dict[str, Any] = {}
+                    _update_param_kwargs(param_kwargs, "dtype", dtype)
+
+                    # Note that an empty test suffix is set here so that the dtype can be appended
+                    # later after the device.
+                    yield (test, '', param_kwargs)
+
+            parametrize_fn = compose_parametrize_fns(dtype_parametrize_fn, parametrize_fn)
+
+        # Instantiate the parametrized tests.
+        for (test, test_suffix, param_kwargs) in parametrize_fn(test, generic_cls, cls):
+            test_suffix = '' if test_suffix == '' else '_' + test_suffix
+            device_suffix = '_' + cls.device_type
+
+            # Note: device and dtype suffix placement
+            # Special handling here to place dtype(s) after device according to test name convention.
+            dtype_kwarg = None
+            if 'dtype' in param_kwargs or 'dtypes' in param_kwargs:
+                dtype_kwarg = param_kwargs['dtypes'] if 'dtypes' in param_kwargs else param_kwargs['dtype']
+            test_name = '{}{}{}{}'.format(name, test_suffix, device_suffix, _dtype_test_suffix(dtype_kwarg))
+
+            instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs)
 
     def run(self, result=None):
         super().run(result=result)
@@ -423,15 +443,6 @@ class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
 
     # No critical error should stop CPU test suite
-    def _should_stop_test_suite(self):
-        return False
-
-# The meta device represents tensors that don't have any storage; they have
-# all metadata (size, dtype, strides) but they don't actually do any compute
-class MetaTestBase(DeviceTypeTestBase):
-    device_type = 'meta'
-    _ignore_not_implemented_error = True
-
     def _should_stop_test_suite(self):
         return False
 
@@ -488,11 +499,8 @@ def get_device_type_test_bases():
                 test_bases.append(CUDATestBase)
         else:
             test_bases.append(CPUTestBase)
-            test_bases.append(MetaTestBase)
     else:
         test_bases.append(CPUTestBase)
-        if not TEST_SKIP_NOARCH:
-            test_bases.append(MetaTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
@@ -627,23 +635,23 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 # Category of dtypes to run an OpInfo-based test for
 # Example use: @ops(dtype=OpDTypes.supported)
 #
-# There are 6 categories:
-# - basic: The dtypes the operator wants to be tested on by default. This will be
-#          a subset of the types supported by the operator.
+# There are 5 categories:
 # - supported: Every dtype supported by the operator. Use for exhaustive
 #              testing of all dtypes.
 # - unsupported: Run tests on dtypes not supported by the operator. e.g. for
 #                testing the operator raises an error and doesn't crash.
 # - supported_backward: Every dtype supported by the operator's backward pass.
 # - unsupported_backward: Run tests on dtypes not supported by the operator's backward pass.
+# - any_one: Runs a test for one dtype the operator supports. Prioritizes dtypes the
+#     operator supports in both forward and backward.
 # - none: Useful for tests that are not dtype-specific. No dtype will be passed to the test
 #         when this is selected.
 class OpDTypes(Enum):
-    basic = 0  # Test the basic set of dtypes (default)
-    supported = 1  # Test all supported dtypes
-    unsupported = 2  # Test only unsupported dtypes
-    supported_backward = 3  # Test all supported backward dtypes
-    unsupported_backward = 4  # Test only unsupported backward dtypes
+    supported = 0  # Test all supported dtypes (default)
+    unsupported = 1  # Test only unsupported dtypes
+    supported_backward = 2  # Test all supported backward dtypes
+    unsupported_backward = 3  # Test only unsupported backward dtypes
+    any_one = 4  # Test precisely one supported dtype
     none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
 
 
@@ -659,9 +667,7 @@ class OpDTypes(Enum):
 # on each device the OpInfo's operator supports, and for every dtype supported by
 # that operator. There are a few caveats to the dtype rule, explained below.
 #
-# First, if the OpInfo defines "default_test_dtypes" then the test
-# is instantiated for the intersection of default_test_dtypes and the
-# dtypes the operator supports. Second, the @ops decorator can accept two
+# The @ops decorator can accept two
 # additional arguments, "dtypes" and "allowed_dtypes". If "dtypes" is specified
 # then the test variants are instantiated for those dtypes, regardless of
 # what the operator supports. If given "allowed_dtypes" then test variants
@@ -678,55 +684,80 @@ class OpDTypes(Enum):
 #     operator's gradient formula supports
 #   OpDTypes.unsupported_backward - the test is instantiated for all dtypes the
 #     operator's gradient formula doesn't support
-#   OpDTypes.none - the test is instantied without any dtype. The test signature
+#   OpDTypes.any_one - the test is instantiated for one dtype the
+#     operator supports. The dtype supports forward and backward if possible.
+#   OpDTypes.none - the test is instantiated without any dtype. The test signature
 #     should not include a dtype kwarg in this case.
 #
 # These options allow tests to have considerable control over the dtypes
-#   they're instantiated for. Finally, the @dtypes decorator composes with the
-#   @ops decorator, and works the same as the "dtypes" argument to @ops.
+#   they're instantiated for.
 
 class ops(_TestParametrizer):
-    def __init__(self, op_list, *, dtypes: OpDTypes = OpDTypes.basic,
+    def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
-        super().__init__(handles_dtypes=True)
         self.op_list = op_list
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         """ Parameterizes the given test function across each op and its associated dtypes. """
-        for op in self.op_list:
-            # Acquires dtypes, using the op data if unspecified
-            dtypes = device_cls._get_dtypes(test)
-            if dtypes is None:
-                if self.opinfo_dtypes == OpDTypes.unsupported_backward:
-                    dtypes = set(get_all_dtypes()).difference(op.supported_backward_dtypes(device_cls.device_type))
-                elif self.opinfo_dtypes == OpDTypes.supported_backward:
-                    dtypes = op.supported_backward_dtypes(device_cls.device_type)
-                elif self.opinfo_dtypes == OpDTypes.unsupported:
-                    dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(device_cls.device_type))
-                elif self.opinfo_dtypes == OpDTypes.supported:
-                    dtypes = op.supported_dtypes(device_cls.device_type)
-                elif self.opinfo_dtypes == OpDTypes.basic:
-                    dtypes = op.default_test_dtypes(device_cls.device_type)
-                elif self.opinfo_dtypes == OpDTypes.none:
-                    dtypes = [None]
-                else:
-                    raise RuntimeError(f"Unknown OpDType: {self.opinfo_dtypes}")
+        if device_cls is None:
+            raise RuntimeError('The @ops decorator is only intended to be used in a device-specific '
+                               'context; use it with instantiate_device_type_tests() instead of '
+                               'instantiate_parametrized_tests()')
 
-                if self.allowed_dtypes is not None:
-                    dtypes = dtypes.intersection(self.allowed_dtypes)
+        for op in self.op_list:
+            # Determine the set of dtypes to use.
+            dtypes: Union[Set[torch.dtype], Set[None]]
+            if isinstance(self.opinfo_dtypes, Sequence):
+                dtypes = set(self.opinfo_dtypes)
+            elif self.opinfo_dtypes == OpDTypes.unsupported_backward:
+                dtypes = set(get_all_dtypes()).difference(op.supported_backward_dtypes(device_cls.device_type))
+            elif self.opinfo_dtypes == OpDTypes.supported_backward:
+                dtypes = op.supported_backward_dtypes(device_cls.device_type)
+            elif self.opinfo_dtypes == OpDTypes.unsupported:
+                dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(device_cls.device_type))
+            elif self.opinfo_dtypes == OpDTypes.supported:
+                dtypes = op.supported_dtypes(device_cls.device_type)
+            elif self.opinfo_dtypes == OpDTypes.any_one:
+                # Arbitrary order
+                dtype_order = (
+                    torch.float32,
+                    torch.float64,
+                    torch.complex64,
+                    torch.complex128,
+                    torch.float16,
+                    torch.bfloat16,
+                    torch.long,
+                    torch.int32,
+                    torch.int16,
+                    torch.int8,
+                    torch.uint8,
+                    torch.bool
+                )
+
+                # Tries to pick a dtype that supports both forward or backward
+                supported = op.supported_dtypes(device_cls.device_type)
+                supported_backward = op.supported_backward_dtypes(device_cls.device_type)
+                supported_both = supported.intersection(supported_backward)
+                dtype_set = supported_both if len(supported_both) > 0 else supported
+                for dtype in dtype_order:
+                    if dtype in dtype_set:
+                        dtypes = {dtype}
+                        break
+            elif self.opinfo_dtypes == OpDTypes.none:
+                dtypes = {None}
             else:
-                assert self.allowed_dtypes is None, "ops(allowed_dtypes=[...]) and the dtypes decorator are incompatible"
-                assert self.opinfo_dtypes == OpDTypes.basic, "ops(dtypes=...) and the dtypes decorator are incompatible"
+                raise RuntimeError(f"Unknown OpDType: {self.opinfo_dtypes}")
+
+            if self.allowed_dtypes is not None:
+                dtypes = dtypes.intersection(self.allowed_dtypes)
+
+            # Construct the test name; device / dtype parts are handled outside.
+            # See [Note: device and dtype suffix placement]
+            test_name = op.formatted_name
 
             for dtype in dtypes:
-                # Construct the test name.
-                test_name = '{}{}_{}{}'.format(op.name.replace('.', '_'),
-                                               '_' + op.variant_test_name if op.variant_test_name else '',
-                                               device_cls.device_type,
-                                               _dtype_test_suffix(dtype))
-
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {'op': op}
                 _update_param_kwargs(param_kwargs, 'dtype', dtype)
@@ -810,7 +841,10 @@ def _has_sufficient_memory(device, size):
             return False
         gc.collect()
         torch.cuda.empty_cache()
-        return torch.cuda.get_device_properties(device).total_memory - torch.cuda.memory_allocated(device) >= size
+        # torch.cuda.mem_get_info, aka cudaMemGetInfo, returns a tuple of (free memory, total memory) of a GPU
+        if device == 'cuda':
+            device = 'cuda:0'
+        return torch.cuda.memory.mem_get_info(device)[0] >= size
 
     if device == 'xla':
         raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
@@ -923,8 +957,6 @@ class deviceCountAtLeast(object):
 
 # Only runs the test on the native device type (currently CPU, CUDA, Meta)
 def onlyNativeDeviceTypes(fn):
-    NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
-
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
         if self.device_type not in NATIVE_DEVICES:

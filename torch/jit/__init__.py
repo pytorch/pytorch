@@ -1,7 +1,8 @@
 import torch._C
 
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Any
+import warnings
 
 from torch.utils import set_module
 
@@ -47,13 +48,15 @@ from torch.jit._trace import (
     _get_trace_graph,
 )
 from torch.jit._async import fork, wait
-from torch.jit._serialization import save, load
-from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
+from torch.jit._serialization import save, load, jit_module_from_flatbuffer, save_jit_module_to_flatbuffer
+from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph, set_fusion_strategy
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
+from torch.jit._ir_utils import _InsertPoint
 
 # For backwards compatibility
 _fork = fork
 _wait = wait
+_set_fusion_strategy = set_fusion_strategy
 
 
 def export_opnames(m):
@@ -185,6 +188,35 @@ def isinstance(obj, target_type):
     return _isinstance(obj, target_type)
 
 
+class strict_fusion(object):
+    """
+    This class errors if not all nodes have been fused in
+    inference, or symbolically differentiated in training.
+
+    Example:
+
+    Forcing fusion of additions.
+
+    .. code-block:: python
+
+        @torch.jit.script
+        def foo(x):
+            with torch.jit.strict_fusion():
+                return x + x + x
+
+    """
+
+    def __init__(self):
+        if not torch._jit_internal.is_scripting():
+            warnings.warn("Only works in script mode")
+        pass
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, type: Any, value: Any, tb: Any) -> None:
+        pass
+
 # Context manager for globally hiding source ranges when printing graphs.
 # Note that these functions are exposed to Python as static members of the
 # Graph class, so mypy checks need to be skipped.
@@ -197,6 +229,8 @@ def _hide_source_ranges() -> Iterator[None]:
     finally:
         torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
+# dont expose Any, TODO: define `__all__`
+del Any
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

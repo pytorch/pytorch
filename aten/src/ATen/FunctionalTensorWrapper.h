@@ -37,7 +37,6 @@ namespace at {
 //
 // See Note [Functionalization: Alias Removal] for details on the aliasing machinery.
 // See Note [Functionalization: Mutation Removal] for details on mutation removal.
-
 struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   explicit FunctionalTensorWrapper(const Tensor& value);
   // Additional constructor to create a FunctionalTensorWrapper directly from an underlying tensor that was created from a view.
@@ -64,7 +63,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // It can't just call sync_(), because the FunctionalTensorWrapper will look like it has no aliases and sync_ will be a noop.
   // We use the reference count on storage_ to determine if the wrapper is aliased, and by the time functorch
   // is ready to propagate updates to inputs, any intermediate views of the input created by the program will have been deallocated.
-  void apply_updates();
+  // This function also returns whether or not the base actually had any updates to apply.
+  bool apply_updates();
   // Takes the current state of value_ and snapshots it, sending it as a pending update to the alias.
   void commit_update();
   // When any tensor is mutated, the tensor increments its alias's "generation".
@@ -95,9 +95,6 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 
  private:
   const char* tensorimpl_type_name() const override;
-  // Returns true if this FunctionalTensorWrapper is aliased with any other FunctionalTensorWrapper objects.
-  // During a functionalization pass, if we have `b = a.view()`, then a and b should both report as aliased.
-  bool is_aliased() const;
   void set_constructor_metadata();
   functionalization::FunctionalStorageImpl* functional_storage_impl() const;
 
@@ -120,26 +117,36 @@ TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(const Tenso
   return functional_impl;
 }
 
-TORCH_API inline bool isFunctionalTensor(const at::Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
-}
+TORCH_API bool isFunctionalTensor(const at::Tensor& tensor);
+TORCH_API bool isFunctionalTensor(const c10::optional<Tensor>& t);
+TORCH_API bool isFunctionalTensor(const c10::List<Tensor>& t_list);
+TORCH_API bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list);
+TORCH_API bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list);
 
 TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
+TORCH_API c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor);
 TORCH_API c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list);
+TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list);
-TORCH_API TensorList to_functional_tensor(const TensorList& t_list);
+TORCH_API std::vector<Tensor> to_functional_tensor(const TensorList& t_list);
 
 TORCH_API Tensor from_functional_tensor(const Tensor& tensor);
 TORCH_API c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t);
 TORCH_API c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list);
 TORCH_API c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list);
-TORCH_API TensorList from_functional_tensor(const TensorList& tensors);
+TORCH_API std::vector<Tensor> from_functional_tensor(const TensorList& tensors);
 
 TORCH_API void sync(const at::Tensor& t);
 TORCH_API void sync(const c10::optional<Tensor>& t);
 TORCH_API void sync(const c10::List<Tensor> t_list);
 TORCH_API void sync(const at::TensorList t_list);
 TORCH_API void sync(const c10::List<c10::optional<Tensor>> t_list);
+
+TORCH_API void replace_(const Tensor& functional_tensor, const Tensor& other);
+TORCH_API void replace_(const TensorList functional_tensor, TensorList other);
+
+TORCH_API void commit_update(const Tensor& functional_tensor);
+TORCH_API void commit_update(const TensorList functional_tensor);
 
 Tensor create_functional_tensor_with_view_meta(const Tensor& view_to_wrap, const Tensor& base, functionalization::ViewMeta meta, int64_t out_idx = 0);
 std::vector<Tensor> create_functional_tensor_with_view_meta(const c10::List<Tensor>& view_to_wrap, const Tensor& base, functionalization::ViewMeta meta);
@@ -149,6 +156,32 @@ void mutate_view_meta(const Tensor& self, functionalization::ViewMeta meta);
 
 void set_sizes_strides_offset(const Tensor& out, const Tensor& meta_out);
 void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector<Tensor>& meta_outs);
+
+
+//  ~~~~~ TLS used in functionalization ~~~~~
+
+TORCH_API bool getFunctionalizationReapplyViewsTLS();
+TORCH_API void setFunctionalizationReapplyViewsTLS(bool reapply_views);
+
+class TORCH_API FunctionalizationReapplyViewsGuard {
+ public:
+  FunctionalizationReapplyViewsGuard(bool reapply_views) {
+    prev_ = getFunctionalizationReapplyViewsTLS();
+    setFunctionalizationReapplyViewsTLS(reapply_views);
+  }
+
+  ~FunctionalizationReapplyViewsGuard() {
+    setFunctionalizationReapplyViewsTLS(prev_);
+  }
+
+  FunctionalizationReapplyViewsGuard(const FunctionalizationReapplyViewsGuard&) = delete;
+  FunctionalizationReapplyViewsGuard operator=(const FunctionalizationReapplyViewsGuard&) = delete;
+  FunctionalizationReapplyViewsGuard(FunctionalizationReapplyViewsGuard&&) = delete;
+  FunctionalizationReapplyViewsGuard operator=(FunctionalizationReapplyViewsGuard&&) = delete;
+
+ private:
+  bool prev_;
+};
 
 } // namespace impl
 } // namespace functionalization

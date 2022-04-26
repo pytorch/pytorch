@@ -18,7 +18,6 @@
 
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/frontend_cuda.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -30,7 +29,7 @@
 #include <pybind11/chrono.h>
 
 #include <c10d/comm.hpp>
-#include <c10d/frontend.hpp>
+#include <c10d/debug.h>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
 
@@ -232,10 +231,6 @@ void _register_builtin_comm_hook(
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
-  ::c10d::initCustomClassBindings();
-#ifdef USE_C10D_NCCL
-  ::c10d::initCustomClassBindingsNccl();
-#endif
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
@@ -455,6 +450,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
           py::arg("has_sync_bn"),
+          py::arg("static_graph"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_runtime_stats_and_log",
@@ -484,20 +480,24 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
-  py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
-      An enum whose values correspond to different debug settings of the
-      torch.distributed package. Currently supporting settings are OFF, INFO,
-      and DETAIL, which can be set via the TORCH_DISTRIBUTED_DEBUG environment
-      variable.
+  py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
+      An enum whose values correspond to different debug levels of the
+      torch.distributed package. Currently supporting OFF, INFO, and DETAIL,
+      which can be set via the TORCH_DISTRIBUTED_DEBUG environment variable
+      or via ``set_debug_level()`` function.
   )")
-      .value("OFF", ::c10d::DistributedDebugLevel::OFF)
-      .value("INFO", ::c10d::DistributedDebugLevel::INFO)
-      .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
+      .value("OFF", ::c10d::DebugLevel::Off)
+      .value("INFO", ::c10d::DebugLevel::Info)
+      .value("DETAIL", ::c10d::DebugLevel::Detail);
 
-  module.def(
-      "_get_debug_mode",
-      &::c10d::parseDistDebugLevel,
-      py::call_guard<py::gil_scoped_release>());
+  module
+      .def("get_debug_level", ::c10d::debug_level,
+          R"(Gets the debug level of the torch.distributed package.)")
+      .def("set_debug_level", ::c10d::setDebugLevel,
+          R"(Sets the debug level of the torch.distributed package.)")
+      .def("set_debug_level_from_env", ::c10d::setDebugLevelFromEnvironment,
+          R"(Sets the debug level of the torch.distributed package from the
+          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``AVG``,
@@ -655,11 +655,13 @@ Example::
           .def(
               "get",
               [](::c10d::Store& store, const std::string& key) -> py::bytes {
-                auto value = store.get(key);
+                auto value = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.get(key);
+                }();
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
-              py::call_guard<py::gil_scoped_release>(),
               R"(
 Retrieves the value associated with the given ``key`` in the store. If ``key`` is not
 present in the store, the function will wait for ``timeout``, which is defined
@@ -1157,14 +1159,17 @@ Arguments:
               "reduce_scatter",
               [](::c10d::ProcessGroup& pg,
                  at::Tensor& output,
-                 std::vector<at::Tensor>& input) {
+                 std::vector<at::Tensor>& input,
+                 ::c10d::ReduceOp op) {
                 std::vector<at::Tensor> outputs = {output};
                 std::vector<std::vector<at::Tensor>> inputs = {input};
-                return pg.reduce_scatter(
-                    outputs, inputs, ::c10d::ReduceScatterOptions());
+                ::c10d::ReduceScatterOptions opts;
+                opts.reduceOp = op;
+                return pg.reduce_scatter(outputs, inputs, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -1298,6 +1303,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 #endif
 
 #ifdef USE_C10D_GLOO
+  static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+
   auto processGroupGloo =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
           module, "ProcessGroupGloo", processGroup);
@@ -1348,9 +1355,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             auto options = ::c10d::ProcessGroupGloo::Options::create();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(::c10d::GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
+            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
+            if (ifnameEnv && strlen(ifnameEnv) > 1) {
+              for (const auto& iface : split(',', ifnameEnv)) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }
@@ -1424,7 +1431,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout") = kProcessGroupDefaultTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
-              "options", &::c10d::ProcessGroupNCCL::getOptions);
+              "options", &::c10d::ProcessGroupNCCL::getOptions)
+          .def_property_readonly(
+              "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,
@@ -1695,6 +1704,7 @@ static PyMethodDef methods[] = { // NOLINT
 PyMethodDef* python_functions() {
   return methods;
 }
+
 } // namespace c10d
 } // namespace distributed
 } // namespace torch

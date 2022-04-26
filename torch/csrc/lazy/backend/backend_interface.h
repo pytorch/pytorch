@@ -15,6 +15,8 @@ namespace lazy {
  */
 class TORCH_API BackendImplInterface {
  public:
+  virtual ~BackendImplInterface() = default;
+
   /**
    * Initialization/Teardown
    * */
@@ -37,7 +39,9 @@ class TORCH_API BackendImplInterface {
   virtual BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const Shape& shape,
       const BackendDevice& device) const = 0;
-
+  virtual BackendDataPtr MakeComputationDataFromScalar(
+      const at::Scalar& scalar,
+      const torch::lazy::BackendDevice& device) const = 0;
   virtual BackendDataPtr CreateDataPlaceholder(
       const BackendDevice& device, const Shape& shape) const = 0;
 
@@ -112,18 +116,13 @@ class TORCH_API BackendImplInterface {
       const ComputationPtr computation) const = 0;
 };
 
-extern std::atomic<const BackendImplInterface*> backend_impl_registry;
-
 class TORCH_API BackendRegistrar {
  public:
   BackendRegistrar(const BackendImplInterface* backend_impl_interface);
 };
 
-inline const BackendImplInterface* TORCH_API getBackend() {
-  auto p = backend_impl_registry.load();
-  CHECK(p) << "Lazy tensor backend not registered.";
-  return p;
-}
+TORCH_API bool hasBackend();
+TORCH_API const BackendImplInterface* getBackend();
 
 }  // lazy
 }  // torch

@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <c10/core/MemoryFormat.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
@@ -191,11 +192,22 @@ std::vector<ExprPtr> make_channels_last_strides(
 
 class TORCH_API Buf : public ExprNode<Buf> {
  public:
-  static ExprHandle make(
+  static BufHandle make(const std::vector<ExprHandle>& dims, Dtype dtype);
+
+  static BufHandle make(
       const std::string& name_hint,
       const std::vector<ExprHandle>& dims,
+      const std::vector<ExprHandle>& strides,
       Dtype dtype);
-  static ExprHandle make(const std::vector<ExprHandle>& dims, Dtype dtype);
+
+  static BufHandle make(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
+      Dtype dtype,
+      c10::optional<ExprHandle> initializer = c10::nullopt,
+      c10::optional<std::vector<ExprHandle>> strides = c10::nullopt,
+      c10::optional<ExprHandle> qscale = c10::nullopt,
+      c10::optional<ExprHandle> qzero = c10::nullopt);
 
   // TODO: unique_name
   VarPtr base_handle() const {
@@ -290,6 +302,27 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return true;
   }
 
+  bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const;
+
+  // The channels-last 1d can benefit the performance of some operators like
+  // conv1d. But the MemoryFormat enum has not covered this layout yet. Hence,
+  // we abstract a dedicated function to check channels-last 1d contiguous.
+  //
+  // Channels-last 1d:
+  //   dims:              n   c    l
+  //   strides(nlc):    c*l   1    c
+  bool is_channels_last_1d_contiguous() const {
+    if (dims_.size() != 3) {
+      return false;
+    }
+    return is_stride_one(1) && is_cont_with(2, 1) && is_cont_with(0, 2);
+  }
+
+ private:
+  bool is_cont_with(int cur_dim, int adjacent_dim) const;
+  bool is_stride_one(int cur_dim) const;
+
  private:
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
@@ -307,6 +340,13 @@ class TORCH_API BufHandle : public ExprHandle {
       const std::vector<ExprHandle>& dims,
       Dtype dtype)
       : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
+
+  BufHandle(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
+      const std::vector<ExprHandle>& strides,
+      Dtype dtype)
+      : ExprHandle(Buf::make(name_hint, dims, strides, dtype)) {}
 
   BufHandle(const std::vector<ExprHandle>& dims, Dtype dtype)
       : ExprHandle(Buf::make("_", dims, dtype)) {}
@@ -355,6 +395,15 @@ class TORCH_API BufHandle : public ExprHandle {
 
   ExprHandle dim(size_t index) const {
     return ExprHandle(node()->dim(index));
+  }
+
+  bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    return node()->is_contiguous(memory_format);
+  }
+
+  bool is_channels_last_1d_contiguous() const {
+    return node()->is_channels_last_1d_contiguous();
   }
 };
 

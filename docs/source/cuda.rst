@@ -26,11 +26,13 @@ torch.cuda
     ipc_collect
     is_available
     is_initialized
+    memory_usage
     set_device
     set_stream
     set_sync_debug_mode
     stream
     synchronize
+    utilization
 
 Random Number Generator
 -------------------------
@@ -69,6 +71,7 @@ Streams and events
     :nosignatures:
 
     Stream
+    ExternalStream
     Event
 
 Graphs (beta)
@@ -90,6 +93,7 @@ Memory management
 
      empty_cache
      list_gpu_processes
+     mem_get_info
      memory_stats
      memory_summary
      memory_snapshot
@@ -103,6 +107,8 @@ Memory management
      max_memory_cached
      reset_max_memory_cached
      reset_peak_memory_stats
+     caching_allocator_alloc
+     caching_allocator_delete
 .. FIXME The following doesn't seem to exist. Is it supposed to?
    https://github.com/pytorch/pytorch/issues/27785
    .. autofunction:: reset_max_memory_reserved

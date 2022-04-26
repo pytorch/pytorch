@@ -1,0 +1,188 @@
+# TODO: this looks sort of similar to _linux-test, but there are like a dozen
+# places where you would have to insert an if statement. Probably it's better to
+# just use a different workflow altogether
+
+name: test
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      test-matrix:
+        required: true
+        type: string
+        description: JSON description of what test configs to run.
+      docker-image:
+        required: true
+        type: string
+        description: Docker image to run in.
+
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
+        required: true
+        description: access key id for test stats upload
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY:
+        required: true
+        description: secret acess key for test stats upload
+
+env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
+  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  test:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    timeout-minutes: 300
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    steps:
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          no-sudo: true
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+
+      - name: Pull docker image
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ inputs.docker-image }}
+
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
+      - name: Test
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
+          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          DOCKER_IMAGE: ${{ inputs.docker-image }}
+          XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+        timeout-minutes: 270
+        run: |
+          set -x
+
+          if [[ $TEST_CONFIG == 'multigpu' ]]; then
+            TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.jenkins/caffe2/test.sh
+          else
+            TEST_COMMAND=.jenkins/pytorch/test.sh
+          fi
+
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+          export COMMIT_MESSAGES
+
+          # detached container should get cleaned up by teardown_ec2_linux
+          # TODO: Stop building test binaries as part of the build phase
+          # Used for GPU_FLAG since that doesn't play nice
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e GITHUB_ACTIONS \
+            -e IN_CI \
+            -e IS_GHA \
+            -e BRANCH \
+            -e SHA1 \
+            -e AWS_DEFAULT_REGION \
+            -e IN_WHEEL_TEST \
+            -e SHARD_NUMBER \
+            -e JOB_BASE_NAME \
+            -e TEST_CONFIG \
+            -e NUM_TEST_SHARDS \
+            -e PR_BODY \
+            -e COMMIT_MESSAGES \
+            -e PYTORCH_RETRY_TEST_CASES \
+            -e PR_LABELS \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SCCACHE_BUCKET \
+            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --ulimit stack=10485760:83886080 \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --shm-size="8g" \
+            --tty \
+            --detach \
+            --name="${container_name}" \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
+          docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+          # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
+          docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@master
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
+        if: always()
+        with:
+          use-gha: true
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Upload test statistics
+        if: always()
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+        shell: bash
+        run: |
+          set -x
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install boto3==1.19.12
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+
+      - name: Teardown Linux
+        uses: ./.github/actions/teardown-linux
+        if: always()
+        with:
+          skip-wait-ssh: true

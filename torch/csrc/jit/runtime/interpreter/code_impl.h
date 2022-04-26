@@ -70,6 +70,9 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
+#ifndef NDEBUG
+  std::vector<Operator> full_operator_table_;
+#endif
   // map<(op name, num inputs), index in operator table>, to avoid duplicates,
   // not including vararg operators
   std::unordered_map<
@@ -321,7 +324,8 @@ struct CodeImpl {
     bool is_vararg = op.schema().is_vararg();
 
     int operation_index = add_to_operator_table(
-        op.getOperation(node),
+        op,
+        node,
         c10::toString(op.schema().operator_name()),
         num_inputs,
         is_vararg);
@@ -361,6 +365,35 @@ struct CodeImpl {
     int result = constant_table_.size();
     constant_table_.emplace_back(std::move(value));
     return result;
+  }
+
+  virtual void emitOperatorOrInstruction(
+      Node* node,
+      OpCode op,
+      int64_t X = 0,
+      uint64_t N = 0,
+      bool emit_inputs = true) {
+    if (emit_inputs) {
+      emitLoadInputs(node->inputs());
+    }
+    insertInstruction(op, X, N);
+  }
+
+  void emitFormat(Node* node) {
+    emitOperatorOrInstruction(node, FORMAT, node->inputs().size(), 0);
+  }
+
+  void checkNodeAndEmit(Node* node) {
+    // check if the node should be emitted as instruction or operator
+    const Operator& op = node->getOperator();
+    std::string unique_op_name = c10::toString(op.schema().operator_name());
+    if (unique_op_name.find("aten::__getitem__.Dict") == 0) {
+      // __get_item__ overloaded operator for Dict
+      // needs to be emitted an instruction
+      emitOperatorOrInstruction(node, DICT_INDEX);
+    } else {
+      emitOperator(node);
+    }
   }
 
   void emitConstant(Node* node) {
@@ -605,7 +638,14 @@ struct CodeImpl {
     switch (node->kind()) {
       default:
         // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-        emitOperator(node);
+        checkNodeAndEmit(node);
+        // emitOperator(node);
+        break;
+      case prim::RaiseException:
+        emitOperatorOrInstruction(node, RAISE_EXCEPTION);
+        break;
+      case prim::TupleIndex:
+        emitOperatorOrInstruction(node, TUPLE_INDEX);
         break;
       case prim::Drop:
         emitDrop(node->inputs());
@@ -685,6 +725,39 @@ struct CodeImpl {
       case prim::Exit:
         emitExit(node);
         break;
+      case prim::Uninitialized:
+        emitOperatorOrInstruction(node, UN_INITIALIZED, 0, 0, false);
+        break;
+      case prim::dtype:
+        emitOperatorOrInstruction(node, DTYPE);
+        break;
+      case prim::device:
+        emitOperatorOrInstruction(node, DEVICE);
+        break;
+      case aten::dim:
+        emitOperatorOrInstruction(node, DIM);
+        break;
+      case prim::is_cuda:
+        emitOperatorOrInstruction(node, IS_CUDA);
+        break;
+      case aten::__not__:
+        emitOperatorOrInstruction(node, __NOT__);
+        break;
+      case aten::format:
+        emitFormat(node);
+        break;
+      case aten::__is__:
+        emitOperatorOrInstruction(node, __IS__);
+        break;
+      case aten::__isnot__:
+        emitOperatorOrInstruction(node, __ISNOT__);
+        break;
+      case prim::NumToTensor:
+        emitOperatorOrInstruction(node, NUM_TO_TENSOR);
+        break;
+      case prim::tolist:
+        emitOperatorOrInstruction(node, TO_LIST);
+        break;
     }
   }
 
@@ -741,11 +814,14 @@ struct CodeImpl {
    * Add an operation to operator_table_ if not a duplicate and return its index
    */
   int add_to_operator_table(
-      const Operation& oper,
+      const Operator& op,
+      const Node* node,
       const std::string& op_name,
       const int num_inputs,
       const bool is_vararg) {
     int size = operator_table_.size();
+
+    const Operation& oper = op.getOperation(node);
 
     if (!is_vararg) {
       std::pair<std::string, int> key(op_name, num_inputs);
@@ -759,7 +835,31 @@ struct CodeImpl {
     }
 
     operator_table_.emplace_back(oper);
+#ifndef NDEBUG
+    full_operator_table_.emplace_back(op);
+#endif
     return size;
+  }
+
+  inline void assert_stack_size(
+      int32_t instruction_index,
+      size_t init_size,
+      size_t actual_size) const {
+#ifndef NDEBUG
+    const auto& schema = full_operator_table_[instruction_index].schema();
+    int64_t expected_size = static_cast<int64_t>(init_size) -
+        static_cast<int64_t>(schema.arguments().size()) +
+        static_cast<int64_t>(schema.returns().size());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        expected_size == actual_size || schema.is_varret() ||
+            schema.is_vararg(),
+        "Expected to find ",
+        expected_size,
+        " values on the stack, but found ",
+        actual_size,
+        " on the stack after ",
+        toString(full_operator_table_[instruction_index].schema()));
+#endif
   }
 };
 
@@ -769,10 +869,12 @@ struct MobileCodeImpl : CodeImpl {
       std::string function_name,
       bool emit_default_input_instructions,
       bool support_default_args_before_out,
+      bool emit_promoted_ops,
       size_t remaining_bailout_depth)
       : CodeImpl(graph, function_name, remaining_bailout_depth, false),
         emit_default_input_instructions_(emit_default_input_instructions),
-        support_default_args_before_out_(support_default_args_before_out) {
+        support_default_args_before_out_(support_default_args_before_out),
+        emit_promoted_ops_(emit_promoted_ops) {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     run();
   }
@@ -829,7 +931,8 @@ struct MobileCodeImpl : CodeImpl {
       if (op.hasOperation() && is_vararg) {
         emitLoadInputs(node->inputs());
         int operation_index = add_to_operator_table(
-            op.getOperation(node),
+            op,
+            node,
             unique_op_name,
             num_inputs,
             /* is_vararg */ true);
@@ -852,9 +955,22 @@ struct MobileCodeImpl : CodeImpl {
           emitLoadInputs(node->inputs(), num_include);
         }
         int operation_index = add_to_operator_table(
-            op.getOperation(node), unique_op_name, num_inputs, is_vararg);
+            op, node, unique_op_name, num_inputs, is_vararg);
         insertInstruction(OP, operation_index);
       }
+    }
+  }
+
+  void emitOperatorOrInstruction(
+      Node* node,
+      OpCode op,
+      int64_t X = 0,
+      uint64_t N = 0,
+      bool emit_inputs = true) override {
+    if (emit_promoted_ops_) {
+      CodeImpl::emitOperatorOrInstruction(node, op, X, N, emit_inputs);
+    } else {
+      CodeImpl::emitOperator(node);
     }
   }
 
@@ -862,6 +978,8 @@ struct MobileCodeImpl : CodeImpl {
   bool emit_default_input_instructions_;
   // To support forward compatibility for bytecode version bump from v6 to v7
   bool support_default_args_before_out_;
+  // To support forward compatibility for bytecode version bump from v7 to v8
+  bool emit_promoted_ops_;
 };
 
 } // namespace interpreter

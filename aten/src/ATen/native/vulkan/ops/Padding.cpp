@@ -1,4 +1,6 @@
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 namespace at {
@@ -35,7 +37,7 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
   const vTensor& v_self = convert(self);
 
   c10::SmallVector<int64_t, 4> output_size(input_dim);
-  for (size_t d = 0; d < input_dim; ++d) {
+  for (const auto d : c10::irange(input_dim)) {
     if (d == input_dim - 1) {
       output_size[d] = input_size[d] + pad_right + pad_left;
     } else if (d == input_dim - 2) {
@@ -54,6 +56,8 @@ Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::reflection_pad2d");
+
     if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
       const struct Block final {
         uvec3 extents;

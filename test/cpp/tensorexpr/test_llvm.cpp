@@ -584,8 +584,7 @@ DOUBLE_INTRINSICS_TEST(lgamma, 4)
 TEST(LLVM, VectorizerLoadStoreTest) {
   BufHandle a("A", {1}, kInt);
 
-  Tensor c =
-      Compute("c", {{4, "i"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor c = Compute("c", {4}, [&](const VarHandle& i) { return a.load(i); });
 
   BufHandle c_buf(c.buf());
   LoopNest l({c});
@@ -606,7 +605,7 @@ TEST(LLVM, VectorizerLoadStoreTest) {
 TEST(LLVM, VectorizeBitCast) {
   BufHandle a("A", {128}, kInt);
 
-  Tensor c = Compute("c", {{128, "i"}}, [&](const VarHandle& i) {
+  Tensor c = Compute("c", {128}, [&](const VarHandle& i) {
     return bitcast<float>(a.load(i));
   });
 
@@ -1186,9 +1185,8 @@ TEST(LLVM, StoreFloat) {
 
 TEST(LLVM, SimpleMath01) {
   const int N = 1024;
-  Tensor tensor = Compute("f", {{N, "i"}}, [](const VarHandle& i) {
-    return cast<float>(i * i + 1);
-  });
+  Tensor tensor = Compute(
+      "f", {N}, [](const VarHandle& i) { return cast<float>(i * i + 1); });
   LoopNest l({tensor});
   StmtPtr stmt = l.root_stmt();
   BufHandle f_buf(tensor.buf());
@@ -1209,9 +1207,8 @@ TEST(LLVM, ComputeMul) {
   const int N = 1024;
   BufHandle a("a", {N}, kFloat);
   BufHandle b("b", {N}, kFloat);
-  Tensor c = Compute("c", {{N, "i"}}, [&](const VarHandle& i) {
-    return a.load(i) * b.load(i);
-  });
+  Tensor c = Compute(
+      "c", {N}, [&](const VarHandle& i) { return a.load(i) * b.load(i); });
 
   BufHandle c_buf(c.buf());
   LoopNest l({c});
@@ -1232,10 +1229,9 @@ TEST(LLVM, BroadcastAdd) {
   const int N = 1024;
   BufHandle a("a", {M, N}, kFloat);
   BufHandle b("b", {N}, kFloat);
-  Tensor c = Compute(
-      "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return a.load(i, j) + b.load(j);
-      });
+  Tensor c = Compute("c", {M, N}, [&](const VarHandle& i, const VarHandle& j) {
+    return a.load(i, j) + b.load(j);
+  });
 
   BufHandle c_buf(c.buf());
   LoopNest l({c});
@@ -1333,9 +1329,8 @@ TEST(LLVM, TensorDynamicShapeAdd) {
     VarHandle n("n", kInt);
     BufHandle a("a", {n}, kFloat);
     BufHandle b("b", {n}, kFloat);
-    Tensor c = Compute("c", {{n, "n"}}, [&](const VarHandle& i) {
-      return a.load(i) + b.load(i);
-    });
+    Tensor c = Compute(
+        "c", {n}, [&](const VarHandle& i) { return a.load(i) + b.load(i); });
     LoopNest l({c});
     StmtPtr s = l.root_stmt();
     LLVMCodeGen cg(s, {a, b, c, n});
@@ -1356,8 +1351,8 @@ TEST(LLVM, DynamicShape2D) {
     VarHandle n("n", kInt);
     BufHandle a("a", {m, n}, kFloat);
     BufHandle b("b", {m, n}, kFloat);
-    Tensor c = Compute(
-        "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
+    Tensor c =
+        Compute("c", {m, n}, [&](const VarHandle& i, const VarHandle& j) {
           return a.load(i, j) + b.load(i, j);
         });
     LoopNest l({c});
@@ -1386,7 +1381,7 @@ TEST(LLVM, EmptyStmt) {
 TEST(LLVM, EliminatedStmt) {
   BufHandle a("a", {1}, kFloat);
 
-  Tensor c = Compute("c", {{0, "m"}}, [&](const VarHandle& m) { return m; });
+  Tensor c = Compute("c", {0}, [&](const VarHandle& m) { return m; });
 
   LoopNest l({c});
   l.prepareForCodegen();
@@ -1405,10 +1400,7 @@ TEST(LLVM, SimpleReduction) {
 
   BufHandle a("a", {1, M, N}, kFloat);
 
-  // TODO: why doesn't implicit vector<DimArg> work?
-  std::vector<DimArg> axis = {DimArg(1)};
-  std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
-  Tensor b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  Tensor b = Reduce("sum", {1}, Sum(), a, {M, N});
   LoopNest loop({b});
 
   loop.prepareForCodegen();
@@ -1442,10 +1434,7 @@ TEST(LLVM, RFactorReduction) {
 
   BufHandle a("a", {1, M, N}, kFloat);
 
-  // TODO: why doesn't implicit vector<DimArg> work?
-  std::vector<DimArg> axis = {DimArg(1)};
-  std::vector<DimArg> reduce_axis = {DimArg(M), DimArg(N)};
-  Tensor b = Reduce("sum", axis, Sum(), a, reduce_axis);
+  Tensor b = Reduce("sum", {1}, Sum(), a, {M, N});
   LoopNest loop({b});
 
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(b);
@@ -1490,7 +1479,7 @@ TEST(LLVM, RFactorVectorizedReduction) {
 
   BufHandle a("a", {1, M, N}, kFloat);
 
-  Tensor b = Reduce("sum", {{1, "K"}}, Sum(), a, {{M, "M"}, {N, "N"}});
+  Tensor b = Reduce("sum", {1}, Sum(), a, {M, N});
   LoopNest loopnest({b});
   std::vector<ForPtr> loops = loopnest.getLoopStmtsFor(b);
   // Reorder n and m loops
@@ -1536,10 +1525,9 @@ static void testSimpleParallel() {
   // parallel or sequential.
   const int M = 4;
   const int N = 6;
-  Tensor f = Compute(
-      "f", {{M, "m"}, {N, "n"}}, [](const VarHandle& m, const VarHandle& n) {
-        return cast<float>(m + n);
-      });
+  Tensor f = Compute("f", {M, N}, [](const VarHandle& m, const VarHandle& n) {
+    return cast<float>(m + n);
+  });
   LoopNest loop_nest({f});
   auto const& loops = loop_nest.getLoopStmtsFor(f);
   ForPtr m = loops[0];
@@ -1588,20 +1576,14 @@ TEST(LLVM, CompositeParallel) {
   for (const auto test_cfg : c10::irange(test_count)) {
     int M = 5;
     int N = 7;
-    Tensor t1 =
-        Compute("t1", {{M, "M"}}, [](const VarHandle& m) { return m + 1.f; });
-    Tensor t2 =
-        Compute("t2", {{N, "N"}}, [](const VarHandle& n) { return n + 2.f; });
-    Tensor t3 = Compute(
-        "t3",
-        {{M, "M"}, {N, "N"}},
-        [=](const VarHandle& m, const VarHandle& n) {
+    Tensor t1 = Compute("t1", {M}, [](const VarHandle& m) { return m + 1.f; });
+    Tensor t2 = Compute("t2", {N}, [](const VarHandle& n) { return n + 2.f; });
+    Tensor t3 =
+        Compute("t3", {M, N}, [=](const VarHandle& m, const VarHandle& n) {
           return t1.load(m) * t2.load(n);
         });
-    Tensor t4 = Compute(
-        "t4",
-        {{M, "M"}, {N, "N"}},
-        [=](const VarHandle& m, const VarHandle& n) {
+    Tensor t4 =
+        Compute("t4", {M, N}, [=](const VarHandle& m, const VarHandle& n) {
           return t3.load(m, n) + m + n;
         });
     LoopNest loop_nest({t4}, {t1, t2, t3, t4});
@@ -1657,12 +1639,12 @@ TEST(LLVM, VectorizedGEMM) {
   BufHandle BP("B", {K, N}, kFloat);
   Tensor CT = Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       Sum(),
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
         return AP.load(m, k) * BP.load(k, n);
       },
-      {{K, "K"}});
+      {K});
   LoopNest loop({CT});
 
   {
@@ -1735,10 +1717,9 @@ TEST(LLVM, CallRaw) {
   VarHandle N("N", kInt);
   BufHandle a("a", {M, N}, kFloat);
   BufHandle b("b", {N}, kFloat);
-  Tensor c = Compute(
-      "c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return a.load(i, j) + b.load(j);
-      });
+  Tensor c = Compute("c", {M, N}, [&](const VarHandle& i, const VarHandle& j) {
+    return a.load(i, j) + b.load(j);
+  });
 
   LoopNest l({c});
   l.prepareForCodegen();
@@ -1776,7 +1757,7 @@ TEST(LLVM, CustomTarget) {
   BufHandle a("a", {M}, kFloat);
   BufHandle b("b", {M}, kFloat);
   BufHandle c("c", {M}, kFloat);
-  Tensor d = Compute("d", {{M, "m"}}, [&](const VarHandle& m) {
+  Tensor d = Compute("d", {M}, [&](const VarHandle& m) {
     return a.load(m) * b.load(m) + c.load(m);
   });
   LoopNest nest({d});
@@ -1792,6 +1773,28 @@ TEST(LLVM, CustomTarget) {
       ->check("fmuls")
       ->check_not("vfmadd")
       ->run(ss.str());
+}
+
+TEST(LLVM, CodeGenKernelFuncName) {
+  BufHandle a("A", {1}, kInt);
+  BufHandle b("B", {1}, kInt);
+  std::vector<int32_t> a_buffer = {42};
+  std::vector<int32_t> b_buffer = {-11};
+  auto store = b.store({0}, a.load(0));
+
+  {
+    LLVMCodeGen cg(store, {a, b});
+    // Check that the kernel function name used by LLVMCodeGen
+    // is not empty.
+    ASSERT_NE(cg.kernel_func_name(), "");
+  }
+
+  {
+    LLVMCodeGen cg(store, {a, b}, at::kCPU, "new_func");
+    // Check that the kernel function name used by LLVMCodeGen
+    // is the one that was given above.
+    ASSERT_EQ(cg.kernel_func_name(), "new_func");
+  }
 }
 
 } // namespace jit

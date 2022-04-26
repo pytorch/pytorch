@@ -10,11 +10,22 @@
   See NOTE: [Tensor vs. TensorBase]
 #endif
 
+#if defined(AT_PER_OPERATOR_HEADERS) && defined(TORCH_ASSERT_ONLY_METHOD_OPERATORS)
+#error This change adds a dependency on all pytorch operators, meaning the     \
+  file will need to be re-compiled every time an operator is changed or added. \
+  Consider including a specific operator from <ATen/ops/{my_operator}_ops.h>   \
+  and see NOTE [TORCH_ASSERT_ONLY_METHOD_OPERATORS].
+#endif
+
+#include <ATen/core/SymInt.h>
+#include <ATen/core/SymIntArrayRef.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/QScheme.h>
 #include <tuple>
 #include <vector>
+
+${Operators_includes}
 
 // Extension writers: do you write wrapper functions? Are you frustrated with
 // resolving overloads of operators? Are you frustrated with dealing with
@@ -55,58 +66,8 @@
 
 // See Note [The ATen Operators API] for details of the at::_ops namespace
 
-namespace c10 { namespace impl {
-
-inline c10::optional<MemoryFormat>
-check_tensor_options_and_extract_memory_format(
-    const TensorOptions& options,
-    c10::optional<MemoryFormat> memory_format) {
-  TORCH_CHECK(
-      options.requires_grad_opt() == c10::nullopt ||
-          options.requires_grad_opt().value() == false,
-      "Operators taking TensorOptions cannot take a TensorOptions with "
-      "options.requires_grad set as true. This isn't implemented yet.");
-  TORCH_CHECK(
-      !(options.has_memory_format() && memory_format.has_value()),
-      "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-      "the redundant setter.");
-  if (memory_format.has_value()) {
-    return memory_format;
-  } else {
-    return options.memory_format_opt();
-  }
-}
-
-}} // namespace impl namespace c10
-
-
-// Forward declarations of any types needed in the operator signatures.
-// We can't directly include these classes because it will cause circular include dependencies.
-// This file is included by TensorBody.h, which defines the Tensor class.
-namespace c10 {
-
-template<typename T>
-class optional;
-template<typename T>
-class List;
-class Stream;
-struct Storage;
-
-}
-
 namespace at {
-
-class Tensor;
-struct Dimname;
-struct Generator;
-using TensorList = c10::ArrayRef<Tensor>;
-using DimnameList = c10::ArrayRef<Dimname>;
-using Stream = c10::Stream;
-using Storage = c10::Storage;
-using QScheme = c10::QScheme;
-
 namespace _ops {
-
-${declarations}
-
-}} // namespace at::_ops
+${Operators_declarations}
+} // namespace _ops
+} // namespace at

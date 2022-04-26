@@ -11,6 +11,7 @@ from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.quantized.modules.conv import _reverse_repeat_padding
 import torch.nn.quantized.modules as nnq
+import warnings
 
 
 class Conv1d(nnq.Conv1d):
@@ -52,6 +53,11 @@ class Conv1d(nnq.Conv1d):
                  device=None,
                  dtype=None,
                  reduce_range=True):
+        warnings.warn(
+            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
+                self._get_name()
+            )
+        )
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _single(kernel_size)
         stride = _single(stride)
@@ -111,6 +117,11 @@ class Conv2d(nnq.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
+        warnings.warn(
+            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
+                self._get_name()
+            )
+        )
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
@@ -170,13 +181,17 @@ class Conv3d(nnq.Conv3d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
+        warnings.warn(
+            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
+                self._get_name()
+            )
+        )
         assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
         factory_kwargs = {'device': device, 'dtype': dtype}
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)
         dilation = _triple(dilation)
-
         super(Conv3d, self)._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode, **factory_kwargs)
@@ -235,8 +250,12 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
+        warnings.warn(
+            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
+                self._get_name()
+            )
+        )
         factory_kwargs = {'device': device, 'dtype': dtype}
-
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
@@ -291,8 +310,12 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
+        warnings.warn(
+            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
+                self._get_name()
+            )
+        )
         factory_kwargs = {'device': device, 'dtype': dtype}
-
         super(ConvTranspose2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
@@ -347,8 +370,12 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
+        warnings.warn(
+            "The current implementation of the {} module has poor numerical accuracy and its use is not recommended".format(
+                self._get_name()
+            )
+        )
         factory_kwargs = {'device': device, 'dtype': dtype}
-
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)

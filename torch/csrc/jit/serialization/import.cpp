@@ -10,6 +10,8 @@
 #endif
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/mobile/file_format.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
@@ -17,9 +19,15 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
+#if defined(ENABLE_FLATBUFFER)
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
+#endif
+
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <caffe2/serialize/istream_adapter.h>
+#include <caffe2/serialize/versions.h>
 
 #include <ATen/ATen.h>
 #include <fmt/format.h>
@@ -174,6 +182,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       obj_loader,
       device_,
       *reader_.get(),
+      nullptr,
       storage_context_);
 }
 
@@ -239,6 +248,10 @@ graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_ze
 Module ScriptModuleDeserializer::deserialize(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
+  // we populate the upgraders map before any load starts
+#if ENABLE_UPGRADERS
+  populate_upgraders_graph_map();
+#endif
   C10_LOG_API_USAGE_ONCE("torch.script.load");
   device_ = device;
   // Load extra files.
@@ -283,9 +296,26 @@ Module import_ir_module(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  auto reader = torch::make_unique<PyTorchStreamReader>(&in);
-  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  in.seekg(0, in.beg);
+  auto format = getFileFormat(in);
+  switch (format) {
+    case FileFormat::FlatbufferFileFormat: {
+#if defined(ENABLE_FLATBUFFER)
+      return load_jit_module_from_stream(in, extra_files, device);
+#else
+      TORCH_CHECK(
+          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
+#endif
+    }
+    case FileFormat::ZipFileFormat: {
+      auto reader = torch::make_unique<PyTorchStreamReader>(&in);
+      ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
+      return deserializer.deserialize(device, extra_files);
+    }
+
+    default:
+      TORCH_CHECK(false, "Unrecognized data format");
+  }
 }
 
 // For reading unified serialization format from torch.Package.
@@ -318,9 +348,25 @@ Module import_ir_module(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  auto reader = torch::make_unique<PyTorchStreamReader>(filename);
-  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  auto format = getFileFormat(filename);
+  switch (format) {
+    case FileFormat::FlatbufferFileFormat: {
+#if defined(ENABLE_FLATBUFFER)
+      return load_jit_module_from_file(filename, extra_files, device);
+#else
+      TORCH_CHECK(
+          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
+#endif
+    }
+    case FileFormat::ZipFileFormat: {
+      auto reader = torch::make_unique<PyTorchStreamReader>(filename);
+      ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
+      return deserializer.deserialize(device, extra_files);
+    }
+
+    default:
+      TORCH_CHECK(false, "Unrecognized data format");
+  }
 }
 
 Module import_ir_module(
@@ -350,9 +396,27 @@ Module load(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = load(std::move(rai), device, extra_files);
-  return module;
+  in.seekg(0, in.beg);
+  auto format = getFileFormat(in);
+  switch (format) {
+    case FileFormat::FlatbufferFileFormat: {
+#if defined(ENABLE_FLATBUFFER)
+      return load_jit_module_from_stream(in, extra_files, device);
+#else
+      TORCH_CHECK(
+          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
+#endif
+    }
+    case FileFormat::ZipFileFormat: {
+      std::unique_ptr<IStreamAdapter> rai =
+          std::make_unique<IStreamAdapter>(&in);
+      auto module = load(std::move(rai), device, extra_files);
+      return module;
+    }
+
+    default:
+      TORCH_CHECK(false, "Unrecognized data format");
+  }
 }
 
 Module load(const std::string& filename, c10::optional<at::Device> device) {
@@ -364,9 +428,27 @@ Module load(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = load(std::move(rai), device, extra_files);
-  return module;
+  auto format = getFileFormat(filename);
+  switch (format) {
+    case FileFormat::FlatbufferFileFormat: {
+#if defined(ENABLE_FLATBUFFER)
+      return load_jit_module_from_file(filename, extra_files, device);
+#else
+      TORCH_CHECK(
+          false, "Flatbuffer input file but the build hasn't enable flatbuffer")
+#endif
+
+      case FileFormat::ZipFileFormat: {
+        std::unique_ptr<FileAdapter> rai =
+            std::make_unique<FileAdapter>(filename);
+        auto module = load(std::move(rai), device, extra_files);
+        return module;
+      }
+
+      default:
+        TORCH_CHECK(false, "Unrecognized data format");
+    }
+  }
 }
 
 Module load(
@@ -380,8 +462,8 @@ Module load(
     std::shared_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
-  // Verify that we're loading a zip archive and not a torch.save pickle archive
-  // (marked by the 0x80 0x02 bytes at the start)
+  // Verify that we're loading a zip archive and not a torch.save pickle
+  // archive (marked by the 0x80 0x02 bytes at the start)
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   TORCH_CHECK(
       check_zip_file(rai),
@@ -394,6 +476,76 @@ Module load(
 
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
+}
+
+// Replace object with a newly created but equivalent object.
+// The goal is to replace object's methods. However, since object's
+// methods are attached to type; we need to replace it's type.
+// Non-objects are unchanged; however, nested structures such as list, dict
+// are also reconstructed because they might contain an object.
+static IValue recreateObject(IValue ivalue, TypeResolver resolver) {
+  if (ivalue.isObject()) {
+    auto obj = ivalue.toObject();
+    auto classtype_old = obj->type();
+    auto newtype = resolver(*classtype_old->name());
+    size_t n = classtype_old->numAttributes();
+    auto newobj = c10::ivalue::Object::create(newtype, n);
+    for (const auto i : c10::irange(n)) {
+      newobj->setSlot(i, recreateObject(obj->getSlot(i), resolver));
+    }
+    return newobj;
+  } else if (ivalue.isList()) {
+    auto res = c10::impl::GenericList(ivalue.type()->containedType(0));
+    for (const auto& ival : ivalue.toList()) {
+      res.emplace_back(recreateObject(ival, resolver));
+    }
+    return res;
+  } else if (ivalue.isGenericDict()) {
+    auto result = c10::impl::GenericDict(
+        ivalue.type()->containedType(0), ivalue.type()->containedType(1));
+    for (const auto& kv : ivalue.toGenericDict()) {
+      result.insert_or_assign(
+          recreateObject(kv.key(), resolver),
+          recreateObject(kv.value(), resolver));
+    }
+    return result;
+  } else if (ivalue.isTuple()) {
+    std::vector<IValue> res;
+    for (const auto& ival : ivalue.toTuple()->elements()) {
+      res.push_back(recreateObject(ival, resolver));
+    }
+    return c10::ivalue::Tuple::create(res);
+  }
+  // Leaf types are returned verbatim.
+  return ivalue;
+}
+
+Module jitModuleFromSourceAndConstants(
+    const IValue& ivalue,
+    const ExtraFilesMap& source,
+    const std::vector<IValue>& constants,
+    int32_t version) {
+  auto compilation_unit = std::make_shared<CompilationUnit>();
+  SourceImporter importer(
+      compilation_unit,
+      &constants,
+      [&source](const std::string& qualifier) -> std::shared_ptr<Source> {
+        auto source_iter = source.find(qualifier);
+        if (source_iter == source.end()) {
+          return nullptr;
+        }
+        return std::make_shared<Source>(
+            source_iter->second, qualifier, 1, nullptr, Source::COPIES_STRING);
+      },
+      version);
+  auto type_resolver = [&](const c10::QualifiedName& qn) {
+    auto cls = importer.loadType(qn);
+    return c10::StrongTypePtr(compilation_unit, std::move(cls));
+  };
+  auto newIvalue = recreateObject(ivalue, type_resolver).toObject();
+  Module m(newIvalue);
+  rewriteQuantizedConvForBC(m);
+  return m;
 }
 
 } // namespace jit

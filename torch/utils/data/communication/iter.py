@@ -5,6 +5,16 @@ from torch.utils.data import IterDataPipe, communication
 
 DEFAULT_NON_BLOCKING_SLEEP = 0.001
 
+__all__ = [
+    "DataPipeBehindQueues",
+    "EnsureNonBlockingDataPipe",
+    "InvalidStateResetRequired",
+    "NonBlocking",
+    "NotAvailable",
+    "QueueWrapper",
+    "default_not_available_hook",
+]
+
 
 def default_not_available_hook():
     time.sleep(DEFAULT_NON_BLOCKING_SLEEP)
@@ -85,9 +95,8 @@ def DataPipeBehindQueues(source_datapipe, protocol, full_stop=False, blocking_re
     source_datapipe = EnsureNonBlockingDataPipe(source_datapipe)
     forever = True
     while forever:
-
         try:
-            # Non-blocking call is Extremely slow here for python.mp, need to figureout good workaround
+            # Non-blocking call is Extremely slow here for python.mp, need to figure out a good workaround
             request = protocol.get_new_request(block=blocking_request_get)
         except communication.protocol.EmptyQueue:
             yield True
@@ -95,7 +104,7 @@ def DataPipeBehindQueues(source_datapipe, protocol, full_stop=False, blocking_re
 
         if isinstance(request, communication.messages.ResetIteratorRequest):
             source_datapipe.reset_iterator()
-            protocol.response_reset()
+            protocol.response_reset_iterator()
 
         elif isinstance(request, communication.messages.TerminateRequest):
             forever = False
@@ -109,14 +118,14 @@ def DataPipeBehindQueues(source_datapipe, protocol, full_stop=False, blocking_re
                     yield True
                     continue
                 except StopIteration:
-                    protocol.response_stop()
+                    protocol.response_stop_iteration()
                     if full_stop:
                         forever = False
                     else:
                         yield True
                     break
                 except InvalidStateResetRequired:
-                    protocol.response_invalid()
+                    protocol.response_invalid_state()
                     if full_stop:
                         forever = False
                     else:
@@ -137,7 +146,6 @@ class QueueWrapper(NonBlocking):
     def __init__(self, protocol, response_wait_time=0.00001):
         if not isinstance(protocol, communication.protocol.IterDataPipeQueueProtocolClient):
             raise Exception('Got', protocol)
-
         self.protocol = protocol
         self.counter = 0
         self._stop_iteration = False
@@ -146,10 +154,10 @@ class QueueWrapper(NonBlocking):
     def reset_iterator(self):
         self._stop_iteration = False
         self.counter = 0
-        self.protocol.request_reset()
+        self.protocol.request_reset_iterator()
         while True:
             try:
-                self.protocol.get_response_reset()
+                self.protocol.get_response_reset_iterator()
                 break
             except communication.protocol.EmptyQueue:
                 if NonBlocking.not_available_hook is not None:

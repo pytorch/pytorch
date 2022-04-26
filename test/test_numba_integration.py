@@ -311,7 +311,7 @@ class TestNumbaIntegration(common.TestCase):
             numpy.uint8,
         ]
         for dtype in dtypes:
-            numpy_ary = numpy.arange(6).reshape(2, 3).astype(dtype),
+            numpy_ary = numpy.arange(6).reshape(2, 3).astype(dtype)
             numba_ary = numba.cuda.to_device(numpy_ary)
             self.assertTrue(numba_ary.is_c_contiguous())
             torch_ary = torch.as_tensor(numba_ary, device="cuda")

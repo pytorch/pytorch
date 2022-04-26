@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/type_inference.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -50,6 +51,30 @@ namespace cuda {
 //! graph_cache indexing;
 
 namespace {
+
+// TODO remove this (75983):
+//   we don't need this any more. I think we can use revertAliasCopyOps.
+//   Similar refactor should be done infallback graph used by fusion guard.
+//   implementation of xxxx_copy ops should be removed.
+//
+// Mark string attribute in alias-copy nodes to enable its implementation
+// in the fallback path.
+void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
+  static std::unordered_set<Symbol> alias_copy_op(
+      {prim::view_copy,
+       prim::reshape_copy,
+       prim::squeeze_copy,
+       prim::unsqueeze_copy});
+
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      enableAliasCopyNodes(graph, b);
+    }
+    if (alias_copy_op.find(n->kind()) != alias_copy_op.end()) {
+      n->s_(attr::name, "CudaFusionGroup");
+    }
+  }
+}
 
 // CudaFusionManager is not thread safe!
 // TODO: we should make the tradeoff here to use thread_local instead of global
@@ -109,6 +134,30 @@ class CudaFusionManager {
     return graph_cache_[kernel_id]->runGraphWithInputs(inputs);
   }
 
+  bool hasFallbackCode(int32_t kernel_id) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return fallback_cache_.count(kernel_id);
+  }
+
+  Code* getFallbackCode(int32_t kernel_id, const Node* fusion_node) {
+    {
+      std::lock_guard<std::mutex> guard(mutex_);
+      auto it = fallback_cache_.find(kernel_id);
+      if (it != fallback_cache_.end()) {
+        return it->second.get();
+      }
+    }
+
+    auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
+    EraseShapeInformation(copied_graph);
+    enableAliasCopyNodes(copied_graph, copied_graph->block());
+    auto code = std::make_unique<Code>(copied_graph, "fallback_cuda_fuser");
+
+    std::lock_guard<std::mutex> guard(mutex_);
+    auto it = fallback_cache_.insert({kernel_id, std::move(code)}).first;
+    return it->second.get();
+  }
+
  private:
   // TODO: Dimension collapsing should be abstracted out and integrated into
   // graph caching.
@@ -137,6 +186,7 @@ class CudaFusionManager {
 
   std::unordered_map<std::string, int32_t> graph_cache_ids_;
   std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
+  std::unordered_map<int64_t, std::unique_ptr<Code>> fallback_cache_;
 
   int32_t next_unique_id_ = 0;
 };
@@ -189,12 +239,30 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   FUSER_PERF_SCOPE("nvFuser::Manager::runCudaFusionGroup");
 
   // Fallback to use if anything goes wrong
-  auto take_fallback = [&]() {
-    // copying graph here since we are eliminating shape information;
-    auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
-    EraseShapeInformation(copied_graph);
-    InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
+  auto take_fallback = [&](Stack& stack) {
+    int32_t kernel_id = fusion_node->i(attr::cache_id);
+    auto fallback_code =
+        CudaFusionManager::getManager().getFallbackCode(kernel_id, fusion_node);
+    InterpreterState{*fallback_code}.run(stack);
   };
+
+  c10::optional<Stack> stack_copy;
+  auto compare_callback = getCudaFuserComparisonCallback();
+  if (compare_callback.run_fallback) {
+    // make a copy of the stack
+    int64_t inputs_size =
+        static_cast<int64_t>(fusion_node->g(attr::Subgraph)->inputs().size());
+    TORCH_INTERNAL_ASSERT(stack.size() >= inputs_size);
+    stack_copy = Stack();
+    stack_copy->insert(
+        stack_copy->end(), stack.begin(), stack.end() - inputs_size);
+    // deepcopy the last (inputs_size) stack items
+    std::transform(
+        stack.end() - inputs_size,
+        stack.end(),
+        std::back_inserter(*stack_copy),
+        [](const c10::IValue& ivalue) { return ivalue.deepcopy(); });
+  }
 
   auto run_fusion = [&]() {
     TORCH_CHECK(
@@ -225,17 +293,61 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
 
   if (useFallback()) {
     try {
-      run_fusion();
+      // if fusion failed once, it's likely to fail again; and failures are
+      // slow. So if the fusion fails, then record the failure and always use
+      // the fallback instead
+      int32_t kernel_id = fusion_node->i(attr::cache_id);
+      bool force_fallback =
+          CudaFusionManager::getManager().hasFallbackCode(kernel_id);
+      if (force_fallback) {
+        take_fallback(stack);
+      } else {
+        run_fusion();
+      }
     } catch (...) {
       TORCH_WARN(
           "FALLBACK path has been taken. This is an indication that codegen"
           "Failed for some reason. To debug try disable codegen fallback path"
           "via setting the env variable"
           "`export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`");
-      take_fallback();
+      take_fallback(stack);
     }
   } else {
     run_fusion();
+  }
+
+  if (compare_callback.callback != nullptr) {
+    Stack fused_outputs;
+    Stack fallback_outputs;
+    int64_t output_count =
+        static_cast<int64_t>(fusion_node->g(attr::Subgraph)->outputs().size());
+    TORCH_CHECK(
+        output_count <= stack.size(),
+        "Expected ",
+        output_count,
+        " outputs but found only ",
+        stack.size(),
+        " items on the stack");
+
+    fused_outputs.insert(
+        fused_outputs.begin(), stack.end() - output_count, stack.end());
+
+    if (stack_copy) {
+      take_fallback(*stack_copy);
+      TORCH_CHECK(
+          stack_copy->size() == stack.size(),
+          "Fused graph returns stack with ",
+          stack.size(),
+          " items, compared to ",
+          stack_copy->size(),
+          " from unfused graph");
+      fallback_outputs.insert(
+          fallback_outputs.begin(),
+          stack_copy->end() - output_count,
+          stack_copy->end());
+    }
+    auto graph_str = fusion_node->g(attr::Subgraph)->toString();
+    compare_callback.callback(fused_outputs, fallback_outputs, graph_str);
   }
 }
 

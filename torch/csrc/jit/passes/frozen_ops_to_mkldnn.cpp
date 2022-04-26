@@ -1,6 +1,6 @@
 #include <ATen/Config.h>
 #include <ATen/Utils.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/native/layer_norm.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -292,7 +292,7 @@ void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
   TORCH_INTERNAL_ASSERT(weight_ival.isTensor());
   weight = weight_ival.toTensor();
 
-  auto shape = pop(stack).toIntVector();
+  auto shape = pop(stack).toDimVector();
   auto input = pop(stack).toTensor();
 
   at::Tensor dst, mean, rstd;

@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/irange.h>
 
 namespace torch {
@@ -90,7 +90,7 @@ struct AutogradZeroSpecializer {
     if (!isBackwardGraph()) {
       return;
     }
-    if (getProfilingMode()) {
+    if (getExecutorMode()) {
       if (auto versioning_if = guardSpecializations()) {
         specializeAutogradOps(versioning_if->blocks()[0]);
         GRAPH_DUMP("After versioning graph", graph_);

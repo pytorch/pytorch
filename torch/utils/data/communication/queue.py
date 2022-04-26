@@ -1,6 +1,7 @@
 import threading
 import time
 
+
 class LocalQueue():
     ops = 0
     stored = 0

@@ -1,11 +1,21 @@
-#include <ATen/ATen.h>
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/UpSample.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/ones.h>
+#endif
 
 namespace at {
 namespace native {
@@ -147,7 +157,6 @@ template <typename scalar_t, typename index_t>
 static inline scalar_t interpolate_aa_single_dim_zero_strides(
     char* src,
     char** data,
-    int64_t i,
     const index_t ids_stride) {
   const index_t ids_min = *(index_t*)&data[0][0];
   const index_t ids_size = *(index_t*)&data[1][0];
@@ -259,7 +268,7 @@ struct CheckAlmostAllZeroStrides {
 
 template <int non_zero_stride_dim, typename scalar_t, typename index_t, int interp_size>
 struct CheckAlmostAllZeroStrides<0, non_zero_stride_dim, scalar_t, index_t, interp_size> {
-  static inline bool eval(const int64_t* strides) {
+  static inline bool eval(const int64_t* /*strides*/) {
     return true;
   }
 };
@@ -293,7 +302,7 @@ static inline void basic_loop_aa_single_dim_zero_strides(
   for (const auto i : c10::irange(n)) {
     *(scalar_t*)&dst[i * strides[0]] =
         interpolate_aa_single_dim_zero_strides<scalar_t, index_t>(
-            src + i * strides[1], &data[2], i, ids_stride);
+            src + i * strides[1], &data[2], ids_stride);
   }
 }
 
@@ -675,7 +684,7 @@ struct HelperInterpBase {
   template <typename scalar_t, typename aa_filter_fn_t>
   static inline std::vector<Tensor> _compute_indices_weights_aa(
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
-    int64_t reshape_dim, bool align_corners, scalar_t scale,
+    int64_t reshape_dim, scalar_t scale,
     int interp_size, aa_filter_fn_t aa_filter_fn
   ) {
 
@@ -851,7 +860,7 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
         // input_index = round(index_f32)
         // Same as Pillow and Scikit-Image/Scipy ndi.zoom
 
-        for (int64_t i=0; i<output_size; i++) {
+        for (const auto i : c10::irange(output_size)) {
           const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
               scale, i, /*align_corners=*/align_corners, /*cubic=*/false);
           input_index = static_cast<int64_t>(floorf(real_input_index + 0.5));
@@ -956,7 +965,6 @@ struct HelperInterpLinear : public HelperInterpBase {
             stride,
             ndims,
             reshape_dim,
-            align_corners,
             scale,
             interp_size,
             &HelperInterpLinear::aa_filter<scalar_t>);
@@ -1020,6 +1028,60 @@ struct HelperInterpCubic : public HelperInterpBase {
       }
     );
     return output;
+  }
+
+  // taken from
+  // https://github.com/python-pillow/Pillow/blob/6812205f18ca4ef54372e87e1a13ce4a859434df/
+  // src/libImaging/Resample.c#L46-L62
+  template<typename scalar_t>
+  static inline scalar_t aa_filter(scalar_t x) {
+    // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+#define a -0.5
+    if (x < 0.0) {
+      x = -x;
+    }
+    if (x < 1.0) {
+      return ((a + 2.0) * x - (a + 3.0)) * x * x + 1;
+    }
+    if (x < 2.0) {
+      return (((x - 5) * x + 8) * x - 4) * a;
+    }
+    return 0.0;
+#undef a
+  }
+
+  static inline std::vector<Tensor> compute_indices_weights_aa(
+    at::ScalarType scalar_type,
+    int64_t input_size,
+    int64_t output_size,
+    int64_t stride,
+    int64_t ndims,
+    int64_t reshape_dim,
+    bool align_corners,
+    const c10::optional<double> opt_scale
+  ) {
+
+    std::vector<Tensor> indices_weights;
+    AT_DISPATCH_FLOATING_TYPES(
+      scalar_type, "compute_indices_weights_aa", [&] {
+
+        scalar_t scale = area_pixel_compute_scale<scalar_t>(
+            input_size, output_size, align_corners, opt_scale);
+
+        auto interp_size = HelperInterpCubic::interp_size;
+
+        indices_weights = HelperInterpCubic::_compute_indices_weights_aa<scalar_t>(
+            input_size,
+            output_size,
+            stride,
+            ndims,
+            reshape_dim,
+            scale,
+            interp_size,
+            &HelperInterpCubic::aa_filter<scalar_t>);
+      }
+    );
+    return indices_weights;
   }
 };
 
@@ -1124,7 +1186,7 @@ void cpu_upsample_generic_aa(at::TensorIterator& iter) {
   iter.for_each(loop);
 }
 
-// Generic separable upsampling interpolation kernels for N-d case.
+// Generic separable upsampling interpolation kernels for N-d case with anti-aliasing
 template <int out_ndims, typename scale_type, class F>
 void _separable_upsample_generic_Nd_kernel_impl_single_dim(
     const Tensor& output,
@@ -1359,6 +1421,17 @@ void upsample_bicubic2d_kernel_impl(
     c10::optional<double> scales_w) {
   upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
     output, input, align_corners, {scales_h, scales_w});
+}
+
+void upsample_bicubic2d_aa_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+
+  separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
+      output, input, align_corners, {scales_h, scales_w});
 }
 
 template <typename scalar_t, typename scale_type, nearest_idx_fn_t nearest_idx_fn>
@@ -1633,8 +1706,21 @@ void upsample_bilinear2d_aa_backward_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES(
-      grad_output.scalar_type(), "upsample_bilinear2d_backward_cpu", [&] {
+      grad_output.scalar_type(), "upsample_bilinear2d_aa_backward_cpu", [&] {
         cpu_upsample_genNd_backward_aa<scalar_t, scale_t, HelperInterpLinear>(
+            grad_input, grad_output, align_corners, {scales_h, scales_w});
+      });
+}
+
+void upsample_bicubic2d_aa_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  AT_DISPATCH_FLOATING_TYPES(
+      grad_output.scalar_type(), "upsample_bicubic2d_aa_backward_cpu", [&] {
+        cpu_upsample_genNd_backward_aa<scalar_t, scale_t, HelperInterpCubic>(
             grad_input, grad_output, align_corners, {scales_h, scales_w});
       });
 }
@@ -1661,5 +1747,7 @@ REGISTER_DISPATCH(_upsample_bilinear2d_aa_backward_kernel, &upsample_bilinear2d_
 REGISTER_DISPATCH(upsample_trilinear3d_kernel, &upsample_trilinear3d_kernel_impl);
 
 REGISTER_DISPATCH(upsample_bicubic2d_kernel, &upsample_bicubic2d_kernel_impl);
+REGISTER_DISPATCH(_upsample_bicubic2d_aa_kernel, &upsample_bicubic2d_aa_kernel_impl);
+REGISTER_DISPATCH(_upsample_bicubic2d_aa_backward_kernel, &upsample_bicubic2d_aa_backward_kernel_impl);
 } // namespace native
 } // namespace at
