@@ -185,64 +185,6 @@ Tensor max_unpooling3d_forward_cpu(
   return output;
 }
 
-Tensor& max_unpooling2d_backward_out_cpu(const Tensor& grad_output_,
-    const Tensor& self,
-    const Tensor& indices_,
-    IntArrayRef output_size,
-    Tensor& grad_input) {
-  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  int64_t oheight = output_size[0];
-  int64_t owidth = output_size[1];
-  int64_t ndim = self.ndimension();
-  int64_t dimh = ndim == 3 ? 1 : 2;
-  int64_t dimw = ndim == 3 ? 2 : 3;
-
-  TORCH_CHECK(
-      indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64 but got type: ", indices_.scalar_type());
-  TORCH_CHECK(
-      self.sizes() == indices_.sizes(),
-      "Expected shape of indices to be same as that of the input tensor (",
-      self.sizes(), ") but got indices tensor with shape: ", indices_.sizes());
-  TORCH_CHECK(output_size.size() == 2, "Output size must be 2 but got: ", output_size.size());
-
-  auto memory_format = self.suggest_memory_format();
-  auto grad_output = grad_output_.contiguous(memory_format);
-  auto indices = indices_.contiguous(memory_format);
-
-  grad_input.resize_(self.sizes(), memory_format);
-  grad_input.zero_();
-
-  if (owidth != grad_output.size(dimw) || oheight != grad_output.size(dimh)) {
-    AT_ERROR(
-        "Inconsistent gradOutput size. output height = ",
-        oheight,
-        ", output width = ",
-        owidth,
-        ", gradOutput: ",
-        grad_output.size(dimh),
-        "x",
-        grad_output.size(dimw));
-  }
-
-  if (grad_input.numel() != 0) {
-    max_unpool2d_backward_kernel(kCPU, grad_input, grad_output, indices);
-  }
-
-  return grad_input;
-}
-
-Tensor max_unpooling2d_backward_cpu(
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& indices,
-    IntArrayRef output_size) {
-  auto grad_input = at::empty({0}, self.options());
-  max_unpooling2d_backward_out_cpu(
-      grad_output, self, indices, output_size, grad_input);
-  return grad_input;
-}
-
 Tensor& max_unpooling3d_backward_out_cpu(
     const Tensor& grad_output_,
     const Tensor& self,
@@ -308,7 +250,6 @@ Tensor max_unpooling3d_backward_cpu(
 }
 
 DEFINE_DISPATCH(max_unpool2d_kernel);
-DEFINE_DISPATCH(max_unpool2d_backward_kernel);
 DEFINE_DISPATCH(max_unpool3d_kernel);
 DEFINE_DISPATCH(max_unpool3d_backward_kernel);
 

@@ -2275,11 +2275,6 @@
   indices: non_differentiable
   result: auto_linear
 
-- name: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  grad_output: max_unpool2d(grad, indices, output_size)
-  self: zeros_like(self)
-  indices: non_differentiable
-
 - name: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: mse_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
   self: mse_loss_double_backward(grad * grad_output, self, reduction)

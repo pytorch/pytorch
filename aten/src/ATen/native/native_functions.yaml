@@ -9518,18 +9518,6 @@
     CPU: max_unpooling2d_forward_cpu
     CUDA: max_unpooling2d_forward_cuda
 
-- func: max_unpool2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) grad_input) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: max_unpooling2d_backward_out_cpu
-    CUDA: max_unpooling2d_backward_out_cuda
-
-- func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  python_module: nn
-  dispatch:
-    CPU: max_unpooling2d_backward_cpu
-    CUDA: max_unpooling2d_backward_cuda
-
 - func: max_unpool3d.out(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:

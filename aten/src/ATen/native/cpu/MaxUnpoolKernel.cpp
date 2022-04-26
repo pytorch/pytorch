@@ -326,28 +326,6 @@ void max_unpool3d_kernel_impl(
   });
 }
 
-void max_unpool2d_backward_kernel_impl(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& indices) {
-  switch(grad_output.suggest_memory_format()) {
-    case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "max_unpool2d_backward", [&] {
-        cpu_max_unpool_backward<scalar_t, /*is_3d*/false>(grad_input, grad_output, indices);
-      });
-      break;
-    }
-    case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "max_unpool2d_backward_channels_last", [&] {
-        cpu_max_unpool_backward_channels_last<scalar_t>(grad_input, grad_output, indices);
-      });
-      break;
-    }
-    default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
-  }
-}
-
 void max_unpool3d_backward_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad_output,
@@ -360,7 +338,6 @@ void max_unpool3d_backward_kernel_impl(
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl);
-REGISTER_DISPATCH(max_unpool2d_backward_kernel, &max_unpool2d_backward_kernel_impl);
 REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl);
 REGISTER_DISPATCH(max_unpool3d_backward_kernel, &max_unpool3d_backward_kernel_impl);
 
