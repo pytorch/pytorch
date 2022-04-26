@@ -734,6 +734,16 @@ constexpr auto autograd_privateuse3_ks =
     DispatchKeySet(DispatchKey::AutogradPrivateUse3);
 constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
 
+// keyset correpsonding to functorch keys that have their own dedicated
+// TensorImpl subclass.
+constexpr auto functorch_transforms_ks = DispatchKeySet({
+    DispatchKey::FuncTorchBatched,
+    DispatchKey::FuncTorchVmapMode,
+    DispatchKey::Batched,
+    DispatchKey::VmapMode,
+    DispatchKey::FuncTorchGradWrapper
+});
+
 // This keyset has:
 // (1) the functionality bits corresponding to backends (dense, sparse,
 // quantized) (2) all of the backend bits set
