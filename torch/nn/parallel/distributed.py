@@ -650,7 +650,7 @@ class DistributedDataParallel(Module, Joinable):
             module=self.module,
             process_group=self.process_group,
             broadcast_bucket_size=self.broadcast_bucket_size,
-            rank=0,
+            src=0,
             params_and_buffers_to_ignore=self.parameters_to_ignore,
         )
         # In debug mode, build a mapping of parameter index -> parameter.
@@ -1174,7 +1174,7 @@ class DistributedDataParallel(Module, Joinable):
             module=self.module,
             process_group=self.process_group,
             broadcast_bucket_size=self.broadcast_bucket_size,
-            rank=self._authoritative_rank,
+            src=self._authoritative_rank,
             params_and_buffers_to_ignore=self.parameters_to_ignore
         )
 
