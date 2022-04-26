@@ -9,7 +9,7 @@ retry () {
 tag="${DOCKER_TAG}"
 
 
-registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
+registry="${DOCKER_REGISTRY:-308535385114.dkr.ecr.us-east-1.amazonaws.com}"
 image="${registry}/pytorch/${IMAGE_NAME}"
 
 # Build new image

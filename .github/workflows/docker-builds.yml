@@ -20,6 +20,8 @@ env:
 jobs:
   docker-build:
     runs-on: [self-hosted, linux.2xlarge]
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
     timeout-minutes: 240
     strategy:
       matrix:
@@ -63,6 +65,7 @@ jobs:
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
+          push_ghcr: true
 
       - name: Pull docker image
         uses: ./.github/actions/pull-docker-image

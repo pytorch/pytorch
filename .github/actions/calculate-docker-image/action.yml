@@ -17,6 +17,9 @@ inputs:
   pull:
     description: If set to any value, run `docker pull`` on the calculated image.
     required: false
+  push_ghcr:
+    descripton: Determines whether or not we actually push an image to GHCR
+    required: false
 
 outputs:
   docker-image:
@@ -81,7 +84,7 @@ runs:
         fi
         echo ::set-output name=rebuild::yes
 
-    - name: Build and push docker image
+    - name: Build and push docker image to ECR
       if: inputs.always-rebuild || steps.check.outputs.rebuild
       env:
         IMAGE_NAME: ${{inputs.docker-image-name}}
@@ -89,4 +92,23 @@ runs:
       working-directory: .circleci/docker
       shell: bash
       run: |
+        ./build_docker.sh
+
+    # This is mainly for redundancy and to give users the opporutnity to use these images since our ECR
+    # not currently public
+    - name: Build and push docker image to GHCR
+      if: inputs.push_ghcr && (inputs.always-rebuild || steps.check.outputs.rebuild)
+      env:
+        IMAGE_NAME: ${{inputs.docker-image-name}}
+        DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker-tag }}
+        DOCKER_REGISTRY: ghcr.io
+        DOCKER_BUILD_WITH_CACHE: 1
+        GHCR_PAT: ${{ secrets.GHCR_PAT }}
+      working-directory: .circleci/docker
+      shell: bash
+      run: |
+        # Push the nightly docker to GitHub Container Registry
+        if [[ -n ${GHCR_PAT} ]]; then
+          echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+        fi
         ./build_docker.sh

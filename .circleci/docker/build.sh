@@ -314,11 +314,17 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   fi
 fi
 
+# Adds a fall through to be able to use the cache within our docker builds
+NO_CACHE_FLAG="--no-cache"
+if [[ ${DOCKER_BUILD_WITH_CACHE:-} = "1" ]]; then
+  NO_CACHE_FLAG=""
+fi
+
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
 # it's no longer needed.
 docker build \
-       --no-cache \
+       ${NO_CACHE_FLAG} \
        --progress=plain \
        --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
