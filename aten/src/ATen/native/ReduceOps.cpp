@@ -1082,10 +1082,6 @@ Tensor& nansum_out(const Tensor& self, IntArrayRef dim,
   return result;
 }
 
-Tensor nansum(const Tensor &self, c10::optional<ScalarType> dtype) {
-  return at::native::nansum(self, std::vector<int64_t>{}, false, dtype);
-}
-
 Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
   Tensor result = create_reduction_result(self, dim, keepdim, dtype);

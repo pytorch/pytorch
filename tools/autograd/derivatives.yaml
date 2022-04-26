@@ -1486,10 +1486,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim)
   result: auto_linear
 
-- name: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes()).to(self.scalar_type()) * self.isnan().logical_not()
-
-- name: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: nansum.dim_IntList(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
