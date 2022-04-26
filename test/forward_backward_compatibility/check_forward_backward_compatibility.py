@@ -116,6 +116,7 @@ ALLOW_LIST = [
     ("prim::infer_squeeze_size.dim", datetime.date(9999, 1, 1)),
     ("prim::infer_squeeze_size", datetime.date(9999, 1, 1)),
     ("aten::_cat", datetime.date(2022, 5, 15)),
+    ("aten::nansum", datetime.date(2022, 5, 15)),
 ]
 
 ALLOW_LIST_COMPILED = [
