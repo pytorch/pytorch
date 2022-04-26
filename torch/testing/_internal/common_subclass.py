@@ -197,26 +197,6 @@ class SubclassInfo:
         self.closed_under_ops = closed_under_ops
 
 
-# Function for generating a random SparseTensor of the given shape.
-def _create_sparse_tensor(shape):
-    if isinstance(shape, int):
-        shape = [shape]
-    total_numel = reduce(operator.mul, shape, 1)
-    populated_numel = torch.randint(1, total_numel, (1,)).item()
-
-    # Generate a random number of values.
-    values = torch.randn(populated_numel)
-
-    # Generate random corresponding indices.
-    indices = []
-    for i in range(populated_numel):
-        index = tuple(torch.randint(0, s, (1,)).item() for s in shape)
-        indices.append(index)
-    indices = torch.tensor(indices)
-
-    return SparseTensor(shape, values, indices)
-
-
 subclass_db = {
     torch.Tensor: SubclassInfo(
         'base_tensor', create_fn=lambda shape: torch.randn(shape)
