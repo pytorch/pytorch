@@ -25,7 +25,7 @@ namespace caffe2 {
 
 template <typename T, class Context>
 void weight_scale_update(
-    int N,
+    int64_t N,
     const T* w,
     const T scale,
     int64_t iter,
