@@ -61,6 +61,14 @@ Tensor& fill_meta_(Tensor& self, const Tensor& value) {
   return self;
 }
 
+Tensor fill(const Tensor& self, const Scalar& value) {
+  return at::empty_like(self).fill_(value);
+}
+
+Tensor fill(const Tensor& self, const Tensor& value) {
+  return at::empty_like(self).fill_(value);
+}
+
 DEFINE_DISPATCH(fill_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
