@@ -8819,7 +8819,7 @@ class _TestONNXRuntime:
         self.run_test(FakeQuantizePerChannelModel(), (x))
 
     @skipIfUnsupportedMinOpsetVersion(13)
-    @disableScriptTest()  # RuntimeError: Can't redefine method: forward on class: __torch__.torch.nn.modules.linear.Linear
+    @skipScriptTest()  # RuntimeError: Can't redefine method: forward on class: __torch__.torch.nn.modules.linear.Linear
     def test_fake_quantize_activation(self):
         from torch import quantization
         m = torch.nn.Linear(1, 1)
@@ -10872,7 +10872,7 @@ class _TestONNXRuntime:
         self.run_test(FlattenModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    @disableScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
+    @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
     def test_quantized_arithmetic_qfunctional(self):
         x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)
         y = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)
