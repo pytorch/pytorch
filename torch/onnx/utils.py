@@ -12,6 +12,7 @@ import inspect
 import numbers
 import os
 import re
+import textwrap
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -287,14 +288,18 @@ def _optimize_graph(
 
         # Find consecutive permutes that are no-ops and remove them.
         torch._C._jit_pass_custom_pattern_based_rewrite_graph(
-            """
-        graph(%Pi):
-            %Pq = quantized::nhwc2nchw(%Pi)
-            %Pr = quantized::nchw2nhwc(%Pq)
-            return (%Pr)""",
-            """
-        graph(%Ri):
-            return (%Ri)""",
+            textwrap.dedent(
+                """\
+                graph(%Pi):
+                    %Pq = quantized::nhwc2nchw(%Pi)
+                    %Pr = quantized::nchw2nhwc(%Pq)
+                    return (%Pr)"""
+            ),
+            textwrap.dedent(
+                """\
+                graph(%Ri):
+                    return (%Ri)"""
+            ),
             graph,
         )
 
