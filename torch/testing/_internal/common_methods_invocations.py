@@ -2258,15 +2258,20 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
         ((S, M, S), (S, M, S)),
         ((M, 1, S), (M, S)),
         ((M, 1, S), (1, M, S)),
-        ((0, 1, 3), (0, 10, 3))
+        ((0, 1, 3), (0, 10, 3)),
+        ((S,), 1)  # TensorxScalar case
     )
 
     sample_kwargs = kwargs.get('sample_kwargs', {})
 
-    for shape_lhs, shape_rhs in shapes:
+    for shape_lhs, shape_or_val_rhs in shapes:
         lhs = make_arg(shape_lhs, **op.lhs_make_tensor_kwargs)
-        rhs = make_arg(shape_rhs, **op.rhs_make_tensor_kwargs)
-        broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
+        if isinstance(shape_or_val_rhs, tuple):
+            rhs = make_arg(shape_or_val_rhs, **op.rhs_make_tensor_kwargs)
+            broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_or_val_rhs))
+        else:
+            rhs = shape_or_val_rhs
+            broadcasts_input = False
 
         yield SampleInput(lhs, args=(rhs,), kwargs=sample_kwargs, broadcasts_input=broadcasts_input)
 
