@@ -700,10 +700,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
 
-        # Some kind of issue with unsymmetric tangent type
-        # Runtime Error: The tangent part of the matrix A should also be symmetric.
-        xfail('linalg.eigh'),
-
         skip('nn.functional.feature_alpha_dropout', 'with_train'),
         skip('pca_lowrank', ''),
         skip('nn.functional.dropout2d', ''),
