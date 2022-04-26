@@ -151,7 +151,6 @@ _SKIP_PYTHON_BINDINGS = [
     "_has_same_storage_numel",  # used for forward AD internals
     "_reshape_alias",
     "replace_",  # only used by the functionalization pass, doesn't need to be exposed to python
-    "zero",  # only used by the functionalization pass, doesn't need to be exposed to python
     "copy",  # only used by the functionalization pass
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
