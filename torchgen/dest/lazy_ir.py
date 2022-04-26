@@ -281,12 +281,14 @@ class GenLazyNativeFuncDefinition:
         return ""
 
     def metrics(self, func: NativeFunction, schema: LazyIrSchema) -> str:
-        return f'{self.metrics_counter};'
+        return f"{self.metrics_counter};"
 
     def get_device(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
+        assert (
+            len(value_types_names) > 0
+        ), "Code below assumes there is at least one tensor arg"
         return f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
         TORCH_INTERNAL_ASSERT(common_device);
         """
@@ -344,7 +346,9 @@ class GenLazyNativeFuncDefinition:
         returns_length = len(schema.returns)
         value_args = schema.filtered_args(values=True, scalars=False)
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
+        assert (
+            len(value_types_names) > 0
+        ), "Code below assumes there is at least one tensor arg"
         first_tensor_name = value_types_names[0]
         bridge_str = f"""auto result = torch::lazy::CreateAtenFromLtcTensor(
                 {self.create_lazy_tensor(first_tensor_name)}(std::move(node), *common_device));"""
@@ -374,7 +378,8 @@ class GenLazyNativeFuncDefinition:
         metadata = self.backend_index.get_kernel(func)
         assert metadata is not None
         schema = LazyIrSchema(func.func)
-        return [f"""\
+        return [
+            f"""\
     {sig.decl(name=f"{self.class_method_name}::{metadata.kernel}")} {{
         {self.force_eager_fallback(func, schema)}
         {self.metrics(func, schema)}
@@ -384,7 +389,8 @@ class GenLazyNativeFuncDefinition:
         {self.build_ir_node(func, schema)}
         {self.return_aten_tensor(func, schema)}
     }};\n
-    """]
+    """
+        ]
 
 
 class ComputeShapeSignature:
