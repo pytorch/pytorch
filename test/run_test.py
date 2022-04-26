@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     shell,
     set_cwd,
+    parser as common_parser,
 )
 import torch.distributed as dist
 from typing import Dict, Optional, List
@@ -620,6 +621,7 @@ def parse_args():
         description="Run the PyTorch unit test suite",
         epilog="where TESTS is any of: {}".format(", ".join(TESTS)),
         formatter_class=argparse.RawTextHelpFormatter,
+        parents=[common_parser]
     )
     parser.add_argument(
         "-v",
