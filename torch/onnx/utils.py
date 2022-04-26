@@ -339,7 +339,7 @@ def _optimize_graph(
 
 
 def warn_on_static_input_change(input_states):
-    """Warns the user that the changes won't take effect in the traced ONNX graph.
+    """Warns that changes to input dictionaries and strings won't take effect in the traced ONNX graph.
 
     We accept dictionaries and strings as ONNX inputs, but they should be only for
     configuration use. we detect here if these inputs are modified, and if so we warn
