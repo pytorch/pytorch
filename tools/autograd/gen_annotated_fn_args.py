@@ -20,11 +20,11 @@ import textwrap
 
 from typing import Dict, List, Any
 
-from tools.codegen.gen import parse_native_yaml
-from tools.codegen.utils import FileManager
-from tools.codegen.context import with_native_function
-from tools.codegen.model import BaseOperatorName, NativeFunction
-import tools.codegen.api.python as python
+from torchgen.gen import parse_native_yaml
+from torchgen.utils import FileManager
+from torchgen.context import with_native_function
+from torchgen.model import BaseOperatorName, NativeFunction
+import torchgen.api.python as python
 from .gen_python_functions import (
     should_generate_py_binding,
     is_py_torch_function,
