@@ -2288,6 +2288,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_wishart_log_prob(self):
+        set_rng_seed(0)
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
         # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
