@@ -278,9 +278,9 @@ class TestNestedTensorDeviceType(TestCase):
     @dtypes(torch.float, torch.float16, torch.double)
     def test_to_padded_tensor_dim2(self, device, dtype):
         ts = [
-            torch.randn(16, device=device, dtype=dtype),
-            torch.randn(24, device=device, dtype=dtype),
-            torch.randn(40, device=device, dtype=dtype),
+            torch.randn(160, device=device, dtype=dtype),
+            torch.randn(1240, device=device, dtype=dtype),
+            torch.randn(2400, device=device, dtype=dtype),
         ]
         nt = torch.nested_tensor(ts, device=device, dtype=dtype)
         pad = 42
