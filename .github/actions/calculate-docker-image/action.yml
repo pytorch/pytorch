@@ -85,7 +85,6 @@ runs:
       if: inputs.always-rebuild || steps.check.outputs.rebuild
       env:
         IMAGE_NAME: ${{inputs.docker-image-name}}
-        DOCKER_SKIP_S3_UPLOAD: "1"
         DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker-tag }}
       working-directory: .circleci/docker
       shell: bash
