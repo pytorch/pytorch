@@ -111,6 +111,17 @@ def _stft_reference(x, hop_length, window):
         X[:, m] = torch.fft.fft(slc * window)
     return X
 
+
+def skip_helper(device, dtype):
+    device_type = torch.device(device).type
+    if dtype in (torch.half, torch.complex32) and device_type == 'cpu':
+        raise unittest.SkipTest("half and complex32 not supported on CPU")
+    elif dtype in (torch.half, torch.complex32) and device_type == 'cuda' and TEST_WITH_ROCM:
+        raise unittest.SkipTest("half and complex32 not supported on ROCM")
+    elif dtype in (torch.half, torch.complex32) and device_type == 'cuda' and not SM53OrLater:
+        raise unittest.SkipTest("half and complex32 is only supported on CUDA device with SM>53")
+
+
 # Tests of functions related to Fourier analysis in the torch.fft namespace
 class TestFFT(TestCase):
     exact_dtype = True
@@ -253,20 +264,40 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypes(torch.half, torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
     def test_fft_round_trip(self, device, dtype):
+        skip_helper(device, dtype)
         # Test that round trip through ifft(fft(x)) is the identity
-        test_args = list(product(
-            # input
-            (torch.randn(67, device=device, dtype=dtype),
-             torch.randn(80, device=device, dtype=dtype),
-             torch.randn(12, 14, device=device, dtype=dtype),
-             torch.randn(9, 6, 3, device=device, dtype=dtype)),
-            # dim
-            (-1, 0),
-            # norm
-            (None, "forward", "backward", "ortho")
-        ))
+        if dtype not in (torch.half, torch.complex32):
+            test_args = list(product(
+                # input
+                (torch.randn(67, device=device, dtype=dtype),
+                 torch.randn(80, device=device, dtype=dtype),
+                 torch.randn(12, 14, device=device, dtype=dtype),
+                 torch.randn(9, 6, 3, device=device, dtype=dtype)),
+                # dim
+                (-1, 0),
+                # norm
+                (None, "forward", "backward", "ortho")
+            ))
+        else:
+            # cuFFT supports powers of 2 for half and complex half precision
+            test_args = list(product(
+                # input
+                (torch.randn(64, device=device, dtype=dtype),
+                 torch.randn(128, device=device, dtype=dtype),
+                 torch.randn(4, 16, device=device, dtype=dtype),
+                 torch.randn(8, 6, 2, device=device, dtype=dtype)),
+                # dim
+                (-1, 0),
+                # norm
+                (None, "forward", "backward", "ortho")
+            ))
+
+        if dtype in (torch.half, torch.complex32):
+            atol, rtol = 1e-2, 1e-2
+        else:
+            atol, rtol = None, None
 
         fft_functions = [(torch.fft.fft, torch.fft.ifft)]
         # Real-only functions
@@ -285,9 +316,13 @@ class TestFFT(TestCase):
                 }
 
                 y = backward(forward(x, **kwargs), **kwargs)
+                if x.dtype is torch.half and y.dtype is torch.complex32:
+                    # Since type promotion currently doesn't work with complex32
+                    # manually promote `x` to complex32
+                    x = x.to(torch.complex32)
                 # For real input, ifft(fft(x)) will convert to complex
                 self.assertEqual(x, y, exact_dtype=(
-                    forward != torch.fft.fft or x.is_complex()))
+                    forward != torch.fft.fft or x.is_complex()), rtol=rtol, atol=atol)
 
     # Note: NumPy will throw a ValueError for an empty input
     @onlyNativeDeviceTypes
@@ -327,13 +362,7 @@ class TestFFT(TestCase):
     @dtypes(torch.int8, torch.half, torch.float, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_fft_type_promotion(self, device, dtype):
-        device_type = torch.device(device).type
-        if dtype in (torch.half, torch.complex32) and device_type == 'cpu':
-            raise unittest.SkipTest("half and complex32 not supported on CPU")
-        elif dtype in (torch.half, torch.complex32) and device_type == 'cuda' and TEST_WITH_ROCM:
-            raise unittest.SkipTest("half and complex32 not supported on ROCM")
-        elif dtype in (torch.half, torch.complex32) and device_type == 'cuda' and not SM53OrLater:
-            raise unittest.SkipTest("half and complex32 is only supported on CUDA device with SM>53")
+        skip_helper(device, dtype)
 
         if dtype.is_complex or dtype.is_floating_point:
             t = torch.randn(64, device=device, dtype=dtype)
@@ -362,6 +391,7 @@ class TestFFT(TestCase):
             torch.complex128: torch.double,
         }
         if dtype in (torch.half, torch.complex32):
+            # cuFFT supports powers of 2 for half and complex half precision
             x = torch.randn(65, device=device, dtype=dtype)
             R = torch.fft.hfft(x)
         else:
@@ -433,8 +463,14 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypes(torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
     def test_fftn_round_trip(self, device, dtype):
+        skip_helper(device, dtype)
+
+        if dtype in (torch.complex32, torch.half):
+            rtol, atol = 1e-2, 1e-2
+        else:
+            rtol, atol = None, None
         norm_modes = (None, "forward", "backward", "ortho")
 
         # input_ndim, dim
@@ -456,7 +492,11 @@ class TestFFT(TestCase):
                               (torch.fft.ihfftn, torch.fft.hfftn)]
 
         for input_ndim, dim in transform_desc:
-            shape = itertools.islice(itertools.cycle(range(4, 9)), input_ndim)
+            if dtype in (torch.half, torch.complex32):
+                # cuFFT supports powers of 2 for half and complex half precision
+                shape = itertools.islice(itertools.cycle((2, 4, 8)), input_ndim)
+            else:
+                shape = itertools.islice(itertools.cycle(range(4, 9)), input_ndim)
             x = torch.randn(*shape, device=device, dtype=dtype)
 
             for (forward, backward), norm in product(fft_functions, norm_modes):
@@ -469,7 +509,7 @@ class TestFFT(TestCase):
                 y = backward(forward(x, **kwargs), **kwargs)
                 # For real input, ifftn(fftn(x)) will convert to complex
                 self.assertEqual(x, y, exact_dtype=(
-                    forward != torch.fft.fftn or x.is_complex()))
+                    forward != torch.fft.fftn or x.is_complex()), rtol=rtol, atol=atol)
 
     @onlyNativeDeviceTypes
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
@@ -494,8 +534,13 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double)
     def test_hfftn(self, device, dtype):
+        skip_helper(device, dtype)
+        if dtype is torch.half:
+            rtol, atol = 1e-2, 1e-2
+        else:
+            rtol, atol = None, None
         # input_ndim, dim
         transform_desc = [
             *product(range(2, 5), (None, (0,), (0, -1))),
@@ -508,8 +553,10 @@ class TestFFT(TestCase):
 
         for input_ndim, dim in transform_desc:
             actual_dims = list(range(input_ndim)) if dim is None else dim
-
-            shape = tuple(itertools.islice(itertools.cycle(range(4, 9)), input_ndim))
+            if dtype is torch.half:
+                shape = tuple(itertools.islice(itertools.cycle((2, 4, 8)), input_ndim))
+            else:
+                shape = tuple(itertools.islice(itertools.cycle(range(4, 9)), input_ndim))
             expect = torch.randn(*shape, device=device, dtype=dtype)
             input = torch.fft.ifftn(expect, dim=dim, norm="ortho")
 
@@ -522,12 +569,17 @@ class TestFFT(TestCase):
             s = [shape[dim] for dim in actual_dims]
             actual = torch.fft.hfftn(input, s=s, dim=dim, norm="ortho")
 
-            self.assertEqual(expect, actual)
+            self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double)
     def test_ihfftn(self, device, dtype):
+        skip_helper(device, dtype)
+        if dtype is torch.half:
+            rtol, atol = 1e-2, 1e-2
+        else:
+            rtol, atol = None, None
         # input_ndim, dim
         transform_desc = [
             *product(range(2, 5), (None, (0,), (0, -1))),
@@ -539,7 +591,11 @@ class TestFFT(TestCase):
         ]
 
         for input_ndim, dim in transform_desc:
-            shape = tuple(itertools.islice(itertools.cycle(range(4, 9)), input_ndim))
+            if dtype is torch.half:
+                shape = tuple(itertools.islice(itertools.cycle((2, 4, 8)), input_ndim))
+            else:
+                shape = tuple(itertools.islice(itertools.cycle(range(4, 9)), input_ndim))
+
             input = torch.randn(*shape, device=device, dtype=dtype)
             expect = torch.fft.ifftn(input, dim=dim, norm="ortho")
 
@@ -551,7 +607,7 @@ class TestFFT(TestCase):
             expect = expect[idx]
 
             actual = torch.fft.ihfftn(input, dim=dim, norm="ortho")
-            self.assertEqual(expect, actual)
+            self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
 
     # 2d-fft tests
