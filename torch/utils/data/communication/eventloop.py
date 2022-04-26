@@ -4,6 +4,11 @@ import pickle
 
 from torch.utils.data import IterDataPipe, communication, MapDataPipe
 
+__all__ = [
+    "DataPipeToQueuesLoop",
+    "SpawnProcessForDataPipeline",
+    "SpawnThreadForDataPipeline",
+]
 
 def DataPipeToQueuesLoop(source_datapipe, req_queue, res_queue):
     if isinstance(source_datapipe, IterDataPipe):
