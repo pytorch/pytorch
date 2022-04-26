@@ -63,13 +63,15 @@ Tensor _to_copy(
         at::QuantizerPtr quantizer = r.quantizer();
         r.copy_(self, non_blocking);
         set_quantizer_(r, quantizer);
-      } else {
-        r = at::empty_strided(
-            self.sizes(),
-            self.strides(),
-            options.pinned_memory(pin_out));
-        r.copy_(self, non_blocking);
+        return r;
       }
+      if (self.is_sparse_csr()) {
+      }
+      r = at::empty_strided(
+          self.sizes(),
+          self.strides(),
+          options.pinned_memory(pin_out));
+      r.copy_(self, non_blocking);
       return r;
     } else {
       memory_format = self.suggest_memory_format();
