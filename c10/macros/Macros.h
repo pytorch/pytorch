@@ -400,7 +400,7 @@ __host__ __device__
 #define C10_MOBILE 1
 #endif // ANDROID / IOS
 
-#if C10_MOBILE
+#if defined(C10_MOBILE) && C10_MOBILE
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE inline
 #else
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE

@@ -509,45 +509,42 @@ TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
 
 namespace detail {
 template <typename Inputs, typename F, typename... Args>
-void record_function_with_scope(RecordScope scope, F fn, const Inputs& inputs, Args&&... args) {
-  at::RecordFunction guard(scope);
-  if (guard.isActive()) {
-    if (guard.needsInputs()) {
-      guard.before(fn, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()), std::forward<Args>(args)...);
-    } else {
-      guard.before(fn, std::forward<Args>(args)...);
-    }
+void record_function_with_scope(RecordFunction& guard, F fn, const Inputs& inputs, Args&&... args) {
+  if (guard.needsInputs()) {
+    guard.before(fn, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()), std::forward<Args>(args)...);
+  } else {
+    guard.before(fn, std::forward<Args>(args)...);
   }
 }
 
 template <typename Inputs, typename F, typename... Args>
-void record_function_with_scope_and_debug_handle(RecordScope scope, F fn, int64_t debug_handle, const Inputs& inputs, Args&&... args) {
-  at::RecordFunction guard(scope);
-  if (guard.isActive()) {
-    guard.setDebugHandle(debug_handle);
-    if (guard.needsInputs()) {
-      guard.before(fn, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()), std::forward<Args>(args)...);
-    } else {
-      guard.before(fn, std::forward<Args>(args)...);
-    }
+void record_function_with_scope_and_debug_handle(RecordFunction& guard, F fn, int64_t debug_handle, const Inputs& inputs, Args&&... args) {
+  guard.setDebugHandle(debug_handle);
+  if (guard.needsInputs()) {
+    guard.before(fn, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()), std::forward<Args>(args)...);
+  } else {
+    guard.before(fn, std::forward<Args>(args)...);
   }
 }
 
 template <typename F, typename... Args>
-void record_function_with_scope(RecordScope scope, F fn, c10::ArrayRef<const c10::IValue> inputs, Args&&... args) {
-  return record_function_with_scope<c10::ArrayRef<const c10::IValue>, F, Args...>(scope, std::move(fn), inputs, std::forward<Args>(args)...);
+void record_function_with_scope(RecordFunction& guard, F fn, c10::ArrayRef<const c10::IValue> inputs, Args&&... args) {
+  return record_function_with_scope<c10::ArrayRef<const c10::IValue>, F, Args...>(guard, std::move(fn), inputs, std::forward<Args>(args)...);
 }
 
 template <typename F, typename... Args>
-void record_function_with_scope_and_debug_handle(RecordScope scope, F fn, int64_t debug_handle, c10::ArrayRef<const c10::IValue> inputs, Args&&... args) {
-  return record_function_with_scope_and_debug_handle<c10::ArrayRef<const c10::IValue>, F, Args...>(scope, std::move(fn), debug_handle, inputs, std::forward<Args>(args)...);
+void record_function_with_scope_and_debug_handle(RecordFunction& guard, F fn, int64_t debug_handle, c10::ArrayRef<const c10::IValue> inputs, Args&&... args) {
+  return record_function_with_scope_and_debug_handle<c10::ArrayRef<const c10::IValue>, F, Args...>(guard, std::move(fn), debug_handle, inputs, std::forward<Args>(args)...);
 }
 
 } // namespace detail
 
 // optional argument - function's seq_no
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
-  ::at::detail::record_function_with_scope(scope, fn, inputs, ##__VA_ARGS__)
+  at::RecordFunction guard(scope); \
+  if (guard.isActive()) { \
+    ::at::detail::record_function_with_scope(guard, fn, inputs, ##__VA_ARGS__); \
+  }
 
 #define RECORD_FUNCTION(fn, inputs, ...) \
   RECORD_FUNCTION_WITH_SCOPE( \
@@ -572,7 +569,10 @@ void record_function_with_scope_and_debug_handle(RecordScope scope, F fn, int64_
 // post process events
 #define RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(  \
     scope, fn, debug_handle, inputs, ...)           \
-  ::at::detail::record_function_with_scope_and_debug_handle(scope, fn, debug_handle, inputs, ##__VA_ARGS__)
+  at::RecordFunction guard(scope);                  \
+  if (guard.isActive()) {                           \
+    ::at::detail::record_function_with_scope_and_debug_handle(guard, fn, debug_handle, inputs, ##__VA_ARGS__); \
+  }
 
 // Helper macros to record LITE INTERPETER scope events with debug handles
 #define RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(             \
