@@ -326,19 +326,9 @@ void max_unpool3d_kernel_impl(
   });
 }
 
-void max_unpool3d_backward_kernel_impl(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& indices) {
-  AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "max_unpool3d_backward", [&] {
-    cpu_max_unpool_backward<scalar_t, /*is_3d*/true>(grad_input, grad_output, indices);
-  });
-}
-
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl);
 REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl);
-REGISTER_DISPATCH(max_unpool3d_backward_kernel, &max_unpool3d_backward_kernel_impl);
 
 }} // at::native
