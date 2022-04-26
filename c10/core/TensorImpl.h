@@ -8,6 +8,7 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
@@ -16,9 +17,11 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
+#include <c10/util/safe_numerics.h>
 
 #include <algorithm>
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <numeric>
 
@@ -49,16 +52,8 @@ class TensorBase;
 
 namespace c10 {
 class Scalar;
-struct IValue;
 struct Storage;
-class OperatorHandle;
 } // namespace c10
-
-namespace torch {
-namespace jit {
-using Stack = std::vector<c10::IValue>;
-}
-} // namespace torch
 
 namespace c10 {
 
@@ -168,9 +163,6 @@ struct C10_API AutogradMetaInterface {
   virtual ~AutogradMetaInterface();
 };
 
-// forward declared
-struct TorchDispatchTypeObject;
-
 namespace impl {
 
 // Unfortunately, the definition of AutogradMeta lives in a separate
@@ -194,137 +186,6 @@ struct C10_API AutogradMetaFactoryRegisterer {
   explicit AutogradMetaFactoryRegisterer(AutogradMetaFactory* factory) {
     SetAutogradMetaFactory(factory);
   }
-};
-
-// Note [Python interpreter tag]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// We store a PyObject on TensorImpl so that we can efficiently translate
-// tensors into the Python representations.  However, in some situations
-// (torchdeploy) there may be multiple Python interpreters in a single process
-// and we must take care not to accidentally mix up PyObjects with the wrong
-// interpreters.  Thus, we also tag every TensorImpl with the Python interpreter
-// it corresponds to.
-//
-// With torchdeploy, we have these invariants:
-//  - Any given TensorImpl can be associated with AT MOST one Python
-//  interpreter.
-//    We represent the interpreter tag as a memory address to an instance of
-//    a virtual class that is allocated once per interpreter (this is so that
-//    we can request the interpreter to perform operations for us, if
-//    necessary).
-//  - A given TensorImpl's interpreter tag can only go from uninitialized to
-//    tagged; once tagged, this is a quiescent state (once tagged to an
-//    interpreter, ALWAYS tagged to that interpreter)
-//  - A thread may mutate the PyObject field of a TensorImpl if and only if it
-//    holds the GIL for the interpreter tagged on the TensorImpl.  (If the
-//    TensorImpl is not tagged, it must first atomically claim its tag before it
-//    can validly write)
-
-// The PyInterpreter object itself is a class that contains some function
-// pointers for interacting with the interpreter.  For now this is just for
-// debugging, but if a Tensor can own a PyObject, the interpreter can be used to
-// free it.
-//
-// WARNING: This class has to be written very carefully, because it may be
-// possible for a Tensor to have a reference an interpreter corresponding to
-// a shared library that has ALREADY BEEN UNLOADED.  This makes blindly calling
-// virtual methods very dangerous, because the vtable may be garbage at that
-// point (on a good day, you might get "pure virtual method called").
-//
-// The idea to solve this problem is we always leak PyInterpreters (so they
-// always stay live even after dlclose), and disarm the "virtual methods" by
-// replacing them with function pointers that just no-op.  This can't be done
-// with a traditional C++ vtable, so we have to roll our own.
-//
-// NB: The downside with representing PyInterpreter tags as full objects is that
-// it takes an extra word on TensorImpl.  If tags were instead just integer
-// indices, on 64-bit architectures we could pack the tag and PyObject together
-// into a single atomic word.  On 32-bit architectures we could simply say that
-// only one Python interpreter is supported (erroring if a nontrivial
-// interpreter tag is attempted to be set).
-//
-// The difficulty with this scheme is we need to maintain an out-of-line table
-// to get at the PyInterpreters so that we can do virtual method calls on them,
-// and registration/deregistration to this table must be done in a thread safe
-// manner.  This can be easily done if the number of possible PyInterpreters is
-// small enough (e.g., 8-bit integer) by simply preallocating an array of
-// sufficient size to hold all possible interpreters.  Surely 128 threads is
-// more than enough for anyone!
-//
-// I didn't decide to do this technique at the moment, because the extra word
-// added by the PyInterpreter tag takes us to 24 words, which means that we
-// still fit inside three eight word cache lines.  If you need to penny pinch
-// another word consider doing this!
-
-struct PyInterpreter;
-struct C10_API PyInterpreter {
-  using name_sig = std::string(const PyInterpreter*);
-  using decref_sig = void(const PyInterpreter*, PyObject*, bool);
-  using detach_sig =
-      c10::intrusive_ptr<TensorImpl>(const PyInterpreter*, const TensorImpl*);
-  using dispatch_sig = void(
-      const PyInterpreter*,
-      const c10::OperatorHandle&,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<TorchDispatchTypeObject>& type);
-
-  PyInterpreter(
-      name_sig* name_fn,
-      decref_sig* decref_fn,
-      detach_sig* detach,
-      dispatch_sig* dispatch)
-      : name_fn_(name_fn),
-        decref_fn_(decref_fn),
-        detach_fn_(detach),
-        dispatch_fn_(dispatch) {}
-
-  name_sig* name_fn_;
-  decref_sig* decref_fn_;
-  detach_sig* detach_fn_;
-  dispatch_sig* dispatch_fn_;
-
-  // UBSAN suppression fixes: "call to function
-  // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
-  // _object*) through pointer to incorrect function type 'void (*)(const
-  // c10::impl::PyInterpreter *, _object *)'" See
-  // https://github.com/google/sanitizers/issues/911
-
-  // Report the name of this interpreter
-  __ubsan_ignore_function__ std::string name() const {
-    return (*name_fn_)(this);
-  }
-
-  // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
-  // See NOTE [PyInterpreter::decref takes an `is_tensor` arg]
-  __ubsan_ignore_function__ void decref(PyObject* pyobj, bool is_tensor) const {
-    return (*decref_fn_)(this, pyobj, is_tensor);
-  }
-
-  // Perform a detach by deferring to the __torch_dispatch__ implementation of
-  // detach, which will also arrange for the PyObject to get copied in this
-  // situation
-  __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> detach(
-      const TensorImpl* self) const {
-    return (*detach_fn_)(this, self);
-  }
-
-  // Invoke the Python boxed fallback dispatch to go back into Python
-  __ubsan_ignore_function__ void dispatch(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack,
-      const std::shared_ptr<TorchDispatchTypeObject>& type) const {
-    return (*dispatch_fn_)(this, op, stack, type);
-  }
-
-  // Disarm this PyInterpreter, making all of its methods noops.
-  // Because the function pointers are raw pointers (not atomics),
-  // a disarm() invocation that is concurrent with active destructors
-  // is not thread safe and will trigger TSAN.  My hope is that this
-  // situations doesn't ever actually happen; tensor destruction should
-  // quiesce when a dlclose happens, and any long lived tensors whose
-  // destructors would be disarmed here only begin the destruction process
-  // on process shutdown (long after the dlclose has occurred).
-  void disarm() noexcept;
 };
 
 // PyInterpreterStatus describes what the state of its interpreter tag
@@ -359,30 +220,6 @@ struct C10_API NamedTensorMetaInterface {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::slow_dim");
   };
-};
-
-// NOTE [What is TorchDispatchTypeObject?]
-// A TorchDispatchTypeObject represents the type of a Tensor subclass that has
-// a __torch_dispatch__ classmethod. Concretely, it holds the class as a
-// PyObject* and a PyInterpreter* that says which python interpreter the class
-// came from.
-//
-// See NOTE [dispatch_fn's type argument] for more details
-struct C10_API TorchDispatchTypeObject {
-  // Steals a reference to type_object
-  TorchDispatchTypeObject(
-      PyObject* type_object,
-      c10::impl::PyInterpreter* pyinterpreter);
-
-  // Releases the stolen reference to type_object
-  ~TorchDispatchTypeObject();
-
-  c10::impl::PyInterpreter* pyinterpreter() const;
-  PyObject* ptr() const;
-
- private:
-  PyObject* data_;
-  c10::impl::PyInterpreter* pyinterpreter_;
 };
 
 // NOTE [ Version Counter Sharing ]
@@ -850,17 +687,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
 
+  virtual Layout layout_impl() const {
+    TORCH_CHECK(
+        false, "layout_impl is only implemented for TensorImpl subclasses.");
+  }
+
  public:
+  // Whether a tensor is sparse COO or not.
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
     return key_set_.has_all(c10::sparse_ks);
   }
 
-  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
-  // format.
+  // Whether a tensor is sparse CSR or not.
   bool is_sparse_csr() const {
-    return key_set_.has_any(c10::sparse_csr_ks);
+    return layout() == kSparseCsr;
   }
 
   bool is_quantized() const {
@@ -898,6 +740,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // reasons.
     constexpr auto xpu_ks = DispatchKeySet(BackendComponent::XPUBit);
     return key_set_.has_all(xpu_ks);
+  }
+
+  bool is_ipu() const {
+    constexpr auto ipu_ks = DispatchKeySet(BackendComponent::IPUBit);
+    return key_set_.has_all(ipu_ks);
   }
 
   bool is_xla() const {
@@ -1002,8 +849,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return kStrided;
     } else if (is_sparse()) {
       return kSparse;
-    } else if (is_sparse_csr()) {
-      return kSparseCsr;
+    } else if (key_set_.has_any(c10::sparse_csr_ks)) {
+      // Typically, the tensor dispatch keys define the tensor layout
+      // uniquely. This allows using non-virtual layout method for
+      // better performance. However, when tensor's layout depends,
+      // say, on tensor attributes, one must use this execution path
+      // where the corresponding tensor impl class overwrites virtual
+      // layout_impl() method.
+      //
+      // TODO: implement layout() as native function/method so that
+      // __torch_dispatch__ users will be able to redefine the
+      // layout() method.
+      return layout_impl();
     } else {
       TORCH_INTERNAL_ASSERT(
           is_mkldnn(), "There is an error in the layout calculation logic.");
@@ -1719,6 +1576,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // we are the ONLY thread that can have gotten to this point.  It is not
     // possible to conflict with another zero interpreter as access is protected
     // by GIL
+    // NB: owns_pyobj tag is initially false
     pyobj_ = pyobj;
   }
 
@@ -1726,6 +1584,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // interpreter.  This is racy!
   impl::PyInterpreter* pyobj_interpreter() {
     return pyobj_interpreter_.load(std::memory_order_acquire);
+  }
+
+  PyObject* _unchecked_untagged_pyobj() const {
+    return reinterpret_cast<PyObject*>(
+        reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
   }
 
   // Test the interpreter tag.  If tagged for the current interpreter, return
@@ -1747,7 +1610,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return c10::nullopt;
     } else if (interpreter == self_interpreter) {
       // NB: pyobj_ could still be null!
-      return c10::make_optional(pyobj_);
+      return c10::make_optional(_unchecked_untagged_pyobj());
     } else {
       TORCH_CHECK(
           false,
@@ -2284,11 +2147,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Compute the number of elements based on the sizes of a tensor.
    */
   int64_t compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      n *= s;
-    }
-    return n;
+#if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
+    // Use overflow checks if supported by the compiler
+    return safe_compute_numel();
+#else
+    return c10::multiply_integers(sizes());
+#endif
   }
 
   /**
@@ -2297,14 +2161,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * using a sparse layout has multiple dimensions with large sizes.
    */
   int64_t safe_compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      TORCH_CHECK(
-          s == 0 || n <= std::numeric_limits<int64_t>::max() / s,
-          "numel: integer multiplication overflow");
-      n *= s;
-    }
-    return n;
+    uint64_t n = 1;
+    bool overflows = c10::safe_multiplies_u64(sizes(), &n);
+    constexpr auto numel_max = std::min(
+        static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+        static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
+
+    overflows |= (n > numel_max);
+    TORCH_CHECK(!overflows, "numel: integer multiplication overflow");
+    return static_cast<int64_t>(n);
   }
 
   /**
@@ -2438,11 +2303,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool owns_pyobj() {
-    return owns_pyobj_;
+    return reinterpret_cast<uintptr_t>(pyobj_) & 1;
   }
 
   void set_owns_pyobj(bool b) {
-    owns_pyobj_ = b;
+    pyobj_ = reinterpret_cast<PyObject*>(
+        reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
   }
 
  protected:
@@ -2530,17 +2396,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // care)
   std::atomic<impl::PyInterpreter*> pyobj_interpreter_;
 
-  // This field contains a weak reference to a PyObject representing
-  // this Tensor.  It MUST NOT be a strong reference, as that would
-  // create a reference cycle between Tensor and the PyObject.  If
-  // pyobj is nullptr, when we transfer Tensor to Python, we allocate
-  // a new PyObject for it and set this field.  This field does not
-  // have to be protected by an atomic as it is only allowed to be
-  // accessed when you hold the GIL.
+  // This field contains a reference to a PyObject representing this Tensor.
+  // If pyobj is nullptr, when we transfer Tensor to Python, we allocate a new
+  // PyObject for it and set this field.  This field does not have to be
+  // protected by an atomic as it is only allowed to be accessed when you hold
+  // the GIL, or during destruction of the tensor.
   //
   // When a PyObject dies, you are obligated to clear this field
   // (otherwise, you will try to use-after-free the pyobj); this currently
   // occurs in THPVariable_clear in torch/csrc/autograd/python_variable.cpp
+  //
+  // NB: Ordinarily, this should not be a strong reference, as if the
+  // PyObject owns the Tensor, this would create a reference cycle.
+  // However, sometimes this ownership flips.  To track who owns
+  // who, this has a single pointer tag indicating whether or not the
+  // C++ object owns the PyObject (the common case, zero, means PyObject
+  // owns the C++ object); see _unchecked_untagged_pyobj for raw access
+  // or check_pyobj for checked access.  See references to PyObject
+  // resurrection in torch/csrc/autograd/python_variable.cpp
   PyObject* pyobj_;
 
   c10::impl::SizesAndStrides sizes_and_strides_;
@@ -2593,7 +2466,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_wrapped_number_ = false;
     allow_tensor_metadata_change_ = true;
     reserved_ = false;
-    owns_pyobj_ = false;
     sizes_customization_policy_ =
         static_cast<uint8_t>(CustomizableMethodPolicy::Default);
     storage_access_should_throw_ = false;
@@ -2648,13 +2520,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ : 1;
-
-  // If pyobj_ is nullptr, this is always false.
-  // Otherwise, this indicates whether or not TensorImpl owns the pyobj_
-  // or vice versa.  Ordinarily, pyobj_ owns TensorImpl, but if the
-  // Python object's refcount goes to zero, we flip the ownership
-  // direction (to make sure the pyobj stays live).
-  bool owns_pyobj_ : 1;
 
   // Customization policy for the sizes() virtual method.
   /* CustomizableMethodPolicy */ uint8_t sizes_customization_policy_ : 2;

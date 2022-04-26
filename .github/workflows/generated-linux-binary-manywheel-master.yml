@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - master
+    tags:
       - 'ciflow/all/*'
       - 'ciflow/trunk/*'
   workflow_dispatch:
@@ -50,38 +51,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -98,9 +71,6 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -165,7 +135,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: seemethere/upload-artifact-s3@v4
         with:
           name: manywheel-py3_7-cuda10_2
           retention-days: 14
@@ -206,38 +176,10 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-          echo "system info $(uname -a)"
-      - name: Start docker if docker deamon is not running
-        run: |
-          if systemctl is-active --quiet docker; then
-              echo "Docker daemon is running...";
-          else
-              echo "Starting docker deamon..." && sudo systemctl start docker;
-          fi
-      - name: Log in to ECR
-        env:
-          AWS_RETRY_MODE: standard
-          AWS_MAX_ATTEMPTS: 5
-        run: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
       - name: Chown workspace
         run: |
           retry () {
@@ -254,10 +196,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: seemethere/download-artifact-s3@v3
         name: Download Build Artifacts
         with:
           name: manywheel-py3_7-cuda10_2

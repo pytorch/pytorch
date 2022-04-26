@@ -26,6 +26,7 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <string>
 
 #ifdef USE_RPC
@@ -175,7 +176,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void callFunction(
       Function& f,
       Stack& stack,
-      size_t bailOut = GraphExecutor::getDefaultNumBailOuts(),
+      c10::optional<size_t> bailOut = c10::nullopt,
       bool next = true) {
     bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
       enterFrame(code, stack.size() - code.num_inputs());
@@ -716,10 +717,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto& forked_fn =
                 toGraphFunction(*frame.function->function_table_[inst.X]);
             InterpreterState forked_interpreter(
-                forked_fn.get_executor()
-                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code,
-                taskLauncher_);
+                forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
@@ -799,10 +797,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         python_class_name = jit_exception->getPythonClassName();
       }
       handleError(
-          ExceptionMessage(e),
-          (bool)jit_exception,
-          not_implemented_error,
-          python_class_name);
+          e, (bool)jit_exception, not_implemented_error, python_class_name);
       return false;
     }
   }
@@ -819,10 +814,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void handleError(
-      const ExceptionMessage& msg,
+      const std::exception& e,
       bool is_jit_exception,
       c10::NotImplementedError* not_implemented_error,
       c10::optional<std::string> python_class_name) {
+    ExceptionMessage msg(e);
     std::ostringstream ss;
     std::string class_name =
         python_class_name ? *python_class_name : "RuntimeError";
@@ -839,17 +835,21 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           not_implemented_error->backtrace(),
           not_implemented_error->caller());
     } else {
+      if (get_cpp_stacktraces_enabled()) {
+        ss << e.what() << "\n";
+      }
       throw std::runtime_error(ss.str());
     }
   }
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
-    bool pre_sampled = false;
-    if (!frame.record_function && at::hasCallbacks() &&
-        at::shouldRunRecordFunction(&pre_sampled)) {
-      auto rec_fn = std::make_unique<at::RecordFunction>(
-          at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
-      if (rec_fn->isActive()) {
+    if (!frame.record_function) {
+      auto step_callbacks =
+          at::getStepCallbacks(at::RecordScope::TORCHSCRIPT_FUNCTION);
+      if (!step_callbacks.empty()) {
+        auto rec_fn =
+            std::make_unique<at::RecordFunction>(std::move(step_callbacks));
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rec_fn->isActive());
         if (rec_fn->needsInputs()) {
           rec_fn->before(
               frame.function->function_name_,
