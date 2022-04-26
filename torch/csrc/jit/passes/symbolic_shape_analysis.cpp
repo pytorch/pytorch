@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_cache.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
@@ -174,6 +175,17 @@ bool symbolicShapeAnalysisTestModeEnabled() {
   return symbolic_shape_analysis_test_mode;
 }
 
+using SSArgument = c10::variant<ShapeArguments, IValue>;
+
+std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
+  if (const IValue* iv = c10::get_if<IValue>(&sa)) {
+    out << *iv;
+  } else {
+    out << c10::get<ShapeArguments>(sa);
+  }
+  return out;
+}
+
 namespace {
 
 bool isListOfInts(const TypePtr& type) {
@@ -244,8 +256,6 @@ c10::SymbolicShape extractListShape(
   return c10::SymbolicShape(output_shape);
 }
 
-} // namespace
-
 // Symbolic Shape Analysis works through iteratively partially evaluating
 // a TorchScript shape compute graph by inputing properties from input
 // Tensors. We can substitute in properties like `len(x)` and `x[1]`
@@ -259,17 +269,6 @@ c10::SymbolicShape extractListShape(
 // deduce that the 4th dimension has the same symbolic shape as inp[3], which
 // means that we do know its concrete value statically but we can asssign sets
 // of tensor dimensions which must be equal at runtime.
-
-using SSArgument = c10::variant<ShapeArguments, IValue>;
-
-std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
-  if (const IValue* iv = c10::get_if<IValue>(&sa)) {
-    out << *iv;
-  } else {
-    out << c10::get<ShapeArguments>(sa);
-  }
-  return out;
-}
 
 struct SymbolicShapeOpAnalyzer {
   std::shared_ptr<Graph> shape_compute_graph_;
@@ -620,7 +619,7 @@ std::vector<SSArgument> getNodeInputShapes(Node* n, const AliasDb& db) {
   for (size_t node_index = 0; node_index < n->inputs().size(); ++node_index) {
     auto type = n->input(node_index)->type();
 
-    if (auto tt = type->castRaw<TensorType>()) {
+    if (type->castRaw<TensorType>()) {
       input_shapes.push_back(tensorShapeArg(n->input(node_index)));
       continue;
     }
@@ -1058,6 +1057,7 @@ void PropagateShapesOnBlock(Block* b, const AliasDb& db) {
     }
   }
 }
+} // namespace
 
 void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
   AliasDb db(graph);
@@ -1076,6 +1076,16 @@ TORCH_API c10::optional<std::vector<c10::SymbolicShape>>
 calculateSymbolicShapesOnOp(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& inputs) {
+  if (shapeComputeGraphForSchema(*schema) == c10::nullopt) {
+    // Avoid doing all this work for functions that don't have a
+    // supported schema
+    return c10::nullopt;
+  }
+
+  if (auto cached_ret_vec = get_cached_shape_function(schema, inputs)) {
+    return cached_ret_vec;
+  }
+
   std::vector<SSArgument> ssa_args;
   for (auto& arg : inputs) {
     if (const IValue* ival = c10::get_if<IValue>(&arg)) {
@@ -1087,7 +1097,11 @@ calculateSymbolicShapesOnOp(
   }
 
   auto op_analyzer = SymbolicShapeOpAnalyzer(schema);
-  return op_analyzer.run(ssa_args);
+  auto res = op_analyzer.run(ssa_args);
+  if (res.has_value()) {
+    cache_shape_function(schema, inputs, res.value());
+  }
+  return res;
 }
 
 } // namespace jit
