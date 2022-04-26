@@ -47,6 +47,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterZeroTensor.cpp",
     "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
     "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+    "aten/src/ATen/RegisterCompositeExplicitAutogradWithMutations.cpp",
     "aten/src/ATen/RegisterMeta.cpp",
     "aten/src/ATen/RegisterSchema.cpp",
     "aten/src/ATen/CPUFunctions.h",
