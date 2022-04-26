@@ -4,6 +4,12 @@
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#endif
 
 #define AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(LAYOUT, NAME, ...)    \
   [&] {                                                                 \
@@ -101,6 +107,20 @@ inline int compressedDimension(Layout layout, IntArrayRef size) {
 
 inline int plainDimension(Layout layout, IntArrayRef size) {
   return size.size() - (isCompressedRow(layout) ? 1 : 2);
+}
+
+template <typename Func, typename... Args>
+Tensor map_sparse_csr_values(const Tensor& t, Func f, Args... args) {
+  TORCH_CHECK(t.is_sparse_csr(), "Expected input to be a SparseCsr Tensor.");
+  auto new_values = f(t.values(), args...);
+  return at::native::_sparse_csr_tensor_unsafe(
+      t.crow_indices(),
+      t.col_indices(),
+      new_values,
+      t.sizes(),
+      new_values.scalar_type(),
+      t.layout(),
+      new_values.device());
 }
 
 } // namespace sparse_csr

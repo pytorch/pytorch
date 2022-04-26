@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/SparseCsrTensorUtils.h>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -64,8 +65,6 @@ Tensor _to_copy(
         r.copy_(self, non_blocking);
         set_quantizer_(r, quantizer);
         return r;
-      }
-      if (self.is_sparse_csr()) {
       }
       r = at::empty_strided(
           self.sizes(),
@@ -205,7 +204,33 @@ Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking
       optional_memory_format);
 }
 
-Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor to(
+    const Tensor& self,
+    ScalarType dtype,
+    bool non_blocking,
+    bool copy,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // TODO: Use the dispatcher for this.
+  // Currently there are unenumerated extensibility issues preventing this.
+  if (self.is_sparse_csr()) {
+    auto memory_format =
+        optional_memory_format.value_or(MemoryFormat::Preserve);
+    TORCH_CHECK(
+        memory_format == MemoryFormat::Preserve,
+        "sparse_csr only supports memory format Preserve, but got ",
+        memory_format,
+        " instead.");
+    return at::sparse_csr::map_sparse_csr_values(
+        self,
+        to_impl,
+        dtype,
+        c10::nullopt,
+        c10::nullopt,
+        c10::nullopt,
+        non_blocking,
+        copy,
+        memory_format);
+  }
   return to_impl(
       self,
       dtype,
