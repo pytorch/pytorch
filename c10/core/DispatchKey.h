@@ -471,6 +471,7 @@ enum class DispatchKey : uint16_t {
   _NestedTensorXLA,
   _NestedTensorMLC,
   _NestedTensorIPU,
+  _NestedTensorNPU,
   _NestedTensorXPU,
   _NestedTensorHPU,
   _NestedTensorVE,
