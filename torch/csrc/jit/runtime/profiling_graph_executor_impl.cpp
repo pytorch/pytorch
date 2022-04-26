@@ -7,9 +7,9 @@
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
+#include <torch/csrc/jit/passes/check_strict_fusion.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
-#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -121,7 +121,6 @@ FusionStrategy setFusionStrategy(FusionStrategy& strategy) {
 }
 
 static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
-static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
@@ -379,10 +378,7 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
 
     EliminateCommonSubexpression(graph);
     GRAPH_DEBUG(
-        "After EliminateCommonSubexpression, before HoistCommonExpression\n",
-        *graph);
-    HoistCommonExpression(graph);
-    GRAPH_DEBUG("After HoistCommonExpression, before CheckInplace\n", *graph);
+        "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
     CheckInplace(graph);
   }
   GRAPH_DEBUG(
@@ -561,11 +557,7 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
   DecomposeOps(graph);
   GRAPH_DEBUG("After DecomposeOps, before ConstantPropagation\n", *graph);
   ConstantPropagation(graph);
-  GRAPH_DEBUG(
-      "After ConstantPropagation, before HoistCommonExpression\n", *graph);
-  HoistCommonExpression(graph);
-  GRAPH_DEBUG(
-      "After EliminateCommonSubexpression, before ElimiateDeadCode\n", *graph);
+  GRAPH_DEBUG("After ConstantPropagation, before EliminateDeadCode\n", *graph);
   EliminateDeadCode(graph);
   GRAPH_DEBUG(
       "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
@@ -680,6 +672,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
   runFinalOptimizations(copy);
+  CheckStrictFusion(copy);
   GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ = ExecutionPlan(copy, function_name_);
   return *optimized_plan_;
