@@ -131,6 +131,10 @@ std::string Result::name() const {
   return c10::visit([](auto& e){ return e.name_; }, event_);
 }
 
+uint8_t Result::record_function_scope() const {
+  return c10::visit([](auto& e){ return e.record_function_scope_; }, event_);
+}
+
 uint64_t Result::correlation_id() const {
   return c10::visit(c10::overloaded(
       [](const OpEvent& e){ return e.correlation_id_; },

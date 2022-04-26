@@ -71,6 +71,7 @@ struct BackendEvent {
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Result {
   std::string name() const;
+  uint8_t record_function_scope() const;
   uint64_t correlation_id() const;
 
   int64_t start_time_us_;
