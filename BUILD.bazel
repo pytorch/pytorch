@@ -3,10 +3,14 @@ load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "header_template_rule")
+load("//:tools/bazel.bzl", "rules")
 load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops", "generate_aten", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
+load(":build.bzl", "define_targets")
+
+define_targets(rules = rules)
 
 COMMON_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
@@ -36,6 +40,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterFunctionalization_3.cpp",
     # "aten/src/ATen/RegisterFunctionalizationEverything.cpp",
     "aten/src/ATen/RegisterMkldnnCPU.cpp",
+    "aten/src/ATen/RegisterNestedTensorCPU.cpp",
     "aten/src/ATen/RegisterQuantizedCPU.cpp",
     "aten/src/ATen/RegisterSparseCPU.cpp",
     "aten/src/ATen/RegisterSparseCsrCPU.cpp",
@@ -77,6 +82,7 @@ generated_cuda_cpp = [
     "aten/src/ATen/CUDAFunctions.h",
     "aten/src/ATen/CUDAFunctions_inl.h",
     "aten/src/ATen/RegisterCUDA.cpp",
+    "aten/src/ATen/RegisterNestedTensorCUDA.cpp",
     "aten/src/ATen/RegisterQuantizedCUDA.cpp",
     "aten/src/ATen/RegisterSparseCUDA.cpp",
     "aten/src/ATen/RegisterSparseCsrCUDA.cpp",
@@ -93,14 +99,7 @@ generate_aten(
         aten_ufunc_generated_cuda_sources("aten/src/ATen/{}") +
         ["aten/src/ATen/Declarations.yaml"]
     ),
-    generator = "//tools/codegen:gen",
-)
-
-py_library(
-    name = "tools_jit",
-    srcs = glob(["tools/jit/*.py"]),
-    data = glob(["tools/jit/templates/*"]),
-    visibility = ["//tools/setup_helpers:__pkg__"],
+    generator = "//torchgen:gen",
 )
 
 libtorch_cpp_generated_sources = [
@@ -277,6 +276,7 @@ filegroup(
             "aten/src/ATen/native/cuda/linalg/*.cpp",
             "aten/src/ATen/native/cudnn/*.cpp",
             "aten/src/ATen/native/miopen/*.cpp",
+            "aten/src/ATen/native/nested/cuda/*.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
             "aten/src/THC/*.cpp",
         ],
@@ -289,6 +289,7 @@ filegroup(
         "aten/src/ATen/cuda/*.cu",
         "aten/src/ATen/cuda/detail/*.cu",
         "aten/src/ATen/native/cuda/*.cu",
+        "aten/src/ATen/native/nested/cuda/*.cu",
         "aten/src/ATen/native/quantized/cuda/*.cu",
         "aten/src/ATen/native/sparse/cuda/*.cu",
     ]) + aten_ufunc_generated_cuda_sources("aten/src/ATen/{}"),
@@ -1348,7 +1349,7 @@ cc_library(
 py_binary(
     name = "gen_op",
     srcs = ["caffe2/contrib/aten/gen_op.py"],
-    deps = ["//tools/codegen"],
+    deps = ["//torchgen"],
 )
 
 genrule(
@@ -1616,14 +1617,6 @@ cc_library(
 )
 
 # torch
-genrule(
-    name = "version_h",
-    srcs = ["torch/csrc/api/include/torch/version.h.in", "version.txt"],
-    outs = ["torch/csrc/api/include/torch/version.h"],
-    cmd = "$(location //tools/setup_helpers:gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
-    tools = ['//tools/setup_helpers:gen_version_header'],
-)
-
 py_binary(
     name = "stringify_file",
     srcs = ["torch/csrc/jit/codegen/cuda/tools/stringify_file.py"],
