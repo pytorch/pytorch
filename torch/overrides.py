@@ -143,6 +143,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.fft.rfftfreq,
         torch.from_file,
         torch.full,
+        torch.fill,
         torch.hamming_window,
         torch.hann_window,
         torch.kaiser_window,
