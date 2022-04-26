@@ -61,6 +61,8 @@ void decompose_functional(const c10::OperatorHandle& op, torch::jit::Stack* stac
   local_keyset.included_ = local_keyset.included_.add(c10::DispatchKey::Functionalize);
   c10::impl::ForceDispatchKeyGuard guard(local_keyset);
 
+  at::functionalization::impl::FunctionalizationReapplyViewsGuard functional_guard(true);
+
   // Step 3: redispatch to native kernel
   // TODO: this is technically kind of sketchy, since we're relying on the fact
   // that the composite kernel is registered to a particular dispatch key.
