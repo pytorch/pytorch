@@ -10,7 +10,8 @@ template <typename T>
 TORCH_API T quantize_val(double scale, int64_t zero_point, float value);
 // TODO combine this with quantize_val once the numerics for ARM are aligned
 // with it
-uint8_t quantize_val_arm(
+template <typename T>
+T quantize_val_arm(
     const float scale,
     const int32_t zero_point,
     const float value);
