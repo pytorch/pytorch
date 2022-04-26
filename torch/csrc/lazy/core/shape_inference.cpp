@@ -593,6 +593,9 @@ std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef
   return {Shape(self.scalar_type(), target_size)};
 }
 
+std::vector<Shape> compute_shape_narrow_copy(const at::Tensor & self, int64_t dim, int64_t start, c10::SymInt length) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+
 std::vector<Shape> compute_shape_select_scatter(const at::Tensor & self, const at::Tensor & src, int64_t dim, int64_t index) {
   auto self_meta = at::native::empty_strided_meta(self.sizes(), self.strides(), /*dtype=*/c10::make_optional(self.scalar_type()), /*layout=*/c10::make_optional(self.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
   auto src_meta = at::native::empty_strided_meta(src.sizes(), src.strides(), /*dtype=*/c10::make_optional(src.scalar_type()), /*layout=*/c10::make_optional(src.layout()), /*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);

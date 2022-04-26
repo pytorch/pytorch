@@ -5,11 +5,18 @@
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+<<<<<<< HEAD
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/to_native.h>
+#endif
+=======
 #include <ATen/ATen.h>
 #else
 #include <ATen/ops/_to_copy.h>
 #endif
 // needed for the meta tensor calls to get stride info in functionalization
+>>>>>>> 5e0d87c1c8 ([prototype] integrate functionalization <> LTC torchscript backend)
 
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
@@ -82,6 +89,18 @@ namespace {
   }
 }
 
+at::Tensor to_device_functionalize(const at::Tensor & self, at::Device device, at::ScalarType dtype, bool non_blocking, bool copy, c10::optional<at::MemoryFormat> memory_format) {
+  if (!at::functionalization::impl::isFunctionalTensor(self)) {
+    // If the input is not a functional tensor, we want to "lift" the output to be functional.
+    // See Note [Functionalization <> torch.Tensor constructor]
+    at::AutoDispatchSkipFunctionalize guard;
+    auto out = self.to(device, dtype, non_blocking, copy, memory_format);
+    return at::functionalization::impl::to_functional_tensor(std::move(out));
+  } else {
+    // otherwise, to.device is a composite op, so let it decompose normally
+    return at::native::to(self, device, dtype, non_blocking, copy, memory_format);
+  }
+}
 
 bool device_opted_into_functionalization(c10::optional<c10::Device> d) {
     return d.has_value() && (d->type() == c10::DeviceType::XLA || d->type() == c10::DeviceType::Lazy);
@@ -121,12 +140,11 @@ at::Tensor _to_copy_functionalize(
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-
-
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
+  m.impl("to.device", TORCH_FN(to_device_functionalize));
   // Note [Lazy Tensor Functionalization]
   // LazyTensor uses the functionalization pass from core.
   // The first time that we create a lazy tensor

@@ -160,9 +160,6 @@ std::tuple<
     self,
     observer_on,
     fake_quant_on,
-    // Careful - the functional and non-functional version of this operator have the same C++ API name.
-    // The only difference in their C++ schemas is that the non-functional version takes in non-const tensors.
-    // (If we call into the funtional version, we'll infinite loop).
     const_cast<Tensor&>(running_min),
     const_cast<Tensor&>(running_max),
     const_cast<Tensor&>(scale),
@@ -174,13 +171,14 @@ std::tuple<
     per_row_fake_quant,
     symmetric_quant);
   // return the outputs, and the mutated inputs
+  // order is important; mutated inputs come last.
   return std::make_tuple(
+    std::get<0>(out),
+    std::get<1>(out),
     running_min_copy,
     running_max_copy,
     scale_copy,
-    zero_point_copy,
-    std::get<0>(out),
-    std::get<1>(out)
+    zero_point_copy
   );
 }
 

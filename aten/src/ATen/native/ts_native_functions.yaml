@@ -140,6 +140,7 @@ full_codegen:
   - upsample_nearest2d
   - upsample_nearest2d_backward
   - zero_
+  - narrow_copy.SymInt
   - alias_copy
   - as_strided_copy
   - diagonal_copy

@@ -283,7 +283,10 @@ Tensor internal_new_from_data(
     // what the extensibility mechanism for this function (internal_new_from_data)
     // looks like for mode-based dispatch keys and C++ tensor extensions.
     c10::impl::ExcludeDispatchKeyGuard functorch_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
-    // And functionalization does the same thing
+    // Note [Functionalization <> torch.Tensor constructor]
+    // Functionalization does the same thing described above; first it construct a raw
+    // data tensor, and then "lifts" it into a wrapper using the `.to()` call further down.
+    // In order to do that though, functionalization needs to explicitly *not* decompose the `aten::to.device` op.
     c10::impl::ExcludeDispatchKeyGuard functionalize_guard(c10::DispatchKey::Functionalize);
 
     if (isStorage(data)) {

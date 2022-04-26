@@ -1188,7 +1188,7 @@ class FunctionSchema:
             base_name = base_name.replace("_copy", "")
 
         if convert_mutable_inputs_to_returns:
-            # find mutable inputs that are not originally returned, and conver them to returns
+            # find mutable inputs that are not originally returned, and convert them to returns
             returns_from_mutable_inputs = tuple(
                 Return(name=None, type=a.type, annotation=None)
                 for a in self.arguments.flat_all
@@ -1197,7 +1197,8 @@ class FunctionSchema:
                 and not any(a.annotation == r.annotation for r in self.returns)
             )
             original_returns = tuple(map(strip_ret_annotation, self.returns))
-            returns = returns_from_mutable_inputs + original_returns
+            # Ordering is important here. We expect the "mutable input" returns to come last.
+            returns = original_returns + returns_from_mutable_inputs
         else:
             returns = tuple(map(strip_ret_annotation, self.returns))
 
