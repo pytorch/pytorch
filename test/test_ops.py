@@ -226,8 +226,7 @@ class TestCommon(TestCase):
             # Sets the default dtype to NumPy's default dtype of double
             cur_default = torch.get_default_dtype()
             torch.set_default_dtype(torch.double)
-            reference_inputs = op.reference_inputs(device, dtype)
-            for sample_input in reference_inputs:
+            for sample_input in op.reference_inputs(device, dtype):
                 self.compare_with_reference(op, op.ref, sample_input, exact_dtype=(dtype is not torch.long))
         finally:
             torch.set_default_dtype(cur_default)
@@ -247,7 +246,7 @@ class TestCommon(TestCase):
             result = op(sample.input, *sample.args, **sample.kwargs)
 
             meta_sample = sample.transform(_to_tensormeta)
-            meta_result = op(meta_sample[0], *meta_sample[1], **meta_sample[2])
+            meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
 
             prims.utils.compare_tensor_meta(result, meta_result)
 

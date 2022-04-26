@@ -16,6 +16,10 @@ from typing import Sequence, Optional, Union, Callable, List
 
 all = [
     #
+    # Elementwise Unary References
+    #
+    "floor",
+    #
     # Elementwise Binary References
     #
     "add",
@@ -285,9 +289,38 @@ def _maybe_resize_out(out: Tensor, shape):
     return out
 
 
+#
+# Elementwise unary references
+#
+
+# TODO: add type promotion support
+def _make_elementwise_unary_reference(prim: Callable) -> Callable:
+    def _ref(a: Tensor, *, out: Optional[Tensor] = None) -> Tensor:
+
+        assert isinstance(a, TensorLike)
+        assert out is None or isinstance(out, TensorLike)
+
+        result = prim(a)
+
+        # TODO: refactor out handling to a generic wrapper
+        if out is not None:
+            out = _maybe_resize_out(out, result.shape)
+            return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
+
+        return result
+
+    return _ref
+
+
+floor = _make_elementwise_unary_reference(prims.floor)
+
+
 def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Callable:
     def _ref(
-        a: Union[Tensor, Number], b: Union[Tensor, Number], out: Optional[Tensor] = None
+        a: Union[Tensor, Number],
+        b: Union[Tensor, Number],
+        *,
+        out: Optional[Tensor] = None
     ) -> Tensor:
         assert isinstance(a, (TensorLike, Number))
         assert isinstance(b, (TensorLike, Number))
