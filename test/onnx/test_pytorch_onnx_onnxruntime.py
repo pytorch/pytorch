@@ -10986,6 +10986,34 @@ class _TestONNXRuntime:
         self.run_test(Module(False), x, rtol=1e-3, atol=1e-6)
         self.run_test(Module(True), x, rtol=1e-3, atol=1e-6)
 
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_grid_sample(self):
+        n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
+
+        class Module(torch.nn.Module):
+
+            def forward(self, input, grid, mode: str, padding_mode: str, align_corners: bool):
+                return torch.nn.functional.grid_sample(input, grid, mode, padding_mode, align_corners)
+
+        for (
+            mode,
+            padding_mode,
+            align_corners,
+        ) in itertools.product(
+            ("bilinear", "nearest", "bicubic"),
+            ("zeros", "border", "reflection"),
+            (True, False),
+        ):
+
+            args = (
+                torch.randn(n, c, h_in, w_in),  # input
+                torch.randn(n, h_out, w_out, 2),  # grid,
+                mode,
+                padding_mode,
+                align_corners,
+            )
+            self.run_test(Module(), args)
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
@@ -11122,6 +11150,8 @@ TestONNXRuntime_opset13 = MakeTestCase(13, keep_initializers_as_inputs=False)
 TestONNXRuntime_opset14 = MakeTestCase(14, keep_initializers_as_inputs=False)
 
 TestONNXRuntime_opset15 = MakeTestCase(15, keep_initializers_as_inputs=False)
+
+TestONNXRuntime_opset16 = MakeTestCase(16, keep_initializers_as_inputs=False)
 
 
 if __name__ == "__main__":
