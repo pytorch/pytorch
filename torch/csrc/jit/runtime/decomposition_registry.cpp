@@ -8,9 +8,7 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 
 #include <c10/util/Exception.h>
-#include <jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <memory>
 #include <unordered_map>
 
 namespace torch {
@@ -22,10 +20,6 @@ std::mutex lock;
 auto compilation_unit = std::make_shared<CompilationUnit>();
 std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     schema_to_decomposition;
-
-// Holds User-Registered Functions and keeps them alive
-std::unordered_map<const FunctionSchema*, std::unique_ptr<Function>>
-    user_registered_funcs;
 
 std::unordered_map<const FunctionSchema*, Function*> schema_to_function;
 
@@ -71,7 +65,7 @@ void DecomposeOp(Node* n) {
   if (!schema) {
     return;
   }
-  auto decomposition = GetDecomposition(n->schema());
+  auto decomposition = DecompositionGraphForSchema(n->schema());
   if (!decomposition) {
     return;
   }
@@ -104,7 +98,7 @@ void RunDecompositions(std::shared_ptr<Graph> g) {
   }
 }
 
-c10::optional<std::shared_ptr<Graph>> GetDecomposition(
+c10::optional<std::shared_ptr<Graph>> DecompositionGraphForSchema(
     const FunctionSchema& schema) {
   loadDecompositionFunctions();
   GRAPH_DEBUG("Trying to find schema: ", schema);
@@ -127,34 +121,8 @@ c10::optional<GraphFunction*> GetDecompositionFunction(
     return c10::nullopt;
   }
   auto& func = toGraphFunction(*cache_it->second);
-  // Simple Executor:
-  // To allow decomposition to run on tensor subclasses such as batched tensors,
-  // we set decompostion execution to use the simple executor so that
-  // optimizations that do not compose with arbitrary subclasses (such as
-  // fusion) do not run
   func._set_initial_executor_execution_mode(ExecutorExecutionMode::SIMPLE);
   return &func;
-}
-
-// Decomposition registers a Graph so that we can initialize a GraphFunction
-// that will run with Simple Executor
-void RegisterDecomposition(
-    const FunctionSchema& schema,
-    std::shared_ptr<Graph> g) {
-  loadDecompositionFunctions();
-  std::lock_guard<std::mutex> guard(lock);
-  std::unique_ptr<GraphFunction> new_func(new GraphFunction(
-      schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE));
-  user_registered_funcs.emplace(&schema, std::move(new_func));
-  schema_to_function[&schema] = user_registered_funcs[&schema].get();
-  schema_to_decomposition[&schema] = g;
-}
-
-Function* GetDecompositionExecutor(const char* schema_literal) {
-  auto& schema = getOperatorForLiteral(schema_literal)->schema();
-  auto maybe_func = GetDecompositionFunction(schema);
-  TORCH_INTERNAL_ASSERT(maybe_func);
-  return *maybe_func;
 }
 
 } // namespace jit
