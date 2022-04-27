@@ -63,8 +63,6 @@ nccl_supports_bf16 = (
 )
 
 mp_configs = [default_mp, mp_only_reduce, mp_only_param_and_buf, mp_no_mixed_precision]
-# mp_configs = [mp_only_reduce]
-#nccl_supports_bf16 = False
 if nccl_supports_bf16:
     mp_diff_buffer_and_reduce = MixedPrecision(
         param_dtype=torch.float16,

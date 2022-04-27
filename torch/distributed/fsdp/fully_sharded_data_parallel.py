@@ -881,18 +881,30 @@ class FullyShardedDataParallel(nn.Module):
             p.data = p.to(cpu_device)
 
     def _mixed_precision_enabled_for_params(self) -> bool:
+        """
+        Whether user explicitly enabled mixed precision for
+        parameters or not.
+        """
         return (
             self.mixed_precision is not None
             and self.mixed_precision.param_dtype is not None
         )
 
     def _mixed_precision_enabled_for_buffers(self) -> bool:
+        """
+        Whether user explicitly enabled mixed precision for
+        buffers or not.
+        """
         return (
             self.mixed_precision is not None
             and self.mixed_precision.buffer_dtype is not None
         )
 
     def _mixed_precision_enabled_for_reduce(self) -> bool:
+        """
+        Whether user explicitly enabled mixed precision for
+        gradient reduction or not.
+        """
         return (
             self.mixed_precision is not None
             and self.mixed_precision.reduce_dtype is not None
@@ -2322,10 +2334,6 @@ class FullyShardedDataParallel(nn.Module):
             orig_grad_data = param.grad.data
             if (
                 self._mixed_precision_enabled_for_reduce()
-                # and (
-                #     not self._mixed_precision_enabled_for_params()
-                #     or self.mixed_precision.param_dtype != self.mixed_precision.reduce_dtype
-                # )
             ):
                 # Cast gradient to precision in which it should be communicated.
                 # TODO: Make this a communication hook when communication hooks
@@ -2411,6 +2419,11 @@ class FullyShardedDataParallel(nn.Module):
                     self.world_size == 1
                 ), "Currently the only way for _is_sharded to be False is \
                     world_size == 1"
+                # Note that we need to cast grads back to the full precision if
+                # 1) parameters were in reduced precision during fwd, as grads
+                # would thus be in this reduced precision, or
+                # 2) parameters did not have precision reduced, but grads
+                # had reduced precision for communication.
                 if (
                     self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
                 ):
