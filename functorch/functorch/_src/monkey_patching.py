@@ -17,7 +17,7 @@ def prep_value(text, indent=4):
 
 
 @functools.wraps(_old_str)
-def _functorch_str(tensor):
+def _functorch_str(tensor, *, tensor_contents=None):
     level = _C.maybe_get_level(tensor)
     if level == -1:
         return _old_str(tensor)
