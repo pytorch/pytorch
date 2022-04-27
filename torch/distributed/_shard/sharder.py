@@ -22,6 +22,6 @@ class Sharder(abc.ABC):
                 The module to apply sharding to.
         Returns:
             A :class:`torch.nn.Module` object that represents a module
-            that's already been sharded (i.e. contains ShardedTensor parameters).
+            that's already been sharded.
         """
         pass
