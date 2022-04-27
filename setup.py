@@ -1079,6 +1079,7 @@ if __name__ == '__main__':
                 'utils/model_dump/code.js',
                 'utils/model_dump/*.mjs',
             ],
+            'torchgen': [],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
             ],
