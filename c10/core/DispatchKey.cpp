@@ -216,6 +216,12 @@ const char* toString(DispatchKey t) {
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";
 
+    // Out-of-core torchdistX dispatch keys
+    case DispatchKey::Fake:
+      return "Fake";
+    case DispatchKey::DeferredInit:
+      return "DeferredInit";
+
     case DispatchKey::Dense:
       return "Dense";
     case DispatchKey::Quantized:
@@ -267,6 +273,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
       {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
+      {"Fake", c10::DispatchKey::Fake},
       {"Named", c10::DispatchKey::Named},
       {"Conjugate", c10::DispatchKey::Conjugate},
       {"Negative", c10::DispatchKey::Negative},
@@ -285,6 +292,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
       {"Batched", c10::DispatchKey::Batched},
       {"VmapMode", c10::DispatchKey::VmapMode},
+      {"DeferredInit", c10::DispatchKey::DeferredInit},
       {"FuncTorchGradWrapper", c10::DispatchKey::FuncTorchGradWrapper},
       {"FuncTorchDynamicLayerFrontMode",
        c10::DispatchKey::FuncTorchDynamicLayerFrontMode},
