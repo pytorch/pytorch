@@ -2,12 +2,12 @@
 
 ## Introduction
 
-Lazy Tensor is a brand new tracing system in PyTorch. It includes a safety guarantee not provided by other tracing systems (jit.trace) in that it retraces and recompiles if properties about the input change, or uses a cached computation otherwise. It's easier to use than jit.trace and **much** easier to use than jit.script! Lazy Tensor traces both forward and backward passes and removes a large number of Python features present in jit scripted and traced graphs
+Lazy Tensor is a brand-new tracing system in PyTorch. It includes a safety guarantee not provided by other tracing systems (jit.trace) in that it retraces and recompiles if properties about the input change or uses a cached computation otherwise. It's easier to use than jit.trace and **much** easier to use than jit.script! Lazy Tensor traces both forward and backward passes and removes many Python features present in jit scripted and traced graphs
 that are difficult for hardware vendors to support.
 
-Let's kick off our introduction to Lazy Tensor with an example that illustrates the safety guarantee, as it's one of the biggest usability issues of jit.trace. Suppose, we'd like to jit trace the following function.
+Let's kick off our introduction to Lazy Tensor with an example that illustrates the safety guarantee, as it's one of the biggest usability issues of jit.trace. Suppose we'd like to jit trace the following function.
 
-```
+```python
 import torch
 
 def add_two_maybe(t: torch.Tensor, maybe: torch.Tensor):
@@ -19,22 +19,29 @@ def add_two_maybe(t: torch.Tensor, maybe: torch.Tensor):
 You may have noticed that `add_two_maybe` contains an if statement that depends on `maybe` input.
 Let's jit trace the function with the following inputs.
 
-```
+```python
 t = torch.ones(1)
 maybe_false = torch.BoolTensor([0])
 good_inputs = (t, maybe_false)
 jit = torch.jit.trace(add_two_maybe, good_inputs)
 # let's check that the results match with eager
-assert(jit(*good_inputs), add_two_maybe(*good_inputs))
+assert jit(*good_inputs) == add_two_maybe(*good_inputs)
 ```
 
-So far, so good! We successfuly traced `add_two_maybe` into `jit` and running it gives us the same result as the original function.
+So far, so good! We successfully traced `add_two_maybe` into `jit` and running it gives us the same result as the original function.
 
 Our troubles start if we change the second input and re-run the traced function.
 
-```
+```python
 maybe_true = torch.BoolTensor([1])
-assert(jit(t, maybe_true), add_two_maybe(t, maybe))
+assert jit(t, maybe_true) == add_two_maybe(t, maybe_true)
+```
+
+```shell
+Traceback (most recent call last):
+  File "/home/villedepommes/github/pytorch4/test/test_tutorial.py", line 27, in <module>
+    assert jit(t, maybe_true) == add_two_maybe(t, maybe_true)
+AssertionError
 ```
 
 Uh oh?! What really happened here? Let's print out the graph for `jit`:
@@ -60,20 +67,20 @@ The first step is to move the inputs to the Lazy device. The Lazy device isn't a
 
 The lazy device is however very special: it makes PyTorch "remember" every aten operation (into a graph) the user calls rather than eagerly executing it. It's lazy that way ;) get it?
 
-So, the lazy device is API that users should use to trace their models with Lazy Tensor. It's also a PyTorch device which is a very convenient way for implementing tracing based on PyTorch dispatcher.
+So, the lazy device is an API that users should use to trace their models with Lazy Tensor. It's also a PyTorch device which is a very convenient way for implementing tracing based on PyTorch dispatcher.
 
 First of all, we need a little bit of setup. The Lazy Tensor needs a backend to actually run traced graphs. We implemented a TorchScript-based backend to give our users end-to-end experience running their models with Lazy Tensor. It also serves as an example for hardware vendors looking to integrate with Lazy Tensor. 
 
 
-```
+```python
 import torch._lazy
 import torch._lazy.ts_backend
 torch._lazy.ts_backend.init()
 ```
 
-Now, we can our example,
+Now, we can run our example,
 
-```
+```python
 dev = "lazy"
 t_lazy = torch.ones(1).to(dev)
 maybe_false_lazy = torch.BoolTensor([0]).to(dev)
@@ -82,30 +89,28 @@ lazy_result = add_two_maybe(t_lazy, maybe_false_lazy)
 
 This is pretty cool! Eventually, however, we would still like to execute our computation and access the result, wouldn't we? 
 
-There are a number of ways to do it. Typically, PyTorch transparently triggers the execution when the user tries to access the result e.g. print a tensor out, move the tensor to a non-lazy device, etc.
+There are a few ways to do it. Typically, PyTorch transparently triggers the execution when the user tries to access the result e.g., print a tensor out, move the tensor to a non-lazy device, etc.
 
 Let's give it a try:
 
-```
+```python
 lazy_result = add_two_maybe(t_lazy, maybe_false_lazy)
 print(lazy_result)
-assert(lazy_result.cpu(), add_two_maybe(t, maybe_false))
+assert lazy_result.cpu() == add_two_maybe(t, maybe_false)
 ```
 
 This works as expected! Let's try the case jit trace couldn't handle.
 
-```
+```python
 maybe_true_lazy = torch.BoolTensor([1]).to(dev)
 lazy_result = add_two_maybe(t_lazy, maybe_true_lazy)
-assert(lazy_result.cpu(), add_two_maybe(t, maybe_true))
+assert lazy_result.cpu() == add_two_maybe(t, maybe_true)
 ```
 
-Woohooo! This works too!
+Woo-hoo! This works too!
 Unfortunately, this flexibility comes with a few downsides. Remember that backends need to translate aten ops into some much lower-level operations that an accelerator understands. The translation process may be time-consuming. Although, usually, it's well worth it! 
 
-TODO: Spiel about awesomeness of whole graph compilations 
-
-However, if you model is wildly dynamic and contains loops that always run different number of times or if statements one after another that explode into different traces every time you run your model, the backend will spend non-trivial amount of time compiling each trace even though the latter is used only for a few times. 
+However, if a non-trivial model is wildly dynamic and contains loops that always run different number of times or if statements one after another that explode into different traces every time you run the model, the backend will spend non-trivial amount of time compiling each trace even though the latter is used only for a few times. 
 
 Alright, at this point, you should have learned the main ideas behind Lazy Tensor, most common usage patterns and APIs.
 Also, you are hopefully as inspired and motivated about Lazy Tensor as I am.
@@ -115,6 +120,8 @@ Let's see now how we can run a full training loop with an optimizer and backward
 ## MNIST MLP
 
 We will adapt the following example running MNIST_MLP from [pytorch/examples](https://github.com/pytorch/examples/blob/main/mnist/main.py)
+
+Note, you can access the full version of the script [here](https://github.com/pytorch/pytorch/blob/master/torch/csrc/lazy/test_mnist.py)
 
 First, we need to install one single dependency, `torchvision`
 
@@ -162,31 +169,45 @@ We are going to run the training loop for 14 epochs which is what the original M
 The rest of the code is pretty standard boilerplate.
 
 ```python
-import os
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 import torchvision
+import os
+from torchvision import datasets, transforms
+from torch.optim.lr_scheduler import StepLR
+import torch._lazy
+import torch._lazy.ts_backend
+import torch._lazy.metrics
+torch._lazy.ts_backend.init()
 
-if __name__='__main__':
+if __name__ =='__main__':
     bsz = 64
     device = 'lazy'
     epochs = 14
     log_interval = 10
-    train_kwargs = {'batch_size': args.batch_size}
-    test_kwargs = {'batch_size': args.test_batch_size}
+    lr = 1
+    gamma = 0.7
+    train_kwargs = {'batch_size': bsz}
     # if we want to use CUDA
     if "LTC_TS_CUDA" in os.environ:
-        train_kwargs = {'num_workers': 1,
+        cuda_kwargs = {'num_workers': 1,
                        'pin_memory': True,
                        'shuffle': True,
                        'batch_size': bsz}
     train_kwargs.update(cuda_kwargs)
 
+    transform=transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.1307,), (0.3081,))
+        ])
     dataset1 = datasets.MNIST('./data', train=True, download=True,
                         transform=transform)
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     model = Net().to(device)
-    optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
-    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
+    optimizer = optim.Adadelta(model.parameters(), lr=lr)
+    scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
     for epoch in range(1, epochs + 1):
         train(log_interval, model, device, train_loader, optimizer, epoch)
         scheduler.step()
@@ -207,12 +228,13 @@ def train(log_interval, model, device, train_loader, optimizer, epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         output = model(data)
         loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
         torch._lazy.mark_step()
+
         if batch_idx % log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
@@ -220,9 +242,23 @@ def train(log_interval, model, device, train_loader, optimizer, epoch):
 ```
 
 
-TODO: outputs
+After the script downloads the dataset, the model will be trained on the Lazy device as
+evidenced by the decreasing loss.
 
-```
+```shell
+Train Epoch: 1 [0/60000 (0%)]   Loss: 2.343924
+Train Epoch: 1 [640/60000 (1%)] Loss: 1.760821
+Train Epoch: 1 [1280/60000 (2%)]        Loss: 0.802798
+Train Epoch: 1 [1920/60000 (3%)]        Loss: 0.856164
+Train Epoch: 1 [2560/60000 (4%)]        Loss: 0.568396
+Train Epoch: 1 [3200/60000 (5%)]        Loss: 0.399044
+Train Epoch: 1 [3840/60000 (6%)]        Loss: 0.457996
+Train Epoch: 1 [4480/60000 (7%)]        Loss: 0.285104
+Train Epoch: 1 [5120/60000 (9%)]        Loss: 0.193083
+Train Epoch: 1 [5760/60000 (10%)]       Loss: 0.486165
+Train Epoch: 1 [6400/60000 (11%)]       Loss: 0.163996
+Train Epoch: 1 [7040/60000 (12%)]       Loss: 0.200323
+
 ```
 
 Let's briefly mention a few more APIs before we wrap this up. Unfortunately, LT is still very early in its development which means it doesn't implement every single PyTorch op out of there.
@@ -237,7 +273,7 @@ print(torch._lazy.metrics.counter_names())
 
 If you are seeing any ops with the prefix: `aten::`
 
-*Sometimes* you could replace such ops with similar that LT does support. More often than not, we will have just live with it until LT matures.
+*Sometimes* you could replace such ops with similar that LT does support. More often than not, we will have to just live with it until LT matures.
 
 Another handy API is `torch._lazy.wait_device_ops()`. Remember, we said that `mark_step()` breaks up the current trace and kicks off a computation asynchronously? If downstream there are no blocking operations such as `print`, `item()`, `to`, LT will happily continue tracing.
 If you would like to time how much exactly time computation and tracing took for some model without including device transfers or printing, you could stick `torch._lazy.wait_device_ops()` and `time.perf_counter()` right after it. Don't forget another `time.perf_counter()` before the trace start!
