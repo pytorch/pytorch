@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -60,18 +62,29 @@ class TestFSDPMisc(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fsdp_diff_param_shape(self):
         # create nccl group with small timeout
+        os.environ["NCCL_BLOCKING_WAIT"] = "1"
+        nccl_pg = dist.new_group(backend="nccl", timeout=timedelta(seconds=10))
         class DiffShapeParams(nn.Module):
             def __init__(self, rank):
                 # non-zero rank have diff embedding shape.
                 super().__init__()
-                dim = 10 if rank == 0 else 20
+                dim = 10 if rank != 0 else 20
                 self.e = nn.Embedding(10, dim)
 
         m = DiffShapeParams(self.rank)
-        with self.assertRaisesRegex(RuntimeError, "appears not to match sizes"):
-            FSDP(m)
-
-        dist.barrier()
+        ctx = (
+            self.assertRaisesRegex(RuntimeError, "appears not to match sizes")
+            if self.rank != 0 else
+            self.assertRaisesRegex(RuntimeError, "Caught collective operation timeout")
+        )
+        # TODO: param shape verification check needs to be enhanced as it currently does
+        # not properly report the error on rank 0, and instead relies on blocking_wait
+        # or async_error_handling to take the process on rank 0 down.
+        with ctx:
+            FSDP(m, nccl_pg)
+            # Should only be run by rank 0, and blocking_wait catches and reports
+            # exception.
+            dist.barrier(nccl_pg)
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_same_model_across_ranks(self):

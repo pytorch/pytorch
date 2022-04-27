@@ -680,7 +680,7 @@ class FullyShardedDataParallel(nn.Module):
             process_group=self.process_group,
             # Same bucket size as used in DDP.
             broadcast_bucket_size=int(250 * 1024 * 1024),
-            rank=0,
+            src=0,
             params_and_buffers_to_ignore=ignored_params,
         )
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
