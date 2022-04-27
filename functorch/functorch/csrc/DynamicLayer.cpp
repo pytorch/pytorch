@@ -657,122 +657,143 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   auto cur_level = getDynamicLayerStack().back().layerId();
   auto cur_key = getDynamicLayerStack().back().key();
 
-  optional<bool> prev_grad_mode = getDynamicLayerStack().back().prevGradMode();
-  optional<bool> prev_fwd_grad_mode = getDynamicLayerStack().back().prevFwdGradMode();
-  if (cur_key == TransformType::Grad) {
-    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
-  }
-  if (cur_key == TransformType::Jvp) {
-    TORCH_INTERNAL_ASSERT(prev_fwd_grad_mode.has_value());
-  }
+  switch (cur_key) {
+    case TransformType::Grad:
+    case TransformType::Jvp:
+      {
+        optional<bool> prev_grad_mode = getDynamicLayerStack().back().prevGradMode();
+        optional<bool> prev_fwd_grad_mode = getDynamicLayerStack().back().prevFwdGradMode();
+        if (cur_key == TransformType::Grad) {
+          TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
+        }
+        if (cur_key == TransformType::Jvp) {
+          TORCH_INTERNAL_ASSERT(prev_fwd_grad_mode.has_value());
+        }
+        auto unwrap = [&](const Tensor& tensor) {
+          if (!tensor.defined()) {
+            return tensor;
+          }
+          auto* maybe_tensor_wrapper = maybeGetTensorWrapper(tensor);
+          if (!maybe_tensor_wrapper) {
+            return tensor;
+          }
+          auto tensor_wrapper_level = maybe_tensor_wrapper->level().value();
+          TORCH_INTERNAL_ASSERT(tensor_wrapper_level <= cur_level);
+          if (tensor_wrapper_level == cur_level) {
+            return maybe_tensor_wrapper->value();
+          }
+          return tensor;
+        };
+        auto wrap = [&](const Tensor& tensor) {
+          if (!tensor.defined()) {
+            return tensor;
+          }
+          // if (c10::show_dispatch_trace_enabled()) {
+          //   std::cout << "wrap " << cur_level << std::endl;
+          // }
+          return makeTensorWrapper(tensor, cur_level);
+        };
 
-  auto unwrap = [&](const Tensor& tensor) {
-    if (!tensor.defined()) {
-      return tensor;
-    }
-    auto* maybe_tensor_wrapper = maybeGetTensorWrapper(tensor);
-    if (!maybe_tensor_wrapper) {
-      return tensor;
-    }
-    auto tensor_wrapper_level = maybe_tensor_wrapper->level().value();
-    TORCH_INTERNAL_ASSERT(tensor_wrapper_level <= cur_level);
-    if (tensor_wrapper_level == cur_level) {
-      return maybe_tensor_wrapper->value();
-    }
-    return tensor;
-  };
-  auto wrap = [&](const Tensor& tensor) {
-    if (!tensor.defined()) {
-      return tensor;
-    }
-    // if (c10::show_dispatch_trace_enabled()) {
-    //   std::cout << "wrap " << cur_level << std::endl;
-    // }
-    return makeTensorWrapper(tensor, cur_level);
-  };
+        // TODO: we only need to do the following (marked with !) on in-place functions
+        // that modify sizes or strides. There aren't many of them.
+        // If autograd dispatch key:
+        // 1. (!) Put a copy of all of the args onto the stack
+        // 2. Unwrap all the args in the copy set
+        // 3. Call the operator
+        // 4. Wrap the output
+        // 5. (!) refreshMetadata for all the args in the original set
+        // 6. (!) Pop those args off.
 
-  // TODO: we only need to do the following (marked with !) on in-place functions
-  // that modify sizes or strides. There aren't many of them.
-  // If autograd dispatch key:
-  // 1. (!) Put a copy of all of the args onto the stack
-  // 2. Unwrap all the args in the copy set
-  // 3. Call the operator
-  // 4. Wrap the output
-  // 5. (!) refreshMetadata for all the args in the original set
-  // 6. (!) Pop those args off.
+        // Step 1 & 2
+        auto args_size = op.schema().arguments().size();
+        // Step 1
+        auto front = stack->size() - args_size;
+        for (const auto arg_idx : c10::irange(0, args_size)) {
+          stack->push_back((*stack)[front + arg_idx]);
+        }
+        // Step 2
+        foreachTensorInplace(*stack, stack->size() - args_size, stack->size(), unwrap);
 
-  // Step 1 & 2
-  auto args_size = op.schema().arguments().size();
-  if (cur_key == TransformType::Grad || cur_key == TransformType::Jvp) {
-    auto args_size = op.schema().arguments().size();
-    // Step 1
-    auto front = stack->size() - args_size;
-    for (const auto arg_idx : c10::irange(0, args_size)) {
-      stack->push_back((*stack)[front + arg_idx]);
-    }
-    // Step 2
-    foreachTensorInplace(*stack, stack->size() - args_size, stack->size(), unwrap);
-  } else if (cur_key == TransformType::Functionalize) {
-    // For now, we don't support nested functionalization calls.
-    // This check just enforces that - after the functionalize kernel runs
-    // and we hit the BackModeFallback, we'll have unwrapped our FunctionalTensors
-    // so we can check that the unwrapped thing is not another (nested) FunctionalTensor.
-    sanityCheckNotFunctional(op, stack, args_size);
-  }
+        auto restore_guard = restoreLocalDispatchKeySetRAII(getDynamicLayerStack().back());
+        WithoutTop guard;
 
-  auto restore_guard = restoreLocalDispatchKeySetRAII(getDynamicLayerStack().back());
+        // See NOTE [grad and vjp interaction with no_grad]
+        optional<c10::AutoGradMode> grad_guard;
+        if (cur_key == TransformType::Grad && prev_grad_mode.has_value() && *prev_grad_mode == false) {
+          grad_guard.emplace(*prev_grad_mode);
+        }
+        optional<c10::AutoFwGradMode> fw_grad_guard;
+        if (cur_key == TransformType::Jvp &&
+            prev_fwd_grad_mode.has_value() && prev_fwd_grad_mode.value() == false) {
+          fw_grad_guard.emplace(*prev_fwd_grad_mode);
+        }
 
-  // pop the top layer. Put it back on dtor.
-  WithoutTop guard;
+        // Re-dispatch
+        if (dynamicLayerStackAccessor().size() == 0) {
+          sanityCheckStack(op, stack);
+        }
+        op.callBoxed(stack);
 
-#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
-  if (c10::show_dispatch_trace_enabled()) {
-    dump_local_tls();
-  }
-#endif
+        // Step 4, 5, 6
+        auto ret_size = op.schema().returns().size();
+        // Step 4
+        foreachTensorInplace(*stack, stack->size() - ret_size, stack->size(), wrap);
 
-  // See NOTE [grad and vjp interaction with no_grad]
-  optional<c10::AutoGradMode> grad_guard;
-  if (cur_key == TransformType::Grad && prev_grad_mode.has_value() && *prev_grad_mode == false) {
-    grad_guard.emplace(*prev_grad_mode);
-  }
-  optional<c10::AutoFwGradMode> fw_grad_guard;
-  if (cur_key == TransformType::Jvp &&
-      prev_fwd_grad_mode.has_value() && prev_fwd_grad_mode.value() == false) {
-    fw_grad_guard.emplace(*prev_fwd_grad_mode);
-  }
+        // Step 5
+        auto args_front = stack->size() - args_size - ret_size;
+        for (const auto arg_idx : c10::irange(0, args_size)) {
+          auto& ivalue = (*stack)[args_front + arg_idx];
+          if (!ivalue.isTensor()) {
+            continue;
+          }
+          auto maybe_tensor_wrapper = maybeGetTensorWrapper(ivalue.toTensor());
+          if (!maybe_tensor_wrapper) {
+            continue;
+          }
+          maybe_tensor_wrapper->refreshMetadata();
+        }
 
-  // Re-dispatch
-  if (dynamicLayerStackAccessor().size() == 0) {
-    sanityCheckStack(op, stack);
-  }
-  op.callBoxed(stack);
-
-  // Step 4, 5, 6
-  auto ret_size = op.schema().returns().size();
-  if (cur_key == TransformType::Grad || cur_key == TransformType::Jvp) {
-    // Step 4
-    foreachTensorInplace(*stack, stack->size() - ret_size, stack->size(), wrap);
-
-    // Step 5
-    auto args_size = op.schema().arguments().size();
-    auto args_front = stack->size() - args_size - ret_size;
-    for (const auto arg_idx : c10::irange(0, args_size)) {
-      auto& ivalue = (*stack)[args_front + arg_idx];
-      if (!ivalue.isTensor()) {
-        continue;
+        // Step 6
+        stack->erase(stack->end() - (args_size + ret_size), stack->end() - ret_size);
+        break;
       }
-      auto maybe_tensor_wrapper = maybeGetTensorWrapper(ivalue.toTensor());
-      if (!maybe_tensor_wrapper) {
-        continue;
-      }
-      maybe_tensor_wrapper->refreshMetadata();
-    }
+    case TransformType::Vmap:
+      {
+        auto restore_guard = restoreLocalDispatchKeySetRAII(getDynamicLayerStack().back());
+        WithoutTop guard;
 
-    // Step 6
-    stack->erase(stack->end() - (args_size + ret_size), stack->end() - ret_size);
-  } else if (cur_key == TransformType::Functionalize) {
-    sanityCheckNotFunctional(op, stack, ret_size);
+        // Re-dispatch
+        if (dynamicLayerStackAccessor().size() == 0) {
+          sanityCheckStack(op, stack);
+        }
+        op.callBoxed(stack);
+
+        break;
+      }
+    case TransformType::Functionalize:
+      {
+        // For now, we don't support nested functionalization calls.
+        // This check just enforces that - after the functionalize kernel runs
+        // and we hit the BackModeFallback, we'll have unwrapped our FunctionalTensors
+        // so we can check that the unwrapped thing is not another (nested) FunctionalTensor.
+        auto args_size = op.schema().arguments().size();
+        sanityCheckNotFunctional(op, stack, args_size);
+
+        auto restore_guard = restoreLocalDispatchKeySetRAII(getDynamicLayerStack().back());
+        WithoutTop guard;
+
+        // Re-dispatch
+        if (dynamicLayerStackAccessor().size() == 0) {
+          sanityCheckStack(op, stack);
+        }
+        op.callBoxed(stack);
+
+        auto ret_size = op.schema().returns().size();
+        sanityCheckNotFunctional(op, stack, ret_size);
+        break;
+      }
+    default:
+      TORCH_INTERNAL_ASSERT(false);
   }
 }
 
