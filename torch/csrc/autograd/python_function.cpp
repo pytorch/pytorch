@@ -603,20 +603,20 @@ static void _append_subgraph(
     value_map[node->inputs().at(i)] = subgraph_input;
   }
   // Find node position in graph, all subsequent nodes after are added to subgraph
-  auto node_posn = std::find(graph->nodes().begin(), graph->nodes().end(), node);
+  auto it = std::find(graph->nodes().begin(), graph->nodes().end(), node);
   std::vector<Value*> tuple_outputs;
   // Skip TupleUnpack node if outputs are tuple
   if (!unpack_output) {
-    node_posn++;
+    it++;
   }
-  for (node_posn++; node_posn != graph->nodes().end(); ++node_posn) {
-    torch::jit::Node* clonenode = *node_posn;
-    auto* new_node = subgraph->insertNode(subgraph->createClone(clonenode, value_map_func));
-    auto trace_it = std::find(subgraph_trace_outputs.begin(), subgraph_trace_outputs.end(), clonenode);
-    for (size_t i = 0; i < clonenode->outputs().size(); ++i) {
-      value_map[clonenode->outputs()[i]] = new_node->outputs()[i];
+  for (it++; it != graph->nodes().end(); ++it) {
+    torch::jit::Node* node = *it;
+    auto* clone_node = subgraph->insertNode(subgraph->createClone(node, value_map_func));
+    auto trace_it = std::find(subgraph_trace_outputs.begin(), subgraph_trace_outputs.end(), node);
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      value_map[node->outputs()[i]] = clone_node->outputs()[i];
       if (trace_it != subgraph_trace_outputs.end()) {
-        subgraph->registerOutput(new_node->outputs()[i]);
+        subgraph->registerOutput(clone_node->outputs()[i]);
       }
     }
   }
@@ -700,11 +700,7 @@ static void _trace_post_record(
       }
     }
   }
-  if (!unpack_output) {
-    _append_subgraph(old_node, graph, subgraph_trace_outputs, unpack_output);
-  } else {
-    _append_subgraph(node, graph, subgraph_trace_outputs, unpack_output);
-  }
+  _append_subgraph(old_node, graph, subgraph_trace_outputs, unpack_output);
 
   // If TupleUnpack operator is created, we copy its output type back
   // to the original tuple type.

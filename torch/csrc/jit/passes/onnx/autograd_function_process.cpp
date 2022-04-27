@@ -11,6 +11,9 @@ void inlineAutogradFunction(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* node = *it++;
+    for (auto block : node->blocks()) {
+      inlineAutogradFunction(block);
+    }
     if (node->kind() == prim::PythonOp) {
       torch::jit::SubgraphUtils::unmergeSubgraph(node);
     }

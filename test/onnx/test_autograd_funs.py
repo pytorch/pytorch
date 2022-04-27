@@ -49,8 +49,6 @@ class _BaseTestCase(TestCase):
             model.train()
         elif training == torch.onnx.TrainingMode.EVAL:
             model.eval()
-        # Need disable onnx_shape_inference for this test because it puts const node to initializers.
-        _set_onnx_shape_inference(False)
         utils._validate_dynamic_axes(dynamic_axes, model, None, None)
         graph, params_dict, torch_out = utils._model_to_graph(model, input,
                                                               do_constant_folding=do_constant_folding,
@@ -60,7 +58,6 @@ class _BaseTestCase(TestCase):
                                                               input_names=input_names,
                                                               dynamic_axes=dynamic_axes,
                                                               inline_autograd=inline_autograd)
-        _set_onnx_shape_inference(True)
         return graph, params_dict, torch_out
 
 class TestAutogradFuns_opset9(_BaseTestCase):
