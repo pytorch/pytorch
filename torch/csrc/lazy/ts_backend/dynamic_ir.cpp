@@ -11,6 +11,19 @@ std::string DimensionNode::ToString() const {
   return "DimensionNode";
 }
 
+  TSOpVector SizeNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+                          TSLoweringContext* loctx) const {
+  std::vector<torch::jit::NamedValue> arguments;
+  std::vector<torch::jit::NamedValue> kwarguments;
+  arguments.reserve(2);
+  auto index = loctx->graph()->insertConstant(static_cast<int64_t>(this->dim_));
+  arguments.emplace_back(loctx->GetOutputOp(operand(0)));
+  arguments.emplace_back(index);
+  torch::lazy::TSOpVector size_out = torch::lazy::LowerTSBuiltin(function, op().op, arguments, kwarguments);
+  CHECK_EQ(size_out.size(), 1);
+  return size_out;
+}
+
 SizeNode::SizeNode(Value input, size_t dim):
     DimensionNode(OpKind{c10::Symbol::fromQualString("aten::size")}, {input}, MHash(dim)),
     dim_(dim) {};
