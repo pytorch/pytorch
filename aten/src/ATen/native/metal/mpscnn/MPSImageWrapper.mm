@@ -37,7 +37,12 @@ using namespace at::native::metal;
       _imageWrapper->release();
     }
     // throw exceptions if we failed to flush the command buffer
-    TORCH_CHECK(error);
+    TORCH_CHECK(false,
+        "Command buffer execution failed!",
+        " Localized_description: ", error.localizedDescription.UTF8String,
+        " Domain: ", error.domain.UTF8String,
+        " Code: ", error.code,
+        " User Info: ", error.userInfo.description.UTF8String);
   }
 }
 
