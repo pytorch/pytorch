@@ -44,6 +44,14 @@ constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
+// If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
+// caching allocator safety for tensors used on both user-facing and
+// internal comm streams
+// Instead, it stashes live references to those tensors until after
+// user-facing streams are synced with comm streams.
+// See non_outputs_stashed_for_allocator_safety_ below.
+constexpr const char* NCCL_AVOID_RECORD_STREAMS = "NCCL_AVOID_RECORD_STREAMS";
+
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
 // All functions of the class are expected to be called in the same order
@@ -165,6 +173,9 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     // Clone of blockingWait_ from ProcessGroupNCCL.
     bool blockingWait_ = false;
 
+    // Clone of avoidRecordStreams_ from ProcessGroupNCCL.
+    bool avoidRecordStreams_ = false;
+
     // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_;
 
@@ -212,6 +223,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     // give a more descriptive message when representing the Work as a string.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
+    // NCCL_AVOID_RECORD_STREAMS implementation helper.
     // Stores references to participating non-output tensors (ie inputs,
     // flattened intermediates).
     // We'll clear this list in synchronizeStreams, just after user-facing
@@ -625,6 +637,9 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
+
+  // Whether or not NCCL_AVOID_RECORD_STREAMS was set
+  bool avoidRecordStreams_ = false;
 
   // Set of communicators that this process group has aborted and their
   // ncclUniqueId has been written to the store. We don't need a lock
