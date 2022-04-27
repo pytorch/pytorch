@@ -230,7 +230,7 @@ def is_py_special_function(f: NativeFunction) -> bool:
 
 
 def gen(
-    out: str, native_yaml_path: str, tags_yaml_path: str   , deprecated_yaml_path: str, template_path: str
+    out: str, native_yaml_path: str, tags_yaml_path: str, deprecated_yaml_path: str, template_path: str
 ) -> None:
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     native_functions = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions

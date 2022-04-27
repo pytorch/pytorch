@@ -1981,8 +1981,8 @@ class NativeFunctionsViewGroup:
             assert self.view.func.signature() == self.view_copy.func.signature(
                 strip_view_copy_name=True
             )
-            assert self.view_copy.tag == Tag.view_copy, (
-                f"{str(self.view_copy.func.name)} appears to be a view_copy operator. The codegen expects"
+            assert 'view_copy' in self.view_copy.tags, (
+                f"{str(self.view_copy.func.name), str(self.view.tags)} appears to be a view_copy operator. The codegen expects"
                 " view_copy operators to be annotated with the 'view_copy' tag in native_functions.yaml."
                 " See Note [view_copy NativeFunction] for details."
             )
@@ -2023,7 +2023,7 @@ def gets_generated_view_copy(f: NativeFunction) -> bool:
     if f.has_composite_implicit_autograd_kernel:
         return False
     # We also don't need to generate copy variants for inplace views.
-    if f.tag == Tag.inplace_view:
+    if 'inplace_view' in f.tags:
         return False
     return True
 

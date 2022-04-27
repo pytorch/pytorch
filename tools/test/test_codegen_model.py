@@ -26,7 +26,7 @@ class TestCodegenModel(expecttest.TestCase):
     def assertUfuncErrorInline(self, yaml_str: str, expect: str) -> None:
         # parse a single structured group out of the yaml to g
         es = yaml.load(yaml_str, Loader=LineLoader)
-        parsed_yaml = parse_native_yaml_struct(es)
+        parsed_yaml = parse_native_yaml_struct(es, set())
         native_functions, backend_indices = (
             parsed_yaml.native_functions,
             parsed_yaml.backend_indices,

@@ -33,6 +33,7 @@ jobs:
           python3 -m tools.generate_torch_version --is_debug=false
           python3 -m tools.pyi.gen_pyi \
             --native-functions-path aten/src/ATen/native/native_functions.yaml \
+            --tags-path aten/src/ATen/native/tags.yaml \
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
       - name: Run lintrunner on all files
