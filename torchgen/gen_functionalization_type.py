@@ -92,7 +92,10 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
 
 
 def modifies_arguments(f: NativeFunction) -> bool:
-    return any(a.annotation is not None and a.annotation.is_write for a in f.func.arguments.flat_all)
+    return any(
+        a.annotation is not None and a.annotation.is_write
+        for a in f.func.arguments.flat_all
+    )
 
 
 def wrapper_name(func: FunctionSchema) -> str:
@@ -203,6 +206,7 @@ but found an argument of type {str(args[0].type)} for operator: {str(func.name)}
         is_alias(a) for a in args[1:]
     ), """In the functionalization codegen, we expect the first argument of every view operator to alias the output.
 View operators with multiple aliasing inputs aren't supported yet. Found an operator that doesn't satisfy this constraint"""
+
 
 # Generates the Functionalization kernel for:
 # - ops that create aliases (e.g. transpose())
@@ -334,22 +338,32 @@ def emit_view_functionalization_body(
     }}
 """
 
+
 def maybe_create_output(f: NativeFunction, var_name: str) -> str:
     if len(f.func.returns) == 0:
-        return ''
+        return ""
     return_type = dispatcher.returns_type(f.func.returns).remove_const_ref().cpp_type()
-    return f'{return_type} {var_name} = '
+    return f"{return_type} {var_name} = "
 
-def wrap_propagate_mutations_and_return(f: NativeFunction, functional_op: Optional[NativeFunction], inner_out_name: str) -> str:
+
+def wrap_propagate_mutations_and_return(
+    f: NativeFunction, functional_op: Optional[NativeFunction], inner_out_name: str
+) -> str:
     if len(f.func.returns) > 1:
         # Some assertions: We don't want any functions with a return type of "-> (Tensor(a!), Tensor)",
         # because:
         # (1) It's more annoying to handle properly
         # (2) It's unnecessary - you can't method-chain on the first (mutated) output because it's part of a tuple.
         # Instead, we expect the (a!) argument to not be returned.
-        mutable_rets = [r for r in f.func.returns if r.annotation is not None and r.annotation.is_write]
+        mutable_rets = [
+            r
+            for r in f.func.returns
+            if r.annotation is not None and r.annotation.is_write
+        ]
         immutable_rets = [r for r in f.func.returns if r.annotation is None]
-        assert len(mutable_rets) == 0 or len(immutable_rets) == 0, f"""\
+        assert (
+            len(mutable_rets) == 0 or len(immutable_rets) == 0
+        ), f"""\
 Found a mutating operator ({f.func.name}) which returns multiple outputs, some of which alias the inputs and some that do not.
  Instead, only the non-aliased outputs should be a part of the return type (and the mutations will happen by side effect)."""
 
@@ -362,17 +376,26 @@ Found a mutating operator ({f.func.name}) which returns multiple outputs, some o
         if returns_are_aliased:
             # Returns are aliased, so we can just return the original inputs
             for r in f.func.returns:
-                aliased_name = next(a for a in f.func.arguments.flat_all
-                                    if a.annotation is not None and a.annotation == r.annotation)
+                aliased_name = next(
+                    a
+                    for a in f.func.arguments.flat_all
+                    if a.annotation is not None and a.annotation == r.annotation
+                )
                 return_names.append(aliased_name.name)
         else:
             # Need to wrap and return the fresh outputs
             return_is_tuple = len(f.func.returns) > 1
             for (i, r) in enumerate(f.func.returns):
-                inner_ret: str = f'std::get<{i}>({inner_out_name})' if return_is_tuple else inner_out_name
-                updates.append(f"""\
-      auto output_{i} = at::functionalization::impl::to_functional_tensor({inner_ret});""")
-                return_names.append(f'std::move(output_{i})')
+                inner_ret: str = (
+                    f"std::get<{i}>({inner_out_name})"
+                    if return_is_tuple
+                    else inner_out_name
+                )
+                updates.append(
+                    f"""\
+      auto output_{i} = at::functionalization::impl::to_functional_tensor({inner_ret});"""
+                )
+                return_names.append(f"output_{i}")
     else:
         # More assertions:
         # We have some native functions that mutate their inputs, and also return fresh outputs
@@ -384,9 +407,15 @@ Found a mutating operator ({f.func.name}) which returns multiple outputs, some o
         # The first tensor(s) in the output should all correspond to the newly updated inputs.
         # The last tensor(s) in the output should correspond to the original outputs of the function.
         assert len(functional_op.func.returns) != 0
-        mutable_inputs = [a for a in f.func.arguments.flat_all if a.annotation is not None and a.annotation.is_write]
+        mutable_inputs = [
+            a
+            for a in f.func.arguments.flat_all
+            if a.annotation is not None and a.annotation.is_write
+        ]
         immutable_rets = [r for r in f.func.returns if r.annotation is None]
-        assert len(mutable_inputs) + len(immutable_rets) == len(functional_op.func.returns), f"""\
+        assert len(mutable_inputs) + len(immutable_rets) == len(
+            functional_op.func.returns
+        ), f"""\
 Found a mutating operator ({f.func.name}) with {len(mutable_inputs)} mutable inputs
  and {len(immutable_rets)} non-aliased return arguments
  but found a corresponding out-of-place operator ({functional_op.func.name}) that had an incorrect number of return arguments.
@@ -394,10 +423,16 @@ Found a mutating operator ({f.func.name}) with {len(mutable_inputs)} mutable inp
 
         inner_return_is_tuple = len(functional_op.func.returns) > 1
         for (i, a) in enumerate(mutable_inputs):
-            inner_ret = f'std::get<{i}>({inner_out_name})' if inner_return_is_tuple else inner_out_name
-            updates.append(f"""\
+            inner_ret = (
+                f"std::get<{i}>({inner_out_name})"
+                if inner_return_is_tuple
+                else inner_out_name
+            )
+            updates.append(
+                f"""\
       at::functionalization::impl::replace_({a.name}, {inner_ret});
-      at::functionalization::impl::commit_update({a.name});""")
+      at::functionalization::impl::commit_update({a.name});"""
+            )
             if returns_are_aliased:
                 # If returns are aliased, we can directly return the inputs
                 return_names.append(a.name)
@@ -405,20 +440,26 @@ Found a mutating operator ({f.func.name}) with {len(mutable_inputs)} mutable inp
         # If returns are not aliased, we need to return (and wrap) the output from the inner call
         if not returns_are_aliased:
             for (i, r) in enumerate(immutable_rets):
-                inner_ret = f'std::get<{len(mutable_inputs) + i}>({inner_out_name})' if inner_return_is_tuple else inner_out_name
-                updates.append(f"""\
-      auto output_{i} = at::functionalization::impl::to_functional_tensor({inner_ret});""")
-                return_names.append(f'output_{i}')
+                inner_ret = (
+                    f"std::get<{len(mutable_inputs) + i}>({inner_out_name})"
+                    if inner_return_is_tuple
+                    else inner_out_name
+                )
+                updates.append(
+                    f"""\
+      auto output_{i} = at::functionalization::impl::to_functional_tensor({inner_ret});"""
+                )
+                return_names.append(f"output_{i}")
 
     if len(f.func.returns) == 0:
-        return_str = ''
+        return_str = ""
     elif len(f.func.returns) == 1:
         assert len(return_names) == 1
-        return_str = f'return {return_names[0]};'
+        return_str = f"return {return_names[0]};"
     else:
         ret_names_str = ", ".join(return_names)
         return_str = f"return {dispatcher.returns_type(f.func.returns).cpp_type()}({ret_names_str});"
-    updates_str = '\n'.join(updates)
+    updates_str = "\n".join(updates)
     return f"""\
 {updates_str}
 {return_str}"""
@@ -474,7 +515,9 @@ def emit_inplace_functionalization_body(
 
     if functional_op is None:
         # We can't functionalize this inplace op, since we don't know what the corresponding functional op is.
-        return_type = dispatcher.returns_type(f.func.returns).remove_const_ref().cpp_type()
+        return_type = (
+            dispatcher.returns_type(f.func.returns).remove_const_ref().cpp_type()
+        )
         warn_str = f"""Note: the functionalization pass encountered an operator ({str(f.func.name)}) that it could not \
 functionalize, because it couldn't find an out-of-place equivalent of the operator to call. \
 Instead, it's calling the inplace/view operator directly. \
@@ -494,7 +537,11 @@ If this causes problems in your program, consider upstreaming the out-of-place o
 """
     else:
         # call the out-of-place variant of the op
-        return_type = dispatcher.returns_type(functional_op.func.returns).remove_const_ref().cpp_type()
+        return_type = (
+            dispatcher.returns_type(functional_op.func.returns)
+            .remove_const_ref()
+            .cpp_type()
+        )
         functional_sig = DispatcherSignature.from_schema(functional_op.func)
         functional_exprs = [
             e.expr
@@ -602,7 +649,7 @@ def gen_functionalization_registration(
 
     if isinstance(g, NativeFunctionsViewGroup):
         # functionalization needs to register kernels for view + view_inplace ops
-        if str(g.view.func.name) == 'to.device':
+        if str(g.view.func.name) == "to.device":
             # See Note [Functionalization <> torch.Tensor constructor]
             return []
         view_str = [emit_registration_helper(g.view)]
