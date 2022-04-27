@@ -1,5 +1,28 @@
 def define_targets(rules):
     rules.cc_library(
+        name = "aten_core",
+        srcs = ["aten/src/ATen/core/SymIntArrayRef.cpp"],
+        hdrs = [
+            "aten/src/ATen/core/ATenGeneral.h",
+            "aten/src/ATen/core/blob.h",
+            "aten/src/ATen/core/DimVector.h",
+            "aten/src/ATen/core/grad_mode.h",
+            "aten/src/ATen/core/UndefinedTensorImpl.h",
+            "aten/src/ATen/core/SymIntArrayRef.h",
+            "aten/src/ATen/core/SymInt.h",
+        ],
+        deps = [
+            "//c10/macros",
+            "//c10/core:base",
+            "//c10/util:base",
+            "//c10/util:typeid",
+        ],
+        copts = ["-isystem aten/src/"],
+        tags = ["no-caffe2-headers"],
+        visibility = ["//:__subpackages__"],
+    )
+
+    rules.cc_library(
         name = "caffe2_serialize",
         srcs = [
             "caffe2/serialize/file_adapter.cc",
