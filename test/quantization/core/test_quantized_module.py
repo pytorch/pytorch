@@ -605,29 +605,25 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                     W_zero_point, Y_scale, Y_zero_point, use_bias, use_fused,
                     use_channelwise)
 
-    def _check_padding_error(self, module):
-        model = nn.Sequential(module, nn.ReLU())
-        model.eval()
-        model.qconfig = torch.ao.quantization.default_qconfig
-        p_model = torch.quantization.prepare(model)
-        with self.assertRaisesRegex(ValueError, 'padding must be a numerical value'):
-            q_model = torch.ao.quantization.convert(p_model)
-
+    def _check_padding_error(self, test_class):
+        for padding_string in ["valid", "same"]:
+            model = nn.Sequential(test_class(1, 128, 80, 1, padding=padding_string), nn.ReLU())
+            model.eval()
+            model.qconfig = torch.ao.quantization.default_qconfig
+            p_model = torch.quantization.prepare(model)
+            with self.assertRaisesRegex(ValueError, 'padding must be a numerical value'):
+                q_model = torch.ao.quantization.convert(p_model)
 
     @override_qengines
     def test_quantized_conv_padding_error(self):
-        padding_strings = ["valid", "same"]
         classes = [nn.Conv1d, nn.Conv2d, nn.Conv3d]
-        for padding_string in padding_strings:
-            for test_class in classes:
-                self._check_padding_error(test_class(1,128,80,1, padding = padding_string))
+        for test_class in classes:
+            self._check_padding_error(test_class)
 
     def test_quantized_conv_transpose_padding_error(self):
-        padding_strings = ["valid", "same"]
         classes = [nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d]
-        for padding_string in padding_strings:
-            for test_class in classes:
-                self._check_padding_error(test_class(1,128,80,1, padding = padding_string))
+        for test_class in classes:
+            self._check_padding_error(test_class)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
