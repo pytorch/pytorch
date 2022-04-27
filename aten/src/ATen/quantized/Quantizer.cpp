@@ -308,6 +308,7 @@ Tensor from_blob_quantized_per_tensor_affine(
     void* data,
     IntArrayRef sizes,
     IntArrayRef strides,
+    int64_t storage_offset,
     std::function<void(void*)> deleter,
     const float scale,
     const int64_t zeroPoint,
@@ -338,7 +339,19 @@ Tensor from_blob_quantized_per_tensor_affine(
       options.dtype(),
       quantizer);
   get_qtensorimpl(qtensor)->set_sizes_and_strides(sizes, strides);
+  get_qtensorimpl(qtensor)->set_storage_offset(storage_offset);
   return qtensor;
+}
+
+Tensor from_blob_quantized_per_tensor_affine(
+    void* data,
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    std::function<void(void*)> deleter,
+    const float scale,
+    const int64_t zeroPoint,
+    const TensorOptions& options) {
+  return from_blob_quantized_per_tensor_affine(data, sizes, strides, 0, deleter, scale, zeroPoint, options);
 }
 
 Tensor from_blob_quantized_per_tensor_affine(
