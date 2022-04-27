@@ -559,7 +559,9 @@ class IrParser {
       auto tensor_type = jit_output->type()->cast<TensorType>();
       TORCH_INTERNAL_ASSERT(
           tensor_type, "output of fusion group is not TensorType.");
-      out = optionalCastStrict(aten_to_data_type(tensor_type->scalarType()));
+      if (tensor_type->scalarType().has_value()) {
+        out = optionalCastStrict(aten_to_data_type(*tensor_type->scalarType()));
+      }
       fusion->addOutput(out);
 
       // mark output tensor as permuted;
