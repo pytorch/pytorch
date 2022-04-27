@@ -64,6 +64,7 @@ class TestFSDPMisc(FSDPTest):
         # create nccl group with small timeout
         os.environ["NCCL_BLOCKING_WAIT"] = "1"
         nccl_pg = dist.new_group(backend="nccl", timeout=timedelta(seconds=10))
+
         class DiffShapeParams(nn.Module):
             def __init__(self, rank):
                 # non-zero rank have diff embedding shape.
@@ -80,6 +81,7 @@ class TestFSDPMisc(FSDPTest):
         # TODO: param shape verification check needs to be enhanced as it currently does
         # not properly report the error on rank 0, and instead relies on blocking_wait
         # or async_error_handling to take the process on rank 0 down.
+        # https://github.com/pytorch/pytorch/issues/76449
         with ctx:
             FSDP(m, nccl_pg)
             # Should only be run by rank 0, and blocking_wait catches and reports
