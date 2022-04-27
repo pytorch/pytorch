@@ -84,7 +84,7 @@ def gen_data(special_op_lists, analysis_name):
 
     ops = yaml.load(open('../../pytorch/aten/src/ATen/native/native_functions.yaml', 'r').read(), Loader=yaml.CLoader)
 
-    annotated_ops = {a.strip(): b.strip() for a, b in list(csv.reader(open('annotated_ops.txt')))}
+    annotated_ops = {a.strip(): b.strip() for a, b in list(csv.reader(open('annotated_ops')))}
     from collections import defaultdict
 
     uniq_ops = []
@@ -160,6 +160,7 @@ def gen_data(special_op_lists, analysis_name):
 
     annotate_ops(ops, is_unique=False)
     with open(f"{analysis_name}", 'w') as f:
+        # import pdb; pdb.set_trace()
         for op in ops:
             info = [
                 op['full_name'], op['meta'], not (op['full_name'] in noncomposite_ops)
@@ -176,12 +177,18 @@ def full_name_check(lst):
 
 
 # Generates batching rule data
-gen_data([full_name_check(get_ops_for_key('FuncTorchBatched'))], 'vmap')
+gen_data([full_name_check(get_ops_for_key('FuncTorchBatched'))], 'vmap.txt')
+
+
+def remove_suffix(input_string, suffix):
+    if suffix and input_string.endswith(suffix):
+        return input_string[:-len(suffix)]
+    return input_string
 
 
 if True:
     with open('run_ops.txt', 'r') as f:
-        opinfo_ops = [i.strip() for i in f.readlines()]
+        opinfo_ops = [remove_suffix(i.strip(), '.default') for i in f.readlines()]
     with open('run_decompositions.txt', 'r') as f:
-        decomposed_ops = [i.strip() for i in f.readlines()]
-    gen_data([name_check(opinfo_ops), name_check(decomposed_ops)], 'decompositions')
+        decomposed_ops = [remove_suffix(i.strip(), '.default') for i in f.readlines()]
+    gen_data([full_name_check(opinfo_ops), full_name_check(decomposed_ops)], 'decompositions.txt')

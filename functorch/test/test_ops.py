@@ -1292,10 +1292,6 @@ class TestDecompositionOpInfo(TestCase):
         xfail('linalg.tensorinv'),
         xfail('to_sparse'),
         skip('tensor_split'),
-        skip('mvlgamma', 'mvlgamma_p_1'),
-        skip('mvlgamma', 'mvlgamma_p_3'),
-        skip('mvlgamma', 'mvlgamma_p_5'),
-        skip('eig'),
         skip('nn.functional.dropout'),
         skip('_masked.softmin'),
         skip('_masked.log_softmax'),
@@ -1303,16 +1299,10 @@ class TestDecompositionOpInfo(TestCase):
         skip('_masked.softmax'),
         skip('_masked.normalize'),
         xfail('linalg.lu_factor', ''),
-        # Some weird matmul stuff with int64 matmuls
-        # inplace op
-        skip('resize_'),
         # Weird conj errors
         xfail('fft.hfft2', dtypes=(torch.float32, torch.float64)),
         xfail('fft.hfft', dtypes=(torch.float32, torch.float64)),
         xfail('fft.hfftn', dtypes=(torch.float32, torch.float64)),
-        skip('nn.functional.binary_cross_entropy', ''),
-        skip('nn.functional.binary_cross_entropy_with_logits', '',),
-        skip('nn.functional.huber_loss'),
     })
     def test_decomposition(self, device, dtype, op):
         # dtype is too confusing of a name for how we're using it
