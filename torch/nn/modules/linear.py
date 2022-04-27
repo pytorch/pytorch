@@ -15,7 +15,6 @@ __all__ = [
     'Identity',
     'LazyLinear',
     'Linear',
-    'NonDynamicallyQuantizableLinear',
 ]
 
 
