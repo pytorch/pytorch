@@ -553,6 +553,13 @@ static bool isFunctionalTensorAtCurrentLevel(const Tensor& tensor) {
   return functional_level == level;
 }
 
+static void setup_dispatch_key_tls(DispatchKeySet exclude, DispatchKeySet include) {
+  auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+  local_keyset.excluded_ = local_keyset.excluded_ | exclude;
+  local_keyset.included_ = local_keyset.included_ | include;
+  c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
+}
+
 void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
@@ -569,68 +576,71 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
   SaveLocalDispatchKeySet guard;
 
-  // if is a grad transform, and the operation is in-place, and the mutated
-  // argument is not currently wrapped in a TensorWrapper, then we need to
-  // error out otherwise the result is silently incorrect
-  checkForInvalidMutationOnCaptures(op, stack, dynamicLayerStack);
-
-  // Unwrap dead GradWrappers, materialize live ones
-  auto maybeTransformGradWrappers = [](const Tensor& tensor) {
-    auto result = unwrapIfDead(tensor);
-    return materializeGradWrappers(result, getDynamicLayerStack());
-  };
+  // Unwrap escaped GradWrappers
   auto num_args = op.schema().arguments().size();
-  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), maybeTransformGradWrappers);
+  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), unwrapIfDead);
 
   auto& layer = dynamicLayerStack.back();
-
   DispatchKeySet exclude = keysToExcludeWhenEnteringDynamicLayer(layer.key());
-  DispatchKeySet hacky_include;
 
-  bool functionalization_add_back_views = false;
+  switch (layer.key()) {
+    case TransformType::Grad:
+    case TransformType::Jvp:
+      {
+        // if is a grad transform, and the operation is in-place, and the mutated
+        // argument is not currently wrapped in a TensorWrapper, then we need to
+        // error out otherwise the result is silently incorrect
+        checkForInvalidMutationOnCaptures(op, stack, dynamicLayerStack);
 
-  // hack
-  if (layer.key() == TransformType::Vmap) {
-    hacky_include = hacky_include.add(kVmapModeKey);
-  } else if (layer.key() == TransformType::Functionalize) {
-    // We always want to call the functionalization kernels if functionalize() is on the layer stack.
-    // It's the responsibility of the functionalization kernel to no-op and redispatch
-    // if none of the input tensors are functional.
-    hacky_include = hacky_include | DispatchKeySet({DispatchKey::Functionalize});
-    functionalization_add_back_views = layer.functionalizeAddBackViews().has_value() && *(layer.functionalizeAddBackViews());
-  }
-  auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-  local_keyset.excluded_ = local_keyset.excluded_ | exclude;
-  local_keyset.included_ = local_keyset.included_ | hacky_include;
-  c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
-  // Only matters for functionalization.
-  // We have some side-car TLS that we can set to toggle the functionaliation behavior.
-  // If set, then we functionalization will only remove mutations, instead of
-  // removing both mutations AND view operators.
-  at::functionalization::impl::FunctionalizationReapplyViewsGuard functional_guard(functionalization_add_back_views);
+        // materialize live GradWrappers
+        auto maybeTransformGradWrappers = [](const Tensor& tensor) {
+          return materializeGradWrappers(tensor, getDynamicLayerStack());
+        };
+        foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), maybeTransformGradWrappers);
 
-#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
-  if (c10::show_dispatch_trace_enabled()) {
-    dump_local_tls();
-  }
-#endif
-
-  // Re-dispatch
-  op.callBoxed(stack);
-  auto ret_size = op.schema().returns().size();
-  foreachTensorInplace(*stack, stack->size() - ret_size, stack->size(),
-    [&](const Tensor& tensor) {
-      if (at::functionalization::impl::isFunctionalTensor(tensor)) {
-        auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
-        // Functorch is responsible for setting the level on the wrapper, since we don't
-        // have that info available in core (for now).
-        // We could just "propagate" the level from the input tensors inside of the functionalize kernels,
-        // but unfortunately we can't do that for factory operators.
-        wrapper->set_level(layer.layerId());
+        setup_dispatch_key_tls(exclude, {});
+        op.callBoxed(stack);
+        break;
       }
-      return tensor;
-    }
-  );
+    case TransformType::Vmap:
+      {
+        setup_dispatch_key_tls(exclude, DispatchKeySet(kVmapModeKey));
+        op.callBoxed(stack);
+        break;
+      }
+    case TransformType::Functionalize:
+      {
+        // We always want to call the functionalization kernels if functionalize() is on the layer stack.
+        // It's the responsibility of the functionalization kernel to no-op and redispatch
+        // if none of the input tensors are functional.
+        setup_dispatch_key_tls(exclude, DispatchKeySet(DispatchKey::Functionalize));
+        auto functionalization_add_back_views = layer.functionalizeAddBackViews().has_value() && *(layer.functionalizeAddBackViews());
+        // We have some side-car TLS that we can set to toggle the functionaliation behavior.
+        // If set, then we functionalization will only remove mutations, instead of
+        // removing both mutations AND view operators.
+        at::functionalization::impl::FunctionalizationReapplyViewsGuard functional_guard(functionalization_add_back_views);
+
+        op.callBoxed(stack);
+
+        auto ret_size = op.schema().returns().size();
+        foreachTensorInplace(*stack, stack->size() - ret_size, stack->size(),
+          [&](const Tensor& tensor) {
+            if (at::functionalization::impl::isFunctionalTensor(tensor)) {
+              auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+              // Functorch is responsible for setting the level on the wrapper, since we don't
+              // have that info available in core (for now).
+              // We could just "propagate" the level from the input tensors inside of the functionalize kernels,
+              // but unfortunately we can't do that for factory operators.
+              wrapper->set_level(layer.layerId());
+            }
+            return tensor;
+          }
+        );
+        break;
+      }
+    default:
+      TORCH_INTERNAL_ASSERT(false);
+  }
 }
 
 struct WithoutTop {
