@@ -3168,6 +3168,7 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
   pn->setCallback(ivalue_profiler);
 }
 
+// profile ivalue, used for optional arguments
 void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 

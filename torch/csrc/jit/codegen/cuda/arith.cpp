@@ -186,6 +186,10 @@ Val* newValLike(Val* val, DataType dtype) {
   return newScalar(vtype, dtype);
 }
 
+// returns the minimum init value for reduction:
+//   -inf for floating type;
+//   lowest value for integer type;
+//   false for bool.
 Val* getMinimumValue(DataType v) {
   switch (v) {
     case (DataType::Double):
@@ -211,6 +215,10 @@ Val* getMinimumValue(DataType v) {
   return nullptr;
 }
 
+// returns the maximum init value for reduction:
+//   inf for floating type;
+//   highest value for integer type;
+//   true for bool.
 Val* getMaximumValue(DataType v) {
   switch (v) {
     case (DataType::Double):
