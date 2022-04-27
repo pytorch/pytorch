@@ -895,7 +895,7 @@ void index_reduce_func_impl(
       self.scalar_type(), "index_reduce_func_exclude_input_init", [&] {
       scalar_t init_val;
       switch (op) {
-        case INDEX_OP::MULTIPLY:
+        case INDEX_OP::PROD:
           init_val = (scalar_t)1;
           break;
         case INDEX_OP::MAXIMUM:
@@ -949,7 +949,7 @@ void index_reduce_func_impl(
         iter.unsafe_replace_operand(2, source_data);
 
         switch (op) {
-          case INDEX_OP::MULTIPLY :
+          case INDEX_OP::PROD :
             mul_stub(iter.device_type(), iter);
             break;
           case INDEX_OP::MINIMUM :
@@ -1001,7 +1001,7 @@ void index_reduce_func_impl(
                 count_ip = counts_ptr + self_i * counts_stride;
                 *count_ip += 1;
                 break;
-              case INDEX_OP::MULTIPLY :
+              case INDEX_OP::PROD :
                 *self_ip *= *(source_ptr + i * source_stride);
                 break;
               case INDEX_OP::MINIMUM :
@@ -1037,7 +1037,7 @@ TORCH_IMPL_FUNC(_index_reduce_cpu_out)
 
   INDEX_OP op;
   if (reduce == "prod") {
-    op = INDEX_OP::MULTIPLY;
+    op = INDEX_OP::PROD;
   } else if (reduce == "mean") {
     op = INDEX_OP::MEAN;
   } else if (reduce == "amax") {

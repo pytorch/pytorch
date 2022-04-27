@@ -726,7 +726,7 @@ void index_reduce_func_cuda_impl(
       self.scalar_type(), "index_reduce_func_cuda_exclude_input_init", [&] {
       scalar_t init_val;
       switch (reduce) {
-        case INDEX_OP::MULTIPLY:
+        case INDEX_OP::PROD:
           init_val = (scalar_t)1;
           break;
         case INDEX_OP::MAXIMUM:
@@ -885,7 +885,7 @@ TORCH_IMPL_FUNC(_index_reduce_cuda_out)
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
 
   if (reduce == "prod") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MULTIPLY, reduce_multiply, result);
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::PROD, reduce_multiply, result);
   } else if (reduce == "mean") {
     index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MEAN, reduce_add, result);
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
