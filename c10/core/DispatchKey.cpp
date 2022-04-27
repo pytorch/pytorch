@@ -21,8 +21,8 @@ const char* toString(BackendComponent t) {
       return "XPUBit";
     case BackendComponent::IPUBit:
       return "IPUBit";
-    case BackendComponent::MLCBit:
-      return "MLCBit";
+    case BackendComponent::MPSBit:
+      return "MPSBit";
     case BackendComponent::HPUBit:
       return "HPUBit";
     case BackendComponent::VEBit:
@@ -64,8 +64,8 @@ const char* toString(DispatchKey t) {
       return "XLA";
     case DispatchKey::Lazy:
       return "Lazy";
-    case DispatchKey::MLC:
-      return "MLC";
+    case DispatchKey::MPS:
+      return "MPS";
     case DispatchKey::HPU:
       return "HPU";
     case DispatchKey::Vulkan:
@@ -142,8 +142,8 @@ const char* toString(DispatchKey t) {
       return "AutogradXLA";
     case DispatchKey::AutogradLazy:
       return "AutogradLazy";
-    case DispatchKey::AutogradMLC:
-      return "AutogradMLC";
+    case DispatchKey::AutogradMPS:
+      return "AutogradMPS";
     case DispatchKey::AutogradHPU:
       return "AutogradHPU";
     case DispatchKey::AutogradPrivateUse1:
@@ -304,7 +304,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"CUDA", c10::DispatchKey::CUDA},
       {"HIP", c10::DispatchKey::HIP},
       {"XLA", c10::DispatchKey::XLA},
-      {"MLC", c10::DispatchKey::MLC},
+      {"MPS", c10::DispatchKey::MPS},
       {"XPU", c10::DispatchKey::XPU},
       {"IPU", c10::DispatchKey::IPU},
       {"HPU", c10::DispatchKey::HPU},
@@ -332,7 +332,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradLazy", c10::DispatchKey::AutogradLazy},
       {"AutogradIPU", c10::DispatchKey::AutogradIPU},
       {"AutogradXPU", c10::DispatchKey::AutogradXPU},
-      {"AutogradMLC", c10::DispatchKey::AutogradMLC},
+      {"AutogradMPS", c10::DispatchKey::AutogradMPS},
       {"AutogradHPU", c10::DispatchKey::AutogradHPU},
       {"AutogradPrivateUse1", c10::DispatchKey::AutogradPrivateUse1},
       {"AutogradPrivateUse2", c10::DispatchKey::AutogradPrivateUse2},
