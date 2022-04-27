@@ -11,7 +11,6 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include "ATen/ops/log_softmax_native.h"
 
 namespace at {
 namespace meta {
@@ -349,7 +348,7 @@ void _log_softmax_cpu_out
 
 TORCH_IMPL_FUNC(log_softmax_cpu_out)
 (const Tensor& input,
- const int64_t dim,
+ int64_t dim,
  c10::optional<ScalarType> dtype,
  const Tensor& output) {
   Tensor converted = dtype.has_value()? input.toType(dtype.value()) : input;

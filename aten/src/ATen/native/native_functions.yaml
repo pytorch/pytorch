@@ -2836,9 +2836,9 @@
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
-  structured_delegate: log_softmax.out
+  structured_delegate: log_softmax.int_out
 
-- func: log_softmax.out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: log_softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU: log_softmax_cpu_out
