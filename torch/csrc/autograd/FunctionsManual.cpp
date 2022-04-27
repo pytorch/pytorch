@@ -3303,7 +3303,7 @@ Tensor linalg_qr_backward(const Tensor& gQ, const Tensor& gR,
   if (m >= n) {
     const auto syminvadj = [](const Tensor& X) {
       auto ret = X + X.mH();
-      ret.diagonal(0, -2, -1).mul_(0.5);
+      at::real(ret.diagonal(0, -2, -1)).mul_(0.5);
       return ret;
     };
     gA = Q.matmul(syminvadj(gA.triu()));
