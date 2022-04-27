@@ -640,7 +640,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "_update_group_membership",
           &TensorPipeAgent::updateGroupMembership,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def_readonly("is_static_group", &TensorPipeAgent::isStaticGroup_)
+      .def_property_readonly("store", &TensorPipeAgent::getStore);
 
 #endif // USE_TENSORPIPE
 

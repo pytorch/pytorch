@@ -2,7 +2,7 @@ from collections import OrderedDict
 import enum
 import functools
 from numbers import Number
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 import warnings
 import copyreg
 from copy import deepcopy
@@ -95,6 +95,7 @@ class Tensor(torch._C._TensorBase):
             # does accurate alias tracking; however, the code below
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
+            # Update the test in test_serialization if you remove 'meta' from here
             if self.is_sparse or self.device.type in ['lazy', 'xla', 'mlc', 'ort', 'meta', 'hpu'] or \
                     (type(self) is not Tensor and self.data_ptr() == 0):
                 new_tensor = self.clone()
@@ -150,7 +151,8 @@ class Tensor(torch._C._TensorBase):
                         new_tensor = new_tensor.conj_physical()
                     if self.is_neg():
                         new_tensor = new_tensor.neg()
-                    new_tensor.requires_grad = self.requires_grad
+            if self.requires_grad:
+                new_tensor.requires_grad_()
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
@@ -541,6 +543,40 @@ class Tensor(torch._C._TensorBase):
             return LU, pivots, infos
         else:
             return LU, pivots
+
+    def stft(self, n_fft: int, hop_length: Optional[int] = None,
+             win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+             center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
+             onesided: Optional[bool] = None, return_complex: Optional[bool] = None):
+        r"""See :func:`torch.stft`
+
+        .. warning::
+          This function changed signature at version 0.4.1. Calling with
+          the previous signature may cause error or return incorrect result.
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.stft, (self,), self, n_fft, hop_length=hop_length,
+                win_length=win_length, window=window, center=center, pad_mode=pad_mode, normalized=normalized,
+                onesided=onesided, return_complex=return_complex
+            )
+        return torch.stft(self, n_fft, hop_length, win_length, window, center,
+                          pad_mode, normalized, onesided, return_complex=return_complex)
+
+    def istft(self, n_fft: int, hop_length: Optional[int] = None,
+              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+              center: bool = True, normalized: bool = False,
+              onesided: Optional[bool] = None, length: Optional[int] = None,
+              return_complex: bool = False):
+        r"""See :func:`torch.istft`"""
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor.istft, (self,), self, n_fft, hop_length=hop_length, win_length=win_length,
+                window=window, center=center, normalized=normalized, onesided=onesided, length=length,
+                return_complex=return_complex
+            )
+        return torch.istft(self, n_fft, hop_length, win_length, window, center,
+                           normalized, onesided, length, return_complex=return_complex)
 
     def resize(self, *sizes):
         if has_torch_function_unary(self):
