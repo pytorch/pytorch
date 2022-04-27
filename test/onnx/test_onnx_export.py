@@ -60,3 +60,47 @@ class TestONNXExport(TestCase):
                               operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
         onnx_model = onnx.load_from_string(f.getvalue())
         self.assertAtenOp(onnx_model, "clamp", "Tensor")
+
+
+    def _helper_test_to_(self, cast_fn):
+        """Run a generic test with the specified cast_fn
+
+        `cast_fn` will be converted into a `torch.jit.script` function
+        and it is meant to wrap a `aten::to` during export to prevent
+        hard-coded devices
+
+        `cast_fn` signature is:
+            def cast_fn(input: torch.Tensor) -> torch.Tensor
+        """
+        cast_fn = torch.jit.script_if_tracing(cast_fn)
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 20, 5)
+                self.conv2 = torch.nn.Conv2d(20, 20, 5)
+
+            def forward(self, x):
+                x = cast_fn(x)
+                x = torch.nn.functional.relu(self.conv1(x))
+                return torch.nn.functional.relu(self.conv2(x))
+
+        f = io.BytesIO()
+        model = MyModel()
+        x = torch.zeros([1, 3, 32, 32])
+        torch.onnx.export(model, (x,), f,
+                          operator_export_type=OperatorExportTypes.ONNX)
+        onnx_model = onnx.load_from_string(f.getvalue())
+        for n in onnx_model.graph.node:
+            assert n.op_type != "To"
+            assert n.op_type != "Cast"
+
+    def test_to__cpu_string(self):
+        def cast_cpu_string(src: torch.Tensor) -> torch.Tensor:
+            return src.to("cpu")
+        self._helper_test_to_(cast_cpu_string)
+
+    def test_to__device_cpu_string(self):
+        def cast_device_cpu_string(src: torch.Tensor) -> torch.Tensor:
+            return src.to(device="cpu")
+        self._helper_test_to_(cast_device_cpu_string)
