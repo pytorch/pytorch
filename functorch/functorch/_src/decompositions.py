@@ -239,22 +239,39 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
     # return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 
+def apply_loss_reduction(loss: Tensor, reduction: int):
+    if reduction == Reduction.MEAN.value:
+        return torch.mean(loss)
+    elif reduction == Reduction.SUM.value:
+        return torch.sum(loss)
+    else:
+        return loss
+
+
 @register_decomposition(aten.l1_loss)
 def l1_loss(self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value) -> Tensor:
-    if reduction != Reduction.NONE.value:
-        loss = (self - target).abs()
-        if reduction == Reduction.MEAN.value:
-            return torch.mean(loss)
-        else:
-            return torch.sum(loss)
-    else:
-        return (self - target).abs()
+    loss = (self - target).abs()
+    return apply_loss_reduction(loss, reduction)
+
+
+@register_decomposition(aten.mse_loss)
+def mse_loss(self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value) -> Tensor:
+    loss = (self - target) ** 2
+    return apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(aten.mse_loss_backward)
 def mse_loss_backward(grad_output: Tensor, input: Tensor, target: Tensor, reduction: int):
     norm = 2. / input.numel() if reduction == Reduction.MEAN.value else 2.
     return norm * (input - target) * grad_output
+
+
+@register_decomposition(aten.huber_loss)
+def huber_loss(self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value, delta: float = 1.0) -> Tensor:
+    assert delta > 0, "huber_loss does not support non-positive values for delta."
+    z = (self - target).abs()
+    loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
+    return apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(aten.huber_loss_backward)
