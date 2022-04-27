@@ -215,6 +215,10 @@ enum class DispatchKey : uint16_t {
 
   Python,
 
+  // Out-of-core key for Fake Tensor in torchdistx.
+  // See https://pytorch.org/torchdistx/latest/fake_tensor.html
+  Fake,
+
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
   // this dispatch key doesn't do any of the substantive functionality for named
@@ -355,6 +359,10 @@ enum class DispatchKey : uint16_t {
   // we can consider adding separate keys dedicated to those individual passes.
   // See Note [Functionalization Pass In Core] for details.
   Functionalize,
+
+  // Out-of-core key for Deferred Module Initialization in torchdistx.
+  // See https://pytorch.org/torchdistx/latest/deferred_init.html
+  DeferredInit,
 
   // Used by Python key logic to know the set of tls on entry to the dispatcher
   // This kernel assumes it is the top-most non-functorch-related DispatchKey.
@@ -710,7 +718,8 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
   }
 }
 
-// Given (DispatchKey::Dense, DispatchKey::CUDABit), returns DispatchKey::CUDA
+// Given (DispatchKey::Dense, BackendComponent::CUDABit), returns
+// DispatchKey::CUDA.
 // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
 // This function relies on the invariant that the dispatch keys between
 // StartOfDenseBackends and EndOfRuntimeBackendKeys are ordered by backend
