@@ -205,7 +205,7 @@ c10::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
   return ConstantValueMap::getInstance().shapeValueMap[tensorName];
 }
 
-// Gets the inferred generatedShapeDataByName from ONNX data propagation
+// Gets the inferred generatedShapeDataByName which is obtained by ONNX data propagation
 std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>& ConstantValueMap::GetInferredShapeData() {
   return ConstantValueMap::getInstance().generatedShapeDataByName;
 }
