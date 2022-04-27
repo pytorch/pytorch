@@ -381,6 +381,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       "static_runtime::expand_dims_copy(Tensor input, int[] dims) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
+      "static_runtime::reshape_maybe_copy_out(Tensor(a) self, int[] proposed_shape) -> (Tensor(a), Tensor, bool)",
+      c10::AliasAnalysisKind::FROM_SCHEMA));
+  m.def(torch::schema(
       "static_runtime::to_maybe_copy_out.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> (Tensor, bool)",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
@@ -551,40 +554,161 @@ void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
 //                         |
 //                         v
 
+namespace {
+
+// Concrete instances of this class define the logic for adding
+// maybe_copy/select_tensor nodes. Some ops need to handle it differently - for
+// instance, reshape_maybe_copy's corresponding select_tensor needs to choose
+// between the two of the op's outputs, while to_maybe_copy's corresponding
+// select_tensor needs to choose between the maybe_copy output and the original
+// tensor.
+class MaybeCopySchemaInfo {
+ public:
+  MaybeCopySchemaInfo(c10::FunctionSchema schema)
+      : schema_(std::move(schema)) {}
+
+  virtual ~MaybeCopySchemaInfo() = default;
+
+  bool matchSchema(const Node* node) const {
+    TORCH_CHECK(node != nullptr);
+    return node->matches(schema_);
+  }
+
+  std::pair<Node*, Node*> addMaybeCopyAndSelectTensorNodes(
+      Graph* graph,
+      Node* node) const {
+    TORCH_CHECK(graph != nullptr && node != nullptr);
+    auto* maybe_copy = addMaybeCopyNode(graph, node);
+    auto* select_tensor = addSelectTensorNode(graph, node, maybe_copy);
+    return {maybe_copy, select_tensor};
+  }
+
+ private:
+  // Add the maybe_copy variant to the graph, leaving the original
+  // node in place. Return the new node and the select_tensor node.
+  virtual Node* addMaybeCopyNode(Graph* graph, Node* node) const = 0;
+
+  // Add the select_tensor node to the graph given the old node and the new one.
+  // This method should replace all uses of old node's output with the
+  // select_tensor node output, but it should not destroy the old node.
+  virtual Node* addSelectTensorNode(
+      Graph* graph,
+      Node* old_node,
+      Node* new_node) const = 0;
+
+  c10::FunctionSchema schema_;
+};
+
+class ToMaybeCopySchemaInfo : public MaybeCopySchemaInfo {
+ public:
+  ToMaybeCopySchemaInfo(c10::FunctionSchema schema)
+      : MaybeCopySchemaInfo(std::move(schema)) {}
+
+ private:
+  Node* addMaybeCopyNode(Graph* graph, Node* node) const override {
+    const static c10::Symbol tmco_symbol =
+        fromQualString("static_runtime::to_maybe_copy_out");
+    // Add the did_copy flag to outputs.
+    auto* new_node = graph->create(tmco_symbol, node->outputs().size() + 1);
+    for (auto* input : node->inputs()) {
+      new_node->addInput(input);
+    }
+    new_node->outputs()[0]->copyMetadata(node->output());
+    new_node->outputs()[1]->setType(c10::BoolType::get());
+    return new_node;
+  }
+
+  Node* addSelectTensorNode(Graph* graph, Node* old_node, Node* new_node)
+      const override {
+    static const auto select_tensor_symbol =
+        fromQualString("static_runtime::select_tensor");
+    auto* select_tensor_node = graph->create(select_tensor_symbol, 1);
+    DCHECK_EQ(new_node->outputs().size(), 2);
+    select_tensor_node->addInput(new_node->input(0));
+    for (auto* output : new_node->outputs()) {
+      select_tensor_node->addInput(output);
+    }
+    select_tensor_node->output()->copyMetadata(old_node->output());
+    old_node->output()->replaceAllUsesWith(select_tensor_node->output());
+    return select_tensor_node;
+  }
+};
+
+class ReshapeMaybeCopySchemaInfo : public MaybeCopySchemaInfo {
+ public:
+  ReshapeMaybeCopySchemaInfo(c10::FunctionSchema schema)
+      : MaybeCopySchemaInfo(std::move(schema)) {}
+
+ private:
+  Node* addMaybeCopyNode(Graph* graph, Node* node) const override {
+    const static c10::Symbol reshape_maybe_copy_symbol =
+        fromQualString("static_runtime::reshape_maybe_copy_out");
+    // Add the did_copy flag to outputs.
+    auto* new_node = graph->create(reshape_maybe_copy_symbol, 3);
+    for (auto* input : node->inputs()) {
+      new_node->addInput(input);
+    }
+    new_node->outputs().at(0)->setType(c10::TensorType::get());
+    new_node->outputs().at(1)->setType(c10::TensorType::get());
+    new_node->outputs().at(2)->setType(c10::BoolType::get());
+    return new_node;
+  }
+
+  Node* addSelectTensorNode(Graph* graph, Node* old_node, Node* new_node)
+      const override {
+    static const auto select_tensor_symbol =
+        fromQualString("static_runtime::select_tensor");
+    auto* select_tensor_node = graph->create(select_tensor_symbol, 1);
+    for (auto* output : new_node->outputs()) {
+      select_tensor_node->addInput(output);
+    }
+    old_node->output()->replaceAllUsesWith(select_tensor_node->output());
+    return select_tensor_node;
+  }
+};
+} // namespace
+
 void ReplaceWithMaybeCopy(
     std::shared_ptr<Graph>& graph,
     bool outputs_are_immutable) {
   AliasDb db(graph);
-  // for ops that have overloads, match the schema
-  static const std::array<std::pair<c10::FunctionSchema, c10::Symbol>, 3> supported_schema =
-      {{{torch::schema(
-             "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
-         fromQualString("static_runtime::to_maybe_copy_out")},
-        {torch::schema(
-             "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
-         fromQualString("static_runtime::to_maybe_copy_out")},
-        {torch::schema(
-             "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
-         fromQualString("static_runtime::to_maybe_copy_out")}}};
 
-  auto match_schema = [](const Node* node, c10::Symbol& out_matched_symbol) {
+  auto tmco_prim_dtype = std::make_unique<ToMaybeCopySchemaInfo>(torch::schema(
+      "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"));
+  auto tmco_dtype = std::make_unique<ToMaybeCopySchemaInfo>(torch::schema(
+      "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"));
+  auto tmco_other = std::make_unique<ToMaybeCopySchemaInfo>(torch::schema(
+      "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"));
+
+  auto rmco = std::make_unique<ReshapeMaybeCopySchemaInfo>(torch::schema(
+      "aten::reshape(Tensor(a) self, int[] proposed_shape) -> Tensor(a)"));
+
+  const std::array<std::unique_ptr<MaybeCopySchemaInfo>, 4> supported_schema = {
+      std::move(tmco_prim_dtype),
+      std::move(tmco_dtype),
+      std::move(tmco_other),
+      std::move(rmco)};
+
+  auto match_schema =
+      [&supported_schema](
+          const Node* node) -> c10::optional<const MaybeCopySchemaInfo*> {
     for (auto& schema : supported_schema) {
-      if (node->matches(schema.first)) {
-        out_matched_symbol = schema.second;
-        return true;
+      if (schema->matchSchema(node)) {
+        return schema.get();
       }
     }
-    return false;
+    return c10::nullopt;
   };
 
   // old node, new node, select_tensor node
   std::vector<std::tuple<Node*, Node*, Node*>> replacement;
   DepthFirstGraphNodeIterator graph_it(graph);
   for (auto n = graph_it.next(); n != nullptr; n = graph_it.next()) {
-    c10::Symbol new_symbol;
-    if (!match_schema(n, new_symbol)) {
+    auto schema_opt = match_schema(n);
+    if (!schema_opt.has_value()) {
       continue;
     }
+    auto schema = *schema_opt;
     TORCH_CHECK(n->outputs().size() == 1);
 
     // Duplicate input writers guard from ReplaceWithCopy below.
@@ -597,34 +721,20 @@ void ReplaceWithMaybeCopy(
       continue;
     }
 
-    // Add the did_copy flag to outputs.
-    auto* new_node = graph->create(new_symbol, n->outputs().size() + 1);
-    for (auto* input : n->inputs()) {
-      new_node->addInput(input);
-    }
-    new_node->outputs().at(1)->setType(c10::BoolType::get());
+    Node* maybe_copy_node;
+    Node* select_tensor_node;
+    std::tie(maybe_copy_node, select_tensor_node) =
+        schema->addMaybeCopyAndSelectTensorNodes(graph.get(), n);
 
-    static const auto select_tensor_symbol =
-        fromQualString("static_runtime::select_tensor");
-    auto* select_tensor_node = graph->create(select_tensor_symbol, 1);
-    DCHECK_EQ(new_node->outputs().size(), 2);
-    select_tensor_node->addInput(n->input(0));
-    for (auto* output : new_node->outputs()) {
-      select_tensor_node->addInput(output);
-    }
-    replacement.emplace_back(n, new_node, select_tensor_node);
+    replacement.emplace_back(n, maybe_copy_node, select_tensor_node);
   }
 
   for (const auto& tup : replacement) {
     auto* const old_node = std::get<0>(tup);
     auto* const new_node = std::get<1>(tup);
     auto* const select_tensor_node = std::get<2>(tup);
-
     new_node->insertBefore(old_node);
     select_tensor_node->insertBefore(old_node);
-    new_node->outputs()[0]->copyMetadata(old_node->output());
-    select_tensor_node->output()->copyMetadata(old_node->output());
-    old_node->replaceAllUsesWith(select_tensor_node);
     old_node->destroy();
   }
 #ifndef NDEBUG

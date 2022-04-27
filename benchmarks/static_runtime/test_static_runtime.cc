@@ -1001,7 +1001,8 @@ TEST(StaticRuntime, Reshape) {
   const auto reshape_script_2 = R"JIT(
     def forward(self, a: Tensor, shape: List[int]):
         b = a.transpose(0, 1)
-        return b.reshape(shape)
+        c = b.reshape(shape)
+        return c.relu()
   )JIT";
 
   const auto reshape_script_3 = R"JIT(
@@ -1050,13 +1051,10 @@ TEST(StaticRuntime, Reshape) {
         return (d, e, f)
   )JIT";
 
-  // b is in_contiguous
-  const auto reshape_incontiguous_script = R"JIT(
+  const auto reshape_output_script = R"JIT(
     def forward(self, a: Tensor, shape: List[int]):
         b = a.transpose(0, 1)
-        c = b.reshape(shape)
-        c = c.relu()
-        return (c)
+        return b.reshape(shape)
   )JIT";
 
   auto a = at::randn({2, 3});
@@ -1067,21 +1065,37 @@ TEST(StaticRuntime, Reshape) {
   auto d = std::vector<int64_t>({5, 1, 2, 2});
   std::vector<IValue> args1{c, d};
 
-  testStaticRuntime(reshape_script_1, args);
-  testStaticRuntime(reshape_script_2, args);
-  testStaticRuntime(reshape_script_3, args);
-  testStaticRuntime(reshape_script_4, args);
-  testStaticRuntime(reshape_script_5, args);
-  testStaticRuntime(reshape_inplace_script, args);
-  testStaticRuntime(reshape_incontiguous_script, args);
+  auto testScript = [](const auto src,
+                       const std::vector<IValue>& args1,
+                       const std::vector<IValue>& args2,
+                       bool enable_copy_variants) {
+    testStaticRuntime(
+        src,
+        args1,
+        args2,
+        /*use_allclose=*/false,
+        /*use_equalnan=*/false,
+        /*check_resize=*/true,
+        enable_copy_variants);
+  };
 
-  testStaticRuntime(reshape_script_1, args, args1);
-  testStaticRuntime(reshape_script_2, args, args1);
-  testStaticRuntime(reshape_script_3, args, args1);
-  testStaticRuntime(reshape_script_4, args, args1);
-  testStaticRuntime(reshape_script_5, args, args1);
-  testStaticRuntime(reshape_inplace_script, args, args1);
-  testStaticRuntime(reshape_incontiguous_script, args, args1);
+  // Disable copy variants to exercise reshape_maybe_copy_out
+  for (bool enable_copy_variants : {true, false}) {
+    testScript(reshape_script_1, args, {}, enable_copy_variants);
+    testScript(reshape_script_2, args, {}, enable_copy_variants);
+    testScript(reshape_script_3, args, {}, enable_copy_variants);
+    testScript(reshape_script_4, args, {}, enable_copy_variants);
+    testScript(reshape_script_5, args, {}, enable_copy_variants);
+    testScript(reshape_inplace_script, args, {}, enable_copy_variants);
+    testScript(reshape_output_script, args, {}, enable_copy_variants);
+
+    testScript(reshape_script_1, args, args1, enable_copy_variants);
+    testScript(reshape_script_2, args, args1, enable_copy_variants);
+    testScript(reshape_script_3, args, args1, enable_copy_variants);
+    testScript(reshape_script_4, args, args1, enable_copy_variants);
+    testScript(reshape_script_5, args, args1, enable_copy_variants);
+    testScript(reshape_output_script, args, args1, enable_copy_variants);
+  }
 }
 
 TEST(StaticRuntime, Repeat) {
@@ -2806,7 +2820,20 @@ TEST(StaticRuntime, ModelCrashOnFirstRunWithBorrowedInputs) {
   EXPECT_THROW(runtime(std::move(args)), std::runtime_error);
 }
 
-TEST(StaticRuntime, ReplaceWithMaybeCopy) {
+TEST(StaticRuntime, ReplaceWithMaybeCopy_Reshape) {
+  const std::string to = R"IR(
+    graph(%0 : Tensor, %shape: int[]):
+      %res: Tensor = aten::reshape(%0, %shape)
+      return (%res)
+  )IR";
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(to, g.get());
+  ReplaceWithMaybeCopy(g);
+  EXPECT_FALSE(hasNodeWithKind(g, "aten::reshape"));
+  EXPECT_TRUE(hasNodeWithKind(g, "static_runtime::reshape_maybe_copy_out"));
+}
+
+TEST(StaticRuntime, ReplaceWithMaybeCopy_To) {
   const std::string to = R"IR(
     graph(%0 : Tensor):
       %1: int = prim::Constant[value=4]()

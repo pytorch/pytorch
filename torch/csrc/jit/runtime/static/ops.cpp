@@ -2723,5 +2723,39 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::reshape_maybe_copy_out,
+    static_runtime_reshape_maybe_copy_out,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto& self = pnode->Input(0).toTensor();
+        const auto proposed_shape = pnode->Input(1).toDimVector();
+        const auto shape = at::infer_size_dv(proposed_shape, self.numel());
+        const auto stride =
+            at::detail::computeStride(self.sizes(), self.strides(), shape);
+        const auto will_copy = !stride.has_value();
+        pnode->Output(2) = will_copy;
+        if (!will_copy) {
+          pnode->Output(0) =
+              at::native::_reshape_alias(self, shape, stride.value());
+          return;
+        }
+        if (pnode->Output(1).isNone()) {
+          pnode->Output(1) = create_empty_from(self);
+        }
+        auto& out = pnode->Output(1).toTensor();
+
+        if (!self.is_contiguous()) {
+          // Avoid internal allocation in reshape_copy_out caused by
+          // self.contiguous()
+          at::native::resize_(out, self.sizes());
+          out = at::_unsafe_view(
+              at::native::copy_(out, self, /*non_blocking=*/false), shape);
+        } else {
+          at::native::reshape_copy_out(out, self, shape, /*infer_shape=*/false);
+        }
+      };
+    });
+
 } // namespace jit
 } // namespace torch

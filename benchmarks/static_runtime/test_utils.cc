@@ -274,7 +274,8 @@ void testStaticRuntime(
     const std::vector<IValue>& args2,
     const bool use_allclose,
     const bool use_equalnan,
-    const bool check_resize) {
+    const bool check_resize,
+    const bool enable_copy_variants) {
   auto test_context = makeTestContext(source);
 
   std::vector<IValue> args_tensors, args_copy;
@@ -302,7 +303,8 @@ void testStaticRuntime(
             .enable_out_variant = enable_out_variant,
             .optimize_memory = enable_out_variant,
             .manage_output_tensors = manage_output_tensors,
-            .enable_tensorexpr_fusion = enable_tensorexpr_fusion};
+            .enable_tensorexpr_fusion = enable_tensorexpr_fusion,
+            .use_copy_variants = enable_copy_variants};
         auto smodule = test_context->makeStaticModule(opts);
         StaticRuntime runtime(smodule);
         auto actual = runtime(args, {});

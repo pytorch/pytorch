@@ -13,14 +13,18 @@ namespace {
 
 bool isUnmanagedSpecialCase(const ProcessedNode& pnode, size_t output_idx) {
   DCHECK(output_idx < pnode.outputs().size());
-  static const auto to_maybe_copy_out_symbol =
-      c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out");
+  static const std::array<c10::Symbol, 2> maybe_copy_symbols{
+      c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out"),
+      c10::Symbol::fromQualString("static_runtime::reshape_maybe_copy_out")};
   // Heuristic and special case:
-  // If to_maybe_copy_out did not actually do anything in the
-  // first iteration, assume it will continue to not do anything
+  // If any of the maybe_copy ops did not copy in the
+  // first iteration, assume it will continue to not copy
   // and avoid managing its output.
-  return pnode.node()->kind() == to_maybe_copy_out_symbol &&
-      pnode.Output(output_idx).isNone();
+  return pnode.Output(output_idx).isNone() &&
+      (std::find(
+           maybe_copy_symbols.begin(),
+           maybe_copy_symbols.end(),
+           pnode.node()->kind()) != maybe_copy_symbols.end());
 }
 
 FastMap<const Value*, at::Tensor*> tensorValueToTensor(

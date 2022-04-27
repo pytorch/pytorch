@@ -28,7 +28,8 @@ void testStaticRuntime(
     const std::vector<c10::IValue>& args2 = {},
     const bool use_allclose = false,
     const bool use_equalnan = false,
-    const bool check_resize = true);
+    const bool check_resize = true,
+    const bool enable_copy_variants = true);
 
 std::shared_ptr<Graph> getGraphFromScript(const std::string& jit_script);
 
