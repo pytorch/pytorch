@@ -4,6 +4,8 @@ from collections import namedtuple
 
 from typing import Any
 
+__all__ = ["enter_dual_level", "exit_dual_level", "make_dual", "unpack_dual", "dual_level"]
+
 # Global variable used to make the python API simpler to use
 _current_level = -1
 
