@@ -1813,7 +1813,9 @@ class TestQuantizedOps(TestCase):
                 error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
 
                 for name, op in ops_under_test.items():
-                    devices = ["cpu", "cuda"] if dim == 2 else ["cpu"]
+                    # TODO: torch.cuda.is_available() should be swapped for a flag that checks if cudnn
+                    # is enabled in the build when cudnn supports adaptive average pooling
+                    devices = ["cpu", "cuda"] if (dim == 2 and torch.cuda.is_available()) else ["cpu"]
                     for device in devices:
                         qX_hat = op(qX.to(device=device), output_size=output_size)
                         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
