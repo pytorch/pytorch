@@ -1403,7 +1403,7 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
         if with_module:
-            hook = functools.partial(hook, weakref.prox(self))
+            hook = functools.partial(hook, weakref.proxy(self))
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 
