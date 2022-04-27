@@ -118,10 +118,26 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def("print_kernel", [](PythonFusionOwner& self) { self.printKernel(); });
 
   // Bindings to Types required for Tensor/Scalar Creation
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<TensorView>(nvfuser, "TensorView");
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<torch::jit::fuser::cuda::Val>(nvfuser, "Val");
+  py::class_<TensorView>(nvfuser, "TensorView")
+      .def(
+          "__str__",
+          [](TensorView& self) -> std::string {
+            std::stringstream ss;
+            TORCH_CHECK(
+                self.getDataType().has_value(),
+                "TensorView does not have DataType?");
+            ss << self.getDataType().value();
+            return self.toString() + " DataType: " + ss.str() +
+                " Contiguity: " + self.domain()->getContiguityString();
+          },
+          py::return_value_policy::reference);
+  py::class_<torch::jit::fuser::cuda::Val>(nvfuser, "Val")
+      .def(
+          "__str__",
+          [](torch::jit::fuser::cuda::Val& self) -> std::string {
+            return self.toString();
+          },
+          py::return_value_policy::reference);
 
   // C++ Side of Context Manager used to mimic the FusionGuard as a way
   // to programatically distinguish code used to define the Fusion instead
