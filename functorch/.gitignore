@@ -12,6 +12,7 @@ docs/build
 docs/src
 docs/source/generated
 .DS_Store
+op_analysis/*.txt
 
 # Editor temporaries
 *.swn
