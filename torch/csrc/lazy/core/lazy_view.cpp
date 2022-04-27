@@ -1,6 +1,7 @@
 #include <torch/csrc/lazy/core/lazy_view.h>
 
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/ir_construct_util.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>

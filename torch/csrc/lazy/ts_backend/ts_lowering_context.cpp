@@ -1,4 +1,5 @@
 #include <c10/core/ScalarType.h>
+#include <torch/csrc/lazy/core/ir_construct_util.h>
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>

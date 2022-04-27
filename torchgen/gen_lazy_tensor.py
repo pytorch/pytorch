@@ -446,6 +446,7 @@ def run_gen_lazy_tensor(
                     "ATen/MetaFunctions.h",
                     "ATen/Operators.h",
                     "ATen/native/CPUFallback.h",
+                    "torch/csrc/lazy/core/ir_construct_util.h",
                     "torch/csrc/lazy/core/lazy_graph_executor.h",
                     "torch/csrc/lazy/core/metrics.h",
                     "torch/csrc/lazy/core/shape.h",

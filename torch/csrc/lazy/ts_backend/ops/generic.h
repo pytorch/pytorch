@@ -2,6 +2,8 @@
 
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
+#include <torch/csrc/lazy/core/ir_construct_util.h>
+
 namespace torch {
 namespace lazy {
 

@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
+#include <torch/csrc/lazy/core/ir_construct_util.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
