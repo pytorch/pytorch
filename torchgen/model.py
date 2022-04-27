@@ -582,8 +582,8 @@ class NativeFunction:
             or d == DispatchKey.CompositeImplicitAutograd]
 
         assert len(composites_in_dispatch) <= 1, (
-            "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradWithMutations, or CompositeImplicitAutograd "
-            "on a single kernel; each "
+            "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradWithMutations, "
+            "or CompositeImplicitAutograd on a single kernel; each "
             "strictly subsumes the other.  If you wanted to provide an explicit autograd "
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
         )
