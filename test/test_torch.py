@@ -7602,8 +7602,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(b.device, b.to(dtype=torch.int32).device)
 
     def test_to(self):
-        self._test_to_with_layout(self, torch.strided)
-        self._test_to_with_layout(self, torch.sparse_csr)
+        self._test_to_with_layout(torch.strided)
+        self._test_to_with_layout(torch.sparse_csr)
 
     # FIXME: describe this test
     def test_as_subclass(self):
