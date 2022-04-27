@@ -279,7 +279,7 @@ TEST(DispatchKeySet, DoubletonPerBackend) {
       expected_keys.insert(
           toRuntimePerBackendFunctionalityKey(functionality2, backend2));
       if (expected_keys != visited_keys) {
-          std::cout << "TEST" << std::endl;
+        std::cout << "TEST" << std::endl;
       }
       ASSERT_EQ(expected_keys, visited_keys);
 
