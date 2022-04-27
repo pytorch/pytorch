@@ -922,11 +922,15 @@ TORCH_IMPL_FUNC(log_softmax_cuda_out) (
   const int64_t dim,
   c10::optional<ScalarType> dtype,
   const Tensor &output) {
+  auto output_temp = output.is_contiguous() ? output : at::empty_like(output, MemoryFormat::Contiguous);
   if (input.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
-      _log_softmax_cuda_out(input, dim, true, output);
+      _log_softmax_cuda_out(input, dim, true, output_temp);
   } else {
       Tensor converted = dtype.has_value()? input.toType(dtype.value()) : input;
-      _log_softmax_cuda_out(converted, dim, false, output);
+      _log_softmax_cuda_out(converted, dim, false, output_temp);
+  }
+  if (!output.is_contiguous()) {
+    output.copy_(output_temp);
   }
 }
 
@@ -936,13 +940,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cuda_out) (
   int64_t dim,
   ScalarType input_dtype,
   const Tensor& grad_input) {
-  bool half_to_float = grad.scalar_type() != input_dtype;
-  if (half_to_float) {
-    TORCH_CHECK(
-        (grad.scalar_type() == ScalarType::Float &&
-         input_dtype == ScalarType::Half),
-        "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
-  }
+  bool half_to_float = grad.scalar_type() == ScalarType::Float && input_dtype == ScalarType::Half;
   host_softmax_backward<LogSoftMaxBackwardEpilogue, true>(grad, output, dim, half_to_float, grad_input);
 }
 

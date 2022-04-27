@@ -541,6 +541,7 @@ class TestCommon(TestCase):
                 final_strides = _extract_strides(out)
                 final_ptrs = _extract_data_ptrs(out)
 
+                print(expected, out)
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:

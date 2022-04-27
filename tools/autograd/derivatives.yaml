@@ -1874,9 +1874,9 @@
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   self: log_sigmoid_backward(grad, self, buffer)
 
-# - name: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
-#   self: _log_softmax_backward_data(grad, result, dim, self.scalar_type())
-#   result: self_t - logsumexp_jvp(self_p, self_t, {dim}, true)
+- name: log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  self: _log_softmax_backward_data(grad, result, dim, self.scalar_type())
+  result: self_t - logsumexp_jvp(self_p, self_t, {dim}, true)
 
 - name: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _sparse_log_softmax_backward_data(grad, result, dim, self)
