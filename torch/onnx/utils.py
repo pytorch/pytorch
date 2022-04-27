@@ -880,7 +880,7 @@ def unconvertible_ops(
         )
     unsupported_ops = list()
     supported_namespaces = ("onnx", "prim", "quantized")
-    for node in graph.nodes():   # type: ignore[attr-defined]
+    for node in graph.nodes():  # type: ignore[attr-defined]
         if node.kind().split(":")[0] not in supported_namespaces:
             unsupported_ops.append(node.kind())
     return graph, unsupported_ops
@@ -1077,7 +1077,7 @@ def _export(
                     graph, export_modules_as_functions, list(params_dict.keys())
                 )
             params_dict = torch._C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
-                graph, params_dict, getattr(model, "training", False)   # type: ignore[arg-type]
+                graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
             )
             if export_params:
                 (
@@ -1296,7 +1296,7 @@ def _new_node(g: torch._C.Graph, opname: str, outputs, *args, **kwargs):
         aten = kwargs.pop("aten", False)
         ns = "aten" if aten else "onnx"
         ns_opname = ns + "::" + opname
-    n = g.create(ns_opname, args, outputs)   # type: ignore[attr-defined]
+    n = g.create(ns_opname, args, outputs)  # type: ignore[attr-defined]
     for k, v in sorted(kwargs.items()):
         # TODO: enable inplace in aten exporting mode.
         if k == "inplace":
@@ -1351,10 +1351,10 @@ def _graph_op(
         elif isinstance(arg, torch._C.Value):
             return arg
         else:
-            return g.op("Constant", value_z=arg)   # type: ignore[attr-defined]
+            return g.op("Constant", value_z=arg)  # type: ignore[attr-defined]
 
     args = [const_if_tensor(arg) for arg in raw_args]
-    n = g.insertNode(_new_node(g, opname, outputs, *args, **kwargs))   # type: ignore[attr-defined]
+    n = g.insertNode(_new_node(g, opname, outputs, *args, **kwargs))  # type: ignore[attr-defined]
 
     from torch.onnx.symbolic_helper import _onnx_shape_inference
 
@@ -1392,15 +1392,15 @@ def _block_op(b, opname, *args, **kwargs):
 
 
 def _add_block(node: torch._C.Node):
-    return node.addBlock()   # type: ignore[attr-defined]
+    return node.addBlock()  # type: ignore[attr-defined]
 
 
 def _add_input_to_block(block: torch._C.Block):
-    return block.addInputToBlock()   # type: ignore[attr-defined]
+    return block.addInputToBlock()  # type: ignore[attr-defined]
 
 
 def _add_output_to_block(block: torch._C.Block, value: torch._C.Value):
-    new_output = block.registerOutput(value)   # type: ignore[attr-defined]
+    new_output = block.registerOutput(value)  # type: ignore[attr-defined]
     return new_output
 
 
@@ -1486,33 +1486,35 @@ def _run_symbolic_function(
         A single or a tuple of Values.
         None when the node gets cloned as is into the new graph.
     """
-    try:
-        import torch.onnx.symbolic_registry as sym_registry
-        from torch.onnx.symbolic_helper import (
-            _export_onnx_opset_version as opset_version,
-        )
-        from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
+    from torch.onnx import symbolic_helper
+    from torch.onnx import symbolic_registry as sym_registry
 
+    opset_version = symbolic_helper._export_onnx_opset_version
+    is_caffe2_aten_fallback = symbolic_helper.is_caffe2_aten_fallback
+
+    # See Note [Export inplace]
+    # TODO(ezyang): I think this is not necessary anymore
+    if n.kind().endswith("_"):  # type: ignore[attr-defined]
+        ns_op_name = n.kind()[:-1]  # type: ignore[attr-defined]
+    else:
+        ns_op_name = n.kind()  # type: ignore[attr-defined]
+    ns, op_name = ns_op_name.split("::")
+
+    try:
         sym_registry.register_version("", opset_version)
 
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
         if is_caffe2_aten_fallback() and opset_version == 9:
-            import torch.onnx.symbolic_caffe2
+            from torch.onnx import symbolic_caffe2
 
-            torch.onnx.symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
+            symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
-        # See Note [Export inplace]
-        # TODO: I think this is not necessary anymore
-        if n.kind().endswith("_"):   # type: ignore[attr-defined]
-            ns_op_name = n.kind()[:-1]   # type: ignore[attr-defined]
-        else:
-            ns_op_name = n.kind()   # type: ignore[attr-defined]
-        ns, op_name = ns_op_name.split("::")
-        domain = ns
         if ns == "aten":
             domain = ""
         elif ns == "quantized" and is_caffe2_aten_fallback():
             domain = "caffe2"
+        else:
+            domain = ns
 
         if sym_registry.is_registered_op(op_name, domain, opset_version):
             symbolic_fn = _find_symbolic_in_registry(
@@ -1520,7 +1522,7 @@ def _run_symbolic_function(
             )
             assert symbolic_fn is not None
 
-            attrs = {k: n[k] for k in n.attributeNames()}   # type: ignore[attr-defined]
+            attrs = {k: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
             if _need_symbolic_context(symbolic_fn):
                 ctx = torch.onnx.SymbolicContext(_params_dict, env, n, block)
                 return symbolic_fn(ctx, g, *inputs, **attrs)
@@ -1531,11 +1533,11 @@ def _run_symbolic_function(
             return symbolic_fn(g, *inputs, **attrs)
         elif ns == "onnx":
             # Clone node to trigger ONNX shape inference
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}   # type: ignore[attr-defined]
-            return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())   # type: ignore[attr-defined]
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
+            return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())  # type: ignore[attr-defined]
         elif _should_aten_fallback(ns, op_name, opset_version, operator_export_type):
             # Direct ATen export requested
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}   # type: ignore[attr-defined]
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
             # `overload_name` is set for non-Caffe2 builds only
@@ -1545,6 +1547,7 @@ def _run_symbolic_function(
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
+        # TODO(justinchu): Update _C._onnx.OperatorExportTypes pyi to include ONNX_FALLTHROUGH
         if operator_export_type == torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
         elif (
@@ -1552,11 +1555,10 @@ def _run_symbolic_function(
             and not is_caffe2_aten_fallback()
         ):
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}   # type: ignore[attr-defined]
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
             return g.at(  # type: ignore[attr-defined]
                 op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )
-
         raise
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
