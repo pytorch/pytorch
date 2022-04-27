@@ -13036,7 +13036,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
-                    # for Float16, causing this test to fail. pow's auztograd for Float16 is thus currently
+                    # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
                     # unsupported on CPU.
                     backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
                     backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half),
@@ -13045,9 +13045,9 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
                     supports_two_python_scalars=True,
+                    lhs_make_tensor_kwargs=dict(low=0),
                     # TODO: FIXME: pow needs a way of specifying that for integer
                     #   types only it does not support negative exponentes
-                    lhs_make_tensor_kwargs=dict(low=0),
                     rhs_make_tensor_kwargs=dict(low=1)),
     BinaryUfuncInfo('float_power',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
@@ -13060,7 +13060,6 @@ op_db: List[OpInfo] = [
                         # FIXME
                         # AssertionError: Object comparison failed: torch.float64 != torch.float32
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-                        # DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
                         # -3.43399e+38 is outside the range of representable values of type 'float'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                     )),
