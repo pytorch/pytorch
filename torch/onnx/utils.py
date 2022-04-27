@@ -3,8 +3,6 @@
 These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
-from __future__ import annotations
-
 import contextlib
 import copy
 import inspect
