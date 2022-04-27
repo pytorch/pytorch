@@ -54,6 +54,8 @@ class _ConvNd(WeightedQuantizedModule):
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.stride = stride
+        if isinstance(padding, str) or (isinstance(padding, tuple) and isinstance(padding[0], str)):
+            raise ValueError('padding must be a numerical value')
         self.padding = padding
         self.dilation = dilation
         self.transposed = transposed
