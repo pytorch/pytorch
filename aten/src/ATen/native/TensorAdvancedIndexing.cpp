@@ -311,36 +311,19 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
-TORCH_PRECOMPUTE_META_FUNC(_index_mul)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self) {
+TORCH_PRECOMPUTE_META_FUNC(_index_reduce)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const c10::string_view reduce,
+ bool include_self) {
   (void)include_self;
+  TORCH_CHECK(reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce == "amin",
+              "_index_reduce(): Expected reduce to be one of prod, mean, amax or amin but got ", reduce, ".");
   dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "_index_mul");
-  return TORCH_PRECOMPUTE_STRUCT(_index_mul)().set_dim(dim);
-}
-
-TORCH_PRECOMPUTE_META_FUNC(_index_min)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self) {
-  (void)include_self;
-  dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "_index_min");
-  return TORCH_PRECOMPUTE_STRUCT(_index_min)().set_dim(dim);
-}
-
-TORCH_PRECOMPUTE_META_FUNC(_index_max)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self) {
-  (void)include_self;
-  dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "_index_max");
-  return TORCH_PRECOMPUTE_STRUCT(_index_max)().set_dim(dim);
-}
-
-TORCH_PRECOMPUTE_META_FUNC(_index_mean)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self) {
-  (void)include_self;
-  dim = maybe_wrap_dim(dim, self.dim());
-  index_func_meta_impl(*this, self, dim, index, source, "_index_mean");
-  return TORCH_PRECOMPUTE_STRUCT(_index_mean)().set_dim(dim);
+  index_func_meta_impl(*this, self, dim, index, source, "_index_reduce");
+  return TORCH_PRECOMPUTE_STRUCT(_index_reduce)().set_dim(dim);
 }
 
 } // namespace meta
@@ -1042,44 +1025,29 @@ void index_reduce_func_impl(
   }
 }
 
-TORCH_IMPL_FUNC(_index_mul_cpu_out)
+TORCH_IMPL_FUNC(_index_reduce_cpu_out)
 (const Tensor& self,
  int64_t dim,
  const Tensor& index,
  const Tensor& source,
+ const c10::string_view reduce,
  bool include_input,
  const Tensor& result) {
-  index_reduce_func_impl(self, dim, index, source, include_input, result, INDEX_OP::MULTIPLY);
-}
+  TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
 
-TORCH_IMPL_FUNC(_index_min_cpu_out)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const Tensor& source,
- bool include_input,
- const Tensor& result) {
-  index_reduce_func_impl(self, dim, index, source, include_input, result, INDEX_OP::MINIMUM);
-}
-
-TORCH_IMPL_FUNC(_index_max_cpu_out)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const Tensor& source,
- bool include_input,
- const Tensor& result) {
-  index_reduce_func_impl(self, dim, index, source, include_input, result, INDEX_OP::MAXIMUM);
-}
-
-TORCH_IMPL_FUNC(_index_mean_cpu_out)
-(const Tensor& self,
- int64_t dim,
- const Tensor& index,
- const Tensor& source,
- bool include_input,
- const Tensor& result) {
-  index_reduce_func_impl(self, dim, index, source, include_input, result, INDEX_OP::MEAN);
+  INDEX_OP op;
+  if (reduce == "prod") {
+    op = INDEX_OP::MULTIPLY;
+  } else if (reduce == "mean") {
+    op = INDEX_OP::MEAN;
+  } else if (reduce == "amax") {
+    op = INDEX_OP::MAXIMUM;
+  } else if (reduce == "amin") {
+    op = INDEX_OP::MINIMUM;
+  } else {
+    TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
+  }
+  index_reduce_func_impl(self, dim, index, source, include_input, result, op);
 }
 
 // Check that indices fall within dimension array size

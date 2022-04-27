@@ -5408,7 +5408,7 @@ Tensor _to_copy_backward(const Tensor &grad_, const c10::TensorOptions &self_opt
   return grad->to(self_options, /*non_blocking=*/false, /*copy=*/false);
 }
 
-std::tuple<Tensor, Tensor> _index_reduction_backward(
+std::tuple<Tensor, Tensor> _index_reduce_backward(
   const Tensor& grad,
   const Tensor& self,
   int dim,
@@ -5427,7 +5427,7 @@ std::tuple<Tensor, Tensor> _index_reduction_backward(
     return std::make_tuple(grad_self, grad_src);
   }
 
-  if (reduce == "mul") {
+  if (reduce == "prod") {
     grad_self = (grad * result) / self;
     grad_self.masked_fill_(self == 0, 0);
     grad_src = (grad * result).index_select(dim, index) / source;
@@ -5439,7 +5439,7 @@ std::tuple<Tensor, Tensor> _index_reduction_backward(
     grad_self = grad / N;
     Tensor N_src = N.index_select(dim, index);
     grad_src = grad.index_select(dim, index) / N_src;
-  } else if (reduce == "max" || reduce == "min") {
+  } else if (reduce == "amax" || reduce == "amin") {
     Tensor value = result.index_select(dim, index);
     Tensor self_is_result = (self == result).to(self.scalar_type());
     Tensor source_is_result = (source == value).to(self.scalar_type());
@@ -5448,7 +5448,7 @@ std::tuple<Tensor, Tensor> _index_reduction_backward(
     grad_self = self_is_result * grad_distributed;
     grad_src = source_is_result * grad_distributed.index_select(dim, index);
   } else {
-    AT_ERROR("Expected 'reduce' to be one of 'mul', 'max', 'min' or 'mean' but got ", reduce, ".");
+    AT_ERROR("Expected 'reduce' to be one of 'prod', 'amax', 'amin' or 'mean' but got ", reduce, ".");
   }
 
   if (!include_self) {
