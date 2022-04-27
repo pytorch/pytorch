@@ -212,6 +212,17 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     // give a more descriptive message when representing the Work as a string.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
+    // Stores references to participating non-output tensors (ie inputs,
+    // flattened intermediates).
+    // We'll clear this list in synchronizeStreams, just after user-facing
+    // stream(s) are synced with the nccl work stream(s).
+    // By keeping these refs (as well as outputs_) alive until after the
+    // collective's work rejoins the user-facing streams, we achieve
+    // caching allocator safety without any recordStream calls.
+    // For in-place collectives, refs stashed here may alias outputs_,
+    // but that doesn't do any harm.
+    std::shared_ptr<std::vector<at::Tensor>> non_outputs_stashed_for_allocator_safety_;
+
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
 

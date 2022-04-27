@@ -429,6 +429,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
     // Block the current stream on the NCCL stream
     (*ncclEndEvents_)[i].block(currentStream);
   }
+
+  non_outputs_stashed_for_allocator_safety_->clear();
 }
 
 // Waiting on the work's corresponding CUDA events
