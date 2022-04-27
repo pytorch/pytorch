@@ -1303,6 +1303,7 @@ class TestDecompositionOpInfo(TestCase):
         xfail('fft.hfft2', dtypes=(torch.float32, torch.float64)),
         xfail('fft.hfft', dtypes=(torch.float32, torch.float64)),
         xfail('fft.hfftn', dtypes=(torch.float32, torch.float64)),
+        xfail('nn.functional.binary_cross_entropy', device_type='cuda', dtypes=(torch.bfloat16,)),
     })
     def test_decomposition(self, device, dtype, op):
         # dtype is too confusing of a name for how we're using it
