@@ -89,7 +89,6 @@ static inline void launch_jitted_unrolled_kernel(
       std::string f_inputs_type_str = at::cuda::jit::typeName<f_inputs_type>();
       std::string compute_type_str = at::cuda::jit::typeName<at::opmath_type<f_inputs_type>>();
       std::string result_type_str = at::cuda::jit::typeName<result_type>();
-
       c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>();
       auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
@@ -167,7 +166,6 @@ at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
       std::string f_inputs_type_str = at::cuda::jit::typeName<f_inputs_type>();
       std::string compute_type_str = at::cuda::jit::typeName<at::opmath_type<f_inputs_type>>();
       std::string result_type_str = at::cuda::jit::typeName<result_type>();
-
       c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>();
       auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
                                                f_inputs_type_str, compute_type_str, result_type_str,

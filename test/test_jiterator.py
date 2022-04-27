@@ -1,9 +1,22 @@
 import torch
 from torch.cuda.jiterator import create_jit_fn
-from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, instantiate_parametrized_tests
+import sys
+import unittest
+from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, instantiate_parametrized_tests, TEST_WITH_ROCM
 
-code_string = "template <typename T> T python_jitted(T x, T y, T alpha, T beta) { return  -x * y + x - y + alpha - beta; }"
-jitted_fn = create_jit_fn(code_string, "python_jitted", alpha=0, beta=0)
+TEST_CUDA = torch.cuda.is_available()
+
+if not TEST_CUDA:
+    print('CUDA not available, skipping tests', file=sys.stderr)
+    TestCase = object  # noqa: F811
+
+if TEST_WITH_ROCM:
+    print('Jiterator is not supported on ROCm, skipping tests', file=sys.stderr)
+    TestCase = object  # noqa: F811
+
+
+code_string = "template <typename T> T my_fused_kernel(T x, T y, T alpha, T beta) { return  -x * y + x - y + alpha - beta; }"
+jitted_fn = create_jit_fn(code_string, alpha=0, beta=0)
 
 def ref_fn(x, y, alpha=0, beta=0):
     return -x * y + x - y + alpha - beta
@@ -28,6 +41,16 @@ class TestPythonJiterator(TestCase):
             rtol = 1e-2
         assert torch.allclose(expected, result, rtol=rtol)
 
+    # TODO: cpu_scalar input is currently not supported
+    @unittest.skip("cpu scalar input is not yet supported")
+    def test_cpu_scalar_input(self):
+        a = torch.rand(3, device='cuda').mul(10)
+        b = 1
+
+        expected = ref_fn(a, b)
+        result = jitted_fn(a, b)
+        assert torch.allclose(expected, result)
+
     shape_stride_cases = [
         # shape: [1]
         ([1], [1]),     # contiguous
@@ -42,8 +65,6 @@ class TestPythonJiterator(TestCase):
         ([1,3], [1,2]), # non-contiguous
         # shape: [3, 3]
         ([3,3], [3,1]), # contiguous
-        ([3,3], [1,3]), # non-contiguous
-        ([3,3], [0,2]), # non-contiguous
         ([3,3], [2,1]), # non-contiguous
     ]
     @parametrize("a_shape_stride", shape_stride_cases)
@@ -129,8 +150,8 @@ class TestPythonJiterator(TestCase):
 
         input_string = ",".join([f"T i{i}" for i in range(num_inputs)])
         function_body = "+".join([f"i{i}" for i in range(num_inputs)])
-        code_string = f"template <typename T> T python_jitted({input_string}) {{ return {function_body}; }}"
-        jitted_fn = create_jit_fn(code_string, "python_jitted")
+        code_string = f"template <typename T> T my_kernel({input_string}) {{ return {function_body}; }}"
+        jitted_fn = create_jit_fn(code_string)
 
         def ref_fn(*inputs):
             return torch.sum(torch.stack(inputs), dim=0)
@@ -139,6 +160,15 @@ class TestPythonJiterator(TestCase):
         result = jitted_fn(*inputs)
 
         assert torch.allclose(expected, result)
+
+    @parametrize("code_string", [
+        "template <typename T> T my _kernel(T x) { return x; }",
+        "template <typename T> Tmy_kernel(T x) { return x; }",
+    ])
+    def test_invalid_function_name(self, code_string):
+        with self.assertRaises(Exception):
+            jitted_fn = create_jit_fn(code_string)
+
 
 instantiate_parametrized_tests(TestPythonJiterator)
 

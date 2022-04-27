@@ -1,5 +1,8 @@
-#include <c10/util/variant.h>
+#include <ATen/jit_macros.h>
 
+#if AT_USE_JITERATOR()
+
+#include <c10/util/variant.h>
 #include <ATen/cuda/jiterator.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -70,7 +73,7 @@ struct OffsetCalculatorContainer {
       AT_FOR_8_INPUTS(DEFINE_CASE)
 #undef DEFINE_CASE
       default:
-        AT_ERROR("make_input_offset_calculator not implemented for ninputs = ", N);
+        TORCH_CHECK(false, "make_input_offset_calculator not implemented for ninputs = ", N);
     }
   }
   void* data_ptr() {
@@ -112,7 +115,7 @@ struct ArrayVariant {
 #undef DEFINE_CASE
 
       default:
-        AT_ERROR("ArrayVariant not implemented for ninputs = ", N);
+        TORCH_CHECK(false, "ArrayVariant not implemented for ninputs = ", N);
     }
 
     c10::visit([&](auto& a) {
@@ -148,7 +151,7 @@ struct TrivialOffsetCalculatorVariant {
 #undef DEFINE_CASE
 
       default:
-        AT_ERROR("TrivialOffsetCalculatorVariant not implemented for ninputs = ", arity);
+        TORCH_CHECK(false, "TrivialOffsetCalculatorVariant not implemented for ninputs = ", arity);
     }
   }
 
@@ -179,7 +182,7 @@ struct LoadWithCastVariant {
 #undef DEFINE_CASE
 
       default:
-        AT_ERROR("make_input_offset_calculator not implemented for ninputs = ", arity);
+        TORCH_CHECK(false, "make_input_offset_calculator not implemented for ninputs = ", arity);
     }
   }
 
@@ -254,7 +257,7 @@ static inline void launch_jitted_vectorized_kernel(
   if (vectorized) {
     // pack args for kernel launch
     constexpr int kernel_args = 3;
-    void* args[kernel_args + extra_args_size];
+    auto args = std::make_unique<void*[]>(kernel_args + extra_args_size);
     args[0] = static_cast<void*>(&N);
     args[1] = data_ptr;
     args[2] = static_cast<void*>(&scalar_val);
@@ -263,7 +266,7 @@ static inline void launch_jitted_vectorized_kernel(
       // since 3 slots are already filled in `args`
       args[i + 3] = const_cast<void*>(extra_args[i].data_ptr());
     }
-    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1u, 1u}, {num_threads(), 1u, 1u});
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.get(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   } else {
     TrivialOffsetCalculatorVariant input_offset_calculator(iter.ninputs());
     void* ic_ptr = input_offset_calculator.data_ptr();
@@ -273,7 +276,7 @@ static inline void launch_jitted_vectorized_kernel(
 
     // pack args for kernel launch
     constexpr int kernel_args = 7;
-    void* args[kernel_args + extra_args_size];
+    auto args = std::make_unique<void*[]>(kernel_args + extra_args_size);
     args[0] = static_cast<void*>(&N);
     args[1] = data_ptr;
     args[2] = ic_ptr;
@@ -287,7 +290,7 @@ static inline void launch_jitted_vectorized_kernel(
       args[i + 7] = const_cast<void*>(extra_args[i].data_ptr());
     }
 
-    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1u, 1u}, {num_threads(), 1u, 1u});
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.get(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   }
 }
 
@@ -338,9 +341,8 @@ static inline void launch_jitted_unrolled_kernel(
 
   // pack args for kernel launch
   constexpr int kernel_args = 7;
-  // size of `extra_args` is unknown at compile-time
   auto extra_args_size = extra_args.size();
-  void* args[kernel_args + extra_args_size];
+  auto args = std::make_unique<void*[]>(kernel_args + extra_args_size);
   args[0] = static_cast<void*>(&N);
   args[1] = data_ptr;
   args[2] = ic_ptr;
@@ -353,7 +355,7 @@ static inline void launch_jitted_unrolled_kernel(
     // since 7 slots are already filled in `args`
     args[i + 7] = const_cast<void*>(extra_args[i].data_ptr());
   }
-  at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1u, 1u}, {num_threads(), 1u, 1u});
+  at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.get(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
 }
 
 void jitted_gpu_kernel_dynamic_impl(
@@ -495,7 +497,7 @@ namespace cuda {
 
 at::Tensor CompileKernel(
   const std::string& op_string,
-  const std::string& optional_name,
+  const std::string& kernel_name,
   const std::vector<at::Tensor>& tensors,
   const std::vector<at::Scalar>& extra_args) {
 
@@ -515,11 +517,11 @@ at::Tensor CompileKernel(
   }
   TensorIterator iter = config.build();
 
-  at::native::jitted_gpu_kernel_dynamic(optional_name, iter, op_string, extra_args);
+  at::native::jitted_gpu_kernel_dynamic(kernel_name, iter, op_string, extra_args);
 
   return iter.output();
 }
 
-
 }} // namespace at::cuda
 
+#endif // AT_USE_JITERATOR()
