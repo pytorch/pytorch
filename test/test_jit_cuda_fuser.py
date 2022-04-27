@@ -4611,7 +4611,8 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
         def _get_extremal_tensor(x, val, dtype):
             if x.dtype != dtype:
                 return x
-            return x.fill_(val)
+            y = torch.empty_like(x)
+            return y.fill_(val)
 
         def _get_extremal_input(x, val, dtype):
             if isinstance(x, torch.Tensor):
