@@ -5899,7 +5899,7 @@ class DistributedTest:
                 module=net.module,
                 process_group=net.process_group,
                 broadcast_bucket_size=net.broadcast_bucket_size,
-                rank=rank_to_broadcast,
+                src=rank_to_broadcast,
                 params_and_buffers_to_ignore=net.parameters_to_ignore
             )
             # Now all model params should be the same.
