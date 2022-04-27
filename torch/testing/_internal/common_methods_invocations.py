@@ -16961,7 +16961,6 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
-        # TODO: extract this into a common helper
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
         assert isinstance(self.torch_opinfo, UnaryUfuncInfo)
@@ -16983,7 +16982,6 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
-        # TODO: extract this into a common helper
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
         assert isinstance(self.torch_opinfo, BinaryUfuncInfo)
