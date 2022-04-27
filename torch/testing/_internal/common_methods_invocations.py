@@ -13055,7 +13055,6 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
-
                     lhs_make_tensor_kwargs=dict(low=0),
                     skips=(
                         # FIXME
