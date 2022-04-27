@@ -13,6 +13,7 @@ except ImportError:
 
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
 
+
 def generate_code(
     gen_dir: pathlib.Path,
     native_functions_path: Optional[str] = None,
@@ -130,8 +131,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--install_dir",
-        help=("Deprecated. Use --gen-dir instead. The semantics are different, do not change "
-              "blindly."),
+        help=(
+            "Deprecated. Use --gen-dir instead. The semantics are different, do not change "
+            "blindly."
+        ),
     )
     parser.add_argument(
         "--subset",
