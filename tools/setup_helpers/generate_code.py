@@ -13,6 +13,7 @@ except ImportError:
 
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
 
+
 def generate_code(
     native_functions_path: Optional[str] = None,
     install_dir: Optional[str] = None,
