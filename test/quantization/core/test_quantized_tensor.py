@@ -354,7 +354,8 @@ class TestQuantizedTensor(TestCase):
         # item
         scale = 1.0
         zero_point = 2
-        for device in ["cpu", "cuda"]:
+        devices = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        for device in devices:
             r = torch.ones(1, dtype=torch.float).to(device=device)
             for dtype in [torch.qint8, torch.quint8, torch.qint32]:
                 qr = torch.quantize_per_tensor(r, scale, zero_point, dtype=dtype)
