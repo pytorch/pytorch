@@ -1,3 +1,14 @@
+load("@//tools/build_defs:glob_defs.bzl", "subdir_glob")
+load(
+    "buck_defs.bzl",
+    "HOT_SRCS",
+    "JIT_SRCS",
+    "LOGGING_SRCS",
+    "OPERATOR_SRCS",
+    "SUBGRAPH_SRCS",
+    "TABLE_SRCS",
+)
+
 cxx_library(
     name = "fmt",
     srcs = ['fmt/src/format.cc'],
@@ -11,4 +22,294 @@ cxx_library(
     raw_headers = glob(["fmt/include/fmt/*.h"]),
     soname = "libthird-party_fmt_fmt.$(ext)",
     visibility = ['PUBLIC'],
+)
+
+cxx_library(
+    name = "pthreadpool",
+    srcs = ['pthreadpool/src/legacy-api.c', 'pthreadpool/src/memory.c', 'pthreadpool/src/portable-api.c', 'pthreadpool/src/pthreads.c'],
+    deps = [
+        "//third_party:FXdiv",
+        ":pthreadpool_header",
+    ],
+    exported_deps = [],
+    compiler_flags = [
+        "-w",
+        "-Os",
+        "-fstack-protector-strong",
+        "-fno-delete-null-pointer-checks"
+    ],
+    headers = {
+        'threadpool-atomics.h': 'pthreadpool/src/threadpool-atomics.h',
+        'threadpool-common.h': 'pthreadpool/src/threadpool-common.h',
+        'threadpool-object.h': 'pthreadpool/src/threadpool-object.h',
+        'threadpool-utils.h': 'pthreadpool/src/threadpool-utils.h'
+    },
+    exported_headers = {"pthreadpool.h": "pthreadpool/include/pthreadpool.h"},
+    preferred_linkage = "static",
+    exported_preprocessor_flags = [],
+    frameworks = [],
+    header_namespace = "pthreadpool",
+    link_whole = False,
+    linker_flags = [],
+    platform_compiler_flags = [],
+    platform_linker_flags = [],
+    platform_preprocessor_flags = [['windows', ['-D_WINDOWS', '-D_WIN32', '-DWIN32', '-DNOMINMAX', '-D_CRT_SECURE_NO_WARNINGS', '-D_USE_MATH_DEFINES']], ['windows.*64$', ['-D_WIN64']]],
+    preprocessor_flags = ['-DPTHREADPOOL_USE_FUTEX=0', '-DPTHREADPOOL_USE_GCD=0'],
+    reexport_all_header_dependencies = True,
+    soname = "",
+    visibility = ['PUBLIC'],
+)
+
+cxx_library(
+    name = "pthreadpool_header",
+    header_namespace = "",
+    exported_headers = {
+        "pthreadpool.h": "pthreadpool/include/pthreadpool.h",
+    },
+)
+
+cxx_library(
+    name = "FXdiv",
+    header_namespace = "",
+    exported_headers = {
+        "fxdiv.h": "FXdiv/include/fxdiv.h",
+    },
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "cpuinfo",
+    srcs = glob(
+        [
+            "cpuinfo/src/*.c",
+            "cpuinfo/src/linux/*.c",
+            "cpuinfo/src/mach/*.c",
+            "cpuinfo/src/x86/*.c",
+            "cpuinfo/src/x86/cache/*.c",
+            "cpuinfo/src/x86/linux/*.c",
+            "cpuinfo/src/x86/mach/*.c",
+        ],
+        exclude = [
+            "cpuinfo/src/x86/mockcpuid.c",
+            "cpuinfo/src/linux/mockfile.c",
+        ],
+    ),
+    raw_headers = glob([
+        "cpuinfo/include/*.h",
+        "cpuinfo/src/*.h",
+        "cpuinfo/src/cpuinfo/*.h",
+        "cpuinfo/src/linux/*.h",
+        "cpuinfo/src/mach/*.h",
+        "cpuinfo/src/x86/*.h",
+        "cpuinfo/src/x86/linux/*.h",
+    ]),
+    force_static = True,
+    include_directories = ["cpuinfo/src", "cpuinfo/include"],
+    preprocessor_flags = [
+        "-DCPUINFO_LOG_LEVEL=2",
+        "-D_GNU_SOURCE=1",
+    ],
+    public_include_directories = ["cpuinfo/include", "cpuinfo/src"],
+    visibility = ["PUBLIC"],
+    deps = [
+        ":clog",
+    ],
+)
+
+cxx_library(
+    name = "clog",
+    srcs = [
+        "cpuinfo/deps/clog/src/clog.c",
+    ],
+    raw_headers = glob([
+        "cpuinfo/deps/clog/include/*.h",
+    ]),
+    public_include_directories = [
+        "cpuinfo/deps/clog/include/",
+    ],
+    force_static = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "FP16",
+    raw_headers = glob([
+        "FP16/include/*.h",
+    ]),
+    public_include_directories = [
+        "FP16/include/",
+    ],
+    force_static = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "XNNPACK",
+    srcs = [
+        "XNNPACK/src/allocator.c",
+        "XNNPACK/src/init.c",
+        "XNNPACK/src/memory-planner.c",
+        "XNNPACK/src/operator-delete.c",
+        "XNNPACK/src/runtime.c",
+        "XNNPACK/src/subgraph.c",
+        "XNNPACK/src/tensor.c",
+    ] + LOGGING_SRCS,
+    exported_headers = {
+        "xnnpack.h": "XNNPACK/include/xnnpack.h",
+    },
+    headers = subdir_glob([
+        ("XNNPACK/src", "**/*.h"),
+        ("XNNPACK/include", "**/*.h"),
+    ]),
+    force_static = True,
+    include_directories = ["cpuinfo/src", "cpuinfo/include"],
+    # fbobjc_preprocessor_flags = ["-DXNN_PRIVATE=", "-DXNN_INTERNAL="],
+    header_namespace = "",
+    preprocessor_flags = [
+        "-DXNN_LOG_LEVEL=0",
+        "-DXNN_NO_Q8_OPERATORS",
+        "-DXNN_NO_F16_OPERATORS",
+        "-DXNN_NO_NCHW_OPERATORS",
+        "-DXNN_NO_QU8_OPERATORS",
+        "-DXNN_NO_S8_OPERATORS",
+        "-DXNN_NO_U8_OPERATORS",
+        "-DXNN_NO_VCVT_OPERATORS",
+        "-DXNN_NO_X32_OPERATORS",
+        "-DXNN_NO_X8_OPERATORS",
+        "-DXNN_NO_XX_OPERATORS",
+    ],
+    public_include_directories = ["cpuinfo/include", "cpuinfo/src"],
+    visibility = ["PUBLIC"],
+    deps = [
+        ":operators",
+        ":subgraph",
+        ":tables",
+        ":ukernels_scalar",
+        #":arm_lib", TODO
+        #":x86_and_x86_64_lib", TODO
+        ":cpuinfo",
+        ":pthreadpool",
+
+    ],
+)
+
+cxx_library(
+    name = "operators",
+    # srcs have to include HOT_SRCS to be able to build on ARVR
+    srcs = OPERATOR_SRCS + HOT_SRCS,
+    headers = subdir_glob([
+        ("XNNPACK/src", "**/*.h"),
+    ]),
+    header_namespace = "",
+    compiler_flags = [
+        "-Oz",
+    ],
+    # fbobjc_preprocessor_flags = ["-DXNN_PRIVATE=", "-DXNN_INTERNAL="],
+    preferred_linkage = "static",
+    preprocessor_flags = [
+        "-DXNN_LOG_LEVEL=0",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        ":interface",
+        ":cpuinfo",
+        ":FP16",
+        ":FXdiv",
+        ":clog",
+    ],
+)
+
+cxx_library(
+    name = "subgraph",
+    srcs = SUBGRAPH_SRCS,
+    headers = subdir_glob([
+        ("XNNPACK/src", "**/*.h"),
+    ]),
+    header_namespace = "",
+    compiler_flags = [
+        "-O2",
+    ],
+    # fbobjc_preprocessor_flags = ["-DXNN_PRIVATE=", "-DXNN_INTERNAL="],
+    preferred_linkage = "static",
+    preprocessor_flags = [
+        "-DXNN_LOG_LEVEL=0",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        ":interface",
+        ":FP16",
+        ":FXdiv",
+        ":clog",
+    ],
+)
+
+cxx_library(
+    name = "tables",
+    srcs = TABLE_SRCS,
+    headers = subdir_glob([
+        ("XNNPACK/src", "**/*.h"),
+    ]),
+    header_namespace = "",
+    compiler_flags = [
+        "-O2",
+    ],
+    # fbobjc_preprocessor_flags = ["-DXNN_PRIVATE=", "-DXNN_INTERNAL="],
+    preferred_linkage = "static",
+    preprocessor_flags = [
+        "-DXNN_LOG_LEVEL=0",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        ":interface",
+        ":FP16",
+        ":FXdiv",
+        ":clog",
+    ],
+)
+
+cxx_library(
+    name = "interface",
+    header_namespace = "",
+    exported_headers = {
+        "xnnpack.h": "XNNPACK/include/xnnpack.h",
+    },
+    preprocessor_flags = [
+        "-DXNN_LOG_LEVEL=0",
+    ],
+    visibility = ["PUBLIC"],
+    exported_deps = [
+        ":pthreadpool_header",
+    ],
+)
+
+PROD_SCALAR_PORTABLE_MICROKERNEL_SRCS = [
+    "XNNPACK/src/params-init.c",
+    "XNNPACK/src/u8-lut32norm/scalar.c",
+    "XNNPACK/src/xx-copy/memcpy.c",
+    "XNNPACK/src/x8-lut/gen/lut-scalar-x4.c",
+    "XNNPACK/src/x32-depthtospace2d-chw2hwc/scalar.c",
+]
+
+cxx_library(
+    name = "ukernels_scalar",
+    srcs = PROD_SCALAR_PORTABLE_MICROKERNEL_SRCS,
+    headers = subdir_glob([
+        ("XNNPACK/src", "**/*.c"),
+        ("XNNPACK/src", "**/*.h"),
+    ]),
+    header_namespace = "",
+    compiler_flags = [
+        "-O2",
+    ],
+    # fbobjc_preprocessor_flags = ["-DXNN_PRIVATE=", "-DXNN_INTERNAL="],
+    preferred_linkage = "static",
+    preprocessor_flags = [
+        "-DXNN_LOG_LEVEL=0",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        ":interface",
+        ":FP16",
+        ":FXdiv",
+    ],
 )

@@ -65,5 +65,5 @@ jobs:
 
       - name: Build Buck target
         run: |
-          echo -e "[buildfile]\n  name = BUILD.buck\n" > .buckconfig
-          buck build --keep-going //third_party:
+          echo -e "" > .buckconfig
+          buck build --config-file oss.buckconfig c10:c10 third_party: --keep-going
