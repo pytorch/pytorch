@@ -1,6 +1,7 @@
 from collections import OrderedDict, namedtuple
 import itertools
 import warnings
+import weakref
 import functools
 
 import torch
@@ -1166,7 +1167,7 @@ class Module:
             grad_fn = var.grad_fn
             if grad_fn is not None:
                 for hook in non_full_backward_hooks:
-                    wrapper = functools.partial(hook, self)
+                    wrapper = functools.partial(hook, weakref.proxy(self))
                     functools.update_wrapper(wrapper, hook)
                     grad_fn.register_hook(wrapper)
                 self._maybe_warn_non_full_backward_hook(input, result, grad_fn)
@@ -1402,7 +1403,7 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
         if with_module:
-            hook = functools.partial(hook, self)
+            hook = functools.partial(hook, weakref.prox(self))
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 
