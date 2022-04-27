@@ -661,7 +661,10 @@ class GitHubPR:
             elapsed_time = current_time - start_time
 
             if(elapsed_time > 355 * 60):
-                gh_post_comment(org, project, pr_num, 'Took too long to merge. Please try again later', dry_run=dry_run)
+                msg = 'Took too long to merge. Please try again later'
+                gh_post_comment(org, project, pr_num, msg, dry_run=dry_run)
+                gh_add_labels(org, project, pr_num, ["land-failed"])
+                raise RuntimeError(msg)
 
             try:
                 self.merge_into(repo, dry_run=dry_run)
