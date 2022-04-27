@@ -1266,7 +1266,7 @@ class PlaceholderObserver(ObserverBase):
         )
 
 
-class RecordingObserver(_ObserverBase):
+class RecordingObserver(ObserverBase):
     r"""
     The module is mainly for debug and records the tensor values during runtime.
 
