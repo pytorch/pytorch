@@ -26,10 +26,7 @@
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/index_add_native.h>
-#include <ATen/ops/_index_mul_native.h>
-#include <ATen/ops/_index_min_native.h>
-#include <ATen/ops/_index_max_native.h>
-#include <ATen/ops/_index_mean_native.h>
+#include <ATen/ops/_index_reduce_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
 #endif
@@ -707,7 +704,6 @@ void index_reduce_func_cuda_impl(
   bool include_self,
   const INDEX_OP& reduce,
   const func_t& reduce_func,
-  const std::string& method_name,
   const Tensor& result) {
   if (!result.is_same(self)) result.copy_(self);
 
@@ -721,10 +717,9 @@ void index_reduce_func_cuda_impl(
 
   if (globalContext().deterministicAlgorithms()){
     TORCH_CHECK(
-      false, method_name, "() does not have a deterministic path. Please file a feature request if you need this.");
+      false, "index_reduce() does not have a deterministic path. Please file a feature request if you need this.");
   }
 
-  // FIXME: should I make this a helper function to reduce code duplication?
   if (!include_self) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -879,30 +874,32 @@ TORCH_IMPL_FUNC(index_add_cuda_out)
   index_add_cuda_impl(self, dim, index, source, alpha, result);
 }
 
-TORCH_IMPL_FUNC(_index_mul_cuda_out)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self, const Tensor& result) {
-  index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MULTIPLY, reduce_multiply, "_index_mul", result);
-}
+TORCH_IMPL_FUNC(_index_reduce_cuda_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const c10::string_view reduce,
+ bool include_self,
+ const Tensor& result) {
+  TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
 
-TORCH_IMPL_FUNC(_index_max_cuda_out)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self, const Tensor& result) {
-  index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MAXIMUM, reduce_maximum, "_index_max", result);
+  if (reduce == "prod") {
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MULTIPLY, reduce_multiply, result);
+  } else if (reduce == "mean") {
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MEAN, reduce_add, result);
+    auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
+    counts.index_add_(dim, index, at::ones_like(source));
+    counts.masked_fill_(counts == 0, 1);
+    result.div_(counts);
+  } else if (reduce == "amax") {
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MAXIMUM, reduce_maximum, result);
+  } else if (reduce == "amin") {
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MINIMUM, reduce_minimum, result);
+  } else {
+    TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
+  }
 }
-
-TORCH_IMPL_FUNC(_index_min_cuda_out)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self, const Tensor& result) {
-  index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MINIMUM, reduce_minimum, "_index_min", result);
-}
-
-TORCH_IMPL_FUNC(_index_mean_cuda_out)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, bool include_self, const Tensor& result) {
-  index_reduce_func_cuda_impl(self, dim, index, source, include_self, INDEX_OP::MEAN, reduce_add, "_index_mean", result);
-  auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
-  counts.index_add_(dim, index, at::ones_like(source));
-  counts.masked_fill_(counts == 0, 1);
-  result.div_(counts);
-}
-
 
 namespace {
 // We prefer this kernel to avoid reloading index points if the number

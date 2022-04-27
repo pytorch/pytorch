@@ -4877,8 +4877,8 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     copy = op_info.name == "index_copy"
     # target.index_fill(dim, idx, value)
     fill = op_info.name == "index_fill"
-    # target._index_<reduction>(dim, idx, value)
-    reduce_op = op_info.name in {"_index_mul", "_index_max", "_index_min", "_index_mean"}
+    # target._index_reduce(dim, idx, source, reduce, *, include_self=True)
+    reduce_op = op_info.name == "_index_reduce"
 
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -4890,9 +4890,11 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     shapes = [(), (1,), (S, S)]
     # extra parameter for add
     alphas = (-1, 0, 2) if add else (None,)
+    # extra parameters for reduce
     include_selfs = (True, False) if reduce_op else (None,)
+    reduces = ('prod', 'mean', 'amin', 'amax') if reduce_op else (None,)
 
-    for shape, alpha, include_self in product(shapes, alphas, include_selfs):
+    for shape, alpha, include_self, reduce in product(shapes, alphas, include_selfs, reduces):
         t = make_arg(shape)
         args = []
 
@@ -4911,6 +4913,10 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
         elif fill:
             # A weird number to catch errors
             args.append(make_arg((1,)).item())
+
+        # reduce
+        if reduce_op:
+            args.append(reduce)
 
         args = tuple(args)
         kwargs = {} if alpha is None else {"alpha": alpha}
@@ -14322,19 +14328,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
-    OpInfo('_index_mul',
-           dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           supports_out=True,
-           sample_inputs_func=sample_inputs_index),
-    OpInfo('_index_max',
-           dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           supports_out=True,
-           sample_inputs_func=sample_inputs_index),
-    OpInfo('_index_min',
-           dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           supports_out=True,
-           sample_inputs_func=sample_inputs_index),
-    OpInfo('_index_mean',
+    OpInfo('_index_reduce',
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=True,
            sample_inputs_func=sample_inputs_index),
