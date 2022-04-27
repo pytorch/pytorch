@@ -3022,6 +3022,7 @@
 - func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
     QuantizedCPU: quantized_max_pool2d
+    QuantizedCUDA: quantized_max_pool2d_cudnn
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
@@ -4922,13 +4923,6 @@
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  dispatch:
-    # Why give zeros_like() a derivative formula?
-    # For the functionalization pass.
-    # zeros_like() runs *underneath* functionalization (we transform zero_ -> zero -> zeros_like),
-    # But the decomposite for zeros_like() calls into more inplace ops!
-    # Instead, we want zeros_like() to be a primitive w.r.t tracing (which we can do by adding an autograd formula).
-    CompositeExplicitAutograd: zeros_like
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   variants: function
@@ -5147,9 +5141,6 @@
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
     SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_csr_
-
-- func: zero(Tensor self) -> Tensor
-  variants: function
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5876,9 +5867,14 @@
   dispatch:
     CUDA: _thnn_fused_lstm_cell_cuda
 
-- func: _thnn_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+# NB: The composite version of this function below is a simple wrapper that duplicates some of the outputs
+#     It is necessary to avoid triggering TensorImpl use count checks in debug mode
+# NB: this is function is NOT differentiable
+- func: _thnn_fused_lstm_cell_backward_impl(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor)
   dispatch:
-    CUDA: _thnn_fused_lstm_cell_backward_cuda
+    CUDA: _thnn_fused_lstm_cell_backward_impl_cuda
+
+- func: _thnn_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
 
 - func: _thnn_differentiable_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor input_gates, Tensor hidden_gates, Tensor? input_bias, Tensor? hidden_bias, Tensor cx, Tensor cy) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
 
