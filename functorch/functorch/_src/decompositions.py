@@ -239,6 +239,18 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
     # return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 
+@register_decomposition(aten.l1_loss)
+def l1_loss(self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value) -> Tensor:
+    if reduction != Reduction.NONE.value:
+        loss = (self - target).abs()
+        if reduction == Reduction.MEAN.value:
+            return torch.mean(loss)
+        else:
+            return torch.sum(loss)
+    else:
+        return (self - target).abs()
+
+
 @register_decomposition(aten.mse_loss_backward)
 def mse_loss_backward(grad_output: Tensor, input: Tensor, target: Tensor, reduction: int):
     norm = 2. / input.numel() if reduction == Reduction.MEAN.value else 2.
