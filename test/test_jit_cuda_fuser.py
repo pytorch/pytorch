@@ -4597,10 +4597,12 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
             return x
 
         def _get_extremal_sample(sample: SampleInput, val, dtype):
-            sample.input = _get_extremal_input(sample.input, val, dtype)
-            sample.args = [_get_extremal_input(x, val, dtype) for x in sample.args]
-            sample.kwargs = {k: _get_extremal_input(v, val, dtype) for k, v in sample.kwargs.items()}
-            return sample
+            extremal_sample = SampleInput(
+                input=_get_extremal_input(sample.input, val, dtype),
+                args=[_get_extremal_input(x, val, dtype) for x in sample.args],
+                kwargs={k: _get_extremal_input(v, val, dtype) for k, v in sample.kwargs.items()},
+            )
+            return extremal_sample
 
         def _get_extremal_samples(sample: SampleInput, dtype):
             vals = [float('inf'), float('-inf'), float('nan')]
