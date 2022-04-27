@@ -13,7 +13,6 @@ def setup(rank, world_size):
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
-
 def cleanup():
     dist.destroy_process_group()
 
@@ -23,7 +22,7 @@ def broadcast():
     if device.index == 0:
         x = torch.ones(2, 3).to(device)
     dist.broadcast(x, 0)
-    print(f"{os.getpid()} broadcast: {x.cpu()}")
+    print(f"{os.getpid()} broadcast: {x}")
     return x
 
 # The compiler_fn is called after the forward and backward graphs are extracted.
