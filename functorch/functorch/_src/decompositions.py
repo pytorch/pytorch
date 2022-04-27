@@ -287,12 +287,13 @@ def huber_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, reduc
 
 @register_decomposition(aten.binary_cross_entropy_backward)
 def binary_cross_entropy_backward(grad_output: Tensor, self: Tensor, target: Tensor, weight: Optional[Tensor] = None, reduction: int = Reduction.MEAN.value) -> Tensor:
-    if weight is None:
-        weight = self.new_ones(())
-    result = weight * (self - target) / self / (1 - self)
+    EPSILON = 1e-12
+    result = grad_output * (self - target) / torch.clamp(self * (1 - self), min=EPSILON)
+    if weight is not None:
+        result = result * weight
     if reduction == Reduction.MEAN.value:
-        result = result * (1.0 / self.numel())
-    return result * grad_output
+        result = result / self.numel()
+    return result
 
 
 @register_decomposition(aten._euclidean_dist)
