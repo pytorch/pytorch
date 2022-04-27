@@ -1,6 +1,5 @@
-import os
 import sys
-from enum import Enum
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -73,3 +72,7 @@ if is_available():
     from .remote_device import _remote_device
 
     set_debug_level_from_env()
+
+if TYPE_CHECKING:
+    from torch._C._distributed_c10d import *  # noqa: F403
+    from .distributed_c10d import *  # noqa: F403 F811

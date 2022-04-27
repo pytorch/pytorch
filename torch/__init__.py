@@ -734,6 +734,7 @@ del manager_path
 # is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
 # so that this import is good enough
 if TYPE_CHECKING:
+    from torch._C import *  # type: ignore[misc] # noqa: F403 F811
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
