@@ -90,7 +90,10 @@ TensorView* view(
   auto analyze_view = analyzeView(x, original_sizes, new_sizes);
 
   auto reduction = (!analyze_view.trivial_reduction_axes.empty())
-      ? sum(x, analyze_view.trivial_reduction_axes, false /* keep_dim */, x->getDataType().value())
+      ? sum(x,
+            analyze_view.trivial_reduction_axes,
+            false /* keep_dim */,
+            x->getDataType().value())
       : x;
 
   auto view = (!analyze_view.transforms.empty())
@@ -111,9 +114,11 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
       trivial_reduction_axes.push_back(idx);
     }
   }
-  return (trivial_reduction_axes.empty())
-      ? x
-      : sum(x, trivial_reduction_axes, false /* keep_dim */, x->getDataType().value());
+  return (trivial_reduction_axes.empty()) ? x
+                                          : sum(x,
+                                                trivial_reduction_axes,
+                                                false /* keep_dim */,
+                                                x->getDataType().value());
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {

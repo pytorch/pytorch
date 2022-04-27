@@ -189,7 +189,8 @@ Val* newValLike(Val* val, DataType dtype) {
 Val* getMinimumValue(DataType v) {
   switch (v) {
     case (DataType::Double):
-      return IrBuilder::create<Double>(-std::numeric_limits<double>::infinity());
+      return IrBuilder::create<Double>(
+          -std::numeric_limits<double>::infinity());
       break;
     case (DataType::Float):
       return IrBuilder::create<Double>(-std::numeric_limits<float>::infinity());
@@ -205,9 +206,7 @@ Val* getMinimumValue(DataType v) {
       break;
     default:
       TORCH_CHECK(
-          false,
-          "Could not generate a max op for tensor with type: ",
-          v);
+          false, "Could not generate a max op for tensor with type: ", v);
   }
   return nullptr;
 }
@@ -231,9 +230,7 @@ Val* getMaximumValue(DataType v) {
       break;
     default:
       TORCH_CHECK(
-          false,
-          "Could not generate a min op for tensor with type: ",
-          v);
+          false, "Could not generate a min op for tensor with type: ", v);
   }
   return nullptr;
 }
@@ -751,7 +748,6 @@ TensorView* sum(
     const std::vector<int>& axes,
     bool keep_dim /*=false*/,
     DataType dtype /* DataType::Null */) {
-
   if (dtype == DataType::Null) {
     auto initial_v1_dtype = v1->getDataType().value();
     if (isBooleanType(initial_v1_dtype) || isIntegralType(initial_v1_dtype)) {
@@ -776,9 +772,7 @@ TensorView* sum(
     init = IrBuilder::create<Bool>(false);
   } else {
     TORCH_CHECK(
-        false,
-        "Could not generate a sum op for tensor with type: ",
-        v1_dtype);
+        false, "Could not generate a sum op for tensor with type: ", v1_dtype);
   }
 
   return reductionOp(BinaryOpType::Add, axes, init, v1, keep_dim, dtype);
@@ -1162,22 +1156,21 @@ TensorView* threshold(TensorView* in, Val* thresh, Val* value) {
 
 Val* clamp(Val* in, Val* min_val, Val* max_val) {
   TORCH_CHECK(
-      (min_val == nullptr ||
-       min_val->getValType().value() == ValType::Scalar ||
+      (min_val == nullptr || min_val->getValType().value() == ValType::Scalar ||
        min_val->getValType().value() == ValType::NamedScalar) &&
-          (max_val == nullptr || 
+          (max_val == nullptr ||
            max_val->getValType().value() == ValType::Scalar ||
            max_val->getValType().value() == ValType::NamedScalar),
       "For Clamp operation: Min and Max values should be Scalars.");
 
-  min_val = (min_val == nullptr) ?
-      getMinimumValue(in->getDataType().value()) :
-      optionalCast(in->getDataType().value(), min_val);
+  min_val = (min_val == nullptr)
+      ? getMinimumValue(in->getDataType().value())
+      : optionalCast(in->getDataType().value(), min_val);
   TORCH_CHECK(min_val != nullptr, "Missing minimum value");
 
-  max_val = (max_val == nullptr) ?
-      getMaximumValue(in->getDataType().value()) :
-      optionalCast(in->getDataType().value(), max_val);
+  max_val = (max_val == nullptr)
+      ? getMaximumValue(in->getDataType().value())
+      : optionalCast(in->getDataType().value(), max_val);
   TORCH_CHECK(max_val != nullptr, "Missing maximum value");
 
   Val* out = newValLike(in, in->getDataType().value());
