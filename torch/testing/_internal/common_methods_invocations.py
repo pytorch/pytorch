@@ -16221,23 +16221,17 @@ op_db: List[OpInfo] = [
         'nansum',
         identity=0,
         nan_policy='omit',
-        supports_out=False,
+        supports_out=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.nansum),
         skips=(
-            # FIXME: nansum does not support passing keepdim without passing dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: nansum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: nansum does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
-            # FIXME: improve precision
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: flaky test so skipped instead of xfailed
+            # possibly bad low precision reference in numpy
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
-                         dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=[torch.float16]),
         ),
     ),
