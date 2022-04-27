@@ -156,7 +156,10 @@ class MixedPrecision:
     .. note:: Specification of reduced precision types must be explicit, in that
         if, for example, ``param_dtype`` is not specified, it will not be cast by
         FSDP. Thus, a config such as ``MixedPrecision(reduce_dtype=torch.float16)``
-        will not cast buffers or parameters.
+        will not cast buffers or parameters. Note that if a ``MixedPrecision``
+        config is specified without a ``reduce_dtype``, gradient communication
+        would occur in the `param_dtype` precision, if given, otherwise, in the
+        original parameter precision.
     """
     # maintain a tensor of this dtype that the fp32 param shard will be cast to.
     # Will control the precision of model params, inputs, and thus compute as
@@ -165,6 +168,8 @@ class MixedPrecision:
     # Gradient communication precision.
     reduce_dtype: Optional[torch.dtype] = None
     # Buffer precision.
+    # TODO: buffer + param are usually of the same type, if user specifies
+    # param but not buffer, should we automatically make buffer be the same?
     buffer_dtype: Optional[torch.dtype] = None
 
 
@@ -919,7 +924,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         assert (
             self._mixed_precision_enabled_for_params()
-        ), f"Expected to only be called when mixed precision for parameters is enabled."
+        ), "Expected to only be called when mixed precision for parameters is enabled."
         with torch.cuda.stream(self._streams["mixed_precision_params"]):
             for p in self.params:
                 assert p._mp_shard is not None
@@ -942,7 +947,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         assert (
             self._mixed_precision_enabled_for_params()
-        ), f"Expected to only be called when mixed precision for parameters is enabled."
+        ), "Expected to only be called when mixed precision for parameters is enabled."
         current_stream = torch.cuda.current_stream()
         for p in params:
             # mp_shard should always be allocated.
@@ -2310,14 +2315,15 @@ class FullyShardedDataParallel(nn.Module):
             orig_grad_data = param.grad.data
             if (
                 self._mixed_precision_enabled_for_reduce()
-                and (
-                    not self._mixed_precision_enabled_for_params()
-                    or self.mixed_precision.param_dtype != self.mixed_precision.reduce_dtype
-                )
+                # and (
+                #     not self._mixed_precision_enabled_for_params()
+                #     or self.mixed_precision.param_dtype != self.mixed_precision.reduce_dtype
+                # )
             ):
                 # Cast gradient to precision in which it should be communicated.
                 # TODO: Make this a communication hook when communication hooks
-                # are implemented for FSDP.
+                # are implemented for FSDP. Note that this is a noop if the
+                # reduce_dtype matches the param dtype.
                 param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
 
             if self.gradient_predivide_factor > 1:
@@ -2351,9 +2357,16 @@ class FullyShardedDataParallel(nn.Module):
                     # Average grad by world_size for consistency with PyTorch DDP.
                     output.div_(self.gradient_postdivide_factor)
 
+                # Note that we need to cast grads back to the full precision if
+                # 1) parameters were in reduced precision during fwd, as grads
+                # would thus be in this reduced precision, or
+                # 2) parameters did not have precision reduced, but grads
+                # had reduced precision for communication.
                 if (
-                    self._mixed_precision_enabled_for_params()
+                    self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
                 ):
+                    if self.rank == 0:
+                        print(" --- casting back to parameter precision --")
                     # Cast gradients back to the full parameter precision so that
                     # optimizer.step() happens in full precision.
                     orig_param_grad_data = output
@@ -2393,7 +2406,10 @@ class FullyShardedDataParallel(nn.Module):
                     self.world_size == 1
                 ), "Currently the only way for _is_sharded to be False is \
                     world_size == 1"
-                if self._mixed_precision_enabled_for_params():
+                if (
+                    self._mixed_precision_enabled_for_params()
+                    or self._mixed_precision_enabled_for_reduce()
+                ):
                     # Cast gradients back to the full parameter precision so that
                     # optimizer.step() happens in full precision.
                     orig_param_grad_data = param.grad.data
