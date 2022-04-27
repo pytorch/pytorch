@@ -265,6 +265,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("is_async", [](const KinetoEvent& e) {
         return e.isAsync();
       })
+      // metadata json
+      .def("metadataJson", [](const KinetoEvent& e) {
+        return e.metadataJson();
+      })
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
       .def("nbytes", [](const KinetoEvent& e) {
         return e.nBytes();

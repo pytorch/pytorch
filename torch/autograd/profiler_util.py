@@ -375,10 +375,11 @@ class FunctionEvent(FormattedTimesMixin):
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
             is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0,
-            is_legacy=False, flops=None, trace_name=None):
+            is_legacy=False, flops=None, trace_name=None, metadata=""):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
+        self.metadata: str = metadata
         self.trace_name: str = trace_name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread

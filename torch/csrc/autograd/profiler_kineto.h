@@ -235,6 +235,14 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  std::string metadataJson() const {
+    return metadataJson_;
+  }
+
+  KinetoEvent& metadataJson(const std::string& metadata) {
+    metadataJson_ = metadata;
+    return *this;
+  }
   int64_t cudaElapsedUs() const;
 
   uint64_t start_thread_id_ = 0;
@@ -262,6 +270,7 @@ struct TORCH_API KinetoEvent {
   bool is_async_{false};
   int64_t debug_handle_{-1};
   std::string backend_;
+  std::string metadataJson_;
 
   torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
   torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;

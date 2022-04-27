@@ -575,7 +575,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             .deviceResourceId(activity.resourceId())
             .startUs(activity.timestamp())
             .durationUs(activity.duration())
-            .activityType((uint8_t)activity.type());
+            .activityType((uint8_t)activity.type())
+            .metadataJson(activity.metadataJson());
         if (activity.linkedActivity()) {
           kineto_event.linkedCorrelationId(
               activity.linkedActivity()->correlationId());

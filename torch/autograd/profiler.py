@@ -336,6 +336,7 @@ class profile(object):
                 device_type=kineto_event.device_type(),
                 device_index=kineto_event.device_index(),
                 flops=kineto_event.flops(),
+                metadata=kineto_event.metadataJson(),
             )
             max_evt_id = fe.id if fe.id > max_evt_id else max_evt_id
             if fe.device_type == DeviceType.CPU and not fe.is_async:
