@@ -21330,11 +21330,11 @@ class NVFuserMultithreadedTest : public ::testing::Test {
   bool was_enabled = false;
 
   void SetUp() override {
-    was_enabled = cuda::fuser::setEnabled(true);
+    was_enabled = fuser::cuda::setEnabled(true);
   }
 
   void TearDown() override {
-    cuda::fuser::setEnabled(was_enabled);
+    fuser::cuda::setEnabled(was_enabled);
   }
 };
 
