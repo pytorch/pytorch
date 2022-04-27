@@ -42,12 +42,14 @@ class TestShardedSoftmax(ShardedTensorTestBase):
     @requires_nccl()
     def test_sharded_softmax_basic(self):
         self._test_sharded_softmax(0)
+        self._test_sharded_softmax(-2)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_softmax_on_sharding_dim(self):
         self._test_sharded_softmax(1)
+        self._test_sharded_softmax(-1)
 
 if __name__ == "__main__":
     run_tests()

@@ -10,7 +10,9 @@ def sharded_softmax(types, args=(), kwargs=None):
     input = args[0]
     pg = input._process_group
     dim = kwargs['dim']
-    if dim == input.sharding_spec().dim:
+    sharding_dim = input.sharding_spec().dim
+    ndims = len(input.size())
+    if dim == sharding_dim or dim + ndims == sharding_dim or sharding_dim + ndims == dim:
         exp = torch.exp(input.local_tensor())
         exp_sum = exp.sum(dim=dim).unsqueeze(dim=dim)
         exp_sum = torch.distributed.nn.functional.all_reduce(exp_sum, group=pg)
