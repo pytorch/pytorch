@@ -22,9 +22,10 @@ def register_elementwise_op(op):
         for local_shard in input.local_shards():
             local_shards_new.append(Shard(op(local_shard.tensor), local_shard.metadata))
         return ShardedTensor._init_from_local_shards_and_global_metadata(
-            local_shards_new, input.metadata(), process_group=pg
+            local_shards_new, input.metadata(), process_group=pg, sharding_spec=input.sharding_spec()
         )
 
 
 register_elementwise_op(torch.nn.functional.gelu)
 register_elementwise_op(torch.nn.functional.relu)
+register_elementwise_op(torch.Tensor.tanh)

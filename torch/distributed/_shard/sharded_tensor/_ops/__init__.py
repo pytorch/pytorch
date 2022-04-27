@@ -8,4 +8,5 @@ from .init import kaiming_uniform_, normal_, uniform_, constant_
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.linear import sharded_linear
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.embedding import sharded_embedding
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.embedding_bag import sharded_embedding_bag
+from torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.softmax import sharded_softmax
 import torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.math_ops
