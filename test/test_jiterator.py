@@ -1,3 +1,5 @@
+# Owner(s): ["module: cuda"]
+
 import torch
 from torch.cuda.jiterator import create_jit_fn
 import sys
@@ -23,12 +25,12 @@ def ref_fn(x, y, alpha=0, beta=0):
 
 class TestPythonJiterator(TestCase):
     @parametrize("dtype", [
-                           torch.float, torch.double, torch.half,
-                        #    torch.bfloat16,  failing due to numerical difference
-                           torch.uint8, torch.int8, torch.int16, torch.int, torch.long,
-                           torch.complex64, torch.complex128,
-                            #    torch.bool,
-                           ])
+        torch.float, torch.double, torch.half,
+        # torch.bfloat16,  failing due to numerical difference
+        torch.uint8, torch.int8, torch.int16, torch.int, torch.long,
+        torch.complex64, torch.complex128,
+        # torch.bool,
+    ])
     def test_all_dtypes(self, dtype):
         a = torch.rand(3, device='cuda').mul(10).type(dtype)
         b = torch.rand(3, device='cuda').mul(10).type(dtype)
@@ -36,7 +38,7 @@ class TestPythonJiterator(TestCase):
         expected = ref_fn(a, b)
         result = jitted_fn(a, b)
 
-        rtol =  0.00001
+        rtol = 0.00001
         if dtype is torch.half:
             rtol = 1e-2
         assert torch.allclose(expected, result, rtol=rtol)
@@ -53,20 +55,21 @@ class TestPythonJiterator(TestCase):
 
     shape_stride_cases = [
         # shape: [1]
-        ([1], [1]),     # contiguous
+        ([1], [1]),        # contiguous
         # shape: [3]
-        ([3], [1]),     # contiguous
-        ([3], [3]),     # non-contiguous
+        ([3], [1]),        # contiguous
+        ([3], [3]),        # non-contiguous
         # shape: [3, 1]
-        ([3,1], [1,1]), # contiguous
-        ([3,1], [1,3]), # non-contiguous
+        ([3, 1], [1, 1]),  # contiguous
+        ([3, 1], [1, 3]),  # non-contiguous
         # shape: [1, 3]
-        ([1,3], [3,1]), # contiguous
-        ([1,3], [1,2]), # non-contiguous
+        ([1, 3], [3, 1]),  # contiguous
+        ([1, 3], [1, 2]),  # non-contiguous
         # shape: [3, 3]
-        ([3,3], [3,1]), # contiguous
-        ([3,3], [2,1]), # non-contiguous
+        ([3, 3], [3, 1]),  # contiguous
+        ([3, 3], [2, 1]),  # non-contiguous
     ]
+
     @parametrize("a_shape_stride", shape_stride_cases)
     @parametrize("b_shape_stride", shape_stride_cases)
     def test_all_shape_stride(self, a_shape_stride, b_shape_stride, dtype=torch.float):
@@ -84,19 +87,18 @@ class TestPythonJiterator(TestCase):
             rtol = 1e-2
         assert torch.allclose(expected, result, rtol=rtol)
 
-    shape_stride_cases_sm= [
-        # shape: [3, 1]
-        ([3,1], [1,3]), # non-contiguous
-        # shape: [3, 3]
-        ([3,3], [3,1]), # contiguous
+    shape_stride_cases_sm = [
+        ([3, 1], [1, 3]),  # non-contiguous
+        ([3, 3], [3, 1]),  # contiguous
     ]
     dtypes = [
         torch.float, torch.double, torch.half,
-    #    torch.bfloat16,  failing due to numerical difference
+        # torch.bfloat16,  failing due to numerical difference
         # torch.uint8,   failing
         torch.int8, torch.int16, torch.int, torch.long,
         torch.complex64, torch.complex128,
     ]
+
     @parametrize("a_dtype", dtypes)
     @parametrize("b_dtype", dtypes)
     @parametrize("a_shape_stride", shape_stride_cases_sm)
@@ -117,11 +119,11 @@ class TestPythonJiterator(TestCase):
         assert torch.allclose(expected, result, rtol=rtol)
 
     @parametrize("dtype", [
-                           torch.float, torch.double, torch.half,
-                        #    output type is mismatching for following cases
-                        #    torch.uint8, torch.int8, torch.int16, torch.int, torch.long,
-                            #    torch.bfloat16,  failing due to numerical difference
-                           ])
+        torch.float, torch.double, torch.half,
+        # output type is mismatching for following cases
+        # torch.uint8, torch.int8, torch.int16, torch.int, torch.long,
+        # torch.bfloat16,  failing due to numerical difference
+    ])
     @parametrize("alpha", [-1, 2.0, None])
     @parametrize("beta", [3, -4.2, None])
     def test_extra_args(self, dtype, alpha, beta):

@@ -14,14 +14,15 @@ class CodeParser:
         function_params = r"(?P<function_params>\(.+\))"
         function_body = r"(?P<function_body>\{.+\})"
 
-        pattern = optional_ws \
-                + "template" \
-                + optional_ws + template_params \
-                + optional_ws + return_type \
-                + required_ws + function_name \
-                + optional_ws + function_params \
-                + optional_ws + function_body \
-                + optional_ws
+        pattern = \
+            optional_ws \
+            + "template" \
+            + optional_ws + template_params \
+            + optional_ws + return_type \
+            + required_ws + function_name \
+            + optional_ws + function_params \
+            + optional_ws + function_body \
+            + optional_ws
 
         result = re.match(pattern, code_string)
 
@@ -60,5 +61,3 @@ def create_jit_fn(op_string: str, **kwargs) -> Callable:
                 expanded_kwargs)
 
     return JittedFunction(op_string, **kwargs)
-
-
