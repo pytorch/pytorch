@@ -2303,7 +2303,7 @@ void separateNestedViews(Node* cuda_fusion_group) {
       auto parent = parent_value->node();
 
       auto grandparent_value = parent->input(0);
-      auto grandparent = grandparent_value->node();
+      C10_UNUSED auto grandparent = grandparent_value->node();
 
       // Before: gp -> x -> n
       // After: gp -> x / gp -> n
