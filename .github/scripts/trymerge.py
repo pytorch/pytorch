@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
@@ -652,6 +653,22 @@ class GitHubPR:
 
         repo.push(self.default_branch(), dry_run)
 
+    def merge_on_green(self, repo: GitRepo, org: str, project: str, pr_num: int, *, dry_run: bool = False) -> None:
+        start_time = time.time()
+
+        while True:
+            current_time = time.time()
+            elapsed_time = current_time - start_time
+
+            if(elapsed_time > 355 * 60):
+                gh_post_comment(org, project, pr_num, 'Took too long to merge. Please try again later', dry_run=dry_run)
+
+            try:
+                self.merge_into(repo, dry_run=dry_run)
+            except Exception as e:
+                print(f"Merge failed due to {e}. Trying again in 60 seconds.")
+                time.sleep(60)
+
 
 @dataclass
 class MergeRule:
@@ -797,7 +814,6 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
-
 def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
@@ -822,6 +838,9 @@ def main() -> None:
     if pr.is_cross_repo() and pr.is_ghstack_pr():
         gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
+
+    if args.on_green:
+        pr.merge_on_green(repo, org, project, args.pr_num, dry_run=args.dry_run)
 
     try:
         pr.merge_into(repo, dry_run=args.dry_run, force=args.force)
