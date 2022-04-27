@@ -2,6 +2,7 @@
 
 #ifdef USE_CUDA
 #include <c10/util/ArrayRef.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -493,10 +494,42 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def_static(
       "sum", &torch::jit::fuser::cuda::sum, py::return_value_policy::reference);
 
-  // Broadcast operation
+  // Broadcast operations
   nvf_ops.def_static(
       "broadcast",
       &torch::jit::fuser::cuda::broadcast,
+      py::return_value_policy::reference);
+  // TODO: We don't have a way to realize a tensor if the operation creates
+  // the output of a fusion.
+  nvf_ops.def_static(
+      "broadcast_in_dim",
+      [](TensorView* input,
+         std::vector<int>& output_shape,
+         std::vector<int>& broadcast_dims) -> TensorView* {
+        TORCH_CHECK(
+            output_shape.size() >= input->nDims(),
+            "The new shape is expected to be greater-then-or-equal to the input",
+            output_shape.size(),
+            input->nDims());
+        TORCH_CHECK(
+            input->nDims() == broadcast_dims.size(),
+            "The broadcast dimensions should match the input dimensions.",
+            input->nDims(),
+            broadcast_dims.size());
+
+        std::vector<bool> is_broadcast_dim(output_shape.size(), true);
+        for (const auto idx : c10::irange(broadcast_dims.size())) {
+          if (idx > 0) {
+            TORCH_CHECK(broadcast_dims[idx - 1] < broadcast_dims[idx],
+              "Broadcast dimension is not greater than the previous value.");
+          }
+          TORCH_CHECK(broadcast_dims[idx] < output_shape.size(),
+            "Invalid broadcast_dims value.");
+          is_broadcast_dim.at(broadcast_dims[idx]) = false;
+        }
+
+        return torch::jit::fuser::cuda::broadcast(input, is_broadcast_dim);
+      },
       py::return_value_policy::reference);
 
   // Cast Operations
