@@ -569,6 +569,23 @@ def get_deterministic_debug_mode() -> builtins.int:
     else:
         return 0
 
+def get_float32_matmul_precision() -> builtins.str:
+    r"""Returns the current value of float32 matrix multiplication precision. Refer to
+    :func:`torch.set_float32_matmul_precision` documentation for more details.
+    """
+    return _C._get_float32_matmul_precision()
+
+def set_float32_matmul_precision(precision):
+    r"""Sets the precision of float32 matrix multiplication (one of HIGHEST, HIGH, MEDIUM).
+
+    Args:
+        precision(str): default "highest": avoid internally reducing precision with
+        formats such as TF32.
+        If "high," allow TF32 (meant to be equivalent to bf16x3).
+        If "medium," allow TF32 (meant to be equivalent to bf16).
+    """
+    _C._set_float32_matmul_precision(precision)
+
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
     appear once per process. This helps avoid excessive warning information.

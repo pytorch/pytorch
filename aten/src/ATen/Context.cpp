@@ -5,6 +5,7 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
 
+#include <algorithm>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -142,7 +143,45 @@ bool Context::allowTF32CuBLAS() const {
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
+  TORCH_WARN("Setting allow_tf32_cublas directly is not recommend as it may conflict with"
+              "torch.set_float32_matmul_precision. Using torch.set_float32_matmul_precision"
+              "is recommended instead.");
   allow_tf32_cublas = b;
+}
+
+Float32MatmulPrecision Context::float32MatmulPrecision() const {
+  return float32_matmul_precision;
+}
+
+void Context::setFloat32MatmulPrecision(Float32MatmulPrecision p) {
+  float32_matmul_precision = p;
+}
+
+void Context::setFloat32MatmulPrecision(const std::string &s) {
+  auto match = [this](const std::string & s_) {
+    // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
+    if (s_ == "highest") {
+      float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
+      allow_tf32_cublas = false;
+      return true;
+    } else if (s_ == "high") {
+      float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
+      allow_tf32_cublas = true;
+      return true;
+    } else if (s_ == "medium") {
+      float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
+      allow_tf32_cublas = true;
+      return true;
+    }
+    return false;
+  };
+  if (match(s)) { return; }
+  std::string sl;
+  std::transform(s.begin(), s.end(), sl.begin(),
+                 [](unsigned char c) -> unsigned char { return std::tolower(c); });
+  if (match(sl)) { return; }
+  TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the previous"
+    "setFloat32MatmulPrecision call had no effect.");
 }
 
 at::LinalgBackend Context::linalgPreferredBackend() const {
