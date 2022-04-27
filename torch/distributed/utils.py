@@ -7,22 +7,14 @@ def _sync_params_and_buffers(
     module,
     process_group,
     broadcast_bucket_size,
-<<<<<<< HEAD
-    rank,
-=======
     src,
->>>>>>> origin/master
     params_and_buffers_to_ignore,
 ):
     """
     Syncs ``module``'s parameters and buffers state so that all ranks contain
     the same module state across all ranks. Note that this API assumes that all
     parameter shapes are consistent before running the synchronization. This can
-<<<<<<< HEAD
-    be checked with ``verify_param_shape_across_processes``.
-=======
     be checked with ``_verify_param_shape_across_processes``.
->>>>>>> origin/master
     """
     module_states = []
     for name, param in module.named_parameters():
@@ -35,9 +27,5 @@ def _sync_params_and_buffers(
 
     if len(module_states) > 0:
         dist._broadcast_coalesced(
-<<<<<<< HEAD
-            process_group, module_states, broadcast_bucket_size, rank
-=======
             process_group, module_states, broadcast_bucket_size, src
->>>>>>> origin/master
         )
