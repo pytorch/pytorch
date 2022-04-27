@@ -17,6 +17,7 @@
 
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
+#include <ATen/core/SymIntArrayRef.h>
 #include <ATen/core/TensorAccessor.h>
 
 namespace c10 {
@@ -218,6 +219,9 @@ class TORCH_API TensorBase {
 
   IntArrayRef sizes() const {
     return impl_->sizes();
+  }
+  c10::SymIntArrayRef sym_sizes() const {
+    return c10::SymIntArrayRef(reinterpret_cast<const SymInt*>(sizes().data()), sizes().size());
   }
   IntArrayRef strides() const {
     return impl_->strides();

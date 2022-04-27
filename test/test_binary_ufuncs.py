@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyNativeDeviceTypes,
-    skipCUDAIfRocm, skipIf, ops, OpDTypes, skipMeta)
+    skipIf, ops, OpDTypes, skipMeta)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, integral_types, complex_types, integral_types_and,
@@ -467,8 +467,10 @@ class TestBinaryUfuncs(TestCase):
             if op.supports_out:
                 # All these output types can be cast to any or complex type
                 out = torch.empty_like(lhs_c64, dtype=torch.complex64)
+
                 self.assertEqual(op(lhs_c64, rhs_c128, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_c64, rhs_c128), out, exact_dtype=False)
+                result = op(lhs_c64, rhs_c128)
+                self.assertEqual(result, out.to(result.dtype))
 
                 if not op.always_returns_bool:
                     # complex outs can't be cast to float types
@@ -2141,7 +2143,6 @@ class TestBinaryUfuncs(TestCase):
             self.assertTrue(torch.all(fn(x, zero).isnan()))
 
     @onlyNativeDeviceTypes  # Check Issue https://github.com/pytorch/pytorch/issues/48130
-    @skipCUDAIfRocm  # Error happens on both ROCM and XLA
     @dtypes(*integral_types())
     def test_fmod_remainder_by_zero_integral(self, device, dtype):
         fn_list = (torch.fmod, torch.remainder)
@@ -2153,13 +2154,16 @@ class TestBinaryUfuncs(TestCase):
             if self.device_type == 'cpu':
                 with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
                     fn(x, zero)
-            # Different value for different dtype on CUDA:
-            # Due to it's an undefined behavior, CUDA returns a pattern of all 1s
-            # for integral dividend (other than int64) divided by zero. For int64,
-            # CUDA returns all 1s for negative dividend, half 1s for positive dividend.
-            # uint8: 0xff -> 255
-            # int32: 0xffffffff -> -1
+            elif torch.version.hip is not None:
+                # ROCm behavior: x % 0 is a no-op; x is returned
+                self.assertEqual(fn(x, zero), x)
             else:
+                # CUDA behavior: Different value for different dtype
+                # Due to it's an undefined behavior, CUDA returns a pattern of all 1s
+                # for integral dividend (other than int64) divided by zero. For int64,
+                # CUDA returns all 1s for negative dividend, half 1s for positive dividend.
+                # uint8: 0xff -> 255
+                # int32: 0xffffffff -> -1
                 if dtype == torch.int64:
                     self.assertEqual(fn(x, zero) == 4294967295, x >= 0)
                     self.assertEqual(fn(x, zero) == -1, x < 0)
@@ -2819,6 +2823,23 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(actual, actual_out)
                 expected = start + weight * (end - start)
                 self.assertEqual(expected, actual)
+
+    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    def test_lerp_lowp(self, device, dtype):
+        ref_dtype = torch.float
+        xvals = (0., -30000.)
+        yvals = (0.1, -20000.)
+        xs = [torch.full((4,), xval, device=device, dtype=dtype) for xval in xvals]
+        ys = [torch.full((4,), yval, device=device, dtype=dtype) for yval in yvals]
+        weights = [70000, torch.full((4,), 8, device=device, dtype=dtype)]
+        for x, y, w in zip(xs, ys, weights):
+            xref = x.float()
+            yref = y.float()
+            wref = w.float() if isinstance(w, torch.Tensor) else w
+            actual = torch.lerp(x, y, w)
+            expected = torch.lerp(xref, yref, wref).to(dtype)
+            self.assertEqual(actual, expected, atol=0., rtol=0.)
 
     def _test_logaddexp(self, device, dtype, base2):
         if base2:
