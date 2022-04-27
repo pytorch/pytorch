@@ -114,8 +114,9 @@ class ObserverBase(ABC, nn.Module):
     with_callable_args = classmethod(_with_callable_args)
 
 
-class _ObserverBase(ObserverBase):
-    r"""Internal common base for all qint/quint8 observers.
+class UniformQuantizationObserverBase(ObserverBase):
+    r"""Internal common base for all observers using uniform quantization
+    to calculate scale and zero_point.
 
     This base is for commonly used parameters used internally.
     Users should use `~torch.ao.quantization.observer.ObserverBase` as a base class
@@ -173,7 +174,7 @@ class _ObserverBase(ObserverBase):
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        super(_ObserverBase, self).__init__(dtype=dtype)
+        super(UniformQuantizationObserverBase, self).__init__(dtype=dtype)
         self.qscheme = qscheme
         if reduce_range:
             warnings.warn(
@@ -334,7 +335,12 @@ class _ObserverBase(ObserverBase):
         raise NotImplementedError("Cannot reset min/max values in the given observer.")
 
 
-class MinMaxObserver(_ObserverBase):
+# Originally, this class was called `_ObserverBase`.  Keeping the old name around
+# for backwards compatibility.
+_ObserverBase = UniformQuantizationObserverBase
+
+
+class MinMaxObserver(UniformQuantizationObserverBase):
     r"""Observer module for computing the quantization parameters based on the
     running min and max values.
 
@@ -551,7 +557,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         return x_orig
 
 
-class PerChannelMinMaxObserver(_ObserverBase):
+class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
     r"""Observer module for computing the quantization parameters based on the
     running per channel min and max values.
 
@@ -814,7 +820,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         return x_orig
 
 
-class HistogramObserver(_ObserverBase):
+class HistogramObserver(UniformQuantizationObserverBase):
     r"""
     The module records the running histogram of tensor values along with
     min/max values. ``calculate_qparams`` will calculate scale and zero_point.
