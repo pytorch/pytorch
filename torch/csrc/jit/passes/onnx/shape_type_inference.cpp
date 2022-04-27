@@ -114,16 +114,11 @@ c10::ShapeSymbol ONNXDimToShapeSymbol(const onnx::TensorShapeProto_Dimension& di
         break;
       }
     }
-    if (!sym) {
-      sym = c10::ShapeSymbol::newSymbol();
-      symbol_map[sym.value()] = dim.dim_param();
-    }
-  } else {
-    // A None dim param is produced.
-    // Assign a new Symbol, no need to keep track
-    // of it because there won't be duplicates.
+  }
+  if (!sym) {
     sym = c10::ShapeSymbol::newSymbol();
-    symbol_map[sym.value()] = "";
+    // If dim.dim_param() is empty, no need to keep track because there won't be duplicates.
+    symbol_map[sym.value()] = dim.dim_param();
   }
   return sym.value();
 }
@@ -1966,9 +1961,10 @@ void ONNXShapeTypeInference(
     // Use original_keys for removing original data which is duplicate
     std::vector<string> original_keys;
     for (const auto& gs_data: generated_shape_data) {
-      if (torch_to_onnx_output_name.count(gs_data.first) > 0) {
-        generated_shape_data[torch_to_onnx_output_name[gs_data.first]] = gs_data.second;
-        if (gs_data.first != torch_to_onnx_output_name[gs_data.first]) {
+      const auto onnx_output_name = torch_to_onnx_output_name.find(gs_data.first);
+      if (onnx_output_name != torch_to_onnx_output_name.end()) {
+        generated_shape_data[onnx_output_name->second] = gs_data.second;
+        if (gs_data.first != onnx_output_name->second) {
           original_keys.push_back(gs_data.first);
         }
       }
@@ -2028,24 +2024,22 @@ void ONNXShapeTypeInference(
   SpecialPostProcess(n);
   // Get data propagation result from ONNX shape inference
   for (auto output: n->outputs()) {
-    if (generated_shape_data.count(torch_to_onnx_output_name[output->debugName()]) > 0) {
-      auto shape_data = generated_shape_data.find(torch_to_onnx_output_name[output->debugName()])->second;
-      std::vector<::c10::ShapeSymbol> final_shape;
-      int rank = shape_data.dim_size();
-      final_shape.reserve(rank);
+    auto generated_shape_pair = generated_shape_data.find(torch_to_onnx_output_name[output->debugName()]);
+    if (generated_shape_pair != generated_shape_data.end()) {
+      auto& generated_shape = generated_shape_pair->second;
+      int rank = generated_shape.dim_size();
+      std::vector<::c10::ShapeSymbol> final_shape(rank);
       for (int i = 0; i < rank; ++i) {
-        final_shape.emplace_back(ONNXDimToShapeSymbol(shape_data.dim(i), symbol_map));
+        final_shape[i] = ONNXDimToShapeSymbol(generated_shape.dim(i), symbol_map);
       }
       c10::SymbolicShape shape_value(final_shape);
       // Store data propagation result into shapeValueMap
       ConstantValueMap::SetShapeValue(output->debugName(), shape_value);
-      // Use original name in PyTorch graph instead of temporarily name in intermediate ONNX graph
-      generated_shape_data[output->debugName()] = shape_data;
-      generated_shape_data.erase(torch_to_onnx_output_name[output->debugName()]);
+      // Use original name in PyTorch graph instead of temporary name in intermediate ONNX graph
+      generated_shape_data[output->debugName()] = generated_shape;
+      generated_shape_data.erase(generated_shape_pair);
     }
   }
-  ConstantValueMap::SetGeneratedShapeDataByName(generated_shape_data);
-  ConstantValueMap::SetSymbolDimMap(symbol_map);
 
   if (IsValidONNXNode(n)) {
     ProcessConstantValueMap(n, opset_version);

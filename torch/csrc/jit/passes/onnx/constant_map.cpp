@@ -205,16 +205,8 @@ c10::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
   return ConstantValueMap::getInstance().shapeValueMap[tensorName];
 }
 
-void ConstantValueMap::SetGeneratedShapeDataByName(std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> generated_shape_data_by_name) {
-  ConstantValueMap::getInstance().generatedShapeDataByName = generated_shape_data_by_name;
-}
-
 std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>& ConstantValueMap::GetGeneratedShapeDataByName() {
   return ConstantValueMap::getInstance().generatedShapeDataByName;
-}
-
-void ConstantValueMap::SetSymbolDimMap(SymbolDimMap symbol_dim_map) {
-  ConstantValueMap::getInstance().symbolDimMap = symbol_dim_map;
 }
 
 SymbolDimMap& ConstantValueMap::GetSymbolDimMap() {
