@@ -11,6 +11,7 @@
 /torch/nn/ @albanD @jbschlosser
 /torch/optim/ @albanD
 /test/test_public_bindings.py @albanD
+/test/allowlist_for_publicAPI.json @albanD @anjali411
 /docs/source/conf.py @albanD
 /aten/src/ATen/native/native_functions.yaml @bdhirsh
 
@@ -39,7 +40,7 @@
 /test/onnx/ @bowenbao @shubhambhokare1
 
 # Docker
-/.circleci/docker/ @jeffdaily @jithunnair-amd
+/.circleci/docker/ @jeffdaily
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
@@ -61,3 +62,13 @@
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
 # tests
 /test/test_linalg.py @lezcano @nikitaved @IvanYashchuk
+
+# OpInfo-related files
+/torch/testing/_internal/common_methods_invocations.py @mruberry @ngimel
+/torch/testing/_internal/common_device_type.py @mruberry @ngimel
+test/test_ops.py @mruberry @ngimel
+test/test_ops_gradients.py @mruberry @ngimel
+test/test_unary_ufuncs.py @mruberry @ngimel
+test/test_binary_ufuncs.py @mruberry @ngimel
+test/test_reductions.py @mruberry @ngimel
+test/test_type_promotion.py @mruberry @ngimel

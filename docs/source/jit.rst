@@ -64,6 +64,7 @@ Creating TorchScript Code
     enable_onednn_fusion
     onednn_fusion_enabled
     set_fusion_strategy
+    strict_fusion
     save
     load
     ignore

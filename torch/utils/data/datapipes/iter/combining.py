@@ -1,12 +1,20 @@
 import warnings
 
 from collections import deque
-from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
+from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import check_lambda_fn
+from torch.utils.data.datapipes.utils.common import _check_lambda_fn
 from torch.utils.data._utils.serialization import DILL_AVAILABLE, SerializationType, serialize_fn, deserialize_fn
+
+__all__ = [
+    "ConcaterIterDataPipe",
+    "DemultiplexerIterDataPipe",
+    "ForkerIterDataPipe",
+    "MultiplexerIterDataPipe",
+    "ZipperIterDataPipe",
+]
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -179,6 +187,9 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.leading_ptr = 0
         self.end_ptr = None
 
+    def __del__(self):
+        self.buffer.clear()
+
 
 class _ChildDataPipe(IterDataPipe):
     r"""
@@ -252,7 +263,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
 
-        check_lambda_fn(classifier_fn)
+        _check_lambda_fn(classifier_fn)
 
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
@@ -371,22 +382,26 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
 
+    def __del__(self):
+        for dq in self.child_buffers:
+            dq.clear()
+
 
 @functional_datapipe('mux')
 class MultiplexerIterDataPipe(IterDataPipe):
     r"""
     Yields one element at a time from each of the input Iterable DataPipes (functional name: ``mux``). As in,
     one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration,
-    and so on. It skips over DataPipes that are exhausted, and ends when all input DataPipes are exhausted.
+    and so on. It ends when the shortest input DataPipe is exhausted.
 
     Args:
-        datapipes: Iterable DataPipes that will take turn to yield their elements, until they are all exhausted
+        datapipes: Iterable DataPipes that will take turn to yield their elements, until the shortest DataPipe is exhausted
 
     Example:
         >>> from torchdata.datapipes.iter import IterableWrapper
-        >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> dp1, dp2, dp3 = IterableWrapper(range(3)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
         >>> list(dp1.mux(dp2, dp3))
-        [0, 10, 20, 1, 11, 21, 2, 12, 22, 3, 13, 23, 4, 14, 24]
+        [0, 10, 20, 1, 11, 21, 2, 12, 22]
     """
     def __init__(self, *datapipes):
         self.datapipes = datapipes
@@ -394,15 +409,16 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]
-        finished: Set[int] = set()
-        while len(finished) < len(iterators):
-            for i in range(len(iterators)):
-                if i not in finished:
-                    try:
-                        value = next(iterators[i])
-                        yield value
-                    except StopIteration:
-                        finished.add(i)
+        while len(iterators):
+            values: List[Any] = []
+            for it in iterators:
+                try:
+                    value = next(it)
+                    values.append(value)
+                except StopIteration:
+                    return
+            for value in values:
+                yield value
 
     def __len__(self):
         if self.length is not None:
@@ -410,7 +426,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
                 raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
             return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            self.length = sum(len(dp) for dp in self.datapipes)
+            self.length = min(len(dp) for dp in self.datapipes) * len(self.datapipes)
         else:
             self.length = -1
         return len(self)

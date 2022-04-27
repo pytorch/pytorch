@@ -154,8 +154,8 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
-if(USE_MLCOMPUTE)
-    list(APPEND TORCH_PYTHON_SRCS ${MLC_PYTHON_SRCS})
+if(USE_MPS)
+    list(APPEND TORCH_PYTHON_SRCS ${MPS_PYTHON_SRCS})
 endif()
 
 if(USE_VALGRIND AND NOT WIN32)
@@ -362,7 +362,6 @@ if(USE_NUMPY)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
-list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS BUILD_CAFFE2)
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
