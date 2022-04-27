@@ -779,10 +779,12 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     return self
 
 
+@quantized_args(True)
 def relu(g, input):
     return op_with_optional_float_cast(g, "Relu", input, opset_before=14)
 
 
+@quantized_args(True)
 def relu6(g, input):
     relu = op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     return clamp_max(g, relu, 6)

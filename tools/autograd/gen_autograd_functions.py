@@ -8,14 +8,14 @@ from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
 from typing import List, Sequence, Tuple
 
-from tools.codegen.api.autograd import (
+from torchgen.api.autograd import (
     Derivative,
     DifferentiabilityInfo,
     SavedAttribute,
     uses_retain_variables,
     uses_single_grad,
 )
-from tools.codegen.api.types import (
+from torchgen.api.types import (
     Binding,
     BaseCType,
     OptionalCType,
@@ -32,9 +32,9 @@ from tools.codegen.api.types import (
     ArrayRefCType,
     optionalIntArrayRefT,
 )
-from tools.codegen.code_template import CodeTemplate
-from tools.codegen.utils import FileManager
-from tools.codegen.model import Argument
+from torchgen.code_template import CodeTemplate
+from torchgen.utils import FileManager
+from torchgen.model import Argument
 
 FUNCTION_DECLARATION = CodeTemplate(
     """\
@@ -649,11 +649,14 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             copy_ranges: List[str] = []
             for i, n in enumerate(var_names):
                 copy_ranges.append(DERIVATIVE_MULTI_COPY_RANGE.substitute(name=n, i=i))
-            return False, DERIVATIVE_MULTI.substitute(
-                idx_ranges=idx_ranges,
-                copy_ranges=copy_ranges,
-                derivative=formula,
-                grad_input_mask=grad_input_mask,
+            return (
+                False,
+                DERIVATIVE_MULTI.substitute(
+                    idx_ranges=idx_ranges,
+                    copy_ranges=copy_ranges,
+                    derivative=formula,
+                    grad_input_mask=grad_input_mask,
+                ),
             )
 
     body.extend(unpack)

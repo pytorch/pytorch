@@ -61,6 +61,14 @@ Tensor& fill_meta_(Tensor& self, const Tensor& value) {
   return self;
 }
 
+Tensor fill(const Tensor& self, const Scalar& value) {
+  return at::empty_like(self).fill_(value);
+}
+
+Tensor fill(const Tensor& self, const Tensor& value) {
+  return at::empty_like(self).fill_(value);
+}
+
 DEFINE_DISPATCH(fill_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -122,6 +130,12 @@ Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
     std::memset(ptr, 0, size_bytes);
   }
   return self;
+}
+
+// Needed for functionalization: we need to convert zero_() directly to zero()
+// when removing mutations.
+Tensor zero(const Tensor& self) {
+  return at::zeros_like(self);
 }
 
 Tensor& zero_(Tensor &self) {
