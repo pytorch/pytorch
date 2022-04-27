@@ -312,6 +312,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
+  OP_DECOMPOSE(pad);
+  OP_DECOMPOSE(_pad_circular);
 
   DECOMPOSE_FUNCTIONAL(block_diag);
 
