@@ -4,13 +4,13 @@
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
 # The fallback is expected to mimick this codegen, so we should keep the two in sync.
 
-from tools.codegen.api import cpp
-from tools.codegen.api.autograd import (
+from torchgen.api import cpp
+from torchgen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo,
     gen_differentiable_outputs,
     dispatch_strategy,
 )
-from tools.codegen.api.types import (
+from torchgen.api.types import (
     Binding,
     DispatcherSignature,
     CType,
@@ -21,18 +21,17 @@ from tools.codegen.api.types import (
     intArrayRefT,
     symIntArrayRefT,
 )
-from tools.codegen.code_template import CodeTemplate
-from tools.codegen.context import with_native_function
-from tools.codegen.model import (
+from torchgen.code_template import CodeTemplate
+from torchgen.context import with_native_function
+from torchgen.model import (
     Type,
     NativeFunction,
     SelfArgument,
     TensorOptionsArguments,
     SchemaKind,
-    is_foreach_op,
 )
 from typing import List, Optional, Sequence, Tuple, Dict
-from tools.codegen.utils import FileManager
+from torchgen.utils import FileManager
 from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_AUTOGRAD,
@@ -503,7 +502,11 @@ def inplace_or_view_method_definition(
 ) -> Optional[str]:
     f = fn.func
     if get_view_info(f) is None and (
-        not modifies_arguments(f) or is_foreach_op(str(f.func.name))
+        # For functions that modify their inputs but don't return them,
+        # we can't give them autograd support.
+        # See https://github.com/pytorch/pytorch/issues/53796
+        not modifies_arguments(f)
+        or len(f.func.returns) == 0
     ):
         return None
     return METHOD_DEFINITION.substitute(
@@ -520,7 +523,7 @@ def inplace_or_view_method_registration(
 ) -> Optional[str]:
     f = fn.func
     if get_view_info(f) is None and (
-        not modifies_arguments(f) or is_foreach_op(str(f.func.name))
+        not modifies_arguments(f) or len(f.func.returns) == 0
     ):
         return None
     return WRAPPER_REGISTRATION.substitute(
