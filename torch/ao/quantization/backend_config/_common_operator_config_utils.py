@@ -22,6 +22,7 @@ from ..fuser_method_mappings import (
     fuse_conv_bn_relu,
     fuse_linear_bn,
     fuse_convtranspose_bn,
+    fuse_linear_bn_leaky_relu,
 )
 from ..qconfig_mapping import _FIXED_QPARAMS_OP_TO_OBSERVER
 

@@ -283,6 +283,22 @@ at::Tensor& PackedLinearWeight::apply_relu_out(
   return apply_impl<true>(input, output_scale, output_zero_point, output);
 }
 
+at::Tensor PackedLinearWeight:: apply_leaky_relu(
+    at::Tensor input,
+    double negative_slope,
+    double output_scale,
+    int64_t output_zero_point) {
+  // Reference path
+  auto x_fp32 = input.dequantize();
+  at::Tensor w_q;
+  c10::optional<at::Tensor> bias;
+  std::tie(w_q, bias) = unpack();
+  auto w_fp32 = w_q.dequantize();
+  auto y_fp32 = at::linear(x_fp32, w_fp32, bias);
+  auto z_fp32 = at::leaky_relu(y_fp32, negative_slope);
+  return at::quantize_per_tensor(z_fp32, output_scale, output_zero_point, c10::kQUInt8);
+}
+
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -618,12 +634,29 @@ at::Tensor PackedLinearWeightsQnnp::apply_relu(
   return apply_impl<true>(std::move(input), output_scale, output_zero_point);
 }
 
+at::Tensor PackedLinearWeightsQnnp::apply_leaky_relu(
+    at::Tensor input,
+    double negative_slope,
+    double output_scale,
+    int64_t output_zero_point) {
+  // Reference path
+  auto x_fp32 = input.dequantize();
+  at::Tensor w_q;
+  c10::optional<at::Tensor> bias;
+  std::tie(w_q, bias) = unpack();
+  auto w_fp32 = w_q.dequantize();
+  auto y_fp32 = at::linear(x_fp32, w_fp32, bias);
+  auto z_fp32 = at::leaky_relu(y_fp32, negative_slope);
+  return at::quantize_per_tensor(z_fp32, output_scale, output_zero_point, c10::kQUInt8);
+}
+
 #endif // USE_PYTORCH_QNNPACK
 
 #if AT_MKLDNN_ENABLED()
-template <bool ReluFused>
+template <PostOps post_op>
 at::Tensor PackedLinearWeightsOnednn::apply_impl(
     at::Tensor input,
+    double negative_slope,
     double output_scale,
     int64_t output_zero_point) {
   const int64_t dim = input.dim();
@@ -639,7 +672,12 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   auto input_dims = {M, K};
   auto input_data_type = dnnl::memory::data_type::u8;
   auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
-  ideep::attr_t op_attr = ReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (post_op == Relu) {
+    op_attr = ideep::attr_t::fuse_relu();
+  } else if (post_op == LeakyRelu) {
+    op_attr = ideep::attr_t::fuse_relu(/*scale=*/1.0f, /*alpha=*/negative_slope);
+  }
   ideep::tensor x(input_desc, input_contig->data_ptr<c10::quint8>());
   auto dst_dims = {M, N};
   double input_scale = input.q_scale();
@@ -705,14 +743,27 @@ at::Tensor PackedLinearWeightsOnednn::apply(
     at::Tensor input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<false>(std::move(input), output_scale, output_zero_point);
+  double negative_slope = 0.0f;
+  return apply_impl<NoPostOp>(
+      std::move(input), negative_slope, output_scale, output_zero_point);
 }
 
 at::Tensor PackedLinearWeightsOnednn::apply_relu(
     at::Tensor input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<true>(std::move(input), output_scale, output_zero_point);
+    double negative_slope = 0.0f;
+  return apply_impl<Relu>(
+      std::move(input), negative_slope, output_scale, output_zero_point);
+}
+
+at::Tensor PackedLinearWeightsOnednn:: apply_leaky_relu(
+    at::Tensor input,
+    double negative_slope,
+    double output_scale,
+    int64_t output_zero_point) {
+  return apply_impl<LeakyRelu>(
+      std::move(input), negative_slope, output_scale, output_zero_point);
 }
 
 #endif // #if AT_MKLDNN_ENABLED()
@@ -739,9 +790,23 @@ class QLinearInt8 final {
   }
 };
 
+class QLinearLeakyReluInt8 final {
+ public:
+  static at::Tensor run(
+      at::Tensor input,
+      const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
+      double negative_slope,
+      double output_scale,
+      int64_t output_zero_point) {
+    return packed_weight->apply_leaky_relu(
+        std::move(input), negative_slope, output_scale, output_zero_point);
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), TORCH_FN(QLinearInt8<false>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), TORCH_FN(QLinearInt8<true>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_leaky_relu"), TORCH_FN(QLinearLeakyReluInt8::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {

@@ -67,6 +67,12 @@ struct TORCH_API PackedLinearWeight : public LinearPackedParamsBase {
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false)
       override;
 
+  at::Tensor apply_leaky_relu(
+      at::Tensor input,
+      double negative_slope,
+      double output_scale,
+      int64_t output_zero_point) override;
+
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
   c10::optional<at::Tensor> bias() override {
@@ -124,6 +130,14 @@ struct TORCH_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
       const at::Tensor& input,
       at::Tensor& output,
       bool reduce_range = false) override;
+
+  at::Tensor apply_leaky_relu(
+      at::Tensor input,
+      double negative_slope,
+      double output_scale,
+      int64_t output_zero_point) override {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 

@@ -360,6 +360,40 @@ class TestFuseFx(QuantizationTestCase):
             expected_node_list=expected_nodes,
             expected_node_occurrence=expected_occurrence)
 
+    def test_fuse_linear_bn_leaky_relu_eval(self):
+        class M(torch.nn.Module):
+            def __init__(self, with_bn=True):
+                super().__init__()
+                self.linear = nn.Linear(1, 1)
+                self.bn1d = nn.BatchNorm1d(1)
+                self.leaky_relu = nn.LeakyReLU(0.01)
+                self.with_bn = with_bn
+
+            def forward(self, x):
+                x = self.linear(x)
+                if self.with_bn:
+                    x = self.bn1d(x)
+                x = self.leaky_relu(x)
+                return x
+
+        expected_nodes = [
+            ns.call_module(nni.LinearLeakyReLU),
+        ]
+        expected_occurrence = {
+            ns.call_module(nn.BatchNorm1d): 0,
+            ns.call_module(nn.LeakyReLU): 0,
+        }
+
+        for with_bn in [True, False]:
+            # test eval mode
+            m = M(with_bn).eval()
+            # fuse_fx is a top level api and only supports eval mode
+            m = fuse_fx(m)
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=expected_nodes,
+                expected_node_occurrence=expected_occurrence)
+
     def test_fuse_convtranspose_bn_eval(self):
 
         m = ModelForConvTransposeBNFusion().eval()

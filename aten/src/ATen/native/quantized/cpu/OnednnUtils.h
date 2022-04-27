@@ -167,6 +167,12 @@ struct DeconvPrimitiveCache : PrimitiveCache {
   }
 };
 
+enum PostOps {
+  NoPostOp,
+  Relu,
+  LeakyRelu,
+};
+
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
   PackedLinearWeightsOnednn(
       std::unique_ptr<ideep::tensor> weight,
@@ -196,6 +202,12 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
+  at::Tensor apply_leaky_relu(
+      at::Tensor input,
+      double negative_slope,
+      double output_scale,
+      int64_t output_zero_point) override;
+
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
   c10::optional<at::Tensor> bias() override {
@@ -210,9 +222,10 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
   LinearPrimitiveCache prim_cache;
   std::unique_ptr<c10::once_flag> cache_initialized_flag;
 
-  template <bool ReluFused>
+  template <PostOps post_op>
   at::Tensor apply_impl(
       at::Tensor input,
+      double negative_slope,
       double output_scale,
       int64_t output_zero_point);
 

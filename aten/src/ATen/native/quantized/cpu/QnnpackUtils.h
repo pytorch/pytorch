@@ -71,6 +71,12 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
 
+  at::Tensor apply_leaky_relu(
+      at::Tensor input,
+      double negative_slope,
+      double output_scale,
+      int64_t output_zero_point) override;
+
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
   c10::optional<at::Tensor> bias() override {
