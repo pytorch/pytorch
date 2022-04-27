@@ -317,6 +317,20 @@ test_vulkan() {
   fi
 }
 
+test_rpc() {
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    echo "Testing RPC C++ tests"
+    # NB: the ending test_rpc must match the current function name for the current
+    # test reporting process (in print_test_stats.py) to function as expected.
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
+    TEST_REPORTS_DIR=test/test-reports/cpp-rpc/test_rpc
+    mkdir -p $TEST_REPORTS_DIR
+    "$TORCH_BIN_DIR"/test_cpp_rpc --gtest_output=xml:$TEST_REPORTS_DIR/test_cpp_rpc.xml
+  fi
+}
+
 test_distributed() {
   echo "Testing distributed python tests"
   time python test/run_test.py --distributed-tests --verbose --shard "${SHARD_NUMBER:-1}" "${NUM_TEST_SHARDS:-1}"
@@ -345,19 +359,9 @@ test_distributed() {
     "$TORCH_BIN_DIR"/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
     "$TORCH_BIN_DIR"/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
   fi
-}
 
-test_rpc() {
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Testing RPC C++ tests"
-    # NB: the ending test_rpc must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
-    TEST_REPORTS_DIR=test/test-reports/cpp-rpc/test_rpc
-    mkdir -p $TEST_REPORTS_DIR
-    "$TORCH_BIN_DIR"/test_cpp_rpc --gtest_output=xml:$TEST_REPORTS_DIR/test_cpp_rpc.xml
+  if [[ "${NUM_TEST_SHARDS:-1}" == 1 || "${SHARD_NUMBER:-1}" != 1 ]]; then
+    test_rpc
   fi
 }
 
@@ -564,6 +568,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
+elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
+  test_distributed
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -585,9 +591,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
-elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
-  test_distributed
-  test_rpc
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
