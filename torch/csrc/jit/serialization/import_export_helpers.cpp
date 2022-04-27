@@ -22,7 +22,7 @@ std::string qualifierToArchivePath(
   return export_prefix + path + "." + kExportSuffix;
 }
 
-std::shared_ptr<SourceView> findSourceInArchiveFromQualifier(
+std::shared_ptr<Source> findSourceInArchiveFromQualifier(
     caffe2::serialize::PyTorchStreamReader& reader,
     const std::string& export_prefix,
     const std::string& qualifier) {
