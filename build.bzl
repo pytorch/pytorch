@@ -11,13 +11,13 @@ def define_targets(rules):
             "aten/src/ATen/core/SymIntArrayRef.h",
             "aten/src/ATen/core/SymInt.h",
         ],
+        strip_include_prefix = "aten/src/",
         deps = [
             "//c10/macros",
             "//c10/core:base",
             "//c10/util:base",
             "//c10/util:typeid",
         ],
-        copts = ["-isystem aten/src/"],
         tags = ["no-caffe2-headers"],
         visibility = ["//:__subpackages__"],
     )
