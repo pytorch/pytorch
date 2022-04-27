@@ -49,6 +49,7 @@ __device__ void sync(
     // If for persistent kernels, lock all blocks until the semaphore has been
     // reached. Make sure we access semaphore as a volatile address so we get
     // the global memory updates.
+    unsigned int ns = 8;
     while ((PERSISTENT || last_block) &&
            ((oldArrive ^ globalAsVolatile(semaphore)) & FIRST_UINT64_BIT) ==
                0) {
@@ -56,7 +57,10 @@ __device__ void sync(
       // semaphore, giving a better chance for other warps/blocks to catch up.
 #if __CUDA_ARCH__ >= 700
       // __nanosleep only available on compute capability 7.0 or higher
-      __nanosleep(200); // avoids busy waiting
+      __nanosleep(ns); // avoids busy waiting
+      if (ns < 256) {
+        ns *= 2;
+      }
 #endif
     }
   }

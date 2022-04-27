@@ -187,6 +187,15 @@ static void Baseline_BatchNorm_cuDNN_fp16(benchmark::State& benchmark_state) {
   Baseline_BatchNorm(benchmark_state, DataType::Half);
 }
 
+// Simple aliases just for names in the printed output
+static void Baseline_ResNet_BatchNorm_cuDNN_fp16(benchmark::State& benchmark_state) {
+  Baseline_BatchNorm(benchmark_state, DataType::Half);
+}
+
+static void Baseline_ResNext_BatchNorm_cuDNN_fp16(benchmark::State& benchmark_state) {
+  Baseline_BatchNorm(benchmark_state, DataType::Half);
+}
+
 //------------------------------------------------------------------------------
 
 NVFUSER_BENCHMARK_DEFINE(
@@ -249,5 +258,82 @@ BENCHMARK(Baseline_BatchNorm_cuDNN_fp16)
 BENCHMARK(Baseline_BatchNorm_cuDNN_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{2, 64}, {2, 32}, {2, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+//------------------------------------------------------------------------------
+// RESNET and REXNEXT benchmarks
+
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_ResNet_BatchNorm_fp16,
+    setupBatchNorm,
+    NvFuserScheduler_BatchNorm,
+    DataType::Half);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_ResNet_BatchNorm_fp16)
+    ->Args({256, 64, 112})
+    ->Args({256, 64, 56})
+    ->Args({256, 256, 56})
+    ->Args({256, 128, 56})
+    ->Args({256, 128, 28})
+    ->Args({256, 512, 28})
+    ->Args({256, 256, 28})
+    ->Args({256, 256, 14})
+    ->Args({256, 1024, 14})
+    ->Args({256, 512, 14})
+    ->Args({256, 512, 7})
+    ->Args({256, 2048, 7})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_ResNext_BatchNorm_fp16,
+    setupBatchNorm,
+    NvFuserScheduler_BatchNorm,
+    DataType::Half);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_ResNext_BatchNorm_fp16)
+    ->Args({128, 64, 112})
+    ->Args({128, 128, 56})
+    ->Args({128, 256, 56})
+    ->Args({128, 128, 56})
+    ->Args({128, 256, 28})
+    ->Args({128, 512, 28})
+    ->Args({128, 512, 14})
+    ->Args({128, 1024, 14})
+    ->Args({128, 1024, 7})
+    ->Args({128, 2048, 7})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+//------------------------------------------------------------------------------
+
+BENCHMARK(Baseline_ResNet_BatchNorm_cuDNN_fp16)
+    ->Args({256, 64, 112})
+    ->Args({256, 64, 56})
+    ->Args({256, 256, 56})
+    ->Args({256, 128, 56})
+    ->Args({256, 128, 28})
+    ->Args({256, 512, 28})
+    ->Args({256, 256, 28})
+    ->Args({256, 256, 14})
+    ->Args({256, 1024, 14})
+    ->Args({256, 512, 14})
+    ->Args({256, 512, 7})
+    ->Args({256, 2048, 7})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_ResNext_BatchNorm_cuDNN_fp16)
+    ->Args({128, 64, 112})
+    ->Args({128, 128, 56})
+    ->Args({128, 256, 56})
+    ->Args({128, 128, 56})
+    ->Args({128, 256, 28})
+    ->Args({128, 512, 28})
+    ->Args({128, 512, 14})
+    ->Args({128, 1024, 14})
+    ->Args({128, 1024, 7})
+    ->Args({128, 2048, 7})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
