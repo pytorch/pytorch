@@ -2372,8 +2372,6 @@ class FullyShardedDataParallel(nn.Module):
                 if (
                     self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
                 ):
-                    if self.rank == 0:
-                        print(" --- casting back to parameter precision --")
                     # Cast gradients back to the full parameter precision so that
                     # optimizer.step() happens in full precision.
                     orig_param_grad_data = output
@@ -2414,8 +2412,7 @@ class FullyShardedDataParallel(nn.Module):
                 ), "Currently the only way for _is_sharded to be False is \
                     world_size == 1"
                 if (
-                    self._mixed_precision_enabled_for_params()
-                    or self._mixed_precision_enabled_for_reduce()
+                    self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
                 ):
                     # Cast gradients back to the full parameter precision so that
                     # optimizer.step() happens in full precision.

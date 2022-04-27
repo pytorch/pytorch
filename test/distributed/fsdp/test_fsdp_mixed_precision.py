@@ -66,24 +66,12 @@ mp_configs = [default_mp, mp_only_reduce, mp_only_param_and_buf, mp_no_mixed_pre
 # mp_configs = [mp_only_reduce]
 #nccl_supports_bf16 = False
 if nccl_supports_bf16:
-    mp_diff_reduce = MixedPrecision(
-        param_dtype=torch.float16,
-        buffer_dtype=torch.float16,
-        reduce_dtype=torch.bfloat16
-    )
-    mp_diff_buffer = MixedPrecision(
-        param_dtype=torch.float16,
-        buffer_dtype=torch.bfloat16,
-        reduce_dtype=torch.float16,
-    )
     mp_diff_buffer_and_reduce = MixedPrecision(
         param_dtype=torch.float16,
         buffer_dtype=torch.bfloat16,
         reduce_dtype=torch.float32
     )
-    mp_configs.extend([
-        mp_diff_reduce, mp_diff_buffer, mp_diff_buffer_and_reduce,
-    ])
+    mp_configs.extend([mp_diff_buffer_and_reduce])
 
 # Buffer original dtype, which can differ from model params.
 _BUFFER_ORIG_DTYPE = torch.float64
@@ -118,8 +106,6 @@ test_name_mapping = {
 
 if nccl_supports_bf16:
     test_name_mapping.update({
-        str(mp_diff_reduce): "mp_diff_reduce",
-        str(mp_diff_buffer): "mp_diff_buffer",
         str(mp_diff_buffer_and_reduce): "mp_diff_buffer_reduce",
     })
 
@@ -141,8 +127,6 @@ def patch_reduce_scatter(new_reduce_scatter, full_precision_param_dtype):
         yield
     finally:
         dist._reduce_scatter_base = orig_reduce_scatter
-        # TODO not sure if global needed below
-        #global _CURRENT_FULL_PRECISION_PARAM_DTYPE
         _CURRENT_FULL_PRECISION_PARAM_DTYPE = None
 
 class LinearMixedPrecision(nn.Module):
@@ -466,39 +450,62 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             ShardingStrategy.FULL_SHARD,
         )
 
-    @skip_if_lt_x_gpu(2)
-    def test_mixed_precision_embedding_table(self):
+    def _test_mixed_precision_embedding_table(self, mp_config):
         # Basic test to ensure int inputs are not casted which would break
         # modules such as embedding tables.
+        param_dtype = mp_config.param_dtype or torch.float32
+        orig_reduce_scatter = dist._reduce_scatter_base
+        test_reduce_scatter = partial(
+            self._reduce_scatter_base_validate_mp, orig_reduce_scatter, mp_config,
+        )
+        with patch_reduce_scatter(test_reduce_scatter, param_dtype):
+            model = self._get_wrapped_model(
+                group=torch.distributed.distributed_c10d._get_default_group(),
+                config={"mixed_precision": mp_config}
+            )
+            optim = torch.optim.SGD(model.parameters(), lr=0.1)
+            for _ in range(6):
+                inp = model.module.get_input(torch.device("cuda"))
+                # This would fail if we casted integer module inputs such as for
+                # embedding tables.
+                output = model(*inp)
+                loss = model.module.get_loss(inp, output).cuda()
+                self.assertEqual(loss.dtype, param_dtype)
+                model.module.run_backward(loss)
+                optim.step()
+
+    @skip_if_lt_x_gpu(2)
+    def test_mp_embedding_reduce(self):
+        self._test_mixed_precision_embedding_table(
+            mp_config=MixedPrecision(reduce_dtype=torch.float16)
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_mp_embedding_only_params_and_bufs(self):
+        self._test_mixed_precision_embedding_table(
+            mp_config=MixedPrecision(
+                param_dtype=torch.float16,
+                buffer_dtype=torch.float16,
+            )
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_mp_embedding_default(self):
         default_mp_config = MixedPrecision(
             param_dtype=torch.float16,
             buffer_dtype=torch.float16,
             reduce_dtype=torch.float16,
         )
-        only_reduce = MixedPrecision(reduce_dtype=torch.float16)
-        only_params_and_buffers = MixedPrecision(param_dtype=torch.float16, buffer_dtype=torch.float16)
-        params_and_reduce_different = MixedPrecision(param_dtype=torch.float16, reduce_dtype=torch.float32, buffer_dtype=torch.float16)
-        for mp_config in [params_and_reduce_different, default_mp_config, only_reduce, only_params_and_buffers]:
-            param_dtype = mp_config.param_dtype or torch.float32
-            orig_reduce_scatter = dist._reduce_scatter_base
-            test_reduce_scatter = partial(
-                self._reduce_scatter_base_validate_mp, orig_reduce_scatter, mp_config,
-            )
-            with patch_reduce_scatter(test_reduce_scatter, param_dtype):
-                model = self._get_wrapped_model(
-                    group=torch.distributed.distributed_c10d._get_default_group(),
-                    config={"mixed_precision": mp_config}
-                )
-                optim = torch.optim.SGD(model.parameters(), lr=0.1)
-                for _ in range(6):
-                    inp = model.module.get_input(torch.device("cuda"))
-                    # This would fail if we casted integer module inputs such as for
-                    # embedding tables.
-                    output = model(*inp)
-                    loss = model.module.get_loss(inp, output).cuda()
-                    self.assertEqual(loss.dtype, param_dtype)
-                    model.module.run_backward(loss)
-                    optim.step()
+        self._test_mixed_precision_embedding_table(mp_config=default_mp_config)
+
+    @skip_if_lt_x_gpu(2)
+    def test_mp_embedding_params_and_reduce_diff(self):
+        params_and_reduce_different = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float32,
+            buffer_dtype=torch.float16
+        )
+        self._test_mixed_precision_embedding_table(mp_config=params_and_reduce_different)
 
 class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     """
