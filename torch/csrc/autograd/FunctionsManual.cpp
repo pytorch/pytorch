@@ -1613,8 +1613,8 @@ Tensor binary_cross_entropy_with_logits_jvp(const Tensor& input_t, const Tensor&
   }
 
   if (weight.defined()) {
-    grad_input.mul_(weight);
-    grad_target.mul_(weight);
+    grad_input = grad_input.mul(weight);
+    grad_target = grad_target.mul(weight);
   }
   return apply_loss_reduction(grad_target + grad_input, reduction);
 }

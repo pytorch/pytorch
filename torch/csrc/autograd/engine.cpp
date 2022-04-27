@@ -50,7 +50,7 @@ static void forked_autograd_child() { in_bad_autograd_fork = true; }
 
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
-#if !defined(WIN32) && !defined(__XROS__)
+#if !defined(WIN32)
   static std::once_flag flag;
   std::call_once(
       flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
