@@ -62,14 +62,18 @@ TraceWrapper::TraceWrapper(const int64_t start_time, const std::string& name)
 
 void TraceWrapper::addCPUActivity(
     const std::string& name,
+    const uint8_t scope,
     const DeviceAndResource device_and_resource,
     const uint64_t correlation_id,
     const int64_t start_time,
     const int64_t end_time) {
 #ifdef USE_KINETO
   TORCH_CHECK((bool)(*this), "Cannot add event to non-existent trace.");
+  auto type = ((at::RecordScope)scope == at::RecordScope::USER_SCOPE)
+    ? libkineto::ActivityType::USER_ANNOTATION
+    : libkineto::ActivityType::CPU_OP;
   cpu_trace_->activities.emplace_back(libkineto::GenericTraceActivity(
-    cpu_trace_->span, libkineto::ActivityType::CPU_OP, name));
+    cpu_trace_->span, type, name));
   auto& act = cpu_trace_->activities.back();
   act.device = device_and_resource.device;
   act.resource = device_and_resource.resource;
@@ -262,9 +266,21 @@ void pushCorrelationId(uint64_t correlation_id) {
 #endif // USE_KINETO
 }
 
+void pushUserCorrelationId(uint64_t correlation_id) {
+#ifdef USE_KINETO
+  libkineto::api().activityProfiler().pushUserCorrelationId(correlation_id);
+#endif // USE_KINETO
+}
+
 void popCorrelationId() {
 #ifdef USE_KINETO
   libkineto::api().activityProfiler().popCorrelationId();
+#endif // USE_KINETO
+}
+
+void popUserCorrelationId() {
+#ifdef USE_KINETO
+  libkineto::api().activityProfiler().popUserCorrelationId();
 #endif // USE_KINETO
 }
 

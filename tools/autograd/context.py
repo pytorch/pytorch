@@ -1,6 +1,6 @@
-from tools.codegen.api.autograd import NativeFunctionWithDifferentiabilityInfo as NFWDI
-from tools.codegen.context import native_function_manager
-from tools.codegen.utils import T
+from torchgen.api.autograd import NativeFunctionWithDifferentiabilityInfo as NFWDI
+from torchgen.context import native_function_manager
+from torchgen.utils import T
 
 import functools
 from typing import Callable
