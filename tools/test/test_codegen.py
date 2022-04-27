@@ -134,7 +134,7 @@ class TestGenAutogradFunctions(unittest.TestCase):
 # to edit for use.
 DEFAULT_NATIVE_FUNCTION, _ = torchgen.model.NativeFunction.from_yaml(
     {"func": "func() -> bool"}, loc=torchgen.model.Location(__file__, 1),
-    set())
+    valid_tags=set())
 
 
 if __name__ == "__main__":
