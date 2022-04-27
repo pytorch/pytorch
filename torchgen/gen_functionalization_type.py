@@ -530,7 +530,7 @@ def gen_functionalization_registration(
 
     if isinstance(g, NativeFunctionsViewGroup):
         # functionalization needs to register kernels for view + view_inplace ops
-        if str(g.view.func.name) == 'to.device':
+        if str(g.view.func.name) == "to.device":
             # See Note [Functionalization <> torch.Tensor constructor]
             return []
         view_str = [emit_registration_helper(g.view)]
