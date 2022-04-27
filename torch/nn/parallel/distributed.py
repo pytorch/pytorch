@@ -776,7 +776,8 @@ class DistributedDataParallel(Module, Joinable):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
-        del attrs["_replicated_tensor_module"]
+        if self._use_replicated_tensor_module:
+            del attrs["_replicated_tensor_module"]
         return attrs
 
     def __setstate__(self, state):
