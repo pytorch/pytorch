@@ -319,10 +319,10 @@ test_vulkan() {
 
 test_distributed() {
   echo "Testing distributed python tests"
-  time python test/run_test.py --distributed-tests --verbose
+  time python test/run_test.py --distributed-tests --verbose --shard "${SHARD_NUMBER:-1}" "${NUM_TEST_SHARDS:-1}"
   assert_git_not_dirty
 
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "${SHARD_NUMBER:-1}" == 1]]; then
     echo "Testing distributed C++ tests"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
