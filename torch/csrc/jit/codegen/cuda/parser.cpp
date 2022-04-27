@@ -560,7 +560,7 @@ class IrParser {
       TORCH_INTERNAL_ASSERT(
           tensor_type, "output of fusion group is not TensorType.");
       if (tensor_type->scalarType().has_value()) {
-        out = optionalCastStrict(aten_to_data_type(*tensor_type->scalarType()));
+        out = optionalCastStrict(aten_to_data_type(*tensor_type->scalarType()), out)->as<TensorView>();
       }
       fusion->addOutput(out);
 

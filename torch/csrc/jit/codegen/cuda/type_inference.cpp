@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/jit_log.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/jit_type.h>
