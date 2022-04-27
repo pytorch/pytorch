@@ -14,9 +14,9 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorIterator.h>
-#include "ATen/ops/dequantize.h"
-#include "ATen/ops/quantize_per_tensor.h"
-#include "c10/core/QScheme.h"
+#include <ATen/ops/dequantize.h>
+#include <ATen/ops/quantize_per_tensor.h>
+#include <c10/core/QScheme.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/library.h>
