@@ -24,13 +24,13 @@ torch/csrc/autograd/generated/
 
 import argparse
 import os
-from tools.codegen.api import cpp
-from tools.codegen.api.autograd import (
+from torchgen.api import cpp
+from torchgen.api.autograd import (
     match_differentiability_info,
     NativeFunctionWithDifferentiabilityInfo,
 )
-from tools.codegen.gen import parse_native_yaml
-from tools.codegen.selective_build.selector import SelectiveBuilder
+from torchgen.gen import parse_native_yaml
+from torchgen.selective_build.selector import SelectiveBuilder
 from typing import List
 from . import gen_python_functions
 from .gen_autograd_functions import (

@@ -52,6 +52,10 @@ query ($owner: String!, $name: String!, $number: Int!) {
             oid
           }
         }
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
         totalCount
       }
       commits(last: 1) {
@@ -237,6 +241,33 @@ query($org: String!, $name: String!, $cursor: String) {
 }
 """
 
+GH_GET_PR_NEXT_AUTHORS_QUERY = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      commits_with_authors: commits(first: 100, after: $cursor) {
+        nodes {
+          commit {
+            author {
+              user {
+                login
+              }
+              email
+              name
+            }
+            oid
+          }
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+      }
+    }
+  }
+}
+"""
+
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_SOURCE_ID = re.compile(r'^ghstack-source-id: (.+)\n?', re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
@@ -347,6 +378,7 @@ class GitHubPR:
         self.changed_files: Optional[List[str]] = None
         self.conclusions: Optional[Dict[str, str]] = None
         self.comments: Optional[List[GitHubComment]] = None
+        self._authors: Optional[List[Tuple[str, str]]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -414,16 +446,41 @@ class GitHubPR:
     def get_pr_creator_login(self) -> str:
         return cast(str, self.info["author"]["login"])
 
+    def _fetch_authors(self) -> List[Tuple[str, str]]:
+        if self._authors is not None:
+            return self._authors
+        authors: List[Tuple[str, str]] = []
+
+        def add_authors(info: Dict[str, Any]) -> None:
+            for node in info["commits_with_authors"]["nodes"]:
+                author_node = node["commit"]["author"]
+                user_node = author_node["user"]
+                author = f"{author_node['name']} <{author_node['email']}>"
+                if user_node is None:
+                    # If author is not github user, user node will be null
+                    authors.append(("", author))
+                else:
+                    authors.append((cast(str, user_node["login"]), author))
+
+        info = self.info
+        for _ in range(100):
+            add_authors(info)
+            if not info["commits_with_authors"]["pageInfo"]["hasNextPage"]:
+                break
+            rc = gh_graphql(GH_GET_PR_NEXT_AUTHORS_QUERY,
+                            name=self.project,
+                            owner=self.org,
+                            number=self.pr_num,
+                            cursor=info["commits_with_authors"]["pageInfo"]["endCursor"])
+            info = rc["data"]["repository"]["pullRequest"]
+        self._authors = authors
+        return authors
+
     def get_committer_login(self, num: int = 0) -> str:
-        user = self.info["commits_with_authors"]["nodes"][num]["commit"]["author"]["user"]
-        # If author is not github user, user node will be null
-        if user is None:
-            return ""
-        return cast(str, user["login"])
+        return self._fetch_authors()[num][0]
 
     def get_committer_author(self, num: int = 0) -> str:
-        node = self.info["commits_with_authors"]["nodes"][num]["commit"]["author"]
-        return f"{node['name']} <{node['email']}>"
+        return self._fetch_authors()[num][1]
 
     def get_checkrun_conclusions(self) -> Dict[str, str]:
         """ Returns list of checkrun / conclusions """
