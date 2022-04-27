@@ -117,6 +117,10 @@ ALLOW_LIST = [
     ("prim::infer_squeeze_size", datetime.date(9999, 1, 1)),
     ("aten::_cat", datetime.date(2022, 5, 15)),
     ("aten::zero", datetime.date(2022, 5, 15)),
+    ("aten::max_unpool2d_backward", datetime.date(2022, 5, 15)),
+    ("aten::max_unpool2d_backward.grad_input", datetime.date(2022, 5, 15)),
+    ("aten::max_unpool3d_backward", datetime.date(2022, 5, 15)),
+    ("aten::max_unpool3d_backward.grad_input", datetime.date(2022, 5, 15)),
 ]
 
 ALLOW_LIST_COMPILED = [
