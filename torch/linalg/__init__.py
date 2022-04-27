@@ -875,6 +875,7 @@ Examples::
 .. _LAPACK's sytrf:
     https://www.netlib.org/lapack/explore-html/d3/db6/group__double_s_ycomputational_gad91bde1212277b3e909eb6af7f64858a.html
 """)
+ldl_factor.__module__ = "torch.linalg"
 
 ldl_factor_ex = _add_docstr(_linalg.linalg_ldl_factor_ex, r"""
 linalg.ldl_factor_ex(A, *, hermitian=False, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
@@ -928,6 +929,7 @@ Examples::
 .. _LAPACK's sytrf:
     https://www.netlib.org/lapack/explore-html/d3/db6/group__double_s_ycomputational_gad91bde1212277b3e909eb6af7f64858a.html
 """)
+ldl_factor_ex.__module__ = "torch.linalg"
 
 ldl_solve = _add_docstr(_linalg.linalg_ldl_solve, r"""
 linalg.ldl_solve(LD, pivots, B, *, hermitian=False, out=None) -> Tensor
@@ -969,6 +971,7 @@ Examples::
     >>> torch.linalg.norm(A @ X - B)
     >>> tensor(0.0001)
 """)
+ldl_solve.__module__ = "torch.linalg"
 
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
 torch.linalg.lstsq(A, B, rcond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
