@@ -1,4 +1,4 @@
-#pragma once
+
 #include <c10/core/DispatchKey.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
@@ -817,9 +817,9 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_xla_ks = DispatchKeySet(DispatchKey::AutocastXLA);
   constexpr auto autocast_mlc_ks = DispatchKeySet(DispatchKey::AutocastMLC);
   constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastIPU);
-  constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastHPU);
-  constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastVE);
-  constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastLazy);
+  constexpr auto autocast_hpu_ks = DispatchKeySet(DispatchKey::AutocastHPU);
+  constexpr auto autocast_ve_ks = DispatchKeySet(DispatchKey::AutocastVE);
+  constexpr auto autocast_lazy_ks = DispatchKeySet(DispatchKey::AutocastLazy);
   constexpr auto autocast_xpu_ks = DispatchKeySet(DispatchKey::AutocastXPU);
 
   switch (t) {
