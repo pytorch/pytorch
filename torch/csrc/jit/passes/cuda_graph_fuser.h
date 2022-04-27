@@ -13,7 +13,6 @@ namespace jit {
 // Register CudaFuseGraph in custom passes
 struct TORCH_API RegisterCudaFuseGraph
     : public PassManager<RegisterCudaFuseGraph> {
-
   static bool canRegisterPass() {
 #ifdef USE_ROCM
     static bool has_rocm = true;

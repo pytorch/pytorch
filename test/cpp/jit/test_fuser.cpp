@@ -18,8 +18,8 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
@@ -62,9 +62,10 @@ class FuserTest : public ::testing::Test {
   void TearDown() override {
     RegisterCudaFuseGraph(old_nvfuser_value_);
   }
+
  private:
   bool old_nvfuser_value_;
-}
+};
 
 TEST_F(FuserTest, TestSimple_CUDA) {
 #if defined(FBCODE_CAFFE2)
