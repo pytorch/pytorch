@@ -40,6 +40,11 @@ PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
 if [[ $TEST_CONFIG == 'default' ]]; then
   export CUDA_VISIBLE_DEVICES=0
+  export HIP_VISIBLE_DEVICES=0
+fi
+
+if [[ $TEST_CONFIG == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export HIP_VISIBLE_DEVICES=0,1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
