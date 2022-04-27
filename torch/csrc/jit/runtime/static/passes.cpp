@@ -1192,57 +1192,5 @@ C10_UNUSED void RemoveUnnecessaryEmbeddingBagOutputs(
   fuse.runOnGraph(graph);
 }
 
-namespace {
-bool isNoOpSlice(Node* node) {
-  DCHECK(node->kind() == aten::slice);
-  auto step = toIValue(node->input(3));
-  if (!step.has_value() || step->toInt() != 1) {
-    return false;
-  }
-  auto start = toIValue(node->input(1));
-  if (!start.has_value() || (start->isInt() && start->toInt() != 0)) {
-    return false;
-  }
-  auto end = toIValue(node->input(2));
-  // Could also look at list length, but most models that have this pattern are
-  // just doing list[0:], so it's not needed for now.
-  return end.has_value() && end->isNone();
-}
-} // namespace
-
-void EliminateNoOpSlice(std::shared_ptr<Graph>& graph) {
-  DepthFirstGraphNodeIterator it(graph);
-  auto schema = torch::schema(
-      "aten::slice.t(t[] l, int? start=None, int? end=None, int step=1) -> t[]");
-  Node* node = nullptr;
-  std::vector<Node*> to_delete;
-  while ((node = it.next()) != nullptr) {
-    if (!node->matches(schema) || !isNoOpSlice(node)) {
-      continue;
-    }
-
-    node->output()->replaceAllUsesWith(node->input(0));
-    to_delete.push_back(node);
-  }
-  for (auto* node : to_delete) {
-    node->destroy();
-  }
-}
-
-void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph) {
-  std::string pattern = R"IR(
-    graph(%input, %packed_params):
-        %x : Tensor = quantized::linear_dynamic_fp16(%input, %packed_params)
-        %y : Tensor = aten::relu(%x)
-        return (%y))IR";
-  std::string fused_pattern = R"IR(
-    graph(%input, %packed_params):
-        %x : Tensor = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
-        return (%x))IR";
-  SubgraphRewriter fuse;
-  fuse.RegisterRewritePattern(pattern, fused_pattern);
-  fuse.runOnGraph(graph);
-}
-
 } // namespace jit
 } // namespace torch
