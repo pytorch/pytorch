@@ -41,21 +41,10 @@ def decompose(decomposition_table):
 class ProxyTensor(torch.Tensor):
     elem: torch.Tensor
 
-    __slots__ = ['elem', 'proxy']
+    __slots__ = ['proxy']
 
     @staticmethod
     def __new__(cls, elem, proxy):
-        # Wrapping something in ProxyTensor implicitly detaches
-        # gradients.  If something required grad, we will collect it as if it
-        # were a leaf.  A consequence of detaching in this way is you
-        # need to maintain a parameter cache when translating tensors
-        # into ProxyTensor, so you don't create multiple copies of
-        # a gradient (they are aliased, but they would count as independent
-        # leaves).  An alternate strategy would be to avoid implicitly
-        # detaching and instead "catch" gradients as they exit the
-        # ProxyTensor boundary.
-        # assert not elem.requires_grad or not torch.is_grad_enabled()
-
         # Hack to deal with super().__new__ not working for sparse tensors
         if elem.is_sparse:
             proxy.node.meta['tensor_meta'] = {}
@@ -69,7 +58,7 @@ class ProxyTensor(torch.Tensor):
 
     def __repr__(self):
         with no_dispatch():
-            return f"ProxyTensor({self.as_subclass(torch.Tensor)})"
+            return f"ProxyTensor({self.as_subclass(torch.Tensor)}, proxy={self.proxy})"
 
     __torch_function__ = _disabled_torch_function_impl
 
@@ -79,7 +68,7 @@ class ProxyTensor(torch.Tensor):
         if func_overload in CURRENT_DECOMPOSITION_TABLE:
             return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
         # Commenting this out for now since it causes some spurious failures (such as error checking)
-        if func == aten._local_scalar_dense:
+        if func_overload == aten._local_scalar_dense.default:
             raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
                                "It's likely that this is caused by data-dependent control flow or similar.")
 
@@ -100,16 +89,14 @@ class ProxyTensor(torch.Tensor):
             real_out = func_overload(*args, **kwargs)
 
         def wrap_with_proxy(e, proxy):
-            # Some ops (like native_batch_norm_backward) return undefined tensors that get
-            # converted into None in python.
-            # As the function signature expects tensors, if we directly return these None
-            # tensors back to C++, we'll error.
-            if e is None:
-                e = torch.empty(())
             if type(e) == torch.Tensor:
                 return ProxyTensor(e, proxy)
             else:
                 return e
+
+        # Unfortunately, tree_map cannot directly be used here. As the resulting
+        # object may be a proxy that represents a tuple, we may need to
+        # explicitly unwrap the proxy by simulating the flattening operations.
         if isinstance(real_out, tuple):
             return tuple(wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out))
         elif isinstance(real_out, list):
@@ -124,25 +111,14 @@ class PythonKeyTracer(Tracer):
     def __init__(self):
         super().__init__()
 
+    # In general, we don't want to make modules leaves. In priniple, users of
+    # this tracer might want to override this in order to turn a couple specific
+    # modules into leaves in the tracd graph.
     def call_module(
         self, m: torch.nn.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
         return forward(*args, **kwargs)
 
-    def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
-        if isinstance(attr_val, torch.nn.Parameter):
-            for n, p in self.root.named_parameters():
-                if attr_val is p:
-                    if n not in parameter_proxy_cache:
-                        proxy = self.create_proxy('get_attr', n, (), {})
-                        parameter_proxy_cache[n] = ProxyTensor(attr_val, proxy)
-                    return parameter_proxy_cache[n]
-            return attr_val
-        return attr_val
-
-    # We need to do this so that parameters entering the `make_fx` context have
-    # a reference to them (and also have requires_grad set on them correctly
-    # I'm not actually sure if this is the right thing to do ...
     def create_arg(self, a: Any):
         if isinstance(a, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
