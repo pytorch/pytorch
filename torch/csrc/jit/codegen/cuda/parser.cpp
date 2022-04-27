@@ -559,14 +559,7 @@ class IrParser {
       auto tensor_type = jit_output->type()->cast<TensorType>();
       TORCH_INTERNAL_ASSERT(
           tensor_type, "output of fusion group is not TensorType.");
-      if (tensor_type->scalarType() == at::ScalarType::Half) {
-        // No need to update value_map_ after this point.
-        out = castOp(DataType::Half, out)->as<TensorView>();
-      }
-      if (tensor_type->scalarType() == at::ScalarType::BFloat16) {
-        // No need to update value_map_ after this point.
-        out = castOp(DataType::BFloat16, out)->as<TensorView>();
-      }
+      out = optionalCastStrict(aten_to_data_type(tensor_type->scalarType()));
       fusion->addOutput(out);
 
       // mark output tensor as permuted;
