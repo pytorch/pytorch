@@ -184,6 +184,18 @@ $4 = torch._ops.aten.slice_copy.Tensor($3, 0, 2, 4)
 $5 = torch._ops.aten.slice_copy.Tensor($4, 1, 2, 4)
 $6 = torch._ops.aten.expand_copy.default($0, [2, 2])""")
 
+    def test_cat(self):
+        def f(x):
+            out = torch.empty(0)
+            torch.cat((x,), out=out)
+            return out
+        self.assert_functionalization(f, torch.ones(2, 2))
+        logs = self.get_logs(f, torch.ones(2, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.cat.default([LoggingTensor(tensor([[1., 1.],
+        [1., 1.]]))])""")
+
     def test_diagonal(self):
         def f(x):
             # test: view ops that take a subset of the original tensor (select/diagonal)
@@ -434,6 +446,21 @@ $1 = torch._ops.aten._to_copy.default($0, dtype=6, layout=0, device=device(type=
 $2 = torch._ops.aten.expand_copy.default($1, [2])
 $3 = torch._ops.aten.add.Tensor($2, $0)""")
 
+    def test_fill_(self):
+        def f(x):
+            y = x + x
+            z = y.diagonal()
+            z.fill_(0)
+            return y
+
+        self.assert_functionalization(f, torch.ones(2, 2))
+        logs = self.get_logs(f, torch.ones(2, 2))
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.add.Tensor($0, $0)
+$2 = torch._ops.aten.diagonal_copy.default($1)
+$3 = torch._ops.aten.fill.Scalar($2, 0)""")
+
     def test_nested_functions_propagate_updates(self):
         def g(x):
             # Create a view of x
@@ -462,14 +489,11 @@ $3 = torch._ops.aten.add.Tensor($2, $0)""")
         with capture_logs() as logs:
             y = f(x1_not_functional, x2_functional)
 
-        # I think the alias trace is coming from the fact that x2 is technically *not*
-        # a LoggingTensor (instead it *contains* a LoggingTensor), but x1 *is* a LoggingTensor.
-        # The important thing here though is that functionalization ran the "+" kernel
+        # Make sure that functionalization ran the "+" kernel
         # with a functional + non-functional tensor, and wrapped the output appropriately.
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)
-$3 = torch._ops.aten.alias_copy.default($2)
-$4 = torch._ops.aten.add.Tensor($3, tensor(1))""")
+$3 = torch._ops.aten.add.Tensor($2, tensor(1))""")
 
     def test_mixed_wrappers_invalid(self):
         x1_not_functional = torch.ones(4)

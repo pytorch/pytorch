@@ -3,7 +3,7 @@ import os
 import pathlib
 import sys
 import yaml
-from typing import Any, List, Optional, cast
+from typing import Any, Optional, cast
 
 try:
     # use faster C loader if available
@@ -11,24 +11,10 @@ try:
 except ImportError:
     from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
 
-source_files = {".py", ".cpp", ".h"}
-
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
-
-# TODO: This is a little inaccurate, because it will also pick
-# up setup_helper scripts which don't affect code generation
-def all_generator_source() -> List[str]:
-    r = []
-    for directory, _, filenames in os.walk("tools"):
-        for f in filenames:
-            if os.path.splitext(f)[1] in source_files:
-                full = os.path.join(directory, f)
-                r.append(full)
-    return sorted(r)
 
 
 def generate_code(
-    ninja_global: Optional[str] = None,
     native_functions_path: Optional[str] = None,
     install_dir: Optional[str] = None,
     subset: Optional[str] = None,
@@ -38,7 +24,7 @@ def generate_code(
 ) -> None:
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
-    from tools.codegen.selective_build.selector import SelectiveBuilder
+    from torchgen.selective_build.selector import SelectiveBuilder
 
     # Build ATen based Variable classes
     if install_dir is None:
@@ -98,7 +84,7 @@ def get_selector_from_legacy_operator_selection_list(
     is_root_operator = True
     is_used_for_training = True
 
-    from tools.codegen.selective_build.selector import SelectiveBuilder
+    from torchgen.selective_build.selector import SelectiveBuilder
 
     selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
         selected_op_list,
@@ -116,7 +102,7 @@ def get_selector(
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
-    from tools.codegen.selective_build.selector import SelectiveBuilder
+    from torchgen.selective_build.selector import SelectiveBuilder
 
     assert not (
         selected_op_list_path is not None and operators_yaml_path is not None
@@ -136,7 +122,6 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Autogenerate code")
     parser.add_argument("--native-functions-path")
-    parser.add_argument("--ninja-global")
     parser.add_argument("--install_dir")
     parser.add_argument(
         "--subset",
@@ -175,7 +160,6 @@ def main() -> None:
     options = parser.parse_args()
 
     generate_code(
-        options.ninja_global,
         options.native_functions_path,
         options.install_dir,
         options.subset,
@@ -203,8 +187,8 @@ def main() -> None:
         assert os.path.isfile(
             ts_native_functions
         ), f"Unable to access {ts_native_functions}"
-        from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
-        from tools.codegen.dest.lazy_ir import TSLazyIR
+        from torchgen.gen_lazy_tensor import run_gen_lazy_tensor
+        from torchgen.dest.lazy_ir import GenTSLazyIR
 
         run_gen_lazy_tensor(
             aten_path=aten_path,
@@ -216,7 +200,7 @@ def main() -> None:
             node_base="TsNode",
             node_base_hdr=ts_node_base,
             build_in_tree=True,
-            lazy_ir_cls=TSLazyIR,
+            lazy_ir_generator=GenTSLazyIR,
             per_operator_headers=options.per_operator_headers,
             gen_forced_fallback_code=True,
         )
