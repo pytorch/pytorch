@@ -24,7 +24,7 @@ fusion.print_kernel()
 
 # Execute Fusion
 input1 = torch.Tensor([4, 3, 2, 1]).cuda().unsqueeze(0).unsqueeze(-1)
-input1 = (input1 + torch.zeros(2, 4, 3, device='cuda')).transpose(1,2)
+input1 = (input1 + torch.zeros(2, 4, 3, device='cuda')).transpose(1, 2)
 input2 = torch.Tensor([1, 2, 3, 4]).cuda().unsqueeze(0).unsqueeze(0)
 input2 = input2 + torch.zeros(2, 3, 4, device='cuda')
 
