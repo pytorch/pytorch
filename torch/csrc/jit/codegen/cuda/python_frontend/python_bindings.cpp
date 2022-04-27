@@ -172,6 +172,25 @@ void initNvFuserPythonBindings(PyObject* module) {
           py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
           py::return_value_policy::reference)
       .def_static(
+          "define_tensor",
+          [](size_t ndims,
+             std::vector<bool> contiguity,
+             torch::jit::fuser::cuda::DataType dtype =
+                 torch::jit::fuser::cuda::DataType::Float) -> TensorView* {
+            TORCH_CHECK(
+                ndims == contiguity.size(),
+                "The number of dimensions specified does not match contiguity.");
+            return TensorViewBuilder()
+                .ndims(ndims)
+                .dtype(dtype)
+                .contiguity(std::move(contiguity))
+                .build();
+          },
+          py::arg("ndims"),
+          py::arg("contiguity"),
+          py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
+          py::return_value_policy::reference)
+      .def_static(
           "define_constant",
           [](double val) -> torch::jit::fuser::cuda::Val* {
             return IrBuilder::create<Double>(val);
@@ -520,11 +539,13 @@ void initNvFuserPythonBindings(PyObject* module) {
         std::vector<bool> is_broadcast_dim(output_shape.size(), true);
         for (const auto idx : c10::irange(broadcast_dims.size())) {
           if (idx > 0) {
-            TORCH_CHECK(broadcast_dims[idx - 1] < broadcast_dims[idx],
-              "Broadcast dimension is not greater than the previous value.");
+            TORCH_CHECK(
+                broadcast_dims[idx - 1] < broadcast_dims[idx],
+                "Broadcast dimension is not greater than the previous value.");
           }
-          TORCH_CHECK(broadcast_dims[idx] < output_shape.size(),
-            "Invalid broadcast_dims value.");
+          TORCH_CHECK(
+              broadcast_dims[idx] < static_cast<int>(output_shape.size()),
+              "Invalid broadcast_dims value.");
           is_broadcast_dim.at(broadcast_dims[idx]) = false;
         }
 
