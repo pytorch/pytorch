@@ -1,4 +1,4 @@
-
+#pragma once
 #include <c10/core/DispatchKey.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
