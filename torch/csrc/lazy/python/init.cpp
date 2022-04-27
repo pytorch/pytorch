@@ -170,6 +170,11 @@ void initLazyBindings(PyObject* module){
         torch::lazy::getLTCForceFallback() = newval;
     }
   );
+  lazy.def(
+    "_enable_reuse_ir", []() {
+        FLAGS_torch_lazy_reuse_ir = true;
+    }
+  );
 
   lazy_ts_backend.def(
     "_init",
