@@ -393,19 +393,19 @@ def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
 
 @register_decomposition(aten.embedding)
 def embedding(weight: Tensor, indices: Tensor, padding_idx: int = -1, scale_grad_by_freq: bool = False, sparse: bool = False) -> Tensor:
-  assert weight.dim() == 2,  "'weight' must be 2-D"
-#   auto indices_arg = TensorArg(indices, "indices", 1);
-#   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
+    assert weight.dim() == 2,  "'weight' must be 2-D"
+    #   auto indices_arg = TensorArg(indices, "indices", 1);
+    #   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
 
-  # TODO: use tensor.index() after improving perf
-  if (indices.dim() == 1):
-    return weight.index_select(0, indices)
+    # TODO: use tensor.index() after improving perf
+    if indices.dim() == 1:
+        return weight.index_select(0, indices)
 
-  size = list(indices.shape)
-  for d in weight.shape[1:]:
-    size.append(d)
+    size = list(indices.shape)
+    for d in weight.shape[1:]:
+        size.append(d)
 
-  return weight.index_select(0, indices.reshape(-1)).view(size)
+    return weight.index_select(0, indices.reshape(-1)).view(size)
 
 
 @register_decomposition(aten.embedding_dense_backward)
