@@ -1184,29 +1184,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::xlogy, aten_xlogy, [](Node* n) -> SROperator {
 });
 
 REGISTER_OPERATOR_FUNCTOR(
-    aten::_log_softmax,
-    aten__log_softmax,
-    [](Node* n) -> SROperator {
-      if (n->matches(torch::schema(
-              "aten::_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor"))) {
-        return [](ProcessedNode* p_node) {
-          const auto& self = p_node->Input(0).toTensor();
-          const auto dim = p_node->Input(1).toInt();
-          const auto half_to_float = p_node->Input(2).toBool();
-          if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = at::cpu::_log_softmax(self, dim, half_to_float);
-            return;
-          }
-          auto& out = p_node->Output(0).toTensor();
-          fastResizeToZero(out);
-          at::cpu::_log_softmax_out(out, self, dim, half_to_float);
-        };
-      }
-      LogAndDumpSchema(n);
-      return nullptr;
-    });
-
-REGISTER_OPERATOR_FUNCTOR(
     aten::_log_softmax_backward_data,
     aten__log_softmax_backward_data,
     [](Node* n) -> SROperator {

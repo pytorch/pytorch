@@ -3,7 +3,6 @@ cpp_namespace: torch::lazy
 full_codegen:
   - _adaptive_avg_pool2d
   - _adaptive_avg_pool2d_backward
-  - _log_softmax
   - _log_softmax_backward_data
   - _softmax
   - _softmax_backward_data

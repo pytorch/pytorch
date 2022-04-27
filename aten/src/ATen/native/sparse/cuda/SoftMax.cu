@@ -19,7 +19,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_masked_softmax_native.h>
-#include <ATen/ops/_log_softmax_cuda_dispatch.h>
+#include <ATen/ops/log_softmax_cuda_dispatch.h>
 #include <ATen/ops/_log_softmax_backward_data_cuda_dispatch.h>
 #include <ATen/ops/_softmax_cuda_dispatch.h>
 #include <ATen/ops/_softmax_backward_data_cuda_dispatch.h>
@@ -395,7 +395,7 @@ void cuda_sparse_coo_softmax(
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
       auto new_values =
-          at::cuda::_log_softmax(values, dim - sparse_dim + 1, false);
+          at::cuda::log_softmax(values, dim - sparse_dim + 1);
       out_values.set_(new_values);
     } else {
       auto new_values = at::cuda::_softmax(values, dim - sparse_dim + 1, false);

@@ -1,3 +1,4 @@
+#include "ATen/ops/log_softmax_cpu_dispatch.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
@@ -15,7 +16,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_log_softmax_backward_data_cpu_dispatch.h>
-#include <ATen/ops/_log_softmax_cpu_dispatch.h>
+#include <ATen/ops/log_softmax_cpu_dispatch.h>
 #include <ATen/ops/_softmax_backward_data_cpu_dispatch.h>
 #include <ATen/ops/_softmax_cpu_dispatch.h>
 #include <ATen/ops/_sparse_log_softmax.h>
@@ -308,7 +309,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
       auto new_values =
-          at::cpu::_log_softmax(values, dim - sparse_dim + 1, false);
+          at::cpu::log_softmax(values, dim - sparse_dim + 1);
       out_values.set_(new_values);
     } else {
       auto new_values = at::cpu::_softmax(values, dim - sparse_dim + 1, false);

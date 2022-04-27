@@ -20,7 +20,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_masked_softmax_native.h>
-#include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/log_softmax_native.h>
 #include <ATen/ops/_log_softmax_backward_data_native.h>
 #include <ATen/ops/_softmax_native.h>
 #include <ATen/ops/_softmax_backward_data_native.h>
@@ -908,12 +908,26 @@ void host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t d
 }
 }
 
-TORCH_IMPL_FUNC(log_softmax_cuda_out) (
+
+void _log_softmax_cuda_out(
   const Tensor &input,
   const int64_t dim,
   const bool half_to_float,
   const Tensor &output) {
   host_softmax<LogSoftMaxForwardEpilogue,true>(input, dim, half_to_float, output);
+}
+
+TORCH_IMPL_FUNC(log_softmax_cuda_out) (
+  const Tensor &input,
+  const int64_t dim,
+  c10::optional<ScalarType> dtype,
+  const Tensor &output) {
+  if (input.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+      _log_softmax_cuda_out(input, dim, true, output);
+  } else {
+      Tensor converted = dtype.has_value()? input.toType(dtype.value()) : input;
+      _log_softmax_cuda_out(converted, dim, false, output);
+  }
 }
 
 TORCH_IMPL_FUNC(log_softmax_backward_cuda_out) (

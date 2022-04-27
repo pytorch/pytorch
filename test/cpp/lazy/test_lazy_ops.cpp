@@ -6924,9 +6924,9 @@ TEST_F(LazyOpsTest, TestLogSoftmaxWrapper) {
     int rank = input.dim();
     for (int dim = -rank; dim < rank; ++dim) {
       torch::Tensor output =
-          torch::_log_softmax(input, dim, /*half_to_float=*/false);
+          torch::log_softmax(input, dim);
       torch::Tensor lazy_output =
-          torch::_log_softmax(lazy_input, dim, /*half_to_float=*/false);
+          torch::log_softmax(lazy_input, dim);
       AllClose(output, lazy_output, /*rtol=*/1e-3);
     }
   });
