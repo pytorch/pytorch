@@ -192,10 +192,19 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
+  void updateGroupMembership(
+      const WorkerInfo& workerInfo,
+      const std::vector<c10::Device> devices,
+      const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+      bool isJoin);
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
+
+  TensorPipeRpcBackendOptions getBackendOptions() const;
+
+  const c10::intrusive_ptr<::c10d::Store> getStore() const;
 
   DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
 
@@ -215,6 +224,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   size_t timeoutMapSize();
   size_t numPendingResponses();
   size_t messageIdToTimeoutMapSize();
+
+  const bool isStaticGroup_;
 
  protected:
   // TensorPipe write function that could be used to write response
@@ -239,6 +250,9 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   void checkAndSetStaticGroup(const c10::intrusive_ptr<::c10d::Store>& store);
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
+
+  // Only use for Dynamic RPC groups, method to have worker leave group
+  void leaveGroup();
 
   // TensorPipe read function that could be used to read response messages
   // by client, and read request messages by server.
@@ -310,12 +324,16 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
         pendingResponseMessage_;
   };
 
+  const c10::intrusive_ptr<::c10d::Store> store_;
+
   const TensorPipeRpcBackendOptions opts_;
-  const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps_;
+  // For dynamic RPC, the reverse device maps are updated whenever a new rank
+  // joins or leaves the group
+  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps_;
   // Local devices used by this agent. If application didn't specify this
   // field, it will be initialized using corresponding local devices in
   // opts_.deviceMaps and reverseDeviceMaps_;
-  const std::vector<c10::Device> devices_;
+  std::vector<c10::Device> devices_;
 
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
@@ -335,8 +353,6 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // the shutdown process
   ::c10d::PrefixStore shutdownStore_;
   int worldSize_ = 0;
-  const bool isStaticGroup_;
-
   std::atomic<uint64_t> nextMessageID_{0};
 
   // Metadata used for tracking of whether certain RPCs have timed out or not.
@@ -413,6 +429,31 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   std::unordered_map<std::string, TimeSeriesMetricsTracker> timeSeriesMetrics_;
   // Mutex to guard timeSeriesMetrics_
   std::mutex metricsMutex_;
+
+  // Custom lock guard used to check if the RPC group is dynamic and lock the
+  // mutex if so
+  struct GroupMembershipLockGuard {
+    GroupMembershipLockGuard(std::mutex& mutex, bool isStaticGroup)
+        : ref_(mutex), isStaticGroup_(isStaticGroup) {
+      if (isStaticGroup_) {
+        ref_.lock();
+      }
+    }
+
+    ~GroupMembershipLockGuard() {
+      if (isStaticGroup_) {
+        ref_.unlock();
+      }
+    }
+
+   private:
+    GroupMembershipLockGuard(const GroupMembershipLockGuard&);
+    std::mutex& ref_;
+    bool isStaticGroup_;
+  };
+  // Mutex to guard access to group membership data
+  // e.g. updates to (workerIdToInfo_, workerNameToInfo_, workerNameToURL_)
+  mutable std::mutex groupMembershipMutex_;
 
   // Map to Track Network Data
   NetworkDataDict networkData_;

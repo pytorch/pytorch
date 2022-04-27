@@ -1,17 +1,17 @@
+#include <c10/util/Exception.h>
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
 #if AT_CUDNN_ENABLED()
-
 #include <ATen/native/cudnn/Macros.h>
-
-#if HAS_CUDNN_V8()
-
-#include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/cudnn/Types.h>
+#endif // AT_CUDNN_ENABLED
+#endif // USE_CUDA
+
+#include <ATen/ATen.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorIterator.h>
 #include "ATen/ops/dequantize.h"
@@ -53,12 +53,20 @@ void check_maxpool2d_params(
 Tensor adaptive_avg_pool2d_quantized_cuda(
     const at::Tensor& input,
     IntArrayRef output_size) {
+// TODO: renable these cudnn preprocessors like quantized_max_pool2d_cudnn below when we implement this function with cudnn
+#ifdef USE_CUDA
+// #if AT_CUDNN_ENABLED()
+// #if HAS_CUDNN_V8()
     // TODO: limit this to per channel quantized tensors for now, though should be easy to adapt
     // to per channel quantized tensors
     TORCH_CHECK(input.qscheme() == at::kPerTensorAffine, "adaptive_avg_pool2d_quantized_cuda oonly supports per channel quantized tensors");
     auto input_fp32 = at::dequantize(input);
     auto result_fp32 = at::adaptive_avg_pool2d(input_fp32, output_size);
     return at::quantize_per_tensor(result_fp32, input.q_scale(), input.q_zero_point(), input.scalar_type());
+#else // USE_CUDA
+  AT_ERROR("at::native::adaptive_avg_pool2d_quantized_cuda: ATen not compiled with USE_CUDA support");
+  return Tensor{}; // never reached, placates the compiler
+#endif
 }
 
 // Currently we support 4D and 3D input (qx) tensors, the latter of which is supported for
@@ -83,6 +91,9 @@ Tensor quantized_max_pool2d_cudnn(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+#ifdef USE_CUDA
+#if AT_CUDNN_ENABLED()
+#if HAS_CUDNN_V8()
   check_maxpool2d_params(
       kernel_size,
       stride,
@@ -199,6 +210,18 @@ Tensor quantized_max_pool2d_cudnn(
 
   // recall we casted our input and output to 4D if qx was 3D, so we recast it back to 3D prior to returning
   return (ndim == 3 ? qy.view(std::vector<int64_t>(output_shape.begin() + 1, output_shape.end())) : qy);
+#else // HAS_CUDNN_V8()
+  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with cuDNN v8 support");
+  return Tensor{}; // never reached, placates the compiler
+#endif // HAS_CUDNN_V8()
+#else // AT_CUDNN_ENABLED()
+  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with cuDNN support");
+  return Tensor{}; // never reached, placates the compiler
+#endif // AT_CUDNN_ENABLED()
+#else // USE_CUDA
+  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with USE_CUDA support");
+  return Tensor{}; // never reached, placates the compiler
+#endif
 }
 
 // Keep the registry in the anonymous namespace.
@@ -226,7 +249,3 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace
 } // namespace native
 } // namespace at
-
-#endif  // HAS_CUDNN_V8
-#endif  // AT_CUDNN_ENABLED
-#endif  // USE_CUDA
