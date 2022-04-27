@@ -205,9 +205,9 @@ c10::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
   return ConstantValueMap::getInstance().shapeValueMap[tensorName];
 }
 
-// Gets the inferred generatedShapeDataByName which is obtained by ONNX data propagation
+// Gets the inferred inferredShapeData which is obtained by ONNX data propagation
 std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>& ConstantValueMap::GetInferredShapeData() {
-  return ConstantValueMap::getInstance().generatedShapeDataByName;
+  return ConstantValueMap::getInstance().inferredShapeData;
 }
 
 SymbolDimMap& ConstantValueMap::GetSymbolDimMap() {
@@ -245,8 +245,8 @@ void ConstantValueMap::UpdateValueName(
       ConstantValueMap::getInstance().useInferredTypeMap, old_name, new_name);
   UpdateStrKey<decltype(shapeValueMap)>(
       ConstantValueMap::getInstance().shapeValueMap, old_name, new_name);
-  UpdateStrKey<decltype(generatedShapeDataByName)>(
-      ConstantValueMap::getInstance().generatedShapeDataByName, old_name, new_name);
+  UpdateStrKey<decltype(inferredShapeData)>(
+      ConstantValueMap::getInstance().inferredShapeData, old_name, new_name);
 }
 
 void ConstantValueMap::ClearMaps() {
@@ -256,7 +256,7 @@ void ConstantValueMap::ClearMaps() {
   ConstantValueMap::getInstance().typeReliableMap.clear();
   ConstantValueMap::getInstance().useInferredTypeMap.clear();
   ConstantValueMap::getInstance().shapeValueMap.clear();
-  ConstantValueMap::getInstance().generatedShapeDataByName.clear();
+  ConstantValueMap::getInstance().inferredShapeData.clear();
   ConstantValueMap::getInstance().symbolDimMap.clear();
 }
 

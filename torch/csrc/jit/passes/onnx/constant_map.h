@@ -87,7 +87,7 @@ class ConstantValueMap {
   // this tensor represents a shape.
   std::unordered_map<std::string, c10::SymbolicShape> shapeValueMap;
   // Stores earlier data propagation results so that they are accessible during future node-level shape inference.
-  std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> generatedShapeDataByName;
+  std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto> inferredShapeData;
   SymbolDimMap symbolDimMap;
 };
 
