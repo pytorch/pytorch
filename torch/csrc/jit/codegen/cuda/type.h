@@ -70,6 +70,11 @@ enum class DataType {
   BFloat16,
   ComplexFloat,
   ComplexDouble,
+  // Vectorized types, used for reinterpret casting views
+  // TODO: add more vectorized types
+  Double_2,
+  Float_2,
+  // Null
   Null
 };
 
@@ -81,6 +86,16 @@ bool isIntegralType(DataType dtype);
 bool isBooleanType(DataType dtype);
 // Returns if the datatype is a complex type
 bool isComplexType(DataType dtype);
+// Returns if the datatype is a vector type
+bool isVectorType(DataType dtype);
+// Return the corresponding vector type
+DataType getVectorType(DataType dtype, size_t vec_size);
+// Return the vector size for the given vector type
+int getVectorSizeFromType(DataType dtype);
+// Return the corresponding type of a vector type
+DataType getTypeFromVectorType(DataType dtype);
+// Return the corresponding scalar of a complex type
+DataType getTypeFromComplexType(DataType dtype);
 
 enum class ExprType {
   Invalid,
@@ -94,9 +109,9 @@ enum class ExprType {
   TransposeOp,
   ShiftOp,
   GatherOp,
-  ViewDtypeOp,
   ViewOp,
   Split,
+  ViewAsScalar,
   Merge,
   Allocate,
   BlockSync,
@@ -135,7 +150,7 @@ enum class UnaryOpType {
   Log10,
   Log1p,
   Log2,
-  EraseType,
+  BitCast,
   Neg,
   RandLike,
   Reciprocal,
@@ -259,7 +274,8 @@ enum class IterType {
   BroadcastWithStride,
   BroadcastWithoutStride,
   Gather,
-  Stride
+  Stride,
+  VectorComponent
 };
 
 enum class SwizzleType { NoSwizzle, Transpose };

@@ -98,7 +98,7 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::TransposeOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
        expr->getExprType().value() == ExprType::GatherOp ||
-       expr->getExprType().value() == ExprType::ViewDtypeOp ||
+       expr->getExprType().value() == ExprType::ViewAsScalar ||
        expr->getExprType().value() == ExprType::ViewOp ||
        expr->getExprType().value() == ExprType::GridReduction ||
        expr->getExprType().value() == ExprType::GridBroadcast ||

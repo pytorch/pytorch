@@ -411,13 +411,11 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
     mapPointwiseOrReductionOp(op);
   }
 
-  void handle(ViewDtypeOp* op) override {
-    mapPointwiseOrReductionOp(op);
-  }
-
   void handle(ViewOp* op) override {
     mapPointwiseOrReductionOp(op);
   }
+
+  void handle(ViewAsScalar* op) override;
 
   void handle(BroadcastOp* op) override;
 

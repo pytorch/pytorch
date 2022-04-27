@@ -554,13 +554,15 @@ std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
     if (id_map.find(from_id) != id_map.end()) {
       continue;
     }
-    // Matching ID not found. It's an error unless from_id is a new
-    // broadcast of a consumer domain; or from_id is a window axis of
-    // a consumer domain. Note that reduction domains are removed from
-    // the producer root domain.
+    // Matching ID not found. It's an error unless the following three cases:
+    // 1. from_id is a new broadcast of a consumer domain; or
+    // 2. from_id is a window axis of a consumer domain; or
+    // 3. from_id is a ViewAsScalar domain
+    // Note that reduction domains are removed from the producer root domain.
     if (!producer_to_consumer &&
         (new_broadcast_domains_.find(DomainKey(from_td, from_id)) !=
              new_broadcast_domains_.end() ||
+         from_id->getIterType() == IterType::VectorComponent ||
          (window_axes_.count(from_id) > 0))) {
       continue;
     }
@@ -870,6 +872,36 @@ void ComputeAtRootDomainMapBuilder::handle(BroadcastOp* op) {
         out_td);
     root_map_.new_broadcast_domains_.insert(DomainKey(out_td, *out_it));
   }
+}
+
+void ComputeAtRootDomainMapBuilder::handle(ViewAsScalar* op) {
+  const TensorView* out_tv = op->output(0)->as<TensorView>();
+  const TensorDomain* out_td = out_tv->domain();
+  const auto& out_root = out_td->getRootDomain();
+
+  const TensorView* in_tv = op->input(0)->as<TensorView>();
+  const TensorDomain* in_td = in_tv->domain();
+
+  std::vector<IterDomain*> in_root =
+      TensorDomain::noReductions(in_tv->getMaybeRFactorDomain());
+  TORCH_INTERNAL_ASSERT(
+      in_root.size() + 1 == out_root.size(),
+      "\nExpression: ",
+      op,
+      "\nInput root domain: ",
+      in_root,
+      "\nOutput root domain: ",
+      out_root);
+  auto in_it = in_root.begin();
+  auto out_it = out_root.begin();
+  while (in_it != in_root.end() && out_it != out_root.end()) {
+    setMaybeMapped(in_td, *in_it, out_td, *out_it);
+    ++in_it;
+    ++out_it;
+  }
+  TORCH_INTERNAL_ASSERT(
+      (*out_it)->isVectorComponent(),
+      "The last dim of ViewDtypeOp's output must be a ViewAsScalar");
 }
 
 void ComputeAtRootDomainMapBuilder::handle(TransposeOp* op) {

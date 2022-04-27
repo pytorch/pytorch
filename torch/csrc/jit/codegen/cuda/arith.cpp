@@ -212,6 +212,24 @@ TensorView* castOp(DataType dtype, TensorView* v1) {
   return castOp(dtype, v1->as<Val>())->as<TensorView>();
 }
 
+Val* bitCastOp(DataType dtype, Val* v1) {
+  if (v1->getDataType().value() == dtype) {
+    return v1;
+  }
+
+  TORCH_CHECK(
+      dataTypeSize(v1->getDataType().value()) == dataTypeSize(dtype),
+      "BitCast only works for types of the same size");
+
+  Val* out = newValLike(v1, dtype);
+  IrBuilder::create<UnaryOp>(UnaryOpType::BitCast, out, v1);
+  return out;
+}
+
+TensorView* bitCastOp(DataType dtype, TensorView* v1) {
+  return bitCastOp(dtype, v1->as<Val>())->as<TensorView>();
+}
+
 Val* unaryOp(UnaryOpType type, Val* v1) {
   TORCH_INTERNAL_ASSERT(
       type != UnaryOpType::Address,
@@ -1544,6 +1562,39 @@ TensorView* gather(
 
   IrBuilder::create<GatherOp>(out_tv, inp, window_shape, pad_width);
   return out_tv;
+}
+
+TORCH_CUDA_CU_API TensorView* viewAsScalar(TensorView* inp) {
+  auto inp_type = inp->getDataType().value();
+  TORCH_CHECK(isVectorType(inp_type), "Invalid type to viewAsScalar. A vector type is expected but ", inp_type, " is given.");
+  int vec_size = getVectorSizeFromType(inp_type);
+  auto out_type = getTypeFromVectorType(inp_type);
+
+  std::vector<IterDomain*> out_domain;
+  auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
+  out_domain.reserve(inp_domain.size());
+  for (auto d : inp_domain) {
+    out_domain.push_back(d->cloneWithoutRFactor());
+  }
+
+  IterDomain* id = IrBuilder::create<IterDomain>(
+      inp_domain[0]->container(),
+      inp_domain[0]->container()->zeroVal(),
+      IrBuilder::create<Int>(vec_size),
+      ParallelType::Serial,
+      IterType::VectorComponent,
+      false);
+  out_domain.push_back(id);
+
+  auto out = IrBuilder::create<TensorView>(
+      inp->container(),
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
+      out_type);
+
+  IrBuilder::create<ViewAsScalar>(inp->container(), out, inp, id);
+
+  return out;
 }
 
 namespace {

@@ -102,6 +102,23 @@ void IndexLowering::handle(const TernaryOp* top) {
       top->getTernaryOpType(), out, in1, in2, in3));
 }
 
+void IndexLowering::handle(const ViewAsScalar* uop) {
+  const auto in = lowerSrcIndex(uop->in(), uop->out());
+  const auto out = lowerDstIndex(uop->out());
+  for (auto loop : for_loops_) {
+    if (GpuLower::current()->caMap()->areMapped(
+            loop->iter_domain(),
+            uop->vector_id()->as<IterDomain>(),
+            IdMappingMode::LOOP)) {
+      Val* index = loop->index();
+      pushBack(
+          IrBuilder::create<ViewAsScalar>(out, in, uop->vector_id(), index));
+      return;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(false, "Can not find index for vector dim");
+}
+
 namespace {
 
 // Get the size of the temporary work buffer for grid communication, this can be

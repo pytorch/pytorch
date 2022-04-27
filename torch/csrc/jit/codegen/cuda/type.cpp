@@ -95,6 +95,62 @@ bool isComplexType(DataType dtype) {
   }
 }
 
+bool isVectorType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Float_2:
+    case DataType::Double_2:
+      return true;
+    default:
+      return false;
+  }
+}
+
+DataType getVectorType(DataType dtype, size_t vec_size) {
+  switch (dtype) {
+    case DataType::Float:
+      TORCH_INTERNAL_ASSERT(vec_size == 2, "Not supported vectorized type");
+      return DataType::Float_2;
+    case DataType::Double:
+      TORCH_INTERNAL_ASSERT(vec_size == 2, "Not supported vectorized type");
+      return DataType::Double_2;
+    default:
+      TORCH_INTERNAL_ASSERT(
+          false, "Not supported vectorized type:", dtype, " and ", vec_size);
+  }
+}
+
+int getVectorSizeFromType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Float_2:
+    case DataType::Double_2:
+      return 2;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Not a vector type:", dtype);
+  }
+}
+
+DataType getTypeFromVectorType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Float_2:
+      return DataType::Float;
+    case DataType::Double_2:
+      return DataType::Double;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Not a vector type:", dtype);
+  }
+}
+
+DataType getTypeFromComplexType(DataType dtype) {
+  switch (dtype) {
+    case DataType::ComplexFloat:
+      return DataType::Float;
+    case DataType::ComplexDouble:
+      return DataType::Double;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Not a vector type:", dtype);
+  }
+}
+
 bool isIntegerOp(const BinaryOpType bopt) {
   return bopt >= BinaryOpType::Mod && bopt <= BinaryOpType::Rshift;
 }
@@ -164,6 +220,10 @@ static const char* data_type2string(DataType t) {
       return "std::complex<float>";
     case DataType::ComplexDouble:
       return "std::complex<double>";
+    case DataType::Double_2:
+      return "Array<double, 2, 1>";
+    case DataType::Float_2:
+      return "Array<float, 2, 1>";
     case DataType::Null:
       return "null_type";
     default:
@@ -216,8 +276,8 @@ static const char* expr_type2string(ExprType t) {
       return "ShiftOp";
     case ExprType::GatherOp:
       return "GatherOp";
-    case ExprType::ViewDtypeOp:
-      return "ViewDtypeOp";
+    case ExprType::ViewAsScalar:
+      return "ViewAsScalar";
     case ExprType::ViewOp:
       return "ViewOp";
     case ExprType::Split:
@@ -256,7 +316,7 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::Frac:
     case UnaryOpType::Gelu:
     case UnaryOpType::Silu:
-    case UnaryOpType::EraseType:
+    case UnaryOpType::BitCast:
     case UnaryOpType::Neg:
     case UnaryOpType::Relu:
     case UnaryOpType::Reciprocal:
@@ -312,7 +372,7 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "log1p";
     case UnaryOpType::Log2:
       return "log2";
-    case UnaryOpType::EraseType:
+    case UnaryOpType::BitCast:
       return "erase_type";
     case UnaryOpType::Neg:
       return "neg";
@@ -605,6 +665,8 @@ static const char* iter_type2string(IterType t) {
       return "g";
     case IterType::Stride:
       return "s";
+    case IterType::VectorComponent:
+      return "v";
     default:
       // Don't try to print t as it would recursively call this function
       TORCH_INTERNAL_ASSERT(false, "Unexpected IterType");
@@ -904,6 +966,10 @@ size_t dataTypeSize(DataType type) {
       return sizeof(uint64_t);
     case DataType::Int32:
       return sizeof(uint32_t);
+    case DataType::Double_2:
+      return sizeof(double) * 2;
+    case DataType::Float_2:
+      return sizeof(float) * 2;
     default:
       TORCH_INTERNAL_ASSERT(false, "Size undefined for data type, ", type);
   }

@@ -805,21 +805,27 @@ int GatherOp::gatherAxis(int axis) const {
   return int(windowShape().size()) + axis;
 }
 
-ViewDtypeOp::ViewDtypeOp(
+ViewAsScalar::ViewAsScalar(
     IrBuilderPasskey passkey,
-    TensorView* out,
-    TensorView* in,
-    DataType dtype)
-    : Expr(passkey, ExprType::ViewDtypeOp), out_(out), in_(in), dtype_(dtype) {
+    Val* out,
+    Val* in,
+    IterDomain* vector_id,
+    Val* index)
+    : Expr(passkey, ExprType::ViewAsScalar),
+      out_(out),
+      in_(in),
+      vector_id_(vector_id),
+      index_(index) {
   addOutput(out);
   addInput(in);
 }
 
-ViewDtypeOp::ViewDtypeOp(const ViewDtypeOp* src, IrCloner* ir_cloner)
+ViewAsScalar::ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
-      dtype_(src->dtype()) {}
+      vector_id_(ir_cloner->clone(src->vector_id_)),
+      index_(ir_cloner->clone(src->index_)) {}
 
 ViewOp::ViewOp(IrBuilderPasskey passkey, TensorView* out, TensorView* in)
     : Expr(passkey, ExprType::ViewOp), out_(out), in_(in) {
@@ -918,7 +924,8 @@ bool IterDomain::sameAs(const Statement* other) const {
   const IterDomain* other_id = other->as<IterDomain>();
 
   bool is_same = isReduction() == other_id->isReduction() &&
-      getParallelType() == other_id->getParallelType();
+      getParallelType() == other_id->getParallelType() &&
+      isVectorComponent() == other_id->isVectorComponent();
   is_same = is_same && ScalarCheck::sameAs(extent(), other_id->extent());
   is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
   is_same =

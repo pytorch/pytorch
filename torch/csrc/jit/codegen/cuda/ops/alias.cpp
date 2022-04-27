@@ -57,25 +57,15 @@ TensorView* view(TensorView* x, DataType dtype) {
     return x;
   }
 
-  // TODO: support view(dtype) for dtypes of different size.
-  TORCH_INTERNAL_ASSERT(
-      dataTypeSize(x->getDataType().value()) == dataTypeSize(dtype),
-      "Currently, aten::view only supports viewing the data as a type with the same size.");
+  auto input_type = x->getDataType().value();
+  auto input_size = dataTypeSize(input_type);
+  auto newsize = dataTypeSize(dtype);
 
-  std::vector<IterDomain*> out_domain;
-  auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
-  out_domain.reserve(inp_domain.size());
-  for (auto d : inp_domain) {
-    out_domain.push_back(d->cloneWithoutRFactor());
+  if (input_size == newsize) {
+    return bitCastOp(dtype, x);
   }
-  auto out = IrBuilder::create<TensorView>(
-      x->container(),
-      IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
-      dtype);
-
-  IrBuilder::create<ViewDtypeOp>(x->container(), out, x, dtype);
-  return out;
+  // TODO: support view(dtype) for dtypes where input_size != newsize
+  TORCH_INTERNAL_ASSERT(false, "Unsupported reinterpret casting view");
 }
 
 TensorView* view(

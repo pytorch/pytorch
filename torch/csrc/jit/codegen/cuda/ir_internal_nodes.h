@@ -502,32 +502,42 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
   std::vector<std::vector<int>> pad_width_;
 };
 
-class TORCH_CUDA_CU_API ViewDtypeOp : public Expr {
+class TORCH_CUDA_CU_API ViewAsScalar : public Expr {
  public:
-  ViewDtypeOp(
+  ViewAsScalar(
       IrBuilderPasskey,
-      TensorView* out,
-      TensorView* in,
-      DataType dtype);
+      Val* out,
+      Val* in,
+      IterDomain* vector_id,
+      Val* index = nullptr);
 
-  ViewDtypeOp(const ViewDtypeOp* src, IrCloner* ir_cloner);
+  ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner);
 
-  TensorView* out() const {
+  Val* out() const {
     return out_;
   }
 
-  TensorView* in() const {
+  Val* in() const {
     return in_;
   }
 
-  DataType dtype() const {
-    return dtype_;
+  IterDomain* vector_id() const {
+    return vector_id_;
+  }
+
+  Val* index() const {
+    return index_;
   }
 
  private:
-  TensorView* const out_ = nullptr;
-  TensorView* const in_ = nullptr;
-  DataType dtype_;
+  Val* const out_ = nullptr;
+  Val* const in_ = nullptr;
+
+  // The IterDomain of type VectorComponent newly appended to the output
+  IterDomain* vector_id_ = nullptr;
+
+  // The index that vector_id_ is lowered into
+  Val* index_ = nullptr;
 };
 
 class TORCH_CUDA_CU_API ViewOp : public Expr {
@@ -638,6 +648,10 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 
   bool isStride() const {
     return getIterType() == IterType::Stride;
+  }
+
+  bool isVectorComponent() const {
+    return getIterType() == IterType::VectorComponent;
   }
 
   bool isParallelized() const {

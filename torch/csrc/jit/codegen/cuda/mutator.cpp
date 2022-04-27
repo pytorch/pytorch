@@ -313,7 +313,7 @@ void OptOutMutator::mutate(GatherOp* op) {
   IrBuilder::create<GatherOp>(container, out, in, window_shape, pad_width);
 }
 
-void OptOutMutator::mutate(ViewDtypeOp* vop) {
+void OptOutMutator::mutate(ViewAsScalar* vop) {
   TensorView* out = maybeMutated(vop->out())->as<TensorView>();
   TensorView* in = maybeMutated(vop->in())->as<TensorView>();
 
@@ -323,7 +323,8 @@ void OptOutMutator::mutate(ViewDtypeOp* vop) {
 
   auto container = vop->container();
   container->removeExpr(vop);
-  IrBuilder::create<ViewDtypeOp>(container, out, in, vop->dtype());
+  IrBuilder::create<ViewAsScalar>(
+      container, out, in, vop->vector_id(), vop->index());
 }
 
 void OptOutMutator::mutate(ViewOp* vop) {

@@ -33,6 +33,7 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   // Insert an expression before the current top-level expression.
   void insertAtTopLevel(Expr* expr);
 
+  void handle(const ViewAsScalar*) final;
   void handle(const UnaryOp*) final;
   void handle(const BinaryOp*) final;
   void handle(const TernaryOp*) final;

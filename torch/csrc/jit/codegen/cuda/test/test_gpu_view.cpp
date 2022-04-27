@@ -122,6 +122,58 @@ TEST_F(NVFuserTest, FusionViewDtypeFailMismatchSize_CUDA) {
   auto x_add_bias = add(x, bias);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(view(x_add_bias, DataType::Int));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(view(x_add_bias, DataType::Half));
+}
+
+TEST_F(NVFuserTest, FusionViewAsRealOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // TODO: We should modify our schedulers to correctly handle
+  // view_as_real. And test these schedulers.
+  std::vector<int64_t> input_shape{512};
+  std::vector<int64_t> output_shape{512, 2};
+
+  TensorView* x =
+      makeSymbolicTensor(input_shape.size(), DataType::ComplexFloat);
+  TensorView* bias =
+      makeSymbolicTensor(input_shape.size(), DataType::ComplexFloat);
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  TensorView* y = makeSymbolicTensor(output_shape.size());
+  fusion.addInput(y);
+
+  auto y_plus_1 = add(y, IrBuilder::create<Double>(1));
+
+  auto x_add_bias = add(x, bias);
+  auto x_view = view_as_real(x_add_bias);
+  auto out = add(y_plus_1, x_view);
+  fusion.addOutput(out);
+
+  out->axis(0)->parallelize(ParallelType::TIDx);
+  x_add_bias->computeAt(out, -1);
+  y->computeAt(out, -1);
+
+  auto in_options =
+      at::TensorOptions().dtype(at::kComplexFloat).device(at::kCUDA, 0);
+  auto out_options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape, in_options);
+  at::Tensor at_bias = at::randn(input_shape, in_options);
+  at::Tensor at_y = at::randn(output_shape, out_options);
+  std::vector<IValue> aten_inputs = {at_x, at_bias, at_y};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto at_x_add_bias = at_x + at_bias;
+  auto at_x_view = at::view_as_real(at_x_add_bias);
+  auto at_y_plus_1 = at_y + 1.0;
+  auto at_out = at_y_plus_1 + at_x_view;
+
+  testValidate(&fusion, outputs, aten_inputs, {at_out}, __LINE__, __FILE__);
 }
 
 TEST_F(NVFuserTest, FusionViewRfactorExtentReplacement_CUDA) {
@@ -846,6 +898,78 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain5_CUDA) {
         "Incorrect concrete ID: ",
         concrete_id->toString());
   }
+}
+
+TEST_F(NVFuserTest, FusionFlattenAfterUnsqueezeOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape{512};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size(), DataType::Double);
+  TensorView* bias = makeSymbolicTensor(input_shape.size(), DataType::Double);
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_unsqueeze = unsqueeze(x_add_bias, -1);
+  auto x_view = flatten(x_unsqueeze);
+  fusion.addOutput(x_view);
+
+  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+  std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+  x_view->split(0, 4);
+  x_add_bias->computeAt(x_view, 1);
+  x_view->axis(0)->parallelize(ParallelType::TIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto at_x_add_bias = at_x + at_bias;
+  auto at_x_view = at_x_add_bias.unsqueeze(-1).flatten();
+
+  testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionComputeAtRootDomainMapWithView_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int64_t> input_shape1{10, 12};
+  const std::vector<int64_t> input_shape2{10, 3, 4};
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+
+  // reduction followed by broadcast
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = broadcast(tv2, {false, true, true});
+
+  // Path with a view
+  auto tv4 = view(tv1, input_shape1, input_shape2);
+
+  // Join the reduciton+broadcast and view paths together
+  auto tv5 = add(tv3, tv4);
+  fusion.addOutput(tv5);
+
+  ComputeAtRootDomainMap map;
+  map.build();
+
+  // It's not possible to compute tv1 at the -1 position of
+  // t2. ComputeAtRootDomainMap should tell that by not mapping the
+  // second axis.
+  auto tv1_tv2_mappable_dims =
+      map.getMappableDims(tv1->domain(), tv2->domain());
+  TORCH_CHECK(
+      tv1_tv2_mappable_dims.find(tv1->axis(1)) == tv1_tv2_mappable_dims.end(),
+      "Invalid ComputeAtRootDomainMap. Domain should not be mappable: ",
+      tv1->axis(1)->toString());
 }
 
 } // namespace jit

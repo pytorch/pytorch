@@ -483,9 +483,9 @@ void IrPrinter::handle(const GatherOp* op) {
   os_ << "} )\n";
 }
 
-void IrPrinter::handle(const ViewDtypeOp* top) {
-  indent() << top->out() << " = view.dtype( " << top->in() << ", "
-           << top->dtype() << " )\n";
+void IrPrinter::handle(const ViewAsScalar* top) {
+  indent() << top->out() << " = view_as_scalar( " << top->in() << ", "
+           << top->vector_id() << " )\n";
 }
 
 void IrPrinter::handle(const ViewOp* top) {
