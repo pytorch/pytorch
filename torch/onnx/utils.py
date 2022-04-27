@@ -5,7 +5,6 @@ converted to models which run on other deep learning frameworks.
 """
 from __future__ import annotations
 
-import collections.abc
 import contextlib
 import copy
 import inspect
@@ -14,13 +13,10 @@ import os
 import re
 import textwrap
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
-import torch.jit
-import torch.onnx
 import torch.serialization
-from torch._six import string_classes
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
@@ -1245,13 +1241,11 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
 
 
 def _is_onnx_list(value):
-    if (
-        not isinstance(value, string_classes)
+    return (
+        not isinstance(value, torch._six.string_classes)
         and not isinstance(value, torch.Tensor)
-        and isinstance(value, collections.abc.Iterable)
-    ):
-        return True
-    return False
+        and isinstance(value, Iterable)
+    )
 
 
 def _add_attribute(node, key, value, aten):
