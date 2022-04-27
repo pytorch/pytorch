@@ -208,7 +208,9 @@ std::vector<int64_t> _pair_int(IValue v) {
   }
 }
 
-static bool isContiguous(const torch::jit::Value* v) {
+static bool isContiguous(
+    const torch::jit::Value* v,
+    at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
   auto const& tt = v->type()->cast<TensorType>();
   if (!tt) {
     return false;
@@ -221,6 +223,14 @@ static bool isContiguous(const torch::jit::Value* v) {
   if (!sizes || !strides) {
     return false;
   }
+
+  // Check dimension size first
+  int ndims = (*sizes).size();
+  if ((memory_format == at::MemoryFormat::ChannelsLast && ndims != 4) ||
+      (memory_format == at::MemoryFormat::ChannelsLast3d && ndims != 5)) {
+    return false;
+  }
+
   return *strides == TensorType::contiguousStridesOf(*sizes);
 }
 
@@ -475,8 +485,48 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     hasRandom_ = true;
   }
 
+  // Check whether the node is to create an new tensor
+  // TODO: It is hard to deduce the layout of the generated tensor.
+  bool is_tensor_creation = true;
+
+  // Check if the tensor is a contiguous tensor
+  bool is_contiguous = false;
+  // Check if the tensor is a channels-last contiguous tensor
+  bool is_channels_last_contiguous = false;
+  for (auto input : inputs) {
+    if (input->type()->kind() != TypeKind::TensorType)
+      continue;
+
+    is_tensor_creation = false;
+    TORCH_CHECK(bufs_.count(input) > 0);
+    auto buf_ = bufs_.at(input);
+
+    auto _is_contiguous = buf_->is_contiguous();
+    if (_is_contiguous) {
+      is_contiguous |= _is_contiguous;
+    } else {
+      is_channels_last_contiguous |=
+          (buf_->is_contiguous(at::MemoryFormat::ChannelsLast) ||
+           buf_->is_contiguous(at::MemoryFormat::ChannelsLast3d) ||
+           buf_->is_channels_last_1d_contiguous());
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        is_tensor_creation ||
+        ((is_contiguous xor is_channels_last_contiguous) &&
+         (is_contiguous || is_channels_last_contiguous)));
+  }
+
   auto outputType = findDtypeForValue(v);
   std::vector<ExprHandle> outputShape = sizesForValue(v);
+  std::vector<ExprHandle> outputStrides;
+  if (is_channels_last_contiguous) {
+    outputStrides =
+        c10::fmap<ExprHandle>(make_channels_last_strides(outputShape));
+  } else {
+    // Default
+    outputStrides = c10::fmap<ExprHandle>(make_contiguous_strides(outputShape));
+  }
 
   std::vector<ArgValue> argInputs;
   if (op == prim::ConstantChunk) {
@@ -521,12 +571,14 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   }
 
   if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
-    return custom_lowering(argInputs, outputShape, outputType, device_);
+    return custom_lowering(
+        argInputs, outputShape, outputStrides, outputType, device_);
   }
   if (v->node()->maybeSchema()) {
     if (NNCLoweringFunction lowering =
             getStandardLoweringFor(c10::toString(v->node()->schema()))) {
-      return lowering(argInputs, outputShape, outputType, device_);
+      return lowering(
+          argInputs, outputShape, outputStrides, outputType, device_);
     }
   }
   std::string msg = std::string("Unhandled node kind (in computeValue): ") +
@@ -995,28 +1047,55 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& outputs = input->owningGraph()->outputs();
   std::unordered_set<const Value*> outputs_set(outputs.begin(), outputs.end());
 
+  auto is_concrete_cont = [](const torch::jit::Value* input) {
+    if (input->isCompleteTensor()) {
+      return isContiguous(input) ||
+          isContiguous(input, at::MemoryFormat::ChannelsLast);
+    } else {
+      return false;
+    }
+  };
+
+  auto is_symbolic_cont = [](std::vector<torch::jit::StrideInput> desc) {
+    if (desc.size() == 1) {
+      return desc[0] == torch::jit::StrideInput::TENSOR_CONT ||
+          desc[0] == torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST;
+    } else {
+      return false;
+    }
+  };
+
   Tensor result(nullptr, nullptr);
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
-      bool contiguous_concrete_tensor =
-          (input->isCompleteTensor() && isContiguous(input));
-      bool contiguous_sym_tensor = false;
+      bool contiguous_concrete_tensor = is_concrete_cont(input);
+      bool contiguous_symbolic_tensor = false;
       if (has_symbolic_shapes_) {
         auto desc = getSymbolicInputStrideDesc(input);
-        contiguous_sym_tensor =
-            desc.size() == 1 && desc[0] == torch::jit::StrideInput::TENSOR_CONT;
+        contiguous_symbolic_tensor = is_symbolic_cont(desc);
       }
+
+      // Get input size and strides
+      auto size_handles = sizesFromSymbolicShape(tt->symbolic_sizes());
+      auto inputTensorStrides = getInputStrides(input, size_handles);
 
       // We don't need to copy the input if:
       //  1) it is not an output AND
       //  2) it is contiguous
-      bool contiguous = contiguous_concrete_tensor || contiguous_sym_tensor;
+      bool contiguous =
+          contiguous_concrete_tensor || contiguous_symbolic_tensor;
       if (!outputs_set.count(input) && contiguous) {
         BufHandle inBuffer(
             "t" + input_name_map_[input],
             sizesFromSymbolicShape(tt->symbolic_sizes()),
+            inputTensorStrides,
             ToDtype(static_cast<ScalarType>(*tt->scalarType())));
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            inBuffer.node()->is_contiguous() ||
+            inBuffer.node()->is_channels_last_1d_contiguous() ||
+            inBuffer.node()->is_contiguous(at::MemoryFormat::ChannelsLast) ||
+            inBuffer.node()->is_contiguous(at::MemoryFormat::ChannelsLast3d));
         bufs_.emplace(input, inBuffer.node());
         bufferArgs_.emplace_back(inBuffer);
         break;
@@ -1025,8 +1104,6 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       // if the input isn't contiguous or is an output,
       // write strided input into  contiguous buffer that is
       // then used in all further compute
-      auto size_handles = sizesFromSymbolicShape(tt->symbolic_sizes());
-      auto inputTensorStrides = getInputStrides(input, size_handles);
       ExprHandle flat_size = 1;
       for (size_t i = 0; i < size_handles.size(); ++i) {
         auto size = size_handles[i];
@@ -1168,11 +1245,12 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
           "Ouput tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
   // output is contiguous, no work to do
-  if (tensorOutputStrideDesc_[v->offset()] ==
-      torch::jit::StrideInput::TENSOR_CONT) {
+  auto stride_desc = tensorOutputStrideDesc_[v->offset()];
+  if (stride_desc == torch::jit::StrideInput::TENSOR_CONT ||
+      stride_desc == torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST) {
     return Tensor(buf, nullptr);
-    ;
   }
+
   TORCH_INTERNAL_ASSERT(
       tensorOutputStrideDesc_[v->offset()] ==
       torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST);
