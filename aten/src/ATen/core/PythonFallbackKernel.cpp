@@ -81,7 +81,6 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto maybe_python_mode_state = at::impl::PythonModeTLS::get_state();
   if (maybe_python_mode_state) {
     StashPythonModeGuard pythonModeGuard;
-    std::cout << "HERE" << std::endl;
     maybe_python_mode_state->pyinterpreter()->dispatch(op, stack, maybe_python_mode_state);
     return;
   }
