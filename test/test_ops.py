@@ -732,8 +732,8 @@ class TestCommon(TestCase):
 
         for sample in op.sample_inputs(device, dtype):
             actual = op(sample.input, *sample.args, **sample.kwargs)
-            (inp, args, kwargs) = sample.transform(lambda x: x.to(torch.complex64))
-            expected = op(inp, *args, **kwargs)
+            transformed_sample = sample.transform(lambda x: x.to(torch.complex64))
+            expected = op(transformed_sample.input, *transformed_sample.args, **transformed_sample.kwargs)
             self.assertEqual(actual, expected, exact_dtype=False)
 
 class TestCompositeCompliance(TestCase):
