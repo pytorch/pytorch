@@ -51,7 +51,7 @@ enum class BackendComponent : uint8_t {
   CUDABit,
   HIPBit,
   XLABit,
-  MLCBit,
+  MPSBit,
   IPUBit,
   XPUBit,
   HPUBit,
@@ -403,7 +403,7 @@ enum class DispatchKey : uint16_t {
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
   // CUDA]
   XLA, // lives out of tree at https://github.com/pytorch/xla
-  MLC, // lives out of tree at https://github.com/pytorch/MLCompute
+  MPS, // registered at build/aten/src/ATen/RegisterMPS.cpp
   IPU, // lives out of tree at https://github.com/graphcore/poptorch
   XPU, // For out of tree Intel's heterogeneous computing plug-in
   HPU, // For out of tree & closed source integration of HPU / Habana
@@ -427,7 +427,7 @@ enum class DispatchKey : uint16_t {
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
   _QuantizedHIP,
   _QuantizedXLA,
-  _QuantizedMLC,
+  _QuantizedMPS,
   _QuantizedIPU,
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
   _QuantizedHPU,
@@ -449,7 +449,7 @@ enum class DispatchKey : uint16_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
   // [Masquerading as CUDA]
   _SparseXLA,
-  _SparseMLC,
+  _SparseMPS,
   _SparseIPU,
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
   _SparseHPU,
@@ -473,7 +473,7 @@ enum class DispatchKey : uint16_t {
   NestedTensorCUDA,
   _NestedTensorHIP,
   _NestedTensorXLA,
-  _NestedTensorMLC,
+  _NestedTensorMPS,
   _NestedTensorIPU,
   _NestedTensorXPU,
   _NestedTensorHPU,
@@ -494,7 +494,7 @@ enum class DispatchKey : uint16_t {
   AutogradCUDA,
   _AutogradHIP,
   AutogradXLA,
-  AutogradMLC,
+  AutogradMPS,
   AutogradIPU,
   AutogradXPU,
   AutogradHPU,
