@@ -110,13 +110,13 @@ ALLOW_LIST = [
     ("aten::grid_sampler_3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_transform_bias_rescale_qkv", datetime.date(9999, 1, 1)),
     ("aten::scatter_reduce.two", datetime.date(2022, 4, 15)),
-    ("aten::stft", datetime.date(2022, 5, 1)),
     ("aten::_s_where", datetime.date(2022, 9, 30)),
     ("quantized::conv2d_cudnn", datetime.date(2022, 3, 22)),
     ("quantized::conv2d_relu_cudnn", datetime.date(2022, 3, 22)),
     ("prim::infer_squeeze_size.dim", datetime.date(9999, 1, 1)),
     ("prim::infer_squeeze_size", datetime.date(9999, 1, 1)),
     ("aten::_cat", datetime.date(2022, 5, 15)),
+    ("aten::zero", datetime.date(2022, 5, 15)),
 ]
 
 ALLOW_LIST_COMPILED = [
