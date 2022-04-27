@@ -53,7 +53,7 @@ class ConstantValueMap {
   static c10::optional<c10::SymbolicShape> GetShapeValue(
       const std::string& tensorName);
 
-  static std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>& GetGeneratedShapeDataByName();
+  static std::unordered_map<std::string, ::ONNX_NAMESPACE::TensorShapeProto>& GetInferredShapeData();
 
   static SymbolDimMap& GetSymbolDimMap();
 
