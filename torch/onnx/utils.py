@@ -1547,7 +1547,6 @@ def _run_symbolic_function(
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
-        # TODO(justinchu): Update _C._onnx.OperatorExportTypes pyi to include ONNX_FALLTHROUGH
         if operator_export_type == torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
         elif (
