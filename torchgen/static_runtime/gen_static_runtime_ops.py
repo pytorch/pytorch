@@ -138,6 +138,7 @@ def main() -> None:
     )
     options = parser.parse_args()
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
+    tags_yaml_path = os.path.join(options.source_path, 'native/tags.yaml')
     parsed_yaml = gen.parse_native_yaml(native_yaml_path)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,

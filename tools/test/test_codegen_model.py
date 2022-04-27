@@ -15,7 +15,7 @@ class TestCodegenModel(expecttest.TestCase):
     def assertParseErrorInline(self, yaml_str: str, expect: str) -> None:
         es = yaml.load(yaml_str, Loader=LineLoader)
         try:
-            parse_native_yaml_struct(es)
+            parse_native_yaml_struct(es, set())
         except AssertionError as e:
             # hack to strip out the context
             msg, _ = str(e).split("  in ", 2)

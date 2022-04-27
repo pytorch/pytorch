@@ -292,21 +292,6 @@ class DeviceCheckType(Enum):
     ExactSame = 1
 
 
-class Tag(Enum):
-    inplace_view = 0
-    view_copy = 1
-
-    def __str__(self) -> str:
-        return self.name
-
-    @staticmethod
-    def parse(value: str) -> "Tag":
-        for k, v in Tag.__members__.items():
-            if k == value:
-                return v
-        raise AssertionError(f"unknown tag {value}")
-
-
 ViewSchemaKind = Enum("ViewSchemaKind", ("aliasing", "inplace", "out", "non_aliasing"))
 
 # The basic input to the code generation is native_functions.yaml.
@@ -416,8 +401,7 @@ class NativeFunction:
 
     # Tags are used to describe semantic information about (groups of) operators,
     # That aren't easily inferrable directly from the operator's schema.
-    # For now operators have at most one tag.
-    tag: Optional["Tag"]
+    tags: Set[str]
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -426,7 +410,8 @@ class NativeFunction:
     # We parse both the NativeFunction + backend-specific information about it, which it stored in a corresponding BackendIndex.
     @staticmethod
     def from_yaml(
-        ei: Dict[str, object], loc: "Location"
+        ei: Dict[str, object], loc: "Location",
+        valid_tags: Set[str]
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
@@ -514,9 +499,18 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tag_str = e.pop("tags", None)
-        assert tag_str is None or isinstance(tag_str, str), f"not a str: {tag_str}"
-        tag = Tag.parse(tag_str) if tag_str else None
+        tags_s = e.pop('tags', '')
+        assert isinstance(tags_s, str)
+        tags: Set[str] = set()
+        if len(tags_s) > 0:
+            assert len(valid_tags) > 0
+            for t in tags_s.split(', '):
+                # TODO: verify that the tag is valid and has an entry in tags.yaml
+                if t in valid_tags:
+                    tags.add(t)
+                else:
+                    raise AssertionError(f'illegal tag {t}')
+        assert isinstance(tags, set)
 
         from torchgen.api import cpp
 
@@ -641,31 +635,29 @@ class NativeFunction:
                     "(it is delegated!)"
                 )
 
-        return (
-            NativeFunction(
-                func=func,
-                use_const_ref_for_mutable_tensors=use_const_ref_for_mutable_tensors,
-                variants=variants,
-                structured=structured,
-                structured_delegate=structured_delegate,
-                structured_inherits=structured_inherits,
-                precomputed=precomputed,
-                ufunc_inner_loop=ufunc_inner_loop,
-                manual_kernel_registration=manual_kernel_registration,
-                manual_cpp_binding=manual_cpp_binding,
-                python_module=python_module,
-                category_override=category_override,
-                device_guard=device_guard,
-                device_check=device_check,
-                loc=loc,
-                cpp_no_default_args=cpp_no_default_args,
-                is_abstract=is_abstract,
-                has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
-                has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
-                tag=tag,
-            ),
-            backend_metadata,
-        )
+        return NativeFunction(
+            func=func,
+            use_const_ref_for_mutable_tensors=use_const_ref_for_mutable_tensors,
+            variants=variants,
+            structured=structured,
+            structured_delegate=structured_delegate,
+            structured_inherits=structured_inherits,
+            precomputed=precomputed,
+            ufunc_inner_loop=ufunc_inner_loop,
+            manual_kernel_registration=manual_kernel_registration,
+            manual_cpp_binding=manual_cpp_binding,
+            python_module=python_module,
+            category_override=category_override,
+            device_guard=device_guard,
+            device_check=device_check,
+            loc=loc,
+            cpp_no_default_args=cpp_no_default_args,
+            is_abstract=is_abstract,
+            has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
+            has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
+            tags=tags,
+        ), backend_metadata
+
 
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
@@ -740,14 +732,10 @@ class NativeFunction:
     @property
     def is_view_op(self) -> bool:
         rets = self.func.returns
-        is_non_mutating_view = len(rets) > 0 and any(
-            r.annotation is not None and not r.annotation.is_write for r in rets
-        )
-        is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
-        is_wildcard_view = any(
-            inp.annotation is not None and inp.annotation.alias_set_after != ""
-            for inp in self.func.schema_order_arguments()
-        )
+        is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
+        is_inplace_view = 'inplace_view' in self.tags
+        is_wildcard_view = any(inp.annotation is not None and
+                               inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
 
     @property

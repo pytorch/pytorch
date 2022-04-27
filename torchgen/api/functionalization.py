@@ -70,6 +70,7 @@ reapply_views_binding = Binding(
 
 # The lambda capture itself doesn't have a name.
 # The name returned here corresponds to the name of the inner function called by the lambda.
+<<<<<<< HEAD:torchgen/api/functionalization.py
 def name(
     g: NativeFunctionsViewGroup,
     *,
@@ -81,6 +82,12 @@ def name(
         # reapply_views is only important for the fwd lambda,
         # since we always plumb the runtime "reapply_views" argument into the reverse function.
         assert is_reverse
+=======
+def name(f: NativeFunction, *, functional_op: NativeFunction, is_reverse: bool, include_namespace: bool) -> str:
+    # For inplace_view ops, the lambda calls out to the corresponding functional view op
+    fn = functional_op if 'inplace_view' in f.tags else f
+    name = fn.func.name.unambiguous_name()
+>>>>>>> parent of ea44645c9a... Revert "Allow specifying tags for aten operators in native_functions.yaml":tools/codegen/api/functionalization.py
     if is_reverse:
         # for the reverse: the name of the inverse function always involves "view_copy",
         # and we plumb the "reapply_views" flag into that function.
