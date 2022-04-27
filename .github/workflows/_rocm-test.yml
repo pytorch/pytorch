@@ -144,7 +144,7 @@ jobs:
 
       - name: Save test results
         if: always()
-        run:
+        run: |
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
