@@ -16,9 +16,13 @@ class ShardingPlan(object):
     layout of a module with a spec, and when to convert back to data parallel fashion.
 
     Args:
-        plan (Dict[str, :class:`torch.distributed._shard.sharding_spec.ShardingSpec`]):
-            a dict describes how to shard the parameters of a module, keyed by the name
-            of parameter to ShardingSpec.
+        plan (Dict[str, Union[:class:`torch.distributed._shard.sharding_spec.ShardingSpec`,
+              :class:`torch.distributed._shard.sharder.Sharder`]):
+            a dict describes how to shard a module, there're currently two ways to shard a module:
+                1. directly shard a module parameter by a `ShardingSpec`, keyed by the name of
+                   a parameter to a `ShardingSpec`.
+                2. shard a submodule by applying a `Sharder` on it, keyed by the name of a module
+                   to a `Sharder` object.
         output_plan (Dict[str, :class:`torch.distributed._shard.sharding_spec.ShardingSpec`), optional):
             a dict specifies the layout of a module's output which produces a ShardedTensor,
             keyed by the name of module to ShardingSpec("" in key means the root module).

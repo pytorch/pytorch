@@ -36,16 +36,15 @@ class TORCH_API BackendDevice {
   BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int64_t ordinal);
 
   int8_t type() const;
-  int64_t ordinal() const { return ordinal_;  }
+  int64_t ordinal() const { return ordinal_; }
 
   bool operator==(const BackendDevice& other) const { return compare(other) == 0; }
   bool operator!=(const BackendDevice& other) const { return compare(other) != 0; }
   bool operator<(const BackendDevice& rhs) const { return compare(rhs) < 0; }
 
-  std::string toString() const;
+  bool has_index() const { return ordinal_ >= 0; }
 
-  // The string -> Device conversion should be handled by the backend interface.
-  C10_DEPRECATED explicit BackendDevice(const std::string& device_spec);
+  std::string toString() const;
 
  private:
   int compare(const BackendDevice& rhs) const;

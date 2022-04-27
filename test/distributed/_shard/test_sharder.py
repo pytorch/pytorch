@@ -149,3 +149,17 @@ class TestCustomSharder(ShardedTensorTestBase):
         ):
             # shard the module with the provided sharding plan
             shard_module(sharded_model, sharding_plan)
+
+        # test conflicted sharding plan
+        spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:0", "rank:1/cuda:1"])
+        sharding_plan = ShardingPlan(
+            plan={
+                "embedding_bags.embedding_bag_0.weight": spec,
+                "embedding_bags": custom_sharder,
+            })
+
+        with self.assertRaisesRegex(
+            RuntimeError, "should not conflict with the submodule tree"
+        ):
+            # shard the module with the provided sharding plan
+            shard_module(sharded_model, sharding_plan)

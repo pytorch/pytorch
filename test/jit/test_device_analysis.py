@@ -6,6 +6,7 @@ import unittest
 import torch
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.jit._passes._property_propagation import apply_input_props_using_example
 
 try:
     from torchvision import models
@@ -18,40 +19,6 @@ if __name__ == "__main__":
         "\tpython test/test_jit.py TESTNAME\n\n"
         "instead."
     )
-
-# TODO: Delete this when PR #67786 is merged.
-def apply_input_props_using_example(graph, example_input):
-    """
-    Applies properties for each tensor in the graph inputs
-    using the example supplied.
-    """
-    graph_inputs = list(graph.inputs())
-    if len(graph_inputs) == 0:
-        return
-
-    # Strip self args off for methods
-    in_0 = graph_inputs[0]
-    if isinstance(in_0.type(), torch._C.ClassType) and in_0.debugName() == "self":
-        graph_inputs = graph_inputs[1:]
-
-    if not len(graph_inputs) == len(example_input):
-        raise RuntimeError(
-            "Number of inputs in graph does not match number of inputs in the example"
-        )
-
-    for i, (graph_i, example_i) in enumerate(zip(graph_inputs, example_input)):
-        if example_i is None:
-            continue  # Skip the type check
-
-        if isinstance(example_i, torch.Tensor) != isinstance(
-            graph_i.type(), torch.TensorType
-        ):
-            raise RuntimeError(
-                f"Input {i} does not match type of example", graph_i, example_i
-            )
-
-        if isinstance(example_i, torch.Tensor):
-            graph_i.setType(torch.TensorType.create_from_tensor(example_i))  # type: ignore[arg-type]
 
 
 class TestDeviceAnalysis(JitTestCase):
