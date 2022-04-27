@@ -253,6 +253,16 @@ TORCH_API Tensor from_blob_quantized_per_tensor_affine(
     void* data,
     IntArrayRef sizes,
     IntArrayRef strides,
+    int64_t storage_offset,
+    std::function<void(void*)> deleter,
+    const float scale,
+    const int64_t zeroPoint,
+    const TensorOptions& options);
+
+TORCH_API Tensor from_blob_quantized_per_tensor_affine(
+    void* data,
+    IntArrayRef sizes,
+    IntArrayRef strides,
     std::function<void(void*)> deleter,
     const float scale,
     const int64_t zeroPoint,
