@@ -2867,7 +2867,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    @skipCUDAIfRocm
     def test_inv_ex_singular(self, device, dtype):
         # if the input matrix is not invertible, info with positive integer is returned
         A = torch.eye(3, 3, dtype=dtype, device=device)
@@ -2895,6 +2894,7 @@ class TestLinalg(TestCase):
     @slowTest
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
+    @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
                         torch.float64: 1e-5, torch.complex128: 1e-5})
@@ -5075,6 +5075,35 @@ class TestLinalg(TestCase):
             A_LU, pivots = fn(torch.lu, (2, 0, 0))
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
+                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypesIfCUDA(*floating_and_complex_types_and(
+                  *[torch.half] if not CUDA9 else [],
+                  *[torch.bfloat16] if CUDA11OrLater and SM53OrLater else []
+                  ))
+    @dtypes(*all_types_and_complex_and(torch.bfloat16))
+    def test_corner_cases_of_cublasltmatmul(self, device, dtype):
+        # common case
+        M = torch.randn(128, device=device).to(dtype)
+        m1 = torch.randn(2048, 2400, device=device).to(dtype)
+        m2 = torch.randn(128, 2400, device=device).to(dtype)
+        torch.nn.functional.linear(m1, m2, M)
+        # Ntrans_B has ld >> rows
+        m1 = torch.rand([128, 2400]).to(dtype).to(device).t()
+        m2 = torch.rand([2048, 25272]).to(dtype).to(device).t()[21940:24340]
+        M = torch.rand([128]).to(dtype).to(device)
+        torch.addmm(M, m2.t(), m1)
+        # trans_A has ld >> rows
+        m1 = torch.rand([128, 25272]).to(dtype).to(device)[:, 21940:24340].t()
+        m2 = torch.randn(2048, 2400, device=device).to(dtype)
+        M = torch.rand([128]).to(dtype).to(device)
+        torch.addmm(M, m2, m1)
+        # large tensor dim > 65535
+        M = torch.randn(16, device=device).to(dtype)
+        m1 = torch.randn(32, 131071 , device=device).to(dtype)
+        m2 = torch.randn(16, 131071, device=device).to(dtype)
+        torch.nn.functional.linear(m1, m2, M)
+
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if not CUDA9 else [],
                   *[torch.bfloat16] if CUDA11OrLater and SM53OrLater else []
@@ -5390,7 +5419,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
-    @skipCUDAIfRocm
     def test_lobpcg_basic(self, device, dtype):
         self._test_lobpcg_method(device, dtype, 'basic')
 
@@ -5732,7 +5760,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else [],
-                  *[torch.half] if not TEST_WITH_ROCM else []))
+                  *[torch.half]))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         # have to use torch.randn(...).to(bfloat16) instead of
@@ -7315,6 +7343,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         if self.device_type == 'cuda':
             sub_test(False)
 
+    @skipCUDAIfRocm  # ROCm: test was exceptionally slow, even for slow tests. Skip until triage.
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
