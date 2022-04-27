@@ -82,7 +82,7 @@ class QuantizeDBRTestCase(QuantizationTestCase):
 
         # compare it against FX
         if do_fx_comparison:
-            m_copy_p = prepare_fx(m_copy, {'': qconfig})
+            m_copy_p = prepare_fx(m_copy, {'': qconfig}, sample_args=example_args)
             out_m_copy_p = m_copy_p(*example_args)
             # print(m_copy_p)
             m_copy_q = convert_fx(m_copy_p)
@@ -1236,9 +1236,9 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         """
         m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
-        # this modifies qconfig_dict inplace to include more keys
-        mp = prepare_fx(m, qconfig_dict)
         example_args = (torch.randn(1, 1, 1, 1),)
+        # this modifies qconfig_dict inplace to include more keys
+        mp = prepare_fx(m, qconfig_dict, sample_args=example_args)
         # need this line to not crash
         mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
 
