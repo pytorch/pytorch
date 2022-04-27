@@ -1296,34 +1296,8 @@ class Module:
         if getattr(self.__class__, "get_extra_state", Module.get_extra_state) is not Module.get_extra_state:
             destination[extra_state_key] = self.get_extra_state()
 
-    def _state_dict_impl(self, destination, prefix, keep_vars):
-        r"""Holds the actual implementation of
-        :meth:`~torch.nn.Module.state_dict`, with recursive calls for
-        descendants of this module.
-
-        In rare cases, users can call this directly to provide a custom
-        :attr:`destination`.
-
-        Args:
-            destination (dict): a dict where state will be stored
-            prefix (str): the prefix for parameters and buffers used in this
-                module
-            keep_vars (bool): whether NOT to return buffers detached from
-                autograd
-        """
-        destination._metadata[prefix[:-1]] = local_metadata = dict(version=self._version)
-        self._save_to_state_dict(destination, prefix, keep_vars)
-        for name, module in self._modules.items():
-            if module is not None:
-                module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
-        for hook in self._state_dict_hooks.values():
-            hook_result = hook(self, destination, prefix, local_metadata)
-            if hook_result is not None:
-                destination = hook_result
-        return destination
-
-    # TODO: Deprecated, destination is becoming private. Remove this signature when BC allows
-    # See https://github.com/pytorch/pytorch/issues/72778#issuecomment-1039263869
+    # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
+    # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
     T_destination = TypeVar('T_destination', bound=Dict[str, Any])
 
     @overload
@@ -1331,40 +1305,15 @@ class Module:
         ...
 
     @overload
-    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Any]:
+    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Any]:
         ...
 
-    def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
         Parameters and buffers set to ``None`` are not included.
-
-        This can be called as
-
-        .. function:: state_dict(*, prefix='', keep_vars=False)
-           :noindex:
-
-        .. function:: state_dict(destination, prefix='', keep_vars=False)
-           :noindex:
-
-        .. warning::
-            The second signature is deprecated and should not be used. It's only
-            temporarily kept for backward compatibility and will be removed in
-            a future release. Use the first signature instead.
-
-        Args:
-            destination (dict, optional): Deprecated. This dict is returned
-                with the module state saved in it. It should also have an
-                attribute ``_metadata: dict`` to save metadata of the module
-                state. If it's not provided, an ``OrderedDict`` is created and
-                returned. Default: ``None``
-            prefix (str, optional): a prefix added to parameter and buffer
-                names to compose the keys in dict. Default: ``''``
-            keep_vars (bool, optional): by default the :class:`~torch.Tensor` s
-                returned in the state dict are detached from autograd. If it's
-                set to ``True``, detaching is not performed. Default: ``False``
 
         Returns:
             dict:
@@ -1376,31 +1325,19 @@ class Module:
             ['bias', 'weight']
 
         """
-
-        # TODO: positional args parsing is just for BC. Remove on transition to kwargs-only
-        warn_msg = []
-        if len(args) > 0:
-            warn_msg.append('positional arguments')
-            if destination is None:
-                destination = args[0]
-            if len(args) > 1 and prefix == '':
-                prefix = args[1]
-            if len(args) > 2 and keep_vars is False:
-                keep_vars = args[2]
-
-        if destination is not None:
-            warn_msg.append('argument "destination"')
-        else:
+        if destination is None:
             destination = OrderedDict()
             destination._metadata = OrderedDict()
-
-        if warn_msg:
-            # DeprecationWarning is ignored by default
-            warnings.warn(
-                " and ".join(warn_msg) + " are deprecated. nn.Module.state_dict will not accept them in the future. "
-                "Refer to https://pytorch.org/docs/master/generated/torch.nn.Module.html#torch.nn.Module.state_dict for details.")
-
-        return self._state_dict_impl(destination, prefix, keep_vars)
+        destination._metadata[prefix[:-1]] = local_metadata = dict(version=self._version)
+        self._save_to_state_dict(destination, prefix, keep_vars)
+        for name, module in self._modules.items():
+            if module is not None:
+                module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
+        for hook in self._state_dict_hooks.values():
+            hook_result = hook(self, destination, prefix, local_metadata)
+            if hook_result is not None:
+                destination = hook_result
+        return destination
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):
         r"""These hooks will be called with arguments: `state_dict`, `prefix`,
