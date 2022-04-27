@@ -109,6 +109,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             wrapped_model.run_backward(loss)
             optim.step()
 
+    @skip_if_lt_x_gpu(2)
     def test_ignored_modules_invalid(self):
         """Tests that passing an FSDP module as an ignored module errors."""
         model = Model()

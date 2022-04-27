@@ -659,18 +659,22 @@ class FullyShardedDataParallel(nn.Module):
         # At this point we are wrapping an atomic FSDP unit. Check module shapes
         # and broadcast module from rank 0 to ensure everything starts off with
         # the same parameters.
-        # Hack: move to compute device and back if it is CPU
+        # Hack: move to compute device and back if it is CPU. In the future,
+        # CPU modules will be moved to device_id if it is specified by user.
         prev_device = next(module.parameters()).device
         was_cpu = (prev_device == torch.device("cpu"))
         if was_cpu:
             warnings.warn(
-                f"Module is input on CPU, we are moving to to {self.compute_device} to perform parameter verification and will move it back after. In the future please specify device_ids which will explicitly tell FSDP to place the module on a particular device."
+                f"Module is input on CPU, we are moving it to {self.compute_device}"
+                " to perform parameter verification, flattening, sharding, and will"
+                " move it back after."
             )
             module = module.to(self.compute_device)
-        _verify_param_shape_across_processes(
-            process_group=self.process_group,
-            tensors=params,  # TODO: FSDP + DDP to verify buffers as well
-        )
+        if params:
+            _verify_param_shape_across_processes(
+                process_group=self.process_group,
+                tensors=params,  # TODO: FSDP + DDP to verify buffers as well
+            )
         _sync_params_and_buffers(
             module=module,
             process_group=self.process_group,
@@ -679,8 +683,6 @@ class FullyShardedDataParallel(nn.Module):
             rank=0,
             params_and_buffers_to_ignore=ignored_params,
         )
-        if was_cpu:
-            module = module.to(prev_device)
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
             module, param_list=params
         )
@@ -739,6 +741,13 @@ class FullyShardedDataParallel(nn.Module):
         if self.cpu_offload.offload_params:
             for p in self.params:
                 self._offload_to_cpu(p)
+
+        if was_cpu:
+            # _fsdp_wrapped_module took ownership of module and we deleted
+            # module, so move _fsdp_wrapped_module back.
+            self._fsdp_wrapped_module = self._fsdp_wrapped_module.to(
+                prev_device
+            )
 
         # For validating execution order across ranks
         self._exec_order_data = _ExecOrderData()
