@@ -221,6 +221,7 @@ but found an argument of type {str(args[0].type)} for operator: {str(func.name)}
     ), """In the functionalization codegen, we expect the first argument of every view operator to alias the output.
 View operators with multiple aliasing inputs aren't supported yet. Found an operator that doesn't satisfy this constraint"""
 
+
 # Generates the Functionalization kernel for:
 # - ops that create aliases (e.g. transpose())
 # - ops that are views AND mutations (e.g. transpose_())
@@ -402,7 +403,9 @@ def emit_inplace_functionalization_body(
 
     if functional_op is None:
         # We can't functionalize this inplace op, since we don't know what the corresponding functional op is.
-        return_type = dispatcher.returns_type(f.func.returns).remove_const_ref().cpp_type()
+        return_type = (
+            dispatcher.returns_type(f.func.returns).remove_const_ref().cpp_type()
+        )
         warn_str = f"""Note: the functionalization pass encountered an operator ({str(f.func.name)}) that it could not \
 functionalize, because it couldn't find an out-of-place equivalent of the operator to call. \
 Instead, it's calling the inplace/view operator directly. \
@@ -422,7 +425,11 @@ If this causes problems in your program, consider upstreaming the out-of-place o
 """
     else:
         # call the out-of-place variant of the op
-        return_type = dispatcher.returns_type(functional_op.func.returns).remove_const_ref().cpp_type()
+        return_type = (
+            dispatcher.returns_type(functional_op.func.returns)
+            .remove_const_ref()
+            .cpp_type()
+        )
         functional_sig = DispatcherSignature.from_schema(functional_op.func)
         functional_exprs = [
             e.expr
@@ -531,7 +538,7 @@ def gen_functionalization_registration(
 
     if isinstance(g, NativeFunctionsViewGroup):
         # functionalization needs to register kernels for view + view_inplace ops
-        if str(g.view.func.name) == 'to.device':
+        if str(g.view.func.name) == "to.device":
             # See Note [Functionalization <> torch.Tensor constructor]
             return []
         view_str = [emit_registration_helper(g.view)]
