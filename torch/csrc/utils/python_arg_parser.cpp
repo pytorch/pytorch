@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
+#include <torch/csrc/utils/python_mode.h>
 
 #include <ATen/ATen.h>
 #include <ATen/PythonTorchFunctionTLS.h>
@@ -285,18 +286,30 @@ auto handle_torch_function_no_python_arg_parser(
 
       // See https://github.com/pytorch/pytorch/issues/63767
       if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__").is(arg) &&
-          torch_function.ptr() != torch::disabled_torch_function_impl()) {
-        TORCH_WARN("Defining your `__torch_function__` as a plain method is deprecated and ",
-                   "will be an error in future, please define it as a classmethod.");
+          torch_function.ptr() != torch::disabled_torch_function_impl() &&
+          !at::impl::PythonModeTLS::get_state()) {
+        TORCH_WARN("Defining your `", torch_function_name_str, "` as a plain method is deprecated ",
+                   "and will be an error in future, please define it as a classmethod.");
       }
 
-      ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
-          torch_function.ptr(),
-          torch_api_function,
-          py_types.ptr(),
-          args,
-          kwargs,
-          NULL));
+      if (torch_function_name == TorchFunctionName::TorchDispatch && at::impl::PythonModeTLS::get_state()) {
+        python_dispatch::StashPythonModeGuard g; // repeated code so the lifetime of this includes the function call
+        ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+            torch_function.ptr(),
+            torch_api_function,
+            py_types.ptr(),
+            args,
+            kwargs,
+            NULL));
+      } else {
+        ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+            torch_function.ptr(),
+            torch_api_function,
+            py_types.ptr(),
+            args,
+            kwargs,
+            NULL));
+      }
       if (ret.ptr() != Py_NotImplemented) {
         // Return the reference to the result. This also covers the case where
         // ret is NULL and __torch_function__/__torch_dispatch raised an
