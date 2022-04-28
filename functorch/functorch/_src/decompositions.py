@@ -285,6 +285,59 @@ def huber_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, reduc
     )
 
 
+@register_decomposition(aten.nll_loss_backward)
+def nll_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, weight: Optional[Tensor], reduction: int, ignore_index: int, total_weight: Tensor) -> Tensor:
+    assert 0 <= self.dim() <= 2, "input tensor should be 1D or 2D"
+    assert target.dim() <= 1, "0D or 1D target tensor expected, multi-target not supported"
+
+    no_batch_dim = self.dim() == 1 and target.dim() == 0
+    assert no_batch_dim or (self.shape[0] == target.shape[0]), (
+        f"size mismatch (got input: {self.shape}, target: {target.shape})"
+    )
+    assert total_weight.numel() == 1, (
+        "expected total_weight to be a single element tensor, got: ",
+        f"{total_weight.shape} ({total_weight.numel()} elements)"
+    )
+
+    assert weight is None or weight.numel() == self.shape[-1], (
+        "weight tensor should be defined either for all or no classes"
+    )
+
+    if reduction == Reduction.NONE.value and self.dim() == 2:
+        assert grad_output.dim() == 1 and grad_output.shape[0] == self.shape[0], (
+            f"Expected a tensor of dimension 1 and tensor.size[0] == {self.shape[0]} but "
+            f"got: dimension {grad_output.dim()} and tensor.size[0] == {grad_output.shape[0]}"
+        )
+    else:
+        assert grad_output.dim() <= 1 and grad_output.numel() == 1, (
+            f"Expected a single element grad_output tensor, but got: {grad_output.shape}"
+        )
+
+    channel_dim = 0 if self.dim() < 2 else 1
+    if reduction == Reduction.MEAN.value:
+        grad_output = grad_output / total_weight
+
+    target = target.unsqueeze(channel_dim)
+    grad_input = torch.zeros_like(self)
+    grad_input = torch.scatter(grad_input, channel_dim, target, -1.)
+
+    if grad_input.dim() > grad_output.dim() > 0:
+        grad_output = grad_output.unsqueeze(channel_dim)
+
+    if weight is not None:
+        new_shape = [1 for _ in range(self.dim())]
+        new_shape[channel_dim] = weight.shape[0]
+        weight.reshape(new_shape)
+        grad_output = grad_output * weight
+
+    has_ignore_index = ignore_index >= 0
+    if has_ignore_index:
+        ignore_index_mask = target != ignore_index
+        grad_output = grad_output * ignore_index_mask
+
+    return grad_input * grad_output
+
+
 @register_decomposition(aten.binary_cross_entropy_backward)
 def binary_cross_entropy_backward(grad_output: Tensor, self: Tensor, target: Tensor, weight: Optional[Tensor] = None, reduction: int = Reduction.MEAN.value) -> Tensor:
     EPSILON = 1e-12
