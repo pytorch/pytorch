@@ -93,7 +93,6 @@ class ShardingSpec(ABC):
         """
         Allows registration of a custom op for ShardedTensor to enable
         custom optimizations for a particular ShardingSpec.
-
         Args:
             sharding_spec(type): The ShardingSpec for which we need to add this custom op.
             op(Callable): The op to override (ex: torch.bmm)
@@ -125,14 +124,12 @@ class ShardingSpec(ABC):
         class_name = type(self).__qualname__
         if not self._has_custom_op(op):
             raise RuntimeError(f'Custom op: {op} not registered for {class_name}')
-
         func = ShardingSpec.custom_ops[class_name][op]
         return func(types, args, kwargs)
 
 def custom_sharding_spec_op(sharding_spec_class, func):
     """
     Decorator to allow custom registration of ops.
-
     Args:
         sharding_spec_class(type): The ShardingSpec for which we need to add this custom op.
         func(Callable): The op to override (ex: torch.bmm)
