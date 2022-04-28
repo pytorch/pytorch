@@ -90,13 +90,12 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
 template <int kSpatialDim>
 template <bool kReluFused>
 void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& quantized_output, const at::Tensor& input, double output_scale) {
-  if (quantized_output.numel() == 0) {
-    return;
-  }
   at::Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   // We will employ broadcasting scalar multiplication in cudnn in the requant_op below. For this to work, cudNN requires
   // the scalar to be a scalar tensor (i.e., all dimensions of size 1) with the same number of dimensions as the tensor we're multiplying to
-  int64_t requantize_multiplier_tensor_size[kSpatialDim + 2] = {1, 1, 1, 1};
+  std::array<int64_t, kSpatialDim + 2> requantize_multiplier_tensor_size = kSpatialDim == 2 ?
+                                                                           std::array<int64_t, kSpatialDim + 2>{1, 1, 1, 1}
+                                                                           : std::array<int64_t, kSpatialDim + 2>{1, 1, 1};
   at::Tensor requantize_multiplier_tensor = at::empty(requantize_multiplier_tensor_size, at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   auto act_scale = input.q_scale();
   auto weight_scale = orig_weight_.q_scale();
@@ -384,6 +383,8 @@ class QConvInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
+    TORCH_CHECK(kSpatialDim == 1 || kSpatialDim == 2, "Error in quantized cudnn conv2d operator: "
+                "Expected kSpatialDim == 1 || kSpatialDim == 2; received kSpatialDim=", kSpatialDim);
     act = act.to(c10::MemoryFormat::ChannelsLast);
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
     if (kReluFused) {
