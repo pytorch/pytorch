@@ -4,6 +4,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/mkldnn/OpContext.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
 #include <ATen/native/quantized/cpu/qadd.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
@@ -1411,6 +1412,27 @@ void nnc_aten_triangular_solve(
   }
 }
 
+void nnc_mkldnn_prepacked_conv2d_run(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  using namespace at::native::mkldnn;
+
+  auto tensors = constructTensors(
+      bufs_num - 1, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+
+  const at::Tensor& x = tensors[1];
+  auto context = reinterpret_cast<Conv2dOpContext*>(buf_data[2]);
+  at::Tensor output = context->run(x);
+  memcpy(
+      buf_data[0], output.data_ptr(), output.element_size() * output.numel());
+}
+
 #ifdef USE_XNNPACK
 
 void nnc_prepacked_linear_clamp_run(
@@ -1588,6 +1610,10 @@ const static RegisterNNCExternalFunction nnc_triangular_solve(
 const static RegisterNNCExternalFunction nnc_embedding(
     "nnc_aten_embedding",
     nnc_aten_embedding);
+
+const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv2d_run(
+    "nnc_mkldnn_prepacked_conv2d_run",
+    nnc_mkldnn_prepacked_conv2d_run);
 
 #ifdef USE_XNNPACK
 const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(
