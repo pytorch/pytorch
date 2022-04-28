@@ -210,7 +210,14 @@ void check_floating_or_complex_dtype(const char* name, ScalarType dtype) {
 
 TORCH_META_FUNC2(mean, dim)
 (const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  check_floating_or_complex_dtype("mean", self.scalar_type());
+  auto in_dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
+
+  TORCH_CHECK(
+      at::isFloatingType(in_dtype) || at::isComplexType(in_dtype),
+      "mean(): at least one of (i) the input dtype and (ii) the desired output dtype should be "
+      "either floating point or complex. "
+      "Got (i) ", self.scalar_type(), " and (ii) ", opt_dtype, " instead.");
+
   auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
@@ -226,11 +233,13 @@ ScalarType get_result_or_self_value_dtype(
   }
 }
 
-
-
 TORCH_META_FUNC2(norm, ScalarOpt_dim)
 (const Tensor& self, const OptionalScalarRef p, IntArrayRef dim, bool keepdim) {
-  check_floating_or_complex_dtype("norm", self.scalar_type());
+  TORCH_CHECK(
+      at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+      "norm(): input dtype should be either floating point or complex. "
+      "Got ", self.scalar_type(), " instead.");
+
   auto out_dtype = get_result_or_self_value_dtype(self, maybe_get_output(), c10::nullopt);
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
@@ -241,7 +250,11 @@ TORCH_META_FUNC2(norm, ScalarOpt_dim_dtype)
  IntArrayRef dim,
  bool keepdim,
  ScalarType dtype) {
-  check_floating_or_complex_dtype("norm", dtype);
+  TORCH_CHECK(
+      at::isFloatingType(dtype) || at::isComplexType(dtype),
+      "norm(): the desired output dtype should be either floating point or complex. "
+      "Got ", dtype, " instead.");
+
   auto out_dtype = get_result_or_self_value_dtype(self, maybe_get_output(), dtype);
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
