@@ -8,6 +8,33 @@
 namespace at {
 namespace native {
 
+inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
+  if (sizes.dim() == 0) {
+    return std::vector<int64_t>();
+  }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
+  std::vector<int64_t> result(1, sizes.sizes()[0]);
+  if (sizes.dim() > 0) {
+    size_t nested_dim = result.size();
+    int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+    result.resize(nested_dim + sizes.sizes()[1]);
+    int64_t sizes_size_0 = sizes.sizes()[0];
+    int64_t sizes_size_1 = sizes.sizes()[1];
+    for (const auto i : c10::irange(sizes_size_1)) {
+      result[nested_dim + i] = sizes_ptr[i];
+    }
+    for (const auto j : c10::irange(sizes_size_1)) {
+      for (const auto i : c10::irange(sizes_size_0)) {
+        if (result[nested_dim + j] &&
+            (result[nested_dim + j] != sizes_ptr[i * sizes.size(1) + j])) {
+          result[nested_dim + j] = -1;
+        }
+      }
+    }
+  }
+  return result;
+}
+
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
     at::Tensor nested_size_tensor)
@@ -17,7 +44,9 @@ NestedTensorImpl::NestedTensorImpl(
           buffer.dtype(),
           buffer.device()),
       buffer_(std::move(buffer)),
-      nested_size_tensor_(std::move(nested_size_tensor)) {
+      nested_size_tensor_(std::move(nested_size_tensor)),
+      opt_sizes_(construct_opt_sizes(nested_size_tensor_))
+{
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");
@@ -41,5 +70,6 @@ void NestedTensorImpl::refresh_dim() {
 const char* NestedTensorImpl::tensorimpl_type_name() const {
   return "NestedTensorImpl";
 }
+
 } // namespace native
 } // namespace at

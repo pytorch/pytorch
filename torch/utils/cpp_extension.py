@@ -1422,7 +1422,6 @@ def _jit_compile(name,
 
                         sources = list(hipified_sources)
 
-
                     _write_ninja_file_and_build_library(
                         name=name,
                         sources=sources,
