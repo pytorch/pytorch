@@ -314,8 +314,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   REDUCTION_BOXED(mode);
   m.impl("nanmedian", nanmedian_decomp);
   REDUCTION_BOXED(nanmedian.dim);
-  m.impl("nansum", nansum_decomp);
-  REDUCTION_BOXED(nansum.dim_IntList);
+  // TODO: re-enable these
+  // m.impl("nansum", nansum_decomp);
+  // REDUCTION_BOXED(nansum.dim_IntList);
   m.impl("norm.Scalar", norm_scalar_decomp);
   REDUCTION_BOXED_ARGS(norm.ScalarOpt_dim, 2);
   m.impl("prod", prod_decomp);
