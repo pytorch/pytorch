@@ -26,6 +26,7 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
+from torch.fx.experimental.meta_tracer import MetaTracer
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -666,6 +667,28 @@ class TestFXExperimental(JitTestCase):
 
         # Confirm that the output is correct
         self.assertEqual(traced(3, 3), m(3, 3))
+
+    def test_meta_tracer(self):
+        mt = MetaTracer()
+
+        class MetaTracerTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(num_embeddings=42, embedding_dim=16)
+                self.layernorm = torch.nn.LayerNorm(16)
+
+            def forward(self, x):
+                emb = self.emb(x)
+                lol = self.layernorm(emb)
+                return torch.relu(lol) if lol.shape[0] < 30 else torch.sigmoid(lol)
+
+        mttm = MetaTracerTestModule()
+        for BS in [15, 35]:
+            x = torch.zeros(BS, dtype=torch.long).random_(42)
+            graph = mt.trace(mttm, meta_args={'x' : x.to(device='meta')})
+            gm = torch.fx.GraphModule(mttm, graph)
+            torch.testing.assert_close(gm(x), mttm(x))
+
 
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
@@ -1618,6 +1641,33 @@ class TestModule(torch.nn.Module):
 
             test_out = traced(*param_values)
             self.assertEqual(test_out, ref_out)
+
+    def test_normalize_quantized_eb(self):
+        target = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
+        args = (
+            torch.empty((2, 3), dtype=torch.uint8),
+            torch.empty((2,), dtype=torch.int64),
+            torch.empty((2,), dtype=torch.int64),
+        )
+        norm_args_and_kwargs = normalize_function(
+            target, args, normalize_to_only_use_kwargs=True
+        )
+        self.assertTrue(norm_args_and_kwargs is not None)
+        self.assertEqual(
+            set(norm_args_and_kwargs.kwargs.keys()),
+            {
+                "weight",
+                "indices",
+                "offsets",
+                "scale_grad_by_freq",
+                "mode",
+                "pruned_weights",
+                "per_sample_weights",
+                "compressed_indices_mapping",
+                "include_last_offset",
+            },
+        )
+        self.assertEqual(norm_args_and_kwargs.args, tuple())
 
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
