@@ -95,7 +95,6 @@ class DecorateInfo(object):
             (self.dtypes is None or dtype in self.dtypes)
         )
 
-
 # FIXME
 # Note: historically the 'input' kwarg had to be a Tensor or TensorList, but we are trying
 #   to support scalar inputs, too. Some tests still depend on 'input' being a Tensor
@@ -186,8 +185,15 @@ class SampleInput(object):
                 return t
 
         sample_tt_input, tt_args, tt_kwargs = tt(self.input), tt(self.args), tt(self.kwargs)
-        # TODO update this return to be a named tuple consistent with SampleInput
-        return (sample_tt_input, tt_args, tt_kwargs)
+
+        # Note the transformed SampleInput assumes metadata like output_process_fn_grad is still valid!
+        return SampleInput(
+            sample_tt_input,
+            args=tt_args,
+            kwargs=tt_kwargs,
+            output_process_fn_grad=self.output_process_fn_grad,
+            broadcasts_input=self.broadcasts_input,
+            name=self.name + "_transformed")
 
     # Returns the NumPy version of the sample input object in the form of a tuple: (input, args, kwargs)
     # Converts tensors to ndarrays by calling .detach().cpu().numpy() on them
@@ -1332,6 +1338,8 @@ class UnaryUfuncInfo(OpInfo):
                  supports_sparse=False,
                  reference_numerics_filter=None,  # Filter for singular input values for test_reference_numerics_normal
                  **kwargs):
+        self._original_unary_ufunc_args = locals().copy()
+
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
                                              dtypesIfCUDA=dtypesIfCUDA,
@@ -2223,10 +2231,8 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
 
         yield SampleInput(lhs, args=(rhs,), kwargs=sample_kwargs, broadcasts_input=broadcasts_input)
 
-
-# Note that these references inputs use scalars for the SampleInput.input value,
-#   and many tests require SampleInput.input be a tensor or a list of tensors
-def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+# The base reference input generation for elementwise binary operations
+def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
     yield from op.sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
     yield from generate_elementwise_binary_tensors(op, device=device, dtype=dtype, requires_grad=requires_grad)
     if dtype is not torch.bool:
@@ -2239,6 +2245,18 @@ def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwar
 
     if dtype.is_floating_point or dtype.is_complex:
         yield from generate_elementwise_binary_extremal_value_tensors(op, device=device, dtype=dtype, requires_grad=requires_grad)
+
+# Note that these references inputs use scalars for the SampleInput.input value,
+#   and many tests require SampleInput.input be a tensor or a list of tensors
+def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+    gen = partial(_reference_inputs_elementwise_binary, op, device, dtype, requires_grad, **kwargs)
+
+    # yields "normal" samples
+    yield from gen()
+
+    # yields noncontiguous samples
+    for sample in gen():
+        yield sample.noncontiguous()
 
 # A functional that extends an elementwise binary operator's bespoke error inputs
 #   with generic error inputs for the class of elementwise binary operations
@@ -16156,23 +16174,17 @@ op_db: List[OpInfo] = [
         'nansum',
         identity=0,
         nan_policy='omit',
-        supports_out=False,
+        supports_out=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.nansum),
         skips=(
-            # FIXME: nansum does not support passing keepdim without passing dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: nansum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: nansum does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
-            # FIXME: improve precision
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: flaky test so skipped instead of xfailed
+            # possibly bad low precision reference in numpy
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
-                         dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=[torch.float16]),
         ),
     ),
@@ -16821,19 +16833,54 @@ op_db: List[OpInfo] = [
 # Python Reference OpInfos should be added to the python_ref_db list below.
 #   Tests can opt-into running on these references by including
 #   that list in the Sequence they pass to the @ops decorator.
+#
+# When a Python Reference OpInfo is constructed a pointer to an
+#   existing OpInfo must be provided using the torch_opinfo_name kwarg.
+#   The existing OpInfo with that name and no variant will be found
+#   to inherit from.
+#
+# Instead of just inheriting the existing OpInfo's metadata, the
+#   Python Reference OpInfos inherit the existing OpInfo's
+#   construction arguments. These arguments can be overridden
+#   by adding kwargs to the constructor.
 
-class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
+def _find_referenced_opinfo(referenced_name):
     '''
-    An OpInfo for a Python reference to an elementwise binary operation.
+    Finds the OpInfo with the given name that has no variant name.
+    '''
+    for opinfo in op_db:
+        if opinfo.name == referenced_name and opinfo.variant_test_name == '':
+            return opinfo
 
-    When constructing this OpInfo a pointer to an existing OpInfo must be
-    provided using the torch_opinfo_name kwarg. An OpInfo with the same
-    name as that string (and no variant) will be found to inherit from.
+def _inherit_constructor_args(name, op, inherited, overrides):
+    # inherits metadata
+    common_kwargs = {
+        'name': name,
+        'op': op,
+        'aliases': None,  # TODO add a check for alias coverage
+        'method_variant': None,
+        'inplace_variant': None,  # TODO: add a check for inplace coverage
+        'supports_scripting': False,
+    }
 
-    Instead of just inheriting the existing OpInfo's metadata, this
-    will actually reconstruct the appropriate OpInfo metadata by
-    inheriting the existing OpInfo's initialization arguments. These
-    arguments can be overridden by adding kwargs to the constructor.
+    # Acquires inherited kwargs
+    kwargs = inherited.copy()
+
+    # Fixes metadata
+    kwargs.update(kwargs['kwargs'])
+    del kwargs['kwargs']
+    del kwargs['self']
+    del kwargs['__class__']
+
+    # Overrides metadata
+    kwargs.update(common_kwargs)
+    kwargs.update(overrides)
+
+    return kwargs
+
+class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise unary operation.
     '''
     def __init__(
             self,
@@ -16843,46 +16890,49 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
-        # TODO: extract this into a common helper
         self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        assert isinstance(self.torch_opinfo, UnaryUfuncInfo)
 
-        # finds the corresponding opinfo
-        self.torch_opinfo = None
-        for opinfo in op_db:
-            if opinfo.name == torch_opinfo_name and opinfo.variant_test_name == '':
-                assert self.torch_opinfo is None
-                self.torch_opinfo = opinfo
+        inherited = self.torch_opinfo._original_unary_ufunc_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, {})
 
+        super(ElementwiseUnaryPythonRefInfo, self).__init__(**ukwargs)
+
+class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise binary operation.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
         assert isinstance(self.torch_opinfo, BinaryUfuncInfo)
 
-        # inherits metadata
-        common_kwargs = {
-            'name': name,
-            'op': op,
-            'aliases': None,  # TODO add a check for alias coverage
-            'method_variant': None,
-            'inplace_variant': None,  # TODO: add a check for inplace coverage
-            'supports_scripting': False,
-        }
-
-        ukwargs = self.torch_opinfo._original_binary_ufunc_args.copy()
-
-        # Fixes metadata
-        original_kwargs = ukwargs['kwargs']
-        del ukwargs['kwargs']
-        del ukwargs['self']
-        del ukwargs['__class__']
-        ukwargs.update(original_kwargs)
-
-        # Overrides metadata
-        ukwargs.update(common_kwargs)
-        ukwargs.update(kwargs)
+        inherited = self.torch_opinfo._original_binary_ufunc_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, {})
 
         super(ElementwiseBinaryPythonRefInfo, self).__init__(**ukwargs)
 
 
 # Separate registry for experimental Python Reference OpInfos.
 python_ref_db = [
+    #
+    # Elementwise unary OpInfos
+    #
+    ElementwiseUnaryPythonRefInfo(
+        '_refs.floor',
+        torch_opinfo_name='floor',
+    ),
+    #
+    # Elementwise binary OpInfos
+    #
     ElementwiseBinaryPythonRefInfo(
         '_refs.add',
         torch_opinfo_name='add',
