@@ -168,16 +168,16 @@ If you want to compile with CUDA support, install
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardwares
 
-If you want to disable CUDA support, export environment variable `USE_CUDA=0`.
+If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
 If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
 If you want to compile with ROCm support, install
 - [AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 and above installation
-- ROCm is currently supported only for Linux system.
+- ROCm is currently supported only for Linux systems.
 
-If you want to disable ROCm support, export environment variable `USE_ROCM=0`.
+If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
 #### Install Dependencies
@@ -289,7 +289,7 @@ You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob
 cmd
 
 :: Set the environment variables after you have downloaded and upzipped the mkl package,
-:: else CMake would throw error as `Could NOT find OpenMP`.
+:: else CMake would throw an error as `Could NOT find OpenMP`.
 set CMAKE_INCLUDE_PATH={Your directory}\mkl\include
 set LIB={Your directory}\mkl\lib;%LIB%
 

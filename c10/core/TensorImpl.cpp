@@ -333,11 +333,11 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  if (owns_pyobj_) {
+  if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
     pyobj_interpreter_.load(std::memory_order_acquire)
-        ->decref(pyobj_, /*is_tensor*/ true);
+        ->decref(_unchecked_untagged_pyobj(), /*is_tensor*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
     // to the PyObject (if there are references to the PyObject,
