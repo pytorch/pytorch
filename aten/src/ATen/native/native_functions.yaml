@@ -2841,6 +2841,9 @@
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   variants: function
 
+- func: _log_softmax.out(Tensor self, int dim, bool half_to_float, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+
 - func: log_softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
