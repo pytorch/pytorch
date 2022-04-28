@@ -202,7 +202,7 @@ def issubinstance(data, data_type):
 # [Note: TypeMeta and TypeAlias]
 # In order to keep compatibility for Python 3.6, use Meta for the typing.
 # TODO: When PyTorch drops the support for Python 3.6, it can be converted
-# into the Alias system and using `__class_getiterm__` for DataPipe. The
+# into the Alias system and using `__class_getitem__` for DataPipe. The
 # typing system will gain benefit of performance and resolving metaclass
 # conflicts as elaborated in https://www.python.org/dev/peps/pep-0560/
 
@@ -420,8 +420,7 @@ def hook_iterator(namespace, profile_name):
             # TODO: Add try-except to in-place reduce traceback from the Exception
             # See: https://github.com/pytorch/data/issues/284
             with context():
-                if self.source_dp.singleton_mode:
-                    _check_iterator_valid(self.source_dp, self.iterator_id)
+                _check_iterator_valid(self.source_dp, self.iterator_id)
                 return next(self.iterator)
 
         def __getattr__(self, name):
@@ -443,8 +442,7 @@ def hook_iterator(namespace, profile_name):
                 while True:
                     request = yield response
                     with context():  # Pass through here every time `__next__` is called
-                        if datapipe.singleton_mode:
-                            _check_iterator_valid(datapipe, iterator_id)
+                        _check_iterator_valid(datapipe, iterator_id)
                         response = gen.send(request)
             except StopIteration as e:
                 return e.value
