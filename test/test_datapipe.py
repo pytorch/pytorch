@@ -2100,92 +2100,16 @@ class TestSharding(TestCase):
         self.assertEqual(sorted(expected), sorted(items))
 
 
-class TestSingleIteratorDataPipe(TestCase):
+class TestIterDataPipeSingletonConstraint(TestCase):
 
-    def test_iterable_wrapper_example(self):
-        """
-        This serves as the example for any DataPipe that only has one child DataPipe.
-        """
-        # 1. An iterator can be created and iterated through (each iterator exhausts after iterated through once).
-        source_dp = dp.iter.IterableWrapper(range(10))
-        it1 = iter(source_dp)
-        print(f"Iterating through iterator1: {list(it1)}")
-        it1 = iter(source_dp)  # This should not raise any warning
-        print(f"Creating a new iterator from the same DataPipe and iterating through again: {list(it1)}")
-        it1 = iter(source_dp)  # This should not raise any warning
-        print(f"Re-creating but only getting the first element of iterator1: {next(it1)}")
-
-        # 2. Initializing a second iterator should invalidate the first iterator, raising a warning if the first is not
-        #    exhausted.
-        print("\nCreating iterator 2...")
-        it2 = iter(source_dp)  # This should raise a warning? Only if the first is not exhausted?
-        print("Calling __next__ on iterator 1:")
-        next(it1)  # This should raise an error, since `it1` should be invalidated
-        print(f"Created iterator 2 from the same DataPipe and iterating through: {list(it2)}")
-
-        # Warning - when should we raise this?
-        # An error should always be raised when user tries to use the original iterator again (via __next__ or similar)
-        # 1. Whenever a new iterator is created
-        # 2. Only when the original iterator is not exhausted? (I think yes definitely)
-        # 3. Never
-        # 4. Option for notebook mode (when warning is hidden is suppressed), but otherwise, there is a warning
-        # Maybe just the error is enough, but a warning for when the original iterator is not exhausted is nice too
-        # (always have global option to suppress, and automatically suppress for notebook mode)
-
-
-    def test_fork_example(self):
-        """
-        This serves as the example for any DataPipe that have multiple child DataPipes (e.g. `fork`, `demux`, `unzip`).
-        """
-        # 1. Iterator can be created and iterated through for the child
-        source_dp = dp.iter.IterableWrapper(range(10))
-        child_dp1, child_dp2 = source_dp.fork(2)
-        it1, it2 = iter(child_dp1), iter(child_dp2)
-        print(f"Iterating through child_iterator1: {list(it1)}")
-        print(f"Iterating through child_iterator2: {list(it2)}")
-        it1, it2 = iter(child_dp1), iter(child_dp2)
-        print(f"Iterating through child_iterator1 again: {list(it1)}")
-        print(f"Iterating through child_iterator2 again: {list(it2)}")
-        it1, it2 = iter(child_dp1), iter(child_dp2)
-        print(f"Re-creating but only getting the first element of iterator1: {next(it1)}")
-
-        # 2. If you initialize a second iterator for a child DataPipe, you will need to either:
-        #    i. start a second buffer (since you need to read the `source_dp` from the beginning again), and
-        #       invalidate the old iterator that was created from the same child DataPipe
-        #       I think this will work, but the logic will be pretty complicated
-        print("Calling `iter(child_dp1)`")
-        it1_new = iter(child_dp1)  # `it1` must be invalidated, a warning is raised
-        next(it1)  # This should raise an error
-        # If we choose to start a second buffer, then the other child iterators do not need to be invalidated
-        next(it2)  # This will not raise an error
-
-        #  Alternatively, we can:
-        #    ii. Invalidate all previous child iterators
-        it1_new = iter(child_dp1)  # both `it1` and `it2` are invalidated, an warning is raised
-        next(it1)  # This should raise an error
-        next(it2)  # This should raise an error
-
-    def test_single_iter_generator(self):
+    def test_iterdatapipe_singleton_constraint(self):
         r"""
-        Testing for the case where IterDataPipe's __iter__ is a generator.
+        Testing for the case where IterDataPipe's `__iter__` is a generator function.
         """
-        # Functional Test: Singleton Mode = False, there shouldn't be an error with multiple iterators
-        source_dp = dp.iter.IterableWrapper(range(10))
+        # Functional Test: There should be an error with multiple iterators
+        source_dp: IterDataPipe = dp.iter.IterableWrapper(range(10))
         it1 = iter(source_dp)
-        self.assertEqual(list(range(10)), list(it1))
-        it1 = iter(source_dp)
-        self.assertEqual(list(range(10)), list(it1))
-        it1 = iter(source_dp)
-        self.assertEqual(0, next(it1))
-        it2 = iter(source_dp)
-        self.assertEqual(0, next(it2))
-        self.assertEqual(1, next(it1))  # No error
-
-        # Functional Test: Singleton Mode = True, there should be an error with multiple iterators
-        IterDataPipe.set_singleton_mode(True)
-        source_dp = dp.iter.IterableWrapper(range(10))
-        it1 = iter(source_dp)
-        self.assertEqual(list(range(10)), list(it1))
+        self.assertEqual(list(range(10)), list(it1))  # It can
         it1 = iter(source_dp)
         self.assertEqual(list(range(10)), list(it1))
         it1 = iter(source_dp)
@@ -2195,11 +2119,12 @@ class TestSingleIteratorDataPipe(TestCase):
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(it1)
 
-    def test_single_iter_for_class_with_next_and_self(self):
         r"""
         Testing for the case where IterDataPipe's `__iter__` returns `self` and there is a `__next__` method
+        Note that the following DataPipe by is singleton by default (because `__iter__` returns `self`).
+        Therefore the test will merely make sure the calls return the same object.
         """
-        class _CustomIterDP(IterDataPipe):
+        class _CustomIterDP_Self(IterDataPipe):
             def __init__(self, iterable):
                 self.iterable = iter(iterable)
 
@@ -2210,19 +2135,18 @@ class TestSingleIteratorDataPipe(TestCase):
                 return next(self.iterable)
 
         # Functional Test: Check that every `__iter__` call returns the same object
-        source_dp = _CustomIterDP(range(10))
+        source_dp = _CustomIterDP_Self(range(10))
         it1 = iter(source_dp)
         it2 = iter(source_dp)
         self.assertEqual(it1, it2)
         self.assertEqual(0, next(it1))
         self.assertEqual(1, next(it2))
         self.assertEqual(2, next(it1))
-        self.assertEqual(range(3,10), list(it1))
+        self.assertEqual(range(3, 10), list(it1))
 
-    def test_single_iter_for_class_without_next(self):
         r"""
-        Testing for the case where IterDataPipe's __iter__ isn't a generator, doesn't return `self`,
-        and there isn't a __next__ method
+        Testing for the case where IterDataPipe's `__iter__` isn't a generator nor returns `self`,
+        and there isn't a `__next__` method.
         """
         class _CustomIterDP(IterDataPipe):
             def __init__(self, iterable):
@@ -2231,16 +2155,7 @@ class TestSingleIteratorDataPipe(TestCase):
             def __iter__(self):
                 return self.iterable  # Intentionally not returning `self`
 
-        # Functional Test: Singleton Mode = False, there shouldn't be an error with multiple iterators
-        source_dp = _CustomIterDP(range(10))
-        it1 = iter(source_dp)
-        self.assertEqual(0, next(it1))
-        it2 = iter(source_dp)
-        self.assertEqual(1, next(it2))
-        self.assertEqual(2, next(it1))
-
-        # Functional Test: Singleton Mode = True, there should be an error with multiple iterators
-        IterDataPipe.set_singleton_mode(True)
+        # Functional Test: There should be an error with multiple iterators
         source_dp = _CustomIterDP(range(10))
         it1 = iter(source_dp)
         self.assertEqual(0, next(it1))
@@ -2248,6 +2163,30 @@ class TestSingleIteratorDataPipe(TestCase):
         self.assertEqual(1, next(it2))
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(it1)
+
+    def test_iterdatapipe_singleton_constraint_multiple_outputs(self):
+        r"""
+        Testing for the case where IterDataPipe has multiple child DataPipes as outputs.
+        """
+        # Functional Test: all previous related iterators should be invalidated when a new iterator
+        #                  is created from a ChildDataPipe
+        source_dp: IterDataPipe = dp.iter.IterableWrapper(range(10))
+        cdp1, cdp2 = source_dp.fork(num_instances=2)
+        it1, it2 = iter(cdp1), iter(cdp2)
+        self.assertEqual(list(range(10)), list(it1))
+        self.assertEqual(list(range(10)), list(it2))
+        it1, it2 = iter(cdp1), iter(cdp2)
+        it3 = iter(cdp1)  # This should invalidate `it1` and `it2`
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it1)
+        with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
+            next(it2)
+        self.assertEqual(0, next(it3))
+        # The next line should not invalidate anything, as there was no new iterator created
+        # for `cdp2` yet, after `it2` was invalidated
+        it4 = iter(cdp2)
+        self.assertEqual(1, next(it3))  # An error shouldn't be raised here
+        self.assertEqual(list(range(10)), list(it4))
 
 
 if __name__ == '__main__':
