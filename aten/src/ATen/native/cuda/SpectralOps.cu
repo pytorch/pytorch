@@ -80,7 +80,7 @@ __global__ void _fft_conjugate_copy_kernel(
   CUDA_KERNEL_LOOP_TYPE(index, numel, int64_t) {
     auto in_offset = ic.get(index)[0];
     auto out_offset = oc.get(index)[0];
-    out_data[out_offset] = static_cast<scalar_t>(std::conj(static_cast<comp_t>(in_data[in_offset])));
+    out_data[out_offset] = std::conj(static_cast<comp_t>(in_data[in_offset]));
   }
 }
 
