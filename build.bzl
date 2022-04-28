@@ -13,12 +13,12 @@ def define_targets(rules):
         ],
         strip_include_prefix = "aten/src/",
         deps = [
-            "//c10/macros",
-            "//c10/core:base",
-            "//c10/util:base",
-            "//c10/util:typeid",
+            "//c10",
         ],
-        tags = ["no-caffe2-headers"],
+        tags = [
+            "no-caffe2-headers",
+            "xplat",
+        ],
         visibility = ["//:__subpackages__"],
     )
 
