@@ -904,6 +904,8 @@ class TestOperators(TestCase):
         xfail('cummin'),
         xfail('cumprod'),
         xfail('eig'),
+        xfail('nansum'),
+        xfail('nanmean'),
         xfail('fmin'),
         xfail('fmax'),
         xfail('fft.ihfft'),
