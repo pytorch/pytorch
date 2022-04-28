@@ -655,6 +655,14 @@ def create_a_shadows_b(
                     env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
                     continue
 
+            if len(node_b.args) == 0:
+                print(
+                    f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
+                    f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
+                    ', kwargs-only node not handled yet')
+                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                continue
+
             fqn_base_a = _maybe_get_fqn(subgraph_a.base_op_node, gm_a)
             fqn_base_b = _maybe_get_fqn(subgraph_b.base_op_node, gm_b)
 
