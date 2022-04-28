@@ -1028,8 +1028,9 @@ class TestSparse(TestCase):
                     small_sparse_result = t_small_sparse.index_select(d, t_idx)
                     self.assertEqual(small_dense_result, small_sparse_result)
 
+    @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    def test_index_select_empty_and_non_contiguous_index(self, device, dtype):
+    def test_index_select_empty_and_non_contiguous_index(self, device, dtype, coalesced):
         # empty index
         idx_empty = torch.tensor([], dtype=torch.long, device=device)
         t = make_tensor((5, 5), dtype=dtype, device=device)
@@ -1047,10 +1048,40 @@ class TestSparse(TestCase):
         self.assertEqual(res_dense, res_sparse)
 
         # case nnz <= size[d]
-        t_small_sparse, _, _ = self._gen_sparse(2, 2, (10, 10), dtype, device, False)
+        t_small_sparse, _, _ = self._gen_sparse(2, 2, (10, 10), dtype, device, coalesced)
         res_sparse = t_small_sparse.index_select(0, idx)
         res_dense = t_small_sparse.to_dense().index_select(0, idx)
         self.assertEqual(res_dense, res_sparse)
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_index_select_parallelization(self, device, dtype, coalesced):
+        """
+        Test with sizes that will trigger parallelization (i.e. with sizes
+        that are >= at::internal::GRAIN_SIZE)
+        """
+        def run_test(nnz, size):
+            t_sparse, _, _ = self._gen_sparse(1, nnz, (size,), dtype, device, coalesced)
+            t_dense = t_sparse.to_dense()
+
+            # idx_small to (sort) and (binary) search into t_sparse
+            idx_small = torch.randint(size, (nnz // 2,), device=device)
+            # idx_large to (sort) and (binary) search into idx_large
+            # NOTE: when coalesced=True, the (binary) search will be
+            # done over t_sparse anyway, as it is already sorted.
+            idx_large = torch.randint(size, (nnz * 2,), device=device)
+            for idx in (idx_small, idx_large):
+                res_dense = t_dense.index_select(0, idx)
+                res_sparse = t_sparse.index_select(0, idx)
+                self.assertEqual(res_dense, res_sparse)
+
+        # NOTE: GRAIN_SIZE = 32768
+        # case nnz <= size[d]
+        tlen = 70000  # > 2 * GRAIN_SIZE
+        run_test(tlen, tlen)
+
+        # case nnz > size[d]
+        run_test(tlen, tlen // 2)
 
     @onlyCPU
     @coalescedonoff
