@@ -95,9 +95,9 @@ class TestBinaryUfuncs(TestCase):
             l = sample.input
             r = sample.args[0]
 
-            np_input, np_args, np_kwargs = sample.numpy()
-            l_numpy = np_input
-            r_numpy = np_args[0]
+            numpy_sample = sample.numpy()
+            l_numpy = numpy_sample.input
+            r_numpy = numpy_sample.args[0]
 
             actual = op(l, r)
             expected = op.ref(l_numpy, r_numpy)
