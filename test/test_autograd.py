@@ -7066,6 +7066,30 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
+    def test_scatter_reduce_backprop_edge_cases(self, device):
+        # test that gradients are propagated correctly when zeros in self/src are reduced for reduce=prod
+        input = torch.tensor([[0., 1., 2.], [3., 4., 0.]], device=device, requires_grad=True)
+        src = torch.tensor([[1., 2., 3.], [4., 5., 0.]], device=device, requires_grad=True)
+        idx = torch.tensor([[0, 0, 0], [1, 1, 1]], device=device)
+        expected_input_grad = torch.tensor([[6., 1., 1.], [1., 0., 1.]])
+        expected_src_grad = torch.tensor([[0., 0., 0.], [0., 0., 80.]])
+        out = input.scatter_reduce(1, idx, src, 'prod', include_self=True)
+        out.sum().backward()
+        self.assertEqual(input.grad, expected_input_grad)
+        self.assertEqual(src.grad, expected_src_grad)
+
+        # test that gradients are evenly distributed for reduce=amin/amax
+        input = torch.tensor([[0., -1., 2.], [3., -4., 0.]], device=device, requires_grad=True)
+        src = torch.tensor([[0., -1., 2.], [3., -4., 0.]], device=device, requires_grad=True)
+        idx = torch.tensor([[0, 1, 2], [0, 1, 2]], device=device)
+        for reduction in ['amax', 'amin']:
+            out = input.scatter_reduce(1, idx, src, reduction, include_self=True)
+            out.sum().backward()
+            self.assertEqual(input.grad, torch.ones_like(input) / 2)
+            self.assertEqual(src.grad, torch.ones_like(src) / 2)
+            input.grad.zero_()
+            src.grad.zero_()
+
     def test_parameter_resize(self, device):
         asd = torch.nn.Parameter(torch.ones(16, dtype=torch.double, device=device))
 
