@@ -5389,7 +5389,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     Tensor N_src = N.gather(dim, index);
     grad_src = grad.gather(dim, index) / N_src;
   } else if (reduce == "amax" || reduce == "amin") {
-    // Evenly distribute gradient when there are multiple max/mins 
+    // Evenly distribute gradient when there are multiple max/mins
     Tensor value = result.gather(dim, index);
     Tensor self_is_result = (self == result).to(self.scalar_type());
     Tensor src_is_result = (src == value).to(self.scalar_type());
