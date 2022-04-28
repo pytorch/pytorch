@@ -83,7 +83,7 @@ cxx_library(
         [
             "cpuinfo/src/*.c",
             "cpuinfo/src/linux/*.c",
-            "cpuinfo/src/mach/*.c",
+            # "cpuinfo/src/mach/*.c",
             "cpuinfo/src/x86/*.c",
             "cpuinfo/src/x86/cache/*.c",
             "cpuinfo/src/x86/linux/*.c",
@@ -202,7 +202,7 @@ cxx_library(
     ]),
     header_namespace = "",
     compiler_flags = [
-        "-Oz",
+        "-Os",
     ],
     # fbobjc_preprocessor_flags = ["-DXNN_PRIVATE=", "-DXNN_INTERNAL="],
     preferred_linkage = "static",
