@@ -89,9 +89,8 @@ class TORCH_API Context {
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
   }
-  static bool hasMLC() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
-  }
+  static bool hasMPS();
+
   static bool hasORT() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::ORT);
   }
@@ -290,6 +289,11 @@ static inline DeprecatedTypeProperties& HIP(ScalarType s) {
       Backend::HIP, s);
 }
 
+static inline DeprecatedTypeProperties& MPS(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::MPS, s);
+}
+
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
 }
@@ -306,8 +310,8 @@ static inline bool hasXLA() {
   return globalContext().hasXLA();
 }
 
-static inline bool hasMLC() {
-  return globalContext().hasMLC();
+static inline bool hasMPS() {
+  return globalContext().hasMPS();
 }
 
 static inline bool hasORT() {
