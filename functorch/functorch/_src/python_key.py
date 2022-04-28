@@ -69,6 +69,9 @@ class PythonTensor(torch.Tensor):
 
     __torch_function__ = _disabled_torch_function_impl
 
+    def __deepcopy__(self, memo):
+        return self.clone()
+
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
         func = func_overload.overloadpacket
