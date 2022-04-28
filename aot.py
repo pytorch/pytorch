@@ -16,11 +16,7 @@ def setup(rank, world_size):
 def cleanup():
     dist.destroy_process_group()
 
-def broadcast():
-    device = torch.device("cuda", dist.get_rank())
-    x = torch.zeros(2, 3).to(device)
-    if device.index == 0:
-        x = torch.ones(2, 3).to(device)
+def broadcast(x):
     dist.broadcast(x, 0)
     print(f"{os.getpid()} broadcast: {x}")
     return x
@@ -40,8 +36,12 @@ def demo_basic(rank, world_size):
     aot_print_fn = aot_function(broadcast, fw_compiler=compiler_fn, bw_compiler=compiler_fn)
 
     # Run the aot_print_fn once to trigger the compilation and print the graphs
-    res = aot_print_fn()
-    ref = broadcast()
+    device = torch.device("cuda", dist.get_rank())
+    x = torch.zeros(2, 3).to(device)
+    if device.index == 0:
+        x = torch.ones(2, 3).to(device)
+    res = aot_print_fn(x)
+    ref = broadcast(x)
     assert torch.allclose(ref, res)
 
     clear_compile_cache()
