@@ -115,12 +115,8 @@ class ObserverBase(ABC, nn.Module):
 
 
 class UniformQuantizationObserverBase(ObserverBase):
-    r"""Internal common base for all observers using uniform quantization
-    to calculate scale and zero_point.
-
-    This base is for commonly used parameters used internally.
-    Users should use `~torch.ao.quantization.observer.ObserverBase` as a base class
-    for custom observers.
+    r"""Common base for all observers using uniform quantization to calculate
+    scale and zero_point.
 
     Args:
         dtype: Quantized data type.
@@ -174,7 +170,7 @@ class UniformQuantizationObserverBase(ObserverBase):
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        super(UniformQuantizationObserverBase, self).__init__(dtype=dtype)
+        super().__init__(dtype=dtype)
         self.qscheme = qscheme
         if reduce_range:
             warnings.warn(
@@ -337,6 +333,7 @@ class UniformQuantizationObserverBase(ObserverBase):
 
 # Originally, this class was called `_ObserverBase`.  Keeping the old name around
 # for backwards compatibility.
+# TODO(after v1.13): delete this
 _ObserverBase = UniformQuantizationObserverBase
 
 
@@ -1283,8 +1280,8 @@ class RecordingObserver(ObserverBase):
     """
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
-    def __init__(self, **kwargs):
-        super(RecordingObserver, self).__init__(**kwargs)
+    def __init__(self, dtype=torch.quint8, **kwargs):
+        super(RecordingObserver, self).__init__(dtype=dtype, **kwargs)
         self.tensor_val = []
 
     def forward(self, x):
