@@ -9,9 +9,14 @@
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/function_schema.h>
 #include <c10/util/Optional.h>
+#include <c10/util/variant.h>
 #include <unordered_map>
 #include <mutex>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <functorch/csrc/Interpreter.h>
+#include <functorch/csrc/VmapInterpreter.h>
+#include <functorch/csrc/ADInterpreters.h>
+#include <functorch/csrc/FunctionalizeInterpreter.h>
 
 // Forward declared bc I am lazy
 namespace c10 { struct AutogradMetaInterface; }
@@ -19,23 +24,9 @@ namespace c10 { struct AutogradMetaInterface; }
 namespace at {
 namespace functorch {
 
-enum RandomnessType {
-    Error,      // always errors when calling a random function
-    Same,       // randomness appears the same across batches
-    Different,  // randomness appears different across batches
-    END
-};
-
-enum class TransformType {
-  Torch,  // Unused
-  Vmap,
-  Grad,  // reverse-mode AD, aka vjp
-  Jvp,  // forward-mode AD
-  Functionalize,
-};
-
-std::ostream& operator<<(std::ostream& os, const TransformType& t);
-
+// TODO: we can excise DynamicLayer in favor of Interpreter,
+// But I am going to leave it for now as a compatiblity shim to avoid
+// needing to refactor a lot of callsites...
 struct FUNCTORCH_API DynamicLayer {
   explicit DynamicLayer(
       TransformType transform_type,
@@ -49,36 +40,15 @@ struct FUNCTORCH_API DynamicLayer {
   TransformType key() const;
   int64_t layerId() const;
 
+  const Interpreter& interpreter() const { return interpreter_; }
+  Interpreter& interpreter() { return interpreter_; }
+
   // Only valid for vmap
   int64_t batchSize() const;
   RandomnessType randomness() const;
 
-  // only valid for grad-based transforms
-  optional<bool> prevGradMode() const;
-
-  // only valid for jvp transform
-  optional<bool> prevFwdGradMode() const;
-
-  void saveLocalDispatchKeySet(c10::impl::LocalDispatchKeySet keyset);
-  void clearSavedLocalDispatchKeySet();
-  c10::impl::LocalDispatchKeySet getSavedLocalDispatchKeySet() const;
-
-  // only valid for functionalization
-  optional<bool> functionalizeAddBackViews() const;
  private:
-  TransformType transform_type_;
-  int64_t layerId_;
-
-  // Honestly these should be a union or some extendable metadata class.
-  // Not doing that for now because I don't think we'll use this mechanism for very long.
-  optional<int64_t> batchSize_;
-  optional<RandomnessType> randomness_;
-  optional<bool> prevGradMode_;
-  optional<bool> prevFwdGradMode_;
-
-  optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
-
-  optional<bool> functionalizeAddBackViews_;
+  Interpreter interpreter_;
 };
 
 FUNCTORCH_API int64_t initAndPushDynamicLayer(
@@ -109,15 +79,12 @@ FUNCTORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
 // add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
 bool isInplaceOp(const c10::FunctionSchema& schema);
 
-// Applies the following for-loop:
-// for i in range(begin, end):
-//   args[i] = func(args[i])
-void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
-    std::function<Tensor(const Tensor&)> func);
+Tensor unwrapIfDead(const Tensor& tensor);
 
 // Pretty printers
 std::ostream& operator<<(std::ostream& os, const DynamicLayer& layer);
 std::ostream& operator<<(std::ostream& os, const std::vector<DynamicLayer>& dynamicLayerStack);
+
 
 }
 } // namespace at
