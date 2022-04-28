@@ -27,12 +27,12 @@ import functools
 import types
 import warnings
 from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator
+import contextlib
 
 import torch
 from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
-import contextlib
 
 __all__ = [
     "get_ignored_functions",
@@ -43,6 +43,7 @@ __all__ = [
     "is_tensor_like",
     "is_tensor_method_or_property",
     "wrap_torch_function",
+    "enable_reentrant_dispatch",
 ]
 
 @functools.lru_cache(None)
@@ -108,6 +109,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.dtype,
         torch.finfo,
         torch.has_mkl,
+        torch.has_mps,
         torch.has_mkldnn,
         torch.has_openmp,
         torch.iinfo,
@@ -142,6 +144,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.fft.rfftfreq,
         torch.from_file,
         torch.full,
+        torch.fill,
         torch.hamming_window,
         torch.hann_window,
         torch.kaiser_window,
@@ -574,6 +577,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.index_put: lambda input, indices, values, accumulate=False: -1,
         torch.index_select: lambda input, dim, index, out=None: -1,
         torch.index_fill: lambda input, dim, index, value: -1,
+        torch._index_reduce: lambda input, dim, index, source, reduce, include_input=True: -1,
         torch.isfinite: lambda tensor: -1,
         torch.isin: lambda e, te, assume_unique=False, invert=False: -1,
         torch.isinf: lambda tensor: -1,
@@ -1106,7 +1110,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__format__: lambda self, format_spec: -1,
         Tensor.__reduce_ex__: lambda self, proto: -1,
         Tensor.__reversed__: lambda self: -1,
-        Tensor.__repr__: lambda self: -1,
+        Tensor.__repr__: lambda self, *, tensor_contents=None: -1,
         Tensor.__setitem__: lambda self, k, v: -1,
         Tensor.__setstate__: lambda self, d: -1,
         Tensor.T.__get__: lambda self: -1,
@@ -1132,7 +1136,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_leaf.__get__: lambda self: -1,
         Tensor.retains_grad.__get__: lambda self: -1,
         Tensor.is_meta.__get__: lambda self: -1,
-        Tensor.is_mlc.__get__: lambda self: -1,
+        Tensor.is_mps.__get__: lambda self: -1,
         Tensor.is_nested.__get__: lambda self: -1,
         Tensor.is_ort.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
@@ -1199,6 +1203,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.geometric_: lambda self, p, *, generator=None: -1,
         Tensor.get_device: lambda self: -1,
         Tensor.half: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.chalf: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.has_names: lambda self: -1,
         Tensor.indices: lambda self: -1,
         Tensor.int: lambda self, memory_format=torch.preserve_format: -1,
@@ -1900,3 +1905,10 @@ def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
         yield mode
     finally:
         _set_torch_function_mode(old)
+
+class enable_reentrant_dispatch():
+    def __enter__(self):
+        self._raii_guard = torch._C._RestorePythonTLSSnapshot()
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        del self._raii_guard
