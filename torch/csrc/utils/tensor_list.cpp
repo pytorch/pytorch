@@ -25,7 +25,7 @@ static PyObject* recursive_to_list(
     if (!obj) throw python_error();
     PyList_SET_ITEM(list.get(), i, obj);
     auto advance_data_ptr = strides[dim] * elementSize;
-    TORCH_INTERNAL_ASSERT(data || advance_data_ptr == 0);
+    TORCH_INTERNAL_ASSERT(data || (advance_data_ptr == 0));
     data += advance_data_ptr;
   }
   return list.release();
@@ -41,7 +41,7 @@ PyObject* tensor_to_list(const Tensor& tensor) {
   TORCH_CHECK(tensor.numel() == 0 || data.data_ptr(), "tolist() shouldn't be called on a tensor with unallocated storage");
   return recursive_to_list(
       (char*)data.data_ptr(), data.sizes(), data.strides(), 0,
-      data.scalar_type(), data.dtype().itemsize());
+      data.scalar_type(), tensor.numel() == 0 ? 0 : data.dtype().itemsize());
 }
 
 }}  // namespace torch::utils
