@@ -890,7 +890,7 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp2 = dp.iter.IterableWrapper([10])
         input_dp3 = dp.iter.IterableWrapper([100, 200, 300])
         output_dp = input_dp1.mux(input_dp2, input_dp3)
-        expected_output = [1, 10, 100]
+        expected_output = [1, 10, 100, 2, 200, 3, 300, 4]
         self.assertEqual(len(expected_output), len(output_dp))
         self.assertEqual(expected_output, list(output_dp))
 
@@ -898,8 +898,8 @@ class TestFunctionalIterDataPipe(TestCase):
         input_dp1 = dp.iter.IterableWrapper([0, 1, 2, 3])
         input_dp2 = dp.iter.IterableWrapper([])
         output_dp = input_dp1.mux(input_dp2)
-        self.assertEqual(len(input_dp2), len(output_dp))
-        self.assertEqual(list(input_dp2), list(output_dp))
+        self.assertEqual(len(input_dp1), len(output_dp))
+        self.assertEqual(list(input_dp1), list(output_dp))
 
         # __len__ Test: raises TypeError when __len__ is called and an input doesn't have __len__
         input_dp1 = dp.iter.IterableWrapper(range(10))
