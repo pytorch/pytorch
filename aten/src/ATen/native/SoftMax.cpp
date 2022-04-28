@@ -11,7 +11,6 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include "c10/util/Exception.h"
 
 namespace at {
 namespace meta {
@@ -318,7 +317,6 @@ void _log_softmax_cpu_out
 (const Tensor& input,
  const int64_t dim,
  const Tensor& output) {
-   std::cout<<input.dtype()<<std::endl;
 
   if (input.numel() == 0) {
     return;
@@ -349,7 +347,6 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
  int64_t dim,
  c10::optional<ScalarType> dtype,
  const Tensor& output) {
-  std::cout<<"353: "<<dtype.has_value()<<' '<<input.dtype()<<std::endl;
   Tensor converted = dtype.has_value()? input.toType(dtype.value()) : input;
   auto output_temp = output.is_contiguous() ? output : at::empty_like(output, MemoryFormat::Contiguous) ;
 
@@ -498,7 +495,8 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
 }
 
 Tensor _log_softmax(const Tensor& input_, const int64_t dim_, bool half_to_float) {
-  TORCH_INTERNAL_ASSERT("This operator is being removed - please don't use it.");
+  TORCH_INTERNAL_ASSERT("This operator is being removed. This is currently left only as a placeholder"
+                        "while updating other libraries that depend on - please don't use it.");
   return input_;
 }
 
