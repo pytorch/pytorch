@@ -3077,44 +3077,44 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
 class TestVmapOperatorsOpInfo(TestCase):
     vmap_fail = {
-        # These are ops that we can't generate fallbacks for
+        # These are things that we either cannot fix or are not actually problems
         xfail('fill_'),
         xfail('resize_'),
         xfail('resize_as_'),
-        xfail('tensor_split'),
         xfail('to_sparse'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
-        xfail('view_as_complex'),
-        xfail('masked_select'),
+        xfail('masked_select'),  # dynamic op
+        xfail('nonzero'),  # dynamic op
+        xfail('allclose'),  # returns a boolean
+        xfail('rand_like'),  # randomness is tested separately
+        xfail('randint_like'),  # randomness is tested separately
+        xfail('randn_like'),  # randomness is tested separately
+        xfail('bernoulli', ''),  # randomness is tested separately
+        xfail('normal', ''),  # randomness is tested separately
+        xfail('normal', 'number_mean'),  # randomness is tested separately
+        xfail('multinomial', ''),  # randomness
+        xfail('nn.functional.embedding', ''),  # we only support some cases
+        xfail('nn.functional.rrelu'),  # randomness
+        xfail('nn.functional.dropout2d', ''),  # randomness
+        xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
+        xfail('as_strided'),  # as_strided is too crazy
+        xfail('nn.functional.fractional_max_pool3d'),  # randomness
+        xfail('nn.functional.fractional_max_pool2d'),  # randomness
 
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug
+        xfail('view_as_complex'),
+        xfail('tensor_split'),
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
         xfail('matrix_exp'),
         xfail('lu_unpack'),
         xfail('histogramdd'),
-        xfail('nn.functional.embedding', ''),
-        xfail('randn_like'),
-        xfail('allclose'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('rand_like'),
-        xfail('randint_like'),
-        xfail('nn.functional.fractional_max_pool3d'),
-        xfail('as_strided'),
-        xfail('nn.functional.fractional_max_pool2d'),
         xfail('nn.functional.embedding_bag'),
-        xfail('nonzero'),
-        xfail('nn.functional.rrelu'),  # random?
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
-        xfail('bernoulli', ''),
-        xfail('nn.functional.feature_alpha_dropout', 'with_train'),
-        xfail('multinomial', ''),
         xfail('column_stack', ''),
         xfail('pca_lowrank', ''),
-        xfail('normal', ''),
-        xfail('nn.functional.dropout2d', ''),
-        xfail('normal', 'number_mean'),
         xfail('svd_lowrank', ''),
 
         # required rank 4 tensor to use channels_last format
