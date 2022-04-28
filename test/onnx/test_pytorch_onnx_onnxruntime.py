@@ -10995,27 +10995,20 @@ class _TestONNXRuntime:
 
         class Module(torch.nn.Module):
 
-            def forward(self, input, grid, mode: str, padding_mode: str, align_corners: bool):
-                return torch.nn.functional.grid_sample(input, grid, mode, padding_mode, align_corners)
+            def __init__(self, mode: str, padding_mode: str, align_corners: bool) -> None:
+                super().__init__()
+                self.mode, self.padding_mode, self.align_corners = mode, padding_mode, align_corners
 
-        for (
-            mode,
-            padding_mode,
-            align_corners,
-        ) in itertools.product(
-            ("bilinear", "nearest", "bicubic"),
-            ("zeros", "border", "reflection"),
-            (True, False),
+            def forward(self, input, grid):
+                return torch.nn.functional.grid_sample(input, grid, self.mode, self.padding_mode, self.align_corners)
+
+        for mode, padding_mode, align_corners in itertools.product(
+            ("bilinear", "nearest", "bicubic"),  # mode
+            ("zeros", "border", "reflection"),  # padding_mode
+            (True, False),  # align_corners
         ):
-
-            args = (
-                torch.randn(n, c, h_in, w_in),  # input
-                torch.randn(n, h_out, w_out, 2),  # grid,
-                mode,
-                padding_mode,
-                align_corners,
-            )
-            self.run_test(Module(), args)
+            input, grid = torch.randn(n, c, h_in, w_in), torch.randn(n, h_out, w_out, 2)
+            self.run_test(Module(mode, padding_mode, align_corners), (input, grid))
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
