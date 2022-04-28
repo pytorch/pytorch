@@ -11623,6 +11623,9 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_gradgrad", dtypes=(torch.float64,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', "test_fn_fwgrad_bwgrad", dtypes=(torch.float64,)),
+            # 76354
+            DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
+                         dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64)),
         ),
     ),
     OpInfo('nn.functional.relu',
@@ -11694,6 +11697,7 @@ op_db: List[OpInfo] = [
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped! 75029"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+               DecorateInfo(unittest.skip("Skipped! 75363"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
                DecorateInfo(unittest.skip("Skipped! RuntimeError: bias tensor has to be contiguous"), 'TestGradients',
                             'test_forward_mode_AD', device_type='cuda', active_if=TEST_WITH_ROCM),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
@@ -12383,7 +12387,10 @@ op_db: List[OpInfo] = [
             # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
             # Consider making it a parameter or input, or detaching the gradient
             # https://github.com/pytorch/pytorch/issues/68752
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'), ],
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # 76354
+            DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
+                         dtypes=(torch.float16, torch.float32, torch.float64)), ],
     ),
     UnaryUfuncInfo(
         'nn.functional.celu',
@@ -14438,6 +14445,9 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # 76354
+               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
+                            dtypes=(torch.float16, torch.float32, torch.float64)),
            )),
     OpInfo('unique_consecutive',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -14449,6 +14459,9 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # 76354
+               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
+                            dtypes=(torch.float16, torch.float32, torch.float64)),
            )),
     OpInfo('put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -16651,6 +16664,9 @@ op_db: List[OpInfo] = [
             #     return torch.nn.functional.nll_loss(i0, i1, weight=tensor([8.4784, 1.7658, 4.3228], dtype=torch.float32))
             #                                                        ~~~~~~ <--- HERE
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
+            # 76354
+            DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
+                         dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64)),
         ),
     ),
     OpInfo(
