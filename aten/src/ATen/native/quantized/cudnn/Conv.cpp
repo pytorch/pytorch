@@ -383,8 +383,6 @@ class QConvInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-    TORCH_CHECK(kSpatialDim == 1 || kSpatialDim == 2, "Error in quantized cudnn conv2d operator: "
-                "Expected kSpatialDim == 1 || kSpatialDim == 2; received kSpatialDim=", kSpatialDim);
     act = act.to(c10::MemoryFormat::ChannelsLast);
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
     if (kReluFused) {
