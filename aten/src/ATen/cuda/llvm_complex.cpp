@@ -493,16 +493,6 @@ operator||(const complex<_Tp>& __x, const complex<_Tp>& __y)
     return (__x.real() || __x.imag()) || (__y.real() || __y.imag());
 }
 
-// logical_xor
-
-template<class _Tp>
-inline constexpr
-bool
-logical_xor(const complex<_Tp>& __x, const complex<_Tp>& __y)
-{
-    return (__x.real() || __x.imag()) != (__y.real() || __y.imag());
-}
-
 // 26.3.7 values:
 
 template <class _Tp, bool = is_integral<_Tp>::value,
