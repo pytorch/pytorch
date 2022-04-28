@@ -305,7 +305,7 @@ class ExprSegmentationSorter {
 
   std::deque<ExprGroup*> to_visit_;
 
-  std::unordered_set<ExprGroup*> to_merge_;
+  std::vector<std::pair<ExprGroup*, ExprGroup*>> to_merge_;
 
   Fusion* fusion_;
 
@@ -935,10 +935,12 @@ void ExprSegmentationSorter::mergeNodes() {
   std::unordered_set<ExprGroupConnections*> clean_up_edges;
 
   while (!to_merge_.empty()) {
-    auto group1 = *to_merge_.begin();
-    auto group2 = group1->payload()->merge_with;
-    to_merge_.erase(group1);
-    to_merge_.erase(group2);
+    ExprGroup *group1 = nullptr, *group2 = nullptr;
+    std::tie(group1, group2) = to_merge_.back();
+    to_merge_.pop_back();
+    TORCH_INTERNAL_ASSERT(
+        group2 == group1->payload()->merge_with,
+        "Expression Sorter: inconsistent to_merge packing");
     clean_up_groups.emplace(group1);
     clean_up_groups.emplace(group2);
     makeMergedNode(group1, group2);
@@ -1277,8 +1279,7 @@ void ExprSegmentationSorter::sort() {
             continue;
           }
 
-          to_merge_.emplace(group.get());
-          to_merge_.emplace(*candidate_it);
+          to_merge_.emplace_back(std::make_pair(group.get(), *candidate_it));
 
           group->payload()->merged = true;
           group->payload()->merge_with = *candidate_it;
@@ -1330,8 +1331,7 @@ void ExprSegmentationSorter::sort() {
           if (testStillDag(group.get(), *candidate_it)) {
             // Mark in same style as default algorithm for convenience even
             // though we will only merge once with the fallback
-            to_merge_.emplace(group.get());
-            to_merge_.emplace(*candidate_it);
+            to_merge_.emplace_back(std::make_pair(group.get(), *candidate_it));
 
             group->payload()->merged = true;
             group->payload()->merge_with = *candidate_it;

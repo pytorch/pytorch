@@ -700,7 +700,14 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         //  to insert the block sync. see FusionRAWSyncInsertionPlace4.
         std::unordered_set<Expr*> smem_writes;
         for (auto it : smem) {
-          smem_writes.insert(it.second);
+          // No need to keep track of shared mem writes that does not
+          //  require a RAW block sync.
+          if (GpuLower::current()
+                  ->syncMap()
+                  .needsRawSync(it.first->as<TensorView>())
+                  .hasTID()) {
+            smem_writes.insert(it.second);
+          }
         }
         last_writes_.push_back(smem_writes);
         smem.clear();
