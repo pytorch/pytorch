@@ -119,6 +119,11 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
   CacheKey key;
+  // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
+  // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
+  // CacheKey objects have the same user defined parameters, but
+  // different padded values, resulting in different hash outputs.
+  memset(&key, 0, sizeof(key));
   bool deterministic{true};
   bool allow_tf32{false};
   auto padding_vec = padding_.vec();
@@ -146,10 +151,8 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     std::vector<int64_t> uids;
     data_ptrs.reserve(10);
     uids.reserve(10);
-    data_ptrs = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
-                                           reinterpret_cast<int8_t*>(maybe_padded_weight_.data_ptr()),
-                                           requantize_multiplier_tensor.data_ptr(),
-                                           reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    data_ptrs = {input.data_ptr<int8_t>(), conv_output.data_ptr(), maybe_padded_weight_.data_ptr<int8_t>(),
+                 requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr<int8_t>()};
     uids = {'x', 'y', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
@@ -291,7 +294,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation in Quantized Conv2D Cudnn");
 }
 
 //

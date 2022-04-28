@@ -1,7 +1,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
-#include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
@@ -169,7 +168,7 @@ void initJITBindings(PyObject* module) {
             if (!n->maybeSchema()) {
               return c10::nullopt;
             }
-            return GetDecomposition(n->schema());
+            return DecompositionGraphForSchema(n->schema());
           })
       .def("_jit_pass_run_decompositions", RunDecompositions)
       // using Node* here instead of Schema because looking up the schema
@@ -184,16 +183,6 @@ void initJITBindings(PyObject* module) {
             } else {
               TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
             }
-          })
-      .def(
-          "_jit_register_decomposition_for_schema",
-          [](const FunctionSchema& s, std::shared_ptr<Graph>& graph) {
-            // because this is invoked by python, the function schema *
-            // becomes different, and we need to find and reuse the
-            // one that is used for caching
-            auto op =
-                findOperatorFor(c10::OperatorName(s.name(), s.overload_name()));
-            RegisterDecomposition(op->schema(), graph);
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def(

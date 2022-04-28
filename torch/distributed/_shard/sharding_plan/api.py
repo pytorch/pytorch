@@ -1,6 +1,10 @@
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+import abc
+import torch.nn as nn
 
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Union
+
+from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_spec import ShardingSpec
 
 @dataclass
@@ -12,9 +16,13 @@ class ShardingPlan(object):
     layout of a module with a spec, and when to convert back to data parallel fashion.
 
     Args:
-        plan (Dict[str, :class:`torch.distributed._shard.sharding_spec.ShardingSpec`]):
-            a dict describes how to shard the parameters of a module, keyed by the name
-            of parameter to ShardingSpec.
+        plan (Dict[str, Union[:class:`torch.distributed._shard.sharding_spec.ShardingSpec`,
+              :class:`torch.distributed._shard.sharder.Sharder`]):
+            a dict describes how to shard a module, there're currently two ways to shard a module:
+                1. directly shard a module parameter by a `ShardingSpec`, keyed by the name of
+                   a parameter to a `ShardingSpec`.
+                2. shard a submodule by applying a `Sharder` on it, keyed by the name of a module
+                   to a `Sharder` object.
         output_plan (Dict[str, :class:`torch.distributed._shard.sharding_spec.ShardingSpec`), optional):
             a dict specifies the layout of a module's output which produces a ShardedTensor,
             keyed by the name of module to ShardingSpec("" in key means the root module).
@@ -51,6 +59,26 @@ class ShardingPlan(object):
         >>>    return_local_tensor=["fc2"]
         >>> )
     """
-    plan: Dict[str, ShardingSpec]
+    plan: Dict[str, Union[ShardingSpec, Sharder]]
     output_plan: Optional[Dict[str, ShardingSpec]] = None
     return_local_tensor: Optional[List[str]] = None
+
+
+class ShardingPlanner(abc.ABC):
+    """
+    Default ShardingPlanner interface, can be extended and
+    implement advanced sharding strategies.
+    """
+    @abc.abstractmethod
+    def build_plan(self, module: nn.Module) -> ShardingPlan:
+        """
+        Given a nn.Module, define how to shard the module across
+        ranks, return a ShardingPlan
+        Args:
+            module (:class:`torch.nn.Module`):
+                The module to apply sharding to.
+        Returns:
+            A :class:`torch.distributed._shard.sharding_plan.ShardingPlan` object that
+            represents how to shard the module.
+        """
+        pass
