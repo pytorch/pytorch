@@ -19,6 +19,7 @@ rules = struct(
     cc_test = cc_test,
     cmake_configure_file = cmake_configure_file,
     filegroup = native.filegroup,
+    genrule = native.genrule,
     glob = native.glob,
     if_cuda = if_cuda,
     py_binary = native.py_binary,
