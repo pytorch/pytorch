@@ -215,6 +215,7 @@ class TestPublicBindings(TestCase):
             "has_lapack",
             "has_mkl",
             "has_mkldnn",
+            "has_zendnn",
             "has_mps",
             "has_openmp",
             "iinfo",

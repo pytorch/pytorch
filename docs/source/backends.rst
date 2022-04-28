@@ -118,6 +118,8 @@ torch.backends.mkldnn
 
 torch.backends.zendnn
 ^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.zendnn
+
 .. autofunction::  torch.backends.zendnn.is_available
 
 
