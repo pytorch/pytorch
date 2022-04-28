@@ -61,31 +61,33 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
       " elements for ",
       kSpatialDim,
       "D convolution.");
-  const int output_channels = transpose ? weight.size(1) * groups
-                                        : weight.size(0);
+  TORCH_CHECK(!transpose, "cudNN quantized conv prepack expects transpose = false")
+  const int num_unpadded_output_channels = weight.size(0);
   const auto qtype = weight.qscheme();
   if (bias.has_value()) {
     TORCH_CHECK(bias.value().dim() == 1, "bias should be a vector (1D Tensor)");
     TORCH_CHECK(
-        bias.value().size(0) == output_channels,
-        "bias should have K elements: " + std::to_string(output_channels));
+        bias.value().size(0) == num_unpadded_output_channels,
+        "bias should have K elements: " + std::to_string(num_unpadded_output_channels));
     // TODO: we create a broadcasted_bias tensor later so I think we don't need to make this contiguous here.
     // we will revisit this when nvidia adds proper support for broadcasting
     // bias_contig = bias->contiguous();
   }
 
-  // cudnn v8.4.0 expects conv2d's weight tensor's input and output channels to be a multiple of 4. if it is not
+  // cudnn v8.4.0 expects conv2d's int8 weight tensor's input and output channels to be a multiple of 4. if it is not
   // we need to explicitly pad it to a multiple of 4 ourselves as cudnn does not currently support padding.
   // TODO: when and if cudnn enables padding in their operators, we can remove padding on our end;
   // currently, limit padding support to groups=1 (ungrouped conv)
   // TODO: implement this for groups > 1
-  auto num_output_channels = weight.size(0);
-  if (weight.size(0) % 4 != 0 || weight.size(1) % 4 != 0) {
-    int8_t nslices2pad_out = (4 - weight.size(0) % 4) % 4; // number of slices we need to pad/add for output channels
-    int8_t nslices2pad_in = (4 - weight.size(1) % 4) % 4; // number of slices we need to pad/add for (input channels / groups)
-    weight = at::pad(weight, {0, 0, 0, 0, 0, nslices2pad_in, 0, nslices2pad_out}, "constant", 0);
+  auto num_input_channels = weight.size(1);
+  int8_t num_output_slices2pad = (4 - num_unpadded_output_channels % 4) % 4;
+  int8_t num_input_slices2pad = (4 - num_input_channels % 4) % 4;
+  if (num_output_slices2pad != 0 || num_input_slices2pad != 0) {
+    // the second argument is an initializer list of padded values. there are 2 values for each dimension.
+    // refer to https://pytorch.org/docs/stable/generated/torch.nn.functional.pad.html for more details
+    weight = at::pad(weight, {0, 0, 0, 0, 0, num_input_slices2pad, 0, num_output_slices2pad}, "constant", 0);
     if (bias.has_value()) {
-      bias.value() = at::pad(bias.value(), {0, nslices2pad_out}, "constant", 0);
+      bias.value() = at::pad(bias.value(), {0, num_output_slices2pad}, "constant", 0);
     }
   }
 
@@ -99,7 +101,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
           groups,
           transpose,
           qtype,
-          num_output_channels);
+          num_unpadded_output_channels);
   return ret_ptr;
 }
 
