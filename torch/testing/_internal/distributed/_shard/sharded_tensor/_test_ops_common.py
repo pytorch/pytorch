@@ -119,10 +119,12 @@ def clone_module_parameter(module, param_name):
     tensor = getattr(module, param_name)
     return torch.nn.Parameter(tensor.detach().clone())
 
-def gen_binary_op_func(python_op):
+def gen_binary_op_func(python_op, inplace=False):
     src_lines = ['def f(lhs, rhs):']
     if "torch" in python_op:
         src_lines.append(f'  return {python_op}(lhs, rhs)\n')
+    elif inplace:
+        src_lines.append(f'  lhs {python_op}= rhs\n  return lhs\n')
     else:
         src_lines.append(f'  return lhs {python_op} rhs\n')
 

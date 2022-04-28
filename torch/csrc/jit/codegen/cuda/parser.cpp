@@ -638,11 +638,7 @@ class IrParser {
   }
 
   static void initRegistry() {
-    if (init_registry_) {
-      // TODO: mutex this guy;
-      registerJitOperator();
-      init_registry_ = false;
-    }
+    std::call_once(once_flag_, []() { registerJitOperator(); });
   }
 
   static bool canParseNode(const Node* node) {
@@ -1369,8 +1365,6 @@ class IrParser {
         REGISTER_PARSE_RULE(
             ptr_op,
             {
-              auto fusion = FusionGuard::getCurFusion();
-
               // TODO: handle channels last
               MemoryFormat format;
               std::list<Val*> list_val;
@@ -2455,12 +2449,8 @@ class IrParser {
             TORCH_INTERNAL_ASSERT(false, "not implemented yet");
           },
           [](const Node* node) -> bool {
-            // We only profile `linear` layer with bias.
-            if (node->input(2)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              return false;
-            }
-            return true;
+            // We only profile `linear` layer but not fusing it.
+            return false;
           });
     }
 
@@ -2974,7 +2964,7 @@ class IrParser {
       cached_registry_lookup_; // NOLINT
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-  static bool init_registry_;
+  static std::once_flag once_flag_;
 };
 std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
 std::unordered_set<Symbol> IrParser::parser_skip_set_; // NOLINT
@@ -2984,7 +2974,7 @@ std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
     IrParser::cached_registry_lookup_; // NOLINT
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-bool IrParser::init_registry_ = true;
+std::once_flag IrParser::once_flag_;
 
 ProfileIValueOp* insertProfileIValueOp(
     Node* node,

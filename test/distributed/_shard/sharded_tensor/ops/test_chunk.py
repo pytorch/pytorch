@@ -56,7 +56,7 @@ class TestShardedTensorChunkOps(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_chunk(self):
-        sharding_dims = [0, -1]
+        sharding_dims = [0]
         specs = []
         for dim in sharding_dims:
             specs.extend(generate_chunk_sharding_specs_for_test(dim))
@@ -72,11 +72,17 @@ class TestShardedTensorChunkOps(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_chunk_error(self):
-        sharding_spec = generate_enumerable_sharding_specs_for_test()
+        chunk_spec = generate_chunk_sharding_specs_for_test(-1)
+        with self.assertRaisesRegex(
+            NotImplementedError, "Chunk by sharding dim is not supported."
+        ):
+            st = sharded_tensor.rand(chunk_spec[0], [17, 24])
+            st.chunk(5, dim=-1)
+        enumerable_spec = generate_enumerable_sharding_specs_for_test()
         with self.assertRaisesRegex(
             NotImplementedError, "Only ChunkShardingSpec is supported for chunk."
         ):
-            st = sharded_tensor.rand(sharding_spec[0], [10, 10])
+            st = sharded_tensor.rand(enumerable_spec[0], [10, 10])
             st.chunk(5, dim=-1)
 
 

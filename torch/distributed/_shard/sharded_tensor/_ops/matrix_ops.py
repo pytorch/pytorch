@@ -85,7 +85,7 @@ def transpose_same_dim(*args, **kwargs):
 def sharded_transpose_check(*args, **kwargs):
     """
     Perform extra checks for the sharded_transpose op such as the input needs to
-    be at least 3 and the sharding spec needs to be a ChunkShardingSpec.
+    be at least 2 and the sharding spec needs to be a ChunkShardingSpec.
 
     Args: same as ``torch.Tensor.type_as``.
 
@@ -184,7 +184,7 @@ _register_sharded_op_on_local_tensor(
 def sharded_masked_fill_check(*args, **kwargs):
     """
     Perform extra checks for the sharded_masked_fill op.
-    Ensure the mask size is compatible with the size of
+    Ensure the mask size is broadcastable with the size of
     the sharded tensor.
 
     Args: same as ``torch.Tensor.masked_fill``.
@@ -198,7 +198,7 @@ def sharded_masked_fill_check(*args, **kwargs):
             "mask dim must not greater than the dim of the sharded tensor."
         )
     for idx in range(-1, -mask.dim() - 1, -1):
-        if mask.size(idx) != st.size(idx):
+        if mask.size(idx) != st.size(idx) and mask.size(idx) != 1:
             raise ValueError(
                 f"The size of mask {mask.dim() + idx} must match the size of "
                 f"sharded tensor {st.dim() + idx} at non-singleton dimension {mask.dim() + idx}"
@@ -226,7 +226,7 @@ def sharded_masked_fill(args, kwargs, pg):
     sharding_dim = st.sharding_spec().dim  # type: ignore[attr-defined]
     narrow_idx = None
     for idx in range(-1, -mask.dim() - 1, -1):
-        if st.dim() + idx == sharding_dim:
+        if st.dim() + idx == sharding_dim and mask.size(idx) != 1:
             narrow_idx = idx
     if narrow_idx is not None:
         rank_idx = None
@@ -249,6 +249,7 @@ _register_sharded_op_on_local_tensor(
     customized_func=sharded_masked_fill,
 )
 
+
 def sharded_view_check(*args, **kwargs):
     """
     Perform extra checks for the sharded_view op.
@@ -268,13 +269,10 @@ def sharded_view_check(*args, **kwargs):
         )
     st_size = math.prod(st.size())
     shape_size = math.prod(shapes)
-    if (
-        shape_size > st_size
-        or st_size % shape_size
-        or shapes.count(lambda x: x < -1) > 0
-    ):
+    neg_sum = sum(i for i in shapes if i < 0)
+    if shape_size > st_size or st_size % shape_size:
         raise ValueError("Shape is invalid for sharded tensor size.")
-    if shapes.count(-1) > 1:
+    if neg_sum < -1:
         raise ValueError("Only one dimension can be inferred for sharded view op.")
 
 
@@ -295,14 +293,18 @@ def sharded_view(args, kwargs, pg):
     """
     st = args[0]
     shapes = args[1:]
+    try:
+        infer_idx = shapes.index(-1)
+    except ValueError:
+        infer_idx = None
+
     # Infer the dim which is specified with -1.
-    if shapes.count(-1):
+    if infer_idx is not None:
         st_size = math.prod(st.size())
         shape_size = -1 * math.prod(shapes)
-        idx = shapes.index(-1)
-        shapes = (*shapes[:idx], st_size // shape_size, *shapes[idx + 1 :])
+        shapes = (*shapes[:infer_idx], st_size // shape_size, *shapes[infer_idx + 1 :])
     if st.size() == shapes:
-        return st
+        return st.local_tensor(), st.sharding_spec(), shapes
 
     st = args[0]
     sharding_dim = st.sharding_spec().dim
@@ -315,7 +317,7 @@ def sharded_view(args, kwargs, pg):
     new_local_tensor_size = (
         *shapes[:sharding_dim],
         shapes[sharding_dim] // world_size,
-        *shapes[sharding_dim + 1:],
+        *shapes[sharding_dim + 1 :],
     )
     new_local_tensor = st.local_tensor().view(*new_local_tensor_size)
     return new_local_tensor, st.sharding_spec(), shapes

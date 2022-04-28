@@ -149,7 +149,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                     st, dim=st.sharding_spec().dim, dtype=torch.float32
                 )
 
-    def _test_masked_fill_with_sizes(self, mask_size):
+    def _test_masked_fill_with_sizes(self, mask_size, broadcast_style=False):
         specs = _chunk_sharding_specs_list_for_test([0, 1, 2], seed=7)
         for spec in specs:
             tensor = torch.rand(35, 17, 26).cuda(self.rank)
@@ -158,6 +158,8 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 .type(torch.BoolTensor)
                 .cuda(self.rank)
             )
+            if broadcast_style:
+                mask = mask.unsqueeze(1)
             tensor_m = tensor.masked_fill(mask, 25.0)
             st_expected = _shard_tensor(tensor_m, spec)
             st_expected._metadata.shards_metadata.sort(
@@ -176,6 +178,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
     def test_sharded_tensor_masked_fill(self):
         self._test_masked_fill_with_sizes((35, 17, 26))
         self._test_masked_fill_with_sizes((17, 26))
+        self._test_masked_fill_with_sizes((35, 26), broadcast_style=True)
         self._test_masked_fill_with_sizes((26,))
 
     @with_comms(init_rpc=True)
@@ -212,7 +215,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
         specs = _chunk_sharding_specs_list_for_test([0, 0], seed=10)
         for spec in specs:
             tensor = torch.rand(16, 35, 26).cuda(self.rank)
-            tensor_v = tensor.view(4, 4, 35, 26)
+            tensor_v = tensor.view(16, 35, 26).view(4, 4, 35, 26)
             st_expected = _shard_tensor(tensor_v, spec)
             st_expected._metadata.shards_metadata.sort(
                 key=lambda x: x.shard_offsets[0],
