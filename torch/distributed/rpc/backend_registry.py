@@ -1,14 +1,15 @@
+__all__ = ["init_backend", "backend_registered", "construct_rpc_backend_options", "register_backend", "BackendType", "BackendValue"]
 
 import collections
 import enum
-from typing import Dict, List, Set, Tuple
+from typing import cast, Dict, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
+from ._utils import _group_membership_management, _update_group_membership
 
 from . import api
 from . import constants as rpc_constants
-
 
 BackendValue = collections.namedtuple(
     "BackendValue", ["construct_rpc_backend_options_handler", "init_backend_handler"]
@@ -160,6 +161,14 @@ def _tensorpipe_exchange_and_check_all_device_maps(
     all_device_maps = {name: map_ for name, _, map_, _ in gathered}
     all_devices = {name: devices for name, _, _, devices in gathered}
 
+    _validate_device_maps(all_names, all_device_counts, all_device_maps, all_devices)
+
+    # passed all checked, construct reverse mapping and get list of devices handled by this agent
+    reverse_device_maps = _create_reverse_mapping(my_name, all_names, all_device_maps)
+    my_devices = _create_device_list(my_devices, my_device_maps, reverse_device_maps)
+    return reverse_device_maps, my_devices
+
+def _validate_device_maps(all_names, all_device_counts, all_device_maps, all_devices, is_static_group=True):
     for node in all_names:
         devices = all_devices[node]
         if len(set(devices)) != len(devices):
@@ -175,7 +184,8 @@ def _tensorpipe_exchange_and_check_all_device_maps(
             )
 
     for source_node in all_names:
-        if not set(all_device_maps[source_node].keys()).issubset(all_names):
+        # For dynamic group (non-static) do not check the target node name since it may not have joined yet
+        if is_static_group and not set(all_device_maps[source_node].keys()).issubset(all_names):
             raise ValueError(
                 f"Node {source_node} has invalid target node names in its device maps\n"
                 f"device maps = {all_device_maps[source_node].keys()}\n"
@@ -205,7 +215,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
                     f"device map = {map_}\n"
                     f"device count = {all_device_counts[source_node]}"
                 )
-            if all_devices[target_node]:
+            if all_devices.get(target_node, []):
                 if not set(map_.values()).issubset(all_devices[target_node]):
                     raise ValueError(
                         f"Node {source_node} has unexpected target devices "
@@ -213,7 +223,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
                         f"device map = {map_}\n"
                         f"devices = {all_devices[target_node]}"
                     )
-            elif not _tensorpipe_validate_devices(
+            elif target_node in all_device_counts and not _tensorpipe_validate_devices(
                 map_.values(), all_device_counts[target_node]
             ):
                 raise ValueError(
@@ -223,14 +233,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
                     f"device count = {all_device_counts[target_node]}"
                 )
 
-    # passed all checked, construct reverse mapping for return values
-    reverse_device_maps: Dict[str, Dict[torch.device, torch.device]] = {}
-    for node in all_names:
-        if my_name in all_device_maps[node]:
-            reverse_device_maps[node] = {
-                v: k for k, v in all_device_maps[node][my_name].items()
-            }
-
+def _create_device_list(my_devices, my_device_maps, reverse_device_maps):
     if not my_devices:
         devices_set: Set[torch.device] = set()
         for _, map_ in my_device_maps.items():
@@ -240,38 +243,60 @@ def _tensorpipe_exchange_and_check_all_device_maps(
         devices_set.discard(torch.device("cpu"))
         my_devices = list(devices_set)
     my_devices = sorted(my_devices, key=lambda d: d.index)
+    return my_devices
 
-    return reverse_device_maps, my_devices
+def _create_reverse_mapping(my_name, all_names, all_device_maps):
+    reverse_device_maps: Dict[str, Dict[torch.device, torch.device]] = {}
+    for node in all_names:
+        if my_name in all_device_maps[node]:
+            reverse_device_maps[node] = {
+                v: k for k, v in all_device_maps[node][my_name].items()
+            }
+    return reverse_device_maps
 
-def _tensorpipe_check_local_device_maps(name, device_count, options):
-    # Check local devices in device_maps and devices are all valid.
-    local_devices = set(options.devices) if options.devices else set()
-    device_maps = options.device_maps
-    for worker_name in device_maps:
-        device_map = device_maps[worker_name]
-        key_set = set(device_map.keys())
-        val_set = set(device_map.values())
-        if not all([
-            len(key_set) == len(device_map),
-            len(val_set) == len(device_map),
-        ]):
-            raise ValueError(
-                f"Invalid device_map configuration for {worker_name}, "
-                f"not 1-to-1 mapping:\ndevice_maps = {device_map}"
-            )
-        local_devices.update(key_set)
+def _get_device_infos():
+    from . import TensorPipeAgent
+    agent = cast(TensorPipeAgent, api._get_current_rpc_agent())
+    opts = agent._get_backend_options()
+    device_count = torch.cuda.device_count()
+    return device_count, opts.device_maps, opts.devices
 
-    if not _tensorpipe_validate_devices(local_devices, device_count):
-        raise ValueError(
-            f"Invalid device in TensorPipe options on {name}:\n"
-            f"device_maps = {options.device_maps},\n"
-            f"devices = {options.devices}"
-        )
+def _set_devices_and_reverse_device_map(agent):
+    from . import TensorPipeAgent
+    agent = cast(TensorPipeAgent, agent)
+    # Group state is retrieved from local agent
+    # On initialization, tensorpipe agent retrieves information from all existing workers, so group state is valid
+    my_worker_info = agent.get_worker_info()
+    my_name = my_worker_info.name
+    all_worker_infos = agent.get_worker_infos()
+    # One round to get device_maps of all workers and construct reverse device maps
+    all_device_counts, all_device_maps, all_devices, all_names = {}, {}, {}, []
+    for worker_info in all_worker_infos:
+        worker_name = worker_info.name
+        if worker_name != my_name:
+            # TODO: make async?
+            device_count, device_map, devices = api.rpc_sync(worker_name, _get_device_infos)
+        else:
+            opts = agent._get_backend_options()
+            device_count, device_map, devices = torch.cuda.device_count(), opts.device_maps, opts.devices
+        all_device_counts[worker_name] = device_count
+        all_device_maps[worker_name] = device_map
+        all_devices[worker_name] = devices
+        all_names.append(worker_name)
+
+    _validate_device_maps(all_names, all_device_counts, all_device_maps, all_devices, is_static_group=False)
+    reverse_device_maps = _create_reverse_mapping(my_name, all_names, all_device_maps)
+
+    # Perform RPC call to all workers, including itself, to include newly joined worker information and device maps
+    for worker_name in all_names:
+        # Set device list for each worker
+        all_devices[worker_name] = _create_device_list(all_devices[worker_name], all_device_maps[worker_name], reverse_device_maps)
+        api.rpc_sync(worker_name, _update_group_membership,
+                     args=(my_worker_info, all_devices[worker_name], reverse_device_maps, True))
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
-    from . import TensorPipeRpcBackendOptions
     from . import TensorPipeAgent
-
+    from . import TensorPipeRpcBackendOptions
     if not isinstance(store, dist.Store):
         raise TypeError("`store` must be a c10d::Store. {}".format(store))
 
@@ -336,47 +361,29 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         return agent
     # initialization for dynamic rpc (ranks can join and leave)
     else:
-        # Validate devices and device_maps locally for current rank
-        _tensorpipe_check_local_device_maps(name, device_count, rpc_backend_options)
+        with _group_membership_management(store, name, True):
+            # Construct TPAgent with empty reverse_device_map and devices
+            # these properties will be updated after initialization
+            agent = TensorPipeAgent(
+                store,
+                name,
+                rank,
+                world_size,
+                rpc_backend_options,
+                {},
+                [],
+            )
+            api._init_rpc_states(agent)
 
-        token_key = "RpcGroupManagementToken"
-        token_location = f"TokenOnWorker{rank}"
-        while True:
-            # Retrieve token from store to signal start of rank join/leave critical section
-            returned = store.compare_set(token_key, "", token_location).decode()
-            if returned == token_location:
-                # Construct TPAgent with empty reverse_device_map and devices
-                # these two properties will be updated after construction
-                agent = TensorPipeAgent(
-                    store,
-                    name,
-                    rank,
-                    world_size,
-                    rpc_backend_options,
-                    {},
-                    [],
-                )
-
-                try:
-                    # TODO: Notify all workers in group this rank has joined and set devices and reverse_device_map
-                    # This is a synchronous operation that completes once all existing ranks are updated
-                    # _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
-                    pass
-                except Exception:
-                    api.shutdown()
-                    raise
-
-                # Finish initialization
-                break
-            else:
-                # Store will wait for the token to be released based on the timeout set in backend options
-                store.wait([returned])
-
-        # Update from store to signal end of rank join/leave critical section
-        store.set(token_key, "")
-        # Other will wait for this token to be set before they execute
-        store.set(token_location, "Done")
-        return agent
+            try:
+                # Notify all workers in group this rank has joined and set devices and reverse_device_map
+                # This is a synchronous operation that completes once all existing ranks are updated
+                _set_devices_and_reverse_device_map(agent)
+                pass
+            except Exception:
+                api.shutdown()
+                raise
+            return agent
 
 register_backend(
     "TENSORPIPE",

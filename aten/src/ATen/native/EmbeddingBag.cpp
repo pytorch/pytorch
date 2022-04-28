@@ -969,7 +969,7 @@ static Tensor apply_bag_size_backward(
 
 template <typename scalar_t>
 void embedding_bag_cpu_max_out(
-    Tensor& max_indices,
+    Tensor* max_indices,
     const Tensor& weight,
     const Tensor& indices,
     const Tensor& offset2bag,
@@ -984,8 +984,12 @@ void embedding_bag_cpu_max_out(
     auto* indices_data = indices.data_ptr<index_t>();
     auto* offset2bag_data = offset2bag.data_ptr<index_t>();
 
-    auto* max_indices_data = max_indices.data_ptr<index_t>();
-    auto max_indices_stride = max_indices.strides()[0];
+    index_t* max_indices_data = nullptr;
+    int64_t max_indices_stride = 0;
+    if (max_indices) {
+      max_indices_data = max_indices->data_ptr<index_t>();
+      max_indices_stride = max_indices->strides()[0];
+    }
 
     auto* weight_data = weight.data_ptr<scalar_t>();
     auto* output_data = output.data_ptr<scalar_t>();
@@ -1012,7 +1016,9 @@ void embedding_bag_cpu_max_out(
 
           if (is_first_for_bag || (weight_item > current_item)) {
             current_item = weight_item;
-            max_indices_data[max_indices_stride * bag + dim] = word_idx;
+            if (max_indices_data) {
+              max_indices_data[max_indices_stride * bag + dim] = word_idx;
+            }
           }
         }
         if (is_first_for_bag) {
@@ -1027,7 +1033,7 @@ void embedding_bag_cpu_max_out(
 }
 
 void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
-                            Tensor& bag_size, Tensor& max_indices,
+                            Tensor& bag_size, Tensor* max_indices,
                             const Tensor &weight, const Tensor &indices,
                             const Tensor &offsets, const int64_t mode,
                             const c10::optional<Tensor>& per_sample_weights,
@@ -1051,7 +1057,9 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
       // make bag_size output deterministic
       at::native::zero_(bag_size);
     }
-     max_indices.copy_(bag_size);
+    if (max_indices) {
+      max_indices->copy_(bag_size);
+    }
   } else { // MODE_MAX
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       weight.scalar_type(), "embedding_bag_cpu_max_out", [&]() {
@@ -1089,7 +1097,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
   Tensor max_indices = make_max_indices(weight, indices, offsets, bag_size, mode, include_last_offset);
 
   _embedding_bag_cpu_impl_out(output, offset2bag,
-                          bag_size, max_indices,
+                          bag_size, &max_indices,
                           weight, indices, offsets,
                           mode, per_sample_weights,
                           include_last_offset, padding_idx);
