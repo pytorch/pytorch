@@ -583,7 +583,7 @@ class TestCuda(TestCase):
     def test_float32_matmul_precision_get_set(self):
         self.assertEqual(torch.get_float32_matmul_precision(), 'highest')
         self.assertFalse(torch.backends.cuda.matmul.allow_tf32, False)
-        for p in ('medium', 'high'): 
+        for p in ('medium', 'high'):
             torch.set_float32_matmul_precision(p)
             self.assertEqual(torch.get_float32_matmul_precision(), p)
             self.assertTrue(torch.backends.cuda.matmul.allow_tf32, True)
