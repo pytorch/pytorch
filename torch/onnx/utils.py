@@ -19,7 +19,7 @@ import inspect
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, SymbolicContext, TrainingMode, CheckerError
-from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
+from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto, Node
 from typing import List, Tuple, Union
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -495,6 +495,18 @@ def unpack_quantized_tensor(value):
         return (value,)
 
 
+def _pre_trace_quant_model(model, args):
+    r"""Returns `torch.jit.trace(model, args)` if model is quantized. Otherwise do nothing and return
+    original model.
+
+    This is due to https://github.com/pytorch/pytorch/issues/75761.
+    """
+    if (any(hasattr(m, "_packed_params") for m in getattr(model, "modules", lambda: [])()) or
+            any(getattr(arg, "is_quantized", False) for arg in args)):
+        return torch.jit.trace(model, args)
+    return model
+
+
 def _assign_onnx_node_name(graph, node_names):
     r"""Takes in ONNX graph, and mapping from torch._C.Node to node name in exported ONNX ModelProto.
 
@@ -538,6 +550,7 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args, )
 
+    model = _pre_trace_quant_model(model, args)
     graph, params, torch_out, module = _create_jit_graph(model, args)
 
     params_dict = _get_named_param_dict(graph, params)
@@ -573,7 +586,11 @@ def _model_to_graph(model, args, verbose=False,
             output_wrapped = torch_out  # type: ignore[assignment]
 
         output_tensors, out_desc = torch._C._jit_flatten(tuple(output_wrapped))
-        torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
+        # assign_output_shape pass is not compatible with quantized outputs.
+        # Quantized outputs are flattened to 3 values in ONNX, while packed as
+        # single value in PyTorch.
+        if not any(getattr(out, "is_quantized", False) for out in output_tensors):
+            torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
 
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)
@@ -1111,6 +1128,15 @@ def _need_symbolic_context(symbolic_fn):
     params = list(inspect.signature(symbolic_fn).parameters.values())
     return params and issubclass(params[0].annotation, SymbolicContext)
 
+def _get_aten_op_overload_name(n: Node) -> str:
+    from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
+
+    # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
+    schema = n.schema()
+    if not schema.startswith("aten::") or is_caffe2_aten_fallback():
+        return ""
+    return torch._C.parse_schema(schema).overload_name
+
 def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into
     # the new graph
@@ -1161,12 +1187,18 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
             attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
-            return g.at(op_name, *inputs, **attrs)
+            # `overload_name` is set for non-Caffe2 builds only
+            return g.at(op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs)
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
         if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
+        elif operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and not is_caffe2_aten_fallback():
+            # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+            return g.at(op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs)
+
         raise
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
