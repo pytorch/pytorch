@@ -82,7 +82,10 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
         " be floating point or complex, but got ", dtype);
     TORCH_CHECK(self.is_complex() == isComplexType(dtype),
         "linalg.vector_norm(): dtype should be ", self.is_complex() ? "complex" : "real",
-        " for ", self.is_complex() ? "complex" : "real", " inputs.");
+        " for ", self.is_complex() ? "complex" : "real", " inputs, but got ", dtype);
+    TORCH_CHECK(promoteTypes(self.scalar_type(), dtype) == dtype,
+        "linalg.vector_norm(): the dtype of x ", "(", self.scalar_type(), ") should be convertible ",
+        "without narrowing to the specified dtype (", dtype, ").");
   }
 
   auto mask = at::native::make_dim_mask(dim, self.dim());
@@ -2584,6 +2587,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   auto dim = opt_dim.value_or(IntArrayRef{});
   auto in_dtype = opt_dtype.value_or(self.scalar_type());
 
+  // Issue arising from the difference between vectorized and non-vectorized implementation on CPU
   Tensor self_;
   if (self.device().type() == c10::kCPU &&
       isComplexType(self.scalar_type()) &&
