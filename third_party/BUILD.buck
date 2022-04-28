@@ -1,4 +1,4 @@
-load("@//tools/build_defs:glob_defs.bzl", "subdir_glob")
+load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load(
     "buck_defs.bzl",
     "HOT_SRCS",
