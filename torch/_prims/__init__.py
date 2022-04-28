@@ -4,6 +4,7 @@ from torch import Tensor
 import torch._prims.utils as utils
 from torch._prims.utils import TensorLike, TensorLikeType, TensorMeta, ShapeType
 from torch.overrides import has_torch_function, handle_torch_function
+import torch._C
 from torch._C._nvfuser import FusionDefinition, DataType  # type: ignore[import]
 
 from typing import Sequence, Optional, Union, Callable, List, Tuple

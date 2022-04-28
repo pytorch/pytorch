@@ -6,7 +6,21 @@ from torch.fx import GraphModule
 from torch._prims.utils import TensorMeta
 from torch._prims.context import PrimContext
 
-from torch._C._nvfuser import Fusion, FusionDefinition  # type: ignore[import]
+import torch._C
+from torch._C._nvfuser import DataType, Fusion, FusionDefinition  # type: ignore[import]
+
+# TODO: refactor me into a common place
+_torch_dtype_to_nvfuser_dtype_map = {
+    torch.cdouble: DataType.ComplexDouble,
+    torch.cfloat: DataType.ComplexFloat,
+    torch.double: DataType.Double,
+    torch.float: DataType.Float,
+    torch.half: DataType.Half,
+    torch.bfloat16: DataType.BFloat16,
+    torch.long: DataType.Int,
+    torch.int: DataType.Int32,
+    torch.bool: DataType.Bool,
+}
 
 
 def execute(ctx: PrimContext, *args, executor: str = "aten", **kwargs):
@@ -36,7 +50,9 @@ def execute(ctx: PrimContext, *args, executor: str = "aten", **kwargs):
             nv_args = [fd]
             for arg in args:
                 if isinstance(arg, torch.Tensor):
-                    x = fd.define_tensor(arg.ndim)
+                    x = fd.define_tensor(
+                        arg.ndim, _torch_dtype_to_nvfuser_dtype_map[arg.dtype]
+                    )
                     fd.add_input(x)
                     nv_args.append(x)
                 else:
