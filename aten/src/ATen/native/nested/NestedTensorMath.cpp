@@ -1,4 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/nested/NestedTensorMath.h>
+
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/NamedTensorUtils.h>
@@ -199,7 +201,7 @@ Tensor nested_tensor(
           pin_memory);
 
   if (list.size() == 0) {
-    return wrap_buffer(ones({0}), ones({}));
+    return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
   }
   std::vector<Tensor> sizes;
   std::vector<Tensor> flat_tensors;
@@ -241,8 +243,7 @@ int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
 }
 
 std::vector<int64_t> NestedTensor_get_max_size(const NestedTensorImpl& nt) {
-  const auto& sizes = nt.get_nested_size_tensor();
-  return NestedTensor_get_max_size_from_size_tensor(sizes);
+  return NestedTensor_get_max_size_from_size_tensor(nt.get_nested_size_tensor());
 }
 
 Tensor NestedTensor_layer_norm(
@@ -328,8 +329,7 @@ Tensor nested_from_padded_generic(
       std::move(new_buffer), sizes);
 }
 
-Tensor NestedTensor_to_padded_tensor(const Tensor& t, double padding) {
-  // TODO port CUDA path in pytorch/nestedtensor to_padded_tensor!
+Tensor NestedTensor_to_padded_tensor_generic(const Tensor& t, double padding) {
   // TODO: skipped optimization for case of all 1x1 tensors
   auto& nt = *get_nested_tensor_impl(t);
   auto max_size = NestedTensor_get_max_size(nt);
