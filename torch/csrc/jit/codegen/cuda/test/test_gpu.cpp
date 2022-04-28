@@ -22466,6 +22466,58 @@ TEST_F(NVFuserTest, FusionPropagateParallelTypesToSiblings_CUDA) {
   testValidate(fe.kernel(), outputs, {t0}, {t0.mean({0})}, __LINE__, __FILE__);
 }
 
+// Test ExactRootDomainMap
+TEST_F(NVFuserTest, FusionExactRootDomainMap_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv0, {false, true});
+  auto tv3 = transpose(tv2, {{0, 1}});
+  auto tv4 = add(tv2, tv1);
+  auto tv5 = add(tv2, tv3);
+  auto tv6 = add(tv3, tv1);
+  fusion.addOutput(tv4);
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv6);
+
+  const auto exact_map = ExactRootDomainMap(&fusion);
+
+  // In the exact mapping, the broadcast domain introduced at tv2 is
+  // only mapped with the another one in tv3, which is just transposed
+  // from tv2. Any other domain, including the second domain of tv4,
+  // must not be mapped.
+
+  auto tv2_bc = tv2->axis(1);
+  auto tv3_bc = tv3->axis(0);
+
+  TORCH_CHECK(
+      exact_map.areMapped(tv2_bc, tv3_bc),
+      "Invalid exact root domain map: ",
+      exact_map.toString());
+
+  // They must not be mapped with anything else.
+  for (auto tv : ir_utils::allTvs(&fusion)) {
+    for (auto root_id : tv->getRootDomain()) {
+      if (root_id == tv2_bc || root_id == tv3_bc) {
+        continue;
+      }
+      TORCH_CHECK(
+          !exact_map.areMapped(root_id, tv2_bc),
+          "Invalid exact root domain map: ",
+          exact_map.toString());
+      TORCH_CHECK(
+          !exact_map.areMapped(root_id, tv3_bc),
+          "Invalid exact root domain map: ",
+          exact_map.toString());
+    }
+  }
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

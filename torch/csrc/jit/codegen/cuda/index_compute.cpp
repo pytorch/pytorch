@@ -1230,21 +1230,9 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
 
   // Map sent to best effort replay needs to match the exact incantation for
   // compute_at_mode.cpp with MappingMode::Index
-  auto c2p_root_map = pairwise_map.mapConsumerToProducer(
-      consumer_tv->domain(), producer_tv->domain());
-
-  // For index map do not map any broadcast dimensions to non-broadcast
-  // dimensions
-  // Prevent any broadcasted axes being mapped to non-broadcasted axes.
-  for (auto it = c2p_root_map.begin(); it != c2p_root_map.end();) {
-    auto c_id = it->first;
-    auto p_id = it->second;
-    if (p_id->isBroadcast() != c_id->isBroadcast()) {
-      it = c2p_root_map.erase(it);
-    } else {
-      ++it;
-    }
-  }
+  auto c2p_root_map =
+      PairwiseRootDomainMap(producer_tv, consumer_tv, true)
+          .mapConsumerToProducer(consumer_tv->domain(), producer_tv->domain());
 
   // This replay has to be consistent with compute at index map.
   BestEffortReplay replay_producer_as_consumer(
@@ -1577,21 +1565,9 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   {
     // Map sent to best effort replay needs to match the exact incantation for
     // compute_at_mode.cpp with MappingMode::Index
-    auto c2p_root_map = pairwise_map.mapConsumerToProducer(
-        consumer_tv->domain(), producer_tv->domain());
-
-    // For index map do not map any broadcast dimensions to non-broadcast
-    // dimensions
-    // Prevent any broadcasted axes being mapped to non-broadcasted axes.
-    for (auto it = c2p_root_map.begin(); it != c2p_root_map.end();) {
-      auto c_id = it->first;
-      auto p_id = it->second;
-      if (p_id->isBroadcast() != c_id->isBroadcast()) {
-        it = c2p_root_map.erase(it);
-      } else {
-        ++it;
-      }
-    }
+    auto c2p_root_map = PairwiseRootDomainMap(producer_tv, consumer_tv, true)
+                            .mapConsumerToProducer(
+                                consumer_tv->domain(), producer_tv->domain());
 
     // This replay has to be consistent with compute at index map.
     BestEffortReplay replay_producer_as_consumer(

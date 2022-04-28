@@ -160,17 +160,9 @@ void IterDomainGraph::build(Fusion* fusion) {
         // For exact mapings do not map any broadcast dimensions to
         // non-broadcast dimensions. Prevent any broadcasted axes being mapped
         // to non-broadcasted axes.
-        auto exact_c2p_root_map = permissive_c2p_root_map;
-        for (auto it = exact_c2p_root_map.begin();
-             it != exact_c2p_root_map.end();) {
-          auto c_id = it->first;
-          auto p_id = it->second;
-          if (p_id->isBroadcast() != c_id->isBroadcast()) {
-            it = exact_c2p_root_map.erase(it);
-          } else {
-            ++it;
-          }
-        }
+        auto exact_c2p_root_map =
+            PairwiseRootDomainMap(p_tv, c_tv, true)
+                .mapConsumerToProducer(c_tv->domain(), p_tv->domain());
 
         // Same as permissive above but for exact
         auto exact_replay_PasC = BestEffortReplay(

@@ -47,8 +47,9 @@ std::unordered_map<IterDomain*, IterDomain*> RootDomainMap::
 
 PairwiseRootDomainMap::PairwiseRootDomainMap(
     const TensorView* producer,
-    const TensorView* consumer)
-    : producer_tv_(producer), consumer_tv_(consumer) {
+    const TensorView* consumer,
+    bool is_exact)
+    : producer_tv_(producer), consumer_tv_(consumer), is_exact_(is_exact) {
   TORCH_INTERNAL_ASSERT(producer != nullptr);
   TORCH_INTERNAL_ASSERT(consumer != nullptr);
   TORCH_INTERNAL_ASSERT(producer->fusion() == consumer->fusion());
@@ -100,6 +101,14 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
       continue;
     }
 
+    // In exact mapping, do not map broadcast domains with
+    // non-broadcast domains
+    if (is_exact_ && producer_id->isBroadcast() != consumer_id->isBroadcast()) {
+      itc++;
+      itp++;
+      continue;
+    }
+
     IterDomain* map_key_id = producer_id;
     IterDomain* map_value_id = consumer_id;
     if (!producer_to_consumer) {
@@ -134,9 +143,17 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::
   for (const auto i : c10::irange(consumer_root.size())) {
     IterDomain* map_key_id = producer_root[new2old[i]];
     IterDomain* map_value_id = consumer_root[i];
+
+    // In exact mapping, do not map broadcast domains with
+    // non-broadcast domains
+    if (is_exact_ && map_key_id->isBroadcast() != map_value_id->isBroadcast()) {
+      continue;
+    }
+
     if (!producer_to_consumer) {
       std::swap(map_key_id, map_value_id);
     }
+
     if (root_dims_to_map.find(map_key_id) != root_dims_to_map.end()) {
       dom_map.insert(std::make_pair(map_key_id, map_value_id));
     }
@@ -146,7 +163,12 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::
 
 std::string PairwiseRootDomainMap::toString() const {
   std::stringstream ss;
-  ss << "{producer: " << producer() << ", consumer: " << consumer() << "}";
+  ss << "{producer: " << producer() << ", consumer: " << consumer();
+  auto p2c = mapProducerToConsumer(producer()->domain(), consumer()->domain());
+  for (auto pair : p2c) {
+    ss << ", " << pair.first->toString() << " -> " << pair.second->toString();
+  }
+  ss << "}";
   return ss.str();
 }
 
@@ -797,10 +819,10 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
 
   // Record equalities from output to all the inputs
   // ignores un-concretizable broadcasts
-  for (auto* i : ir_utils::filterByType<TensorView>(e->inputs())) {
-    const TensorDomain* in_td = i->domain();
+  for (auto* in_tv : ir_utils::filterByType<TensorView>(e->inputs())) {
+    const TensorDomain* in_td = in_tv->domain();
     std::vector<IterDomain*> in_root =
-        TensorDomain::noReductions(i->getMaybeRFactorDomain());
+        TensorDomain::noReductions(in_tv->getMaybeRFactorDomain());
     TORCH_INTERNAL_ASSERT(
         in_root.size() == out_root.size(),
         "\nExpression: ",
@@ -1073,6 +1095,85 @@ bool ComputeAtRootDomainMapBuilder::safeToMap(const DomainKeySet& domains) {
     return false;
   }
   return true;
+}
+
+namespace {
+class ExactRootDomainMapBuilder : private IterVisitor {
+ public:
+  ExactRootDomainMapBuilder(
+      Fusion* fusion,
+      DisjointSets<const IterDomain*>& eq_sets)
+      : eq_sets_(eq_sets) {
+    traverseFrom(fusion, fusion->outputs());
+  }
+
+ private:
+  using IterVisitor::handle;
+
+  void handle(Expr* expr) final {
+    for (auto producer : ir_utils::filterByType<TensorView>(expr->inputs())) {
+      for (auto consumer :
+           ir_utils::filterByType<TensorView>(expr->outputs())) {
+        PairwiseRootDomainMap pwise_map(producer, consumer, true);
+        const auto mappings = pwise_map.mapProducerToConsumer(
+            producer->domain(), consumer->domain());
+        for (const auto& mapping : mappings) {
+          eq_sets_.mapEntries(mapping.first, mapping.second);
+        }
+      }
+    }
+  }
+
+ private:
+  DisjointSets<const IterDomain*>& eq_sets_;
+};
+
+} // namespace
+
+ExactRootDomainMap::ExactRootDomainMap(Fusion* fusion) {
+  ExactRootDomainMapBuilder builder(fusion, eq_sets_);
+}
+
+bool ExactRootDomainMap::areMapped(
+    const IterDomain* id_a,
+    const IterDomain* id_b) const {
+  return eq_sets_.strictAreMapped(id_a, id_b);
+}
+
+std::unordered_map<IterDomain*, IterDomain*> ExactRootDomainMap::map(
+    const TensorDomain* producer,
+    const TensorDomain* consumer,
+    const std::unordered_set<IterDomain*>& root_dims_to_map,
+    bool producer_to_consumer) const {
+  const auto& producer_root =
+      TensorDomain::noReductions(producer->getMaybeRFactorDomain());
+  const auto& consumer_root = consumer->getRootDomain();
+  const TensorDomain* from_td = producer_to_consumer ? producer : consumer;
+  const TensorDomain* to_td = producer_to_consumer ? consumer : producer;
+  const auto& from_ids = producer_to_consumer ? producer_root : consumer_root;
+  const auto& to_ids = producer_to_consumer ? consumer_root : producer_root;
+
+  std::unordered_map<IterDomain*, IterDomain*> id_map;
+
+  for (auto& from_id : from_ids) {
+    if (root_dims_to_map.find(from_id) == root_dims_to_map.end()) {
+      continue;
+    }
+    for (const auto& to_id : to_ids) {
+      if (areMapped(from_id, to_id)) {
+        TORCH_INTERNAL_ASSERT(
+            id_map.insert({from_id, to_id}).second,
+            "Multiple matching ID detected for ",
+            from_id);
+      }
+    }
+  }
+
+  return id_map;
+}
+
+std::string ExactRootDomainMap::toString() const {
+  return eq_sets_.toString();
 }
 
 } // namespace cuda

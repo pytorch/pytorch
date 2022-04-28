@@ -82,7 +82,8 @@ class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
   //! \param consumer The consumer tensor of a producer-consumer pair.
   explicit PairwiseRootDomainMap(
       const TensorView* producer,
-      const TensorView* consumer);
+      const TensorView* consumer,
+      bool is_exact = false);
 
   const TensorView* producer() const {
     return producer_tv_;
@@ -110,6 +111,8 @@ class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
  private:
   const TensorView* producer_tv_ = nullptr;
   const TensorView* consumer_tv_ = nullptr;
+  //! If true, does not map broadcast IDs with non-broadcast IDs
+  const bool is_exact_ = false;
 };
 
 //! Represents an iteration domain of a TensorDomain. Only used for
@@ -293,8 +296,8 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
       const TensorDomain* td_b,
       const IterDomain* id_b) const;
 
-  //! Returns if key_a and key_b are mapped to eachother (equivalent), or are
-  //! the same key.
+  //! Returns if key_a and key_b are mapped to each other (equivalent), or are
+  //! the same key. Returns false if two keys are not known to be mapped.
   bool canMap(const DomainKey& key_a, const DomainKey& key_b) const;
 
   //! Returns the set of (non-broadcast) DomainKeys that id in td is
@@ -452,6 +455,27 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   //! Disable UnmappableReductions check, should
   //!  always be false for compute_at use cases
   bool map_through_reduction_ = false;
+};
+
+//! Maps root domains of an entire fusion. Does not map broadcast
+//! domains with non-broadcast domains.
+class TORCH_CUDA_CU_API ExactRootDomainMap : public RootDomainMap {
+ public:
+  ExactRootDomainMap(Fusion* fusion);
+
+  bool areMapped(const IterDomain* id_a, const IterDomain* id_b) const;
+
+  std::string toString() const;
+
+ protected:
+  std::unordered_map<IterDomain*, IterDomain*> map(
+      const TensorDomain* producer,
+      const TensorDomain* consumer,
+      const std::unordered_set<IterDomain*>& root_dims_to_map,
+      bool producer_to_consumer) const override;
+
+ private:
+  DisjointSets<const IterDomain*> eq_sets_;
 };
 
 } // namespace cuda
