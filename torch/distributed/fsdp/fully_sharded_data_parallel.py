@@ -2629,6 +2629,12 @@ class FullyShardedDataParallel(nn.Module):
         warnings on the first deviating iteration and stops checking
         thereafter.
 
+        For now, only the all-gathers to rebuild full parameters in the forward
+        pass are checked since (1) a correct forward order should imply a
+        correct pre-backward order for typical cases and (2) there may be some
+        issues with pre-fetching that need to be looked into:
+        https://github.com/pytorch/pytorch/issues/76553
+
         Executing in ``no_sync()`` does not affect this check for
         ``FULL_SHARD`` and ``SHARD_GRAD_OP``: (1) Being in ``no_sync()`` in the
         first iteration does not yield a different all-gather sequence, and (2)
@@ -2638,10 +2644,8 @@ class FullyShardedDataParallel(nn.Module):
         sequence's prefix (for ``SHARD_GRAD_OP``).
         """
         # Only check all-gathers when rebuilding the full parameters in the
-        # forward pass or in the beginning of the backward pass
-        if self.training_state not in (
-            TrainingState_.FORWARD, TrainingState_.BACKWARD_PRE,
-        ):
+        # forward pass
+        if self.training_state != TrainingState_.FORWARD:
             return
         eod = self._exec_order_data
         param_index = eod.get_param_index(param)
