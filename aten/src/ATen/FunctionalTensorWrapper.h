@@ -63,7 +63,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // It can't just call sync_(), because the FunctionalTensorWrapper will look like it has no aliases and sync_ will be a noop.
   // We use the reference count on storage_ to determine if the wrapper is aliased, and by the time functorch
   // is ready to propagate updates to inputs, any intermediate views of the input created by the program will have been deallocated.
-  void apply_updates();
+  // This function also returns whether or not the base actually had any updates to apply.
+  bool apply_updates();
   // Takes the current state of value_ and snapshots it, sending it as a pending update to the alias.
   void commit_update();
   // When any tensor is mutated, the tensor increments its alias's "generation".
@@ -127,19 +128,25 @@ TORCH_API c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>
 TORCH_API c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list);
 TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list);
-TORCH_API TensorList to_functional_tensor(const TensorList& t_list);
+TORCH_API std::vector<Tensor> to_functional_tensor(const TensorList& t_list);
 
 TORCH_API Tensor from_functional_tensor(const Tensor& tensor);
 TORCH_API c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t);
 TORCH_API c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list);
 TORCH_API c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list);
-TORCH_API TensorList from_functional_tensor(const TensorList& tensors);
+TORCH_API std::vector<Tensor> from_functional_tensor(const TensorList& tensors);
 
 TORCH_API void sync(const at::Tensor& t);
 TORCH_API void sync(const c10::optional<Tensor>& t);
 TORCH_API void sync(const c10::List<Tensor> t_list);
 TORCH_API void sync(const at::TensorList t_list);
 TORCH_API void sync(const c10::List<c10::optional<Tensor>> t_list);
+
+TORCH_API void replace_(const Tensor& functional_tensor, const Tensor& other);
+TORCH_API void replace_(const TensorList functional_tensor, TensorList other);
+
+TORCH_API void commit_update(const Tensor& functional_tensor);
+TORCH_API void commit_update(const TensorList functional_tensor);
 
 Tensor create_functional_tensor_with_view_meta(const Tensor& view_to_wrap, const Tensor& base, functionalization::ViewMeta meta, int64_t out_idx = 0);
 std::vector<Tensor> create_functional_tensor_with_view_meta(const c10::List<Tensor>& view_to_wrap, const Tensor& base, functionalization::ViewMeta meta);
