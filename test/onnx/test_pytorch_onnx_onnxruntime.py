@@ -9183,7 +9183,7 @@ class _TestONNXRuntime:
                       dynamic_axes={"size": [0, 1]},
                       test_with_inputs=[(boxes, size), (boxes, size_2)])
 
-    @skipIfUnsupportedMaxOpsetVersion(16) # TODO: Opset 16 RoiAlign result mismatch
+    @skipIfUnsupportedMaxOpsetVersion(16)  # TODO: Opset 16 RoiAlign result mismatch
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
@@ -9191,7 +9191,7 @@ class _TestONNXRuntime:
         model = ops.RoIAlign((5, 5), 1., 2)
         self.run_test(model, (x, single_roi))
 
-    @skipIfUnsupportedMaxOpsetVersion(16) # TODO: Opset 16 RoiAlign result mismatch
+    @skipIfUnsupportedMaxOpsetVersion(16)  # TODO: Opset 16 RoiAlign result mismatch
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align_aligned(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
@@ -9297,7 +9297,7 @@ class _TestONNXRuntime:
                       test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
-    @skipIfUnsupportedMaxOpsetVersion(16) # TODO: Opset 16 RoiAlign result mismatch
+    @skipIfUnsupportedMaxOpsetVersion(16)  # TODO: Opset 16 RoiAlign result mismatch
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_multi_scale_roi_align(self):
