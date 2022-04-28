@@ -24,9 +24,11 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
-     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, precisionOverride,
+     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, skipCUDAIf, precisionOverride,
      toleranceOverride, tol, has_cusolver)
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN
+from torch.testing._internal.common_cuda import (
+    CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
+    _get_torch_cuda_version, _get_magma_version)
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -5588,6 +5590,80 @@ def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=
         u = l.detach().clone().mT.contiguous().requires_grad_(requires_grad)
         yield SampleInput(u, kwargs=dict(upper=True))
 
+def sample_inputs_linalg_ldl_factor(op_info, device, dtype, requires_grad=False, **kwargs):
+    from torch.testing._internal.common_utils import (
+        random_hermitian_pd_matrix,
+        random_symmetric_pd_matrix,
+    )
+
+    device = torch.device(device)
+
+    # Symmetric inputs
+    yield SampleInput(
+        random_symmetric_pd_matrix(S, dtype=dtype, device=device),
+        kwargs=dict(hermitian=False),
+    )  # single matrix
+    yield SampleInput(
+        random_symmetric_pd_matrix(S, 2, dtype=dtype, device=device),
+        kwargs=dict(hermitian=False),
+    )  # batch of matrices
+    yield SampleInput(
+        torch.zeros(0, 0, dtype=dtype, device=device), kwargs=dict(hermitian=False)
+    )  # 0x0 matrix
+    yield SampleInput(
+        torch.zeros(0, 2, 2, dtype=dtype, device=device), kwargs=dict(hermitian=False)
+    )  # zero batch of matrices
+
+    # Hermitian inputs
+    # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
+    magma_254_available = device.type == 'cuda' and _get_magma_version() >= (2, 5, 4)
+    if dtype.is_complex and (device.type == 'cpu' or magma_254_available):
+        yield SampleInput(
+            random_hermitian_pd_matrix(S, dtype=dtype, device=device),
+            kwargs=dict(hermitian=True),
+        )  # single matrix
+        yield SampleInput(
+            random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),
+            kwargs=dict(hermitian=True),
+        )  # batch of matrices
+
+def sample_inputs_linalg_ldl_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+    # Generate LDL factors of symmetric (and Hermitian on CPU) matrices
+    from torch.testing._internal.common_utils import random_hermitian_pd_matrix, random_symmetric_pd_matrix
+    device = torch.device(device)
+    symmetric_inputs = (
+        random_symmetric_pd_matrix(S, dtype=dtype, device=device),  # single matrix
+        random_symmetric_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
+        torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
+        torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
+    )
+    hermitian_inputs = (
+        random_hermitian_pd_matrix(S, dtype=dtype, device=device),
+        random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),
+    ) if device.type == 'cpu' and dtype.is_complex else ()
+    test_cases1 = (torch.linalg.ldl_factor_ex(a, hermitian=False) for a in symmetric_inputs)
+    test_cases2 = (torch.linalg.ldl_factor_ex(a, hermitian=True) for a in hermitian_inputs)
+
+    # Symmetric case
+    for test_case in test_cases1:
+        factors, pivots, _ = test_case
+        factors.requires_grad = requires_grad
+        for B_batch_shape in ((), factors.shape[:-2]):
+            B = make_tensor((*B_batch_shape, factors.shape[-1], S), device=device, dtype=dtype, requires_grad=requires_grad)
+            yield SampleInput(factors, args=(pivots, B), kwargs=dict(hermitian=False))
+            clone_factors = factors.detach().clone().requires_grad_(requires_grad)
+            yield SampleInput(clone_factors, args=(pivots, B), kwargs=dict(hermitian=False))
+
+    # Hermitian case
+    for test_case in test_cases2:
+        factors, pivots, _ = test_case
+        factors.requires_grad = requires_grad
+        for B_batch_shape in ((), factors.shape[:-2]):
+            B = make_tensor((*B_batch_shape, factors.shape[-1], S), device=device, dtype=dtype, requires_grad=requires_grad)
+            yield SampleInput(factors, args=(pivots, B), kwargs=dict(hermitian=True))
+            clone_factors = factors.detach().clone().requires_grad_(requires_grad)
+            yield SampleInput(clone_factors, args=(pivots, B), kwargs=dict(hermitian=True))
+
 def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kwargs):
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
 
@@ -10563,6 +10639,29 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ]),
+    OpInfo('linalg.ldl_factor',
+           aten_name='linalg_ldl_factor',
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_linalg_ldl_factor,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+           ),
+    OpInfo('linalg.ldl_factor_ex',
+           aten_name='linalg_ldl_factor_ex',
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_linalg_ldl_factor,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+           ),
+    OpInfo('linalg.ldl_solve',
+           aten_name='linalg_ldl_solve',
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_linalg_ldl_solve,
+           decorators=[
+               skipCUDAIf(_get_torch_cuda_version() < (11, 4), "not available before CUDA 11.3.1"),
+               skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           ),
     OpInfo('linalg.lstsq',
            aten_name='linalg_lstsq',
            dtypes=floating_and_complex_types(),

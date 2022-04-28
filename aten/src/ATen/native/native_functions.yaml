@@ -11025,6 +11025,38 @@
   dispatch:
     CPU, CUDA: _det_lu_based_helper_backward_helper
 
+- func: linalg_ldl_factor_ex(Tensor self, *, bool hermitian=False, bool check_errors=False) -> (Tensor LD, Tensor pivots, Tensor info)
+  structured_delegate: linalg_ldl_factor_ex.out
+  python_module: linalg
+  variants: function
+
+- func: linalg_ldl_factor_ex.out(Tensor self, *, bool hermitian=False, bool check_errors=False, Tensor(a!) LD, Tensor(b!) pivots, Tensor(c!) info) -> (Tensor(a!) LD, Tensor(b!) pivots, Tensor(c!) info)
+  structured: True
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_ldl_factor_ex_out
+
+- func: linalg_ldl_factor(Tensor self, *, bool hermitian=False) -> (Tensor LD, Tensor pivots)
+  python_module: linalg
+  variants: function
+
+- func: linalg_ldl_factor.out(Tensor self, *, bool hermitian=False, Tensor(a!) LD, Tensor(b!) pivots) -> (Tensor(a!) LD, Tensor(b!) pivots)
+  python_module: linalg
+  variants: function
+
+- func: linalg_ldl_solve(Tensor LD, Tensor pivots, Tensor B, *, bool hermitian=False) -> Tensor
+  structured_delegate: linalg_ldl_solve.out
+  python_module: linalg
+  variants: function
+
+- func: linalg_ldl_solve.out(Tensor LD, Tensor pivots, Tensor B, *, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_ldl_solve_out
+
 - func: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   python_module: linalg
   variants: function
