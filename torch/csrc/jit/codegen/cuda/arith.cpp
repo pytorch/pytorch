@@ -1492,7 +1492,6 @@ TensorView* gather(
         ". Padding right: ",
         pad_right);
     const auto out_stop_offset = inp_stop_offset.value() + extent_adjustment;
-    Val* out_axis_dim = nullptr;
     out_root_domains.push_back(IrBuilder::create<IterDomain>(
         FusionGuard::getCurFusion()->zeroVal(),
         inp_axis->extent(),
