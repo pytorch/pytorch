@@ -82,7 +82,7 @@ class QuantizeDBRTestCase(QuantizationTestCase):
 
         # compare it against FX
         if do_fx_comparison:
-            m_copy_p = prepare_fx(m_copy, {'': qconfig}, sample_args=example_args)
+            m_copy_p = prepare_fx(m_copy, {'': qconfig}, example_inputs=example_args)
             out_m_copy_p = m_copy_p(*example_args)
             # print(m_copy_p)
             m_copy_q = convert_fx(m_copy_p)
@@ -1023,16 +1023,16 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
 
         m = M().eval()
         qconfig = torch.quantization.default_qconfig
-        example_args = (torch.randn(1, 1, 2, 2),)
-        mp = _quantize_dbr.prepare(m, {'': qconfig}, example_args)
-        out_p = mp(*example_args)
+        example_inputs = (torch.randn(1, 1, 2, 2),)
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, example_inputs)
+        out_p = mp(*example_inputs)
         mq = _quantize_dbr.convert(copy.deepcopy(mp))
-        out_q = mq(*example_args)
+        out_q = mq(*example_inputs)
 
         mp, mq = ns.add_loggers('mp', mp, 'mq', mq)
 
-        mp(*example_args)
-        mq(*example_args)
+        mp(*example_inputs)
+        mq(*example_inputs)
 
         act_comparison = ns.extract_logger_info(mp, mq, 'mq')
         ns_fx.extend_logger_results_with_comparison(
@@ -1059,21 +1059,21 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         # regular case
         m = nn.Sequential(nn.Conv2d(1, 1, 1))
         qconfig_dict = {'': torch.quantization.default_qconfig}
-        example_args = (torch.randn(1, 1, 1, 1),)
-        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
-        mp(*example_args)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
+        mp(*example_inputs)
         mq = _quantize_dbr.convert(mp)
-        mq(*example_args)
+        mq(*example_inputs)
         self.assertTrue(isinstance(mq[0], nnq.Conv2d))
 
         # quantization turned off
         m = nn.Sequential(nn.Conv2d(1, 1, 1))
         qconfig_dict = {'': None}
-        example_args = (torch.randn(1, 1, 1, 1),)
-        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
-        mp(*example_args)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
+        mp(*example_inputs)
         mq = _quantize_dbr.convert(mp)
-        mq(*example_args)
+        mq(*example_inputs)
         self.assertTrue(isinstance(mq[0], nn.Conv2d))
 
     def test_qconfig_dict_object_type_module(self):
@@ -1093,11 +1093,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 (nn.Hardswish, None),
             ],
         }
-        example_args = (torch.randn(1, 1, 1, 1),)
-        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
-        mp(*example_args)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
+        mp(*example_inputs)
         mq = _quantize_dbr.convert(mp)
-        mq(*example_args)
+        mq(*example_inputs)
         self.assertTrue(isinstance(mq[0], nnq.Conv2d))
         self.assertTrue(isinstance(mq[1], nn.Hardswish))
         self.assertTrue(isinstance(mq[2], nnq.Conv2d))
@@ -1120,11 +1120,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 (torch.add, None),
             ],
         }
-        example_args = (torch.randn(1, 1, 1, 1),)
-        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
-        mp(*example_args)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
+        mp(*example_inputs)
         mq = _quantize_dbr.convert(mp)
-        mq(*example_args)
+        mq(*example_inputs)
         rewritten = mq.rewrite_for_scripting()
         expected_occurrence = {
             NodeSpec.call_function(torch.add): 1,
@@ -1152,11 +1152,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 (torch.Tensor.add, None),
             ],
         }
-        example_args = (torch.randn(1, 1, 1, 1),)
-        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
-        mp(*example_args)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
+        mp(*example_inputs)
         mq = _quantize_dbr.convert(mp)
-        mq(*example_args)
+        mq(*example_inputs)
         rewritten = mq.rewrite_for_scripting()
         expected_occurrence = {
             NodeSpec.call_function(torch.add): 1,
@@ -1183,11 +1183,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 (torch.add, torch.quantization.default_qconfig),
             ],
         }
-        example_args = (torch.randn(1, 1, 1, 1),)
-        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
-        mp(*example_args)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
+        mp(*example_inputs)
         mq = _quantize_dbr.convert(mp)
-        mq(*example_args)
+        mq(*example_inputs)
         rewritten = mq.rewrite_for_scripting()
         expected_occurrence = {
             NodeSpec.call_function(torch.add): 0,
@@ -1219,11 +1219,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 ('2.0', None),
             ],
         }
-        example_args = (torch.randn(1, 1, 1, 1),)
-        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
-        mp(*example_args)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
+        mp(*example_inputs)
         mq = _quantize_dbr.convert(mp)
-        mq(*example_args)
+        mq(*example_inputs)
         self.assertTrue(isinstance(mq[0][0], nnq.Conv2d))
         self.assertTrue(isinstance(mq[1], nn.Conv2d))
         self.assertTrue(isinstance(mq[2][0], nn.Conv2d))
@@ -1236,11 +1236,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         """
         m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
-        example_args = (torch.randn(1, 1, 1, 1),)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
         # this modifies qconfig_dict inplace to include more keys
-        mp = prepare_fx(m, qconfig_dict, sample_args=example_args)
+        mp = prepare_fx(m, qconfig_dict, example_inputs=example_inputs)
         # need this line to not crash
-        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
 
     def _test_serialization(self, model, input_shape):
         example_inputs = (torch.randn(*input_shape),)
@@ -1324,15 +1324,15 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             ),
         )
         qconfig_dict = {'': torch.quantization.default_qconfig}
-        example_args = (torch.randn(1, 1, 1, 1),)
-        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
         mq = _quantize_dbr.convert(mp)
-        mqs = torch.jit.trace(mq, example_args)
+        mqs = torch.jit.trace(mq, example_inputs)
         FileCheck().check_count("aten::alias", 5, exactly=True).run(
             mqs.inlined_graph)
-        res1 = mqs(*example_args)
+        res1 = mqs(*example_inputs)
         mqs = remove_redundant_aliases(mqs)
-        res2 = mqs(*example_args)
+        res2 = mqs(*example_inputs)
         self.assertTrue(torch.allclose(res1, res2))
         # TODO(future PR): figure out why aliasing still appears in the inlined
         # graph, and if that is fixed then just check the inlined graph.
@@ -1609,11 +1609,11 @@ class TestQuantizeDBRModels(QuantizeDBRTestCase):
         m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False)\
             .eval().float()
         qconfig_dict = {'': torch.quantization.default_qconfig}
-        example_args = (torch.randn(1, 3, 224, 224),)
-        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        example_inputs = (torch.randn(1, 3, 224, 224),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
         mq = _quantize_dbr.convert(mp)
-        mqs = torch.jit.trace(mq, example_args)
-        res1 = mqs(*example_args)
+        mqs = torch.jit.trace(mq, example_inputs)
+        res1 = mqs(*example_inputs)
         mqs = remove_redundant_aliases(mqs)
-        res2 = mqs(*example_args)
+        res2 = mqs(*example_inputs)
         self.assertTrue(torch.allclose(res1, res2))
