@@ -26,6 +26,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/mkldnn_rewrite.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -428,8 +429,10 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
       // accidentally used by any other pass.
       RemoveProfileNodesAndSpecializeTypes(graph);
       GRAPH_DEBUG(
-          "After RemoveProfileNodesAndSpecializeTypes, before BatchMM\n",
+          "After RemoveProfileNodesAndSpecializeTypes, before FuseMkldnn\n",
           *graph);
+      FuseMkldnn(graph);
+      GRAPH_DEBUG("After FuseMkldnn, before BatchMM\n", *graph);
       // Rewrite subgraphs with many MMs into expressions that batch them.
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
