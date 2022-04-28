@@ -1,5 +1,11 @@
 #pragma once
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/view_copy.h>
+#endif
+
 #include <ATen/core/DimVector.h>
 #include <ATen/Tensor.h>
 #include <c10/util/Exception.h>
@@ -293,7 +299,7 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
 
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
 // Precondition: is_expandable_to(shape, tensor.sizes()) must be true
-static inline Tensor sum_to(Tensor tensor, const IntArrayRef shape) {
+static inline Tensor sum_to(Tensor tensor, const IntArrayRef shape, bool always_return_non_view=false) {
   if (shape.size() == 0) {
     return tensor.sum();
   }
@@ -311,7 +317,13 @@ static inline Tensor sum_to(Tensor tensor, const IntArrayRef shape) {
   if (!reduce_dims.empty()) {
     tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
   }
-  return leading_dims > 0 ? tensor.view(shape) : tensor;
+  if (always_return_non_view) {
+    // This is only actually used by the functionalization pass.
+    // We want to be able to guarantee that this function doesn't return a view of the input.
+    return leading_dims > 0 ? at::view_copy(tensor, shape) : tensor.clone();
+  } else {
+    return leading_dims > 0 ? tensor.view(shape) : tensor;
+  }
 }
 
 // True if `shape` can be broadcasted to `desired`
