@@ -3,6 +3,7 @@
 #if AT_USE_JITERATOR()
 
 #include <c10/util/variant.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/jiterator.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -225,7 +226,8 @@ static inline void launch_jitted_vectorized_kernel(
   ss << static_cast<int>(at::cuda::jit::BinaryFuncVariant::NoScalar);
   ss << extra_args_types;
   ss << vec_size;
-  ss << dev_idx;
+// DeviceIndex, e.g. int8_t, is not treated as a number by the stream, cast to int as a workaround
+  ss << static_cast<int>(dev_idx);
   const std::string cache_key = ss.str();
 
   static std::mutex _jiterator_mutex;
@@ -488,7 +490,6 @@ void jitted_gpu_kernel_dynamic(
   jitted_gpu_kernel_dynamic_impl(kernel_name, iter, f, needs_dynamic_casting, extra_args);
 }
 
-
 } // namespace native
 
 
@@ -510,6 +511,7 @@ at::Tensor CompileKernel(
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
     .enforce_safe_casting_to_output(true)
+    .check_all_same_dtype(true)
     // TODO:  add_output or add_owned_output
     .add_owned_output(output);
   for (const auto& t: tensors){
@@ -517,6 +519,7 @@ at::Tensor CompileKernel(
   }
   TensorIterator iter = config.build();
 
+  CUDAGuard guard(iter.device());
   at::native::jitted_gpu_kernel_dynamic(kernel_name, iter, op_string, extra_args);
 
   return iter.output();
