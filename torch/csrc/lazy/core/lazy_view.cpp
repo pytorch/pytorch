@@ -2,19 +2,8 @@
 
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
-#include <torch/csrc/lazy/core/view_ops/as_strided.h>
-#include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
-#include <torch/csrc/lazy/core/view_ops/diagonal.h>
-#include <torch/csrc/lazy/core/view_ops/diagonal_view_update.h>
-#include <torch/csrc/lazy/core/view_ops/narrow.h>
-#include <torch/csrc/lazy/core/view_ops/narrow_view_update.h>
-#include <torch/csrc/lazy/core/view_ops/permute.h>
-#include <torch/csrc/lazy/core/view_ops/resize.h>
-#include <torch/csrc/lazy/core/view_ops/select.h>
-#include <torch/csrc/lazy/core/view_ops/squeeze.h>
-#include <torch/csrc/lazy/core/view_ops/unsqueeze.h>
-#include <torch/csrc/lazy/core/view_ops/select_view_update.h>
-#include <torch/csrc/lazy/core/view_ops/view.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
+#include <torch/csrc/lazy/core/ops/utils.h>
 
 #include <c10/util/Exception.h>
 #include <algorithm>
@@ -28,35 +17,35 @@ namespace {
 Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
   switch (view_info.view_type) {
     case ViewInfo::Type::kSelect:
-      return MakeNode<Select>(
+      return MakeSelect(
           ir_value,
           view_info.select->dim,
           view_info.select->start,
           view_info.select->end,
           view_info.select->stride);
     case ViewInfo::Type::kNarrow:
-      return MakeNode<Narrow>(
-          ir_value, view_info.indices, view_info.shape.sizes());
+      return MakeNarrow(
+          ir_value, view_info.indices, view_info.shape.sizes().vec());
     case ViewInfo::Type::kNoOp:
       return ir_value;
     case ViewInfo::Type::kPermute:
-      return MakeNode<Permute>(ir_value, view_info.permutation);
+      return MakePermute(ir_value, view_info.permutation);
     case ViewInfo::Type::kReshape:
-      return MakeNode<View>(ir_value, view_info.shape.sizes().vec());
+      return MakeView(ir_value, view_info.shape.sizes().vec());
     case ViewInfo::Type::kResize:
-      return MakeNode<Resize>(ir_value, view_info.shape.sizes().vec());
+      return MakeResize(ir_value, view_info.shape.sizes().vec());
     case ViewInfo::Type::kSqueeze:
-      return MakeNode<torch::lazy::Squeeze>(ir_value, view_info.squeeze_index);
+      return MakeSqueeze(ir_value, view_info.squeeze_index);
     case ViewInfo::Type::kUnsqueeze:
-      return MakeNode<torch::lazy::Unsqueeze>(ir_value, view_info.squeeze_index);
+      return MakeUnsqueeze(ir_value, view_info.squeeze_index);
     case ViewInfo::Type::kAsStrided:
-      return MakeNode<AsStrided>(
+      return MakeAsStrided(
           ir_value,
           view_info.shape.sizes().vec(),
           view_info.as_strided->stride,
           view_info.as_strided->offset);
     case ViewInfo::Type::kDiagonal:
-      return MakeNode<Diagonal>(
+      return MakeDiagonal(
           ir_value,
           view_info.diagonal->offset,
           view_info.diagonal->dim1,
@@ -90,7 +79,7 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
     const ViewInfo& view_info = update_data.view_infos[i - 1];
     switch (view_info.view_type) {
       case ViewInfo::Type::kSelect:
-        result = MakeNode<SelectViewUpdate>(
+        result = MakeSelectViewUpdate(
             tmp_values[i - 1],
             result,
             view_info.select->dim,
@@ -99,29 +88,29 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
             view_info.select->stride);
         break;
       case ViewInfo::Type::kNarrow:
-        result = MakeNode<NarrowViewUpdate>(
+        result = MakeNarrowViewUpdate(
             tmp_values[i - 1], result, view_info.indices);
         break;
       case ViewInfo::Type::kNoOp:
         break;
       case ViewInfo::Type::kPermute:
-        result = MakeNode<Permute>(
+        result = MakePermute(
             result, InversePermutation(view_info.permutation));
         break;
       case ViewInfo::Type::kReshape:
-        result = MakeNode<View>(result, view_info.source_shape.sizes().vec());
+        result = MakeView(result, view_info.source_shape.sizes().vec());
         break;
       case ViewInfo::Type::kResize:
-        result = MakeNode<Resize>(result, view_info.source_shape.sizes().vec());
+        result = MakeResize(result, view_info.source_shape.sizes().vec());
         break;
       case ViewInfo::Type::kSqueeze:
-          result = MakeNode<torch::lazy::Unsqueeze>(ir_value, view_info.squeeze_index);
+          result = MakeUnsqueeze(ir_value, view_info.squeeze_index);
           break;
       case ViewInfo::Type::kUnsqueeze:
-          result = MakeNode<torch::lazy::Squeeze>(ir_value, view_info.squeeze_index);
+          result = MakeSqueeze(ir_value, view_info.squeeze_index);
           break;
       case ViewInfo::Type::kAsStrided:
-        result = MakeNode<AsStridedViewUpdate>(
+        result = MakeAsStridedViewUpdate(
             tmp_values[i - 1],
             result,
             view_info.source_shape.sizes().vec(),
@@ -129,7 +118,7 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
             view_info.as_strided->offset);
         break;
       case ViewInfo::Type::kDiagonal:
-        result = MakeNode<DiagonalViewUpdate>(
+        result = MakeDiagonalViewUpdate(
             tmp_values[i - 1],
             result,
             view_info.diagonal->offset,
@@ -166,7 +155,7 @@ ViewInfo::ViewInfo(
     Shape source_shape,
     std::vector<int64_t> permutation)
     : view_type(view_type),
-      shape(Permute::MakePermuteShape(source_shape, permutation)),
+      shape(MakePermuteShape(source_shape, permutation)),
       source_shape(std::move(source_shape)),
       permutation(std::move(permutation)) {
   TORCH_CHECK(view_type == Type::kPermute);
@@ -174,7 +163,7 @@ ViewInfo::ViewInfo(
 
 ViewInfo::ViewInfo(Type view_type, const Shape& source_shape, SelectInfo select)
     : view_type(view_type),
-      shape(Select::MakeSelectShape(
+      shape(MakeSelectShape(
           source_shape,
           select.dim,
           select.start,
@@ -202,7 +191,7 @@ ViewInfo::ViewInfo(
     const Shape& source_shape,
     DiagonalInfo diagonal)
     : view_type(view_type),
-      shape(Diagonal::MakeDiagonalShape(
+      shape(MakeDiagonalShape(
           source_shape,
           diagonal.offset,
           diagonal.dim1,
