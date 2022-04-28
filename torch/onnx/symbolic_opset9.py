@@ -2249,33 +2249,29 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 def to(g, self, *args):
 
-    def is_aten_to_device_only(*args):
+    def is_aten_to_device_only(args):
         if len(args) == 4:
             # aten::to(Tensor, Device, bool, bool, memory_format)
-            if args[0].node().kind() == "prim::device" or \
-                    args[0].type().isSubtypeOf(ListType.ofInts()):
-                return True
-            if sym_help._is_value(args[0]) and \
-                    args[0].node().kind() == "onnx::Constant" and \
-                    isinstance(args[0].node()["value"], str):
-                return True
+            return args[0].node().kind() == "prim::device" or \
+                args[0].type().isSubtypeOf(ListType.ofInts()) or \
+                (sym_help._is_value(args[0]) and
+                    args[0].node().kind() == "onnx::Constant" and
+                    isinstance(args[0].node()["value"], str))
         elif len(args) == 5:
             # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
+            # When dtype is None, this is a aten::to(device) call
             dtype = sym_help._get_const(args[1], "i", "dtype")
-            if not dtype:
-                # When dtype is None, this is a aten::to(device) call
-                return True
-        elif len(args) >= 6 and len(args) <= 7:
+            return dtype is None
+        elif len(args) in (6, 7):
             # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, memory_format) -> Tensor
             # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool, memory_format) -> Tensor
+            # When dtype is None, this is a aten::to(device) call
             dtype = sym_help._get_const(args[0], "i", "dtype")
-            if not dtype:
-                # When dtype is None, this is a aten::to(device) call
-                return True
+            return dtype is None
         return False
 
     # ONNX doesn't have a concept of a device, so we ignore device-only casts
-    if is_aten_to_device_only(*args):
+    if is_aten_to_device_only(args):
         return self
 
     if len(args) == 4:

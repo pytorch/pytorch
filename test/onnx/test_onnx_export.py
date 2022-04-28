@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import onnx
 import torch
+from typing import Callable
 
 from test_pytorch_common import TestCase
 from torch.onnx.symbolic_helper import _onnx_unsupported
@@ -62,38 +63,23 @@ class TestONNXExport(TestCase):
         self.assertAtenOp(onnx_model, "clamp", "Tensor")
 
 
-    def _helper_test_to_(self, cast_fn):
-        """Run a generic test with the specified cast_fn
+    def _helper_test_to_(self, cast_fn: Callable[[torch.Tensor], torch.Tensor]):
+        """Helper to test aten::to(device) variants
 
-        `cast_fn` will be converted into a `torch.jit.script` function
-        and it is meant to wrap a `aten::to` during export to prevent
-        hard-coded devices
+        `cast_fn` is converted into a `torch.jit.script`. It wraps `aten::to`
+        during export to preventing the devices to be hard-coded.
 
-        `cast_fn` signature is:
-            def cast_fn(input: torch.Tensor) -> torch.Tensor
+        Needed by detectron2 after https://github.com/facebookresearch/detectron2/pull/4132/
         """
-        cast_fn = torch.jit.script_if_tracing(cast_fn)
-
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(3, 20, 5)
-                self.conv2 = torch.nn.Conv2d(20, 20, 5)
-
-            def forward(self, x):
-                x = cast_fn(x)
-                x = torch.nn.functional.relu(self.conv1(x))
-                return torch.nn.functional.relu(self.conv2(x))
+        cast_fn = torch.jit.script(cast_fn)
 
         f = io.BytesIO()
-        model = MyModel()
         x = torch.zeros([1, 3, 32, 32])
-        torch.onnx.export(model, (x,), f,
-                          operator_export_type=OperatorExportTypes.ONNX)
+        torch.onnx.export(cast_fn, (x,), f)
         onnx_model = onnx.load_from_string(f.getvalue())
         for n in onnx_model.graph.node:
-            assert n.op_type != "To"
-            assert n.op_type != "Cast"
+            self.assertNotEqual(n.op_type, "To")
+            self.assertNotEqual(n.op_type, "Cast")
 
     def test_to__cpu_string(self):
         def cast_cpu_string(src: torch.Tensor) -> torch.Tensor:
