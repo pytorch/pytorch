@@ -325,7 +325,7 @@ class TestSparseCSR(TestCase):
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_empty_errors(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only batched sparse CSR matrices are supported, but got size"):
+        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only batched sparse CSR tensors are supported, but got size"):
             torch.empty((5,), dtype=dtype, device=device, layout=torch.sparse_csr)
 
     @skipMeta
@@ -336,8 +336,8 @@ class TestSparseCSR(TestCase):
         for batch_shape in ((), (2,), (2, 3)):
             prod = reduce(mul, batch_shape, 1)
             crow_indices = torch.tensor([0, 2, 4], device=device).repeat(prod, 1).reshape(*batch_shape, -1)
-            col_indices = torch.tensor([0, 1, 0, 1], device=device).repeat(prod, 1).reshape(*batch_shape, -1)
             values = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(prod, 1).reshape(*batch_shape, -1)
+            col_indices = torch.tensor([0, 1, 0, 1], device=device).repeat(prod, 1).reshape(*batch_shape, -1)
             sparse = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=dtype, device=device)
             cloned_sparse = sparse.clone()
             self.assertEqual(sparse, cloned_sparse)
@@ -415,7 +415,7 @@ class TestSparseCSR(TestCase):
             nnz = 6
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
 
-            with self.assertRaisesRegex(RuntimeError, "torch.resize_: Only batched sparse CSR matrices are supported"):
+            with self.assertRaisesRegex(RuntimeError, "torch.resize_: Only batched sparse CSR tensors are supported."):
                 new_shape = (4,)
                 a.resize_(new_shape)
 
@@ -467,7 +467,7 @@ class TestSparseCSR(TestCase):
         torch.sparse_csr_tensor(crow_indices, col_indices, values, size, device=device)
 
         with self.assertRaisesRegex(RuntimeError, r"size of a batched CSR tensor must have length >= 2, but got: 1"):
-            torch.sparse_csr_tensor(crow_indices, col_indices, values,
+            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values),
                                     size=(2,),
                                     device=device)
 
@@ -496,7 +496,6 @@ class TestSparseCSR(TestCase):
                                     r"crow_indices\.size\(-1\) must be equal to size\[-2\] \+ 1 \(that is 2\), but got: 3"):
             torch.sparse_csr_tensor(crow_indices, col_indices, values, (1, 1),
                                     device=device)
-
 
         with self.assertRaisesRegex(RuntimeError,
                                     r"number of dimensions of crow_indices and col_indices must be the same"):

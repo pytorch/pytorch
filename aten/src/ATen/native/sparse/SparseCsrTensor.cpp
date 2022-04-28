@@ -42,8 +42,6 @@ namespace native {
 using namespace at::sparse_csr;
 
 namespace {
-
-
 } // end anonymous namespace
 
 void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, const IntArrayRef size, const Layout& layout) {
@@ -218,6 +216,15 @@ void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, c
 void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
   _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseCsr);
 }
+void _validate_sparse_csc_tensor_args(const Tensor& ccol_indices, const Tensor& row_indices, const Tensor& values, IntArrayRef size) {
+  _validate_sparse_compressed_tensor_args(ccol_indices, row_indices, values, size, kSparseCsc);
+}
+void _validate_sparse_bsr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
+  _validate_sparse_compressed_tensor_args(crow_indices, col_indices, values, size, kSparseBsr);
+}
+void _validate_sparse_bsc_tensor_args(const Tensor& ccol_indices, const Tensor& row_indices, const Tensor& values, IntArrayRef size) {
+  _validate_sparse_compressed_tensor_args(ccol_indices, row_indices, values, size, kSparseBsc);
+}
 
 // Construction of CSR, CSC, BSR, and BSC tensors.
 
@@ -232,10 +239,9 @@ SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   Layout layout = AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(options.layout(), "new_compressed_tensor", [&] { return the_layout; });
   DispatchKey dispatch_key;
-
   TORCH_CHECK_NOT_IMPLEMENTED(
     options.device().type() == kCPU || options.device().type() == kCUDA,
-     "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
+    "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
 
   if (options.device().is_cuda()) {
     dispatch_key = DispatchKey::SparseCsrCUDA;
@@ -297,6 +303,9 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
   }
 
 SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr)
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc)
 
 inline DimVector _estimate_sparse_compressed_tensor_size(
     const Tensor& compressed_indices,
@@ -420,6 +429,9 @@ Tensor sparse_compressed_tensor_template(
   }
 
 SPARSE_COMPRESSED_TENSOR(csr, kSparseCsr)
+SPARSE_COMPRESSED_TENSOR(csc, kSparseCsc)
+SPARSE_COMPRESSED_TENSOR(bsr, kSparseBsr)
+SPARSE_COMPRESSED_TENSOR(bsc, kSparseBsc)
 
 Tensor empty_sparse_csr(
     IntArrayRef size,
@@ -429,22 +441,37 @@ Tensor empty_sparse_csr(
     c10::optional<bool> pin_memory,
     c10::optional<MemoryFormat> optional_memory_format) {
   check_size_nonnegative(size);
-
-  TORCH_CHECK(size.size() >= 2, "torch.empty: Only batched sparse CSR matrices are supported, but got size ", size);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout == Layout::SparseCsr);
-
-  auto rows = size[size.size() - 2];
-  int64_t nnz = 0;
-
-  auto crow_indices_size = DimVector(size.slice(0, size.size() - 2));
-  crow_indices_size.push_back(rows + 1);
-  auto col_indices_values_size = DimVector(size.slice(0, size.size() - 2));
-  col_indices_values_size.push_back(nnz);
-
+  Layout layout_ = layout.value_or(kSparseCsr);
+  const std::string layout_name = at::sparse_csr::layoutToString(layout_, /*upper=*/ true);
   TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(Layout::Strided).device(device).pinned_memory(pin_memory);
-  auto crow_indices = at::empty(crow_indices_size, options);
-  auto col_indices = at::empty(col_indices_values_size, options);
-  auto values = at::empty(col_indices_values_size, options.dtype(dtype));
+  Tensor crow_indices;
+  Tensor col_indices;
+  Tensor values;
+
+  switch (layout_) {
+  case kSparseCsr:
+  case kSparseCsc:
+    {
+      TORCH_CHECK(size.size() >= 2, "torch.empty: Only batched sparse ", layout_name, " tensors are supported, but got size ", size);
+      auto rows = size[size.size() - ((layout == kSparseCsr) ?  2 : 1)];
+      auto crow_indices_size = DimVector(size.slice(0, size.size() - 2));
+      crow_indices_size.push_back(rows + 1);
+      auto col_indices_values_size = DimVector(size.slice(0, size.size() - 2));
+      int64_t nnz = 0;
+      col_indices_values_size.push_back(nnz);
+      crow_indices = at::empty(crow_indices_size, options);
+      col_indices = at::empty(col_indices_values_size, options);
+      values = at::empty(col_indices_values_size, options.dtype(dtype));
+    }
+    break;
+  case kSparseBsr:
+  case kSparseBsc:
+    TORCH_CHECK(size.size() >= 2, "torch.empty: At least 2D sparse ", layout_name, " tensors are supported.");
+    TORCH_CHECK(false, "empty_sparse_csr: layout ", layout_, " is not yet supported");  // TODO: replace with implementation
+    break;
+  default:
+    TORCH_CHECK(false, "empty_sparse_csr: layout ", layout_, " is not supported");
+  }
 
   return at::native::_sparse_csr_tensor_unsafe(
       crow_indices,
@@ -462,13 +489,29 @@ const Tensor& resize_sparse_csr_(
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   check_size_nonnegative(size);
-  TORCH_CHECK(size.size() >= 2, "torch.resize_: Only batched sparse CSR matrices are supported, but got size ", size);
+  Layout layout_ = self.layout();
+  const std::string layout_name = at::sparse_csr::layoutToString(layout_, /*upper=*/ true);
+  switch (layout_) {
+  case kSparseCsr:
+  case kSparseCsc:
+    TORCH_CHECK(size.size() >= 2, "torch.resize_: Only batched sparse ", layout_name, " tensors are supported, but got size ", size);
+    break;
+  case kSparseBsr:
+  case kSparseBsc:
+    TORCH_CHECK(size.size() >= 2, "torch.resize_: At least 2D sparse ", layout_name, " tensors are supported, but got size ", size);  // FIXME
+    break;
+  default:
+    TORCH_CHECK(false, "resize_sparse_csr_: layout ", layout_, " is not supported");
+  }
+
+  auto col_index = size.size() - (at::sparse_csr::isCompressedRow(layout_) ? 1 : 2);
+  std::string plain_dimension_name = (at::sparse_csr::isCompressedRow(layout_) ? "columns" : "rows");
   TORCH_CHECK(
-      self.size(-1) <= size[size.size() - 1],
-      "torch.resize_: Resizing columns of sparse CSR tensors to a smaller value is not supported. ",
-      "The original number of columns is ",
-      self.size(-1),
-      " while the requested new number of columns is ", size[size.size() - 1], ".");
+      self.size(col_index) <= size[col_index],
+      "torch.resize_: Resizing ", plain_dimension_name, " of sparse ", layout_name, " tensors to a smaller value is not supported. ",
+      "The original number of ", plain_dimension_name, " is ",
+      self.size(col_index),
+      " while the requested new number of ", plain_dimension_name, " is ", size[col_index], ".");
   get_sparse_csr_impl(self)->resize_(self._nnz(), size);
   return self;
 }
@@ -478,8 +521,8 @@ Tensor& copy_sparse_csr_(Tensor& self, const Tensor& src, bool non_blocking) {
       self.sizes() == src.sizes(),
       "copy_sparse_csr_: only same size tensors are supported.");
   TORCH_CHECK(
-      self.is_sparse_csr() && src.is_sparse_csr(),
-      "copy_sparse_csr_: copy between different layouts is not supported. Found self type = ",
+      self.layout() == src.layout(),  // TODO: support CSR->BSR, CSC->BSC
+      "copy between different layouts is not supported. Found self type = ",
       self.toString(),
       " and src type = ",
       src.toString());
@@ -489,6 +532,7 @@ Tensor& copy_sparse_csr_(Tensor& self, const Tensor& src, bool non_blocking) {
   self.crow_indices().copy_(src.crow_indices(), non_blocking);
   self.col_indices().copy_(src.col_indices(), non_blocking);
   self.values().copy_(src.values(), non_blocking);
+  get_sparse_csr_impl(self)->set_layout(src.layout());
   return self;
 }
 
@@ -518,13 +562,22 @@ bool _is_same_size_as_sparse_csr(
 const SparseCsrTensor& resize_as_sparse_csr_(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
-  TORCH_CHECK(
-      src.is_sparse_csr() && self.is_sparse_csr(),
-      "resize_as_sparse_csr_: layout for self and src must be sparse_csr but got ",
-      self.layout(),
-      " for self, and ",
-      src.layout(),
-      " for src");
+  switch(self.layout()) {
+  case kSparseCsr:
+  case kSparseCsc:
+  case kSparseBsr:
+  case kSparseBsc:
+    TORCH_CHECK(
+                src.layout() == self.layout(),
+                "resize_as_sparse_csr_: layout for self and src must be match but got ",
+                self.layout(),
+                " for self, and ",
+                src.layout(),
+                " for src");
+    break;
+  default:
+    TORCH_CHECK(false, "resize_as_sparse_csr_: layout ", self.layout(), " is not supported");
+  }
   if (!_is_same_size_as_sparse_csr(self, src)) {
     get_sparse_csr_impl(self)->resize_as_sparse_csr_tensor_(src);
   }
@@ -545,7 +598,7 @@ SparseCsrTensor clone_sparse_csr(
                                                self.values().clone(),
                                                self.sizes(),
                                                optTypeMetaToScalarType(options.dtype_opt()),
-                                               options.layout_opt(),
+                                               self.layout(),
                                                options.device_opt(),
                                                options.pinned_memory_opt());
 }
@@ -563,20 +616,26 @@ Tensor empty_like_sparse_csr(
           .merge_in(options_)
           .merge_memory_format(optional_memory_format);
 
-  if (options.layout() == kSparseCsr) {
-    auto result = at::native::_sparse_csr_tensor_unsafe(
-        self.crow_indices().clone(),
-        self.col_indices().clone(),
-        at::empty(self.values().sizes(), options.layout(kStrided)),
-        self.sizes(),
-        dtype,
-        self.layout(),
-        device);
-    return result;
-  } else if (options.layout() == kStrided) {
+  switch(options.layout()) {
+  case kSparseCsr:
+    //case kSparseCsc:
+    //case kSparseBsr:
+    //case kSparseBsc:
+    return at::native::_sparse_csr_tensor_unsafe(
+                                                 self.crow_indices().clone(),
+                                                 self.col_indices().clone(),
+                                                 at::empty(self.values().sizes(), options.layout(kStrided)),
+                                                 self.sizes(),
+                                                 dtype,
+                                                 self.layout(),
+                                                 device);
+    break;
+  // TODO: kSparse
+  case kStrided:
     return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
-  } else {
-    TORCH_CHECK(false, "Layout ", options.layout(), " is not supported");
+    break;
+  default:
+    TORCH_CHECK(false, "empty_like_sparse_csr: layout ", options.layout(), " is not supported");
   }
 }
 

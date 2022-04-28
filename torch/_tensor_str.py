@@ -353,18 +353,23 @@ def _str_intern(inp, *, tensor_contents=None):
             if values.numel() == 0:
                 values_str += ', size=' + str(tuple(values.shape))
             tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
-    elif self.is_sparse_csr:
+    elif self.layout in [torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc]:
         suffixes.append('size=' + str(tuple(self.shape)))
         suffixes.append('nnz=' + str(self._nnz()))
         if not has_default_dtype:
             suffixes.append('dtype=' + str(self.dtype))
+
         if not custom_contents_provided:
-            crow_indices_prefix = 'crow_indices=tensor('
+            cdimname = {torch.sparse_csr: 'row', torch.sparse_csc: 'column',
+                        torch.sparse_bsr: 'row', torch.sparse_bsc: 'column'}[self.layout]
+            pdimname = {torch.sparse_csc: 'row', torch.sparse_csr: 'column',
+                        torch.sparse_bsc: 'row', torch.sparse_bsr: 'column'}[self.layout]
+            crow_indices_prefix = f'c{cdimname[:3]}_indices=tensor('
             crow_indices = self.crow_indices().detach()
             crow_indices_str = _tensor_str(crow_indices, indent + len(crow_indices_prefix))
             if crow_indices.numel() == 0:
                 crow_indices_str += ', size=' + str(tuple(crow_indices.shape))
-            col_indices_prefix = 'col_indices=tensor('
+            col_indices_prefix = f'{pdimname[:3]}_indices=tensor('
             col_indices = self.col_indices().detach()
             col_indices_str = _tensor_str(col_indices, indent + len(col_indices_prefix))
             if col_indices.numel() == 0:

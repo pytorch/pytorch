@@ -277,17 +277,13 @@ class Tensor(torch._C._TensorBase):
                 raise NotImplementedError(
                     'sparse tensor __reduce_ex__ for layout `%s`' % (self.layout))
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
-        elif self.is_sparse_csr:
-            if self.layout == torch.sparse_csr:
-                args_sparse_csr = (self.layout,
-                                   (self.crow_indices(),
-                                    self.col_indices(),
-                                    self.values(),
-                                    self.size()))
-            else:
-                raise NotImplementedError(
-                    'sparse csr tensor __reduce_ex__ for layout `%s`' % (self.layout))
-            return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
+        elif self.layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+            args_sparse_csr = (self.layout,
+                               (self.crow_indices(),
+                                self.col_indices(),
+                                self.values(),
+                                self.size()))
+            return (torch._utils._rebuild_sparse_compressed_tensor, args_sparse_csr)
         elif self.data_ptr() == 0 and type(self) is not torch.Tensor:
             arg_wrapper_subclass = (
                 type(self),

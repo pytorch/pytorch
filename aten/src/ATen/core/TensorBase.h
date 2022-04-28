@@ -273,10 +273,19 @@ class TORCH_API TensorBase {
   // it reports the memory the tensor would take *if* it were contiguous.
   // Defined to be numel() * itemsize()
   size_t nbytes() const {
-    TORCH_CHECK(layout () != at::kSparse,
-                "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
-                "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
-                "equivalent dense tensor, multiply numel() by element_size()");
+    switch(layout()) {
+    case at::kSparse:
+    case at::kSparseCsr:
+    case at::kSparseCsc:
+    case at::kSparseBsr:
+    case at::kSparseBsc:
+      TORCH_CHECK(false,
+                  "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
+                  "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
+                  "equivalent dense tensor, multiply numel() by element_size()");
+      break;
+    default: ;
+    }
     return impl_->numel() * impl_->itemsize();
   }
 

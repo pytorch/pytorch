@@ -428,6 +428,22 @@ THPVARIABLE_SPARSE_COMPRESSED_CTOR(sparse_compressed_tensor, 9,
 THPVARIABLE_SPARSE_COMPRESSED_CTOR(sparse_csr_tensor, 9,
     ({"sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
       "sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(sparse_csc_tensor, 9,
+                                   ({"sparse_csc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+                                     "sparse_csc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(sparse_bsr_tensor, 9,
+                                   ({"sparse_bsr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+                                     "sparse_bsr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(sparse_bsc_tensor, 9,
+                                   ({"sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+                                     "sparse_bsc_tensor(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"}))
+
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(_sparse_csc_tensor_unsafe, 7,
+                                   ({"_sparse_csc_tensor_unsafe(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(_sparse_bsr_tensor_unsafe, 7,
+                                   ({"_sparse_bsr_tensor_unsafe(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
+THPVARIABLE_SPARSE_COMPRESSED_CTOR(_sparse_bsc_tensor_unsafe, 7,
+                                   ({"_sparse_bsc_tensor_unsafe(PyObject* ccol_indices, PyObject* row_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)"}))
 
 THPVARIABLE_SPARSE_COMPRESSED_CTOR(_sparse_compressed_tensor_unsafe, 8,
     ({"_sparse_compressed_tensor_unsafe(PyObject* compressed_indices, PyObject* plain_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool requires_grad=False)"}))
@@ -780,10 +796,16 @@ static PyMethodDef torch_functions_manual[] = {
   {"range", castPyCFunctionWithKeywords(THPVariable_range), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"sparse_coo_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_coo_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"_sparse_coo_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_coo_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
-  {"_sparse_compressed_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_compressed_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"sparse_compressed_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_compressed_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"sparse_csr_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_csr_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"sparse_csc_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_csc_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"sparse_bsr_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_bsr_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"sparse_bsc_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_bsc_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sparse_compressed_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_compressed_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"_sparse_csr_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_csr_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sparse_csc_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_csc_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sparse_bsr_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_bsr_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sparse_bsc_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_bsc_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"tensor", castPyCFunctionWithKeywords(THPVariable_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"get_device", castPyCFunctionWithKeywords(THPVariable_get_device), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"numel", castPyCFunctionWithKeywords(THPVariable_numel), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},

@@ -8,6 +8,7 @@
 #include <ATen/native/Resize.h>
 
 namespace at {
+
 namespace {
 DeviceType SparseCsrTensorSetToDeviceType(DispatchKeySet key_set) {
   if (key_set.has(DispatchKey::SparseCsrCPU)) {
@@ -76,8 +77,14 @@ const char* SparseCsrTensorImpl::tensorimpl_type_name() const {
 }
 
 void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
-  auto rows = size[size.size() - 2];
-  auto cols = size[size.size() - 1];
+  // TODO: check how nnz is defined for block tensors? Is it the
+  // number of blocks or the number of blocks times the numel per
+  // block?
+  TORCH_CHECK(layout_ == kSparseCsr, "resize_: layout ", layout_, " is not yet supported"); // TODO
+  int row_dim = at::sparse_csr::rowDimension(layout_, size);
+  int col_dim = at::sparse_csr::columnDimension(layout_, size);
+  auto rows = size[row_dim];
+  auto cols = size[col_dim];
   auto old_crow_indices_size = crow_indices_.size(-1);
 
   auto new_crow_indices_size = DimVector(size.slice(0, size.size() - 2));
