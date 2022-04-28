@@ -127,7 +127,27 @@ class GenLazyIR(ABC):
     def node_base_ctor_call(self, schema: LazyIrSchema) -> str:
         # backends can customize the way the node base class constructor is called,
         # as long as all of its arguments can be generated from information available from the schema
-        return f"{self.node_base}(torch::lazy::OpKind({aten_symbol(schema)})"
+        base_ctor_value_args_list = []
+        for arg in schema.filtered_args(values=True, scalars=False):
+            if isinstance(arg.lazy_type, BaseCType) or isinstance(
+                arg.lazy_type, VectorCType
+            ):
+                base_ctor_value_args_list.append(f"{arg.name}")
+            elif isinstance(arg.lazy_type, OptionalCType):
+                base_ctor_value_args_list.append(f"{arg.name}.value_or(kNullValue)")
+            else:
+                raise AssertionError(
+                    f"Unsupported type ({arg.lazy_type}) - add support if necessary"
+                )
+        base_ctor_value_args = ", ".join(base_ctor_value_args_list)
+
+        scalar_args = schema.filtered_args(values=False, scalars=True)
+        scalar_hashes = ", ".join([f"{a.name}" for a in scalar_args])
+
+        return f"""{self.node_base}(torch::lazy::OpKind({aten_symbol(schema)}),
+              {{{base_ctor_value_args}}}, std::move(shapes),
+              /* num_outputs */ {len(schema.returns)},
+              torch::lazy::MHash({scalar_hashes}))"""
 
     def gen(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         # for now, we just want one IR class decl and soon after also the method defs
@@ -153,22 +173,11 @@ class GenLazyIR(ABC):
                 for a in scalar_args
             ]
         )
-        scalar_hashes = ", ".join([f"{a.name}" for a in scalar_args])
-        base_ctor_value_args_list = []
-        optional_values = []
-        for arg in value_args:
-            if isinstance(arg.lazy_type, BaseCType) or isinstance(
-                arg.lazy_type, VectorCType
-            ):
-                base_ctor_value_args_list.append(f"{arg.name}")
-            elif isinstance(arg.lazy_type, OptionalCType):
-                base_ctor_value_args_list.append(f"{arg.name}.value_or(kNullValue)")
-                optional_values.append(arg.name)
-            else:
-                raise AssertionError(
-                    f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})"
-                )
-        base_ctor_value_args = ", ".join(base_ctor_value_args_list)
+        optional_values = [
+            arg.name
+            for arg in schema.filtered_args(values=True, scalars=False)
+            if isinstance(arg.lazy_type, OptionalCType)
+        ]
         has_optional_decls = "\n  ".join(
             [f"bool has_{value}: 1;" for value in optional_values]
         )
@@ -194,10 +203,7 @@ class GenLazyIR(ABC):
 class {schema.node_name} : public {self.node_base} {{
  public:
   {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
-      : {self.node_base_ctor_call(schema)},
-              {{{base_ctor_value_args}}}, std::move(shapes),
-              /* num_outputs */ {len(func.returns)},
-              torch::lazy::MHash({scalar_hashes})){comma_if_scalar_initializers}
+      : {self.node_base_ctor_call(schema)}{comma_if_scalar_initializers}
         {scalar_initializers}
 
   {{
