@@ -37,9 +37,9 @@ echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
 fi
 
-is_master_doc=false
+is_main_doc=false
 if [ "$version" == "master" ]; then
-  is_master_doc=true
+  is_main_doc=true
 fi
 
 # Argument 3: The branch to push to. Usually is "site"
@@ -86,7 +86,7 @@ pushd docs
 
 # Build the docs
 pip -q install -r requirements.txt
-if [ "$is_master_doc" = true ]; then
+if [ "$is_main_doc" = true ]; then
   build_docs html
   [ $? -eq 0 ] || exit $?
   make coverage

@@ -1,9 +1,10 @@
 #pragma once
 
-#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <array>
 
 namespace torch {
 namespace jit {
@@ -18,10 +19,8 @@ struct TensorArgCodegen {
   };
 
   T* data;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  nvfuser_index_t size[N];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  nvfuser_index_t stride[N];
+  std::array<nvfuser_index_t, N> size;
+  std::array<nvfuser_index_t, N> stride;
   constexpr int nDims() {
     return N;
   }
@@ -33,6 +32,7 @@ struct TensorArgCodegen {
   }
 };
 
+// 0-Dim GPU based tensor
 template <typename T, typename nvfuser_index_t>
 struct TensorArgCodegen<T, 0, nvfuser_index_t> {
   T& operator[](nvfuser_index_t ind) {
@@ -51,6 +51,17 @@ struct TensorArgCodegen<T, 0, nvfuser_index_t> {
   }
 };
 
+// Specialization for 0-dim case that's easy to pass in a CPU based tensor
+// without memcpy
+template <typename T>
+struct CpuScalarTensorCodegen {
+  T& operator[](int) {
+    return data;
+  };
+
+  T data;
+};
+
 struct ArgAbstract {
   virtual ~ArgAbstract() = default;
   virtual void* arg() = 0;
@@ -59,35 +70,39 @@ struct ArgAbstract {
 struct PhiloxCudaStateArg : public ArgAbstract {
   at::PhiloxCudaState val_;
   PhiloxCudaStateArg(at::PhiloxCudaState _val) : val_(_val){};
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  void* arg() {
+  void* arg() override {
     return &val_;
   }
 };
 
 struct LongArg : public ArgAbstract {
   int64_t val_;
-  explicit LongArg(int64_t _val) : val_(_val){};
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  void* arg() {
+  explicit LongArg(int64_t _val) : val_(_val) {}
+  void* arg() override {
     return &val_;
   }
 };
 
 struct DoubleArg : public ArgAbstract {
   double val_;
-  explicit DoubleArg(double _val) : val_(_val){};
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  void* arg() {
+  explicit DoubleArg(double _val) : val_(_val) {}
+  void* arg() override {
+    return &val_;
+  }
+};
+
+struct ComplexDoubleArg : public ArgAbstract {
+  c10::complex<double> val_;
+  explicit ComplexDoubleArg(c10::complex<double> _val) : val_(_val) {}
+  void* arg() override {
     return &val_;
   }
 };
 
 struct BoolArg : public ArgAbstract {
   bool val_;
-  explicit BoolArg(bool _val) : val_(_val){};
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  void* arg() {
+  explicit BoolArg(bool _val) : val_(_val) {}
+  void* arg() override {
     return &val_;
   }
 };
@@ -119,9 +134,20 @@ struct TensorArg : public TensorArgAbstract {
   }
 };
 
-std::unique_ptr<TensorArgAbstract> getTensorArg(
-    c10::ScalarType dtype,
-    int nDims);
+template <typename CPU_TENSOR_TYPE>
+struct CpuScalarTensorArg : public ArgAbstract {
+  CPU_TENSOR_TYPE instance_;
+
+  CpuScalarTensorArg() = delete;
+
+  explicit CpuScalarTensorArg(decltype(CPU_TENSOR_TYPE::data) _data) {
+    instance_.data = _data;
+  }
+
+  void* arg() override {
+    return &instance_;
+  }
+};
 
 class KernelArgumentHolder {
  public:

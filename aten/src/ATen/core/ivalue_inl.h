@@ -575,18 +575,34 @@ struct TORCH_API TupleElements {
   }
 };
 
+template <typename T>
+struct TupleTypeFactory {};
+
+template <>
+struct TORCH_API TupleTypeFactory<TupleType> {
+  static TupleTypePtr create(std::vector<TypePtr> types) {
+    return TupleType::create(std::move(types));
+  }
+  static TupleTypePtr fallback(const Type& type);
+};
+
+template <>
+struct TORCH_API TupleTypeFactory<c10::DynamicType> {
+  static DynamicTypePtr create(std::vector<TypePtr> elemTypes);
+  static DynamicTypePtr fallback(const Type&);
+};
+
 struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
   TupleElements elements_;
-  mutable std::shared_ptr<TupleType>
-      type_; // lazily computed for unnamed tuples
+  mutable c10::TypePtr type_; // lazily computed for unnamed tuples
 
  public:
   // named tuples have additional type information, so we
   // directly create them tagged
   static c10::intrusive_ptr<Tuple> createNamed(
       std::vector<IValue> elements_,
-      std::shared_ptr<TupleType> type_) {
+      c10::TypePtr type_) {
     return c10::make_intrusive<Tuple>(std::move(elements_), std::move(type_));
   }
 
@@ -685,14 +701,17 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return elements_.size();
   }
 
-  template <typename T = c10::Type>
-  std::shared_ptr<TupleType> type() const {
+  template <typename T = c10::TupleType>
+  std::shared_ptr<T> type() const {
     if (!type_) {
-      type_ = TupleType::create(fmap(elements(), [&](const IValue& v) {
-        return v.type<T>();
+      type_ = TupleTypeFactory<T>::create(fmap(elements(), [&](const IValue& v) {
+        return v.type<typename T::ElementType>();
       }));
     }
-    return type_;
+    if (auto t = type_->cast<T>()) {
+      return t;
+    }
+    return TupleTypeFactory<T>::fallback(*type_);
   }
 
   static size_t hash(const Tuple& t) {
@@ -712,7 +731,7 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   explicit Tuple(std::vector<IValue> elements)
     : elements_(std::move(elements)){}
 
-  explicit Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type)
+  explicit Tuple(std::vector<IValue> elements, c10::TypePtr type)
     : elements_(std::move(elements)), type_(std::move(type)) {}
 
   explicit Tuple(TupleElements&& elements)
@@ -1216,7 +1235,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // We need devices to be sorted in order to use ensureIsSubsetOfDevices.
   static std::vector<c10::Device> sortAndDeduplicateDevices(
-      const c10::impl::VirtualGuardImpl& impl,
+      const c10::impl::VirtualGuardImpl& /*impl*/,
       std::vector<c10::Device> devices) {
     std::sort(
       devices.begin(), devices.end(),
@@ -1565,6 +1584,7 @@ DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
 DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
+DEFINE_TO(c10::SymInt, toSymInt)
 
 template <class T>
 struct _fake_type {};
@@ -1648,13 +1668,18 @@ c10::List<Elem> generic_to(IValue ivalue, _fake_type<c10::List<Elem>>) {
 }
 
 template <typename T>
-static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
-  std::vector<T> result;
+static T createVectorLikeFromList(const c10::detail::ListImpl* impl) {
+  T result;
   result.reserve(impl->list.size());
   for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
-    result.push_back(impl->list[i].to<T>());
+    result.push_back(impl->list[i].to<typename T::value_type>());
   }
   return result;
+}
+
+template <typename T>
+static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
+  return createVectorLikeFromList<std::vector<T>>(impl);
 }
 
 template <typename T>
@@ -1792,6 +1817,14 @@ inline std::vector<int64_t> IValue::toIntVector() const {
   return createVectorFromList<int64_t>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
+inline at::DimVector IValue::toDimVector() const {
+  AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toDimVector on null intrusive_ptr IValue");
+  return createVectorLikeFromList<at::DimVector>(
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
 inline c10::List<double> IValue::toDoubleList() && {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return c10::List<double>(moveToIntrusivePtr<c10::detail::ListImpl>());
@@ -1848,6 +1881,22 @@ inline std::vector<at::Tensor> IValue::toTensorVector() const {
   return createVectorFromList<at::Tensor>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
+inline c10::List<c10::optional<at::Tensor>> IValue::toOptionalTensorList() && {
+  AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
+  return c10::List<c10::optional<at::Tensor>>(moveToIntrusivePtr<c10::detail::ListImpl>());
+}
+inline c10::List<c10::optional<at::Tensor>> IValue::toOptionalTensorList() const& {
+  AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
+  return c10::List<c10::optional<at::Tensor>>(toIntrusivePtr<c10::detail::ListImpl>());
+}
+inline std::vector<c10::optional<at::Tensor>> IValue::toOptionalTensorVector() const {
+  AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toOptionalTensorVector on null intrusive_ptr IValue");
+  return createVectorFromList<c10::optional<at::Tensor>>(
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
 inline c10::List<IValue> IValue::toList() && {
   AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
   return c10::List<IValue>(moveToIntrusivePtr<c10::detail::ListImpl>());
@@ -1887,28 +1936,6 @@ inline ivalue::Tuple& IValue::toTupleRef() const {
       "called toTupleRef on null intrusive_ptr IValue");
   return *static_cast<c10::ivalue::Tuple*>(
       payload.u.as_intrusive_ptr);
-}
-
-inline bool IValue::isDoubleList() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
-}
-
-inline bool IValue::isComplexDoubleList() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexType::Kind;
-}
-
-inline bool IValue::isTensorList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
-}
-
-inline bool IValue::isIntList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
-}
-
-inline bool IValue::isBoolList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
@@ -1963,6 +1990,7 @@ inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
+inline IValue::IValue(c10::SymIntArrayRef v) : IValue(at::ArrayRef<c10::SymInt>(v.data(), v.size())) {}
 template <class T, IValue::enable_if_ivalue_constructible<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
@@ -1971,6 +1999,13 @@ inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(c10::OptionalArrayRef<T> v) : IValue() {
+  if (v.has_value()) {
+    *this = IValue(std::move(*v));
+  }
+}
+
 template <class T, size_t N>
 inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
@@ -2140,7 +2175,7 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   // Str) return value equality
   // 2. If it is a tensor type, we need to take undefined tensor into account
   // 3. Undefined_tensor is None and vice versa should be true
-  // 4. If it is a reference type (i.e. is_intrusive_ptr), then is is True when
+  // 4. If it is a reference type (i.e. is_intrusive_ptr), then is True when
   // the pointed-to object is the same.
   // 5. False for all other comparisons.
   if (this->isNone() && rhs.isNone()) {
@@ -2182,7 +2217,7 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
   return IValue(std::move(x));
 }
 template <typename T>
-IValue from_(T&& x, std::false_type) {
+IValue from_(T&& /*x*/, std::false_type) {
   static_assert(
       guts::false_t<T>::value,
       "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
@@ -2248,8 +2283,13 @@ struct IValue::TagType<c10::Type> {
   static TORCH_API c10::TypePtr get(const IValue&);
 };
 
+template <>
+struct IValue::TagType<c10::DynamicType> {
+  static TORCH_API c10::TypePtr get(const IValue&);
+};
+
 template <typename T>
-typename T::Ptr IValue::type() const {
+TypePtr IValue::type() const {
   return IValue::TagType<T>::get(*this);
 }
 

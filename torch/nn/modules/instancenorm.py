@@ -73,8 +73,8 @@ class _InstanceNorm(_NormBase):
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 3D input (a mini-batch of 1D
-    inputs with optional additional channel dimension) as described in the paper
+    r"""Applies Instance Normalization over a 2D (unbatched) or 3D (batched) input
+    as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
 
@@ -84,7 +84,7 @@ class InstanceNorm1d(_InstanceNorm):
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
+    of size `C` (where `C` is the number of features or channels of the input) if :attr:`affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
     `torch.var(input, unbiased=False)`.
 
@@ -114,8 +114,7 @@ class InstanceNorm1d(_InstanceNorm):
         transform.
 
     Args:
-        num_features: :math:`C` from an expected input of size
-            :math:`(N, C, L)` or :math:`(C, L)`
+        num_features: number of features or channels :math:`C` of the input
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has

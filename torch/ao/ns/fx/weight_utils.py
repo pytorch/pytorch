@@ -158,23 +158,27 @@ def get_op_to_type_to_weight_extraction_fn() -> Dict[str, Dict[Callable, Callabl
 
     op_to_type_to_weight_extraction_fn: Dict[str, Dict[Callable, Callable]] = {
         'call_module': {
-            # Conv
+            # Conv1d
             nn.Conv1d: mod_weight_detach,
-            nn.Conv2d: mod_weight_detach,
-            nn.Conv3d: mod_weight_detach,
             nni.ConvReLU1d: mod_0_weight_detach,
-            nni.ConvReLU2d: mod_0_weight_detach,
-            nni.ConvReLU3d: mod_0_weight_detach,
             nnq.Conv1d: mod_weight_bias_0,
+            nnqat.Conv1d: mod_weight_detach,
             nniqat.ConvBn1d: mod_weight_detach,
             nniqat.ConvBnReLU1d: mod_weight_detach,
+            nniqat.ConvReLU1d: mod_weight_detach,
             nniq.ConvReLU1d: mod_weight_bias_0,
+            # Conv2d
+            nn.Conv2d: mod_weight_detach,
+            nni.ConvReLU2d: mod_0_weight_detach,
             nnq.Conv2d: mod_weight_bias_0,
             nnqat.Conv2d: mod_weight_detach,
             nniqat.ConvBn2d: mod_weight_detach,
             nniqat.ConvBnReLU2d: mod_weight_detach,
             nniqat.ConvReLU2d: mod_weight_detach,
             nniq.ConvReLU2d: mod_weight_bias_0,
+            # Conv3d
+            nn.Conv3d: mod_weight_detach,
+            nni.ConvReLU3d: mod_0_weight_detach,
             nnq.Conv3d: mod_weight_bias_0,
             nnqat.Conv3d: mod_weight_detach,
             nniqat.ConvBn3d: mod_weight_detach,
@@ -189,6 +193,7 @@ def get_op_to_type_to_weight_extraction_fn() -> Dict[str, Dict[Callable, Callabl
             nnqat.Linear: mod_weight_detach,
             nnqd.Linear: mod_weight_bias_0,
             nniqat.LinearReLU: mod_weight_detach,
+            nniqat.LinearBn1d: mod_weight_detach,
             nn.modules.linear.NonDynamicallyQuantizableLinear: mod_weight_detach,
             # LSTM
             nn.LSTM: get_lstm_weight,

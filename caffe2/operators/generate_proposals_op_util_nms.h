@@ -6,7 +6,6 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/macros.h"
 #include "caffe2/utils/eigen_utils.h"
-#include "caffe2/utils/math.h"
 
 #include <c10/util/irange.h>
 
@@ -50,8 +49,7 @@ std::vector<int> nms_cpu_upright(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<size_t>(topN)) {
       break;
     }
 
@@ -127,7 +125,7 @@ std::vector<int> soft_nms_cpu_upright(
   EArrXi pending = AsEArrXt(indices);
   while (pending.size() > 0) {
     // Exit if already enough proposals
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<unsigned>(topN)) {
       break;
     }
 
@@ -344,7 +342,6 @@ int convex_hull_graham(
     Eigen::Vector2f* q,
     bool shift_to_zero = false) {
   CAFFE_ENFORCE(num_in >= 2);
-  std::vector<int> order;
 
   // Step 1:
   // Find point with minimum y
@@ -561,8 +558,7 @@ std::vector<int> nms_cpu_rotated(
   std::vector<int> keep;
   while (order.size() > 0) {
     // exit if already enough proposals
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<size_t>(topN)) {
       break;
     }
 
@@ -627,7 +623,7 @@ std::vector<int> soft_nms_cpu_rotated(
   EArrXi pending = AsEArrXt(indices);
   while (pending.size() > 0) {
     // Exit if already enough proposals
-    if (topN >= 0 && keep.size() >= topN) {
+    if (topN >= 0 && keep.size() >= static_cast<size_t>(topN)) {
       break;
     }
 

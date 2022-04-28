@@ -3,7 +3,17 @@ from torch import Tensor
 
 from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
 
+__all__ = [
+    "BatchSampler",
+    "RandomSampler",
+    "Sampler",
+    "SequentialSampler",
+    "SubsetRandomSampler",
+    "WeightedRandomSampler",
+]
+
 T_co = TypeVar('T_co', covariant=True)
+
 
 class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
@@ -76,8 +86,7 @@ class RandomSampler(Sampler[int]):
     Args:
         data_source (Dataset): dataset to sample from
         replacement (bool): samples are drawn on-demand with replacement if ``True``, default=``False``
-        num_samples (int): number of samples to draw, default=`len(dataset)`. This argument
-            is supposed to be specified only when `replacement` is ``True``.
+        num_samples (int): number of samples to draw, default=`len(dataset)`.
         generator (Generator): Generator used in sampling.
     """
     data_source: Sized
@@ -93,10 +102,6 @@ class RandomSampler(Sampler[int]):
         if not isinstance(self.replacement, bool):
             raise TypeError("replacement should be a boolean value, but got "
                             "replacement={}".format(self.replacement))
-
-        if self._num_samples is not None and not replacement:
-            raise ValueError("With replacement=False, num_samples should not be specified, "
-                             "since a random permute will be performed.")
 
         if not isinstance(self.num_samples, int) or self.num_samples <= 0:
             raise ValueError("num_samples should be a positive integer "
@@ -123,7 +128,9 @@ class RandomSampler(Sampler[int]):
                 yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).tolist()
             yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator).tolist()
         else:
-            yield from torch.randperm(n, generator=generator).tolist()
+            for _ in range(self.num_samples // n):
+                yield from torch.randperm(n, generator=generator).tolist()
+            yield from torch.randperm(n, generator=generator).tolist()[:self.num_samples % n]
 
     def __len__(self) -> int:
         return self.num_samples

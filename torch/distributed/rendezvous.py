@@ -9,7 +9,7 @@ import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import Dict, Optional, Union
+from typing import Dict
 
 import torch._six as six
 from torch.distributed import FileStore, PrefixStore, Store, TCPStore
@@ -50,6 +50,10 @@ def register_rendezvous_handler(scheme, handler):
         )
     _rendezvous_handlers[scheme] = handler
 
+# Query will have format "rank=0&world_size=1" and is
+# converted into {"rank": 0, "world_size": 1}
+def _query_to_dict(query: str) -> Dict[str, str]:
+    return dict((pair[0], pair[1]) for pair in (pair.split("=") for pair in filter(None, query.split("&"))))
 
 def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if not isinstance(url, six.string_classes):
@@ -64,9 +68,7 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     # Append node-specific arguments.
     result = urlparse(url)
     if rank != -1 or world_size != -1:
-        query_dict: Dict[str, Union[int, str]] = dict(
-            pair.split("=") for pair in filter(None, result.query.split("&"))
-        )
+        query_dict = _query_to_dict(result.query)
         assert (
             "rank" not in query_dict and "world_size" not in query_dict
         ), "The url: {url} has node-specific arguments(rank, world_size) already.".format(
@@ -88,6 +90,34 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
         raise RuntimeError("No rendezvous handler for {}://".format(result.scheme))
     return _rendezvous_handlers[result.scheme](url, **kwargs)
 
+def _create_store_from_options(backend_options, rank):
+    result = urlparse(backend_options.init_method)
+
+    # If using env initialization, get rank and world_size from env
+    world_size = -1
+    if result.scheme == "env":
+        rank = os.environ.get("RANK", rank)
+        # Here, the world_size has already beeen initialized to -1 in init_rpc
+        # If the world_size env variable is also not present then it is a dynamic group
+        world_size = int(os.environ.get("WORLD_SIZE", world_size))
+
+    query_dict = _query_to_dict(result.query)
+    # if rank is -1 then intentionally exclude rank for the query, error will be thrown later
+    if rank != -1:
+        query_dict["rank"] = str(rank)
+    query_dict["world_size"] = str(world_size)
+
+    result = result._replace(
+        query="{}".format(
+            "&".join(["{}={}".format(k, v) for k, v in query_dict.items()])
+        )
+    )
+
+    url = urlunparse(result)
+    if result.scheme not in _rendezvous_handlers:
+        raise RuntimeError("No handler for {}://".format(result.scheme))
+    store, _, _ = next(_rendezvous_handlers[result.scheme](url))
+    return store
 
 def _rendezvous_error(msg):
     return ValueError("Error initializing torch.distributed using " + msg)
@@ -110,16 +140,14 @@ def _file_rendezvous_handler(url: str, **kwargs):
 
     if not path:
         raise _error("path missing")
-    query: Dict[str, str]
-    # mypy doesn't allow dict() to accept List of values (#257)
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type]
-    if "rank" not in query:
+    query_dict = _query_to_dict(result.query)
+    if "rank" not in query_dict:
         raise _error("rank parameter missing")
-    if "world_size" not in query:
+    if "world_size" not in query_dict:
         raise _error("world size parameter missing")
 
-    rank = int(query["rank"])
-    world_size = int(query["world_size"])
+    rank = int(query_dict["rank"])
+    world_size = int(query_dict["world_size"])
     store = FileStore(path, world_size)
     yield (store, rank, world_size)
 
@@ -147,6 +175,9 @@ def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
     and port are correctly passed via ``hostname`` and ``port``. All
     non-zero ranks will create and return a TCPStore client.
     """
+    # check if port is uint16_t
+    if not 0 <= port < 2**16:
+        raise ValueError(f"port must have value from 0 to 65535 but was {port}.")
 
     if _torchelastic_use_agent_store():
         attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]
@@ -168,16 +199,14 @@ def _tcp_rendezvous_handler(
     result = urlparse(url)
     if not result.port:
         raise _error("port number missing")
-    query: Dict[str, Union[int, str]]
-    # mypy doesn't allow dict() to accept List of values (#257)
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type]
-    if "rank" not in query:
+    query_dict = _query_to_dict(result.query)
+    if "rank" not in query_dict:
         raise _error("rank parameter missing")
-    if "world_size" not in query:
+    if "world_size" not in query_dict:
         raise _error("world size parameter missing")
 
-    rank = int(query["rank"])
-    world_size = int(query["world_size"])
+    rank = int(query_dict["rank"])
+    world_size = int(query_dict["world_size"])
     assert result.hostname is not None
 
     store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout)
@@ -205,21 +234,20 @@ def _env_rendezvous_handler(
             return env_val
 
     result = urlparse(url)
-    query: Dict[str, Union[int, str]]
-    # mypy doesn't allow dict() to accept List of values (#257)
-    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type]
+    query_dict = _query_to_dict(result.query)
 
-    rank: Optional[Union[str, int]]
-    world_size: Optional[Union[str, int]]
-    master_port: Optional[Union[str, int]]
+    rank: int
+    world_size: int
+    master_port: int
+    master_addr: str
 
-    if "rank" in query:
-        rank = int(query["rank"])
+    if "rank" in query_dict:
+        rank = int(query_dict["rank"])
     else:
         rank = int(_get_env_or_raise("RANK"))
 
-    if "world_size" in query:
-        world_size = int(query["world_size"])
+    if "world_size" in query_dict:
+        world_size = int(query_dict["world_size"])
     else:
         world_size = int(_get_env_or_raise("WORLD_SIZE"))
 

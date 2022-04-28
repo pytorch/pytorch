@@ -31,9 +31,9 @@ class ReductionParams {
   // Inner Reduction Domain:
 
   // Reduce across the block?
-  bool cross_block_inner_reduce = false;
+  bool cross_block_inner_reduction = false;
   // Reduce across the grid?
-  bool cross_grid_inner_reduce = false;
+  bool cross_grid_inner_reduction = false;
   // Inner reduction unroll/vectorize
   bool unroll_inner_reduction = false;
   // Unrolling factor
@@ -81,9 +81,9 @@ class ReductionParams {
   // Outer Reduction Domain if 3D Scheduled:
 
   // Reduce across the block?
-  bool cross_block_outer_reduce = false;
+  bool cross_block_outer_reduction = false;
   // Reduce across the grid?
-  bool cross_grid_outer_reduce = false;
+  bool cross_grid_outer_reduction = false;
   // Split grid dim for iteration axis in case it's too large for cuda
   bool split_grid_dim_outer_reduction = false;
   // Register persistent buffer size in outer dimension
@@ -113,8 +113,8 @@ class ReductionParams {
         other.persistent_kernel == persistent_kernel &&
         other.project_persistent_buffers == project_persistent_buffers &&
         other.schedule_3D == schedule_3D &&
-        other.cross_block_inner_reduce == cross_block_inner_reduce &&
-        other.cross_grid_inner_reduce == cross_grid_inner_reduce &&
+        other.cross_block_inner_reduction == cross_block_inner_reduction &&
+        other.cross_grid_inner_reduction == cross_grid_inner_reduction &&
         other.unroll_inner_reduction == unroll_inner_reduction &&
         other.unroll_factor_inner_reduction == unroll_factor_inner_reduction &&
         other.vectorize_inner_reduction == vectorize_inner_reduction &&
@@ -128,8 +128,8 @@ class ReductionParams {
         other.unroll_factor_iter_dom == unroll_factor_iter_dom &&
         other.vectorize_iter_dom == vectorize_iter_dom &&
         other.split_grid_dim_iter_dom == split_grid_dim_iter_dom &&
-        other.cross_block_outer_reduce == cross_block_outer_reduce &&
-        other.cross_grid_outer_reduce == cross_grid_outer_reduce &&
+        other.cross_block_outer_reduction == cross_block_outer_reduction &&
+        other.cross_grid_outer_reduction == cross_grid_outer_reduction &&
         other.unroll_outer_reduction == unroll_outer_reduction &&
         other.unroll_factor_outer_reduction == unroll_factor_outer_reduction &&
         other.split_grid_dim_outer_reduction ==
@@ -153,10 +153,10 @@ class ReductionParams {
     if (schedule_3D) {
       ss << "3D Schedule\n"
          << "Outer Reduction: ";
-      if (cross_block_outer_reduce) {
+      if (cross_block_outer_reduction) {
         ss << "cross block - " << block_dim_outer_reduction << " / ";
       }
-      if (cross_grid_outer_reduce) {
+      if (cross_grid_outer_reduction) {
         ss << "cross grid - " << grid_dim_outer_reduction << " / ";
         ss << (split_grid_dim_outer_reduction ? "split grid dim / " : "");
       }
@@ -189,18 +189,18 @@ class ReductionParams {
 
     ss << "\nInner Reduction Domain: ";
 
-    if (cross_block_inner_reduce) {
+    if (cross_block_inner_reduction) {
       ss << "cross block - " << block_dim_inner_reduction << " / ";
       ss << (pad_inner_reduction_to_warp ? " pad to warp / " : "");
     }
-    if (cross_grid_inner_reduce) {
+    if (cross_grid_inner_reduction) {
       ss << "cross grid - " << grid_dim_inner_reduction << " / ";
       ss << (split_grid_dim_inner_reduction ? "split grid dim / " : "");
     }
     if (batches_per_block_inner_reduction > 1 || persistent_kernel) {
       ss << "persistent batch - " << batches_per_block_inner_reduction << " / ";
     }
-    ss << (cross_grid_inner_reduce && split_grid_dim_inner_reduction
+    ss << (cross_grid_inner_reduction && split_grid_dim_inner_reduction
                ? "split grid dimension / "
                : "")
        << (vectorize_inner_reduction ? "vectorize / " : "")
@@ -225,8 +225,8 @@ class ReductionParamsHash {
         static_cast<size_t>(rp.persistent_kernel) << (bits - 2) ^
         static_cast<size_t>(rp.project_persistent_buffers) << (bits - 3) ^
         static_cast<size_t>(rp.schedule_3D) << (bits - 4) ^
-        static_cast<size_t>(rp.cross_block_inner_reduce) << (bits - 5) ^
-        static_cast<size_t>(rp.cross_grid_inner_reduce) << (bits - 6) ^
+        static_cast<size_t>(rp.cross_block_inner_reduction) << (bits - 5) ^
+        static_cast<size_t>(rp.cross_grid_inner_reduction) << (bits - 6) ^
         static_cast<size_t>(rp.unroll_inner_reduction) << (bits - 7) ^
         static_cast<size_t>(rp.unroll_factor_inner_reduction) ^
         static_cast<size_t>(rp.vectorize_inner_reduction) << (bits - 8) ^
@@ -239,8 +239,8 @@ class ReductionParamsHash {
         static_cast<size_t>(rp.unroll_factor_iter_dom) ^
         static_cast<size_t>(rp.vectorize_iter_dom) << (bits - 14) ^
         static_cast<size_t>(rp.split_grid_dim_iter_dom) << (bits - 15) ^
-        static_cast<size_t>(rp.cross_block_outer_reduce) << (bits - 16) ^
-        static_cast<size_t>(rp.cross_grid_outer_reduce) << (bits - 17) ^
+        static_cast<size_t>(rp.cross_block_outer_reduction) << (bits - 16) ^
+        static_cast<size_t>(rp.cross_grid_outer_reduction) << (bits - 17) ^
         static_cast<size_t>(rp.split_grid_dim_outer_reduction) << (bits - 18) ^
         static_cast<size_t>(rp.batches_per_block_outer_reduction)
             << (bits - 19);

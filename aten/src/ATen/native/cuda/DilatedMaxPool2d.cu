@@ -1,6 +1,8 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
@@ -11,6 +13,13 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/LaunchUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/max_pool2d_with_indices_native.h>
+#include <ATen/ops/max_pool2d_with_indices_backward_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -35,7 +44,7 @@ static __device__ inline int p_end(int size, int pad, int pooled_size, int strid
 // kernels borrowed from Caffe
 template <typename scalar_t, typename accscalar_t>
 __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom_data,
-    const int num, const int channels, const int height,
+    const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
@@ -166,7 +175,7 @@ C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 #else
 C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)
 #endif
-__global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_diff,
+__global__ void max_pool_backward_nchw(const scalar_t* top_diff,
     const int64_t* top_mask, const int num, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
@@ -199,15 +208,13 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
 
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-__global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_diff,
+__global__ void max_pool_backward_nhwc(const scalar_t* top_diff,
                                     const int64_t* top_mask, const int nbatch, const int channels,
                                     const int height, const int width, const int pooled_height,
                                     const int pooled_width, const int kernel_h, const int kernel_w,
                                     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
                                     const int dilation_h, const int dilation_w,
                                     const int out_stride_c, const int out_stride_h, const int out_stride_w,
-                                    const int in_stride_n, const int in_stride_c,
-                                    const int in_stride_h, const int in_stride_w,
                                     const int kernel_stride_C, const int kernel_size_C,
                                     scalar_t* bottom_diff) {
   extern __shared__ int smem[];
@@ -396,7 +403,7 @@ const Tensor& indices) {
           max_pool_forward_nchw<scalar_t, scalar_t>
               <<<ceil_div(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
               count, input_data,
-                  nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+                  nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                   kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                   output_data, indices_data);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -516,15 +523,12 @@ const Tensor& gradInput) {
           // Please check comments at https://github.com/pytorch/pytorch/pull/34519.
           max_pool_backward_nhwc<scalar_t, accscalar_t>
           <<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>>(
-              count,
                   gradOutput_data,
                   indices_data,
                   nbatch,
                   nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                   kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                   out_stride_c, out_stride_h, out_stride_w,
-                  in_stride_n, in_stride_c,
-                  in_stride_h, in_stride_w,
                   kernel_stride_C, kernel_size_C,
                   gradInput_data);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -544,7 +548,6 @@ const Tensor& gradInput) {
 
           max_pool_backward_nchw<scalar_t, accscalar_t>
           <<<grid, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-              count,
                   gradOutput_data,
                   indices_data,
                   nbatch,

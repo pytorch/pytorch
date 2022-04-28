@@ -541,7 +541,7 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup() {
 ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
   auto group = makeEmptyGroup();
   group->exprs().push_back(expr);
-  if (ir_utils::isTVOp(expr)) {
+  if (ir_utils::isTvOp(expr)) {
     auto out_tv = expr->outputs()[0]->as<TensorView>();
     // Grab all id's that are shared with other tensors.
     for (const auto tv_i : c10::irange(out_tv->getComputeAtPosition())) {
@@ -649,65 +649,6 @@ ExprGroup* getProducer(ExprGroup* sg1, ExprGroup* sg2) {
   return nullptr;
 }
 
-// Go through all expressions and compute a local ordering of loops. operator<
-// is implemented based on the concrete_id_dependencies analysis done. If
-// there's no dependency between two IDs then order doesn't mater, otherwise we
-// can tell which is inner most by checking if there's any dependency
-// relationships.
-//
-// Dependency relationships in concrete_id_dependencies has a "global" view in
-// the fusion, so it can resolve ordering by only looking at id's and the
-// dependency map.
-//
-// For example two expressions may have domains: [I0], [I1] Yet we
-// won't know the ordering unless we see a domain with: [I0, I1]. This happened
-// in advancedIndexing9 (also see AdvancedLowering6) test when merging T5 with
-// the group containing T10 (cache of T5, which is post broadcasted output) and
-// T6(pre broadcasted output).
-// T5 had the domain [0, 1, 2, 3, 4] produce at 3
-// T6 had the domain [0, 3, 4] compute at 3
-// Merging [0, 1, 2] and [0, 3, 4] resulted in the domain [0, 3, 4, 1, 2]
-//
-// If ID's are not in filter, we don't care about their ordering and ignore
-// them. This is because we're only focused on loops we will have to merge
-// across groups. If the domain is not in a produce at position in the producer
-// edges, or a compute at position in the consumer edges, the expressions we
-// look at may not have a unique ordering.
-
-struct LocalDomainSorter {
-  LocalDomainSorter(
-      const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
-          concrete_id_dependencies)
-      : concrete_id_dependencies_(concrete_id_dependencies) {}
-
-  // Return if id0 should be before id1
-  inline bool operator()(IterDomain* id0, IterDomain* id1) {
-    auto concrete_id_0 =
-        GpuLower::current()->caLoopMap().getConcreteMappedID(id0);
-    auto concrete_id_1 =
-        GpuLower::current()->caLoopMap().getConcreteMappedID(id1);
-
-    if (concrete_id_dependencies_.find(concrete_id_0) !=
-        concrete_id_dependencies_.end()) {
-      const auto& dependencies_0 = concrete_id_dependencies_.at(concrete_id_0);
-      // if id0 depends on id1 it means id1 is inside id0, so id0 < id1
-      return dependencies_0.count(concrete_id_1);
-    }
-
-    if (concrete_id_dependencies_.find(concrete_id_1) !=
-        concrete_id_dependencies_.end()) {
-      const auto& dependencies_1 = concrete_id_dependencies_.at(concrete_id_1);
-      // if id1 depends on id0 it means id0 is inside id1, so id1 < id0
-      return !dependencies_1.count(concrete_id_0);
-    }
-
-    return true;
-  }
-
-  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
-      concrete_id_dependencies_;
-};
-
 std::vector<IterDomain*> getLocalDomainOrdering(
     const std::vector<Expr*>& exprs,
     const ComputeAtMap& map,
@@ -721,7 +662,7 @@ std::vector<IterDomain*> getLocalDomainOrdering(
   std::unordered_set<IterDomain*> domains;
 
   for (auto expr : exprs) {
-    if (!ir_utils::isTVOp(expr)) {
+    if (!ir_utils::isTvOp(expr)) {
       continue;
     }
 
@@ -755,7 +696,8 @@ std::vector<IterDomain*> getLocalDomainOrdering(
   std::sort(
       merged_domain.begin(),
       merged_domain.end(),
-      LocalDomainSorter(concrete_id_dependencies));
+      IterDomainDependencySorter(
+          concrete_id_dependencies, GpuLower::current()->caParallelMap()));
   return merged_domain;
 }
 } // namespace
@@ -840,7 +782,7 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     if (producer_of_consumer_edge->isA<TensorView>()) {
       auto tv = producer_of_consumer_edge->as<TensorView>();
       for (const auto tv_i : c10::irange(tv->getComputeAtPosition())) {
-        ca_ids.emplace(GpuLower::current()->caLoopMap().getConcreteMappedID(
+        ca_ids.emplace(GpuLower::current()->caParallelMap().getConcreteMappedID(
             tv->axis(tv_i)));
       }
     }
@@ -855,7 +797,7 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
     if (consumer_of_producer_edge->isA<TensorView>()) {
       auto tv = consumer_of_producer_edge->as<TensorView>();
       for (const auto tv_i : c10::irange(tv->getMaxProducerPosition())) {
-        pa_ids.emplace(GpuLower::current()->caLoopMap().getConcreteMappedID(
+        pa_ids.emplace(GpuLower::current()->caParallelMap().getConcreteMappedID(
             tv->axis(tv_i)));
       }
     }
@@ -866,7 +808,7 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
 
   auto ordered_ids = getLocalDomainOrdering(
       joined_groups->exprs(),
-      GpuLower::current()->caLoopMap(),
+      GpuLower::current()->caParallelMap(),
       all_ca_pa_ids,
       concrete_id_dependencies);
 
@@ -914,7 +856,7 @@ bool canReducePA(ExprGroup* group) {
     // it can't decide if it can be reduced
     bool has_matching_pa = false;
     for (const auto i : c10::irange(consumer_tv->getMaxProducerPosition())) {
-      if (GpuLower::current()->caLoopMap().areMapped(
+      if (GpuLower::current()->caParallelMap().areMapped(
               consumer_tv->axis(i), group_pa_last_id)) {
         has_matching_pa = true;
         break;
@@ -931,7 +873,7 @@ bool canReducePA(ExprGroup* group) {
              static_cast<int>(producer_tv->getComputeAtPosition());
          producer_pos_i > 0;
          producer_pos_i--) {
-      if (GpuLower::current()->caLoopMap().areMapped(
+      if (GpuLower::current()->caParallelMap().areMapped(
               producer_tv->axis(producer_pos_i - 1), group_pa_last_id)) {
         return false;
       }
@@ -1027,7 +969,7 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
          tv_id_i--) {
       auto tv_id = tv->axis((int)(tv_id_i - 1));
       auto concrete_id =
-          GpuLower::current()->caLoopMap().getConcreteMappedID(tv_id);
+          GpuLower::current()->caParallelMap().getConcreteMappedID(tv_id);
 
       if (concrete_id_dependencies.find(concrete_id) ==
           concrete_id_dependencies.end()) {
@@ -1039,7 +981,7 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
 
       // Loops after tv_id are dependent on tv_id
       dependencies.emplace(
-          GpuLower::current()->caLoopMap().getConcreteMappedID(tv_id));
+          GpuLower::current()->caParallelMap().getConcreteMappedID(tv_id));
     }
   }
 
@@ -1067,26 +1009,61 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
       std::back_inserter(to_visit),
       [](const auto& concrete_dep_entry) { return concrete_dep_entry.first; });
 
+  size_t inf_loop_counter = to_visit.size();
+  bool failed = false;
+
   while (!to_visit.empty()) {
     auto id = to_visit.front();
     to_visit.pop_front();
 
+    if (inf_loop_counter-- == 0) {
+      failed = true;
+      break;
+    }
+
     auto& dependencies = concrete_id_dependencies.at(id);
-    bool ready = std::all_of(
-        dependencies.begin(), dependencies.end(), [&visited](IterDomain* id) {
-          return visited.count(id);
-        });
+    bool ready = dependencies.empty() ||
+        std::all_of(dependencies.begin(),
+                    dependencies.end(),
+                    [&visited](IterDomain* id) { return visited.count(id); });
 
     if (!ready) {
       to_visit.push_back(id);
       continue;
     }
 
+    inf_loop_counter = to_visit.size();
+
     for (auto dependency : dependencies) {
       auto dep_of_dep = concrete_id_dependencies.at(dependency);
       dependencies.insert(dep_of_dep.begin(), dep_of_dep.end());
     }
     visited.emplace(id);
+  }
+  if (failed) {
+    std::cerr
+        << "ERROR: Iteration domain sorting has failed, infinite loop detected."
+        << std::endl;
+    std::cerr << "Failed to sort out: " << std::endl;
+    for (auto entry : to_visit) {
+      std::cerr << entry->toString();
+      if (entry != to_visit.back()) {
+        std::cerr << ", ";
+      }
+    }
+
+    std::cerr << "Depdencies: " << std::endl;
+    for (const auto& dep_entry : concrete_id_dependencies) {
+      std::cerr << "  Deps of " << dep_entry.first->toString() << std::endl
+                << "   ";
+
+      for (auto dep : dep_entry.second) {
+        std::cerr << dep->toString() << ", ";
+      }
+      std::cerr << std::endl;
+    }
+
+    TORCH_INTERNAL_ASSERT(false);
   }
 }
 
@@ -1145,7 +1122,7 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
     return false;
   }
 
-  const auto& loop_map = GpuLower::current()->caLoopMap();
+  const auto& parallel_map = GpuLower::current()->caParallelMap();
 
   // If inner loop dependencies have not been resolved, cannot merge.
   if (!loopReady(producer_ca_domain.back()) ||
@@ -1182,11 +1159,11 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
       continue;
     }
 
-    if (!loop_map.areMapped(compute_at_dim, producer_ca_domain.back())) {
+    if (!parallel_map.areMapped(compute_at_dim, producer_ca_domain.back())) {
       continue;
     }
 
-    if (loop_map.areMapped(compute_at_dim, consumer_pa_domain.back())) {
+    if (parallel_map.areMapped(compute_at_dim, consumer_pa_domain.back())) {
       return true;
     }
   }

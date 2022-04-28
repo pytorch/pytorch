@@ -11,6 +11,28 @@
 #include <ATen/core/function.h>
 #include <iostream>
 
+namespace std {
+template<>
+struct hash<std::tuple<std::string, c10::TypePtr, c10::TypePtr>> {
+  size_t operator()(std::tuple<std::string, c10::TypePtr, c10::TypePtr> const& t) const {
+    // This hashing is all hidden behind a static initializer so it
+    // doesn't have to be optimal
+    auto hash = std::hash<std::string>()(std::get<0>(t));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<2>(t)));
+    return hash;
+  }
+};
+template<>
+struct hash<std::tuple<std::string, c10::TypePtr>> {
+  size_t operator()(std::tuple<std::string, c10::TypePtr> const& t) const {
+    auto hash = std::hash<std::string>()(std::get<0>(t));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
+    return hash;
+  }
+};
+} // namespace std
+
 namespace c10 {
 
 static_assert(
@@ -237,6 +259,47 @@ ListTypePtr ListType::ofStrings() {
   return value;
 }
 
+TypePtr OptionalType::get(TypePtr inner) {
+  static ska::flat_hash_map<TypePtr, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(inner) == containerTypePtrs.end()) {
+    TypePtr t = TypeFactory::create<OptionalType>(inner);
+    containerTypePtrs.emplace(inner, std::move(t));
+  }
+  return containerTypePtrs[inner];
+}
+
+TypePtr ListType::get(std::string identifier, TypePtr inner) {
+  static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  auto key = std::make_tuple(identifier, inner);
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(key) == containerTypePtrs.end()) {
+    TypePtr t = ListType::create(inner);
+    containerTypePtrs.emplace(key, std::move(t));
+  }
+  return containerTypePtrs[key];
+}
+
+TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
+  static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  auto map_key = std::make_tuple(identifier, key, value);
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(map_key) == containerTypePtrs.end()) {
+    TypePtr t = DictType::create(key, value);
+    containerTypePtrs.emplace(map_key, std::move(t));
+  }
+  return containerTypePtrs[map_key];
+}
+
 AnyListTypePtr AnyListType::get() {
   static AnyListTypePtr value(new AnyListType());
   return value;
@@ -254,6 +317,11 @@ AnyClassTypePtr AnyClassType::get() {
 
 AnyEnumTypePtr AnyEnumType::get() {
   static AnyEnumTypePtr value(new AnyEnumType());
+  return value;
+}
+
+SymIntTypePtr SymIntType::get() {
+  static SymIntTypePtr value(new SymIntType());
   return value;
 }
 
@@ -382,6 +450,9 @@ MatchTypeReturn matchTypeVariables(
     const TypePtr& actual,
     TypeEnv& type_env) {
   if (!formal->hasFreeVariables()) {
+    if (auto dyn = formal->castRaw<c10::DynamicType>()) {
+      return matchTypeVariables(dyn->fallback(), actual, type_env);
+    }
     return MatchTypeReturn::Success();
   }
 
@@ -512,6 +583,9 @@ MatchTypeReturn matchTypeVariables(
 // change return types like List[List[t]] into List[List[int]]
 TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, std::unordered_map<std::string, TypePtr>& type_env) {
   if (!type->hasFreeVariables()) {
+    if (auto dyn = type->castRaw<c10::DynamicType>()) {
+      return tryEvalTypeVariables(dyn->fallback(), type_env);
+    }
     return type;
   }
 
@@ -596,13 +670,29 @@ TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
     const std::vector<TypePtr>& field_types) {
-      std::vector<IValue> empty_defaults;
-      return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
-    }
+  std::vector<IValue> empty_defaults;
+  return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
+}
 
+TupleTypePtr TupleType::createNamed(
+    const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<c10::string_view>& field_names,
+    const std::vector<TypePtr>& field_types) {
+  std::vector<IValue> empty_defaults;
+  return createWithSpec(qualName, field_names, field_types, empty_defaults);
+}
 
-TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qualName,
+TupleTypePtr TupleType::createNamed(
+    const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
+    const std::vector<TypePtr>& field_types,
+    std::vector<IValue>& field_defaults) {
+  return createWithSpec(qualName, field_names, field_types, field_defaults);
+}
+
+template <typename S>
+TupleTypePtr TupleType::createWithSpec(const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<S>& field_names,
     const std::vector<TypePtr>& field_types,
     std::vector<IValue>& field_defaults) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
@@ -613,7 +703,7 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
   for (size_t i = 0; i < field_names.size(); ++i) {
     if (i < min_default_idx) {
       Argument arg{
-          /*name=*/field_names[i],
+          /*name=*/std::string{field_names[i]},
           /*type=*/field_types[i],
           /*N=*/i};
       arguments.emplace_back(std::move(arg));
@@ -625,7 +715,7 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
                   "mutability could lead to potential memory aliasing "
                   "problems");
       Argument arg{
-          /*name=*/field_names[i],
+          /*name=*/std::string{field_names[i]},
           /*type=*/field_types[i],
           /*N=*/i,
           /*default_value=*/field_defaults[j]};

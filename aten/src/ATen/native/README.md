@@ -61,8 +61,7 @@ signature.
 - `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
 - `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
-- `str`.  It is translated into a C++ argument of type `std::string`
-  (but we should fix this, see https://github.com/pytorch/pytorch/issues/53546)
+- `str`.  It is translated into a C++ argument of non-owning type `c10::string_view`
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
   floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
   numerical types. However, you probably don't want to use `Scalar`;
@@ -292,7 +291,7 @@ If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
 Available backend options can be found by searching `dispatch_keys` in
-[codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
+[codegen](https://github.com/pytorch/pytorch/blob/master/torchgen/gen.py).
 There are also two special "generic" backends:
 
   - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):
@@ -543,7 +542,7 @@ Here're steps to follow to decide the right dispatch keyword:
       Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
       the implementations and add dispatch section with device keywords instead.
 3. Validate the computed dispatch table matches what you want. You can use `PythonDispatcher` provided in
-[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispacher.py).
+[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispatcher.py).
 It shows for a certain operator, what the computed dispatch table looks like after your registrations.
 
     ```

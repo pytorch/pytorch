@@ -12,12 +12,18 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
+#include <c10/macros/Macros.h>
 #include <c10/util/llvmMathExtras.h>
 #include <cassert>
 #include <climits>
 #include <cstring>
 #include <iterator>
 #include <list>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
 
 namespace c10 {
 
@@ -894,3 +900,5 @@ std::ostream& operator<<(
 }
 
 } // end namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()

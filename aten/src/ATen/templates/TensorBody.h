@@ -32,7 +32,9 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
+#include <ATen/core/SymInt.h>
 #include <ATen/core/TensorBase.h>
+
 
 #include <ATen/MethodOperators.h>
 
@@ -340,6 +342,10 @@ class TORCH_API Tensor: public TensorBase {
     return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
   }
 
+  Tensor meta() const {
+    return to(options().device(DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
+  }
+
   // ~~~~~ Autograd API ~~~~~
 
   /// \fn bool is_leaf() const;
@@ -628,8 +634,7 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace at
 
-// See Note [Avoiding Include Cycles In Static Dispatch]
-${static_dispatch_ops_headers}
+
 namespace at {
 ${tensor_method_definitions}
 } // namespace at
@@ -674,7 +679,7 @@ struct MaybeOwnedTraits<at::Tensor> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
   }
 };

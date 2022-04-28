@@ -251,7 +251,7 @@ void initScriptListBindings(PyObject* module) {
             try {
               for (py::handle obj : iter) {
                 iter_list.append(toIValue(
-                    py::object(obj, /*is_borrowed*/ true),
+                    py::reinterpret_borrow<py::object>(obj),
                     self->type()->getElementType()));
               }
             } catch (const py::cast_error& e) {
