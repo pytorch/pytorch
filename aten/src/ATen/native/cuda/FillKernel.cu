@@ -25,15 +25,10 @@ void fill_kernel_cuda(TensorIterator& iter, const Scalar& value) {
   if(at::isComplexType(dtype)) {
 #if AT_USE_JITERATOR()
   static const auto fill_string = jiterator_stringify(
-      template<typename scalar_t>
-      struct FillFunctor {
-        FillFunctor(scalar_t v): value(v) {}
-        __device__ __forceinline__ scalar_t operator() () const {
-          return value;
-        }
-        private:
-          scalar_t value;
-      };
+      template<typename T>
+      T fill_kernel(T value) {
+        return value;
+      }
   ); // fill_string
   AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "fill_cuda", [&]() {
       jitted_gpu_kernel<
