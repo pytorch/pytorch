@@ -1383,6 +1383,16 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   }
 }
 
+TEST(TestSymIntArrayRef, BasicConversion) {
+  const size_t X = 2, Y = 4, Z = 5;
+  std::vector<int64_t> tgt_size_v{2, 4, 5};
+  std::vector<c10::SymInt> tgt_size({X, Y, Z});
+  auto a = at::randn({1, 4, 1}, at::kCPU);
+  auto b = a.expand(tgt_size);
+  auto c = a.expand(tgt_size_v);
+  ASSERT_TRUE(torch::allclose(b, c));
+}
+
 TEST(TestSymInt, NarrowCopyWithSymbolicInt) {
   static const size_t LENGTH = 5;
   auto a = at::randn({10}, at::kCPU);
@@ -3000,6 +3010,11 @@ TEST(TestFunctionExecutor, RunDecompositionTest) {
 TEST(TestShapeGraphLinting, Basic) {
   auto schemas = RegisteredShapeComputeSchemas();
   for (const auto& schema : schemas) {
+    // arange does not acually support complex, leave as
+    // union[int, float] for now
+    if (schema->name() == "aten::arange") {
+      continue;
+    }
     auto g = shapeComputeGraphForSchema(*schema);
     TORCH_INTERNAL_ASSERT(g);
     LintShapeComputeGraph(schema, *g);
