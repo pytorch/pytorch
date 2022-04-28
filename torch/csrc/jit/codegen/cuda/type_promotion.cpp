@@ -211,6 +211,12 @@ Val* optionalCast(DataType dtype, Val* v) {
   }
 }
 
+Val* optionalCastStrict(DataType dtype, Val* v) {
+  TORCH_INTERNAL_ASSERT(v->getDataType().has_value());
+  const bool kSameDtype = v->getDataType().value() == dtype;
+  return (kSameDtype) ? v : castOp(dtype, v);
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
