@@ -97,6 +97,7 @@ from typing import Callable, List, Optional, Sequence, Tuple, Union, Dict
 DONT_REQUIRE_DERIVATIVE = {
     # These only depend on the input Tensor's shape and device, not the data
     "ones_like",
+    "zeros_like",
     "rand_like",
     "randn_like",
     # These are only implemented on integral types
@@ -170,7 +171,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "triu",
     "chunk",
     "zero_",
-    "zeros_like",
     "eq_",
     "ne_",
     "add",
@@ -672,6 +672,7 @@ for (const auto& _t: ${arg}) {
 def gen_variable_type(
     out: str,
     native_yaml_path: str,
+    tags_yaml_path: str,
     fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
