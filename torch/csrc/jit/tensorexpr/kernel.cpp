@@ -485,10 +485,6 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     hasRandom_ = true;
   }
 
-  // Check whether the node is to create an new tensor
-  // TODO: It is hard to deduce the layout of the generated tensor.
-  bool is_tensor_creation = true;
-
   // Check if the tensor is a contiguous tensor
   bool is_contiguous = false;
   // Check if the tensor is a channels-last contiguous tensor
@@ -497,7 +493,6 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     if (input->type()->kind() != TypeKind::TensorType)
       continue;
 
-    is_tensor_creation = false;
     TORCH_CHECK(bufs_.count(input) > 0);
     auto buf_ = bufs_.at(input);
 
@@ -510,17 +505,12 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
            buf_->is_contiguous(at::MemoryFormat::ChannelsLast3d) ||
            buf_->is_channels_last_1d_contiguous());
     }
-
-    TORCH_INTERNAL_ASSERT(
-        is_tensor_creation ||
-        ((is_contiguous xor is_channels_last_contiguous) &&
-         (is_contiguous || is_channels_last_contiguous)));
   }
 
   auto outputType = findDtypeForValue(v);
   std::vector<ExprHandle> outputShape = sizesForValue(v);
   std::vector<ExprHandle> outputStrides;
-  if (is_channels_last_contiguous) {
+  if (is_channels_last_contiguous && (!is_contiguous)) {
     outputStrides =
         c10::fmap<ExprHandle>(make_channels_last_strides(outputShape));
   } else {
@@ -1049,8 +1039,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
 
   auto is_concrete_cont = [](const torch::jit::Value* input) {
     if (input->isCompleteTensor()) {
-      return isContiguous(input) ||
-          isContiguous(input, at::MemoryFormat::ChannelsLast);
+      return isContiguous(input);
     } else {
       return false;
     }
@@ -1058,8 +1047,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
 
   auto is_symbolic_cont = [](std::vector<torch::jit::StrideInput> desc) {
     if (desc.size() == 1) {
-      return desc[0] == torch::jit::StrideInput::TENSOR_CONT ||
-          desc[0] == torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST;
+      return desc[0] == torch::jit::StrideInput::TENSOR_CONT;
     } else {
       return false;
     }
@@ -1246,8 +1234,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   BufPtr buf = bufs_.at(v);
   // output is contiguous, no work to do
   auto stride_desc = tensorOutputStrideDesc_[v->offset()];
-  if (stride_desc == torch::jit::StrideInput::TENSOR_CONT ||
-      stride_desc == torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST) {
+  if (stride_desc == torch::jit::StrideInput::TENSOR_CONT) {
     return Tensor(buf, nullptr);
   }
 
