@@ -4,21 +4,21 @@ namespace torch {
 namespace lazy {
 
 namespace {
-std::atomic<const BackendImplInterface*> backend_impl_registry;
+std::atomic<BackendImplInterface*> backend_impl_registry;
 } // namespace
 
 bool hasBackend() {
   return !!backend_impl_registry.load();
 }
 
-const BackendImplInterface* getBackend() {
+BackendImplInterface* getBackend() {
   auto* interface = backend_impl_registry.load();
   TORCH_CHECK(interface, "Lazy tensor backend not registered.");
   return interface;
 }
 
 BackendRegistrar::BackendRegistrar(
-    const BackendImplInterface* backend_impl_interface) {
+    BackendImplInterface* backend_impl_interface) {
   backend_impl_registry.store(backend_impl_interface);
 }
 

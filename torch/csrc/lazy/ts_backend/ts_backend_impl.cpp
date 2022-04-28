@@ -145,7 +145,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   torch::lazy::BackendDevice GetBackendDevice(
       c10::Device device) const override;
 
-  void SetRngSeed(size_t seed) const override {
+  void SetRngSeed(size_t seed) override {
     LOG(FATAL) << "Not implemented yet.";
   }
 
