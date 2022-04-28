@@ -5,6 +5,11 @@ from torchgen.api.types import (
     FunctionalizationLambda,
     ViewInverseSignature,
     NativeSignature,
+    CType,
+    BaseCType,
+    VectorCType,
+    tensorListT,
+    tensorT,
 )
 from torchgen.api.translate import translate
 from torchgen.context import (
@@ -28,7 +33,7 @@ from torchgen.model import (
 )
 from torchgen.selective_build.selector import SelectiveBuilder
 
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Union, Tuple, Callable
 
 # This file contains codegen that relates to the functionalization pass.
 # It includes:
@@ -118,6 +123,18 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
     )
 
 
+# We need to wrap / unwrap various arguments from the op in the functionalization kernels.
+# Some op schemas include non-owning types though (like TensorList),
+# and when we unwrap them we expect to get out an owning type!.
+# We also return a lambda that tells you how to conver the non-owning type argument into the owning type.
+def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
+    if t == BaseCType(tensorListT):
+        return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
+    # There are technically other non-owning types out there (like IntArrayRef),
+    # but functionalization only actually cares about the ones involving tensors.
+    return t, lambda x: x
+
+
 # unwraps all tensor-like arguments, returning:
 # (1) a string containing all of the logic that does the unwrapping
 # (2) a context, to be used by translate(), with all of the relevant bindings.
@@ -137,14 +154,17 @@ def unwrap_tensor_args(
             maybe_sync_input = (
                 "" if is_view_op else f"at::functionalization::impl::sync({arg.name});"
             )
+            unwrapped_type, conversion_fn = get_owning_type(
+                arg.nctype.remove_const_ref().type
+            )
             unwrapped_tensor_args.append(
                 f"""
-      {arg.nctype.remove_const_ref().cpp_type()} {unwrapped_name};
+      {unwrapped_type.cpp_type()} {unwrapped_name};
       if (at::functionalization::impl::isFunctionalTensor({arg.name})) {{
         {maybe_sync_input}
         {unwrapped_name} = at::functionalization::impl::from_functional_tensor({arg.name});
       }} else {{
-        {unwrapped_name} = {arg.name};
+        {unwrapped_name} = {conversion_fn(arg.name)};
       }}"""
             )
             context.append(arg.with_name(unwrapped_name))
@@ -381,21 +401,7 @@ def emit_inplace_functionalization_body(
         for e in translate(unwrapped_args_ctx, dispatcher_sig.arguments(), method=False)
     ]
 
-    # Note [functionalizating copy_() and not preserving strides]
-    # copy_() can't be functionalized, since there doesn't exist an out-of-place variant.
-    # We could add one, but that would be sub-optimal for functorch: copy() would need to allocate a fresh tensor.
-    # This may seem like a large hack for one optimization, but copy_() is one of the most common inplace operators.
-    # Instead, we can replace `self.copy_(src)` with `src.to(self).expand_as(self)`.
-    # This maintains the exact same semantics, EXCEPT that we don't preserve the strides from `self`.
-    # This seems like a reasonable tradeoff, for a few reasons:
-    # - mutation removal is only used by functorch, and not by Vulkan or XLA. Functorch already doesn't preserve strides.
-    # - There are actually a few other places where the functionalization pass currently doesn't support strides:
-    #   calls to slice/diagonal_scatter don't currently preserve the strides of their inputs (but maybe we should fix this).
-    if str(f.func.name) == "copy_":
-        functional_call_str = """\
-            auto tmp_intermediate = at::_ops::to_other::call(src_, self_, non_blocking, false, c10::nullopt);
-            tmp_output = at::_ops::expand_copy::call(tmp_intermediate, self_.sizes(), false);"""
-    elif functional_op is None:
+    if functional_op is None:
         # We can't functionalize this inplace op, since we don't know what the corresponding functional op is.
         warn_str = f"""Note: the functionalization pass encountered an operator ({str(f.func.name)}) that it could not \
 functionalize, because it couldn't find an out-of-place equivalent of the operator to call. \
@@ -423,15 +429,14 @@ If this causes problems in your program, consider upstreaming the out-of-place o
                 unwrapped_args_ctx, functional_sig.arguments(), method=False
             )
         ]
-        functional_call_str = f"tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});"  # noqa: B950
 
     if f.func.is_out_fn():
         mutable_input_post_processing = "\n".join(
             [
                 f"""
-      auto {a.name}_functional = at::functionalization::impl::unsafeGetFunctionalWrapper({a.name});
-      {a.name}_functional->replace_({'std::get<' + str(i) + '>(tmp_output)' if len(f.func.returns) > 1 else 'tmp_output'});
-      {a.name}_functional->commit_update();"""
+      at::functionalization::impl::replace_(
+        {a.name}, {'std::get<' + str(i) + '>(tmp_output)' if len(f.func.returns) > 1 else 'tmp_output'});
+      at::functionalization::impl::commit_update({a.name});"""
                 for (i, a) in enumerate(f.func.arguments.out)
                 if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
             ]
@@ -440,9 +445,8 @@ If this causes problems in your program, consider upstreaming the out-of-place o
         mutable_input_post_processing = "\n".join(
             [
                 f"""
-      auto {a.name}_functional = at::functionalization::impl::unsafeGetFunctionalWrapper({a.name});
-      {a.name}_functional->replace_(tmp_output);
-      {a.name}_functional->commit_update();"""
+      at::functionalization::impl::replace_({a.name}, tmp_output);
+      at::functionalization::impl::commit_update({a.name});"""
                 for a in f.func.arguments.flat_all
                 if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
             ]
@@ -467,7 +471,7 @@ If this causes problems in your program, consider upstreaming the out-of-place o
         {return_type} tmp_output;
         {{
           at::AutoDispatchSkipFunctionalize guard;
-          {functional_call_str}
+          tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::call({', '.join(functional_exprs)});
         }}
         {mutable_input_post_processing}
         {return_str(f)};
