@@ -296,8 +296,13 @@ def _is_checkpoint_valid():
 
 
 def variable(*args, **kwargs):
-    warnings.warn("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")
-    return torch.tensor(*args, **kwargs)
+    raise RuntimeError("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")
+
+# Monkey patching variable.Variable to fix FX codegen. FX generates a call by roughly doing
+# f"{fn.__module__}.{fn.__name__}(...). This yields torch.autograd.variable.Variable(...) in the
+# output of an FX graph.  Unfortunately the module name torch.autograd.variable is shadowed by the
+# deprecated function - variable(...).
+variable.Variable = Variable  # type: ignore[attr-defined]
 
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")

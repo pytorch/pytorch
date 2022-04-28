@@ -23,7 +23,7 @@ Squeeze::Squeeze(const torch::lazy::Value& input, int dim)
     : torch::lazy::TsNode(torch::lazy::OpKind(at::aten::squeeze), {input},
                           /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
-  SetShapeDeferred(
+  addComputedShape(
       [&]() {
         const auto& input_shape = input.shape();
         return torch::lazy::Shape(input_shape.scalar_type(),

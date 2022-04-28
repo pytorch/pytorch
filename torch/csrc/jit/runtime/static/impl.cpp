@@ -164,6 +164,7 @@ void OptimizeGraph(
       ReplaceWithMaybeCopy(graph);
     }
     FuseListUnpack(graph);
+    RemoveUnnecessaryOutputs(graph);
 #endif
   }
 

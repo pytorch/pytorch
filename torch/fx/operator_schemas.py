@@ -1,6 +1,7 @@
 import torch
 import inspect
 import numbers
+import types
 import typing
 import enum
 import warnings
@@ -256,7 +257,7 @@ def normalize_function(
     if kwargs is None:
         kwargs = {}
     new_args_and_kwargs = None
-    if target in boolean_dispatched or target.__module__ in ['torch.nn.functional', 'torch.functional']:
+    if not isinstance(target, types.BuiltinFunctionType):
         target_for_analysis = target
         if target in boolean_dispatched:
             # HACK: `boolean_dispatch` as used in `torch.nn.functional` makes it so that we have
