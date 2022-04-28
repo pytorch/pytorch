@@ -634,13 +634,6 @@
     "amp_definitely_not_available",
     "defaultdict"
   ],
-  "torch.cuda.memory": [
-    "Any",
-    "Device",
-    "Dict",
-    "Union",
-    "is_initialized"
-  ],
   "torch.cuda.nccl": [
     "init_rank",
     "is_available",

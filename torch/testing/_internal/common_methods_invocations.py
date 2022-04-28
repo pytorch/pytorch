@@ -23,7 +23,7 @@ from torch.testing._internal.common_dtype import (
     all_types, double_types, empty_types
 )
 from torch.testing._internal.common_device_type import \
-    (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
+    (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, skipCUDAIf, precisionOverride,
      toleranceOverride, tol, has_cusolver)
 from torch.testing._internal.common_cuda import (
@@ -4902,6 +4902,9 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     copy = op_info.name == "index_copy"
     # target.index_fill(dim, idx, value)
     fill = op_info.name == "index_fill"
+    # target._index_reduce(dim, idx, source, reduce, *, include_self=True)
+    reduce_op = op_info.name == "_index_reduce"
+
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_permutation = partial(torch.randperm, device=device, dtype=torch.int64)
@@ -4912,8 +4915,11 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     shapes = [(), (1,), (S, S)]
     # extra parameter for add
     alphas = (-1, 0, 2) if add else (None,)
+    # extra parameters for reduce
+    include_selfs = (True, False) if reduce_op else (None,)
+    reduces = ('prod', 'mean', 'amin', 'amax') if reduce_op else (None,)
 
-    for shape, alpha in product(shapes, alphas):
+    for shape, alpha, include_self, reduce in product(shapes, alphas, include_selfs, reduces):
         t = make_arg(shape)
         args = []
 
@@ -4927,14 +4933,20 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
         args.append(idx)
 
         # source
-        if copy or add:
+        if copy or add or reduce_op:
             args.append(make_arg(shape))
         elif fill:
             # A weird number to catch errors
             args.append(make_arg((1,)).item())
 
+        # reduce
+        if reduce_op:
+            args.append(reduce)
+
         args = tuple(args)
         kwargs = {} if alpha is None else {"alpha": alpha}
+        if include_self is not None:
+            kwargs['include_self'] = include_self
 
         yield SampleInput(t, args=args, kwargs=kwargs)
 
@@ -8977,9 +8989,6 @@ op_db: List[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
-                        # 76046
-                        DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                                     dtypes=(torch.bool,)),
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
@@ -9157,9 +9166,6 @@ op_db: List[OpInfo] = [
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               # 76046
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                            dtypes=(torch.int32, torch.int64)),
                # 76047
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                             dtypes=(torch.int8, torch.int16, torch.int32, torch.int64)),
@@ -9532,9 +9538,6 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/54841
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.bfloat16]),
-                       # 76046
-                       DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                                    dtypes=(torch.int32, torch.int64)),
                    ),
                    sample_kwargs=sample_kwargs_clamp_scalar,
                    sample_inputs_func=sample_inputs_clamp_scalar),
@@ -11895,12 +11898,9 @@ op_db: List[OpInfo] = [
                # RuntimeError: falseINTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                            'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            ],
-           skips=(
-               # 76046
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                            dtypes=(torch.float16,)),
-           ),
            sample_inputs_func=sample_inputs_local_response_norm,),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
@@ -12177,6 +12177,8 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
         ),
         skips=(
             # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 4096
@@ -12190,9 +12192,6 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
-            # 76046
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                         dtypes=(torch.float16,)),
         ),
     ),
     OpInfo('nn.functional.avg_pool2d',
@@ -12399,9 +12398,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               # 76046
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                            dtypes=(torch.float16,)),
+           ),
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                            'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            )),
     OpInfo('nn.functional.bilinear',
            aten_name='bilinear',
@@ -12722,7 +12722,10 @@ op_db: List[OpInfo] = [
         supports_out=False,
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',), ],
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+        ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
             DecorateInfo(unittest.expectedFailure,
@@ -12735,9 +12738,6 @@ op_db: List[OpInfo] = [
                          'TestUnaryUfuncs', "test_reference_numerics_extremal",
                          dtypes=(torch.complex64, torch.complex128), device_type='cpu',
                          active_if=(IS_MACOS or IS_WINDOWS)),
-            # 76046
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                         dtypes=(torch.float16,)),
         ),
     ),
     OpInfo(
@@ -14472,6 +14472,11 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
+    OpInfo('_index_reduce',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=True,
+           decorators=[onlyCPU],
+           sample_inputs_func=sample_inputs_index),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -15138,10 +15143,6 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           skips=(
-               # 76046
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.bool,)),
-           ),
            sample_inputs_func=sample_inputs_squeeze),
     OpInfo('fill_',
            op=lambda x, scalar: torch.fill_(x.clone(), scalar),
@@ -16559,8 +16560,6 @@ op_db: List[OpInfo] = [
             # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
-            # 76046
-            DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02),
@@ -16570,6 +16569,8 @@ op_db: List[OpInfo] = [
                          'TestReductions', 'test_ref_small_input'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestMasked', 'test_reference_masked'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
         ],
         sample_inputs_func=sample_inputs_masked_std_var,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
@@ -16759,10 +16760,11 @@ op_db: List[OpInfo] = [
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
             # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
-            # 76046
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                         dtypes=(torch.float16,)),
         ),
+        decorators=(
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+        )
     ),
     OpInfo(
         "nn.functional.hinge_embedding_loss",
