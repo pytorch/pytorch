@@ -63,7 +63,7 @@ if(INTERN_BUILD_ATEN_OPS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
-  file(GLOB_RECURSE all_python "${PROJECT_SOURCE_DIR}/tools/codegen/*.py")
+  file(GLOB_RECURSE all_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
   COMMAND
   "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
@@ -458,10 +458,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
     "${TOOLS_PATH}/autograd/gen_inplace_or_view_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
-    "${TOOLS_PATH}/codegen/gen_backend_stubs.py"
-    "${TOOLS_PATH}/codegen/gen_lazy_tensor.py"
-    "${TOOLS_PATH}/codegen/api/lazy.py"
-    "${TOOLS_PATH}/codegen/dest/lazy_ir.py"
+    "${TORCH_ROOT}/torchgen/gen_backend_stubs.py"
+    "${TORCH_ROOT}/torchgen/gen_lazy_tensor.py"
+    "${TORCH_ROOT}/torchgen/api/lazy.py"
+    "${TORCH_ROOT}/torchgen/dest/lazy_ir.py"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -652,10 +652,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
     )
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
-  endif()
-
-  if(USE_MLCOMPUTE)
-    include(../mlc/mlc_build.cmake)
   endif()
 
   if(USE_ROCM)
@@ -1542,9 +1538,6 @@ if(USE_CUDA)
   endif()
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
-endif()
-if(USE_MLCOMPUTE)
-  target_link_libraries(torch PUBLIC torch_mlc_library)
 endif()
 
 if(PRINT_CMAKE_DEBUG_INFO)
