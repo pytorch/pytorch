@@ -24,9 +24,11 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
-     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, precisionOverride,
+     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, skipCUDAIf, precisionOverride,
      toleranceOverride, tol, has_cusolver)
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN
+from torch.testing._internal.common_cuda import (
+    CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
+    _get_torch_cuda_version, _get_magma_version)
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -1467,6 +1469,22 @@ def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad, **k
             yield SampleInput(make_arg(size), args=(n,))
         for n in [-4, -2, -1]:
             yield SampleInput(make_arg_fullrank(*size), args=(n,))
+
+def sample_inputs_pow(op, device, dtype, requires_grad, **kwargs):
+    # If base is complex allow for negative real/imag components
+    lhs_low = 0 if not dtype.is_complex else -9
+
+    # Integral dtype helper
+    def is_integral(dtype):
+        return dtype in {torch.int8, torch.int16, torch.int32, torch.int64}
+
+    # Only Interal types do not support negative exponents
+    rhs_low = 1 if is_integral(dtype) else -9
+
+    op.lhs_make_tensor_kwargs['low'] = lhs_low
+    op.rhs_make_tensor_kwargs['low'] = rhs_low
+
+    return sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
 
 def sample_inputs_hsplit(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((6,), dtype=dtype, device=device,
@@ -5587,6 +5605,80 @@ def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=
         # generate upper-triangular inputs
         u = l.detach().clone().mT.contiguous().requires_grad_(requires_grad)
         yield SampleInput(u, kwargs=dict(upper=True))
+
+def sample_inputs_linalg_ldl_factor(op_info, device, dtype, requires_grad=False, **kwargs):
+    from torch.testing._internal.common_utils import (
+        random_hermitian_pd_matrix,
+        random_symmetric_pd_matrix,
+    )
+
+    device = torch.device(device)
+
+    # Symmetric inputs
+    yield SampleInput(
+        random_symmetric_pd_matrix(S, dtype=dtype, device=device),
+        kwargs=dict(hermitian=False),
+    )  # single matrix
+    yield SampleInput(
+        random_symmetric_pd_matrix(S, 2, dtype=dtype, device=device),
+        kwargs=dict(hermitian=False),
+    )  # batch of matrices
+    yield SampleInput(
+        torch.zeros(0, 0, dtype=dtype, device=device), kwargs=dict(hermitian=False)
+    )  # 0x0 matrix
+    yield SampleInput(
+        torch.zeros(0, 2, 2, dtype=dtype, device=device), kwargs=dict(hermitian=False)
+    )  # zero batch of matrices
+
+    # Hermitian inputs
+    # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
+    magma_254_available = device.type == 'cuda' and _get_magma_version() >= (2, 5, 4)
+    if dtype.is_complex and (device.type == 'cpu' or magma_254_available):
+        yield SampleInput(
+            random_hermitian_pd_matrix(S, dtype=dtype, device=device),
+            kwargs=dict(hermitian=True),
+        )  # single matrix
+        yield SampleInput(
+            random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),
+            kwargs=dict(hermitian=True),
+        )  # batch of matrices
+
+def sample_inputs_linalg_ldl_solve(op_info, device, dtype, requires_grad=False, **kwargs):
+    # Generate LDL factors of symmetric (and Hermitian on CPU) matrices
+    from torch.testing._internal.common_utils import random_hermitian_pd_matrix, random_symmetric_pd_matrix
+    device = torch.device(device)
+    symmetric_inputs = (
+        random_symmetric_pd_matrix(S, dtype=dtype, device=device),  # single matrix
+        random_symmetric_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
+        torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
+        torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
+    )
+    hermitian_inputs = (
+        random_hermitian_pd_matrix(S, dtype=dtype, device=device),
+        random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),
+    ) if device.type == 'cpu' and dtype.is_complex else ()
+    test_cases1 = (torch.linalg.ldl_factor_ex(a, hermitian=False) for a in symmetric_inputs)
+    test_cases2 = (torch.linalg.ldl_factor_ex(a, hermitian=True) for a in hermitian_inputs)
+
+    # Symmetric case
+    for test_case in test_cases1:
+        factors, pivots, _ = test_case
+        factors.requires_grad = requires_grad
+        for B_batch_shape in ((), factors.shape[:-2]):
+            B = make_tensor((*B_batch_shape, factors.shape[-1], S), device=device, dtype=dtype, requires_grad=requires_grad)
+            yield SampleInput(factors, args=(pivots, B), kwargs=dict(hermitian=False))
+            clone_factors = factors.detach().clone().requires_grad_(requires_grad)
+            yield SampleInput(clone_factors, args=(pivots, B), kwargs=dict(hermitian=False))
+
+    # Hermitian case
+    for test_case in test_cases2:
+        factors, pivots, _ = test_case
+        factors.requires_grad = requires_grad
+        for B_batch_shape in ((), factors.shape[:-2]):
+            B = make_tensor((*B_batch_shape, factors.shape[-1], S), device=device, dtype=dtype, requires_grad=requires_grad)
+            yield SampleInput(factors, args=(pivots, B), kwargs=dict(hermitian=True))
+            clone_factors = factors.detach().clone().requires_grad_(requires_grad)
+            yield SampleInput(clone_factors, args=(pivots, B), kwargs=dict(hermitian=True))
 
 def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kwargs):
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
@@ -10563,6 +10655,29 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ]),
+    OpInfo('linalg.ldl_factor',
+           aten_name='linalg_ldl_factor',
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_linalg_ldl_factor,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+           ),
+    OpInfo('linalg.ldl_factor_ex',
+           aten_name='linalg_ldl_factor_ex',
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_linalg_ldl_factor,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+           ),
+    OpInfo('linalg.ldl_solve',
+           aten_name='linalg_ldl_solve',
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_linalg_ldl_solve,
+           decorators=[
+               skipCUDAIf(_get_torch_cuda_version() < (11, 4), "not available before CUDA 11.3.1"),
+               skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           ),
     OpInfo('linalg.lstsq',
            aten_name='linalg_lstsq',
            dtypes=floating_and_complex_types(),
@@ -13045,17 +13160,14 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
                     supports_two_python_scalars=True,
-                    lhs_make_tensor_kwargs=dict(low=0),
-                    # TODO: FIXME: pow needs a way of specifying that for integer
-                    #   types only it does not support negative exponentes
-                    rhs_make_tensor_kwargs=dict(low=1)),
+                    sample_inputs_func=sample_inputs_pow),
     BinaryUfuncInfo('float_power',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
                     promotes_int_to_float=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
-                    lhs_make_tensor_kwargs=dict(low=0),
+                    sample_inputs_func=sample_inputs_pow,
                     skips=(
                         # FIXME
                         # AssertionError: Object comparison failed: torch.float64 != torch.float32
