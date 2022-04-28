@@ -16,13 +16,6 @@ static ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTyp
   return tmap;
 }
 
-std::unordered_map<std::string, std::function<PyObject*(void*)>>&
-getClassConverter() {
-  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
-      classConverter;
-  return classConverter;
-}
-
 c10::ClassTypePtr getCustomClassTypeImpl(const std::type_index &tindex) {
   auto& tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(tindex);
