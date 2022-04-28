@@ -202,7 +202,7 @@ def issubinstance(data, data_type):
 # [Note: TypeMeta and TypeAlias]
 # In order to keep compatibility for Python 3.6, use Meta for the typing.
 # TODO: When PyTorch drops the support for Python 3.6, it can be converted
-# into the Alias system and using `__class_getiterm__` for DataPipe. The
+# into the Alias system and using `__class_getitem__` for DataPipe. The
 # typing system will gain benefit of performance and resolving metaclass
 # conflicts as elaborated in https://www.python.org/dev/peps/pep-0560/
 
@@ -376,14 +376,23 @@ def _generate_iterdatapipe_msg(datapipe):
 def _check_iterator_valid(datapipe, iterator_id) -> None:
     r"""
     Given an instance of a DataPipe and an iterator ID, check if they match, and if not, raises an exception.
+    In the case of ChildDataPipe, the ID gets compared to the one stored in `main_datapipe` as well.
     """
     if hasattr(datapipe, "_is_child_datapipe") and datapipe._is_child_datapipe is True:
-        pass  # TODO: Add logic for multiple ChildDataPipe
+        if hasattr(datapipe, "_check_valid_iterator_id"):
+            if datapipe._check_valid_iterator_id(iterator_id):
+                pass
+            else:
+                raise RuntimeError("This iterator has been invalidated, because a new iterator has been created "
+                                   f"from one of the ChildDataPipes of "
+                                   f"{_generate_iterdatapipe_msg(datapipe.main_datapipe)}")
+        else:
+            raise RuntimeError("ChildDataPipe must have method `_check_valid_iterator_id`.")
     else:
         if datapipe._valid_iterator_id == iterator_id:
             pass
         else:
-            raise RuntimeError("This iterator has been invalidated, because another iterator has been created"
+            raise RuntimeError("This iterator has been invalidated, because another iterator has been created "
                                f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}")
 
 
@@ -391,10 +400,16 @@ def _set_datapipe_valid_iterator_id(datapipe):
     r"""
     Given a DataPipe, set or update its valid iterator ID.
     """
-    if datapipe._valid_iterator_id is None:
-        datapipe._valid_iterator_id = 0
+    if hasattr(datapipe, "_is_child_datapipe") and datapipe._is_child_datapipe is True:
+        if hasattr(datapipe, "_set_main_datapipe_valid_iterator_id"):
+            datapipe._set_main_datapipe_valid_iterator_id()
+        else:
+            raise RuntimeError("ChildDataPipe must have method `_set_main_datapipe_valid_iterator_id`.")
     else:
-        datapipe._valid_iterator_id += 1
+        if datapipe._valid_iterator_id is None:
+            datapipe._valid_iterator_id = 0
+        else:
+            datapipe._valid_iterator_id += 1
     return datapipe._valid_iterator_id
 
 
@@ -420,8 +435,7 @@ def hook_iterator(namespace, profile_name):
             # TODO: Add try-except to in-place reduce traceback from the Exception
             # See: https://github.com/pytorch/data/issues/284
             with context():
-                if self.source_dp.singleton_mode:
-                    _check_iterator_valid(self.source_dp, self.iterator_id)
+                _check_iterator_valid(self.source_dp, self.iterator_id)
                 return next(self.iterator)
 
         def __getattr__(self, name):
@@ -443,8 +457,7 @@ def hook_iterator(namespace, profile_name):
                 while True:
                     request = yield response
                     with context():  # Pass through here every time `__next__` is called
-                        if datapipe.singleton_mode:
-                            _check_iterator_valid(datapipe, iterator_id)
+                        _check_iterator_valid(datapipe, iterator_id)
                         response = gen.send(request)
             except StopIteration as e:
                 return e.value
