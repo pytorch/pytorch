@@ -1459,18 +1459,30 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     // If nnz is smaller than size, then either indices[dim] or index gets sorted,
     // then this follows by a binary search to find interesections.
     const auto get_selected_indices_small_nnz_large_size = [&]() -> std::tuple<Tensor, Tensor> {
+      const auto grain_size = at::internal::GRAIN_SIZE;
+      const auto n_threads_nnz = std::max<int64_t>(
+          1, std::min<int64_t>((nnz + grain_size - 1) / grain_size, at::get_num_threads())
+      );
+      const auto n_threads_index = std::max<int64_t>(
+          1, std::min<int64_t>((index_len + grain_size - 1) / grain_size, at::get_num_threads())
+      );
       const auto search_in_dim_indices
         // if either dim_indices or index requires sorting, we compare
         // the cost of sort + binary search, which is comparing
         // (len(dim_indices) + len(index)) * log(len(index)) to
         // (len(dim_indices) + len(index)) * log(len(dim_indices)).
         // That simplifies to comparing len(dim_indices) to len(index).
-        = (nnz <= index_len)
+        // Additionally, we take into consideration potential parallel
+        // speedup.
+        = (nnz / n_threads_nnz <= index_len / n_threads_index)
         // if self is coalesced and dim is 0, then we compare
         // index_len * log(len(dim_indices)), which is binary search into dim_indices,
-        // to (len(index_len) + len(dim_indices)) * log(index_len)
+        // to (len(index_len) + len(dim_indices)) * log(index_len).
+        // Additionally, we take into consideration potential parallel
+        // speedup.
           || (self.is_coalesced() && dim == 0
-              && index_len * std::log2(nnz) <= (nnz + index_len) * std::log2(index_len))
+          && (index_len * std::log2(nnz) / n_threads_index
+            <= (nnz / n_threads_nnz + index_len) * std::log2(index_len)))
         ? true : false;
 
       // src is a source of indices to binary search in sorted
