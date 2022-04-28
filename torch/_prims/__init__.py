@@ -4,10 +4,11 @@ from torch import Tensor
 import torch._prims.utils as utils
 from torch._prims.utils import TensorLike, TensorLikeType, TensorMeta, ShapeType
 from torch.overrides import has_torch_function, handle_torch_function
-import torch._C
-from torch._C._nvfuser import FusionDefinition, DataType  # type: ignore[import]
 
-from typing import Sequence, Optional, Union, Callable, List, Tuple
+FusionDefinition = torch._C._nvfuser.FusionDefinition  # type: ignore[attr-defined]
+DataType = torch._C._nvfuser.DataType  # type: ignore[attr-defined]
+
+from typing import Sequence, Optional, Union, Callable, List, Tuple, Any
 from numbers import Number
 from functools import reduce
 from enum import Enum
@@ -450,8 +451,8 @@ tan = _make_elementwise_unary_prim(
 # Elementwise binary operations
 #
 # TODO: we should be able to stamp these out but it's a little tricky with FX's name resolution
-def _add_nvfuser(fd: FusionDefinition, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.add(a, b)
+def _add_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.add(a, b)  # type: ignore[attr-defined]
 
 
 add = _make_elementwise_binary_prim(
@@ -505,8 +506,8 @@ def _div_aten(a, b):
     return torch.true_divide(a, b)
 
 
-def _div_nvfuser(fd: FusionDefinition, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.div(a, b)
+def _div_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.div(a, b)  # type: ignore[attr-defined]
 
 
 div = _make_elementwise_binary_prim(
@@ -523,8 +524,8 @@ eq = _make_elementwise_binary_prim(
 )
 
 
-def _ge_nvfuser(fd: FusionDefinition, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.ge(a, b)
+def _ge_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.ge(a, b)  # type: ignore[attr-defined]
 
 
 ge = _make_elementwise_binary_prim(
@@ -535,8 +536,8 @@ ge = _make_elementwise_binary_prim(
 )
 
 
-def _gt_nvfuser(fd: FusionDefinition, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.gt(a, b)
+def _gt_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.gt(a, b)  # type: ignore[attr-defined]
 
 
 gt = _make_elementwise_binary_prim(
@@ -547,8 +548,8 @@ gt = _make_elementwise_binary_prim(
 )
 
 
-def _le_nvfuser(fd: FusionDefinition, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.le(a, b)
+def _le_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.le(a, b)  # type: ignore[attr-defined]
 
 
 le = _make_elementwise_binary_prim(
@@ -559,8 +560,8 @@ le = _make_elementwise_binary_prim(
 )
 
 
-def _lt_nvfuser(fd: FusionDefinition, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.lt(a, b)
+def _lt_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.lt(a, b)  # type: ignore[attr-defined]
 
 
 lt = _make_elementwise_binary_prim(
@@ -583,8 +584,8 @@ min = _make_elementwise_binary_prim(
 )
 
 
-def _mul_nvfuser(fd: FusionDefinition, a: TensorLikeType, b: TensorLikeType):
-    return fd.Ops.mul(a, b)
+def _mul_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.mul(a, b)  # type: ignore[attr-defined]
 
 
 mul = _make_elementwise_binary_prim(
@@ -697,12 +698,12 @@ def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):
 
 
 def _broadcast_in_dim_nvfuser(
-    fd: FusionDefinition,
+    fd: Any,
     a: torch.Tensor,
     shape: ShapeType,
     broadcast_dimensions: ShapeType,
 ):
-    return fd.Ops.broadcast_in_dim(a, shape, broadcast_dimensions)
+    return fd.Ops.broadcast_in_dim(a, shape, broadcast_dimensions)  # type: ignore[attr-defined]
 
 
 _broadcast_in_dim_doc = """
@@ -1043,11 +1044,9 @@ _torch_dtype_to_nvfuser_dtype_map = {
 }
 
 
-def _convert_element_type_nvfuser(
-    fd: FusionDefinition, a: Tensor, dtype: torch.dtype
-) -> Tensor:
+def _convert_element_type_nvfuser(fd: Any, a: Tensor, dtype: torch.dtype) -> Tensor:
     nvfuser_dtype = _torch_dtype_to_nvfuser_dtype_map[dtype]
-    return fd.Ops.cast(nvfuser_dtype, a)
+    return fd.Ops.cast(nvfuser_dtype, a)  # type: ignore[attr-defined]
 
 
 _convert_element_type_doc = """

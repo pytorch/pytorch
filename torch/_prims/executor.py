@@ -6,8 +6,9 @@ from torch.fx import GraphModule
 from torch._prims.utils import TensorMeta
 from torch._prims.context import PrimContext
 
-import torch._C
-from torch._C._nvfuser import DataType, Fusion, FusionDefinition  # type: ignore[import]
+DataType = torch._C._nvfuser.DataType  # type: ignore[attr-defined]
+Fusion = torch._C._nvfuser.Fusion  # type: ignore[attr-defined]
+FusionDefinition = torch._C._nvfuser.FusionDefinition  # type: ignore[attr-defined]
 
 # TODO: refactor me into a common place
 _torch_dtype_to_nvfuser_dtype_map = {
