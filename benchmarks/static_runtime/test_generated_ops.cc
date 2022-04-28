@@ -1919,40 +1919,6 @@ TEST(StaticRuntime, autogen_xlogy_Tensor) {
       /*check_resize=*/true);
 }
 
-TEST(StaticRuntime, autogen__log_softmax) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %dim: int, %half_to_float: bool):
-        %bias: None = prim::Constant()
-        %ret = aten::_log_softmax(%self, %dim, %half_to_float)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto dim0 = 1;
-  auto half_to_float0 = false;
-  std::vector<IValue> args{self0, dim0, half_to_float0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto dim1 = 1;
-  auto half_to_float1 = false;
-  std::vector<IValue> args2{self1, dim1, half_to_float1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
 TEST(StaticRuntime, autogen__log_softmax_backward_data) {
   const std::string script = R"IR(
     graph(%grad_output: Tensor, %output: Tensor, %dim: int, %input_dtype: int):
