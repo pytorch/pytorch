@@ -94,6 +94,7 @@ struct THPFunction {
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
 
+    PyObject *saved_for_forward;
     // The actual PyNode (in the autograd graph) that this data was
     // saved for.  This field may be NULL (because a user can construct
     // a THPFunction directly from Python), but when this field is non-NULL,

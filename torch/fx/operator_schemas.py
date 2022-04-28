@@ -1,12 +1,14 @@
 import torch
 import inspect
 import numbers
+import types
 import typing
 import enum
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast, TYPE_CHECKING
 from torch._jit_internal import boolean_dispatched
 from ._compatibility import compatibility
+from torch._ops import OpOverloadPacket, OpOverload
 
 if TYPE_CHECKING:
     from .node import Argument
@@ -133,6 +135,8 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
             return_schemas=True, returns a tuple containing the optional Python signatures
             and the optional TorchScript Function signature
     """
+    if isinstance(op, OpOverloadPacket) or isinstance(op, OpOverload):
+        op = op.op
     override = _manual_overrides.get(op)
     if override:
         return (override, None) if return_schemas else None
@@ -253,7 +257,7 @@ def normalize_function(
     if kwargs is None:
         kwargs = {}
     new_args_and_kwargs = None
-    if target in boolean_dispatched or target.__module__ in ['torch.nn.functional', 'torch.functional']:
+    if not isinstance(target, types.BuiltinFunctionType):
         target_for_analysis = target
         if target in boolean_dispatched:
             # HACK: `boolean_dispatch` as used in `torch.nn.functional` makes it so that we have

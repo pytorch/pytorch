@@ -1,3 +1,6 @@
+.. automodule:: torch.package
+.. py:module:: torch.package.analyze
+
 .. currentmodule:: torch.package
 
 torch.package
@@ -13,7 +16,7 @@ will help you learn more about ``torch.package`` and how to use it.
 
 .. warning::
 
-    This module depends on the ``pickle`` module which is is not secure. Only unpackage data you trust.
+    This module depends on the ``pickle`` module which is not secure. Only unpackage data you trust.
 
     It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
     Never unpackage data that could have come from an untrusted source, or that could have been tampered with.

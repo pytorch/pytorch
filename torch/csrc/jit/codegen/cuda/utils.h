@@ -1,7 +1,8 @@
 #pragma once
 
-#include <ATen/core/jit_type.h>
+#include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -9,6 +10,12 @@ namespace fuser {
 namespace cuda {
 
 void debugPrint(const c10::TensorTypePtr& type);
+
+bool is_zero_dim_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
+bool is_zero_sized_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
+
+bool is_cpu_scalar(const at::Tensor& tensor);
+bool is_cpu_scalar(const c10::TensorType& tensor_type);
 
 //! Types of debug print-outs
 //!
@@ -42,6 +49,9 @@ bool useFallback();
 
 // Returns if unrolling should not be used for kernels with RNG in them.
 bool disableRNGUnrolling();
+
+//! Returns if index hoisting should be disabled
+TORCH_CUDA_CU_API bool disableIndexHoisting();
 
 //! Ceil integer division
 constexpr int64_t ceilDiv(int64_t a, int64_t b) {
@@ -115,6 +125,8 @@ constexpr unsigned int switch_pair(T t1, T t2) {
   constexpr unsigned int _WORD_SHIFT = 16;
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
 }
+
+std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type);
 
 } // namespace cuda
 } // namespace fuser

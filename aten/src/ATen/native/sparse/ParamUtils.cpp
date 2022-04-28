@@ -1,7 +1,15 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/ParamUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/ATen.h>
+#include <ATen/WrapDimUtils.h>
 #include <tuple>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_like_native.h>
+#endif
 
 namespace at {
 namespace native {

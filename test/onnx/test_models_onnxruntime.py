@@ -13,13 +13,11 @@ def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
 
     for opset_version in opset_versions:
         self.opset_version = opset_version
+        self.onnx_shape_inference = True
         run_model_test(self, model, False,
                        input=inputs, rtol=rtol, atol=atol)
 
         if self.is_script_test_enabled and opset_version > 11:
-            TestModels.onnx_shape_inference = True
-
-            outputs = model(inputs)
             script_model = torch.jit.script(model)
             run_model_test(self, script_model, False,
                            input=inputs, rtol=rtol, atol=atol)

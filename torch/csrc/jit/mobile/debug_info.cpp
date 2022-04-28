@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/mobile/debug_info.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 
@@ -121,14 +122,26 @@ MobileDebugTable::MobileDebugTable(
       at::DataPtr debug_data;
       size_t debug_size{0};
       std::tie(debug_data, debug_size) = reader->getRecord(record_name);
-      auto ivalues =
-          std::move(
-              *jit::unpickle(
-                   reinterpret_cast<const char*>(debug_data.get()), debug_size)
-                   .toTuple())
-              .elements();
-      SourceRangeDeserializer deserializer;
-      for (auto& val : ivalues) {
+      auto ivalueTuple = jit::unpickle(
+          reinterpret_cast<const char*>(debug_data.get()),
+          debug_size,
+          nullptr,
+          {},
+          c10::parseType);
+      const auto& ivalues = ivalueTuple.toTuple()->elements();
+      IValue lines;
+      std::unique_ptr<SourceRangeDeserializer> deserializer;
+      if (ivalues.size() == 3 && ivalues[0].isString() &&
+          kFormatWithStringTable == ivalues[0].toStringRef()) {
+        // new format
+        deserializer = std::make_unique<SourceRangeDeserializer>(ivalues[1]);
+        lines = ivalues[2];
+      } else {
+        deserializer = std::make_unique<SourceRangeDeserializer>();
+        lines = ivalueTuple;
+      }
+
+      for (auto& val : lines.toTuple()->elements()) {
         auto tup_elems = std::move(*std::move(val).toTuple()).elements();
         // For BC we decode only tuples with 3 elements
         // assuming it contains
@@ -136,7 +149,7 @@ MobileDebugTable::MobileDebugTable(
         if (tup_elems.size() == 3) {
           int64_t debug_handle = tup_elems[kSourceRangeTagIndex].toInt();
           auto source_range =
-              deserializer.deserialize(tup_elems[kSourceRangeIndex]);
+              deserializer->deserialize(tup_elems[kSourceRangeIndex]);
           source_range_map.emplace(debug_handle, std::move(source_range));
         }
       }

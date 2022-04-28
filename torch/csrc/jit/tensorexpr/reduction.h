@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -36,11 +35,11 @@ class TORCH_API Reducer {
     return init_;
   }
 
-  ReduceOpPtr operator()(
-      BufPtr result_buf,
+  ExprHandle operator()(
+      BufHandle result_buf,
       ExprHandle body,
-      const std::vector<ExprPtr>& output,
-      const std::vector<VarPtr>& inner) const;
+      const std::vector<ExprHandle>& output,
+      const std::vector<VarHandle>& inner) const;
 
   ReduceOpPtr operator()(
       BufPtr result_buf,
@@ -111,6 +110,16 @@ class TORCH_API Reducer {
     auto e = interaction(accum, body);
     return e.node();
   }
+  static ExprHandle complete(
+      BufHandle accumulator,
+      ReduceInteraction interaction,
+      ExprHandle body,
+      const std::vector<ExprHandle>& output_args,
+      const std::vector<VarHandle>& reduce_args) {
+    ExprHandle accum = Load::make(body.dtype(), accumulator, output_args);
+    auto e = interaction(accum, body);
+    return e;
+  }
 
  private:
   ExprPtr init_;
@@ -133,6 +142,10 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
         body_(body),
         reduce_args_(std::move(reduce_args)),
         reducer_(reducer) {}
+  static ExprHandle make(
+      ExprHandle body,
+      std::vector<VarHandle> reduce_args,
+      const Reducer& reducer);
 
   // return the body expression which obtains the value to be reduced.
   ExprPtr body() const {

@@ -151,6 +151,10 @@ at::LinalgBackend Context::linalgPreferredBackend() const {
 
 void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   linalg_preferred_backend = b;
+  TORCH_CHECK((b != at::LinalgBackend::Cusolver) || hasCuSOLVER(),
+      "Cannot set preferred backend to cuSOLVER if PyTorch has not been compiled with cuSOLVER.");
+  TORCH_CHECK((b != at::LinalgBackend::Magma) || hasMAGMA(),
+      "Cannot set preferred backend to MAGMA if PyTorch has not been compiled with MAGMA.");
   if (b != at::LinalgBackend::Default) {
     TORCH_WARN_ONCE(
       "torch.backends.cuda.preferred_linalg_library is an experimental feature. "
@@ -179,6 +183,18 @@ bool Context::hasMKL() {
 bool Context::hasMKLDNN() {
 #if AT_MKLDNN_ENABLED()
   return true;
+#else
+  return false;
+#endif
+}
+
+bool Context::hasMPS() {
+#if defined(__APPLE__) and defined(TARGET_ON_MAC)
+  if (@available(macOS 12.3, *)) {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MPS);
+  } else {
+    return false;
+  }
 #else
   return false;
 #endif
@@ -231,6 +247,10 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 #endif
     engines.push_back(at::kNoQEngine);
 #endif // C10_MOBILE
+
+#if AT_MKLDNN_ENABLED()
+    engines.push_back(at::kONEDNN);
+#endif
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {

@@ -761,6 +761,32 @@ static void fuseListConstructListUnpack(Block* b) {
   }
 }
 
+// https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+static void eraseTupleConstruct(Block* block) {
+  std::vector<Value*> new_block_outputs;
+  bool found_tuple_construct = false;
+  // TupleConstruct is generated from the symbolics in quantized domain, and
+  // consumed by other quantized operators. The remained TupleConstruct should
+  // be at the output of the blocks.
+  for (auto* output : block->outputs()) {
+    auto output_node = output->node();
+    if (output_node->kind() == prim::TupleConstruct) {
+      found_tuple_construct = true;
+      for (auto* input : output_node->inputs()) {
+        new_block_outputs.emplace_back(input);
+      }
+    } else {
+      new_block_outputs.emplace_back(output);
+    }
+  }
+  if (found_tuple_construct) {
+    block->removeAllOutputs();
+    for (auto* output : new_block_outputs) {
+      block->registerOutput(output);
+    }
+  }
+}
+
 void removeMaxPoolUnusedOutput(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     auto n = *it;
@@ -1025,6 +1051,7 @@ void PeepholeOptimizeONNX(
   fuseListConstructListUnpack(graph->block());
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
+  eraseTupleConstruct(graph->block());
   EliminateDeadCode(
       graph->block(),
       true,

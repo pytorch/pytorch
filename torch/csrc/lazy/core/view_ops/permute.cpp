@@ -12,8 +12,8 @@ Permute::Permute(const Value& input, std::vector<int64_t> dims)
           /*num_outputs=*/1,
           MHash(dims)),
       dims_(std::move(dims)) {
-  SetShapeDeferred([&]() {
-    return MakePermuteShape(GetShapeFromTsOutput(operand(0)), dims_);
+  addComputedShape([&]() {
+    return MakePermuteShape(operand(0).shape(), dims_);
   });
 }
 

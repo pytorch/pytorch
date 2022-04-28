@@ -5,6 +5,7 @@ import torch
 from . import Sampler, Dataset
 import torch.distributed as dist
 
+__all__ = ["DistributedSampler", ]
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -19,7 +20,8 @@ class DistributedSampler(Sampler[T_co]):
     original dataset that is exclusive to it.
 
     .. note::
-        Dataset is assumed to be of constant size.
+        Dataset is assumed to be of constant size and that any instance of it always
+        returns the same elements in the same order.
 
     Args:
         dataset: Dataset used for sampling.

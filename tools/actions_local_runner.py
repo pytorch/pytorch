@@ -59,7 +59,7 @@ def git(args: List[str]) -> List[str]:
     return [line.strip() for line in lines]
 
 
-def find_changed_files() -> List[str]:
+def find_changed_files(ref_branch: str = "origin/master") -> List[str]:
     untracked = []
 
     for line in git(["status", "--porcelain"]):
@@ -74,7 +74,7 @@ def find_changed_files() -> List[str]:
     cached = git(["diff", "--cached", "--name-only"])
 
     # Committed
-    merge_base = git(["merge-base", "origin/master", "HEAD"])[0]
+    merge_base = git(["merge-base", ref_branch, "HEAD"])[0]
     diff_with_origin = git(["diff", "--name-only", merge_base, "HEAD"])
 
     # De-duplicate
@@ -334,10 +334,10 @@ class YamlStep(Check):
         return await shell_cmd(script, env=env)
 
 
-def changed_files() -> Optional[List[str]]:
+def changed_files(ref_branch: str = "origin/master") -> Optional[List[str]]:
     changed_files: Optional[List[str]] = None
     try:
-        changed_files = sorted(find_changed_files())
+        changed_files = sorted(find_changed_files(ref_branch))
     except Exception:
         # If the git commands failed for some reason, bail out and use the whole list
         print(
@@ -381,6 +381,11 @@ def main() -> None:
         "--no-quiet", help="output commands", action="store_true", default=False
     )
     parser.add_argument("--step", action="append", help="steps to run (in order)")
+    parser.add_argument(
+        "--ref_branch",
+        default="origin/master",
+        help="remote/branch used during comparison for --changed-only (default=origin/master",
+    )
     args = parser.parse_args()
 
     quiet = not args.no_quiet
@@ -396,7 +401,7 @@ def main() -> None:
 
         files = None
         if args.changed_only:
-            files = changed_files()
+            files = changed_files(args.ref_branch)
 
         checks = [ad_hoc_steps[args.job](files, quiet)]
     else:

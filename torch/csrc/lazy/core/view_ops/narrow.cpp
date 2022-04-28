@@ -16,8 +16,8 @@ Narrow::Narrow(
           MHash(base_indices, sizes)),
       base_indices_(base_indices.begin(), base_indices.end()),
       sizes_(sizes.begin(), sizes.end()) {
-  SetShapeDeferred([&]() {
-    return Shape(GetShapeFromTsOutput(operand(0)).scalar_type(), sizes);
+  addComputedShape([&]() {
+    return Shape(operand(0).shape().scalar_type(), sizes);
   });
 }
 
