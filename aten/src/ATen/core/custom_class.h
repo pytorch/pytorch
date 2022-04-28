@@ -2,12 +2,10 @@
 
 #include <typeindex>
 #include <memory>
-#include <unordered_map>
 
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/python_stub.h>
 
 namespace c10 {
 
@@ -27,6 +25,4 @@ const c10::ClassTypePtr& getCustomClassType() {
   return cache;
 }
 
-TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
-getClassConverter();
 }
