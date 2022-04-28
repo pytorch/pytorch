@@ -404,7 +404,7 @@ struct alignas(4) complex<Half> {
   // be constexpr
   C10_HOST_DEVICE explicit inline complex(const Half& real, const Half& imag)
       : real_(real), imag_(imag) {}
-  C10_HOST_DEVICE explicit inline complex(const c10::complex<float>& value)
+  C10_HOST_DEVICE inline complex(const c10::complex<float>& value)
       : real_(value.real()), imag_(value.imag()) {}
 
   // Conversion operator
