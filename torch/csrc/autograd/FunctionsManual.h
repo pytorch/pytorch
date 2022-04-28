@@ -57,8 +57,8 @@ Tensor norm_jvp(
   bool keepdim
 );
 Tensor norm_jvp(const Tensor& grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm);
-Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim);
-at::Tensor linalg_vector_norm_backward(at::Tensor grad, const at::Tensor & self, const at::Scalar & ord, at::Tensor norm, const at::OptionalIntArrayRef & opt_dim, bool keepdim);
+Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim, const c10::optional<ScalarType> opt_dtype);
+at::Tensor linalg_vector_norm_backward(at::Tensor grad, const at::Tensor & self, const at::Scalar & ord, at::Tensor norm, const at::OptionalIntArrayRef & opt_dim, bool keepdim, const c10::optional<ScalarType> opt_dtype);
 at::Tensor pow_backward(at::Tensor grad, const at::Tensor & self, const at::Scalar & exponent_);
 at::Tensor pow_backward_self(at::Tensor grad, const at::Tensor & self, const at::Tensor & exponent);
 at::Tensor pow_backward_exponent(at::Tensor grad, const at::Tensor& self, const at::Tensor& exponent, at::Tensor result);

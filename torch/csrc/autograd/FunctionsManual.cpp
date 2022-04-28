@@ -300,14 +300,16 @@ Tensor norm_jvp(const Tensor& self_p, const Tensor& self_t, const optional<Scala
   return norm_jvp(self_p, self_t, p_, norm, {}, true);
 }
 
-Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim, const c10::optional<ScalarType> opt_dtype) {
   auto dim = opt_dim.value_or(IntArrayRef({}));
-  return norm_jvp(self_p, self_t, scalar_ord, norm, dim, keepdim);
+  auto dtype = opt_dtype.value_or(self_p.scalar_type());
+  return norm_jvp(self_p.to(dtype), self_t.to(dtype), scalar_ord, norm, dim, keepdim).to(toRealValueType(dtype));
 }
 
-Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim) {
+Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const at::OptionalIntArrayRef& opt_dim, bool keepdim, const c10::optional<ScalarType> opt_dtype) {
   auto dim = opt_dim.value_or(IntArrayRef({}));
-  return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
+  auto dtype = opt_dtype.value_or(self.scalar_type());
+  return norm_backward(grad, self.to(dtype), scalar_ord, norm, dim, keepdim).to(self.scalar_type());
 }
 
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent) {
@@ -1002,8 +1004,7 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p
   }
   grad_output = grad_output.sum(
       reduce_dims, /*keepdim=*/true, /*dtype=*/real_acc_type);
-  auto nb = linalg_vector_norm_backward(
-      grad_output, self, p, norm, reduce_dims, /*keepdim=*/true);
+  auto nb = norm_backward(grad_output, self, p, norm, reduce_dims, /*keepdim=*/true);
 
   auto invnorm = (norm + 1e-7).reciprocal();
   auto grad_norm = maxnorm * invnorm * (grad - invnorm * nb);

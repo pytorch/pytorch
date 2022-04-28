@@ -1930,6 +1930,10 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     for size, ord_, dim, keepdim in product(sizes, ords, dims, (True, False)):
         yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=dim))
+        if dtype == torch.float32:
+            yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=dim, dtype=torch.float64))
+        if dtype == torch.complex64:
+            yield SampleInput(make_arg(size), args=(ord_,), kwargs=dict(keepdim=keepdim, dim=dim, dtype=torch.complex128))
 
 # The following functions and classes are for testing elementwise binary operators.
 
