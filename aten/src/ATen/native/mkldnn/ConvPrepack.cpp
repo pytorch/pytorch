@@ -60,6 +60,7 @@ ContextConv2D create(
   const auto input_size_expanded =
       expand_param_if_needed(input_size, "input_size", 4);
 
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   auto w = itensor_view_from_dense(weight);
   ideep::tensor::desc expected_weight_desc =
       ideep::convolution_forward::expected_weights_desc(
@@ -152,6 +153,8 @@ Tensor mkldnn_convolution(
   c10::MaybeOwned<Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
+
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   const ideep::tensor mkldnn_input = itensor_from_tensor(input);
   c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};
   if (bias.defined()) {
