@@ -88,6 +88,8 @@ class TORCH_API LoweringContext {
                             const Shape& shape,
                             const std::string& name) = 0;
 
+  virtual void Lower(Node*) = 0;
+
   // Build the computation capturing all the operations created with the
   // embedded builder (returned by the builder() API).
   virtual ComputationPtr Build() = 0;

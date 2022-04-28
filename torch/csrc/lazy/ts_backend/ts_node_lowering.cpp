@@ -17,44 +17,6 @@
 namespace torch {
 namespace lazy {
 
-class TSNodeLowering : public TSNodeLoweringInterface {
- public:
-  TSNodeLowering(const std::string& name, torch::lazy::TSLoweringContext* loctx)
-      : loctx_(loctx),
-        function_(loctx ? std::make_shared<torch::jit::GraphFunction>(
-                              name, loctx->graph(), nullptr)
-                        : nullptr) {}
-
-  torch::lazy::TSLoweringContext* loctx() { return loctx_; }
-
-  bool Lower(const torch::lazy::Node* node) override {
-    if (auto* tsnode = dynamic_cast<const torch::lazy::TsNode*>(node)) {
-      // First, we call the node lowering function, which exists for newly
-      // codegenned or refactored nodes
-      TSOpVector ops = tsnode->Lower(function_, loctx());
-      if (ops.empty()) {
-        return false;
-      }
-      CHECK_EQ(node->num_outputs(), ops.size());
-      for (size_t i = 0; i < ops.size(); ++i) {
-        loctx()->AssignOutputOp(torch::lazy::Output(node, i), ops[i]);
-      }
-      return true;
-    }
-    throw std::runtime_error(
-        "Expected torch::lazy::TsNode but could not dynamic cast");
-  }
-
-  torch::lazy::TSLoweringContext* loctx_;
-  std::shared_ptr<torch::jit::GraphFunction> function_;
-};
-
-std::unique_ptr<TSNodeLoweringInterface> TSNodeLoweringInterface::Create(
-    torch::lazy::LoweringContext* loctx) {
-  return std::make_unique<TSNodeLowering>(
-      "TSNodeLowering", static_cast<torch::lazy::TSLoweringContext*>(loctx));
-}
-
 TSOpVector LowerBuiltin(
     const torch::lazy::Node* node,
     std::shared_ptr<torch::jit::GraphFunction> function,
