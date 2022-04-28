@@ -208,7 +208,7 @@ class AccTestCase(TRTTestCase):
 
         if test_implicit_batch_dim:
             interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
-            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol, precision)
 
         if test_explicit_batch_dim:
             interp = TRTInterpreter(
