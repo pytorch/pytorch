@@ -226,6 +226,7 @@ namespace c10 {
   _(onnx, Gemm)                      \
   _(onnx, LSTM)                      \
   _(onnx, MatMul)                    \
+  _(onnx, Min)                       \
   _(onnx, Mul)                       \
   _(onnx, Pow)                       \
   _(onnx, RNN)                       \

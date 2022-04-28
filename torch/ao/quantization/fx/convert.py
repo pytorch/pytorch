@@ -31,13 +31,13 @@ from .qconfig_utils import (
     update_qconfig_for_fusion,
     is_qconfig_supported_by_dtype_configs,
 )
-from .backend_config.utils import (
+from torch.ao.quantization.backend_config.utils import (
     get_root_module_to_quantized_reference_module,
     get_pattern_to_dtype_configs,
     get_fused_module_classes,
     get_qat_module_classes,
 )
-from .backend_config import get_native_backend_config_dict
+from torch.ao.quantization.backend_config import get_native_backend_config_dict
 from .graph_module import (
     QuantizedGraphModule,
     is_observed_module,

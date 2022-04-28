@@ -20,24 +20,31 @@ import textwrap
 
 from typing import Dict, List, Any
 
-from tools.codegen.gen import parse_native_yaml
-from tools.codegen.utils import FileManager
-from tools.codegen.context import with_native_function
-from tools.codegen.model import BaseOperatorName, NativeFunction
-import tools.codegen.api.python as python
-from .gen_python_functions import should_generate_py_binding, is_py_torch_function, \
-    is_py_nn_function, is_py_linalg_function, is_py_variable_method, is_py_special_function, \
-    is_py_fft_function
+from torchgen.gen import parse_native_yaml
+from torchgen.utils import FileManager
+from torchgen.context import with_native_function
+from torchgen.model import BaseOperatorName, NativeFunction
+import torchgen.api.python as python
+from .gen_python_functions import (
+    should_generate_py_binding,
+    is_py_torch_function,
+    is_py_nn_function,
+    is_py_linalg_function,
+    is_py_variable_method,
+    is_py_special_function,
+    is_py_fft_function,
+)
+
 
 def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
     native_functions = parse_native_yaml(native_yaml_path).native_functions
     mappings = (
-        (is_py_torch_function, 'torch._C._VariableFunctions'),
-        (is_py_nn_function, 'torch._C._nn'),
-        (is_py_linalg_function, 'torch._C._linalg'),
-        (is_py_special_function, 'torch._C._special'),
-        (is_py_fft_function, 'torch._C._fft'),
-        (is_py_variable_method, 'torch.Tensor'),
+        (is_py_torch_function, "torch._C._VariableFunctions"),
+        (is_py_nn_function, "torch._C._nn"),
+        (is_py_linalg_function, "torch._C._linalg"),
+        (is_py_special_function, "torch._C._special"),
+        (is_py_fft_function, "torch._C._fft"),
+        (is_py_variable_method, "torch.Tensor"),
     )
     annotated_args: List[str] = []
     for pred, namespace in mappings:
@@ -48,13 +55,18 @@ def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
             groups[f.func.name.name].append(f)
         for group in groups.values():
             for f in group:
-                annotated_args.append(f'{namespace}.{gen_annotated_args(f)}')
+                annotated_args.append(f"{namespace}.{gen_annotated_args(f)}")
 
-    template_path = os.path.join(autograd_dir, 'templates')
+    template_path = os.path.join(autograd_dir, "templates")
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    fm.write_with_template('annotated_fn_args.py', 'annotated_fn_args.py.in', lambda: {
-        'annotated_args': textwrap.indent('\n'.join(annotated_args), '    '),
-    })
+    fm.write_with_template(
+        "annotated_fn_args.py",
+        "annotated_fn_args.py.in",
+        lambda: {
+            "annotated_args": textwrap.indent("\n".join(annotated_args), "    "),
+        },
+    )
+
 
 @with_native_function
 def gen_annotated_args(f: NativeFunction) -> str:
@@ -63,26 +75,28 @@ def gen_annotated_args(f: NativeFunction) -> str:
         if arg.default is not None:
             continue
         out_arg: Dict[str, Any] = {}
-        out_arg['name'] = arg.name
-        out_arg['simple_type'] = python.argument_type_str(arg.type, simple_type=True)
+        out_arg["name"] = arg.name
+        out_arg["simple_type"] = python.argument_type_str(arg.type, simple_type=True)
         size = python.argument_type_size(arg.type)
         if size:
-            out_arg['size'] = size
+            out_arg["size"] = size
         out_args.append(out_arg)
 
-    return f'{f.func.name.name}: {repr(out_args)},'
+    return f"{f.func.name.name}: {repr(out_args)},"
+
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description='Generate annotated_fn_args script')
-    parser.add_argument('native_functions', metavar='NATIVE',
-                        help='path to native_functions.yaml')
-    parser.add_argument('out', metavar='OUT',
-                        help='path to output directory')
-    parser.add_argument('autograd', metavar='AUTOGRAD',
-                        help='path to template directory')
+    parser = argparse.ArgumentParser(description="Generate annotated_fn_args script")
+    parser.add_argument(
+        "native_functions", metavar="NATIVE", help="path to native_functions.yaml"
+    )
+    parser.add_argument("out", metavar="OUT", help="path to output directory")
+    parser.add_argument(
+        "autograd", metavar="AUTOGRAD", help="path to template directory"
+    )
     args = parser.parse_args()
     gen_annotated(args.native_functions, args.out, args.autograd)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

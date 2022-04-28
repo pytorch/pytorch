@@ -1881,6 +1881,22 @@ inline std::vector<at::Tensor> IValue::toTensorVector() const {
   return createVectorFromList<at::Tensor>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
+inline c10::List<c10::optional<at::Tensor>> IValue::toOptionalTensorList() && {
+  AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
+  return c10::List<c10::optional<at::Tensor>>(moveToIntrusivePtr<c10::detail::ListImpl>());
+}
+inline c10::List<c10::optional<at::Tensor>> IValue::toOptionalTensorList() const& {
+  AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
+  return c10::List<c10::optional<at::Tensor>>(toIntrusivePtr<c10::detail::ListImpl>());
+}
+inline std::vector<c10::optional<at::Tensor>> IValue::toOptionalTensorVector() const {
+  AT_ASSERT(isOptionalTensorList(), "Expected OptionalTensorList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toOptionalTensorVector on null intrusive_ptr IValue");
+  return createVectorFromList<c10::optional<at::Tensor>>(
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
 inline c10::List<IValue> IValue::toList() && {
   AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
   return c10::List<IValue>(moveToIntrusivePtr<c10::detail::ListImpl>());
@@ -1974,6 +1990,7 @@ inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
+inline IValue::IValue(c10::SymIntArrayRef v) : IValue(at::ArrayRef<c10::SymInt>(v.data(), v.size())) {}
 template <class T, IValue::enable_if_ivalue_constructible<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
