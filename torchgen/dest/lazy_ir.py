@@ -250,6 +250,9 @@ class GenLazyNativeFuncDefinition:
     metrics_counter: str
     create_tensor: str
     create_from_first_tensor: bool
+    create_aten_from_ltc_tensor: str
+    tuple_aten_from_ltc_tensors: str
+    lazy_value_class: str
 
     def lazy_tensor_decls(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
@@ -360,15 +363,15 @@ class GenLazyNativeFuncDefinition:
             len(value_types_names) > 0
         ), "Code below assumes there is at least one tensor arg"
         first_tensor_name = value_types_names[0]
-        bridge_str = f"""auto result = torch::lazy::CreateAtenFromLtcTensor(
+        bridge_str = f"""auto result = {self.create_aten_from_ltc_tensor}(
                 {self.create_lazy_tensor(first_tensor_name)}(std::move(node), *common_device));"""
 
         if returns_length > 1:
             bridge_str = f"""std::vector<{self.tensor_class}Ptr> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
-            lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}(torch::lazy::Value(node, i), *common_device));
+            lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({self.lazy_value_class}(node, i), *common_device));
         }}
-        auto result = torch::lazy::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
+        auto result = {self.tuple_aten_from_ltc_tensors}<{returns_length}>(lazy_tensors);"""
 
         if schema.name.name.inplace or func.func.is_out_fn():
             assert returns_length == 1, (
