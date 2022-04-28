@@ -404,9 +404,8 @@ class ShardedTensor(ShardedTensorInterface):
                                      requires_grad=tensor_properties.requires_grad)
         sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
-        # attach local_shards and sharding spec to ShardedTensor created
+        # attach local_shards to the ShardedTensor created
         sharded_tensor._local_shards = local_shards
-        sharded_tensor._sharding_spec = spec
 
         # run post initialization, i.e. map registration, rpc initialization
         sharded_tensor._post_init()
