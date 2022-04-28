@@ -5305,9 +5305,16 @@ Tensor lu_factor_ex_jvp(
   }
 }
 
+Tensor log_softmax_jvp(Tensor self_t, Tensor self_p, int dim, const c10::optional<ScalarType> dtype) {
+  if (dtype.has_value()) {
+    self_t = self_t.to(*dtype);
+    self_p = self_p.to(*dtype);
+  }
+  return self_t - logsumexp_jvp(self_p, self_t, {dim}, true);
+}
+
 Tensor logsumexp_jvp(const Tensor& self_p, const Tensor& self_t, IntArrayRef dim, bool keepdim) {
   // NB: for simplicitly, we recompute some values that can be reused from forward
-  std::cout<<"5309"<<std::endl;
   auto self_p_exp = (self_p - at::amax(self_p, dim, true)).exp();  // Use the exp-normalize trick
   std::cout<<"5311"<<std::endl;
   auto sumexp_p = self_p_exp.sum(dim, keepdim);

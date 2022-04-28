@@ -85,6 +85,7 @@ at::Tensor solve_jvp(const Tensor& X, const Tensor& A, const Tensor& dA, const T
 at::Tensor solve_backward_self(const at::Tensor & grad, const at::Tensor & self, const at::Tensor & A);
 at::Tensor solve_backward_A(const at::Tensor & grad, const at::Tensor & self, const at::Tensor & A, const at::Tensor & solution);
 at::Tensor cumsum_backward(const at::Tensor & grad, int64_t dim);
+at::Tensor log_softmax_jvp(at::Tensor self_t, at::Tensor self_p, int dim, const c10::optional<ScalarType> dtype);
 at::Tensor logsumexp_backward(at::Tensor grad, const at::Tensor & self, at::Tensor result, at::IntArrayRef dim, bool keepdim);
 at::Tensor logsumexp_jvp(const at::Tensor& self_p, const at::Tensor& self_t, IntArrayRef dim, bool keepdim);
 at::Tensor logcumsumexp_backward(at::Tensor grad, const at::Tensor & self, at::Tensor result, int64_t dim);

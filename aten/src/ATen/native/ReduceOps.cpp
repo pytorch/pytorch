@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cfloat>
 #include <type_traits>
+#include <iostream>
 
 namespace at {
 namespace native {
