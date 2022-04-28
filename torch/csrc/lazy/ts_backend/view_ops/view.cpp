@@ -1,4 +1,4 @@
-#include <torch/csrc/lazy/core/view_ops/view.h>
+#include <torch/csrc/lazy/ts_backend/view_ops/view.h>
 
 #include <ATen/InferSize.h>
 
