@@ -223,9 +223,20 @@ at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
   }
 }
 
-template <char const *name, typename result_type, typename compute_type, int arity,
-          at::cuda::jit::BinaryFuncVariant scalar_pos=at::cuda::jit::BinaryFuncVariant::NoScalar, typename ... Args>
-void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, const bool dynamic_casting, compute_type scalar_val, std::tuple<Args...> extra_args) {
+template <
+    char const* name,
+    typename result_type,
+    typename f_inputs_type,
+    int arity,
+    at::cuda::jit::BinaryFuncVariant scalar_pos =
+        at::cuda::jit::BinaryFuncVariant::NoScalar,
+    typename... Args>
+void jitted_gpu_kernel_impl(
+    TensorIteratorBase& iter,
+    const std::string& f,
+    const bool dynamic_casting,
+    at::opmath_type<f_inputs_type> scalar_val,
+    std::tuple<Args...> extra_args) {
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ninputs() == arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
@@ -250,7 +261,7 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
   if (!dynamic_casting) {
     if (contiguous) {
       // Case 1: no dynamic casting and contiguous
-      launch_jitted_vectorized_kernel<name, result_type, compute_type, arity, scalar_pos>(
+      launch_jitted_vectorized_kernel<name, result_type, f_inputs_type, arity, scalar_pos>(
         iter.device().index(), numel, f, data, scalar_val, extra_args);
       return;
     }
@@ -260,7 +271,7 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
     auto output_offset_calculator = make_output_offset_calculator(iter);
     auto loader = memory::LoadWithoutCast();
     auto storer = memory::StoreWithoutCast();
-    launch_jitted_unrolled_kernel<name, result_type, compute_type, scalar_pos>(
+    launch_jitted_unrolled_kernel<name, result_type, f_inputs_type, scalar_pos>(
       iter.device().index(), numel, f, data, input_offset_calculator,
       output_offset_calculator, loader, storer, contiguous, scalar_val, extra_args);
     return;
@@ -283,7 +294,7 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
     // Case 3: dynamic casting and contiguous
     auto input_offset_calculator = TrivialOffsetCalculator<arity>();
     auto output_offset_calculator = TrivialOffsetCalculator<1>();
-    launch_jitted_unrolled_kernel<name, result_type, compute_type, scalar_pos>(
+    launch_jitted_unrolled_kernel<name, result_type, f_inputs_type, scalar_pos>(
       iter.device().index(), numel, f, data, input_offset_calculator,
       output_offset_calculator, loader, storer, contiguous, scalar_val, extra_args);
     return;
@@ -292,7 +303,7 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
   // Case 4: dynamic casting and noncontiguous
   auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
   auto output_offset_calculator = make_output_offset_calculator(iter);
-  launch_jitted_unrolled_kernel<name, result_type, compute_type, scalar_pos>(
+  launch_jitted_unrolled_kernel<name, result_type, f_inputs_type, scalar_pos>(
     iter.device().index(), numel, f, data, input_offset_calculator,
     output_offset_calculator, loader, storer, contiguous, scalar_val, extra_args);
 }
