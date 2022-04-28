@@ -242,8 +242,8 @@ def grad(
         return handle_torch_function(
             grad,
             overridable_args,
-            outputs,
-            inputs,
+            t_outputs,
+            t_inputs,
             grad_outputs=grad_outputs,
             retain_graph=retain_graph,
             create_graph=create_graph,
