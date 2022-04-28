@@ -22,7 +22,7 @@ namespace lazy {
 struct TSBackendDeviceType : public BackendDeviceType {
   TSBackendDeviceType() = delete;
   TSBackendDeviceType(c10::DeviceType deviceType)
-    :BackendDeviceType((int8_t)deviceType) {
+    :BackendDeviceType(static_cast<int8_t>(deviceType)) {
     TORCH_CHECK(deviceType == at::kCPU || deviceType == at::kCUDA);
   }
 
