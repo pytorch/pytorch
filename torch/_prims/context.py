@@ -155,6 +155,6 @@ class PrimContext(object):
         # Remaps torch operations to their references
         if func in _torch_to_reference_map:
             fn = _torch_to_reference_map[func]
-            return fn(*args, **kwargs)
+            return fn(*args, **kwargs)  # type: ignore[operator]
 
         return func(*args, **kwargs)
