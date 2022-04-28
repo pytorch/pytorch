@@ -119,6 +119,11 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
   CacheKey key;
+  // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
+  // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
+  // CacheKey objects have the same user defined parameters, but
+  // different padded values, resulting in different hash outputs.
+  memset(&key, 0, sizeof(key));
   bool deterministic{true};
   bool allow_tf32{false};
   auto padding_vec = padding_.vec();
