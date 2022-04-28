@@ -676,11 +676,11 @@ Tensor sparse_compressed_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarTy
       r.pyobject(ARG_PLAIN_INDICES), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
     return at::sparse_compressed_tensor(compressed_indices, plain_indices, values,
-                                 values.options().layout(r.layoutOptional(ARG_LAYOUT1))).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
+                                 values.options().layout(r.layoutOptional(ARG_LAYOUT))).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
   }
   throw std::runtime_error("sparse_compressed_tensor(): invalid arguments");
 }
-    
+ 
 template <c10::Layout required_layout>
 Tensor sparse_compressed_tensor_ctor_template(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
   TORCH_INTERNAL_ASSERT(!isSparseCsr(dispatchKeyToBackend(dispatch_key)));
@@ -706,7 +706,8 @@ Tensor sparse_compressed_tensor_ctor_template(c10::DispatchKey dispatch_key, at:
         ARG_REQUIRES_GRAD1,
         ARGS_COUNT1
   };
-  const std::string layout_name = at::sparse_csr::layoutToString(required_layout, /*upper=*/false, /*lower=*/true));
+
+  const std::string layout_name = at::sparse_csr::layoutToString(required_layout, /*upper=*/false, /*lower=*/true);
   auto safe_get_attr_string = [](PyObject *o, const char *attr_name) -> PyObject* {
     // Clear error indicator if attribute does not exists.
     // Otherwise subsequent Python C API calls might return bogus values.
