@@ -244,7 +244,27 @@ SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
       DispatchKeySet(dispatch_key), layout, options.dtype());
 }
 
-template <c10::Layout required_layout>
+
+Tensor _sparse_compressed_tensor_unsafe(const Tensor& compressed_indices,
+                                        const Tensor& plain_indices,
+                                        const Tensor& values,
+                                        IntArrayRef size,
+                                        c10::optional<ScalarType> dtype,
+                                        c10::optional<Layout> layout,
+                                        c10::optional<Device> device,
+                                        c10::optional<bool> pin_memory) {
+  if (!layout) {
+    AT_ERROR("sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
+  }
+  Layout layout_ = layout.value();
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
+  SparseCsrTensor self = new_compressed_tensor(options);
+  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  return self;
+}
+
+template <Layout required_layout>
 Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
                                                  const Tensor& plain_indices,
                                                  const Tensor& values,
@@ -253,14 +273,8 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
                                                  c10::optional<Layout> layout,
                                                  c10::optional<Device> device,
                                                  c10::optional<bool> pin_memory) {
-
   Layout layout_ = layout.value_or(required_layout);
-  if (required_layout == kUnspecified) {
-    // checks that sparse compressed layout is specified
-    AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
-  } else {
-    TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
-  }
+  TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
   get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
@@ -279,7 +293,6 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
     return _sparse_compressed_tensor_unsafe_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
   }
 
-SPARSE_COMPRESSED_TENSOR_UNSAFE(compressed, kUnspecified);
 SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
 
 // TODO: This constructor should probably use an ATen abstract method in order
