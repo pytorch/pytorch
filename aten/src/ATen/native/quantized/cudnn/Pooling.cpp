@@ -14,7 +14,6 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/quantized/Quantizer.h>
 #include <c10/core/QScheme.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
@@ -56,9 +55,9 @@ Tensor adaptive_avg_pool2d_quantized_cuda(
 #ifdef USE_CUDA
 // #if AT_CUDNN_ENABLED()
 // #if HAS_CUDNN_V8()
-    // TODO: limit this to per channel quantized tensors for now, though should be easy to adapt
+    // TODO: limit this to per tensor quantized tensors for now, though should be easy to adapt
     // to per channel quantized tensors
-    TORCH_CHECK(input.qscheme() == at::kPerTensorAffine, "adaptive_avg_pool2d_quantized_cuda oonly supports per channel quantized tensors");
+    TORCH_CHECK(input.qscheme() == at::kPerTensorAffine, "adaptive_avg_pool2d_quantized_cuda oonly supports per tensor quantized tensors");
     auto input_fp32 = at::dequantize(input);
     auto result_fp32 = at::adaptive_avg_pool2d(input_fp32, output_size);
     return at::quantize_per_tensor(result_fp32, input.q_scale(), input.q_zero_point(), input.scalar_type());
