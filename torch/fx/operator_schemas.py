@@ -257,6 +257,8 @@ def normalize_function(
     if kwargs is None:
         kwargs = {}
     new_args_and_kwargs = None
+    if isinstance(target, OpOverloadPacket) or isinstance(target, OpOverload):
+        target = target.op
     if not isinstance(target, types.BuiltinFunctionType):
         target_for_analysis = target
         if target in boolean_dispatched:

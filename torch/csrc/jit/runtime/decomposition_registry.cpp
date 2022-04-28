@@ -150,11 +150,15 @@ void RegisterDecomposition(
   schema_to_decomposition[&schema] = g;
 }
 
-Function* GetDecompositionExecutor(const char* schema_literal) {
-  auto& schema = getOperatorForLiteral(schema_literal)->schema();
+Function* GetDecompositionExecutor(const FunctionSchema& schema) {
   auto maybe_func = GetDecompositionFunction(schema);
   TORCH_INTERNAL_ASSERT(maybe_func);
   return *maybe_func;
+}
+
+Function* GetDecompositionExecutor(const char* schema_literal) {
+  auto& schema = getOperatorForLiteral(schema_literal)->schema();
+  return GetDecompositionExecutor(schema);
 }
 
 } // namespace jit

@@ -417,6 +417,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     COMMAND
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
+      --tags-path "aten/src/ATen/native/tags.yaml"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
@@ -424,6 +425,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${GEN_PER_OPERATOR_FLAG}
     DEPENDS
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
     "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
     "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
     "${TORCH_ROOT}/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
