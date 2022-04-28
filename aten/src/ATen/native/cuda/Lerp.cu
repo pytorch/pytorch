@@ -24,6 +24,8 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
               opmath_t self_val_f = self_val;
               opmath_t end_val_f = end_val;
               opmath_t weight_val_f = weight_val;
+              // Conditional for better numeric. This has been discussed in
+              // https://github.com/pytorch/pytorch/pull/18871
               return (std::abs(weight_val_f) < 0.5)
                   ? self_val_f + weight_val_f * (end_val_f - self_val_f)
                   : end_val_f -
@@ -44,6 +46,8 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
             iter, [=] GPU_LAMBDA(scalar_t self_val, scalar_t end_val) {
               opmath_t self_val_f = self_val;
               opmath_t end_val_f = end_val;
+              // Conditional for better numeric. This has been discussed in
+              // https://github.com/pytorch/pytorch/pull/18871
               return (std::abs(weight_val) < 0.5)
                   ? self_val_f + weight_val * (end_val_f - self_val_f)
                   : end_val_f -

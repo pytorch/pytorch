@@ -5,6 +5,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 # TODO: maybe refactor this to a separate util function
 from .native import _get_binary_op_configs
+from .native import _get_share_qparams_op_configs
 
 from ..fuser_method_mappings import reverse_sequential_wrapper2
 
@@ -192,15 +193,11 @@ def get_tensorrt_backend_config_dict():
             non_weighted_op_qint8_dtype_config,
         ]
     }
-    identity_config = {
-        "pattern": torch.nn.Identity,
-        "observation_type": ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
-        "dtype_configs": [
-            non_weighted_op_qint8_dtype_config,
-        ]
-    }
     binary_op_dtype_configs = [
         weighted_op_qint8_dtype_config,
+    ]
+    share_qparams_op_dtype_configs = [
+        non_weighted_op_qint8_dtype_config,
     ]
     return {
         # optional
@@ -224,8 +221,8 @@ def get_tensorrt_backend_config_dict():
             # conv3d_relu_fused_config,
             addmm_config,
             cat_config,
-            identity_config,
             *_get_binary_op_configs(binary_op_dtype_configs),
+            *_get_share_qparams_op_configs(share_qparams_op_dtype_configs),
         ]
     }
 

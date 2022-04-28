@@ -101,6 +101,10 @@ class CudaFuserTestOptions():
         torch._C._jit_set_autocast_mode(self.old_value)
 
 class TestCudaFuser(JitTestCase):
+    def assertEqual(self, *args, **kwargs):
+        kwargs["exact_layout"] = True
+        super(JitTestCase, self).assertEqual(*args, **kwargs)
+
     def _getSubgraphInFusion(self, graph):
         num_node = 0
         subgraph = None
@@ -221,6 +225,7 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(oo.dtype, jit_oo.dtype)
             self.assertEqual(oo, jit_oo)
         self.assertGraphContains(t_jit.graph_for(x, y, z, alpha), FUSION_GUARD)
+
 
     @unittest.skipIf(not TEST_BF16, "device does not support BFloat16")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -3611,6 +3616,30 @@ class TestCudaFuser(JitTestCase):
             self._view_test_generator(ndims, self._bias_view_relu_helper)
         self._alias_bias_view_relu_helper([2, 3, 4, 5], [1, 6, 1, 2, 2, 5, 1], torch.float, 'cuda', 1e-6)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_strict_fusion(self):
+        def success(x):
+            with torch.jit.strict_fusion():
+                return x + x + x
+
+        scripted = self.checkScript(success, (torch.rand([4], device='cuda'),))
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_not("aten::add").check("prim::CudaFusionGroup").run(g)
+
+        def failure(x):
+            with torch.jit.strict_fusion():
+                return x + torch.mm(x, x) + x
+
+        with self.assertRaises(Exception) as error_out:
+            foo_s = torch.jit.script(failure)
+            foo_s(torch.rand([4, 4]))
+            foo_s(torch.rand([4, 4]))
+
+        fc = FileCheck().check("Found unfused operators")
+        fc.check("aten::mm").run(str(error_out.exception))
+
     def _ltc_helper(self, shape, dtype, device, error, approximate=True):
         # modeled after LTC linear layer
         class LTC(torch.nn.Module):
@@ -4557,7 +4586,7 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
 
             val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-            self.assertEqual(ref, val)
+            self.assertEqual(ref, val, exact_layout=True)
 
         # https://github.com/pytorch/pytorch/issues/35600
         # each torch.jit.trace adds state to the _python_cu compilation unit
