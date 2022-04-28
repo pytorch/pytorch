@@ -458,6 +458,7 @@ class Block:
 
 # Defined in torch/csrc/jit/ir/ir.h
 class Node:
+    def schema(self) -> str: ...
     def output(self) -> Value: ...
     def outputs(self) -> List[Value]: ...
     def outputsSize(self) -> _int: ...
@@ -709,6 +710,7 @@ def _valgrind_toggle_and_dump_stats() -> None: ...  # CALLGRIND_TOGGLE_COLLECT a
 
 has_openmp: _bool
 has_mkl: _bool
+has_mps: _bool
 has_lapack: _bool
 has_cuda: _bool
 has_mkldnn: _bool

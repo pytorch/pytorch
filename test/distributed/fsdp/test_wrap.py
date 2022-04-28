@@ -280,8 +280,6 @@ class TestAutoWrap(TestCase):
         TestFSDPWrap.NestedSequentialModel.verify_model_all_wrapped(self, model)
 
     def test_transformer_auto_wrap_policy(self):
-        """
-        """
         model = TransformerWithSharedParams(group=self.process_group)
         my_auto_wrap_policy = functools.partial(
             transformer_auto_wrap_policy,

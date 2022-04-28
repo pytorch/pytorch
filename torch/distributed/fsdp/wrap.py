@@ -38,7 +38,7 @@ def transformer_auto_wrap_policy(
     """
     A convenient auto wrap policy for transformer models. If the submodule is an instance of
     transformer_layer_cls, the submodule will be wrapped as a FSDP unit. Otherwise, all the other
-    reminder submodules are wrapped by the outermost FSDP unit. Right now, FSDP requires submodules
+    remainder submodules are wrapped by the outermost FSDP unit. Right now, FSDP requires submodules
     that share weights to be wrapped in the same FSDP unit, this auto wrap policy can conviniently
     wrap the shared embeddings into the same FSDP unit for transformer models. In the near future,
     FSDP will support submodules that share weights to be wrapped in the separated FSDP units.
