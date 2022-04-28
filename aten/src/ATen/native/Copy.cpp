@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
@@ -20,6 +21,7 @@
 #include <ATen/ops/_copy_from.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/expand_copy.h>
 #endif
 
 #ifdef USE_FBGEMM
@@ -247,6 +249,24 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
   copy_stub(device_type, iter, non_blocking);
   return self;
+}
+
+Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
+  // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
+  // (1) It isn't exposed to the frontend (no python bindings)
+  // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
+  // Note: This implementation doesn't currently preserve the strides of `self`.
+  // That might be fine for functorch (which already doesn't preserve strides in vmap),
+  // but it's worth looking into whether or not this implementation will be problematic for LazyTensor/XLA.
+  auto intermediate = src.to(self, non_blocking);
+  // Unfortunately, copy()'s decomposition involves view ops.
+  // To preserve the functionalization pass semantics of "maybe reapply views",
+  // we need to manually do that here.
+  if (at::functionalization::impl::getFunctionalizationReapplyViewsTLS()) {
+    return intermediate.expand(self.sizes());
+  } else {
+    return at::expand_copy(intermediate, self.sizes());
+  }
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {

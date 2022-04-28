@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseCsrTensorImpl.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/LegacyTypeDispatch.h>
@@ -62,7 +63,9 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
       values_(std::move(values)),
       layout_(layout) {
   // https://pytorch.org/blog/pytorch-feature-classification-changes/#beta
-  TORCH_WARN_ONCE("Sparse CSR tensor support is in beta state.");
+  TORCH_WARN_ONCE("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensor support is in beta state."
+                  "If you miss a functionality in the sparse tensor support, please submit a feature request "
+                  "to https://github.com/pytorch/pytorch/issues.");
   set_storage_access_should_throw();
   is_non_overlapping_and_dense_ = false;
   set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
@@ -134,19 +137,19 @@ void SparseCsrTensorImpl::set_member_tensors(
 }
 
 IntArrayRef SparseCsrTensorImpl::strides() const {
-  TORCH_CHECK(false, "Sparse CSR tensors do not have strides.");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have strides.");
 }
 int64_t SparseCsrTensorImpl::stride(int64_t d) const {
-  TORCH_CHECK(false, "Sparse CSR tensors do not have strides.");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have strides.");
 }
 void SparseCsrTensorImpl::set_size(int64_t dim, int64_t new_size) {
-  TORCH_CHECK(false, "Sparse CSR tensors do not have set_size.");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_size.");
 }
 void SparseCsrTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
-  TORCH_CHECK(false, "Sparse CSR tensors do not have set_stride.");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_stride.");
 }
 void SparseCsrTensorImpl::set_storage_offset(int64_t storage_offset) {
-  TORCH_CHECK(false, "Sparse CSR tensors do not have set_storage_offset.");
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_storage_offset.");
 }
 
 } // namespace at

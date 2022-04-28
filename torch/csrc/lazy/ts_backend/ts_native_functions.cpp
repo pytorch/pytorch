@@ -400,6 +400,13 @@ at::Tensor LazyNativeFunctions::max_pool3d_with_indices_backward(
                                                        ceil_mode, indices);
 }
 
+at::Tensor LazyNativeFunctions::narrow(const at::Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  TORCH_LAZY_FN_COUNTER("lazy::");
+  auto self_tensor = torch::lazy::TryGetLtcTensor(self);
+  return torch::lazy::CreateAtenFromLtcTensor(torch::lazy::narrow(
+      self_tensor, dim, start, length));
+}
+
 at::Tensor & LazyNativeFunctions::normal_(at::Tensor & self, double mean, double std, c10::optional<at::Generator> generator) {
     // Unconditionally fall back.
     // implementing normal_ via lazy tensor caused differences in results compared to eager.

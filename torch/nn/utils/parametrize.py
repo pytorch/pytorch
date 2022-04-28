@@ -614,7 +614,19 @@ def remove_parametrizations(
             # We do this so that the parameter does not to change the id()
             # This way the user does not need to update the optimizer
             with torch.no_grad():
-                original.set_(t)
+                if type(original) is torch.Tensor:
+                    original.set_(t)
+                else:
+                    try:
+                        original.set_(t)
+                    except RuntimeError as e:
+                        # TODO: Fix this for tensor subclasses that are parameters:
+                        # RuntimeError: set_storage is not allowed on a Tensor created from .data or .detach().
+                        raise RuntimeError("Calling remove_parametrizations() with leave_parametrized=True "
+                                           "for a parameter that is an instance of a tensor subclass requires "
+                                           "set_() to be implemented correctly for the tensor subclass. Either "
+                                           "set leave_parametrized=False or provide a working implementation for "
+                                           "set_() in the tensor subclass.")
     else:
         if leave_parametrized:
             # We cannot use no_grad because we need to know whether one or more

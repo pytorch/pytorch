@@ -27,6 +27,8 @@ from torch.testing._internal.common_utils import skipIfCaffe2
           --produce-onnx-test-data: generate onnx test data
           --accept: accept onnx updates and overwrite models
 '''
+
+# Full diff for expect files
 import unittest
 unittest.TestCase.maxDiff = None
 
