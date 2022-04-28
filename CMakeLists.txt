@@ -797,7 +797,7 @@ if(NOT MSVC)
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
   endif()
-  if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0.0))
+  if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0.0))
     # Suppress issue: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43407
     string(APPEND CMAKE_CXX_FLAGS " -Wno-attributes")
   endif()
