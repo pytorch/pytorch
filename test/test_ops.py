@@ -93,7 +93,6 @@ class TestCommon(TestCase):
             try:
                 samples = tuple(op.sample_inputs(device, dtype, requires_grad=requires_grad))
             except Exception as e:
-                print(e, "EXCEPTIOn")
                 unsupported(dtype)
                 continue
 
