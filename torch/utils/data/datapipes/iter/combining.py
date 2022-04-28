@@ -216,12 +216,12 @@ class _ChildDataPipe(IterDataPipe):
     """
     _is_child_datapipe: bool = True
 
-    def __init__(self, main_datapipe, instance_id: int):
+    def __init__(self, main_datapipe: IterDataPipe, instance_id: int):
         required_attrs = ["get_next_element_by_instance", "is_instance_started", "is_every_instance_exhausted", "reset"]
         required_ops = [getattr(main_datapipe, attr) for attr in required_attrs]
         if any(not callable(op) for op in required_ops):
             raise NotImplementedError(f"Main Datapipe must have methods {required_attrs} implemented.")
-        self.main_datapipe = main_datapipe
+        self.main_datapipe: IterDataPipe = main_datapipe
         self.instance_id = instance_id
 
     def __iter__(self):
@@ -238,6 +238,23 @@ class _ChildDataPipe(IterDataPipe):
 
     def get_generator_by_instance(self, instance_id: int):
         yield from self.main_datapipe.get_next_element_by_instance(self.instance_id)
+
+    def _set_main_datapipe_valid_iterator_id(self) -> int:
+        r"""
+        Update the valid iterator ID for both this DataPipe object and `main_datapipe`.
+        """
+        if self.main_datapipe._valid_iterator_id is None:
+            self.main_datapipe._valid_iterator_id = 0  # type: ignore[attr-defined]
+        elif self.main_datapipe._valid_iterator_id == self._valid_iterator_id:  # type: ignore[has-type]
+            self.main_datapipe._valid_iterator_id += 1  # type: ignore[attr-defined]
+        self._valid_iterator_id = self.main_datapipe._valid_iterator_id
+        return self._valid_iterator_id
+
+    def _check_valid_iterator_id(self, iterator_id) -> bool:
+        r"""
+        Check the valid iterator ID against that of DataPipe object and that of `main_datapipe`.
+        """
+        return iterator_id == self._valid_iterator_id and iterator_id == self.main_datapipe._valid_iterator_id
 
     def save_snapshot(self):
         # TODO: Save buffer depending on self.main_datapipe type
