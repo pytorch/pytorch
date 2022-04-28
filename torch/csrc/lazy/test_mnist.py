@@ -11,6 +11,7 @@ import torch._lazy.ts_backend
 import torch._lazy.metrics
 torch._lazy.ts_backend.init()
 
+
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
@@ -36,6 +37,7 @@ class Net(nn.Module):
         output = F.log_softmax(x, dim=1)
         return output
 
+
 def train(log_interval, model, device, train_loader, optimizer, epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
@@ -52,7 +54,8 @@ def train(log_interval, model, device, train_loader, optimizer, epoch):
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.item()))
 
-if __name__ =='__main__':
+
+if __name__ == '__main__':
     bsz = 64
     device = 'lazy'
     epochs = 14
@@ -68,13 +71,13 @@ if __name__ =='__main__':
                        'batch_size': bsz}
     train_kwargs.update(cuda_kwargs)
 
-    transform=transforms.Compose([
+    transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
-        ])
+    ])
     dataset1 = datasets.MNIST('./data', train=True, download=True,
-                        transform=transform)
-    train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
+                              transform=transform)
+    train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
     model = Net().to(device)
     optimizer = optim.Adadelta(model.parameters(), lr=lr)
     scheduler = StepLR(optimizer, step_size=1, gamma=gamma)

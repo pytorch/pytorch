@@ -69,7 +69,7 @@ The lazy device is however very special: it makes PyTorch "remember" every aten 
 
 So, the lazy device is an API that users should use to trace their models with Lazy Tensor. It's also a PyTorch device which is a very convenient way for implementing tracing based on PyTorch dispatcher.
 
-First of all, we need a little bit of setup. The Lazy Tensor needs a backend to actually run traced graphs. We implemented a TorchScript-based backend to give our users end-to-end experience running their models with Lazy Tensor. It also serves as an example for hardware vendors looking to integrate with Lazy Tensor. 
+First of all, we need a little bit of setup. The Lazy Tensor needs a backend to actually run traced graphs. We implemented a TorchScript-based backend to give our users end-to-end experience running their models with Lazy Tensor. It also serves as an example for hardware vendors looking to integrate with Lazy Tensor.
 
 
 ```python
@@ -87,7 +87,7 @@ maybe_false_lazy = torch.BoolTensor([0]).to(dev)
 lazy_result = add_two_maybe(t_lazy, maybe_false_lazy)
 ```
 
-This is pretty cool! Eventually, however, we would still like to execute our computation and access the result, wouldn't we? 
+This is pretty cool! Eventually, however, we would still like to execute our computation and access the result, wouldn't we?
 
 There are a few ways to do it. Typically, PyTorch transparently triggers the execution when the user tries to access the result e.g., print a tensor out, move the tensor to a non-lazy device, etc.
 
@@ -108,9 +108,9 @@ assert lazy_result.cpu() == add_two_maybe(t, maybe_true)
 ```
 
 Woo-hoo! This works too!
-Unfortunately, this flexibility comes with a few downsides. Remember that backends need to translate aten ops into some much lower-level operations that an accelerator understands. The translation process may be time-consuming. Although, usually, it's well worth it! 
+Unfortunately, this flexibility comes with a few downsides. Remember that backends need to translate aten ops into some much lower-level operations that an accelerator understands. The translation process may be time-consuming. Although, usually, it's well worth it!
 
-However, if a non-trivial model is wildly dynamic and contains loops that always run different number of times or if statements one after another that explode into different traces every time you run the model, the backend will spend non-trivial amount of time compiling each trace even though the latter is used only for a few times. 
+However, if a non-trivial model is wildly dynamic and contains loops that always run different number of times or if statements one after another that explode into different traces every time you run the model, the backend will spend non-trivial amount of time compiling each trace even though the latter is used only for a few times.
 
 Alright, at this point, you should have learned the main ideas behind Lazy Tensor, most common usage patterns and APIs.
 Also, you are hopefully as inspired and motivated about Lazy Tensor as I am.
@@ -173,7 +173,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torchvision
 import os
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
@@ -182,7 +181,7 @@ import torch._lazy.ts_backend
 import torch._lazy.metrics
 torch._lazy.ts_backend.init()
 
-if __name__ =='__main__':
+if __name__  == '__main__':
     bsz = 64
     device = 'lazy'
     epochs = 14
