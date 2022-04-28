@@ -1313,7 +1313,7 @@ def _graph_op(
 
     Args:
         g: The Torch graph.
-        opname: The ONNX operator name, e.g., `Abs` or `Add`.
+        opname: The ONNX operator name, e.g., `Abs` or `Add`. TODO(justinchu): Update examples to correct ones.
         raw_args: The inputs to the operator; usually provided
             as arguments to the `symbolic` definition.
         outputs: The number of outputs this operator returns.
