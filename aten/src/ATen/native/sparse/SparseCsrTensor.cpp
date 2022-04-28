@@ -386,12 +386,7 @@ Tensor sparse_compressed_tensor_template(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   Layout layout_ = layout.value_or(required_layout);
-  if (required_layout == kUnspecified) {
-    // checks that sparse compressed layout is specified
-    AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
-  } else {
-    TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
-  }
+  TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
   auto size_ = (size.has_value() ? size.value() : _estimate_sparse_compressed_tensor_size(compressed_indices, plain_indices, values, layout_));
 
   // See [Note: hacky wrapper removal for TensorOptions]
