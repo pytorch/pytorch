@@ -74,7 +74,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "mlc": MLCConfigNode,
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
-            "noarch": NoarchConfigNode,
+            "crossref": CrossRefConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -171,9 +171,9 @@ class ParallelTBBConfigNode(TreeConfigNode):
         return ImportantConfigNode
 
 
-class NoarchConfigNode(TreeConfigNode):
+class CrossRefConfigNode(TreeConfigNode):
     def init2(self, node_name):
-        self.props["is_noarch"] = node_name
+        self.props["is_crossref"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

@@ -20,7 +20,6 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
-          needs-history-and-master: true
 
       - name: Install lintrunner
         run: pip install lintrunner==0.6.*
@@ -80,6 +79,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -122,6 +122,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
       - name: Install requirements
         id: requirements
         run: |
@@ -165,6 +166,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -207,7 +209,6 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
-          needs-history-and-master: true
       - name: Install dependencies
         # mypy and boto3 versions copied from
         # .circleci/docker/common/install_conda.sh
@@ -244,6 +245,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
       - name: Install torch
         if: matrix.with_torch == 'with_torch'
         run: |
