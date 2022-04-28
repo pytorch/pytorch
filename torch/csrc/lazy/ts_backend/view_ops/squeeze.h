@@ -5,9 +5,6 @@
 namespace torch {
 namespace lazy {
 
-TORCH_API std::vector<int64_t> BuildSqueezedDimensions(c10::ArrayRef<int64_t> dimensions,
-                                             int64_t squeeze_dim);
-
 class TORCH_API Squeeze : public TsNode {
  public:
   // Squeeze out the specified dimension index, -1 for all trivial dimensions.
