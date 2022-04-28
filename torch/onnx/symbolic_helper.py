@@ -1,18 +1,17 @@
 import enum
-import torch
-import warnings
 import inspect
+import warnings
+from functools import wraps
 from sys import maxsize as maxsize
 from typing import Set
 
+import torch
 import torch.onnx
+
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
-
-from functools import wraps
 from torch._C import OptionalType
-
 
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
@@ -60,9 +59,6 @@ from torch._C import OptionalType
 # ---------------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------------
-
-# Save some builtins as locals, because we'll shadow them below
-_sum = sum
 
 
 def _parse_arg(value, desc, arg_name=None, node_name=None):
