@@ -109,8 +109,10 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
   at::Tensor quantized_output = at::_empty_affine_quantized(qa.sizes(), at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
                                                             output_scale, output_zero_point, memory_format);
-  // TODO: When cudnn enables support for broadcasting, we can remove this tensor
-  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
+  // We will employ broadcasting scalar multiplication in cudnn in the requant_op below. For this to work, cudNN requires
+  // the scalar to be a scalar tensor (i.e., all dimensions of size 1) with the same number of dimensions as the tensor we're multiplying to
+  at::SmallVector<int64_t, 3> requantize_multiplier_tensor_size(quantized_output.dim(), 1);
+  at::Tensor requantize_multiplier_tensor = at::empty(requantize_multiplier_tensor_size, at::device(at::kCUDA).dtype(at::kFloat), memory_format);
   requantize_multiplier_tensor.fill_(qa.q_scale() / output_scale);
   at::Tensor rhs_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), memory_format);
   rhs_multiplier_tensor.fill_(qb.q_scale() / qa.q_scale());

@@ -94,8 +94,10 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     return;
   }
   at::Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-  // TODO: combine empty & fill_ using full_like or full
-  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+  // We will employ broadcasting scalar multiplication in cudnn in the requant_op below. For this to work, cudNN requires
+  // the scalar to be a scalar tensor (i.e., all dimensions of size 1) with the same number of dimensions as the tensor we're multiplying to
+  int64_t requantize_multiplier_tensor_size[kSpatialDim + 2] = {1, 1, 1, 1};
+  at::Tensor requantize_multiplier_tensor = at::empty(requantize_multiplier_tensor_size, at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   auto act_scale = input.q_scale();
   auto weight_scale = orig_weight_.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
