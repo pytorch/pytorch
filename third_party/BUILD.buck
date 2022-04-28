@@ -1,6 +1,6 @@
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load(
-    "buck_defs.bzl",
+    "//third_party:buck_defs.bzl",
     "HOT_SRCS",
     "JIT_SRCS",
     "LOGGING_SRCS",
