@@ -1210,18 +1210,18 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
-linalg.vector_norm(A, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+linalg.vector_norm(x, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes a vector norm.
 
-If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
+If :attr:`x` is complex valued, it computes the norm of :attr:`x`\ `.abs()`
 
 Supports input of float, double, cfloat and cdouble dtypes.
 
-This function does not necessarily treat multidimensonal :attr:`A` as a batch of
+This function does not necessarily treat multidimensonal :attr:`x` as a batch of
 vectors, instead:
 
-- If :attr:`dim`\ `= None`, :attr:`A` will be flattened before the norm is computed.
+- If :attr:`dim`\ `= None`, :attr:`x` will be flattened before the norm is computed.
 - If :attr:`dim` is an `int` or a `tuple`, the norm will be computed over these dimensions
   and the other dimensions will be treated as batch dimensions.
 
@@ -1246,7 +1246,7 @@ where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent ob
         :func:`torch.linalg.matrix_norm` computes a matrix norm.
 
 Args:
-    A (Tensor): tensor, flattened by default, but this behavior can be
+    x (Tensor): tensor, flattened by default, but this behavior can be
         controlled using :attr:`dim`.
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
@@ -1257,12 +1257,13 @@ Args:
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-    dtype (:class:`torch.dtype`, optional): If specified, the input tensor is cast to
-        :attr:`dtype` before performing the operation, and the returned tensor's type
-        will be :attr:`dtype`. Default: `None`
+    dtype (:class:`torch.dtype`, optional): If specified, the input tensor is cast to :attr:`dtype`
+        before performing the operation, and the returned tensor’s type will be :attr:`dtype`
+        if real and of its real counterpart if complex. :attr:`dtype` may be complex if
+        the input is complex, otherwise it must be real. Default: None
 
 Returns:
-    A real-valued tensor, even when :attr:`A` is complex.
+    A real-valued tensor, even when :attr:`x` is complex.
 
 Examples::
 

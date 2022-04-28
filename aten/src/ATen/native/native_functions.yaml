@@ -11156,11 +11156,11 @@
 - func: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    CPU, CUDA: linalg_vector_norm
+  structured_delegate: linalg_vector_norm.out
 
 - func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  structured: True
   dispatch:
     CPU, CUDA: linalg_vector_norm_out
 
