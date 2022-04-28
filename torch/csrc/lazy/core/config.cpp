@@ -4,7 +4,7 @@ C10_DEFINE_bool(torch_lazy_ir_debug, false, "Enable lazy tensor IR debugging");
 
 C10_DEFINE_bool(
     torch_lazy_param_aliasing,
-    false,
+    true,
     "Enable parameter aliasing support");
 
 C10_DEFINE_bool(
