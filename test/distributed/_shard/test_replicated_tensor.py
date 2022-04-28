@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: distributed"]
+import io
 
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
@@ -285,6 +286,26 @@ class TestReplicatedTensor(ShardedTensorTestBase):
                     ddp = DDP(model)
                     out = ddp(replica_tensor)
                 self.assertIsInstance(out, ReplicatedTensor)
+
+        # Test save and load.
+        with _ddp_replicated_tensor(False):
+            ddp = DDP(model)
+            expected_state_dict = ddp.state_dict()
+            buffer = io.BytesIO()
+            torch.save(ddp, buffer)
+
+            buffer.seek(0)
+            obj = torch.load(buffer)
+            self.assertEqual(expected_state_dict, obj.state_dict())
+
+        with _ddp_replicated_tensor(True):
+            ddp = DDP(model)
+            buffer = io.BytesIO()
+            torch.save(ddp, buffer)
+
+            buffer.seek(0)
+            obj = torch.load(buffer)
+            self.assertEqual(expected_state_dict, obj.state_dict())
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
