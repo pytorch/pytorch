@@ -2,7 +2,7 @@ import os
 import argparse
 import pathlib
 
-from tools.codegen.gen import FileManager, parse_native_yaml
+from torchgen.gen import FileManager, parse_native_yaml
 from gen_vmap_plumbing import gen_all_vmap_plumbing
 
 """
