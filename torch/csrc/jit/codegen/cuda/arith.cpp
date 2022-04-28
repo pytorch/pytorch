@@ -441,8 +441,7 @@ Val* binaryOp(
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(config, operands);
   auto cast_values = promoteValues(operands, common_dtype);
-  return binaryOp(
-      type, cast_values.front(), cast_values.back(), common_dtype);
+  return binaryOp(type, cast_values.front(), cast_values.back(), common_dtype);
 }
 
 TensorView* binaryOp(
@@ -1081,8 +1080,7 @@ Val* where(Val* c, Val* v1, Val* v2) {
       "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
-  auto cast_values =
-      promoteValues(TypePromotion::default_op_config, {v1, v2});
+  auto cast_values = promoteValues(TypePromotion::default_op_config, {v1, v2});
   v1 = cast_values[0];
   v2 = cast_values[1];
 
