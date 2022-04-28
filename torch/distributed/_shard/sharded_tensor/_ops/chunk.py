@@ -35,7 +35,7 @@ def register_chunk_op(op):
         spec = st.sharding_spec()
         if not isinstance(spec, ChunkShardingSpec):
             raise NotImplementedError("Only ChunkShardingSpec is supported for chunk.")
-        if spec.dim == dim or st.dim() + spec.dim == dim or st.dim() + dim == spec.dim:
+        if spec.dim == dim or st.dim() + spec.dim == dim or st.dim() + dim == spec.dim:  # type: ignore[operator]
             raise NotImplementedError("Chunk by sharding dim is not supported.")
 
         local_tensor = st.local_tensor()

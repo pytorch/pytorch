@@ -267,8 +267,8 @@ def sharded_view_check(*args, **kwargs):
             f"Shape having dim {len(shapes)} is not supported "
             f"for sharded tensor sharded on dim {st.sharding_spec().dim}."
         )
-    st_size = math.prod(st.size())
-    shape_size = math.prod(shapes)
+    st_size = math.prod(st.size())  # type: ignore[attr-defined]
+    shape_size = math.prod(shapes)  # type: ignore[attr-defined]
     neg_sum = sum(i for i in shapes if i < 0)
     if shape_size > st_size or st_size % shape_size:
         raise ValueError("Shape is invalid for sharded tensor size.")
@@ -300,8 +300,8 @@ def sharded_view(args, kwargs, pg):
 
     # Infer the dim which is specified with -1.
     if infer_idx is not None:
-        st_size = math.prod(st.size())
-        shape_size = -1 * math.prod(shapes)
+        st_size = math.prod(st.size())  # type: ignore[attr-defined]
+        shape_size = -1 * math.prod(shapes)  # type: ignore[attr-defined]
         shapes = (*shapes[:infer_idx], st_size // shape_size, *shapes[infer_idx + 1 :])
     if st.size() == shapes:
         return st.local_tensor(), st.sharding_spec(), shapes
