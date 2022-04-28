@@ -744,6 +744,19 @@ class TestReductions(TestCase):
             lambda n, d: logsumexp(n, d),
             use_integral=False)
 
+    @onlyCPU
+    def test_mean_int_with_optdtype(self, device):
+        a = make_tensor((3, 4, 5), dtype=torch.int64, device=device)
+
+        # Can't compute mean of integral tensors.
+        with self.assertRaisesRegex(RuntimeError, f"mean(): at least one of .* Got (i) Long and (ii) None"):
+            a.mean()
+
+        # If the optional desired output type is given, the input
+        # is internally cast.
+        a_float = a.to(torch.float32)
+        self.assertEqual(a_float.mean(), a.mean(dtype=torch.float32))
+
     # TODO: update this and tests that use it to handle device properly
     def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
         shape = (3, 4, 5)
