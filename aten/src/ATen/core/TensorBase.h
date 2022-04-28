@@ -433,10 +433,10 @@ class TORCH_API TensorBase {
     return impl_->is_mkldnn();
   }
 
-  /// Returns if a `Tensor` is mlc tensor.
-  bool is_mlc() const {
+  /// Returns if a `Tensor` is mps tensor.
+  bool is_mps() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_mlc();
+    return impl_->is_mps();
   }
 
   /// Returns if a `Tensor` is ort tensor.
