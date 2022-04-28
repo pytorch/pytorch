@@ -1,4 +1,5 @@
-#include <torch/csrc/lazy/core/view_ops/permute.h>
+#include <torch/csrc/lazy/core/ops/utils.h>
+#include <torch/csrc/lazy/ts_backend/view_ops/permute.h>
 
 #include <torch/csrc/lazy/core/helpers.h>
 
@@ -21,14 +22,6 @@ std::string Permute::ToString() const {
   std::stringstream ss;
   ss << TsNode::ToString() << ", dims=(" << c10::Join(", ", dims_) << ")";
   return ss.str();
-}
-
-Shape Permute::MakePermuteShape(
-    const Shape& source_shape,
-    c10::ArrayRef<int64_t> permutation) {
-  return Shape(
-      source_shape.scalar_type(),
-      PermuteDimensions(permutation, source_shape.sizes()));
 }
 
 } // namespace lazy
