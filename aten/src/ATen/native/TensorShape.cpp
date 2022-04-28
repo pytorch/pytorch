@@ -42,7 +42,6 @@ inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
 
 inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITensorListRef& inputs) {
   c10::optional<c10::MemoryFormat> format = c10::nullopt;
-  auto it = inputs.begin();
   for (const Tensor& t : inputs) {
     auto f = t.suggest_memory_format();
     if (f == c10::MemoryFormat::Contiguous) {
@@ -836,6 +835,11 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   auto diag = result.diagonal(offset, dim1, dim2);
   diag.copy_(self);
   return result;
+}
+
+Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
+  auto size = expectIntArrayRef(packed_size);
+  return expand(self, size, implicit);
 }
 
 Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
