@@ -5,6 +5,7 @@
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -853,6 +854,9 @@ class TensorExprFuser {
     if (device->is_cpu()) {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
+      if (fuser::cuda::isEnabled()) {
+        return false;
+      }
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
       return false;

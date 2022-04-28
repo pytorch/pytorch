@@ -39,12 +39,11 @@ class NVFuserEnabler {
 
   static bool nvfuserCanBeEnabled() {
 #ifdef USE_ROCM
-    bool has_rocm = true;
+    return false;
 #else
-    bool has_rocm = false;
-#endif
-    return at::globalContext().hasCUDA() && !has_rocm &&
+    return at::globalContext().hasCUDA() &&
         NVFuserPassManager::isRegistered();
+#endif
   }
 
   static void assertFuserCanBeEnabled(bool is_enabled) {
