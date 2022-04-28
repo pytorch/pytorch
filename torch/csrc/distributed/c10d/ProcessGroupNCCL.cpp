@@ -1486,7 +1486,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       // operations where `inputs' and `outputs' are not the same.
       //
       // See [Sync Streams].
-      if (!avoidRecordStreams_) {
+      if (avoidRecordStreams_) {
+
+      } else {
         c10::cuda::CUDACachingAllocator::recordStream(
             inputs[i].storage().data_ptr(), ncclStream);
       }
@@ -1598,17 +1600,21 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 
   pre(ncclStreams_[key]);
 
-  for (const auto i : c10::irange(tensors.size())) {
-    gpuGuard.set_index(devices[i].index());
-    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+  if (avoidRecordStreams_) {
 
-    // Both send tensor and recv tensor are created on a worker stream and used
-    // in different ncclStreams.  Hence, both must record the ncclStream to
-    // prevent being freed before the collective finishes.
-    //
-    // See [Sync Streams].
-    c10::cuda::CUDACachingAllocator::recordStream(
-        tensors[i].storage().data_ptr(), ncclStream);
+  } else {
+    for (const auto i : c10::irange(tensors.size())) {
+      gpuGuard.set_index(devices[i].index());
+      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+
+      // Both send tensor and recv tensor are created on a worker stream and used
+      // in different ncclStreams.  Hence, both must record the ncclStream to
+      // prevent being freed before the collective finishes.
+      //
+      // See [Sync Streams].
+      c10::cuda::CUDACachingAllocator::recordStream(
+          tensors[i].storage().data_ptr(), ncclStream);
+    }
   }
 
   {
@@ -1852,8 +1858,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        c10::cuda::CUDACachingAllocator::recordStream(
-            output.storage().data_ptr(), stream);
+        if (avoidRecordStreams_) {
+
+        } else {
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
+        }
         return ncclAllGather(
             input.data_ptr(),
             output.data_ptr(),
@@ -1869,9 +1879,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
           at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
           for (const auto j : c10::irange(outputTensors[0].size())) {
             // See [Sync Streams].
-            c10::cuda::CUDACachingAllocator::recordStream(
-                outputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
+            if (avoidRecordStreams_) {
 
+            } else {
+              c10::cuda::CUDACachingAllocator::recordStream(
+                  outputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
+            }
             outputTensors[i][j].copy_(outputFlattened[i][j], true);
           }
         }
@@ -1917,8 +1930,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        c10::cuda::CUDACachingAllocator::recordStream(
-            output.storage().data_ptr(), stream);
+        if (avoidRecordStreams_) {
+
+        } else {
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
+        }
         return ncclReduceScatter(
             input.data_ptr(),
             output.data_ptr(),
@@ -1934,8 +1951,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
           at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
           for (const auto j : c10::irange(inputTensors[0].size())) {
             // See [Sync Streams].
-            c10::cuda::CUDACachingAllocator::recordStream(
-                inputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
+            if (avoidRecordStreams_) {
+
+            } else {
+              c10::cuda::CUDACachingAllocator::recordStream(
+                  inputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
+            }
 
             inputFlattened[i][j].copy_(inputTensors[i][j], true);
           }
@@ -1981,8 +2002,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_reduce_scatter_base(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        c10::cuda::CUDACachingAllocator::recordStream(
-            output.storage().data_ptr(), stream);
+        if (avoidRecordStreams_) {
+
+        } else {
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
+        }
         return ncclReduceScatter(
             input.data_ptr(),
             output.data_ptr(),
@@ -2092,8 +2117,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
           // See [Sync Streams].
-          c10::cuda::CUDACachingAllocator::recordStream(
-              output.storage().data_ptr(), stream);
+          if (avoidRecordStreams_) {
+
+          } else {
+            c10::cuda::CUDACachingAllocator::recordStream(
+                output.storage().data_ptr(), stream);
+          }
           torch::cuda::nccl::all2all_single_equal_split(
               input, output, this->getSize(), comm, stream);
           return ncclSuccess;
@@ -2131,8 +2160,12 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
           c10d::computeLengthsAndOffsets(
               outputSplitSizes, output, &recv_lengths, &recv_offsets);
           // See [Sync Streams].
-          c10::cuda::CUDACachingAllocator::recordStream(
-              output.storage().data_ptr(), stream);
+          if (avoidRecordStreams_) {
+
+          } else {
+            c10::cuda::CUDACachingAllocator::recordStream(
+                output.storage().data_ptr(), stream);
+          }
           torch::cuda::nccl::all2all_single_unequal_split(
               input.data_ptr(),
               send_lengths.data(),
@@ -2332,9 +2365,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank;
         if (getRank() == root) {
-          for(auto output: outputs) {
-            c10::cuda::CUDACachingAllocator::recordStream(
-                output.storage().data_ptr(), stream);
+          if (avoidRecordStreams_) {
+
+          } else {
+            for(auto output: outputs) {
+              c10::cuda::CUDACachingAllocator::recordStream(
+                  output.storage().data_ptr(), stream);
+            }
           }
         }
         torch::cuda::nccl::gather(inputTensors[0], outputs, comm, stream, root);
@@ -2410,9 +2447,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank;
         if (getRank() == root) {
-          for(auto input: inputs) {
-            c10::cuda::CUDACachingAllocator::recordStream(
-                input.storage().data_ptr(), stream);
+          if (avoidRecordStreams_) {
+
+          } else {
+            for(auto input: inputs) {
+              c10::cuda::CUDACachingAllocator::recordStream(
+                  input.storage().data_ptr(), stream);
+            }
           }
         }
         torch::cuda::nccl::scatter(inputs, outputTensors[0], comm, stream, root);
@@ -2454,8 +2495,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        c10::cuda::CUDACachingAllocator::recordStream(
-            output.storage().data_ptr(), stream);
+
+        if (avoidRecordStreams_) {
+
+        } else {
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
+        }
         return ncclAllGather(
             input.data_ptr(),
             output.data_ptr(),
