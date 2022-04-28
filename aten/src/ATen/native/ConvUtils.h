@@ -289,4 +289,30 @@ static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const 
   return can_use_miopen_channels_last_2d || can_use_miopen_channels_last_3d;
 }
 
+static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+
+  // disable NHWC for float64 input.
+  if (input.scalar_type() == at::kDouble ||
+      weight.scalar_type() == at::kDouble) {
+    return false;
+  }
+
+  // disable NHWC for MkldnnCPU tensor.
+  if (input.is_mkldnn() || weight.is_mkldnn()) {
+    return false;
+  }
+
+  auto input_memory_format = input.suggest_memory_format();
+  auto weight_memory_format = weight.suggest_memory_format();
+
+  bool can_use_mkldnn_channels_last_2d =
+      (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
+      (weight_memory_format == at::MemoryFormat::ChannelsLast);
+
+  // TODO: add channels last 3d support
+  bool can_use_mkldnn_channels_last_3d = false;
+
+  return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
+}
+
 }} // namespace at::native
