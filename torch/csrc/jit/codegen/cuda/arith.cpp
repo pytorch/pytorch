@@ -1566,7 +1566,11 @@ TensorView* gather(
 
 TORCH_CUDA_CU_API TensorView* viewAsScalar(TensorView* inp) {
   auto inp_type = inp->getDataType().value();
-  TORCH_CHECK(isVectorType(inp_type), "Invalid type to viewAsScalar. A vector type is expected but ", inp_type, " is given.");
+  TORCH_CHECK(
+      isVectorType(inp_type),
+      "Invalid type to viewAsScalar. A vector type is expected but ",
+      inp_type,
+      " is given.");
   int vec_size = getVectorSizeFromType(inp_type);
   auto out_type = getTypeFromVectorType(inp_type);
 
