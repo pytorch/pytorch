@@ -12,7 +12,8 @@ except ImportError:
     from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
 
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
-TAGS_PATH = 'aten/src/ATen/native/tags.yaml'
+TAGS_PATH = "aten/src/ATen/native/tags.yaml"
+
 
 def generate_code(
     native_functions_path: Optional[str] = None,
@@ -126,7 +127,7 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Autogenerate code")
     parser.add_argument("--native-functions-path")
-    parser.add_argument('--tags-path')
+    parser.add_argument("--tags-path")
     parser.add_argument("--install_dir")
     parser.add_argument(
         "--subset",

@@ -37,8 +37,12 @@ from .gen_python_functions import (
 )
 
 
-def gen_annotated(native_yaml_path: str, tags_yaml_path: str, out: str, autograd_dir: str) -> None:
-    native_functions = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
+def gen_annotated(
+    native_yaml_path: str, tags_yaml_path: str, out: str, autograd_dir: str
+) -> None:
+    native_functions = parse_native_yaml(
+        native_yaml_path, tags_yaml_path
+    ).native_functions
     mappings = (
         (is_py_torch_function, "torch._C._VariableFunctions"),
         (is_py_nn_function, "torch._C._nn"),
@@ -91,7 +95,7 @@ def main() -> None:
     parser.add_argument(
         "native_functions", metavar="NATIVE", help="path to native_functions.yaml"
     )
-    parser.add_argument('tags', metavar='TAGS', help='path to tags.yaml')
+    parser.add_argument("tags", metavar="TAGS", help="path to tags.yaml")
     parser.add_argument("out", metavar="OUT", help="path to output directory")
     parser.add_argument(
         "autograd", metavar="AUTOGRAD", help="path to template directory"

@@ -72,8 +72,7 @@ def add_view_copy_derivatives(
 
 
 def load_derivatives(
-    derivatives_yaml_path: str, native_yaml_path: str,
-    tags_yaml_path: str
+    derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str
 ) -> Sequence[DifferentiabilityInfo]:
     # Do some caching as this is a deterministic function
     global _GLOBAL_LOAD_DERIVATIVE_CACHE

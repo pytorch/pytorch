@@ -410,8 +410,7 @@ class NativeFunction:
     # We parse both the NativeFunction + backend-specific information about it, which it stored in a corresponding BackendIndex.
     @staticmethod
     def from_yaml(
-        ei: Dict[str, object], loc: "Location",
-        valid_tags: Set[str]
+        ei: Dict[str, object], loc: "Location", valid_tags: Set[str]
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
@@ -499,17 +498,17 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tags_s = e.pop('tags', '')
+        tags_s = e.pop("tags", "")
         assert isinstance(tags_s, str)
         tags: Set[str] = set()
         if len(tags_s) > 0:
             assert len(valid_tags) > 0
-            for t in tags_s.split(', '):
+            for t in tags_s.split(", "):
                 # TODO: verify that the tag is valid and has an entry in tags.yaml
                 if t in valid_tags:
                     tags.add(t)
                 else:
-                    raise AssertionError(f'illegal tag {t}')
+                    raise AssertionError(f"illegal tag {t}")
         assert isinstance(tags, set)
 
         from torchgen.api import cpp
@@ -635,29 +634,31 @@ class NativeFunction:
                     "(it is delegated!)"
                 )
 
-        return NativeFunction(
-            func=func,
-            use_const_ref_for_mutable_tensors=use_const_ref_for_mutable_tensors,
-            variants=variants,
-            structured=structured,
-            structured_delegate=structured_delegate,
-            structured_inherits=structured_inherits,
-            precomputed=precomputed,
-            ufunc_inner_loop=ufunc_inner_loop,
-            manual_kernel_registration=manual_kernel_registration,
-            manual_cpp_binding=manual_cpp_binding,
-            python_module=python_module,
-            category_override=category_override,
-            device_guard=device_guard,
-            device_check=device_check,
-            loc=loc,
-            cpp_no_default_args=cpp_no_default_args,
-            is_abstract=is_abstract,
-            has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
-            has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
-            tags=tags,
-        ), backend_metadata
-
+        return (
+            NativeFunction(
+                func=func,
+                use_const_ref_for_mutable_tensors=use_const_ref_for_mutable_tensors,
+                variants=variants,
+                structured=structured,
+                structured_delegate=structured_delegate,
+                structured_inherits=structured_inherits,
+                precomputed=precomputed,
+                ufunc_inner_loop=ufunc_inner_loop,
+                manual_kernel_registration=manual_kernel_registration,
+                manual_cpp_binding=manual_cpp_binding,
+                python_module=python_module,
+                category_override=category_override,
+                device_guard=device_guard,
+                device_check=device_check,
+                loc=loc,
+                cpp_no_default_args=cpp_no_default_args,
+                is_abstract=is_abstract,
+                has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
+                has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
+                tags=tags,
+            ),
+            backend_metadata,
+        )
 
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
@@ -732,10 +733,14 @@ class NativeFunction:
     @property
     def is_view_op(self) -> bool:
         rets = self.func.returns
-        is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
-        is_inplace_view = 'inplace_view' in self.tags
-        is_wildcard_view = any(inp.annotation is not None and
-                               inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
+        is_non_mutating_view = len(rets) > 0 and any(
+            r.annotation is not None and not r.annotation.is_write for r in rets
+        )
+        is_inplace_view = "inplace_view" in self.tags
+        is_wildcard_view = any(
+            inp.annotation is not None and inp.annotation.alias_set_after != ""
+            for inp in self.func.schema_order_arguments()
+        )
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
 
     @property
@@ -1955,7 +1960,7 @@ class NativeFunctionsViewGroup:
             assert self.view.func.signature() == self.view_copy.func.signature(
                 strip_view_copy_name=True
             )
-            assert 'view_copy' in self.view_copy.tags, (
+            assert "view_copy" in self.view_copy.tags, (
                 f"{str(self.view_copy.func.name), str(self.view.tags)} appears to be a view_copy operator. The codegen expects"
                 " view_copy operators to be annotated with the 'view_copy' tag in native_functions.yaml."
                 " See Note [view_copy NativeFunction] for details."
@@ -1997,7 +2002,7 @@ def gets_generated_view_copy(f: NativeFunction) -> bool:
     if f.has_composite_implicit_autograd_kernel:
         return False
     # We also don't need to generate copy variants for inplace views.
-    if 'inplace_view' in f.tags:
+    if "inplace_view" in f.tags:
         return False
     return True
 
