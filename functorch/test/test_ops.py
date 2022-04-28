@@ -567,56 +567,54 @@ class TestOperators(TestCase):
         skip('bernoulli'),  # randomness
         skip('normal', ''),  # randomness
         skip('normal', 'number_mean'),  # randomness
+        xfail('nn.functional.dropout'),  # randomness
+        xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
 
         # All of the following are bugs and need to be fixed
+        skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
+        xfail('__getitem__', ''),
+        xfail('_masked.prod'),  # calls aten::item
+        xfail('block_diag'),
         xfail('eig'),
-        xfail('view_as_complex'),
         xfail('fft.ihfft'),
         xfail('fft.ihfft'),
+        xfail('fft.ihfft2'),
+        xfail('fft.ihfftn'),
         xfail('fft.rfft'),
         xfail('fft.rfft'),
+        xfail('fft.rfft2'),
         xfail('fft.rfftn'),
-        xfail('linalg.det', ''),
+        xfail('index_copy'),
+        xfail('index_put', ''),
         xfail('linalg.cholesky'),
+        xfail('linalg.det', ''),
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.eigh'),
         xfail('linalg.householder_product'),
         xfail('linalg.inv'),
+        xfail('linalg.lu_factor', ''),
         xfail('linalg.matrix_norm'),
         xfail('linalg.matrix_power'),
         xfail('linalg.norm'),
+        xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('linalg.slogdet'),
-        # really annoying thing where it passes correctness check but not has_batch_rule
-        skip('linalg.svdvals'),
+        xfail('linalg.tensorinv'),
         xfail('logdet'),
+        xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('masked_scatter'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
+        xfail('nn.functional.fractional_max_pool2d'),
+        xfail('nn.functional.fractional_max_pool3d'),
+        xfail('nn.functional.gaussian_nll_loss'),
         xfail('prod'),
         xfail('put'),
         xfail('quantile'),
+        xfail('stft'),
         xfail('symeig'),
         xfail('take'),
-        xfail('linalg.tensorinv'),
-        xfail('block_diag'),
-        xfail('nn.functional.dropout'),
-        xfail('fft.ihfft2'),
-        xfail('fft.ihfftn'),
-        xfail('nn.functional.gaussian_nll_loss'),
-        xfail('fft.rfft2'),
-        skip('qr'),  # Nondetermistic
-        xfail('_masked.prod'),  # calls aten::item
-        xfail('stft'),
-        xfail('nn.functional.fractional_max_pool3d'),
-        xfail('as_strided'),
-        xfail('nn.functional.fractional_max_pool2d'),
-        xfail('__getitem__', ''),
-        xfail('index_put', ''),
-        xfail('lu_solve'),
-        xfail('index_copy'),
-        xfail('linalg.lu_factor', ''),
-        xfail('linalg.norm', 'subgradients_at_zero'),
+        xfail('view_as_complex'),
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
