@@ -226,8 +226,7 @@ class TestCommon(TestCase):
             # Sets the default dtype to NumPy's default dtype of double
             cur_default = torch.get_default_dtype()
             torch.set_default_dtype(torch.double)
-            reference_inputs = op.reference_inputs(device, dtype)
-            for sample_input in reference_inputs:
+            for sample_input in op.reference_inputs(device, dtype):
                 self.compare_with_reference(op, op.ref, sample_input, exact_dtype=(dtype is not torch.long))
         finally:
             torch.set_default_dtype(cur_default)
@@ -247,7 +246,7 @@ class TestCommon(TestCase):
             result = op(sample.input, *sample.args, **sample.kwargs)
 
             meta_sample = sample.transform(_to_tensormeta)
-            meta_result = op(meta_sample[0], *meta_sample[1], **meta_sample[2])
+            meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
 
             prims.utils.compare_tensor_meta(result, meta_result)
 
@@ -275,7 +274,8 @@ class TestCommon(TestCase):
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
-            n_inp, n_args, n_kwargs = sample_input.noncontiguous()
+            noncontig_sample = sample_input.noncontiguous()
+            n_inp, n_args, n_kwargs = noncontig_sample.input, noncontig_sample.args, noncontig_sample.kwargs
 
             # Verifies sample input tensors should have no grad or history
             sample_tensor = t_inp if isinstance(t_inp, torch.Tensor) else t_inp[0]
@@ -737,9 +737,10 @@ class TestCommon(TestCase):
 
         for sample in op.sample_inputs(device, dtype):
             actual = op(sample.input, *sample.args, **sample.kwargs)
-            (inp, args, kwargs) = sample.transform(lambda x: x.to(torch.complex64))
-            expected = op(inp, *args, **kwargs)
+            transformed_sample = sample.transform(lambda x: x.to(torch.complex64))
+            expected = op(transformed_sample.input, *transformed_sample.args, **transformed_sample.kwargs)
             self.assertEqual(actual, expected, exact_dtype=False, atol=atol, rtol=rtol)
+
 
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
