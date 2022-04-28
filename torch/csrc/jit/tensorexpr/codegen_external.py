@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
-from tools.codegen.gen import parse_native_yaml, FileManager
-import tools.codegen.model as model
+from torchgen.gen import parse_native_yaml, FileManager
+import torchgen.model as model
 
 def num_leading_spaces(line: str) -> int:
     return len(line) - len(line.lstrip())

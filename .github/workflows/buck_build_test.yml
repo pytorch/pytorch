@@ -65,6 +65,5 @@ jobs:
 
       - name: Build Buck target
         run: |
-          touch .buckconfig
-          find . -name "BUCK.github" -exec bash -c 'mv "$1" "${1%.github}"' - '{}' +
+          echo -e "[buildfile]\n  name = BUILD.buck\n" > .buckconfig
           buck build --keep-going //third_party:
