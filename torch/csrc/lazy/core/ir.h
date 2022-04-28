@@ -11,7 +11,6 @@
 #include <utility>
 #include <vector>
 
-#include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/core/hash.h>
@@ -175,6 +174,19 @@ inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
   stream << node.ToString();
   return stream;
 }
+
+template <typename T>
+const T* NodeCast(const Node* node, OpKind op) {
+  if (op != node->op()) {
+    return nullptr;
+  }
+#ifdef NDEBUG
+  return static_cast<const T*>(node);
+#else
+  return &dynamic_cast<const T&>(*node);
+#endif
+}
+
 
 // Represents a specific output produced by a node. Since the output of a node
 // can be composed by multiple outputs, the node+index coordinates fully qualify
