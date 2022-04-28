@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <iostream>
-#include "c10/core/DeviceType.h"
-
+#include <c10/core/DeviceType.h>
 #include <c10/core/Device.h>
 #include <test/cpp/lazy/test_lazy_ops_util.h>
 #include <torch/csrc/lazy/core/helpers.h>
