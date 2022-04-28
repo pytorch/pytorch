@@ -5,8 +5,9 @@ import torch._prims.utils as utils
 from torch._prims.utils import TensorLike, TensorLikeType, TensorMeta, ShapeType
 from torch.overrides import has_torch_function, handle_torch_function
 
-FusionDefinition = torch._C._nvfuser.FusionDefinition  # type: ignore[attr-defined]
-DataType = torch._C._nvfuser.DataType  # type: ignore[attr-defined]
+import torch._C._nvfuser as nvfuser  # type: ignore[import]
+FusionDefinition = nvfuser.FusionDefinition  # type: ignore[attr-defined]
+DataType = nvfuser.DataType  # type: ignore[attr-defined]
 
 from typing import Sequence, Optional, Union, Callable, List, Tuple, Any
 from numbers import Number
