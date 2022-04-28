@@ -2491,6 +2491,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
                         kwargs={'alpha': alpha_val, 'beta': beta_val},))
     return sample_inputs
 
+
 def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha = 2 + 3j if dtype.is_complex else 0.6
     beta = 1 + 2j if dtype.is_complex else 0.2
@@ -2500,15 +2501,16 @@ def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **
         for index_dtype in (torch.int32, torch.int64):
             for m, n, k in itertools.product([0, 5], repeat=3):
                 yield SampleInput(
-                        make_tensor((m, n), device=device, dtype=dtype).to_sparse_csr().requires_grad_(requires_grad),
-                        args=(
-                            make_tensor((m, k), device=device, dtype=dtype,
-                                        requires_grad=requires_grad),
-                            make_tensor((k, n), device=device, dtype=dtype,
-                                        requires_grad=requires_grad)),
-                        kwargs={'alpha': alpha, 'beta': beta})
+                    make_tensor((m, n), device=device, dtype=dtype).to_sparse_csr().requires_grad_(requires_grad),
+                    args=(
+                        make_tensor((m, k), device=device, dtype=dtype,
+                                    requires_grad=requires_grad),
+                        make_tensor((k, n), device=device, dtype=dtype,
+                                    requires_grad=requires_grad)),
+                    kwargs={'alpha': alpha, 'beta': beta})
 
     return list(generator())
+
 
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     return (
@@ -10316,7 +10318,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
                onlyCUDA,
-               skipCUDAIf(_get_torch_cuda_version() < (11, 3), "cusparseSDDMM was added in 11.2.1"),],
+               skipCUDAIf(_get_torch_cuda_version() < (11, 3), "cusparseSDDMM was added in 11.2.1"), ],
            skips=(
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
