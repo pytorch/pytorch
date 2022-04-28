@@ -52,7 +52,6 @@
 namespace at {
 namespace sparse_csr {
 
-constexpr auto kUnspecified = Layout::NumOptions;
 using SparseCsrTensor = Tensor;
 
 inline SparseCsrTensorImpl* get_sparse_csr_impl(const SparseCsrTensor& self) {
