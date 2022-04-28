@@ -23,7 +23,7 @@ from torch.testing._internal.common_dtype import (
     all_types, double_types, empty_types
 )
 from torch.testing._internal.common_device_type import \
-    (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
+    (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, precisionOverride,
      toleranceOverride, tol, has_cusolver)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN
@@ -94,7 +94,6 @@ class DecorateInfo(object):
             (self.device_type is None or self.device_type == device_type) and
             (self.dtypes is None or dtype in self.dtypes)
         )
-
 
 # FIXME
 # Note: historically the 'input' kwarg had to be a Tensor or TensorList, but we are trying
@@ -186,8 +185,15 @@ class SampleInput(object):
                 return t
 
         sample_tt_input, tt_args, tt_kwargs = tt(self.input), tt(self.args), tt(self.kwargs)
-        # TODO update this return to be a named tuple consistent with SampleInput
-        return (sample_tt_input, tt_args, tt_kwargs)
+
+        # Note the transformed SampleInput assumes metadata like output_process_fn_grad is still valid!
+        return SampleInput(
+            sample_tt_input,
+            args=tt_args,
+            kwargs=tt_kwargs,
+            output_process_fn_grad=self.output_process_fn_grad,
+            broadcasts_input=self.broadcasts_input,
+            name=self.name + "_transformed")
 
     # Returns the NumPy version of the sample input object in the form of a tuple: (input, args, kwargs)
     # Converts tensors to ndarrays by calling .detach().cpu().numpy() on them
@@ -1332,6 +1338,8 @@ class UnaryUfuncInfo(OpInfo):
                  supports_sparse=False,
                  reference_numerics_filter=None,  # Filter for singular input values for test_reference_numerics_normal
                  **kwargs):
+        self._original_unary_ufunc_args = locals().copy()
+
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
                                              dtypesIfCUDA=dtypesIfCUDA,
@@ -2270,10 +2278,8 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
 
         yield SampleInput(lhs, args=(rhs,), kwargs=sample_kwargs, broadcasts_input=broadcasts_input)
 
-
-# Note that these references inputs use scalars for the SampleInput.input value,
-#   and many tests require SampleInput.input be a tensor or a list of tensors
-def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+# The base reference input generation for elementwise binary operations
+def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
     yield from op.sample_inputs_func(op, device, dtype, requires_grad, **kwargs)
     yield from generate_elementwise_binary_tensors(op, device=device, dtype=dtype, requires_grad=requires_grad)
     if dtype is not torch.bool:
@@ -2286,6 +2292,18 @@ def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwar
 
     if dtype.is_floating_point or dtype.is_complex:
         yield from generate_elementwise_binary_extremal_value_tensors(op, device=device, dtype=dtype, requires_grad=requires_grad)
+
+# Note that these references inputs use scalars for the SampleInput.input value,
+#   and many tests require SampleInput.input be a tensor or a list of tensors
+def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs):
+    gen = partial(_reference_inputs_elementwise_binary, op, device, dtype, requires_grad, **kwargs)
+
+    # yields "normal" samples
+    yield from gen()
+
+    # yields noncontiguous samples
+    for sample in gen():
+        yield sample.noncontiguous()
 
 # A functional that extends an elementwise binary operator's bespoke error inputs
 #   with generic error inputs for the class of elementwise binary operations
@@ -4882,6 +4900,9 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     copy = op_info.name == "index_copy"
     # target.index_fill(dim, idx, value)
     fill = op_info.name == "index_fill"
+    # target._index_reduce(dim, idx, source, reduce, *, include_self=True)
+    reduce_op = op_info.name == "_index_reduce"
+
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_permutation = partial(torch.randperm, device=device, dtype=torch.int64)
@@ -4892,8 +4913,11 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     shapes = [(), (1,), (S, S)]
     # extra parameter for add
     alphas = (-1, 0, 2) if add else (None,)
+    # extra parameters for reduce
+    include_selfs = (True, False) if reduce_op else (None,)
+    reduces = ('prod', 'mean', 'amin', 'amax') if reduce_op else (None,)
 
-    for shape, alpha in product(shapes, alphas):
+    for shape, alpha, include_self, reduce in product(shapes, alphas, include_selfs, reduces):
         t = make_arg(shape)
         args = []
 
@@ -4907,14 +4931,20 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
         args.append(idx)
 
         # source
-        if copy or add:
+        if copy or add or reduce_op:
             args.append(make_arg(shape))
         elif fill:
             # A weird number to catch errors
             args.append(make_arg((1,)).item())
 
+        # reduce
+        if reduce_op:
+            args.append(reduce)
+
         args = tuple(args)
         kwargs = {} if alpha is None else {"alpha": alpha}
+        if include_self is not None:
+            kwargs['include_self'] = include_self
 
         yield SampleInput(t, args=args, kwargs=kwargs)
 
@@ -8883,9 +8913,6 @@ op_db: List[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
-                        # 76046
-                        DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                                     dtypes=(torch.bool,)),
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
@@ -9063,9 +9090,6 @@ op_db: List[OpInfo] = [
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               # 76046
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                            dtypes=(torch.int32, torch.int64)),
                # 76047
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                             dtypes=(torch.int8, torch.int16, torch.int32, torch.int64)),
@@ -9438,9 +9462,6 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/54841
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.bfloat16]),
-                       # 76046
-                       DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                                    dtypes=(torch.int32, torch.int64)),
                    ),
                    sample_kwargs=sample_kwargs_clamp_scalar,
                    sample_inputs_func=sample_inputs_clamp_scalar),
@@ -11785,12 +11806,9 @@ op_db: List[OpInfo] = [
                # RuntimeError: falseINTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                            'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            ],
-           skips=(
-               # 76046
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                            dtypes=(torch.float16,)),
-           ),
            sample_inputs_func=sample_inputs_local_response_norm,),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
@@ -12067,6 +12085,8 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
         ),
         skips=(
             # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 4096
@@ -12080,9 +12100,6 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
-            # 76046
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                         dtypes=(torch.float16,)),
         ),
     ),
     OpInfo('nn.functional.avg_pool2d',
@@ -12289,9 +12306,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               # 76046
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                            dtypes=(torch.float16,)),
+           ),
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                            'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            )),
     OpInfo('nn.functional.bilinear',
            aten_name='bilinear',
@@ -12612,7 +12630,10 @@ op_db: List[OpInfo] = [
         supports_out=False,
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',), ],
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+        ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
             DecorateInfo(unittest.expectedFailure,
@@ -12625,9 +12646,6 @@ op_db: List[OpInfo] = [
                          'TestUnaryUfuncs', "test_reference_numerics_extremal",
                          dtypes=(torch.complex64, torch.complex128), device_type='cpu',
                          active_if=(IS_MACOS or IS_WINDOWS)),
-            # 76046
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                         dtypes=(torch.float16,)),
         ),
     ),
     OpInfo(
@@ -14361,6 +14379,11 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
+    OpInfo('_index_reduce',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=True,
+           decorators=[onlyCPU],
+           sample_inputs_func=sample_inputs_index),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -15029,10 +15052,6 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           skips=(
-               # 76046
-               DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.bool,)),
-           ),
            sample_inputs_func=sample_inputs_squeeze),
     OpInfo('fill_',
            op=lambda x, scalar: torch.fill_(x.clone(), scalar),
@@ -16211,23 +16230,17 @@ op_db: List[OpInfo] = [
         'nansum',
         identity=0,
         nan_policy='omit',
-        supports_out=False,
+        supports_out=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.nansum),
         skips=(
-            # FIXME: nansum does not support passing keepdim without passing dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: nansum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: nansum does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
-            # FIXME: improve precision
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: flaky test so skipped instead of xfailed
+            # possibly bad low precision reference in numpy
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
-                         dtypes=[torch.float16]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=[torch.float16]),
         ),
     ),
@@ -16456,8 +16469,6 @@ op_db: List[OpInfo] = [
             # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
-            # 76046
-            DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02),
@@ -16467,6 +16478,8 @@ op_db: List[OpInfo] = [
                          'TestReductions', 'test_ref_small_input'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestMasked', 'test_reference_masked'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
         ],
         sample_inputs_func=sample_inputs_masked_std_var,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
@@ -16656,10 +16669,11 @@ op_db: List[OpInfo] = [
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
             # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
-            # 76046
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                         dtypes=(torch.float16,)),
         ),
+        decorators=(
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+        )
     ),
     OpInfo(
         "nn.functional.hinge_embedding_loss",
@@ -16876,19 +16890,54 @@ op_db: List[OpInfo] = [
 # Python Reference OpInfos should be added to the python_ref_db list below.
 #   Tests can opt-into running on these references by including
 #   that list in the Sequence they pass to the @ops decorator.
+#
+# When a Python Reference OpInfo is constructed a pointer to an
+#   existing OpInfo must be provided using the torch_opinfo_name kwarg.
+#   The existing OpInfo with that name and no variant will be found
+#   to inherit from.
+#
+# Instead of just inheriting the existing OpInfo's metadata, the
+#   Python Reference OpInfos inherit the existing OpInfo's
+#   construction arguments. These arguments can be overridden
+#   by adding kwargs to the constructor.
 
-class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
+def _find_referenced_opinfo(referenced_name):
     '''
-    An OpInfo for a Python reference to an elementwise binary operation.
+    Finds the OpInfo with the given name that has no variant name.
+    '''
+    for opinfo in op_db:
+        if opinfo.name == referenced_name and opinfo.variant_test_name == '':
+            return opinfo
 
-    When constructing this OpInfo a pointer to an existing OpInfo must be
-    provided using the torch_opinfo_name kwarg. An OpInfo with the same
-    name as that string (and no variant) will be found to inherit from.
+def _inherit_constructor_args(name, op, inherited, overrides):
+    # inherits metadata
+    common_kwargs = {
+        'name': name,
+        'op': op,
+        'aliases': None,  # TODO add a check for alias coverage
+        'method_variant': None,
+        'inplace_variant': None,  # TODO: add a check for inplace coverage
+        'supports_scripting': False,
+    }
 
-    Instead of just inheriting the existing OpInfo's metadata, this
-    will actually reconstruct the appropriate OpInfo metadata by
-    inheriting the existing OpInfo's initialization arguments. These
-    arguments can be overridden by adding kwargs to the constructor.
+    # Acquires inherited kwargs
+    kwargs = inherited.copy()
+
+    # Fixes metadata
+    kwargs.update(kwargs['kwargs'])
+    del kwargs['kwargs']
+    del kwargs['self']
+    del kwargs['__class__']
+
+    # Overrides metadata
+    kwargs.update(common_kwargs)
+    kwargs.update(overrides)
+
+    return kwargs
+
+class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise unary operation.
     '''
     def __init__(
             self,
@@ -16898,46 +16947,49 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
-        # TODO: extract this into a common helper
         self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        assert isinstance(self.torch_opinfo, UnaryUfuncInfo)
 
-        # finds the corresponding opinfo
-        self.torch_opinfo = None
-        for opinfo in op_db:
-            if opinfo.name == torch_opinfo_name and opinfo.variant_test_name == '':
-                assert self.torch_opinfo is None
-                self.torch_opinfo = opinfo
+        inherited = self.torch_opinfo._original_unary_ufunc_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, {})
 
+        super(ElementwiseUnaryPythonRefInfo, self).__init__(**ukwargs)
+
+class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise binary operation.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
         assert isinstance(self.torch_opinfo, BinaryUfuncInfo)
 
-        # inherits metadata
-        common_kwargs = {
-            'name': name,
-            'op': op,
-            'aliases': None,  # TODO add a check for alias coverage
-            'method_variant': None,
-            'inplace_variant': None,  # TODO: add a check for inplace coverage
-            'supports_scripting': False,
-        }
-
-        ukwargs = self.torch_opinfo._original_binary_ufunc_args.copy()
-
-        # Fixes metadata
-        original_kwargs = ukwargs['kwargs']
-        del ukwargs['kwargs']
-        del ukwargs['self']
-        del ukwargs['__class__']
-        ukwargs.update(original_kwargs)
-
-        # Overrides metadata
-        ukwargs.update(common_kwargs)
-        ukwargs.update(kwargs)
+        inherited = self.torch_opinfo._original_binary_ufunc_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, {})
 
         super(ElementwiseBinaryPythonRefInfo, self).__init__(**ukwargs)
 
 
 # Separate registry for experimental Python Reference OpInfos.
 python_ref_db = [
+    #
+    # Elementwise unary OpInfos
+    #
+    ElementwiseUnaryPythonRefInfo(
+        '_refs.floor',
+        torch_opinfo_name='floor',
+    ),
+    #
+    # Elementwise binary OpInfos
+    #
     ElementwiseBinaryPythonRefInfo(
         '_refs.add',
         torch_opinfo_name='add',
