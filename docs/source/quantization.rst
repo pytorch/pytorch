@@ -39,7 +39,7 @@ APIs are provided that incorporate typical workflows of converting FP32 model
 to lower precision with minimal accuracy loss.
 
 Quantization API Summary
-------------------------
+-----------------------------
 
 PyTorch provides two different modes of quantization: Eager Mode Quantization and FX Graph Mode Quantization.
 
