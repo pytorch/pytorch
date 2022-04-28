@@ -2838,6 +2838,9 @@
   variants: function, method
   structured_delegate: log_softmax.int_out
 
+- func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  variants: function
+
 - func: log_softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:

@@ -11,6 +11,7 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
+#include "c10/util/Exception.h"
 
 namespace at {
 namespace meta {
@@ -492,6 +493,11 @@ Tensor special_softmax(const Tensor& input_, const int64_t dim_, c10::optional<S
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
   return at::log_softmax(input_, dim_, c10::nullopt);
+}
+
+Tensor _log_softmax(const Tensor& input_, const int64_t dim_, bool half_to_float) {
+  TORCH_INTERNAL_ASSERT("This operator is being removed - please don't use it.");
+  return input_;
 }
 
 Tensor special_log_softmax(const Tensor& input, const int64_t dim, c10::optional<ScalarType> dtype) {
