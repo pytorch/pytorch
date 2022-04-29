@@ -154,8 +154,8 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
-if(USE_MLCOMPUTE)
-    list(APPEND TORCH_PYTHON_SRCS ${MLC_PYTHON_SRCS})
+if(USE_MPS)
+    list(APPEND TORCH_PYTHON_SRCS ${MPS_PYTHON_SRCS})
 endif()
 
 if(USE_VALGRIND AND NOT WIN32)
@@ -203,6 +203,7 @@ add_custom_command(
     COMMAND
     "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
+      --tags-path "aten/src/ATen/native/tags.yaml"
       --deprecated-functions-path "tools/autograd/deprecated.yaml"
     DEPENDS
     "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
@@ -210,6 +211,7 @@ add_custom_command(
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
     "${TOOLS_PATH}/pyi/gen_pyi.py"
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
     "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
@@ -362,7 +364,6 @@ if(USE_NUMPY)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
-list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS BUILD_CAFFE2)
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
