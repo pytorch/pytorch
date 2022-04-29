@@ -17068,10 +17068,13 @@ def _inherit_constructor_args(name, op, inherited, overrides):
     kwargs = inherited.copy()
 
     # Fixes metadata
-    kwargs.update(kwargs['kwargs'])
-    del kwargs['kwargs']
-    del kwargs['self']
-    del kwargs['__class__']
+    if 'kwargs' in kwargs:
+        kwargs.update(kwargs['kwargs'])
+        del kwargs['kwargs']
+    if 'self' in kwargs:
+        del kwargs['self']
+    if '__class__' in kwargs:
+        del kwargs['__class__']
 
     # Overrides metadata
     kwargs.update(common_kwargs)
@@ -17097,8 +17100,7 @@ class OpInfoPythonRefInfo(OpInfo):
 
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, {})
-
-        super(OpInfo, self).__init__(**ukwargs)
+        super(OpInfoPythonRefInfo, self).__init__(**ukwargs)
 
 class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
     '''
