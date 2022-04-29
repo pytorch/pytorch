@@ -768,7 +768,6 @@ inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, cons
   int n = cuda_int_cast(A.size(-1), "n");
   int k = std::min(m, n);
   int batchsize = cuda_int_cast(batchCount(A), "batch size");
-  TORCH_INTERNAL_ASSERT(m > n, "torch.linalg.svd: gesvda requires matrix have m > n");
 
   int lda = A.stride(-1);
   int ldu = compute_uv ? U.stride(-1) : m;
@@ -817,11 +816,20 @@ inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, cons
     batchsize);
 }
 
+// We'll copy A inside svd_cusolver_gesvdaStridedBatched
 inline static void svd_cusolver_gesvdaStridedBatched(
     const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
     const Tensor& infos, bool full_matrices, bool compute_uv) {
+  // We need to pass a copy of A, as it will be overwritten
+  // gesvd just knows how to handle m >= n, so in the other case we need to transpose A
+  const auto not_A_H = A.size(-2) >= A.size(-1);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda_gesvdaStridedBatched", [&] {
-    apply_svd_cusolver_gesvdaStridedBatched<scalar_t>(A, U, S, V, infos, full_matrices, compute_uv);
+    apply_svd_cusolver_gesvdaStridedBatched<scalar_t>(
+      cloneBatchedColumnMajor(not_A_H ? A : A.mH()),
+      not_A_H ? U : V,
+      S,
+      not_A_H ? V : U,
+      infos, full_matrices, compute_uv);
   });
 }
 
@@ -920,11 +928,9 @@ void svd_cusolver(const Tensor& A,
         convergence_check_needed = true;
       }
     } else if (driver.value() == "gesvda") {
-      // cuSOLVER: gesvdaStridedBatched is preferred for "tall skinny" matrices
-      TORCH_CHECK(m > n,
-        "torch.linalg.svd: cuSOLVER `gesvda` driver requires that the number of rows be greater than "
-        "the number of columns in the input matrices (ideally tall and skinny).");
-      svd_cusolver_gesvdaStridedBatched(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
+      // cuSOLVER: gesvdaStridedBatched is preferred for "tall skinny" (m > n) matrices
+      // We do a transpose here to make it also work for (m < n) matrices.
+      svd_cusolver_gesvdaStridedBatched(A, U, S, V, info, full_matrices, compute_uv);
       convergence_check_needed = true;
     } else {
       TORCH_CHECK(false, "torch.linalg.svd: unknown svd driver ", driver.value(), " in svd_cusolver computation. ", check_svd_doc);

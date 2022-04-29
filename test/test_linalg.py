@@ -2596,13 +2596,8 @@ class TestLinalg(TestCase):
                 if backend == 'cusolver' or driver is None:
                     # only test cases below and skip otherwise:
                     # - backend == 'cusolver' (driver can be anything)
-                    #   - cusolver 'gesvda' only works for m > n
                     # - backend != 'cusolver' (driver should only be None)
-
-                    if driver == 'gesvda' and m <= n:
-                        continue
-                    # else:
-                    #     pass  # that is, run the test
+                    pass
                 else:
                     continue
 
