@@ -272,6 +272,13 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
       groups->toInt());
 }
 
+// For MKLDNN conv fusion OP, the fuser only supports the MKLDNN OP context to
+// be a Constant
+bool mkldnnConv2dFusionIsSupported(const torch::jit::Node* node) {
+  constexpr int CONTEXT_POS = 1;
+  return node->input(CONTEXT_POS)->node()->kind() == prim::Constant;
+}
+
 // The fuser currently only supports matmul of 2D x 2D matrices
 bool matmulIsSupported(const torch::jit::Node* node) {
   auto const& input0 = getTensorInfoJit(node->input(0));
