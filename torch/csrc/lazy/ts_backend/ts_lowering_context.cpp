@@ -32,8 +32,9 @@ void TSLoweringContext::AssignOutputOp(
     const Output& output,
     torch::jit::Value* op) {
   auto ts_node = NodeCast<TsNode>(output.node, output.node->op());
-  if (!ts_node->getPythonStacktrace().empty()) {
-    op->node()->s_(c10::Symbol::attr("source"), ts_node->getPythonStacktrace());
+  std::string stack_trace = ts_node->getPythonStacktrace();
+  if (!stack_trace.empty()) {
+    op->node()->s_(c10::Symbol::attr("source"), stack_trace);
   }
   emitted_outputs_[output] = op;
 }
@@ -50,7 +51,7 @@ torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
       auto scalarType = ts_data->scalar.value().type();
       if (isFloatingType(scalarType)) {
         param->setType(c10::FloatType::get());
-      } else if (isIntegralType(scalarType) || (scalarType == c10::kBool)) {
+      } else if (isIntegralType(scalarType, /*includeBool=*/true)) {
         param->setType(c10::IntType::get());
       } else {
         TORCH_CHECK(

@@ -635,9 +635,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 # Category of dtypes to run an OpInfo-based test for
 # Example use: @ops(dtype=OpDTypes.supported)
 #
-# There are 6 categories:
-# - basic: The dtypes the operator wants to be tested on by default. This will be
-#          a subset of the types supported by the operator.
+# There are 5 categories:
 # - supported: Every dtype supported by the operator. Use for exhaustive
 #              testing of all dtypes.
 # - unsupported: Run tests on dtypes not supported by the operator. e.g. for
@@ -649,13 +647,12 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 # - none: Useful for tests that are not dtype-specific. No dtype will be passed to the test
 #         when this is selected.
 class OpDTypes(Enum):
-    basic = 0  # Test the basic set of dtypes (default)
-    supported = 1  # Test all supported dtypes
-    unsupported = 2  # Test only unsupported dtypes
-    supported_backward = 3  # Test all supported backward dtypes
-    unsupported_backward = 4  # Test only unsupported backward dtypes
-    any_one = 5  # Test precisely one supported dtype
-    none = 6  # Instantiate no dtype variants (no dtype kwarg needed)
+    supported = 0  # Test all supported dtypes (default)
+    unsupported = 1  # Test only unsupported dtypes
+    supported_backward = 2  # Test all supported backward dtypes
+    unsupported_backward = 3  # Test only unsupported backward dtypes
+    any_one = 4  # Test precisely one supported dtype
+    none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
 
 
 # Decorator that defines the OpInfos a test template should be instantiated for.
@@ -670,9 +667,7 @@ class OpDTypes(Enum):
 # on each device the OpInfo's operator supports, and for every dtype supported by
 # that operator. There are a few caveats to the dtype rule, explained below.
 #
-# First, if the OpInfo defines "default_test_dtypes" then the test
-# is instantiated for the intersection of default_test_dtypes and the
-# dtypes the operator supports. Second, the @ops decorator can accept two
+# The @ops decorator can accept two
 # additional arguments, "dtypes" and "allowed_dtypes". If "dtypes" is specified
 # then the test variants are instantiated for those dtypes, regardless of
 # what the operator supports. If given "allowed_dtypes" then test variants
@@ -698,7 +693,7 @@ class OpDTypes(Enum):
 #   they're instantiated for.
 
 class ops(_TestParametrizer):
-    def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.basic,
+    def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
                  allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
         self.op_list = op_list
         self.opinfo_dtypes = dtypes
@@ -724,8 +719,6 @@ class ops(_TestParametrizer):
                 dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(device_cls.device_type))
             elif self.opinfo_dtypes == OpDTypes.supported:
                 dtypes = op.supported_dtypes(device_cls.device_type)
-            elif self.opinfo_dtypes == OpDTypes.basic:
-                dtypes = op.default_test_dtypes(device_cls.device_type)
             elif self.opinfo_dtypes == OpDTypes.any_one:
                 # Arbitrary order
                 dtype_order = (
