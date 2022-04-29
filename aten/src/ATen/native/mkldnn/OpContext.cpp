@@ -1,6 +1,8 @@
 #include <ATen/native/mkldnn/ConvPrepack.h>
 #include <ATen/native/mkldnn/OpContext.h>
 
+#if AT_MKLDNN_ENABLED()
+
 namespace at {
 namespace native {
 namespace mkldnn {
@@ -37,3 +39,5 @@ Tensor MkldnnConv2dOpContext::run(const Tensor& input) {
 } // namespace mkldnn
 } // namespace native
 } // namespace at
+
+#endif // AT_MKLDNN_ENABLED()

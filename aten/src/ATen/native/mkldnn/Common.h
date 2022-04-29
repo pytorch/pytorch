@@ -1,6 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/Config.h>
+
+#if AT_MKLDNN_ENABLED()
+
 #include <ideep/tensor.hpp>
 
 namespace at {
@@ -38,3 +42,5 @@ struct ContextConv2D final {
 } // namespace mkldnn
 } // namespace native
 } // namespace at
+
+#endif // AT_MKLDNN_ENABLED()
