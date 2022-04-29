@@ -101,8 +101,6 @@ class CudaFusionManager {
   //       have identical contiguity information! (So identical stride + shape
   //       is even more restricting in a good way)
   int32_t registerOrGetCacheId(std::shared_ptr<Graph>& graph) {
-    std::lock_guard<std::mutex> guard(mutex_);
-
     // prepare graph for lowering;
     // We should not call `EraseShapeInformation(graph);`, graph representation
     // does not incorporate static sizes, but just rank of input tensors, which
@@ -110,6 +108,7 @@ class CudaFusionManager {
     auto canonical_graph = Canonicalize(graph, false);
     auto repr = canonical_graph->toString(false);
 
+    std::lock_guard<std::mutex> guard(mutex_);
     // create new graph_cache_ids_ entry if none existed yet;
     if (graph_cache_ids_.count(repr) == 0) {
       int32_t kernel_id = getNextUniqueID();
@@ -238,23 +237,29 @@ void compileCudaFusionGroup(Node* fusion_node) {
   } else {
     compile_fusion();
   }
+
+  // Assigning a cache_id to facilitate graph execution and fallback
+  if (!fusion_node->hasAttribute(attr::cache_id)) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    int32_t fusion_cache_id =
+        CudaFusionManager::getManager().getNextUniqueID();
+    fusion_node->i_(attr::cache_id, fusion_cache_id);
+  }
 }
 
 void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   FUSER_PERF_SCOPE("nvFuser::Manager::runCudaFusionGroup");
+  TORCH_CHECK(
+      fusion_node->hasAttribute(attr::cache_id),
+      "node prim::CudaFusionGroup has not been compiled yet");
 
   // Fallback to use if anything goes wrong
   auto take_fallback = [&](Stack& stack) {
     std::unique_ptr<Code> fallback_code_unique;
     Code* fallback_code;
-    if (fusion_node->hasAttribute(attr::cache_id)) {
-      int32_t kernel_id = fusion_node->i(attr::cache_id);
-      fallback_code = CudaFusionManager::getManager().getFallbackCode(
-          kernel_id, fusion_node);
-    } else {
-      fallback_code_unique = createFallbackCode(fusion_node);
-      fallback_code = fallback_code_unique.get();
-    }
+    int32_t kernel_id = fusion_node->i(attr::cache_id);
+    fallback_code = CudaFusionManager::getManager().getFallbackCode(
+        kernel_id, fusion_node);
     InterpreterState{*fallback_code}.run(stack);
   };
 
@@ -280,12 +285,6 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     TORCH_CHECK(
         fusion_node->kind() == prim::CudaFusionGroup,
         "prim::CudaFusionGroup expected");
-    // TODO: should we support runtime compilation with updated dynamic shape;
-    //       shape inference would be needed so we can allocate output;
-    TORCH_CHECK(
-        fusion_node->hasAttribute(attr::cache_id),
-        "node prim::CudaFusionGroup has not been compiled yet");
-
     int32_t kernel_id = fusion_node->i(attr::cache_id);
     // Currently we just construct I/O tensors for static graph;
 
