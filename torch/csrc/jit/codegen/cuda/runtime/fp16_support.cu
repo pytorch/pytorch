@@ -30,3 +30,18 @@ __device__ float __half2float(const __half h) {
   asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__NVFUSER_HALF_TO_CUS(h)));
   return val;
 }
+
+__device__ __half __double2half(const double x)
+{
+  __half val;
+  asm("{  cvt.rn.f16.f64 %0, %1;}\n"
+      : "=h"(__NVFUSER_HALF_TO_US(val))
+      : "d"(x));
+  return val;
+}
+
+__device__ double __half2double(const __half h) {
+  double val;
+  asm("{  cvt.f64.f16 %0, %1;}\n" : "=d"(val) : "h"(__NVFUSER_HALF_TO_CUS(h)));
+  return val;
+}
