@@ -15,6 +15,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <c10/util/irange.h>
 #include <ATen/FuncTorchTLS.h>
+#include <functorch/csrc/ATenDecompositions.h>
 
 namespace at {
 namespace functorch {
@@ -158,12 +159,6 @@ struct SaveLocalDispatchKeySet {
   SaveLocalDispatchKeySet(const SaveLocalDispatchKeySet&) = delete;
   SaveLocalDispatchKeySet& operator=(const SaveLocalDispatchKeySet&) = delete;
 };
-
-static c10::impl::ForceDispatchKeyGuard
-restoreLocalDispatchKeySetRAII(const DynamicLayer& layer) {
-  auto tmp = layer.interpreter().getSavedLocalDispatchKeySet();
-  return c10::impl::ForceDispatchKeyGuard(tmp);
-}
 
 const std::vector<DynamicLayer>& getDynamicLayerStack() {
   return dynamicLayerStackAccessor();
@@ -330,38 +325,6 @@ std::ostream& operator<< (std::ostream& os, const std::vector<DynamicLayer>& dls
   return os;
 }
 
-static bool allTensors(
-    ArrayRef<IValue> args,
-    std::function<bool(const Tensor&)> pred) {
-  for (const auto& ivalue : args) {
-    // Tensor?[] translates to a c10::List<IValue> so we need to peek inside List
-    if (ivalue.isList()) {
-      for (const auto& elt : ivalue.toListRef()) {
-        if (elt.isTensor() && !pred(elt.toTensor())) {
-            return false;
-        }
-      }
-      continue;
-    }
-    if (ivalue.isTensorList()) {
-      for (const auto& elt : ivalue.toTensorList()) {
-        if (!pred(elt)) {
-          return false;
-        }
-      }
-      continue;
-    }
-    TORCH_INTERNAL_ASSERT(!ivalue.isGenericDict(), "No operators can accept GenericDict");
-    if (!ivalue.isTensor()) {
-      continue;
-    }
-    if (!pred(ivalue.toTensor())) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool isInplaceOp(const FunctionSchema& schema) {
   if (!schema.is_mutable() || schema.returns().size() != 1) {
     return false;
@@ -403,8 +366,72 @@ WithoutTop::~WithoutTop() {
   pushDynamicLayer(std::move(layer_));
 }
 
-void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+// NOTE: [forward-mode AD decompositions hack]
+//
+// The mechanism is: in DynamicLayerFrontMode, IF we are dispatching on the
+// jvp transform, AND we have a decomposition for the operation, then run
+// the decomposition.
+//
+// Let's break that down. There are a douple of moving pieces.
+//
+// 0. How do we know what transform we're dispatching on?
+// Easy, check the top of the DynamicLayerStack and read the transform.
+//
+// 1. Next, we must identify when an operation (e.g. nll_loss_backward)
+// gets dispatched to. The slow way to do this is to str check
+// OperatorHandle::schema::name. We do something a little faster, which is:
+// - register a special kernel to the DynamicLayerFrontMode key
+//   (see FALLBACK_WITH_ID)
+// - that special kernel invokes dynamicLayerFrontFallbackOperator with
+//   a special enum value (ATenOpId) that identifies the operation.
+//
+// 2. Next, we need to call the decomposition. See call_decomposition_for_jvp.
+// The decompositions are written in C++ right now, but we really want to just
+// reuse the decompositions that we have in Python (because those are actually
+// tested).
+
+// Ideally c10::OperatorHandle would have a field like this
+// to identify the operator.
+// The stuff here should map 1:1 with the operator name.
+// aten::nll_loss_backward -> nll_loss_backward
+// aten::add.Tensor -> add_Tensor
+enum class ATenOpId {
+  nll_loss_backward,
+  nll_loss2d_backward,
+};
+
+static void call_decomposition_for_jvp(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    ATenOpId op_id) {
+  switch (op_id) {
+    case ATenOpId::nll_loss2d_backward:
+    case ATenOpId::nll_loss_backward: {
+      ArrayRef<IValue> args = torch::jit::last(stack, 7);
+      auto result = nll_loss_backward_decomp(
+        args[0].toTensor(),
+        args[1].toTensor(),
+        args[2].toTensor(),
+        args[3].toTensor(),
+        args[4].toInt(),
+        args[5].toInt(),
+        args[6].toTensor()
+      );
+      torch::jit::pop(*stack, 7);
+      torch::jit::push(stack, result);
+      return;
+    }
+    default:
+      TORCH_INTERNAL_ASSERT(false);
+  }
+}
+
+static void dynamicLayerFrontFallbackOperator(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack,
+    optional<ATenOpId> maybe_op_id) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
+  TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
   if (c10::show_dispatch_trace_enabled()) {
     std::cout << dynamicLayerStack << std::endl;
@@ -412,11 +439,16 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   }
 #endif
 
+  // Hack: if jvp and we have a decomposition registered, then do the decomposition
+  if (dynamicLayerStack.back().interpreter().key() == TransformType::Jvp &&
+      maybe_op_id.has_value()) {
+    return call_decomposition_for_jvp(op, stack, *maybe_op_id);
+  }
+
   // Save the current LocalDispatchKeySet (to the current DynamicLayer).
   // Upon exiting the current scope, that LocalDispatchKeySet gets restored.
   // When the current DynamicLayer dispatches to the next (inner) DynamicLayer,
   // it will also temporarily restore the saved LocalDispatchKeySet.
-  TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
   SaveLocalDispatchKeySet guard;
 
   // Unwrap escaped GradWrappers
@@ -430,6 +462,17 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
 static c10::impl::ForceDispatchKeyGuard
 restoreLocalDispatchKeySetRAII(const c10::impl::LocalDispatchKeySet& key_set) {
   return c10::impl::ForceDispatchKeyGuard(key_set);
+}
+
+void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  return dynamicLayerFrontFallbackOperator(op, stack, nullopt);
+}
+
+template <ATenOpId op_id>
+void dynamicLayerFrontFallbackWithOpId(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) {
+  return dynamicLayerFrontFallbackOperator(op, stack, op_id);
 }
 
 void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
@@ -448,11 +491,17 @@ TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_BACK_MODE_KEY, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dynamicLayerBackFallback>());
 }
 
-// TORCH_LIBRARY_IMPL(aten, DynamicLayerFront, m) {
-//   m.impl("_unwrap_for_grad", native::_unwrap_for_grad);
-//   m.impl("dump_tensor", native::dump_tensor);
-//   m.impl("dlevel", native::dlevel);
-// }
+#define FALLBACK_WITH_ID(op) \
+  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallbackWithOpId<ATenOpId::op>>());
+
+#define FALLBACK_WITH_ID2(op, overload) \
+  m.impl(#op "." #overload, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallbackWithOpId<ATenOpId::op ## _ ## overload>>());
+
+TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
+  FALLBACK_WITH_ID(nll_loss_backward);
+  FALLBACK_WITH_ID(nll_loss2d_backward);
+}
+
 
 }
 } // namespace at
