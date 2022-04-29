@@ -212,11 +212,16 @@ TORCH_META_FUNC2(mean, dim)
 (const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto in_dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
 
+  std::string opt_dtype_str("None");
+  if (opt_dtype.has_value()) {
+    opt_dtype_str = toString(opt_dtype.value());
+  }
+
   TORCH_CHECK(
       at::isFloatingType(in_dtype) || at::isComplexType(in_dtype),
       "mean(): at least one of (i) the input dtype and (ii) the desired output dtype should be "
       "either floating point or complex. "
-      "Got (i) ", self.scalar_type(), " and (ii) ", opt_dtype, " instead.");
+      "Got (i) ", self.scalar_type(), " and (ii) ", opt_dtype_str, " instead.");
 
   auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());
   resize_reduction(*this, self, dim, keepdim, out_dtype);
