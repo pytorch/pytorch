@@ -234,10 +234,14 @@ void compileCudaFusionGroup(Node* fusion_node) {
       compile_fusion();
     } catch (...) {
       TORCH_WARN(
-          "FALLBACK path has been taken. This is an indication that codegen"
-          "Failed for some reason. To debug try disable codegen fallback path"
-          "via setting the env variable"
-          "`export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`");
+          "FALLBACK path has been taken inside: ",
+          __FUNCTION__,
+          ". This is an indication that codegen Failed for some reason.\n"
+          "To debug try disable codegen fallback path via setting the env"
+          " variable `export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`\n"
+          "To report the issue, try enable logging via setting the env"
+          "variable ` export PYTORCH_JIT_LOG_LEVEL=manager.cpp`\n");
+      GRAPH_DUMP(__FUNCTION__, " hitting fallback on graph\n", *graph);
       CudaFusionManager::getManager().unregisterCacheId(graph);
     }
   } else {
@@ -263,8 +267,8 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     std::unique_ptr<Code> fallback_code_unique;
     Code* fallback_code;
     int32_t kernel_id = fusion_node->i(attr::cache_id);
-    fallback_code = CudaFusionManager::getManager().getFallbackCode(
-        kernel_id, fusion_node);
+    fallback_code =
+        CudaFusionManager::getManager().getFallbackCode(kernel_id, fusion_node);
     InterpreterState{*fallback_code}.run(stack);
   };
 
@@ -322,10 +326,11 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
       }
     } catch (...) {
       TORCH_WARN(
-          "FALLBACK path has been taken. This is an indication that codegen"
-          "Failed for some reason. To debug try disable codegen fallback path"
-          "via setting the env variable"
-          "`export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`");
+          "FALLBACK path has been taken inside: ",
+          __FUNCTION__,
+          ". This is an indication that codegen Failed for some reason.\n"
+          "To debug try disable codegen fallback path via setting the env"
+          " variable `export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`\n");
       take_fallback(stack);
     }
   } else {
