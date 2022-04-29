@@ -4023,7 +4023,13 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
       OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
       OpTuple{at::erf, UnaryOpType::Erf, "erf"},
-      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"}};
+      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"},
+      OpTuple{at::erfc, UnaryOpType::IsFinite, "isfinite"},
+      OpTuple{at::erfc, UnaryOpType::IsInf, "isinf"},
+      OpTuple{at::erfc, UnaryOpType::IsNan, "isnan"},
+      OpTuple{at::erfc, UnaryOpType::IsNegInf, "isneginf"},
+      OpTuple{at::erfc, UnaryOpType::IsPosInf, "isposinf"},
+      OpTuple{at::erfc, UnaryOpType::IsReal, "isreal"}};
 
   // Complex support for the following op is not working in nvFuser yet
   std::vector<OpTuple> ops_skip_complex{

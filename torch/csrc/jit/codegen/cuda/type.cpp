@@ -344,6 +344,18 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "tanh";
     case UnaryOpType::Trunc:
       return "trunc";
+    case UnaryOpType::IsFinite:
+      return "isfinite";
+    case UnaryOpType::IsInf:
+      return "isinf";
+    case UnaryOpType::IsNan:
+      return "isnan";
+    case UnaryOpType::IsNegInf:
+      return "isneginf";
+    case UnaryOpType::IsPosInf:
+      return "isposinf";
+    case UnaryOpType::IsReal:
+      return "isreal";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for unary op type.");
   }
