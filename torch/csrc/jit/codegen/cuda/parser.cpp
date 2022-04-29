@@ -1052,7 +1052,7 @@ class IrParser {
             list_val.pop_front();
             auto out =
                 unaryOp(op_mapping[node->kind()], operand, DataType::Bool);
-            out->value_map.emplace(
+            value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
           isInputNonSizeZeroTensor,
