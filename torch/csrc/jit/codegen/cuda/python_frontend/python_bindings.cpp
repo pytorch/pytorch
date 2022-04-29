@@ -332,7 +332,6 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_BINARY_OP("remainder", remainder)
   NVFUSER_PYTHON_BINDING_BINARY_OP("sub", sub)
   NVFUSER_PYTHON_BINDING_BINARY_OP("mod", mod)
-  NVFUSER_PYTHON_BINDING_BINARY_OP("ceil_div", ceilDiv)
   NVFUSER_PYTHON_BINDING_BINARY_OP("lshift", lshift)
   NVFUSER_PYTHON_BINDING_BINARY_OP("rshift", rshift)
   NVFUSER_PYTHON_BINDING_BINARY_OP("eq", eq)
