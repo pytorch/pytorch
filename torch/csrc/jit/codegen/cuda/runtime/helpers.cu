@@ -439,12 +439,12 @@ bool isnan(T x) {
 
 template <typename T>
 bool isneginf(T x) {
-  return x == -std::numeric_limits<T>::infinity();
+  return x < 0 && isinf(x);
 }
 
 template <typename T>
 bool isposinf(T x) {
-  return x == std::numeric_limits<T>::infinity();
+  return x > 0 && isinf(x);
 }
 
 template <typename T>
