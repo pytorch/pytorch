@@ -165,7 +165,8 @@ class NaiveTypePropagator {
       case aten::isneginf:
       case aten::isposinf:
       case aten::isreal: {
-        copyScalarTypeAndDeviceToOutput(c10::ScalarType::Bool, c10::nullopt, node);
+        copyScalarTypeAndDeviceToOutput(
+            c10::ScalarType::Bool, c10::nullopt, node);
         break;
       }
       // binary float
