@@ -262,6 +262,12 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::Reciprocal:
     case UnaryOpType::Set:
     case UnaryOpType::Sigmoid:
+    case UnaryOpType::IsFinite:
+    case UnaryOpType::IsInf:
+    case UnaryOpType::IsNan:
+    case UnaryOpType::IsNegInf:
+    case UnaryOpType::IsPosInf:
+    case UnaryOpType::IsReal:
       return false;
     default:
       return true;

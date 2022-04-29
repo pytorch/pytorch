@@ -411,3 +411,48 @@ template <typename T>
 TypelessData<sizeof(T), alignof(T)> erase_type(T x) {
   return x;
 }
+
+template <typename T>
+bool isfinite(T x) {
+  return ::isfinite(x);
+}
+
+template <typename T>
+bool isfinite(std::complex<T> x) {
+  return ::isfinite(abs(x));
+}
+
+template <typename T>
+bool isinf(T x) {
+  return ::isinf(x);
+}
+
+template <typename T>
+bool isinf(std::complex<T> x) {
+  return ::isinf(std::real(x)) || ::isinf(std::imag(x));
+}
+
+template <typename T>
+bool isnan(T x) {
+  return x != x;
+}
+
+template <typename T>
+bool isneginf(T x) {
+  return x == -std::numeric_limits<T>::infinity();
+}
+
+template <typename T>
+bool isposinf(T x) {
+  return x == std::numeric_limits<T>::infinity();
+}
+
+template <typename T>
+bool isreal(T x) {
+  return true;
+}
+
+template <typename T>
+bool isreal(std::complex<T> x) {
+  return std::imag(x) == 0;
+}

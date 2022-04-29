@@ -4009,6 +4009,10 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::sqrt, UnaryOpType::Sqrt, "sqrt"},
       OpTuple{at::tan, UnaryOpType::Tan, "tan"},
       OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
+      OpTuple{at::isfinite, UnaryOpType::IsFinite, "isfinite"},
+      OpTuple{at::isinf, UnaryOpType::IsInf, "isinf"},
+      OpTuple{at::isnan, UnaryOpType::IsNan, "isnan"},
+      OpTuple{at::isreal, UnaryOpType::IsReal, "isreal"},
   };
 
   // The following ops has no complex support in eager mode
@@ -4024,12 +4028,9 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
       OpTuple{at::erf, UnaryOpType::Erf, "erf"},
       OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"},
-      OpTuple{at::erfc, UnaryOpType::IsFinite, "isfinite"},
-      OpTuple{at::erfc, UnaryOpType::IsInf, "isinf"},
-      OpTuple{at::erfc, UnaryOpType::IsNan, "isnan"},
-      OpTuple{at::erfc, UnaryOpType::IsNegInf, "isneginf"},
-      OpTuple{at::erfc, UnaryOpType::IsPosInf, "isposinf"},
-      OpTuple{at::erfc, UnaryOpType::IsReal, "isreal"}};
+      OpTuple{at::isneginf, UnaryOpType::IsNegInf, "isneginf"},
+      OpTuple{at::isposinf, UnaryOpType::IsPosInf, "isposinf"},
+  };
 
   // Complex support for the following op is not working in nvFuser yet
   std::vector<OpTuple> ops_skip_complex{
