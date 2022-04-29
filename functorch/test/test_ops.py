@@ -1558,7 +1558,9 @@ class TestDecompositionOpInfo(TestCase):
                 f.write(f'{op}\n')
 
     def test_decompositions_torchscriptable(self, device):
-        skip_list = []
+        skip_list = [
+            aten.rsub.Scalar,
+        ]
         for op, decomposition in decomposition_table.items():
             if op in skip_list:
                 continue
