@@ -34,8 +34,8 @@ from torch.nn.functional import GRID_SAMPLE_INTERPOLATION_MODES, GRID_SAMPLE_PAD
 # Because `torch.nn.functional.grid_sample` calls `torch.grid_sampler`.
 @parse_args("v", "v", "i", "i", "b")
 def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
-    mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]
-    padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]
+    mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
+    padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
     return g.op(
         "GridSample",
         input,
