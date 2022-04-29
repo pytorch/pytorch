@@ -1,3 +1,5 @@
+# Owner(s): ["module: primTorch"]
+
 from torch import Tensor
 import torch.autograd
 from torch.utils._python_dispatch import enable_python_mode
@@ -263,16 +265,6 @@ CROSS_REF_EXCLUDE_SET = {
         torch.bfloat16,
         "nn.functional.layer_norm",
     ),  # "batch_norm" not implemented for 'BFloat16'
-    (
-        "cpu",
-        torch.bfloat16,
-        "nn.functional.hardtanh",
-    ),  # "hardshrink_backward_cpu" not implemented for 'BFloat16'
-    (
-        "cpu",
-        torch.float16,
-        "nn.functional.mse_loss",
-    ),  # "mse_backward_cpu_out" not implemented for 'Half'
     ("cpu", torch.bfloat16, "addmm"),  # decomposition loses precision
     ("cpu", torch.bfloat16, "softmax"),  # needs relaxed prec
     ("cpu", torch.bfloat16, "log_softmax"),  # needs relaxed prec

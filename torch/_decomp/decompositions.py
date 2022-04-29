@@ -480,7 +480,7 @@ def native_layer_norm(
     input_ndim = input.dim()
 
     axis = input_ndim - len(normalized_shape)
-    M = prod(input_shape[:axis])
+    M = prod(input_shape[:axis])  # type: ignore[arg-type]
 
     # Hmm... not sure how I get around this...
     # Basically, native_batch_norm doesn't support 0-entry tensors, while
@@ -582,8 +582,8 @@ def native_layer_norm_backward(
         else:
             outer_dim_indices.append(i)
 
-    N = prod(inner_dims)
-    M = prod(outer_dims)
+    N = prod(inner_dims)  # type: ignore[arg-type]
+    M = prod(outer_dims)  # type: ignore[arg-type]
     if M <= 0 or N <= 0:
         return (
             input.new_zeros(input_shape),
@@ -607,23 +607,23 @@ def native_layer_norm_backward(
     if output_mask[0]:
         d_input: Optional[Tensor] = (rstd / N) * inner
     else:
-        d_input: Optional[Tensor] = None
+        d_input = None
 
     if output_mask[1] and weight is not None:
         if len(outer_dim_indices) > 0:
             d_weight: Optional[Tensor] = torch.sum(grad_out * x_hat, outer_dim_indices, False)
         else:
-            d_weight: Optional[Tensor] = grad_out * x_hat
+            d_weight = grad_out * x_hat
     else:
-        d_weight: Optional[Tensor] = None
+        d_weight = None
 
     if output_mask[2] and bias is not None:
         if len(outer_dim_indices) > 0:
             d_bias: Optional[Tensor] = torch.sum(grad_out, outer_dim_indices, False)
         else:
-            d_bias: Optional[Tensor] = grad_out
+            d_bias = grad_out
     else:
-        d_bias: Optional[Tensor] = None
+        d_bias = None
     return (d_input, d_weight, d_bias)
 
 
