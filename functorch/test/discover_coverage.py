@@ -600,8 +600,8 @@ JVP_EXEMPTIONS = {
     'nn.functional.dropout',  # not actually problem, randomness testing artifact
     'nn.functional.dropout2d',  # not actually problem, randomness testing artifact
     'nn.functional.rrelu',  # not actually problem, randomness testing artifact
-    # 'normal',
-    # 'bernoulli',
+    'normal',  # not actually problem, randomness testing artifact
+    'bernoulli',  # not actually problem, randomness testing artifact
     # 'multinomial',
 }
 
@@ -703,6 +703,8 @@ class Operator:
             'torch.nn.functional.dropout2d',
             # exception: we dont even support double backward for this
             'torch.nn.functional.hardswish',
+            'bernoulli',  # this isn't differentiable
+            'normal',  # not differentiable
         }
         if self.name in exemptions:
             return Support.YES
@@ -716,6 +718,8 @@ class Operator:
         VMAPJVP_EXEMPTIONS = {
             'prod',  # dynamic (backward)
             'nn.functional.batch_norm',  # testing problem
+            'normal',  # not actually problem, randomness testing artifact
+            'bernoulli',  # not actually problem, randomness testing artifact
         }
         if self.name in VMAPJVP_EXEMPTIONS:
             return Support.YES
