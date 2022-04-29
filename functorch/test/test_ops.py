@@ -569,13 +569,18 @@ class TestOperators(TestCase):
         skip('normal', 'number_mean'),  # randomness
         xfail('nn.functional.dropout'),  # randomness
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
+        xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
+        xfail('masked_scatter'),  # dynamic
+        xfail('nn.functional.fractional_max_pool2d'),  # random
+        xfail('nn.functional.fractional_max_pool3d'),  # random
+        xfail('take'),  # dynamic
 
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         xfail('__getitem__', ''),
         xfail('_masked.prod'),  # calls aten::item
         xfail('block_diag'),
-        xfail('eig'),
+        xfail('eig'),  # calls aten::item
         xfail('fft.ihfft'),
         xfail('fft.ihfft'),
         xfail('fft.ihfft2'),
@@ -585,35 +590,25 @@ class TestOperators(TestCase):
         xfail('fft.rfft2'),
         xfail('fft.rfftn'),
         xfail('index_copy'),
-        xfail('index_put', ''),
-        xfail('linalg.cholesky'),
-        xfail('linalg.det', ''),
+        xfail('linalg.det', ''),  # calls .item()
         xfail('linalg.eig'),  # Uses aten::allclose
-        xfail('linalg.eigh'),
-        xfail('linalg.householder_product'),
-        xfail('linalg.inv'),
-        xfail('linalg.lu_factor', ''),
+        xfail('linalg.eigh'),  # needs diag_scatter
+        xfail('linalg.householder_product'),  # needs select_scatter
         xfail('linalg.matrix_norm'),
-        xfail('linalg.matrix_power'),
         xfail('linalg.norm'),
         xfail('linalg.norm', 'subgradients_at_zero'),
-        xfail('linalg.slogdet'),
-        xfail('linalg.tensorinv'),
-        xfail('logdet'),
-        xfail('lu_solve'),
-        xfail('lu_unpack'),
-        xfail('masked_scatter'),
-        xfail('matrix_exp'),
-        xfail('nanquantile'),
-        xfail('nn.functional.fractional_max_pool2d'),
-        xfail('nn.functional.fractional_max_pool3d'),
-        xfail('nn.functional.gaussian_nll_loss'),
-        xfail('prod'),
+        xfail('linalg.slogdet'),  # calls .item()
+        xfail('logdet'),  # calls .item()
+        xfail('lu_solve'),  # requires .contiguous() call somewhere rather than fallback
+        xfail('lu_unpack'),  # would benefit from narrow_scatter
+        xfail('matrix_exp'),  # would benefit from narrow_scatter
+        xfail('nanquantile'),  # checks q via a .item() call
+        xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
+        xfail('prod'),  # calls nonzero
         xfail('put'),
-        xfail('quantile'),
+        xfail('quantile'),  # checks q via a .item() call
         xfail('stft'),
-        xfail('symeig'),
-        xfail('take'),
+        xfail('symeig'),  # would benefit from diag_scatter
         xfail('view_as_complex'),
 
         # required rank 4 tensor to use channels_last format
@@ -751,9 +746,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
-        xfail('linalg.inv'),
-        xfail('linalg.tensorinv'),
-        xfail('linalg.matrix_power'),
         xfail('linalg.norm'),
         xfail('linalg.householder_product'),
         xfail('tensor_split'),
@@ -761,7 +753,6 @@ class TestOperators(TestCase):
         xfail('var_mean'),
         xfail('as_strided'),
         xfail('fill_'),
-        xfail('linalg.cholesky'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('std_mean'),
         xfail('block_diag'),
@@ -772,7 +763,6 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         xfail('prod'),
 
-        xfail('linalg.lu_factor', ''),
         skip('nn.functional.dropout2d', ''),
         skip('nn.functional.feature_alpha_dropout', 'without_train'),
         skip('pca_lowrank', ''),
@@ -823,6 +813,8 @@ class TestOperators(TestCase):
         xfail('cumprod'),
         xfail('lu_solve'),
         xfail('linalg.lstsq', 'grad_oriented'),
+        xfail('linalg.cholesky'),
+        xfail('linalg.qr'),
         xfail('cross'),
         xfail('qr'),
         xfail('linalg.pinv'),
@@ -922,16 +914,13 @@ class TestOperators(TestCase):
         xfail('linalg.householder_product'),
         xfail('linalg.lstsq', ''),
         xfail('linalg.lstsq', 'grad_oriented'),
-        xfail('linalg.inv'),
         xfail('linalg.matrix_norm'),
-        xfail('linalg.matrix_power'),
         xfail('linalg.norm'),
         xfail('linalg.pinv'),
         xfail('linalg.qr'),
         xfail('linalg.pinv', 'hermitian'),
         xfail('linalg.slogdet'),
         xfail('linalg.solve'),
-        xfail('linalg.tensorinv'),
         xfail('logdet'),
         xfail('lu'),
         xfail('lu_solve'),
