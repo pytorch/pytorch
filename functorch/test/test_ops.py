@@ -9,6 +9,7 @@ import torch
 from torch import Tensor
 import functools
 import unittest
+from collections import defaultdict
 from contextlib import contextmanager
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
@@ -1272,15 +1273,13 @@ def ref_vjp_no_create(f, *primals):
 
 
 run_decompositions = set()
-run_ops = set()
+run_ops = defaultdict(int)
 
 
 class TestDecompositionOpInfo(TestCase):
 
-    @unittest.skipIf(IS_FBCODE, "__torch_dispatch__ is buggy")
     @ops(
         functorch_lagging_op_db + additional_op_db,
-        allowed_dtypes=[torch.float32, torch.float64, torch.float16, torch.bfloat16] + [*integral_types()]
     )
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
@@ -1406,7 +1405,7 @@ class TestDecompositionOpInfo(TestCase):
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 global run_ops
-                run_ops.add(func)
+                run_ops[func] += 1
 
                 def unwrap_tensor(e):
                     if isinstance(e, DecompositionTensor):
@@ -1541,13 +1540,12 @@ class TestDecompositionOpInfo(TestCase):
     @unittest.skipIf(IS_FBCODE, "__torch_dispatch__ is buggy")
     def test_placeholder(self):
         global run_ops, run_decompositions
-        with open('op_analysis/run_ops.txt', 'w') as f:
-            def get_names(inpt):
-                return sorted([x.__name__ for x in inpt])
-            for op in get_names(run_ops):
-                f.write(f'{op}\n')
+        with open('op_analysis/run_ops.txt', 'w') as f, open('op_analysis/count_ops.txt', 'w') as g:
+            for op, count in sorted(run_ops.items(), key=lambda x: x[0].__name__):
+                f.write(f'{op.__name__}\n')
+                g.write(f'{count}\n')
         with open('op_analysis/run_decompositions.txt', 'w') as f:
-            for op in get_names(run_decompositions):
+            for op in sorted([i.__name__ for i in run_decompositions]):
                 f.write(f'{op}\n')
 
     def test_decompositions_torchscriptable(self, device):
