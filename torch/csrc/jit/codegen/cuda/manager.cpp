@@ -120,6 +120,12 @@ class CudaFusionManager {
     return graph_cache_ids_[repr];
   };
 
+  // get fallback kernel id
+  int32_t getFallbackKernelId() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return getNextUniqueID();
+  }
+
   void unregisterCacheId(std::shared_ptr<Graph>& graph) {
     auto canonical_graph = Canonicalize(graph, false);
     auto repr = canonical_graph->toString(false);
@@ -240,9 +246,8 @@ void compileCudaFusionGroup(Node* fusion_node) {
 
   // Assigning a cache_id to facilitate graph execution and fallback
   if (!fusion_node->hasAttribute(attr::cache_id)) {
-    std::lock_guard<std::mutex> guard(mutex_);
     int32_t fusion_cache_id =
-        CudaFusionManager::getManager().getNextUniqueID();
+        CudaFusionManager::getManager().getFallbackKernelId();
     fusion_node->i_(attr::cache_id, fusion_cache_id);
   }
 }
