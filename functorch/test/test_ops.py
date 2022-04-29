@@ -1148,7 +1148,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.layer_norm', ''),
         xfail('nn.functional.logsigmoid', ''),
         xfail('nn.functional.mse_loss', ''),
-        xfail('nn.functional.nll_loss', ''),
         xfail('nn.functional.pad', 'circular'),
         xfail('nn.functional.prelu', ''),
         xfail('nn.functional.softmin', ''),
@@ -1240,7 +1239,31 @@ class TestOperators(TestCase):
                     expected = (tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec))
                 return expected
 
-            expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
+            def double_backward_trick_reference(primals, cotangents, primals_tangents, cotangents_tangents):
+                def f(*all_inputs):
+                    p = all_inputs[:len(primals)]
+                    c = all_inputs[len(primals):]
+                    _, vjp_fn = ref_vjp(fn, *p)
+                    return vjp_fn(c)
+
+                flat_primals, _ = tree_flatten((primals, cotangents))
+                flat_tangents, _ = tree_flatten((primals_tangents, cotangents_tangents))
+                flat_primals = tuple(flat_primals)
+                flat_tangents = tuple(flat_tangents)
+
+                # doesn't actually invoke forward-mode AD, it does the
+                # "double backward trick"
+                result = torch.autograd.functional.jvp(f, flat_primals, v=flat_tangents)
+                return result
+
+            # HACK: obviously pytorch should also have the same coverage
+            FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH = {
+                'nn.functional.nll_loss',
+            }
+            if op.name in FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH:
+                expected = double_backward_trick_reference(primals, cotangents, primals_tangents, cotangents_tangents)
+            else:
+                expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
             self.assertEqual(result, expected)
 
 
