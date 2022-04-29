@@ -1,33 +1,28 @@
 # -*- coding: utf-8 -*-
 
-import torch
-from torch._C import ListType, OptionalType
-from torch.nn.modules.utils import _single, _pair, _triple
+import math
+import warnings
+from functools import partial, wraps
+from sys import maxsize as maxsize
+from typing import Optional
 
+import torch
 import torch.onnx
+import torch.onnx.symbolic_helper as sym_help
 
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
-from functools import partial
-from functools import wraps
-
-import torch.onnx.symbolic_helper as sym_help
+from torch._C import ListType, OptionalType
+from torch.nn.modules.utils import _pair, _single, _triple
 from torch.onnx.symbolic_helper import (
-    parse_args,
+    ScalarType,
     _parse_arg,
     _unimplemented,
-    ScalarType,
-    quantized_args,
     args_have_same_dtype,
+    parse_args,
+    quantized_args,
 )
-
-from typing import Optional
-from sys import maxsize as maxsize
-
-import math
-import warnings
-
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -4847,8 +4842,8 @@ class Prim:
                 if i > 0 and (i + 1) < len(inputs):
                     b_in.setType(inputs[i + 1].type())
             torch._C._jit_pass_onnx_block(
-                b, new_block, operator_export_type, env, False
-            )  # type:ignore[arg-type]
+                b, new_block, operator_export_type, env, False  # type:ignore[arg-type]
+            )
         new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
             new_node, opset_version
         )
@@ -4907,7 +4902,7 @@ class Prim:
             env = torch._C._jit_pass_onnx_block(
                 current_b,
                 block,
-                operator_export_type,
+                operator_export_type,  # type:ignore[arg-type]
                 env,  # type:ignore[arg-type]
                 True,
             )
@@ -4934,8 +4929,12 @@ class Prim:
             for b in n.blocks():
                 new_block = new_node.addBlock()
                 torch._C._jit_pass_onnx_block(
-                    b, new_block, operator_export_type, env, False
-                )  # type:ignore[arg-type]
+                    b,
+                    new_block,
+                    operator_export_type,
+                    env,
+                    False,  # type:ignore[arg-type]
+                )
             new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
                 new_node, opset_version
             )
