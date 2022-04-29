@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
-import torch._refs as refs  # noqa: F401
+# import torch._refs as refs  # noqa: F401
 
 from distutils.version import LooseVersion
 
@@ -13849,11 +13849,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
-           skips=(
-               # 76046
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                            dtypes=(torch.float16,)),
-           ),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True),
@@ -17074,17 +17069,17 @@ python_ref_db = [
     #
     # Elementwise unary OpInfos
     #
-    ElementwiseUnaryPythonRefInfo(
-        '_refs.floor',
-        torch_opinfo_name='floor',
-    ),
-    #
-    # Elementwise binary OpInfos
-    #
-    ElementwiseBinaryPythonRefInfo(
-        '_refs.add',
-        torch_opinfo_name='add',
-    ),
+    # ElementwiseUnaryPythonRefInfo(
+    #     '_refs.floor',
+    #     torch_opinfo_name='floor',
+    # ),
+    # #
+    # # Elementwise binary OpInfos
+    # #
+    # ElementwiseBinaryPythonRefInfo(
+    #     '_refs.add',
+    #     torch_opinfo_name='add',
+    # ),
 ]
 
 # Common operator groupings
