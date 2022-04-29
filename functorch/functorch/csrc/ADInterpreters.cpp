@@ -6,7 +6,7 @@ namespace at { namespace functorch {
 
 static void checkForInvalidMutationOnCaptures(
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
+    const torch::jit::Stack* stack,
     int64_t cur_level) {
   if (!isInplaceOp(op.schema())) {
     return;
