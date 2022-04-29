@@ -10069,7 +10069,6 @@ op_db: List[OpInfo] = [
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
                      skips=(
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ),
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.rfft2',
@@ -10083,7 +10082,6 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False,
                      decorators=[
                          precisionOverride({torch.float: 1e-4}),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ],),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
@@ -10096,7 +10094,6 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False,
                      decorators=[
                          precisionOverride({torch.float: 1e-4}),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ],),
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
@@ -10137,7 +10134,6 @@ op_db: List[OpInfo] = [
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and(torch.bool),
                      skips=(
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ),
                      check_batched_grad=False),
     SpectralFuncInfo('fft.ihfft2',
@@ -10152,7 +10148,6 @@ op_db: List[OpInfo] = [
                      decorators=(
                          # The values for attribute 'shape' do not match: torch.Size([5, 6, 5]) != torch.Size([5, 6, 6]).
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                          DecorateInfo(precisionOverride({torch.float: 2e-4}), 'TestFFT', 'test_reference_nd'),
                          # Mismatched elements!
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -10171,7 +10166,6 @@ op_db: List[OpInfo] = [
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                          # Mismatched elements!
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                          DecorateInfo(
                              precisionOverride({torch.float: 2e-4}),
                              'TestFFT', 'test_reference_nd')],
