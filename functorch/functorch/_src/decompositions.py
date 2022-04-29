@@ -479,6 +479,16 @@ def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
         return self + value * tensor1 * tensor2
 
 
+@register_decomposition(aten.rsub.Tensor)
+def rsub(self: Tensor, other: Tensor, alpha: float = 1) -> Tensor:
+    return torch.sub(other, self, alpha=alpha)
+
+
+@register_decomposition(aten.rsub.Scalar)
+def rsub(self: Tensor, other: float, alpha: float = 1) -> Tensor:
+    return torch.sub(other, self, alpha=alpha)
+
+
 @register_decomposition(aten.embedding)
 def embedding(weight: Tensor, indices: Tensor, padding_idx: int = -1, scale_grad_by_freq: bool = False, sparse: bool = False) -> Tensor:
     assert weight.dim() == 2,  "'weight' must be 2-D"
