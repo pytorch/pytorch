@@ -175,6 +175,7 @@ struct MemoryFormat {
     // have to decode `permutation_` when we want to apply/restore permutation_.
     permuted_order_ = stride_order;
     bool has_permutation = false;
+    permutation_ = 0;
     for (const auto i : c10::irange(rank)) {
       permutation_ = permutation_ * 10 + stride_order[i];
       if (!has_permutation && stride_order[i] != rank - 1 - i) {
