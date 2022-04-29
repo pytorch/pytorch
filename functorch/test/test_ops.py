@@ -663,9 +663,6 @@ class TestOperators(TestCase):
         xfail('fill_'),
         xfail('block_diag'),  # TODO: We expect this to fail in core, but it doesn't
 
-        # https://gist.github.com/zou3519/c42d032c0111c6b65235583d391bf7a3
-        xfail('nn.functional.linear'),
-
         # Apprently these support forward AD, but we get "Trying to use forward AD..."
         # These are cases where OpInfo has supports_forward_ad=True, but disables
         # the test
@@ -724,11 +721,17 @@ class TestOperators(TestCase):
                 self.assertEqual(loop_out, batched_out)
 
     vmapjvpall_fail = {
+        # The following are expected (not a bug)
         skip('bernoulli', ''),  # randomness
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.rrelu'),  # randomness
+        skip('nn.functional.dropout2d', ''),
+        skip('nn.functional.feature_alpha_dropout', 'without_train'),
+        skip('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
         xfail('nn.functional.fractional_max_pool3d'),  # Cannot access data pointer of Tensor that doesn't have storage
+
+        # The following are bugs that we should fix
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('_masked.mean', device_type='cuda'),
         xfail('_masked.prod', device_type='cuda'),
@@ -742,7 +745,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', device_type='cpu'),
         xfail('nn.functional.hinge_embedding_loss', device_type='cpu'),
 
-        # xfail list
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('linalg.norm', 'subgradients_at_zero'),
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
@@ -759,15 +761,11 @@ class TestOperators(TestCase):
         xfail('scatter'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
-        xfail('nn.functional.linear'),
         xfail('view_as_complex'),
         xfail('prod'),
 
-        skip('nn.functional.dropout2d', ''),
-        skip('nn.functional.feature_alpha_dropout', 'without_train'),
         skip('pca_lowrank', ''),
         skip('svd_lowrank', ''),
-        skip('nn.functional.feature_alpha_dropout', 'with_train'),
 
         xfail('stft'),  # transpose_ fallback
 
