@@ -21,8 +21,10 @@ with FusionDefinition(fusion) as fd :
     t4 = fd.Ops.atan2(t3, s0)
     t5 = fd.Ops.relu(t4)
     t6 = fd.Ops.sum(t5, [-1], False, DataType.Float)
+    t7 = fd.Ops.isfinite(t6)
 
     fd.add_output(t6)
+    fd.add_output(t7)
 
 fusion.print_ir()
 
@@ -36,3 +38,4 @@ for _ in range(5) :
     outputs = fusion.execute([input1, input2, 2.0])
 
 print(outputs[0])
+print(outputs[1])
