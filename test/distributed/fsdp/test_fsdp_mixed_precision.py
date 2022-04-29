@@ -297,7 +297,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                     optim.step()
 
                     # Summon full params should be in full precision
-                    with model.summon_full_params():
+                    with model.summon_full_params(model):
                         # It is not expected for summon_full_params to allocate
                         # a mixed precision shard.
                         self._validate_mp_shard_freed(model)

@@ -76,9 +76,13 @@ Tensor _to_copy(
     }
   }
   // See Note [Explicit nullopt MemoryFormat argument]
-  auto r = at::empty(self.sizes(),
-                     options.memory_format(memory_format).pinned_memory(pin_out),
-                     c10::nullopt);
+  // TODO: empty_quantized does not work here. It raises an exception in CheckMemoryFormat.h prior to
+  // empty_affine_quantizd/_empty_per_channel_affine_quantized calls
+  // at::empty also does not work here because there is no proper at::empty support for quantized tensors
+  // as it would return a quantized tensor with an UnknownQuantizer
+  auto r = self.is_quantized() ? at::empty_like(self, memory_format)
+                               : at::empty(self.sizes(),
+                                 options.memory_format(memory_format).pinned_memory(pin_out), c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
 }
@@ -247,7 +251,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.layout() == c10::kStrided) {
     return grad.to_dense();
   }
-  AT_ERROR("Unsupported input layout: ", input_.layout());
+  AT_ERROR("to_dense_backward: Unsupported input layout: ", input_.layout());
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
@@ -414,7 +418,17 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
 }
 
 Tensor csr_to_sparse_csr(const Tensor& self) {
-  return self;
+  // Just returning self doesn't work
+  // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152,
+  // please report a bug to PyTorch. aten::to_sparse_csr
+  return at::native::_sparse_csr_tensor_unsafe(
+      self.crow_indices(),
+      self.col_indices(),
+      self.values(),
+      self.sizes(),
+      self.scalar_type(),
+      c10::kSparseCsr,
+      self.device());
 }
 
 Tensor coo_to_sparse_csr(const Tensor& self) {
