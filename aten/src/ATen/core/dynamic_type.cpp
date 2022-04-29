@@ -372,7 +372,7 @@ ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
   for (const auto& elem : dyn.arguments().elems) {
     types.emplace_back(elem.ty);
     if (const auto& name = elem.label) {
-      fields.emplace_back(*elem.label);
+      fields.emplace_back(*name);
     }
   }
   if (const auto& name = dyn.name()) {

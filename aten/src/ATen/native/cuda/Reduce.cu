@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/Reduce.cuh>
 #include <c10/util/ArrayRef.h>
 

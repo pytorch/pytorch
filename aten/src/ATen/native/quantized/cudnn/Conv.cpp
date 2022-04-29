@@ -48,6 +48,7 @@ struct CacheKey {
   uint8_t output_alignment;
   // default to -1 when no bias
   int8_t bias_alignment;
+  bool kReluFused;
 };
 std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
@@ -110,7 +111,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     new_size[0] = bias_.value().size(0);
     broadcasted_bias = bias_.value().reshape(new_size);
     broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
-    broadcasted_bias.value() = broadcasted_bias.value().contiguous(c10::MemoryFormat::ChannelsLast);
+    broadcasted_bias.value() = broadcasted_bias.value().to(c10::MemoryFormat::ChannelsLast);
     bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
     auto bias_multiplier = 1.0 / (act_scale * weight_scale);
     bias_multiplier_tensor.value().fill_(bias_multiplier);
@@ -118,6 +119,11 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
   CacheKey key;
+  // memset is needed here because there is implicit packing added for CacheKey, and this can result in uninitialized padded values that are
+  // used for hashing (see how at::native::ParamsHash is defined). without memset, we can potentially come across a situation where two
+  // CacheKey objects have the same user defined parameters, but
+  // different padded values, resulting in different hash outputs.
+  memset(&key, 0, sizeof(key));
   bool deterministic{true};
   bool allow_tf32{false};
   auto padding_vec = padding_.vec();
@@ -136,6 +142,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   } else {
     key.bias_alignment = -1;
   }
+  key.kReluFused = kReluFused;
 
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
@@ -144,10 +151,8 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     std::vector<int64_t> uids;
     data_ptrs.reserve(10);
     uids.reserve(10);
-    data_ptrs = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
-                                           reinterpret_cast<int8_t*>(orig_weight_.data_ptr()),
-                                           requantize_multiplier_tensor.data_ptr(),
-                                           reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    data_ptrs = {input.data_ptr<int8_t>(), conv_output.data_ptr(), orig_weight_.data_ptr<int8_t>(),
+                 requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr<int8_t>()};
     uids = {'x', 'y', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
@@ -289,7 +294,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation in Quantized Conv2D Cudnn");
 }
 
 //
@@ -375,7 +380,7 @@ class QConvInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-    act = act.contiguous(c10::MemoryFormat::ChannelsLast);
+    act = act.to(c10::MemoryFormat::ChannelsLast);
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
     if (kReluFused) {
       return packed_weight->apply_relu(act, output_scale, output_zero_point);

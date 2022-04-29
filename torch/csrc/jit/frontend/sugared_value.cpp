@@ -118,9 +118,10 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_sparse", "prim"},
            {"is_sparse_csr", "prim"},
            {"is_mkldnn", "prim"},
-           {"is_mlc", "prim"},
+           {"is_mps", "prim"},
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
+           {"is_ipu", "prim"},
            {"is_meta", "prim"},
            {"is_leaf", "aten"},
            {"is_nested", "prim"},
@@ -659,6 +660,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
+  self->node()->setSourceRange(loc);
   if (!type_->findMethod("__init__")) {
     throw ErrorReport(loc) << "Class " << type_->name()->name()
                            << " does not have an __init__ function defined";
