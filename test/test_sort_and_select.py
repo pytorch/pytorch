@@ -123,6 +123,7 @@ class TestSortAndSelect(TestCase):
             x = torch.tensor([1, 10, 2, 2, 3, 7, 7, 8, 9, 9] * 3)
             self.assertEqual(torch.argsort(x, stable=True), torch.sort(x, stable=True).indices)
             self.assertEqual(torch.argsort(x, stable=False), torch.sort(x, stable=False).indices)
+            self.assertEqual(torch.argsort(x), torch.sort(x).indices)
 
 
             # Test sorting with NaNs
