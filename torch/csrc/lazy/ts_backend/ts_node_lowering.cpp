@@ -5,27 +5,14 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/ts_backend/ops/cast.h>
-#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
-#include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
-#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
-#include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
+#include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
-#include <torch/csrc/lazy/core/view_ops/as_strided.h>
-#include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
-#include <torch/csrc/lazy/core/view_ops/diagonal.h>
-#include <torch/csrc/lazy/core/view_ops/diagonal_view_update.h>
-#include <torch/csrc/lazy/core/view_ops/narrow.h>
-#include <torch/csrc/lazy/core/view_ops/narrow_view_update.h>
-#include <torch/csrc/lazy/core/view_ops/permute.h>
-#include <torch/csrc/lazy/core/view_ops/select.h>
-#include <torch/csrc/lazy/core/view_ops/select_view_update.h>
-#include <torch/csrc/lazy/core/view_ops/squeeze.h>
-#include <torch/csrc/lazy/core/view_ops/unsqueeze.h>
-#include <torch/csrc/lazy/core/view_ops/view.h>
-#include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
+#include <torch/csrc/lazy/ts_backend/ir_builder.h>
+#include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
+#include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 namespace torch {
 namespace lazy {
