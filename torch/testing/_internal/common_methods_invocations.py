@@ -20,7 +20,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
-    all_types, double_types, empty_types
+    all_types, double_types, empty_types, integral_types
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
-import torch._refs as refs  # noqa: F401
+# import torch._refs as refs  # noqa: F401
 
 from distutils.version import LooseVersion
 
@@ -1472,14 +1472,10 @@ def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad, **k
 
 def sample_inputs_pow(op, device, dtype, requires_grad, **kwargs):
     # If base is complex allow for negative real/imag components
-    lhs_low = 0 if not dtype.is_complex else -9
-
-    # Integral dtype helper
-    def is_integral(dtype):
-        return dtype in {torch.int8, torch.int16, torch.int32, torch.int64}
+    lhs_low = -9 if dtype.is_complex else 0
 
     # Only Interal types do not support negative exponents
-    rhs_low = 1 if is_integral(dtype) else -9
+    rhs_low = 1 if dtype in integral_types() else -9
 
     op.lhs_make_tensor_kwargs['low'] = lhs_low
     op.rhs_make_tensor_kwargs['low'] = rhs_low
@@ -13150,6 +13146,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_permute),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                    ref=np.power,
                     # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
                     # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
                     # unsupported on CPU.
@@ -13160,7 +13157,19 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
                     supports_two_python_scalars=True,
-                    sample_inputs_func=sample_inputs_pow),
+                    sample_inputs_func=sample_inputs_pow,
+                    skips=(
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
+                                     dtypes=[torch.int8, torch.int16, torch.int32, torch.int64, torch.complex64, torch.complex128]),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
+                                     dtypes=[torch.int16, torch.int32, torch.int64, torch.complex64, torch.complex128]),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_reference_numerics',
+                                     dtypes=[torch.int8, torch.int16, torch.int32, torch.int64, torch.complex64]),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_scalar_support',
+                                     dtypes=[torch.float32, torch.int64, torch.complex64]),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+                                     'test_broadcasting', dtypes=[torch.int64]),
+                    )),
     BinaryUfuncInfo('float_power',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
                     promotes_int_to_float=True,
@@ -13172,6 +13181,7 @@ op_db: List[OpInfo] = [
                         # FIXME
                         # AssertionError: Object comparison failed: torch.float64 != torch.float32
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_scalar_support'),
                         # -3.43399e+38 is outside the range of representable values of type 'float'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                     )),
@@ -13856,11 +13866,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
-           skips=(
-               # 76046
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
-                            dtypes=(torch.float16,)),
-           ),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True),
@@ -17081,17 +17086,17 @@ python_ref_db = [
     #
     # Elementwise unary OpInfos
     #
-    ElementwiseUnaryPythonRefInfo(
-        '_refs.floor',
-        torch_opinfo_name='floor',
-    ),
-    #
-    # Elementwise binary OpInfos
-    #
-    ElementwiseBinaryPythonRefInfo(
-        '_refs.add',
-        torch_opinfo_name='add',
-    ),
+    # ElementwiseUnaryPythonRefInfo(
+    #     '_refs.floor',
+    #     torch_opinfo_name='floor',
+    # ),
+    # #
+    # # Elementwise binary OpInfos
+    # #
+    # ElementwiseBinaryPythonRefInfo(
+    #     '_refs.add',
+    #     torch_opinfo_name='add',
+    # ),
 ]
 
 # Common operator groupings
