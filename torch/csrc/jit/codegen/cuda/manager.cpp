@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/type_inference.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -241,7 +242,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
           " variable `export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`\n"
           "To report the issue, try enable logging via setting the env"
           "variable ` export PYTORCH_JIT_LOG_LEVEL=manager.cpp`\n");
-      GRAPH_DUMP(__FUNCTION__, " hitting fallback on graph\n", *graph);
+      GRAPH_DUMP("`compile_fusion` hits fallback on graph\n", graph);
       CudaFusionManager::getManager().unregisterCacheId(graph);
     }
   } else {
