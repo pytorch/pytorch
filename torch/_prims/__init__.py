@@ -5,6 +5,7 @@ import torch._prims.utils as utils
 from torch._prims.utils import TensorLike, TensorLikeType, TensorMeta, ShapeType
 from torch.overrides import has_torch_function, handle_torch_function
 
+from torch._C import *  # noqa: F403
 import torch._C._nvfuser as nvfuser  # type: ignore[import]
 FusionDefinition = nvfuser.FusionDefinition  # type: ignore[attr-defined]
 DataType = nvfuser.DataType  # type: ignore[attr-defined]
