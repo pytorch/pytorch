@@ -34,10 +34,11 @@ from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
-    skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
+    TEST_WITH_CROSSREF,
+    skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize)
+    skipIfNotRegistered, bytes_to_scalar, parametrize, noncontiguous_like)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -629,6 +630,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
     # Uses mismatched arange out size to trigger a warning
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref perturbs line numbering")
     def test_cpp_warnings_have_python_context(self, device):
         # Creates long string in advance to avoid a too-long Python line
         s = ".+Triggered internally at.+RangeFactories.+"
@@ -2752,6 +2754,55 @@ else:
             sz = list(x.size())
             sz[d] = 0
             self.assertEqual(sz, y.size())
+
+    # FIXME: move to indexing test suite
+    @onlyCPU
+    @parametrize("reduce", ['prod', 'amin', 'amax', 'mean'])
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_index_reduce(self, device, dtype, reduce):
+        size = (3, 4, 5)
+        index_dtypes = [torch.int, torch.long]
+        include_selfs = [True, False]
+        reduction_init = {'prod': 1, 'mean': 0, 'amin': float('inf'), 'amax': -float('inf')}
+
+        for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
+            for idx_dtype, include_self in product(index_dtypes, include_selfs):
+                for dim in range(len(size)):
+                    num_src = np.random.randint(10)
+                    num_dest = size[dim]
+                    dest = torch.randn(size, dtype=dtype, device=device)
+                    if not dest_contig:
+                        dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=True)
+                    src = torch.randn(*size[:dim], num_src, *size[dim + 1:], dtype=dtype, device=device)
+                    if not src_contig:
+                        src = noncontiguous_like(src)
+                    idx = torch.randint(num_dest, (num_src,), dtype=idx_dtype, device=device)
+                    if not index_contig:
+                        idx = noncontiguous_like(idx)
+                    expected = dest.clone()
+                    dest._index_reduce_(dim, idx, src, reduce, include_self=include_self)
+                    # fill rows in idx with reduction inits if include_self=False
+                    if (not include_self):
+                        expected.index_fill_(dim, idx.long(), reduction_init[reduce])
+                    expected = expected.transpose(0, dim)
+                    src = src.transpose(0, dim)
+                    for i in range(num_src):
+                        if reduce == 'prod':
+                            expected[idx[i]] *= src[i]
+                        elif reduce == 'amin':
+                            torch.minimum(expected[idx[i]], src[i], out=expected[idx[i]])
+                        elif reduce == 'amax':
+                            torch.maximum(expected[idx[i]], src[i], out=expected[idx[i]])
+                        else:
+                            expected[idx[i]] += src[i]
+                    if reduce == 'mean':
+                        counts = torch.ones_like(expected) if include_self else torch.zeros_like(expected)
+                        counts.index_add_(0, idx, torch.ones_like(src))
+                        counts.masked_fill_(counts == 0, 1)
+                        expected /= counts
+                    expected = expected.transpose(0, dim)
+
+                    self.assertEqual(dest, expected)
 
     # FIXME: move to test indexing
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -7163,7 +7214,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # FIXME: move these meta tests to their own test suite/class or
     #   distribute them among the appropriate test suites for their ops
-    @noarchTest
     def test_empty_meta(self):
         x = torch.empty(2 ** 20, 2 ** 20, device='meta')
         y = torch.empty(2 ** 20, device='meta')
@@ -7171,12 +7221,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
         self.assertRaises(RuntimeError, lambda: z[0][0].item())
 
-    @noarchTest
     def test_format_scalar_meta(self):
         x = torch.empty((), device='meta')
         self.assertEqual(format(x), repr(x))
 
-    @noarchTest
     def test_upsample_nearest1d_meta(self):
         # TODO: this test should be triggered by test_nn.py but right
         # now meta is not enabled (and even if it was, we are probably
@@ -7200,7 +7248,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
         self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
-    @noarchTest
     def test_upsample_nearest2d_meta(self):
         # TODO: the out tests cannot be triggered by test_nn.py because
         # we don't actually do out= arguments for nn functions, so there
@@ -7241,13 +7288,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             """Expected out tensor to have device meta, but got cpu instead"""
         )
 
-    @noarchTest
     def test_detach_meta(self):
         x = torch.empty(2, device='meta')
         # This used to segfault
         self.assertRaises(RuntimeError, lambda: x.detach().storage())
 
-    @noarchTest
     def test_add_meta_scalar(self):
         # From https://github.com/pytorch/pytorch/issues/53815
         x = torch.empty(2, device='meta')
@@ -7873,6 +7918,22 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(cdouble.dtype, torch.complex128)
         self.assertEqual(cdouble.real, x.double())
         self.assertEqual(cdouble.imag, torch.zeros_like(cdouble.imag))
+        chalf = x.chalf()
+        self.assertEqual(chalf.dtype, torch.complex32)
+        self.assertEqual(chalf.real, x.half())
+        self.assertEqual(chalf.imag, torch.zeros_like(chalf.imag))
+
+    def test_type_alias(self):
+        type_alias_map = {torch.float64: torch.double,
+                          torch.float32: torch.float,
+                          torch.int32: torch.int,
+                          torch.int64: torch.long,
+                          torch.int16: torch.short,
+                          torch.float16: torch.half,
+                          torch.complex32: torch.chalf,
+                          torch.complex64: torch.cfloat}
+        for dtype, alias in type_alias_map.items():
+            self.assertIs(alias, dtype)
 
     # FIXME: Describe this test
     def test_doc_template(self) -> None:
