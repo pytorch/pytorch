@@ -242,15 +242,15 @@ at::Scalar as_scalar(PyObject* arg) {
 PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
   HANDLE_TH_ERRORS
 
-  PyObject* op_string_o = nullptr;
+  PyObject* code_string_o = nullptr;
   PyObject* kernel_name_o = nullptr;
   PyObject* tensors_o = nullptr;
   PyObject* kwargs_o = nullptr;
-  if(!PyArg_ParseTuple(args, "OOO|O", &op_string_o, &kernel_name_o, &tensors_o, &kwargs_o)) {
+  if(!PyArg_ParseTuple(args, "OOO|O", &code_string_o, &kernel_name_o, &tensors_o, &kwargs_o)) {
     return nullptr;
   }
 
-  std::string op_string = THPUtils_unpackString(op_string_o);
+  std::string code_string = THPUtils_unpackString(code_string_o);
   std::string kernel_name = THPUtils_unpackString(kernel_name_o);
 
   THPUtils_assert(PyTuple_Check(tensors_o), "tensors argument is expected to "
@@ -274,7 +274,7 @@ PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
     extra_args.emplace_back(as_scalar(value));
   }
 
-  at::Tensor output = at::cuda::CompileKernel(op_string, kernel_name, tensors, extra_args);
+  at::Tensor output = at::cuda::CompileKernel(code_string, kernel_name, tensors, extra_args);
 
   return THPVariable_Wrap(output);
   END_HANDLE_TH_ERRORS

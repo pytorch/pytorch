@@ -4,7 +4,9 @@ from typing import Callable
 
 import re
 
-class CodeParser:
+__all__ = ["create_jit_fn"]
+
+class _CodeParser:
     def __init__(self, code_string: str):
         optional_ws = r"\s*"
         required_ws = r"\s+"
@@ -36,17 +38,40 @@ class CodeParser:
         self.function_body = result["function_body"]
 
 
-def create_jit_fn(op_string: str, **kwargs) -> Callable:
-    class JittedFunction:
-        def __init__(self, op_string: str, **kwargs):
-            self.op_string = op_string
+def create_jit_fn(code_string: str, **kwargs) -> Callable:
+    """
+    Create a jiterator-generated cuda kernel.
 
-            parsed_code = CodeParser(op_string)
+    Args:
+        code_string (string): CUDA code string to be compiled by jiterator
+        kwargs (Dict, optional): Keyword arguments for generated function
+
+    Examples:
+        >>> code_string = "template <typename T> T my_kernel(T x, T y, T alpha) { return  -x + alpha * y; }"
+        >>> jitted_fn = create_jit_fn(code_string, alpha=1.0)
+        >>> a = torch.rand(3, device='cuda')
+        >>> b = torch.rand(3, device='cuda')
+        >>> # invoke jitted function like a regular python function
+        >>> result = jitted_fn(a, b, alpha=3.14)
+
+    .. warning::
+        This API is in beta and may change in future releases.
+
+    .. warning::
+        Jiterator only supports elementwise kernels with up to 8 tensor inputs
+    """
+    class JittedFunction:
+        def __init__(self, code_string: str, **kwargs):
+            self.code_string = code_string
+
+            parsed_code = _CodeParser(code_string)
             self.kernel_name = parsed_code.function_name
 
             self.kwargs_dict = kwargs
 
         def __call__(self, *tensors: Tensor, **kwargs):
+            assert len(tensors) <= 8, "jiterator only supports up to 8 tensor inputs."
+
             expanded_kwargs = self.kwargs_dict.copy()
             for key, value in kwargs.items():
                 if key in self.kwargs_dict:
@@ -55,9 +80,9 @@ def create_jit_fn(op_string: str, **kwargs) -> Callable:
                     raise KeyError(f"{key} is not declared in function definition")
 
             return torch._C._cuda_compile_kernel(
-                self.op_string,
+                self.code_string,
                 self.kernel_name,
                 tensors,
                 expanded_kwargs)
 
-    return JittedFunction(op_string, **kwargs)
+    return JittedFunction(code_string, **kwargs)
