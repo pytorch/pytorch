@@ -14,8 +14,7 @@ from torch.testing._internal.common_utils import \
      IS_IN_CI, suppress_warnings, noncontiguous_like,
      TEST_WITH_ASAN, IS_WINDOWS, IS_FBCODE, first_sample)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo, ops_and_refs,
-     python_ref_db)
+    (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo, ops_and_refs)
 from torch.testing._internal.common_device_type import \
     (deviceCountAtLeast, instantiate_device_type_tests, ops,
      onlyCUDA, onlyNativeDeviceTypes, OpDTypes, skipMeta)
