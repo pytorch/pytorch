@@ -435,6 +435,15 @@ bool IValue::isTensorList() const {
   return isListOf<c10::TensorType>();
 }
 
+bool IValue::isOptionalTensorList() const {
+  if (!isList()) {
+    return false;
+  }
+  const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
+  const auto expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
+  return expected_ty == ty;
+}
+
 bool IValue::isIntList() const {
   return isListOf<c10::IntType>();
 }
@@ -1170,5 +1179,4 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
   }
   return ctx->dstFuture;
 }
-
 } // namespace c10

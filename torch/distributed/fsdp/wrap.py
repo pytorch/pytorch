@@ -4,7 +4,17 @@
 # LICENSE file in the root directory of this source tree.
 
 import contextlib
-from typing import Any, Callable, Dict, Generator, Optional, Set, Tuple, Type, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    cast,
+)
 
 import torch.nn as nn
 
@@ -87,12 +97,12 @@ def enable_wrap(
     """
     Context manager to wrap modules using a wrapper.
 
-    Useful for when you'd like to apply the same parameters to all child modules
-    that you wrap. A particularly important use case is wrapping large layers so
-    that they get sharded (in-place) during initialization, to avoid running out of
-    system memory. Large layers can indicate that they should be sharded via
-    the ``wrap`` annotation and this context manager can provide the
-    exact configuration for these nested instances.
+    Useful for when you'd like to apply the same configuration arguments to all
+    child modules that you wrap. A particularly important use case is wrapping
+    large layers so that they get sharded (in-place) during initialization, to
+    avoid running out of system memory. Large layers can indicate that they
+    should be sharded via the ``wrap`` annotation and this context manager can
+    provide the exact configuration for these nested instances.
 
     Usage::
 
@@ -162,6 +172,8 @@ def _recursive_wrap(
     module: nn.Module,
     auto_wrap_policy: Callable,
     wrapper_cls: Callable,
+    ignored_modules: Set[nn.Module],
+    ignored_params: Set[nn.Parameter],
     only_wrap_children: bool = False,
     **kwargs: Any
 ) -> Tuple[nn.Module, int]:
@@ -173,6 +185,11 @@ def _recursive_wrap(
             module to recursively wrap
         auto_wrap_policy (Callable):
             A callable specifying a policy to recursively wrap layers with FSDP.
+        ignored_modules (Set[torch.nn.Module]): Modules to ignore when
+            wrapping.
+        ignored_params (Set[torch.nn.Parameter]): Parameters to ignore when
+            wrapping; these should be the parameters contained in the modules
+            in ``ignored_modules``.
     Returns:
         (nn.Module, int):
             Wrapped module and the number parameters wrapped recursively.
@@ -181,20 +198,28 @@ def _recursive_wrap(
     assert wrapper_cls is not None, "Must specify wrapper_cls"
     # Make sure no child is already wrapped.
     for _, child in module.named_modules():
+        if child in ignored_modules:
+            continue
         assert not isinstance(child, cast(type, wrapper_cls))
 
-    # We count all params, assuming none of them is already wrapped.
-    num_params = sum([p.numel() for p in module.parameters()])
+    # We count all params, assuming none of them are already wrapped.
+    num_params = sum(
+        p.numel() for p in module.parameters() if p not in ignored_params
+    )
 
     assert auto_wrap_policy is not None
     if auto_wrap_policy(module=module, recurse=True, unwrapped_params=num_params):
         total_wrapped_params = 0
         # Iterate through the children, recursively wrap if necessary
         for name, child in module.named_children():
+            if child in ignored_modules:
+                continue
             wrapped_child, num_wrapped_params = _recursive_wrap(
                 module=child,
                 auto_wrap_policy=auto_wrap_policy,
                 wrapper_cls=wrapper_cls,
+                ignored_modules=ignored_modules,
+                ignored_params=ignored_params,
                 **kwargs,
             )
             setattr(module, name, wrapped_child)
