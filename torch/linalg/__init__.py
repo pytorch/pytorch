@@ -2310,18 +2310,15 @@ the output has the same batch dimensions.
 The parameter :attr:`mode` chooses between the full and reduced QR decomposition.
 If :attr:`A` has shape `(*, m, n)`, denoting `k = min(m, n)`
 
-- :attr:`mode`\ `= 'reduced'` (default): Returns `(Q, R)` of shapes `(*, m, k)`, `(*, k, n)` respectively.
-- :attr:`mode`\ `= 'complete'`: Returns `(Q, R)` of shapes `(*, m, m)`, `(*, m, n)` respectively.
-- :attr:`mode`\ `= 'r'`: Computes only the reduced `R`. Returns `(Q, R)` with `Q` empty and `R` of shape `(*, k, n)`.
+- :attr:`mode`\ `= 'reduced'` (default): Returns `(Q, R)` of shapes `(*, m, k)`, `(*, k, n)` respectively. It is always differentiable.
+- :attr:`mode`\ `= 'complete'`: Returns `(Q, R)` of shapes `(*, m, m)`, `(*, m, n)` respectively. It is differentiable for `m <= n`.
+- :attr:`mode`\ `= 'r'`: Computes only the reduced `R`. Returns `(Q, R)` with `Q` empty and `R` of shape `(*, k, n)`. It is never differentiable.
 
 Differences with `numpy.linalg.qr`:
 
 - :attr:`mode`\ `= 'raw'` is not implemented.
 - Unlike `numpy.linalg.qr`, this function always returns a tuple of two tensors.
   When :attr:`mode`\ `= 'r'`, the `Q` tensor is an empty tensor.
-  This behavior may change in a future PyTorch release.
-
-.. note:: The only :attr:`mode` that is differentiable is :attr:`mode`\ `= 'reduced'`.
 
 .. warning:: The elements in the diagonal of `R` are not necessarily positive.
              As such, the returned QR decomposition is only unique up to the sign of the diagonal of `R`.
