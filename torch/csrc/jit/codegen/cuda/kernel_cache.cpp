@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/debug_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -274,6 +275,8 @@ FusionKernelRuntime::FusionKernelRuntime(
       std::make_unique<FusionPrecomputedIntegers>(fusion_copy.get());
 
   //! Try to schedule the complete fusion
+  scheduler_debug_utils::canScheduleMessage(
+      "***Runtime***: Try to schedule fusion un-segmented:\n");
   const auto maybe_complete_fusion_heuristic =
       SchedulerEntry::proposeHeuristics(fusion_copy.get(), runtime_info);
 

@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/debug_utils.h>
 
 #include <sstream>
 
@@ -1128,6 +1129,7 @@ std::ostream& operator<<(
         return group_order.at(edge_a->from) < group_order.at(edge_b->from);
       });
 
+  os << "Segmented_Fusion Dump: -- fusion segments:\n";
   os << "Segmented_Fusion{ \n";
   os << "groups: \n";
   for (const auto g : sorted_groups_to_print) {
@@ -1146,6 +1148,9 @@ std::ostream& operator<<(
 }
 
 void SegmentedFusion::print() const {
+  std::cout << "Segmented_Fusion Dump: -- Re-written complete fusion:{\n";
+  completeFusion()->printMath();
+  std::cout << "} // {Re-written complete fusion}\n";
   std::cout << this << "\n";
 }
 
@@ -1583,6 +1588,8 @@ c10::optional<ScheduleHeuristic> tryMerge(
     SegmentedGroup* b = nullptr) {
   FusionSegmentGuard fsg(fusion, getAllInputs(a, b), getAllOutputs(a, b));
 
+  scheduler_debug_utils::canScheduleMessage(
+      "\n**Segmenter** Considering fusion:\n", fusion);
   return SchedulerEntry::proposeHeuristics(fusion, runtime_info);
 }
 
@@ -1594,6 +1601,8 @@ c10::optional<ScheduleHeuristic> tryMerge(
       fusion,
       allInputsIfTrueElseOutputs(segmented_groups, true),
       allInputsIfTrueElseOutputs(segmented_groups, false));
+  scheduler_debug_utils::canScheduleMessage(
+      "\n**Segmenter** Considering fusion:\n", fusion);
   return SchedulerEntry::proposeHeuristics(fusion, runtime_info);
 }
 

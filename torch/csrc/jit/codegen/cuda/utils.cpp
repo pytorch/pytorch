@@ -24,6 +24,7 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::CudaToFile, false},
       {DebugDumpOption::LaunchParam, false},
       {DebugDumpOption::FusionSegments, false},
+      {DebugDumpOption::FusionSegmenterLog, false},
       {DebugDumpOption::FusionArgs, false},
       {DebugDumpOption::KernelArgs, false},
       {DebugDumpOption::EffectiveBandwidth, false},
@@ -55,6 +56,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::LaunchParam] = true;
       } else if (token == "segmented_fusion") {
         options_map[DebugDumpOption::FusionSegments] = true;
+      } else if (token == "segmenter_logging") {
+        options_map[DebugDumpOption::FusionSegmenterLog] = true;
       } else if (token == "fusion_args") {
         options_map[DebugDumpOption::FusionArgs] = true;
       } else if (token == "kernel_args") {
@@ -83,7 +86,7 @@ auto parseDebugDumpOptions() {
             "\tcuda_to_file, launch_param, segmented_fusion, fusion_args,\n",
             "\tkernel_args, dump_eff_bandwidth, draw_segmented_fusion,\n",
             "\tscheduler_params, parallel_dimensions, buffer_reuse_verbose,\n",
-            "\tptxas_verbose, halo\n");
+            "\tptxas_verbose, halo, segmenter_logging\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)

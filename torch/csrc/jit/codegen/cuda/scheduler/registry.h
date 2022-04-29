@@ -184,7 +184,7 @@ class TORCH_CUDA_CU_API SchedulerEntry {
 
   ReductionParams& rparams() {
     return rparams_;
-  };
+  }
 
   PointwiseParams& pparams() {
     return pparams_;
@@ -215,6 +215,9 @@ class TORCH_CUDA_CU_API SchedulerEntryHash {
 
 //! Debug print function for heuristics
 std::string toString(ScheduleHeuristic sh);
+
+//! Debug print function for heuristics
+std::ostream& operator<<(std::ostream& os, ScheduleHeuristic sh);
 
 } // namespace cuda
 } // namespace fuser

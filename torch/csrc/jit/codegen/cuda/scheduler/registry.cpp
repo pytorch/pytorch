@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/debug_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
@@ -799,11 +800,15 @@ class ReductionScheduler : public SchedulerEntry {
     // TODO Add more testing before enabling
     auto view_tvs = scheduler_utils::getViewTVs(fusion);
     if (view_tvs.size() > 0) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Reduction, "No support for view op");
       return false;
     }
 
     // Needs at least one non-trivial reduction to consider.
     if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Reduction, "No reduction op to schedule");
       return false;
     }
 
@@ -817,6 +822,8 @@ class ReductionScheduler : public SchedulerEntry {
 
     if (findTransposeOps(fusion).size() > 0) {
       // Use pointwise logic
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Reduction, "No support for transpose op");
       return false;
     }
 
@@ -845,6 +852,12 @@ class ReductionScheduler : public SchedulerEntry {
           axis_count = reduction_root_size(red);
         } else {
           if (reduction_root_size(red) != axis_count) {
+            scheduler_debug_utils::canScheduleRejectReason(
+                ScheduleHeuristic::Reduction,
+                "Inconsistent reduction axes ",
+                red,
+                "is not ",
+                axis_count);
             return false;
           }
         }
@@ -859,6 +872,12 @@ class ReductionScheduler : public SchedulerEntry {
       for (size_t it = 1; it < reduction_tvs.size(); it++) {
         if (!checkPatternEquivalence(
                 reduction_tvs[it - 1], reduction_tvs[it], root_map)) {
+          scheduler_debug_utils::canScheduleRejectReason(
+              ScheduleHeuristic::Reduction,
+              "Un-mapped multi-reduction: ",
+              reduction_tvs[it - 1],
+              " ",
+              reduction_tvs[it]);
           return false;
         }
       }
@@ -867,12 +886,18 @@ class ReductionScheduler : public SchedulerEntry {
     // Doesn't allow persistent kernels in this scheduler
     auto persistent_buffer_info = scheduler_utils::persistentBuffers(fusion);
     if (persistent_buffer_info.persistent_buffers.size() > 0) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Reduction,
+          "need persistent buffers that reduction scheduler doesn't handle");
       return false;
     }
 
     if (!SchedulerTopologyChecker::supportedPostReductionFusion(
             fusion, reduction_tvs) ||
         SchedulerTopologyChecker::hasPostReductionBCast(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Reduction,
+          "has unsupported post reduction fusion");
       return false;
     }
 
@@ -917,13 +942,22 @@ class PointWiseScheduler : public SchedulerEntry {
     // to eliminate mismatch between canSchedule and
     // schedule pointwise.
     if (!hasReferenceTensorView(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::PointWise, "cannot find reference tensor");
       return false;
     }
 
     auto reduction_ops =
         ir_utils::getReductionOps(fusion, true /* ignore_trivial */);
     auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
-    return reduction_ops.empty() && welford_ops.empty();
+
+    if (!reduction_ops.empty() || !welford_ops.empty()) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::PointWise, "no support for reduction ops");
+      return false;
+    }
+
+    return true;
   }
 
   static bool canScheduleRunTime(
@@ -966,6 +1000,8 @@ class PersistentKernelScheduler : public SchedulerEntry {
   static bool canScheduleCompileTime(Fusion* fusion) {
     // Needs at least one non-trivial reduction to consider.
     if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent, "needs a reduction op");
       return false;
     }
 
@@ -975,11 +1011,16 @@ class PersistentKernelScheduler : public SchedulerEntry {
     // For persistent schedule we want welford translated to average and
     // standard deviation reductions.
     if (welford_ops.begin() != welford_ops.end()) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent,
+          "no support for un-translated welford");
       return false;
     }
 
     auto view_tvs = scheduler_utils::getViewTVs(fusion);
     if (view_tvs.size() > 0) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent, "no support for view");
       return false;
     }
 
@@ -988,11 +1029,15 @@ class PersistentKernelScheduler : public SchedulerEntry {
 
     if (reduction_tvs.size() == 0) {
       // Use pointwise logic
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent, "no reduction tv");
       return false;
     }
 
     if (findTransposeOps(fusion).size() > 0) {
       // Use pointwise logic
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent, "no support for transpose");
       return false;
     }
 
@@ -1017,6 +1062,9 @@ class PersistentKernelScheduler : public SchedulerEntry {
         axis_count = reduction_root_size(red);
       } else {
         if (reduction_root_size(red) != axis_count) {
+          scheduler_debug_utils::canScheduleRejectReason(
+              ScheduleHeuristic::Persistent,
+              "inconsistent reduction root size");
           return false;
         }
       }
@@ -1031,6 +1079,12 @@ class PersistentKernelScheduler : public SchedulerEntry {
     for (const auto it : c10::irange(1, reduction_tvs.size())) {
       if (!checkPatternEquivalence(
               reduction_tvs[it - 1], reduction_tvs[it], root_map)) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Persistent,
+            "unmapped reduction ",
+            reduction_tvs[it - 1],
+            " and ",
+            reduction_tvs[it]);
         return false;
       }
     }
@@ -1038,10 +1092,15 @@ class PersistentKernelScheduler : public SchedulerEntry {
     // Only accept persistent kernels
     auto persistent_buffer_info = scheduler_utils::persistentBuffers(fusion);
     if (persistent_buffer_info.persistent_buffers.size() == 0) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent, "no persistent buffer identified");
       return false;
     }
 
     if (SchedulerTopologyChecker::hasNonNormalizePostReductionBCast(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent,
+          "unsupported post reduction normalization");
       return false;
     }
 
@@ -1081,6 +1140,9 @@ class PersistentKernelScheduler : public SchedulerEntry {
         persistent_buffer_size_info.projected_persistent_buffer_size);
 
     if (persistent_buffer_size > scheduler_utils::register_file_size) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent,
+          "not enough registers for persistence");
       return false;
     }
 
@@ -1122,6 +1184,9 @@ class PersistentKernelScheduler : public SchedulerEntry {
             // Reduction count is larger than max thread count * 4
             properties.total_reduction_numel >=
                 device_max_threads_per_multiprocessor * 4)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Persistent, "unsupported cross grid persistence");
+
       return false;
     }
 
@@ -1229,6 +1294,7 @@ c10::optional<ScheduleHeuristic> SchedulerEntry::proposeHeuristics(
     SchedulerRuntimeInfo& runtime_info) {
   for (auto sh : all_heuristics()) {
     if (canSchedule(sh, fusion, runtime_info)) {
+      scheduler_debug_utils::canScheduleMessage("***Accepted*** as: ", sh);
       return sh;
     }
   }
@@ -1255,6 +1321,11 @@ std::string toString(ScheduleHeuristic sh) {
       TORCH_INTERNAL_ASSERT(false, "undefined schedule");
   }
   return "";
+}
+
+std::ostream& operator<<(std::ostream& os, ScheduleHeuristic sh) {
+  os << toString(sh);
+  return os;
 }
 
 namespace {
