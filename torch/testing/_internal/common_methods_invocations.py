@@ -2491,7 +2491,6 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
                         kwargs={'alpha': alpha_val, 'beta': beta_val},))
     return sample_inputs
 
-
 def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha = 2 + 3j if dtype.is_complex else 0.6
     beta = 1 + 2j if dtype.is_complex else 0.2
@@ -2501,16 +2500,27 @@ def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **
         for index_dtype in (torch.int32, torch.int64):
             for m, n, k in itertools.product([0, 5], repeat=3):
                 yield SampleInput(
-                    make_tensor((m, n), device=device, dtype=dtype).to_sparse_csr().requires_grad_(requires_grad),
+                    torch.eye(m, n, device=device, dtype=dtype)
+                    .to_sparse_csr()
+                    .requires_grad_(requires_grad),
                     args=(
-                        make_tensor((m, k), device=device, dtype=dtype,
-                                    requires_grad=requires_grad),
-                        make_tensor((k, n), device=device, dtype=dtype,
-                                    requires_grad=requires_grad)),
-                    kwargs={'alpha': alpha, 'beta': beta})
+                        make_tensor(
+                            (m, k),
+                            device=device,
+                            dtype=dtype,
+                            requires_grad=requires_grad,
+                        ),
+                        make_tensor(
+                            (k, n),
+                            device=device,
+                            dtype=dtype,
+                            requires_grad=requires_grad,
+                        ),
+                    ),
+                    kwargs={"alpha": alpha, "beta": beta},
+                )
 
     return list(generator())
-
 
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     return (
@@ -10314,7 +10324,7 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('sparse.sampled_addmm',
            dtypes=floating_and_complex_types(),
-           supports_autograd=False,
+           supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
                onlyCUDA,
@@ -10331,6 +10341,8 @@ op_db: List[OpInfo] = [
                # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
                # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
+               # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
@@ -10340,6 +10352,14 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # RuntimeError: unsupported memory format option Preserve
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
            )),
     UnaryUfuncInfo('i0',
                    ref=np_unary_ufunc_integer_promotion_wrapper(
