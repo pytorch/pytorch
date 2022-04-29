@@ -749,7 +749,7 @@ class TestReductions(TestCase):
         a = make_tensor((3, 4, 5), dtype=torch.int64, device=device)
 
         # Can't compute mean of integral tensors.
-        with self.assertRaisesRegex(RuntimeError, fr"mean\(\): at least one of .* Got \(i\) Long and \(ii\) None"):
+        with self.assertRaisesRegex(RuntimeError, r"mean\(\): at least one of .* Got \(i\) Long and \(ii\) None"):
             a.mean()
 
 
@@ -763,7 +763,7 @@ class TestReductions(TestCase):
         self.assertEqual(a_float.mean(), a.mean(dtype=torch.float32))
 
         # Error if desired output dtype mismatches
-        with self.assertRaisesRegex(RuntimeError, fr".* out tensor to have dtype double, but got float instead"):
+        with self.assertRaisesRegex(RuntimeError, r".* out tensor to have dtype double, but got float instead"):
             torch.mean(a, [], dtype=torch.float64, out=a_float)
 
     # TODO: update this and tests that use it to handle device properly
