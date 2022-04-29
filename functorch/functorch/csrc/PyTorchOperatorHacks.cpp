@@ -120,11 +120,14 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const c10::optiona
   }
   auto output = at::matmul(input, weight.t());
   if (bias->defined()) {
-    // TODO(rzou): I'm a little uncomfortable with this
-    if (can_perform_inplace(output, *bias)) {
-      return output.add_(*bias);
+    const auto& stack = getDynamicLayerStack();
+    bool any_vmap_layers = std::any_of(
+        stack.begin(), stack.end(),
+        [](const DynamicLayer& dl){ return dl.key() == TransformType::Vmap; });
+    if (any_vmap_layers) {
+      return output.add(*bias);
     }
-    return output.add(*bias);
+    return output.add_(*bias);
   }
   return output;
 }
