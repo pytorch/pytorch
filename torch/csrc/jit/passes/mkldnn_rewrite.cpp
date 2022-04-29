@@ -1,4 +1,5 @@
 #include <ATen/Config.h>
+#include <ATen/code_template.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
@@ -147,31 +148,50 @@ void insertMkldnnPrePackedOps(script::Module& module) {
   }
 }
 
+// Eltwise inplace OP shares the same op_attr
+std::string PrepareAttr(const std::string& op) {
+  auto pos = op.find("_");
+  if (pos != std::string::npos) {
+    return op.substr(0, pos);
+  } else {
+    return op;
+  }
+}
+
 void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
-
-  std::string conv2d_prepack_run_relu_fused = R"(
-    graph(%input, %weight, %bias, %stride:int[], %padding:int[],
-          %dilation:int[], %groups:int, %input_size:int[], %dummy_attr:str):
-        %attr: str = prim::Constant[value="relu"]()
-        %packed_weight_bias : __torch__.torch.classes.mkldnn.Conv2dOpContext = mkldnn_prepacked::conv2d_prepack(
-            %weight, %bias, %stride, %padding, %dilation, %groups,
-            %input_size, %attr)
-        %res = mkldnn_prepacked::conv2d_run(%input, %packed_weight_bias)
-        return (%res) )";
-
-  std::string conv2d_prepack_run_relu = R"(
+  std::vector<std::string> fusion_operators = {"relu"};
+  auto conv_op_rstring = at::jit::CodeTemplate(R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %input_size:int[], %dummy_attr:str):
         %packed_weight_bias = mkldnn_prepacked::conv2d_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %input_size, %dummy_attr)
         %conv2d_res = mkldnn_prepacked::conv2d_run(%input, %packed_weight_bias)
-        %res = aten::relu(%conv2d_res)
-        return (%res) )";
+        %res = aten::${op}(%conv2d_res)
+        return (%res))");
 
-  rewriter.RegisterRewritePattern(
-      conv2d_prepack_run_relu, conv2d_prepack_run_relu_fused);
+  auto conv_op_fused_rstring = at::jit::CodeTemplate(R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[],
+          %dilation:int[], %groups:int, %input_size:int[], %dummy_attr:str):
+        %attr: str = prim::Constant[value="${op_attr}"]()
+        %packed_weight_bias : __torch__.torch.classes.mkldnn.Conv2dOpContext = mkldnn_prepacked::conv2d_prepack(
+            %weight, %bias, %stride, %padding, %dilation, %groups,
+            %input_size, %attr)
+        %res = mkldnn_prepacked::conv2d_run(%input, %packed_weight_bias)
+        return (%res))");
+
+  for (const auto& op : fusion_operators) {
+    at::jit::TemplateEnv env;
+    env.s("op", op);
+
+    at::jit::TemplateEnv env_fused;
+    env_fused.s("op_attr", PrepareAttr(op));
+
+    rewriter.RegisterRewritePattern(
+        conv_op_rstring.format(env), conv_op_fused_rstring.format(env_fused));
+  }
+
   rewriter.runOnGraph(graph);
 }
 
