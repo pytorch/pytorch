@@ -267,6 +267,7 @@ class Module:
         self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
         self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
         self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._load_state_dict_post_hooks: Dict[int, Callable] = OrderedDict()
         self._modules: Dict[str, Optional['Module']] = OrderedDict()
 
     forward: Callable[..., Any] = _forward_unimplemented
@@ -1183,6 +1184,8 @@ class Module:
             self._state_dict_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
             self._load_state_dict_pre_hooks = OrderedDict()
+        if '_load_state_dict_post_hooks' not in self.__dict__:
+            self._load_state_dict_post_hooks = OrderedDict()
         if '_non_persistent_buffers_set' not in self.__dict__:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
@@ -1426,6 +1429,26 @@ class Module:
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 
+    def register_load_state_dict_post_hook(self, hook):
+        r"""
+        These hooks will be called with the following arguments:
+            1. The current module this hook is registered on
+            2. A ``NamedTuple`` consisting of attributes ``missing_keys``
+                and ``unexpected_keys``. ``missing_keys`` is a ``list`` of
+                ``str`` containing the missing keys and ``unexpected_keys``
+                is a ``list`` of ``str`` containing the unexpected keys.
+        If the hook wishes to modify the ``NamedTuple`` ``missing_keys``
+        or ``unexpected_keys`` returned by ``load_state_dict``, the hook
+        can simply modify the ``NamedTuple`` argument it is invoked with.
+        Arguments:
+            hook (Callable): Callable hook that will be invoked after
+                loading the state dict.
+        """
+        handle = hooks.RemovableHandle(self._load_state_dict_post_hooks)
+        self._load_state_dict_post_hooks[handle.id] = hook
+        return handle
+
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
@@ -1579,7 +1602,12 @@ class Module:
         if len(error_msgs) > 0:
             raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
                                self.__class__.__name__, "\n\t".join(error_msgs)))
-        return _IncompatibleKeys(missing_keys, unexpected_keys)
+
+        incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
+        for hook in self._load_state_dict_post_hooks.values():
+            hook(self, incompatible_keys)
+
+        return incompatible_keys
 
     def _named_members(self, get_members_fn, prefix='', recurse=True):
         r"""Helper method for yielding various names + members of modules."""
