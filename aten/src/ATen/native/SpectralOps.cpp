@@ -865,7 +865,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
     // pad center
     auto left = (n_fft - win_length) / 2;
     if (window.defined()) {
-      window_ = at::zeros({n_fft}, window.options());
+      window_ = window.new_zeros({n_fft});
       window_.narrow(0, left, win_length).copy_(window);
     } else {
       window_ = at::zeros({n_fft}, self.options());
