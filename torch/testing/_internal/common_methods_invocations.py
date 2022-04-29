@@ -15,7 +15,7 @@ from torch._six import inf
 import collections.abc
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -750,6 +750,8 @@ class OpInfo(object):
     supports_expanded_weight: bool = False
 
     def __post_init__(self):
+        self._original_opinfo_args = asdict(self).copy()
+
         assert self.dtypes is not None, "OpInfo for {0} has no dtypes!".format(self.name)
 
         dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
@@ -17076,6 +17078,27 @@ def _inherit_constructor_args(name, op, inherited, overrides):
     kwargs.update(overrides)
 
     return kwargs
+
+class OpInfoPythonRefInfo(OpInfo):
+    '''
+    An OpInfo for a Python reference of an OpInfo base class operation.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        assert isinstance(self.torch_opinfo, OpInfo)
+
+        inherited = self.torch_opinfo._original_opinfo_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, {})
+
+        super(OpInfo, self).__init__(**ukwargs)
 
 class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
     '''
