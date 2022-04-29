@@ -68,6 +68,7 @@ struct TraceWrapper {
   // addMemoryUsageActivity.
   void addCPUActivity(
       const std::string& name,
+      const uint8_t scope,
       const DeviceAndResource device_and_resource,
       const uint64_t correlation_id,
       const int64_t start_time,
@@ -114,11 +115,15 @@ struct ActivityTraceWrapper {
 };
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
-void prepareTrace(const bool cpuOnly, const ActivitySet& activities);
+void prepareTrace(
+    const bool cpuOnly, const ActivitySet& activities,
+    const torch::profiler::impl::ExperimentalConfig& config);
 void startTrace();
 ActivityTraceWrapper stopTrace();
 void pushCorrelationId(uint64_t correlation_id);
+void pushUserCorrelationId(uint64_t correlation_id);
 void popCorrelationId();
+void popUserCorrelationId();
 void recordThreadInfo();
 
 } // namespace kineto
