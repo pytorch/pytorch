@@ -19,7 +19,7 @@ with FusionDefinition(fusion) as fd :
     t1_b = fd.Ops.broadcast(t1, [True, True, False])
     t2 = fd.Ops.add(t0, t1)
     t3 = fd.Ops.mul(t2, c0)
-    t4 = fd.Ops.mul(t3, s0)
+    t4 = fd.Ops.atan2(t3, s0)
     t5 = fd.Ops.relu(t4)
     t6 = fd.Ops.sum(t5, [-1], False, f.DataType.Float)
 

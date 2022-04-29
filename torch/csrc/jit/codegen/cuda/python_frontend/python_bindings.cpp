@@ -336,6 +336,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   NVFUSER_PYTHON_BINDING_BINARY_OP("rshift", rshift)
   NVFUSER_PYTHON_BINDING_BINARY_OP("sub", sub)
   NVFUSER_PYTHON_BINDING_BINARY_OP("xor_op", xorOp)
+  NVFUSER_PYTHON_BINDING_BINARY_OP("atan2", atan2)
 #undef NVFUSER_PYTHON_BINDING_BINARY_OP
 
 #define NVFUSER_PYTHON_BINDING_TERNARY_OP(op_str, op_name)                   \
