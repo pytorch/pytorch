@@ -8,6 +8,8 @@
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/irange.h>
 
+#if AT_MKLDNN_ENABLED()
+
 namespace at {
 namespace native {
 namespace mkldnn {
@@ -200,3 +202,5 @@ Tensor conv2d_run(
 } // namespace mkldnn
 } // namespace native
 } // namespace at
+
+#endif // AT_MKLDNN_ENABLED()

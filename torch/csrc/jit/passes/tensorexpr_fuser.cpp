@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
+#include <ATen/Config.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
@@ -70,9 +71,13 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 namespace tensorexpr {
 
 OperatorSet& getCustomOperatorSet() {
-  static OperatorSet _g_custom_operator_set{
-      "mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.Conv2dOpContext W_prepack) -> (Tensor Y)",
-  };
+  static OperatorSet _g_custom_operator_set{};
+
+#if AT_MKLDNN_ENABLED()
+  _g_custom_operator_set.insert(
+      {"mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.Conv2dOpContext W_prepack) -> (Tensor Y)"});
+#endif // AT_MKLDNN_ENABLED()
+
   return _g_custom_operator_set;
 }
 

@@ -1,5 +1,5 @@
+#include <ATen/Config.h>
 #include <ATen/core/jit_type.h>
-
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -17,6 +17,20 @@
 
 namespace torch {
 namespace jit {
+
+namespace mkldnn {
+namespace detail {
+
+#if AT_MKLDNN_ENABLED()
+bool mkldnn_fuser_enabled = true;
+#else
+bool mkldnn_fuser_enabled = false;
+#endif // AT_MKLDNN_ENABLED()
+
+} // namespace detail
+} // namespace mkldnn
+
+#if AT_MKLDNN_ENABLED()
 
 c10::VaryingShape<int64_t> getSizesOf(Node* n, size_t idx) {
   auto tt = n->input(idx)->type()->cast<TensorType>();
@@ -85,7 +99,7 @@ bool canFuseOnDevice(Value* v) {
   if (!device) {
     return false;
   }
-  return device->is_cpu();
+  return device->is_cpu() && mkldnn::detail::mkldnn_fuser_enabled;
 }
 
 bool isFusableOnDevice(Node* node) {
@@ -211,6 +225,14 @@ void FuseMkldnn(std::shared_ptr<Graph>& graph) {
       "After FuseReluWithPackedOps, before FoldPrePackingOps\n", *graph);
   FoldPrePackingOps(graph);
 }
+
+#else
+
+void FuseMkldnn(std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("MKLDNN Not enabled", graph);
+}
+
+#endif // AT_MKLDNN_ENABLED()
 
 } // namespace jit
 } // namespace torch

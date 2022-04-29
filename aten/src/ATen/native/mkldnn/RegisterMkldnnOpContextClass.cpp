@@ -4,6 +4,8 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
+#if AT_MKLDNN_ENABLED()
+
 namespace at {
 namespace native {
 namespace mkldnn {
@@ -55,3 +57,5 @@ TORCH_LIBRARY_IMPL(mkldnn_prepacked, CPU, m) {
 } // namespace mkldnn
 } // namespace native
 } // namespace at
+
+#endif // AT_MKLDNN_ENABLED()

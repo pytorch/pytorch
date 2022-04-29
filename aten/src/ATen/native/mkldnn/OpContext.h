@@ -4,6 +4,8 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/native/mkldnn/Common.h>
 
+#if AT_MKLDNN_ENABLED()
+
 namespace at {
 namespace native {
 namespace mkldnn {
@@ -85,3 +87,5 @@ class MkldnnConv2dOpContext final : public Conv2dOpContext {
 } // namespace mkldnn
 } // namespace native
 } // namespace at
+
+#endif // AT_MKLDNN_ENABLED()

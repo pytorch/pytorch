@@ -5,6 +5,8 @@
 #include <ATen/native/mkldnn/OpContext.h>
 #include <c10/util/string_view.h>
 
+#if AT_MKLDNN_ENABLED()
+
 namespace at {
 namespace native {
 namespace mkldnn {
@@ -59,3 +61,5 @@ Tensor run(ContextConv2D& context, const Tensor& input);
 } // namespace mkldnn
 } // namespace native
 } // namespace at
+
+#endif // AT_MKLDNN_ENABLED()

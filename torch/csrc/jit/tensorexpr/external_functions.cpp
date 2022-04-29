@@ -1412,6 +1412,8 @@ void nnc_aten_triangular_solve(
   }
 }
 
+#if AT_MKLDNN_ENABLED()
+
 void nnc_mkldnn_prepacked_conv2d_run(
     int64_t bufs_num,
     void** buf_data,
@@ -1432,6 +1434,8 @@ void nnc_mkldnn_prepacked_conv2d_run(
   memcpy(
       buf_data[0], output.data_ptr(), output.element_size() * output.numel());
 }
+
+#endif // AT_MKLDNN_ENABLED()
 
 #ifdef USE_XNNPACK
 
@@ -1611,9 +1615,11 @@ const static RegisterNNCExternalFunction nnc_embedding(
     "nnc_aten_embedding",
     nnc_aten_embedding);
 
+#if AT_MKLDNN_ENABLED()
 const static RegisterNNCExternalFunction reg_nnc_mkldnn_prepacked_conv2d_run(
     "nnc_mkldnn_prepacked_conv2d_run",
     nnc_mkldnn_prepacked_conv2d_run);
+#endif // AT_MKLDNN_ENABLED()
 
 #ifdef USE_XNNPACK
 const static RegisterNNCExternalFunction reg_nnc_prepacked_linear_clamp_run(

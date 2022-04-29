@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Config.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 
