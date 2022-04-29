@@ -64,35 +64,49 @@ int jitted_can_vectorize_up_to(const TensorIteratorBase& iter) {
   return result;
 }
 
-struct OffsetCalculatorContainer {
-  OffsetCalculatorContainer(const TensorIteratorBase& iter) {
+template<int N>
+static std::unique_ptr<OffsetCalculator<N>> make_unique_input_offset_calculator(const TensorIteratorBase& iter) {
+  // array size can not be 0, this happens when N == 0
+  constexpr int array_size = std::max<int>(N, 1);
+  TORCH_INTERNAL_ASSERT(N == iter.ntensors() - iter.noutputs());
+  std::array<const int64_t*, array_size> strides;
+  int64_t element_sizes[array_size];
+  for (int i = 0; i < N; i++) {
+    strides[i] = iter.strides(i + iter.noutputs()).data();
+    element_sizes[i] = iter.element_size(i + iter.noutputs());
+  }
+  return std::make_unique<OffsetCalculator<N>>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
+}
+
+template<int ...Is>
+auto OffsetCalculatorType_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<std::unique_ptr<OffsetCalculator<Is>>...>;
+
+template<int N>
+using OffsetCalculatorType_List = decltype(OffsetCalculatorType_List_Impl(std::make_integer_sequence<int, N>{}));
+
+
+struct OffsetCalculatorVariant {
+  using OffsetCalculatorTypes = OffsetCalculatorType_List<8>;
+
+  OffsetCalculatorVariant(const TensorIteratorBase& iter) {
     int N = iter.ninputs();
     switch(N) {
 #define DEFINE_CASE(index)        \
-      case index : v.v##index = make_input_offset_calculator<index>(iter); break;
+      case index : v = make_unique_input_offset_calculator<index>(iter); break;
 
       AT_FOR_8_INPUTS(DEFINE_CASE)
 #undef DEFINE_CASE
       default:
-        TORCH_CHECK(false, "make_input_offset_calculator not implemented for ninputs = ", N);
+        TORCH_CHECK(false, "OffsetCalculatorVariant not implemented for ninputs = ", N);
     }
   }
+
   void* data_ptr() {
-    return static_cast<void*>(&v);
+    return c10::visit([](auto & v){ return static_cast<void*>(v.get()); }, v);
   }
 
-private:
-  union v_t {
-    OffsetCalculator<0> v0;
-    OffsetCalculator<1> v1;
-    OffsetCalculator<2> v2;
-    OffsetCalculator<3> v3;
-    OffsetCalculator<4> v4;
-    OffsetCalculator<5> v5;
-    OffsetCalculator<6> v6;
-    OffsetCalculator<7> v7;
-    v_t() {} // default constructor
-  } v;
+ private:
+  OffsetCalculatorTypes v;
 };
 
 template<int ...Is>
@@ -396,7 +410,7 @@ void jitted_gpu_kernel_dynamic_impl(
     }
 
     // Case 2: no dynamic casting and noncontiguous
-    OffsetCalculatorContainer input_offset_calculator(iter);
+    OffsetCalculatorVariant input_offset_calculator(iter);
     void* ic_ptr = input_offset_calculator.data_ptr();
     auto output_offset_calculator = make_output_offset_calculator(iter);
     void* oc_ptr = static_cast<void*>(&output_offset_calculator);
@@ -439,7 +453,7 @@ void jitted_gpu_kernel_dynamic_impl(
   }
 
   // Case 4: dynamic casting and noncontiguous
-  OffsetCalculatorContainer input_offset_calculator(iter);
+  OffsetCalculatorVariant input_offset_calculator(iter);
   void* ic_ptr = input_offset_calculator.data_ptr();
 
   auto output_offset_calculator = make_output_offset_calculator(iter);
@@ -511,7 +525,7 @@ at::Tensor CompileKernel(
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
     .enforce_safe_casting_to_output(true)
-    .check_all_same_dtype(true)
+    .check_all_same_device(true)
     // TODO:  add_output or add_owned_output
     .add_owned_output(output);
   for (const auto& t: tensors){

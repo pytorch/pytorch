@@ -43,16 +43,6 @@ class TestPythonJiterator(TestCase):
             rtol = 1e-2
         assert torch.allclose(expected, result, rtol=rtol)
 
-    # TODO: cpu_scalar input is currently not supported
-    @unittest.skip("cpu scalar input is not yet supported")
-    def test_cpu_scalar_input(self):
-        a = torch.rand(3, device='cuda').mul(10)
-        b = 1
-
-        expected = ref_fn(a, b)
-        result = jitted_fn(a, b)
-        assert torch.allclose(expected, result)
-
     shape_stride_cases = [
         # shape: [1]
         ([1], [1]),        # contiguous

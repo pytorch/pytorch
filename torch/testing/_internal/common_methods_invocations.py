@@ -15746,9 +15746,9 @@ op_db: List[OpInfo] = [
         decorators=[onlyCUDA],
         skips=(
             # Jiterator ops doesn't support neg or conj view
-            # DecorateInfo(unittest.skip("skip"), 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.skip("skip"), 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.skip("skip"), 'TestMathBits', 'test_conj_view'),
-            # DecorateInfo(unittest.skip("skip"), 'TestMathBits', 'test_neg_conj_view'),
+            DecorateInfo(unittest.skip("skip"), 'TestMathBits', 'test_neg_conj_view'),
             # Jiterator ops doesn't have composite rule
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
         )
