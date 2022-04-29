@@ -12,6 +12,7 @@ from .utils import (
     get_target_type_str,
     get_arg_indices_of_inputs_to_log,
     get_node_input_qparams,
+    op_type_supports_shadowing,
 )
 
 from .ns_types import (
@@ -622,6 +623,18 @@ def create_a_shadows_b(
                     f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
                     f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
                     ', unknown dtype cast')
+                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                continue
+
+            all_op_types_support_shadowing = (
+                op_type_supports_shadowing(subgraph_a.start_node) and
+                op_type_supports_shadowing(node_b)
+            )
+            if not all_op_types_support_shadowing:
+                print(
+                    f'skipping shadow loggers for node_b: {get_target_type_str(node_b, gm_b)}' +
+                    f', start_node_a: {get_target_type_str(subgraph_a.start_node, gm_a)}' +
+                    ', unsupported')
                 env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
                 continue
 
