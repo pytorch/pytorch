@@ -160,6 +160,52 @@ void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv,
 template <class scalar_t>
 void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info);
 
+template <class scalar_t>
+void lapackLdlHermitian(
+    char uplo,
+    int n,
+    scalar_t* a,
+    int lda,
+    int* ipiv,
+    scalar_t* work,
+    int lwork,
+    int* info);
+
+template <class scalar_t>
+void lapackLdlSymmetric(
+    char uplo,
+    int n,
+    scalar_t* a,
+    int lda,
+    int* ipiv,
+    scalar_t* work,
+    int lwork,
+    int* info);
+
+template <class scalar_t>
+void lapackLdlSolveHermitian(
+    char uplo,
+    int n,
+    int nrhs,
+    scalar_t* a,
+    int lda,
+    int* ipiv,
+    scalar_t* b,
+    int ldb,
+    int* info);
+
+template <class scalar_t>
+void lapackLdlSolveSymmetric(
+    char uplo,
+    int n,
+    int nrhs,
+    scalar_t* a,
+    int lda,
+    int* ipiv,
+    scalar_t* b,
+    int ldb,
+    int* info);
+
 template<class scalar_t, class value_t=scalar_t>
 void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda, value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, value_t *rwork, int *iwork, int *info);
 #endif
@@ -240,6 +286,14 @@ using lu_solve_trans_fn = void (*)(
     TransposeType /*trans*/);
 DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
 
+using ldl_factor_fn = void (*)(
+    const Tensor& /*LD*/,
+    const Tensor& /*pivots*/,
+    const Tensor& /*info*/,
+    bool /*upper*/,
+    bool /*hermitian*/);
+DECLARE_DISPATCH(ldl_factor_fn, ldl_factor_stub);
+
 using svd_fn = void (*)(
     const Tensor& /*A*/,
     const bool /*full_matrices*/,
@@ -250,4 +304,11 @@ using svd_fn = void (*)(
     const Tensor& /*info*/);
 DECLARE_DISPATCH(svd_fn, svd_stub);
 
+using ldl_solve_fn = void (*)(
+    const Tensor& /*LD*/,
+    const Tensor& /*pivots*/,
+    const Tensor& /*result*/,
+    bool /*upper*/,
+    bool /*hermitian*/);
+DECLARE_DISPATCH(ldl_solve_fn, ldl_solve_stub);
 }} // namespace at::native
