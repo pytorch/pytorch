@@ -77,10 +77,6 @@
 #endif
 #endif
 
-#if defined(USE_MLCOMPUTE)
-#include <mlc/torch_mlc/csrc/MLCInit.h>
-#endif
-
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
 #endif
@@ -732,15 +728,6 @@ void initModule(PyObject *module);
 }} // namespace torch::cuda
 #endif
 
-#ifdef USE_MLCOMPUTE
-PyMethodDef* ModuleMLC_methods();
-namespace torch { namespace mlc {
-
-void initBindings(PyObject *module);
-
-}} // namespace torch::mlc
-#endif
-
 bool THDPByteStorage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
@@ -794,9 +781,6 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
-#ifdef USE_MLCOMPUTE
-  THPUtils_addPyMethodDefs(methods, ModuleMLC_methods());
-#endif
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
@@ -848,9 +832,6 @@ PyObject* initModule() {
   torch::lazy::initLazyBindings(module);
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
-#endif
-#ifdef USE_MLCOMPUTE
-  torch::mlc::init_bindings(module);
 #endif
   ASSERT_TRUE(THPByteStorage_init(module));
 
@@ -1020,15 +1001,15 @@ Call this whenever a new thread is created in order to propagate values from
 #else
   PyObject *has_cuda = Py_False;
 #endif
-#ifdef USE_MLCOMPUTE
-  PyObject *has_mlc = Py_True;
+
+#ifdef USE_MPS
+  PyObject *has_mps = Py_True;
 #else
-  PyObject *has_mlc = Py_False;
+  PyObject *has_mps = Py_False;
 #endif
 
-  ASSERT_TRUE(set_module_attr("has_mlc", has_mlc));
-
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
+  ASSERT_TRUE(set_module_attr("has_mps", has_mps));
 
   ASSERT_TRUE(set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
@@ -1060,6 +1041,13 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_BUILD_ABI), Py_None));
 #endif
 #undef SET_STR_DEFINE
+
+  py_module.def("_set_conj", [](const at::Tensor & x, bool conj) {
+    x._set_conj(conj);
+  });
+  py_module.def("_set_neg", [](const at::Tensor & x, bool neg) {
+    x._set_neg(neg);
+  });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator = (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
