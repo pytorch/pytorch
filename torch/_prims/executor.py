@@ -7,6 +7,7 @@ from torch._prims.utils import TensorMeta
 from torch._prims.context import PrimContext
 
 import torch._C._nvfuser as nvfuser  # type: ignore[import]
+
 DataType = nvfuser.DataType  # type: ignore[attr-defined]
 Fusion = nvfuser.Fusion  # type: ignore[attr-defined]
 FusionDefinition = nvfuser.FusionDefinition  # type: ignore[attr-defined]

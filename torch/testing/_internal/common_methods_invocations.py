@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
-import torch._refs as refs  # noqa: F401
+# import torch._refs as refs  # noqa: F401
 
 from distutils.version import LooseVersion
 
@@ -16990,17 +16990,17 @@ python_ref_db = [
     #
     # Elementwise unary OpInfos
     #
-    ElementwiseUnaryPythonRefInfo(
-        '_refs.floor',
-        torch_opinfo_name='floor',
-    ),
-    #
-    # Elementwise binary OpInfos
-    #
-    ElementwiseBinaryPythonRefInfo(
-        '_refs.add',
-        torch_opinfo_name='add',
-    ),
+    # ElementwiseUnaryPythonRefInfo(
+    #     '_refs.floor',
+    #     torch_opinfo_name='floor',
+    # ),
+    # #
+    # # Elementwise binary OpInfos
+    # #
+    # ElementwiseBinaryPythonRefInfo(
+    #     '_refs.add',
+    #     torch_opinfo_name='add',
+    # ),
 ]
 
 # Common operator groupings
