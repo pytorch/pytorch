@@ -13,7 +13,6 @@ from collections import defaultdict
 from contextlib import contextmanager
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
-from torch.testing._internal.common_dtype import integral_types
 from torch.testing._internal.common_device_type import \
      toleranceOverride, tol
 from functorch_lagging_op_db import functorch_lagging_op_db
