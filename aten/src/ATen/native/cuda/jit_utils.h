@@ -85,6 +85,9 @@ AT_FORALL_SCALAR_TYPES(TYPE_NAME_FN)
 // JIT uses std::complex directly, because nvRTC compile programs
 // with -default-device, so there is no such issue like:
 //   "std::sin(complex) is __host__ only"
+template <> inline std::string typeName<c10::complex<at::Half>>(){
+    return "std::complex<at::Half>";
+}
 template <> inline std::string typeName<c10::complex<float>>(){
     return "std::complex<float>";
 }
