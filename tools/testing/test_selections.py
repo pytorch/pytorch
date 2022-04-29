@@ -194,7 +194,7 @@ def _query_changed_test_files() -> List[str]:
     return lines
 
 
-"""Get sharded test allocation based on historic S3 data."""
+# Get sharded test allocation based on historic S3 data.
 def get_shard_based_on_S3(
     which_shard: int, num_shards: int, tests: List[str], test_times_file: str
 ) -> List[str]:
