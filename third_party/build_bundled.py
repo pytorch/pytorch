@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import os
 
 
@@ -52,7 +53,7 @@ def create_bundled(d, outstream):
         outstream.write(f"Files: {files}\n")
         outstream.write('  For details, see ')
         outstream.write(license_file)
-        outstream.write('\n\n') 
+        outstream.write('\n\n')
 
 
 def identify_license(f, exception=''):
@@ -89,6 +90,8 @@ def identify_license(f, exception=''):
         elif 'BoostSoftwareLicense-Version1.0' in txt:
             # Hmm, do we need to check the text?
             return 'BSL-1.0'
+        elif squeeze("Clarified Artistic License") in txt:
+            return 'Clarified Artistic License'
         elif all([squeeze(m) in txt.lower() for m in bsd3_txt]):
             return 'BSD-3-Clause'
         elif all([squeeze(m) in txt.lower() for m in bsd3_v1_txt]):
@@ -97,30 +100,30 @@ def identify_license(f, exception=''):
             return 'BSD-2-Clause'
         elif all([squeeze(m) in txt.lower() for m in bsd3_src_txt]):
             return 'BSD-Source-Code'
-        elif all([squeeze(m) in txt.lower() for m in mit_txt]):
+        elif any([squeeze(m) in txt.lower() for m in mit_txt]):
             return 'MIT'
         else:
             raise ValueError('unknown license')
 
-mit_txt = ['permission is hereby granted, free of charge, to any person '
-           'obtaining a copy of this software and associated documentation '
-           'files (the "software"), to deal in the software without '
-           'restriction, including without limitation the rights to use, copy, '
-           'modify, merge, publish, distribute, sublicense, and/or sell copies '
-           'of the software, and to permit persons to whom the software is '
+mit_txt = ['permission is hereby granted, free of charge, to any person ',
+           'obtaining a copy of this software and associated documentation ',
+           'files (the "software"), to deal in the software without ',
+           'restriction, including without limitation the rights to use, copy, ',
+           'modify, merge, publish, distribute, sublicense, and/or sell copies ',
+           'of the software, and to permit persons to whom the software is ',
            'furnished to do so, subject to the following conditions:',
 
-           'the above copyright notice and this permission notice shall be '
+           'the above copyright notice and this permission notice shall be ',
            'included in all copies or substantial portions of the software.',
 
-           'the software is provided "as is", without warranty of any kind, '
-           'express or implied, including but not limited to the warranties of '
-           'merchantability, fitness for a particular purpose and '
-           'noninfringement. in no event shall the authors or copyright holders '
-           'be liable for any claim, damages or other liability, whether in an '
-           'action of contract, tort or otherwise, arising from, out of or in '
-           'connection with the software or the use or other dealings in the '
-           'software.'
+           'the software is provided "as is", without warranty of any kind, ',
+           'express or implied, including but not limited to the warranties of ',
+           'merchantability, fitness for a particular purpose and ',
+           'noninfringement. in no event shall the authors or copyright holders ',
+           'be liable for any claim, damages or other liability, whether in an ',
+           'action of contract, tort or otherwise, arising from, out of or in ',
+           'connection with the software or the use or other dealings in the ',
+           'software.',
            ]
 
 bsd3_txt = ['redistribution and use in source and binary forms, with or without '
@@ -154,6 +157,21 @@ bsd3_src_txt = bsd3_txt[:2] + bsd3_txt[4:]
 
 if __name__ == '__main__':
     third_party = os.path.join(mydir)
-    fname = os.path.join(third_party, 'LICENSES_BUNDLED.txt')
+    parser = argparse.ArgumentParser(
+        description="Generate bundled licenses file",
+    )
+    parser.add_argument(
+        "--out-file",
+        type=str,
+        default=os.environ.get(
+            "PYTORCH_THIRD_PARTY_BUNDLED_LICENSE_FILE",
+            str(os.path.join(third_party, 'LICENSES_BUNDLED.txt'))
+        ),
+        help="location to output new bundled licenses file",
+    )
+
+    args = parser.parse_args()
+    fname = args.out_file
+    print(f"+ Writing bundled licenses to {args.out_file}")
     with open(fname, 'w') as fid:
         create_bundled(third_party, fid)

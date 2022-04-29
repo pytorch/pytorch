@@ -248,7 +248,7 @@ class TestUpgraders(JitTestCase):
         torch.jit.save(loaded_model, buffer)
         buffer.seek(0)
         version = self._load_model_version(loaded_model)
-        self.assertTrue(version == 4)
+        self.assertEqual(version, 4)
         loaded_model_twice = torch.jit.load(buffer)
 
         self.assertEqual(loaded_model(torch.Tensor([5.0, 3.0]), 2.0),
