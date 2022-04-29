@@ -52,6 +52,13 @@ class Reduction(Enum):
     SUM = 2
 
 
+# This expands x until x.dim() == dim. Might be useful as an operator
+def _unsqueeze_to_dim(x: Tensor, dim: int):
+    for _ in range(dim - x.dim()):
+        x = x.unsqueeze(-1)
+    return x
+
+
 @register_decomposition(aten.tanh_backward)
 def tanh_backward(out_grad: Tensor, y: Tensor):
     return out_grad * (1 - y * y)
@@ -208,9 +215,7 @@ def prelu_backward(grad_output: Tensor, self: Tensor, weight: Tensor) -> Tuple[T
     # be a scalar or a vector of size [C], and in the forward pass it's
     # broadcast against [N, C, ...]. So now, we need to do the corresponding
     # reduction, which is harder than we'd like...
-    cur_weight = weight
-    for _ in range(2, grad_output.dim()):
-        cur_weight = cur_weight.unsqueeze(-1)
+    cur_weight = _unsqueeze_to_dim(weight, self.dim() - 1)
     input_grad = torch.where(self > 0, grad_output, cur_weight * grad_output)
     weight_grad_collector = torch.where(self > 0, grad_output.new_zeros(()), self * grad_output)
     out = weight_grad_collector.sum_to_size(cur_weight.shape)
@@ -516,43 +521,6 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition(aten.native_layer_norm)
-def native_layer_norm(input: Tensor, normalized_shape: List[int], weight: Optional[Tensor], bias: Optional[Tensor], eps: float) -> Tuple[Tensor, Tensor, Tensor]:
-    input_shape = input.shape
-    input_ndim = input.dim()
-
-    axis = input_ndim - len(normalized_shape)
-    M = prod(input_shape[:axis])
-
-    # Hmm... not sure how I get around this...
-    # Basically, native_batch_norm doesn't support 0-entry tensors, while
-    # native_layer_norm does (and is tested by OpInfos!)
-    if M > 0:
-        input_reshaped = input.view(1, M, -1)
-    else:
-        return (input, input.new_zeros((0,)), input.new_zeros((0,)))
-
-    # Unlike Batch Normalization, which applies scalar scale and bias for each
-    # entire channel/plane with the affine option, Layer Normalization applies
-    # per-element scale and bias. E.g. For input {N, C, H, W}, weight for
-    # batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
-    out, mean, rstd = aten.native_batch_norm(
-        input_reshaped, weight=None, bias=None, running_mean=None,
-        running_var=None, training=True, momentum=0.0, eps=eps)
-    out = out.view(input_shape)
-    if weight is not None:
-        out = out * weight
-    if bias is not None:
-        out = out + bias
-
-    stat_shape = list(input_shape[:axis])
-    for _ in range(axis, input.dim()):
-        stat_shape.append(1)
-    mean = mean.view(stat_shape)
-    rstd = rstd.view(stat_shape)
-    return (out, mean, rstd)
-
-
 @register_decomposition(aten.split_with_sizes)
 def split_with_sizes(self: Tensor, split_sizes: List[int], dim: int = 0) -> List[Tensor]:
     num_splits = len(split_sizes)
@@ -595,6 +563,51 @@ def l1_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, reductio
 
     norm = sign / self.numel() if reduction == Reduction.MEAN.value else sign
     return grad_output * norm
+
+
+@register_decomposition(aten.native_batch_norm)
+def native_batch_norm(input: Tensor, weight: Optional[Tensor], bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, momentum: float, eps: float) -> Tuple[Tensor, Tensor, Tensor]:
+    reduction_dims = [0] + list(range(2, input.dim()))
+    if training:
+        save_mean = torch.mean(input, dim=reduction_dims)
+        biased_var = torch.var(input, dim=reduction_dims, unbiased=False)
+        save_invstd = 1 / (torch.sqrt(biased_var + eps))
+
+        if running_mean is not None:
+            running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean)
+        if running_var is not None:
+            n = input.numel() / input.shape[1]
+            # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
+            # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
+            # numerics probably don't matter.
+            unbiased_var = biased_var * (n / (n - 1))
+            running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
+        mean = save_mean
+        invstd = save_invstd
+    else:
+        assert running_mean is not None and running_var is not None
+        mean = running_mean
+        invstd = 1 / (torch.sqrt(running_var + eps))
+        # Very annoying inconsistency where CPU and CUDA give different shapes
+        if input.device.type == 'cuda':
+            save_mean = running_mean
+            save_invstd = invstd
+        else:
+            save_mean = input.new_zeros((0,))
+            save_invstd = input.new_zeros((0,))
+
+    if weight is None:
+        weight = input.new_ones(())
+
+    if bias is None:
+        bias = input.new_zeros(())
+
+    mean = _unsqueeze_to_dim(mean, input.dim() - 1)
+    invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
+    weight = _unsqueeze_to_dim(weight, input.dim() - 1)
+    bias = _unsqueeze_to_dim(bias, input.dim() - 1)
+    output = ((input - mean) * invstd) * weight + bias
+    return output, save_mean, save_invstd
 
 
 @register_decomposition(aten.native_layer_norm_backward)
@@ -652,6 +665,43 @@ def native_layer_norm_backward(grad_out: Tensor, input: Tensor, normalized_shape
     else:
         d_bias = None
     return (d_input, d_weight, d_bias)
+
+
+@register_decomposition(aten.native_layer_norm)
+def native_layer_norm(input: Tensor, normalized_shape: List[int], weight: Optional[Tensor], bias: Optional[Tensor], eps: float) -> Tuple[Tensor, Tensor, Tensor]:
+    input_shape = input.shape
+    input_ndim = input.dim()
+
+    axis = input_ndim - len(normalized_shape)
+    M = prod(input_shape[:axis])
+
+    # Hmm... not sure how I get around this...
+    # Basically, native_batch_norm doesn't support 0-entry tensors, while
+    # native_layer_norm does (and is tested by OpInfos!)
+    if M > 0:
+        input_reshaped = input.view(1, M, -1)
+    else:
+        return (input, input.new_zeros((0,)), input.new_zeros((0,)))
+
+    # Unlike Batch Normalization, which applies scalar scale and bias for each
+    # entire channel/plane with the affine option, Layer Normalization applies
+    # per-element scale and bias. E.g. For input {N, C, H, W}, weight for
+    # batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
+    out, mean, rstd = aten.native_batch_norm(
+        input_reshaped, weight=None, bias=None, running_mean=None,
+        running_var=None, training=True, momentum=0.0, eps=eps)
+    out = out.view(input_shape)
+    if weight is not None:
+        out = out * weight
+    if bias is not None:
+        out = out + bias
+
+    stat_shape = list(input_shape[:axis])
+    for _ in range(axis, input.dim()):
+        stat_shape.append(1)
+    mean = mean.view(stat_shape)
+    rstd = rstd.view(stat_shape)
+    return (out, mean, rstd)
 
 
 @register_decomposition(aten.clamp_min)
@@ -723,7 +773,7 @@ def var_decomposition(x: Tensor, dims: Optional[List[int]], correction: int = 0,
     return sum / n
 
 
-@register_decomposition(aten.std)
+@register_decomposition(aten.std.correction)
 def std_decomposition(x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False):
     return torch.sqrt(torch.var(x, dims, correction=correction, keepdim=keepdim))
 
