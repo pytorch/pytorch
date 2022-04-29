@@ -35,7 +35,7 @@ ApproximateClockToUnixTimeConverter::measurePair() {
 ApproximateClockToUnixTimeConverter::time_pairs
     ApproximateClockToUnixTimeConverter::measurePairs() {
   static constexpr auto n_warmup = 5;
-  for (const auto _ : c10::irange(n_warmup)) {
+  for (C10_UNUSED const auto _ : c10::irange(n_warmup)) {
     getApproximateTime();
     steady_clock_t::now();
   }

@@ -449,7 +449,6 @@ function(torch_compile_options libname)
         -Wall
         -Wextra
         -Wno-unused-parameter
-        -Wno-unused-variable
         -Wno-unused-function
         -Wno-unused-result
         -Wno-unused-local-typedefs
@@ -470,8 +469,7 @@ function(torch_compile_options libname)
       if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
         list(APPEND private_compile_options
           -Wno-range-loop-analysis)
-      endif()
-      if(NOT APPLE)
+      else()
         list(APPEND private_compile_options
           # Considered to be flaky.  See the discussion at
           # https://github.com/pytorch/pytorch/pull/9608
