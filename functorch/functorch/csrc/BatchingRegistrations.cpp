@@ -146,7 +146,7 @@ Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
     return self.squeeze_(dim);
   }
   auto* batched = maybeGetBatchedImpl(self);
-  TORCH_CHECK(batched->bdim() == 0);
+  TORCH_CHECK(batched && batched->bdim() == 0);
   auto logical_dim = self.dim();
   auto dim_physical = 1 + maybe_wrap_dim(dim, logical_dim);
   batched->value().squeeze_(dim_physical);
@@ -162,7 +162,7 @@ Tensor& unsqueeze__batching_rule(Tensor& self, int64_t dim) {
     return self.unsqueeze_(dim);
   }
   auto* batched = maybeGetBatchedImpl(self);
-  TORCH_CHECK(batched->bdim() == 0);
+  TORCH_CHECK(batched && batched->bdim() == 0);
   auto logical_dim = self.dim();
   auto dim_physical = 1 + maybe_wrap_dim(dim, logical_dim + 1);
   batched->value().unsqueeze_(dim_physical);
