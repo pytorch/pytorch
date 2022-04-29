@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     shell,
     set_cwd,
+    parser as common_parser,
 )
 import torch.distributed as dist
 from typing import Dict, Optional, List
@@ -201,18 +202,20 @@ WINDOWS_BLOCKLIST = [
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
     "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharding_plan/test_sharding_plan",
     "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
-    "distributed/_shard/sharded_tensor/test_partial_tensor",
     "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_partial_tensor",
     "distributed/_shard/test_replicated_tensor",
 ] + FSDP_TEST
 
@@ -221,24 +224,27 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/cuda/test_tensorpipe_agent",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharding_plan/test_sharding_plan",
     "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
-    "distributed/_shard/sharded_tensor/test_partial_tensor",
     "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_partial_tensor",
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
     "test_type_hints",
     "test_openmp",
-] + FSDP_TEST
+]
 
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
@@ -615,6 +621,7 @@ def parse_args():
         description="Run the PyTorch unit test suite",
         epilog="where TESTS is any of: {}".format(", ".join(TESTS)),
         formatter_class=argparse.RawTextHelpFormatter,
+        parents=[common_parser]
     )
     parser.add_argument(
         "-v",
@@ -871,6 +878,10 @@ def get_selected_tests(options):
 
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
+
+    # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
+    if torch.version.cuda is not None and LooseVersion(torch.version.cuda) == "11.6":
+        options.exclude.extend(["distributions/test_constraints"])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
