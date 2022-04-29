@@ -54,11 +54,11 @@ static void check_shape_forward(const Tensor& input,
 #define MKLDNN_CONV_ARG_CHECK(IT, OP) std::any_of(IT.begin(), IT.end(), [](auto x) { return x OP 0; })
   auto is_padding_neg = MKLDNN_CONV_ARG_CHECK(padding, <);
   auto is_stride_nonpos = MKLDNN_CONV_ARG_CHECK(stride, <=);
-  auto is_dilation_neg = MKLDNN_CONV_ARG_CHECK(dilation, <);
+  auto is_dilation_nonpos = MKLDNN_CONV_ARG_CHECK(dilation, <=);
 #undef MKLDNN_CONV_ARG_CHECK
   TORCH_CHECK(!is_padding_neg, "negative padding is not supported");
   TORCH_CHECK(!is_stride_nonpos, "non-positive stride is not supported");
-  TORCH_CHECK(!is_dilation_neg, "non-positive dilation is not supported");
+  TORCH_CHECK(!is_dilation_nonpos, "non-positive dilation is not supported");
   TORCH_CHECK(groups > 0, "non-positive groups is not supported");
 
   int64_t k = input.ndimension();
