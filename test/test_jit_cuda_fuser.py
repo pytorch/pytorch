@@ -563,13 +563,14 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y)
         jit_o = t_jit(x, y)
         jit_o = t_jit(x, y)
+        o = t(x, y)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("failing case {}\n{}\n{}\n{}".format(dtype, operation, x, y), o, jit_o, 1e-2))
+        gradient_check &= (o.dtype == torch.double)
         if gradient_check:
             gradcheck(t_jit, [x, y], nondet_tol=1e-5)
         elif dtype in self.support_tensor_dtypes:
             self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
-        o = t(x, y)
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertTrue(self._compare("failing case {}\n{}\n{}\n{}".format(dtype, operation, x, y), o, jit_o, 1e-2))
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
