@@ -164,6 +164,27 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
 }}"""
 
 
+def gen_vmap_plumbing_no_returns(native_function: NativeFunction) -> str:
+    schema = native_function.func
+    sig = DispatcherSignature.from_schema(schema)
+    cur_level_var = 'cur_level'
+
+    unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema, cur_level_var)
+
+    return f"""\
+template <typename batch_rule_t, batch_rule_t batch_rule>
+{sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t {cur_level_var} = maybe_layer->layerId();
+{textwrap.indent(bdims_all_none_case, "  ")}
+{textwrap.indent(unwraps, "  ")}
+  batch_rule({', '.join(unwrapped_arg_list)});
+}}"""
+
+
 def gen_vmap_plumbing(native_function: NativeFunction) -> str:
     schema = native_function.func
     sig = DispatcherSignature.from_schema(schema)
@@ -171,7 +192,7 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str:
 
     # Only support cases where all returns are Tensors or vector<Tensor>
     if len(returns) == 0:
-        return None
+        return gen_vmap_plumbing_no_returns(native_function)
     if not all(ret.type.is_tensor_like() for ret in returns):
         return None
     if not accepts_at_least_one_tensor_input(schema):
@@ -256,6 +277,7 @@ allowlist = {
     'logaddexp',
     'logaddexp2',
     'lcm',
+    '_linalg_check_errors',
     'maximum',
     'minimum',
     'mul.Tensor',

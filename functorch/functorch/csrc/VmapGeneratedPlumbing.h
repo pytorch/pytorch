@@ -3642,6 +3642,20 @@ at::Tensor gather_backward_generated_plumbing(const at::Tensor & grad, const at:
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+void _linalg_check_errors_generated_plumbing(const at::Tensor & info, c10::string_view api_name, bool is_matrix) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(info, cur_level)) {
+    return at::_ops::_linalg_check_errors::call(info, api_name, is_matrix);
+  }
+  Tensor info_value;
+  optional<int64_t> info_bdim;
+  std::tie(info_value, info_bdim) = unwrapTensorAtLevel(info, cur_level);
+  batch_rule(info_value, info_bdim, api_name, is_matrix);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor cholesky_generated_plumbing(const at::Tensor & self, bool upper) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
