@@ -76,8 +76,7 @@ ParallelTypeBitmap avoidRedundantWrites(const TensorView* out_tv) {
   // result would be incorrect if the buffer is shared by redundant
   // threads. Correctness issues here come from smem aliasing or grid reductions
   // because the reduction itself performs an update to a value, not just a set.
-  const bool is_reduction = out_tv->definition()->isA<ReductionOp>() ||
-      out_tv->definition()->isA<WelfordOp>();
+  const bool is_reduction = ir_utils::isReductionOp(out_tv->definition());
   if (!(out_tv->getMemoryType() == MemoryType::Shared ||
         (out_tv->getMemoryType() == MemoryType::Global && is_reduction))) {
     return ParallelTypeBitmap();
@@ -131,7 +130,7 @@ ParallelTypeBitmap getReductionPredicateForUnusedParallelTypes(
     const TensorView* tv,
     const ThreadPredicateMap::PredicateInfo& pred_info) {
   auto tv_def = tv->definition();
-  if (!(tv_def && (tv_def->isA<ReductionOp>() || tv_def->isA<WelfordOp>()) &&
+  if (!(tv_def && ir_utils::isReductionOp(tv_def) &&
         tv->getMemoryType() == MemoryType::Global)) {
     return {};
   }

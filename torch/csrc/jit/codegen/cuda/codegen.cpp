@@ -673,28 +673,28 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   std::string genBinaryOp(
       BinaryOpType op_type,
-      Val* out,
+      DataType data_type,
       const std::string& lhs,
       const std::string& rhs) {
     std::stringstream expr;
     if (auto op = inline_op_str(op_type)) {
       expr << lhs << " ";
-      if (alsoBooleanOperator(op_type) && out->dtype() == DataType::Bool) {
+      if (alsoBooleanOperator(op_type) && data_type == DataType::Bool) {
         expr << stringifyBooleanOp(op_type);
       } else {
         expr << *op;
       }
       expr << " " << rhs;
     } else {
-      if (integer_op_str(op_type) && isIntegralType(out->dtype())) {
+      if (integer_op_str(op_type) && isIntegralType(data_type)) {
         auto int_op = integer_op_str(op_type);
         expr << *int_op;
-      } else if (bool_op_str(op_type) && isBooleanType(out->dtype())) {
+      } else if (bool_op_str(op_type) && isBooleanType(data_type)) {
         auto bool_op = bool_op_str(op_type);
         expr << *bool_op;
       } else {
         expr << op_type;
-        if (needFloatSuffix(op_type) && out->dtype() == DataType::Float) {
+        if (needFloatSuffix(op_type) && data_type == DataType::Float) {
           expr << "f";
         }
       }
@@ -809,14 +809,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (print_inline_) {
       // Inline expression: `lhs op rhs`
       code_ << genBinaryOp(
-          op_type, bop->out(), gen(bop->lhs()), gen(bop->rhs()));
+          op_type, bop->out()->dtype(), gen(bop->lhs()), gen(bop->rhs()));
     } else {
       indent() << gen(bop->out());
       if (bop->out()->isScalar()) {
         // Single line: `out = lhs op rhs;`
         code_ << " = "
               << genBinaryOp(
-                     op_type, bop->out(), gen(bop->lhs()), gen(bop->rhs()));
+                     op_type,
+                     bop->out()->dtype(),
+                     gen(bop->lhs()),
+                     gen(bop->rhs()));
       } else {
         // Split TensorView expressions across multiple lines:
         //
@@ -962,11 +965,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     code_ << ");\n";
   }
 
-  std::string genReductionOp(BinaryOpType op_type, Val* out) {
+  std::string genReductionOp(BinaryOpType op_type, DataType data_type) {
     std::stringstream lambda;
-    DataType data_type = out->dtype();
     lambda << "[](" << data_type << " &a, " << data_type << " b) "
-           << "{ a = " << genBinaryOp(op_type, out, "a", "b") << "; }";
+           << "{ a = " << genBinaryOp(op_type, data_type, "a", "b") << "; }";
     return lambda.str();
   }
 
@@ -1007,9 +1009,26 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     indent() << kTab << genInline(stmt->predicate()) << ");\n";
   }
 
-  void genWarpReductionOp(
-      const ReductionOp* rop,
-      const IterDomain* reduction_id) {
+  void genSerialReduction(
+      const kir::TensorIndex* output,
+      const Val* input,
+      BinaryOpType reduction_op_type) {
+    const auto domain = output->view()->domain();
+
+    const auto gen_out = gen(output);
+    indent() << gen_out << " = "
+             << genBinaryOp(
+                    reduction_op_type, output->dtype(), gen_out, gen(input))
+             << ";\n";
+    return;
+  }
+
+  void genWarpReduction(
+      const kir::TensorIndex* output,
+      const kir::TensorIndex* input,
+      const Val* init,
+      BinaryOpType reduction_op_type,
+      kir::Predicate* read_pred) {
     bool is_single_warp =
         kernel_->getWarpPaddedParallelInfo().is_tidx_single_warp;
 
@@ -1019,44 +1038,27 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     } else {
       code_ << "<false>(\n";
     }
-    indent() << kTab << gen(rop->out()) << ",\n";
-    indent() << kTab << gen(rop->in()) << ",\n";
-    indent() << kTab << genReductionOp(rop->getReductionOpType(), rop->out())
+    indent() << kTab << gen(output) << ",\n";
+    indent() << kTab << gen(input) << ",\n";
+    indent() << kTab << genReductionOp(reduction_op_type, output->dtype())
              << ",\n";
     indent() << kTab << "threadIdx,\n";
     indent() << kTab << "blockDim,\n";
-    indent() << kTab << "static_cast<" << rop->out()->dtype()
+    indent() << kTab << "static_cast<" << output->dtype()
              << "*>(shared_mem),\n";
-    TORCH_INTERNAL_ASSERT(
-        rop->predicate() != nullptr && rop->predicate()->hasValue());
-    indent() << kTab << genInline(rop->predicate()) << ",\n";
-    indent() << kTab << rop->out()->dtype() << "(" << genInline(rop->init())
-             << "));\n";
+    TORCH_INTERNAL_ASSERT(read_pred != nullptr && read_pred->hasValue());
+    indent() << kTab << genInline(read_pred) << ",\n";
+    indent() << kTab << output->dtype() << "(" << genInline(init) << "));\n";
   }
 
-  void handle(const ReductionOp* rop) final {
-    TORCH_INTERNAL_ASSERT(rop->out()->isA<kir::TensorIndex>());
-
-    const auto out = rop->out()->as<kir::TensorIndex>();
-    const auto domain = out->view()->domain();
-
-    const bool has_block_reduce = domain->hasBlockReduction();
-    const bool has_grid_reduce = domain->hasGridReduction();
-
-    if (!has_block_reduce && !has_grid_reduce) {
-      const auto gen_out = gen(out);
-      const auto op_type = rop->getReductionOpType();
-      indent() << gen_out << " = "
-               << genBinaryOp(op_type, out, gen_out, gen(rop->in())) << ";\n";
-      return;
-    }
-
-    if (auto reduction_id = ir_utils::getMaybeWarpReductionDim(rop)) {
-      genWarpReductionOp(rop, reduction_id.value());
-      return;
-    }
-
-    const auto par_domains = ir_utils::getParallelDomains(rop->out());
+  void genBlockReduction(
+      const kir::TensorIndex* output,
+      const kir::TensorIndex* input,
+      const Val* init,
+      BinaryOpType reduction_op_type,
+      kir::Predicate* read_pred,
+      kir::Predicate* write_pred) {
+    const auto par_domains = ir_utils::getParallelDomains(output);
     // Get parallel reduction domains
     const bool tidx =
         par_domains.find(ParallelType::TIDx) != par_domains.end() &&
@@ -1068,33 +1070,59 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         par_domains.find(ParallelType::TIDz) != par_domains.end() &&
         par_domains.at(ParallelType::TIDz)->isReduction();
 
-    const auto data_type = rop->out()->dtype();
+    const auto data_type = output->dtype();
+
+    indent() << "blockReduce<" << (tidx ? "true" : "false") << ", "
+             << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
+             << ">(\n";
+    indent() << kTab << gen(output) << ",\n";
+    indent() << kTab << gen(input) << ",\n";
+    indent() << kTab << genReductionOp(reduction_op_type, output->dtype())
+             << ",\n";
+    indent() << kTab << "threadIdx,\n";
+    indent() << kTab << "blockDim,\n";
+    indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
+    TORCH_INTERNAL_ASSERT(read_pred != nullptr && read_pred->hasValue());
+    indent() << kTab << genInline(read_pred) << ",\n";
+    // Pass the write predicate if available and different from the
+    // default predicate. The blockReduce runtime function uses the
+    // default predicate for both read and write when only the
+    // default one is given.
+    if (write_pred != nullptr) {
+      TORCH_INTERNAL_ASSERT(write_pred->hasValue());
+      indent() << kTab << genInline(write_pred) << ",\n";
+    }
+    indent() << kTab << data_type << "(" << genInline(init) << "));\n";
+  }
+
+  void handle(const ReductionOp* rop) final {
+    TORCH_INTERNAL_ASSERT(rop->out()->isA<kir::TensorIndex>());
+
+    const auto output = rop->out()->as<kir::TensorIndex>();
+    const auto input = rop->in()->as<kir::TensorIndex>();
+    const auto domain = output->view()->domain();
     const auto op_type = rop->getReductionOpType();
 
-    if (has_block_reduce) {
-      indent() << "blockReduce<" << (tidx ? "true" : "false") << ", "
-               << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
-               << ">(\n";
-      indent() << kTab << gen(rop->out()) << ",\n";
-      indent() << kTab << gen(rop->in()) << ",\n";
-      indent() << kTab << genReductionOp(op_type, rop->out()) << ",\n";
-      indent() << kTab << "threadIdx,\n";
-      indent() << kTab << "blockDim,\n";
-      indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
-      TORCH_INTERNAL_ASSERT(
-          rop->predicate() != nullptr && rop->predicate()->hasValue());
-      auto read_pred = genInline(rop->predicate());
-      indent() << kTab << read_pred << ",\n";
-      // Pass the write predicate if available and different from the
-      // default predicate. The blockReduce runtime function uses the
-      // default predicate for both read and write when only the
-      // default one is given.
-      if (rop->writePredicate() != nullptr) {
-        TORCH_INTERNAL_ASSERT(rop->writePredicate()->hasValue());
-        auto write_pred = genInline(rop->writePredicate());
-        indent() << kTab << write_pred << ",\n";
-      }
-      indent() << kTab << data_type << "(" << genInline(rop->init()) << "));\n";
+    const bool has_block_reduce = domain->hasBlockReduction();
+    const bool has_grid_reduce = domain->hasGridReduction();
+
+    TORCH_INTERNAL_ASSERT(
+        !has_grid_reduce,
+        "ReductionOp does not support block parallelization. GridReductionOp must be used. ",
+        rop->toString());
+
+    if (!has_block_reduce) {
+      genSerialReduction(output, input, op_type);
+    } else if (auto reduction_id = ir_utils::getMaybeWarpReductionDim(rop)) {
+      genWarpReduction(output, input, rop->init(), op_type, rop->predicate());
+    } else {
+      genBlockReduction(
+          output,
+          input,
+          rop->init(),
+          op_type,
+          rop->predicate(),
+          rop->writePredicate());
     }
   }
 
@@ -1239,7 +1267,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     TORCH_INTERNAL_ASSERT(
         !rop->isFused(), "This is not for the fused reduction kernel\n");
 
-    const auto par_domains = ir_utils::getParallelDomains(rop->outputs()[0]);
+    const auto par_domains =
+        ir_utils::getParallelDomains(ir_utils::getTvOutput(rop));
     ArgumentBuilder flags;
     for (const ParallelType pt : kParallelTypeThreads) {
       const bool parallel_reduction =
@@ -1297,9 +1326,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
     func_args.arg(gen(grop->out()));
     func_args.arg(gen(grop->in()));
-    func_args.arg(genReductionOp(op_type, out));
+    func_args.arg(genReductionOp(op_type, out->dtype()));
     func_args.arg("&").append(varName(work_buffer)).append("[0]");
-    func_args.arg(varName(sync_buffer));
+    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
     func_args.arg(genCall("static_cast", ptrType(data_type), "shared_mem"));
     // read and write predicates
     TORCH_INTERNAL_ASSERT(
@@ -1381,7 +1410,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // init_val
     func_args.arg(genCall("LocalTuple", data_type, genInline(grop->init())));
     // reduction_op
-    func_args.arg(genReductionOp(op_type, out));
+    func_args.arg(genReductionOp(op_type, out->dtype()));
 
     indent() << kTab << func_args << ");\n";
   }

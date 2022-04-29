@@ -302,6 +302,7 @@ TORCH_CUDA_CU_API DataType aten_to_data_type(const at::ScalarType& scalar_type);
 TORCH_CUDA_CU_API at::ScalarType data_type_to_aten(const DataType& data_type);
 
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ValType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const PredicateType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const DataType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ExprType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const UnaryOpType);

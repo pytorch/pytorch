@@ -491,24 +491,23 @@ void PredicateElimination::handle(Expr* expr) {
     // so that must be allocated on global memory. Since we don't omit
     // predication for expressions involving global memory, this
     // should never occur.
-    std::stringstream ss;
-    ss << input;
     TORCH_INTERNAL_ASSERT(
-        input_def != nullptr, "Inconsistent input found: ", ss.str());
+        input_def != nullptr, "Inconsistent input found: ", input->toString());
 
     // If input is an output of reduction, it should be fully
     // initialied as it's allocated on local memory.
-    if (input_def->isA<ReductionOp>() || input_def->isA<WelfordOp>()) {
+    if (ir_utils::isReductionOp(input_def)) {
       continue;
-    } else if (expr->isA<ReductionOp>()) {
+    }
+
+    if (expr->isA<ReductionOp>()) {
       setReductionInitValue(input, expr->as<ReductionOp>()->init());
       continue;
     } else if (auto wop = dynamic_cast<WelfordOp*>(expr)) {
       Val* init = wop->getInitVals().at(i);
       setReductionInitValue(input, init);
       continue;
-    }
-    if (expr->isA<MmaOp>()) {
+    } else if (expr->isA<MmaOp>()) {
       setReductionInitValue(input, expr->as<MmaOp>()->init());
       continue;
     } else if (

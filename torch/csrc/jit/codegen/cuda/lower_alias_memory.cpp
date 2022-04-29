@@ -1076,7 +1076,7 @@ class AllocateReuseModifier {
         if (!tv_def) {
           continue;
         }
-        if (!isPointwiseTvOp(tv_def) && !isReductionTvOp(tv_def)) {
+        if (!isPointwiseTvOp(tv_def) && !ir_utils::isReductionTvOp(tv_def)) {
           if (isBroadcastTvOp(tv_def)) {
             info.has_broadcast_between = true;
           } else {
@@ -1127,14 +1127,6 @@ class AllocateReuseModifier {
           expr->isA<TernaryOp>();
     }
     return false;
-  }
-
-  // Utility to capture reduction ops
-  bool isReductionTvOp(const Expr* expr) {
-    if (!ir_utils::isTvOp(expr)) {
-      return false;
-    }
-    return expr->isA<ReductionOp>() || expr->isA<WelfordOp>();
   }
 
   // Utility to capture reduction ops

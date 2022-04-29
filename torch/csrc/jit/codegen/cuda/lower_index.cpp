@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
@@ -154,7 +155,7 @@ Val* getGridCommWorkBufferSize(
         })) {
       continue;
     }
-    buffer_size = IrBuilder::mulExpr(buffer_size, pt_dim);
+    buffer_size = SimplifyingIrBuilder::mulExpr(buffer_size, pt_dim);
   }
   return buffer_size;
 }
@@ -173,25 +174,9 @@ Val* getGridSyncBufferSize(const TensorDomain* td) {
         })) {
       continue;
     }
-    buffer_size = IrBuilder::mulExpr(buffer_size, pt_dim);
+    buffer_size = SimplifyingIrBuilder::mulExpr(buffer_size, pt_dim);
   }
   return buffer_size;
-}
-
-// Allocate global buffer for a grid communication calls, i.e. grid reduce, grid
-// welford reduce, grid broadcast.
-kir::Allocate* allocGlobalBufferForGridComm(
-    Val* buffer_size,
-    DataType dtype,
-    bool zero_init) {
-  const std::vector<IterDomain*> new_buffer_ids = {
-      IrBuilder::create<IterDomain>(
-          GpuLower::current()->kernel()->zeroVal(), buffer_size)};
-  const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
-  const auto buffer_tv =
-      IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
-  return IrBuilder::create<kir::Allocate>(
-      buffer_tv, buffer_tv->getMemoryType(), nullptr, zero_init);
 }
 
 } // namespace
@@ -267,13 +252,13 @@ void IndexLowering::handleGridReduction(
       out_domain->domain().end(),
       [](IterDomain* id) { return !isTrivialIterDomain(id); });
 
-  const auto reduce_buffer = allocGlobalBufferForGridComm(
+  const auto reduce_buffer = ir_utils::allocGlobalBufferForGridComm(
       getGridCommWorkBufferSize(
           out_domain, rop->isFused() && is_within_a_loop ? 2 : 1),
       out->dtype(),
       false);
 
-  const auto sync_buffer = allocGlobalBufferForGridComm(
+  const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
       getGridSyncBufferSize(out_domain), DataType::Int, true);
 
   // The thread predicate for GridReduction needs to be set
@@ -402,14 +387,14 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
   const auto work_buffer_size = getGridCommWorkBufferSize(
       out_domain, indexed_wop->isFused() && is_within_a_loop ? 2 : 1);
 
-  const auto out_var_buffer = allocGlobalBufferForGridComm(
+  const auto out_var_buffer = ir_utils::allocGlobalBufferForGridComm(
       work_buffer_size, indexed_wop->outVar()->dtype(), false);
-  const auto out_avg_buffer = allocGlobalBufferForGridComm(
+  const auto out_avg_buffer = ir_utils::allocGlobalBufferForGridComm(
       work_buffer_size, indexed_wop->outAvg()->dtype(), false);
-  const auto out_N_buffer = allocGlobalBufferForGridComm(
+  const auto out_N_buffer = ir_utils::allocGlobalBufferForGridComm(
       work_buffer_size, indexed_wop->outN()->dtype(), false);
 
-  const auto sync_buffer = allocGlobalBufferForGridComm(
+  const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
       getGridSyncBufferSize(out_domain), DataType::Int, true);
 
   // The thread predicate for GridReduction needs to be set
@@ -496,10 +481,10 @@ void IndexLowering::handle(const BroadcastOp* bop) {
 
   // Grid broadcast
   const auto out_domain = out_tv->domain();
-  const auto broadcast_buffer = allocGlobalBufferForGridComm(
+  const auto broadcast_buffer = ir_utils::allocGlobalBufferForGridComm(
       getGridCommWorkBufferSize(out_domain), out->dtype(), false);
 
-  const auto sync_buffer = allocGlobalBufferForGridComm(
+  const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
       getGridSyncBufferSize(out_domain), DataType::Int, true);
 
   auto grid_broadcast = IrBuilder::create<kir::GridBroadcast>(

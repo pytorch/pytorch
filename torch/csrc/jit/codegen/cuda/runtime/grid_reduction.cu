@@ -189,7 +189,7 @@ __device__ void gridReduce(
     const T& inp_val,
     Func reduction_op,
     volatile T* work_buf,
-    Tensor<int64_t, 1> sync_flags,
+    int64_t* sync_flags,
     T* shared_buf,
     bool read_pred,
     bool write_pred,

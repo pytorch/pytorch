@@ -222,17 +222,8 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) {
     // If there's any expression that requires barrier
     // synchronization, the else part can't be omitted
     for (auto expr : loop->body().exprs()) {
-      if (expr->isA<BroadcastOp>()) {
-        const ParallelTypeBitmap domains = pred_map.getParallelBroadcastDomains(
-            expr->outputs()[0]->as<TensorView>());
-        if (domains.any()) {
-          return false;
-        }
-      } else if (expr->isA<ReductionOp>() || expr->isA<WelfordOp>()) {
-        auto td = ir_utils::getTvOutput(expr)->domain();
-        if (td->hasBlockReduction() || td->hasGridReduction()) {
-          return false;
-        }
+      if (ir_utils::hasBlockSync(expr, pred_map)) {
+        return false;
       }
     }
     // If the number of visits of the loop body per thread is one, the

@@ -109,6 +109,11 @@ bool isTvOp(const Expr* expr) {
 }
 
 TensorView* getTv(Val* val) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return const_cast<TensorView*>(getTv(const_cast<const Val*>(val)));
+}
+
+const TensorView* getTv(const Val* val) {
   if (val->isA<TensorView>()) {
     return val->as<TensorView>();
   } else if (val->isA<kir::TensorIndex>()) {
@@ -137,6 +142,16 @@ TensorView* getTvOutput(const Expr* expr) {
   return nullptr;
 }
 
+bool isReductionOp(const Expr* expr) {
+  // Note that GridReduction inherits ReductionOp
+  return expr->isA<ReductionOp>() || expr->isA<WelfordOp>() ||
+      expr->isA<kir::GridWelford>();
+}
+
+bool isReductionTvOp(const Expr* expr) {
+  return isTvOp(expr) && isReductionOp(expr);
+}
+
 bool isScalarOp(const Expr* expr) {
   for (auto out : expr->outputs())
     if (!out->isScalar())
@@ -149,9 +164,8 @@ bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
     return false;
   }
 
-  if (!(expr->isA<ReductionOp>() || expr->isA<BroadcastOp>() ||
-        expr->isA<WelfordOp>() || expr->isA<kir::GridReduction>() ||
-        expr->isA<kir::GridBroadcast>() || expr->isA<kir::GridWelford>())) {
+  if (!(isReductionOp(expr) || expr->isA<BroadcastOp>() ||
+        expr->isA<kir::GridBroadcast>())) {
     return false;
   }
 
@@ -234,8 +248,8 @@ bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis) {
 }
 
 std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
-    Val* val) {
-  TensorView* tv = nullptr;
+    const Val* val) {
+  const TensorView* tv = nullptr;
   if (val->isA<TensorView>()) {
     tv = val->as<TensorView>();
   } else if (val->isA<kir::TensorIndex>()) {
@@ -252,6 +266,20 @@ std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
     }
   }
   return parallel_domains;
+}
+
+kir::Allocate* allocGlobalBufferForGridComm(
+    Val* buffer_size,
+    DataType dtype,
+    bool zero_init) {
+  const std::vector<IterDomain*> new_buffer_ids = {
+      IrBuilder::create<IterDomain>(
+          GpuLower::current()->kernel()->zeroVal(), buffer_size)};
+  const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
+  const auto buffer_tv =
+      IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
+  return IrBuilder::create<kir::Allocate>(
+      buffer_tv, buffer_tv->getMemoryType(), nullptr, zero_init);
 }
 
 } // namespace ir_utils

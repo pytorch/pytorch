@@ -494,35 +494,12 @@ void IrPrinter::handle(const ViewOp* top) {
 
 void IrPrinter::handle(const kir::Predicate* node) {
   switch (node->predicate_type()) {
-    case PredicateType::Inline: {
-      os_ << "Inline_Predicate";
-      break;
-    }
     case PredicateType::Manual: {
       os_ << node->value();
       break;
     }
-    case PredicateType::Misaligned: {
-      os_ << "Misaligned_Predicate";
-      break;
-    }
-    case PredicateType::Padding: {
-      os_ << "Padding_Predicate";
-      break;
-    }
-    case PredicateType::Shift: {
-      os_ << "Shift_Predicate";
-      break;
-    }
-    case PredicateType::Unswitch: {
-      os_ << "Unswitch_Predicate";
-      break;
-    }
-    case PredicateType::Vectorize: {
-      os_ << "Vectorize_Predicate";
-      break;
-    }
     default:
+      os_ << node->predicate_type();
       break;
   }
 }
@@ -642,20 +619,6 @@ void IrPrinter::handle(const kir::GridReduction* node) {
   os_ << "\n";
   indent() << kTab << ".sync_buffer=";
   handle(node->sync_buffer()->buffer());
-  os_ << "\n";
-  indent() << kTab << ".grid_read_pred=";
-  if (node->predicate() != nullptr) {
-    handle(node->predicate());
-  } else {
-    os_ << "nullptr";
-  }
-  os_ << "\n";
-  indent() << kTab << ".grid_write_pred=";
-  if (node->writePredicate() != nullptr) {
-    handle(node->writePredicate());
-  } else {
-    os_ << "nullptr";
-  }
   os_ << "\n";
 }
 

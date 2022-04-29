@@ -45,7 +45,10 @@ __device__ float lerp(float start, float end, float weight) {
   }
 }
 
-__device__ std::complex<double> lerp(std::complex<double> start, std::complex<double> end, std::complex<double> weight) {
+__device__ std::complex<double> lerp(
+    std::complex<double> start,
+    std::complex<double> end,
+    std::complex<double> weight) {
   if (abs(weight) < 0.5) {
     return start + weight * (end - start);
   } else {
@@ -53,7 +56,10 @@ __device__ std::complex<double> lerp(std::complex<double> start, std::complex<do
   }
 }
 
-__device__ std::complex<float> lerp(std::complex<float> start, std::complex<float> end, std::complex<float> weight) {
+__device__ std::complex<float> lerp(
+    std::complex<float> start,
+    std::complex<float> end,
+    std::complex<float> weight) {
   if (abs(weight) < 0.5f) {
     return start + weight * (end - start);
   } else {

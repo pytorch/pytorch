@@ -66,15 +66,21 @@ std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
 // Returns if Val is a TensorView or TensorIndex
 bool isTV(const Val* const);
 
-// Returns is Expr is a TensorView or TensorIndex Expr.
+// Returns if Expr is a TensorView or TensorIndex Expr.
 TORCH_CUDA_CU_API bool isTvOp(const Expr*);
 
 // Returns the first output of Expr that is a TensorView
 TensorView* getTvOutput(const Expr*);
 
+// Returns if Expr is a reduction op
+TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
+
+// Returns if Expr is a reduction op with TensorView or TensorIndex
+TORCH_CUDA_CU_API bool isReductionTvOp(const Expr*);
+
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
 
-//! Returns the Fuser iterdomain that maps to the thread dimension grouped
+//! Returns the iterdomain that maps to the thread dimension grouped
 //!  to warps. Returns nullopt if the reduction is not to be lowered to
 //!  a warp reduction.
 c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node);
@@ -84,6 +90,7 @@ bool isScalarOp(const Expr*);
 //! Get TensorView potentially via kir::TensorIndex. Returns nullptr if
 //! cast fails.
 TensorView* getTv(Val*);
+const TensorView* getTv(const Val*);
 
 //! Get only TensorView potentially via kir::TensorIndex.
 std::vector<TensorView*> getTvs(const std::vector<Val*>& vals);
@@ -93,7 +100,14 @@ std::vector<TensorView*> getTvs(const std::vector<Val*>& vals);
 bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis);
 
 std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
-    Val* val);
+    const Val* val);
+
+// Allocate global buffer for a grid communication calls, i.e. grid reduce, grid
+// welford reduce, grid broadcast.
+kir::Allocate* allocGlobalBufferForGridComm(
+    Val* buffer_size,
+    DataType dtype,
+    bool zero_init);
 
 } // namespace ir_utils
 

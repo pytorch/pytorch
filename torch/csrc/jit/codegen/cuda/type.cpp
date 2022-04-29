@@ -254,6 +254,29 @@ static const char* val_type2string(ValType t) {
   }
 }
 
+static const char* predicate_type2string(PredicateType t) {
+  switch (t) {
+    case PredicateType::Manual:
+      return "Manual";
+    case PredicateType::Inline:
+      return "Inline";
+    case PredicateType::Unswitch:
+      return "Unswitch";
+    case PredicateType::Vectorize:
+      return "Vectorize";
+    case PredicateType::Misaligned:
+      return "Misaligned";
+    case PredicateType::Shift:
+      return "Shift";
+    case PredicateType::Padding:
+      return "Padding";
+    case PredicateType::ReductionWrite:
+      return "ReductionWrite";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "No string found for predicate type.");
+  }
+}
+
 static const char* expr_type2string(ExprType t) {
   switch (t) {
     case ExprType::UnaryOp:
@@ -822,6 +845,10 @@ at::ScalarType data_type_to_aten(const DataType& data_type) {
 
 std::ostream& operator<<(std::ostream& out, const ValType vtype) {
   return out << val_type2string(vtype);
+}
+
+std::ostream& operator<<(std::ostream& out, const PredicateType ptype) {
+  return out << predicate_type2string(ptype);
 }
 
 std::ostream& operator<<(std::ostream& out, const DataType dtype) {

@@ -412,22 +412,6 @@ Val* getGridSyncBufferSize(const ParallelTypeBitmap& ptb) {
   return buffer_size;
 }
 
-// Copied from lower_index.cpp, may be worth either removing this function and
-// doing it inline or reusing the function from lower_index.cpp
-kir::Allocate* allocGlobalBufferForGridComm(
-    Val* buffer_size,
-    DataType dtype,
-    bool zero_init) {
-  const std::vector<IterDomain*> new_buffer_ids = {
-      IrBuilder::create<IterDomain>(
-          GpuLower::current()->kernel()->zeroVal(), buffer_size)};
-  const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
-  const auto buffer_tv =
-      IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
-  return IrBuilder::create<kir::Allocate>(
-      buffer_tv, buffer_tv->getMemoryType(), nullptr, zero_init);
-}
-
 } // namespace
 
 class ReadAfterWriteSyncs : public kir::ExprMutator {
@@ -511,7 +495,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       Expr* sync_expr = nullptr;
       kir::Allocate* maybe_alloc = nullptr;
       if (sync_bitmap.hasBID()) {
-        maybe_alloc = allocGlobalBufferForGridComm(
+        maybe_alloc = ir_utils::allocGlobalBufferForGridComm(
             getGridSyncBufferSize(sync_bitmap), DataType::Int, true);
         sync_expr = IrBuilder::create<kir::GridSync>(
             sync_bitmap, maybe_alloc->buffer());
