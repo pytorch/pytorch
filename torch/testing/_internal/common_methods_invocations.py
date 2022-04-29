@@ -2497,28 +2497,27 @@ def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **
 
     def generator():
         # sparse.sampled_addmm performs: alpha * (A @ B) * sparse_ones_like(C) + beta * C
-        for index_dtype in (torch.int32, torch.int64):
-            for m, n, k in itertools.product([0, 5], repeat=3):
-                yield SampleInput(
-                    torch.eye(m, n, device=device, dtype=dtype)
-                    .to_sparse_csr()
-                    .requires_grad_(requires_grad),
-                    args=(
-                        make_tensor(
-                            (m, k),
-                            device=device,
-                            dtype=dtype,
-                            requires_grad=requires_grad,
-                        ),
-                        make_tensor(
-                            (k, n),
-                            device=device,
-                            dtype=dtype,
-                            requires_grad=requires_grad,
-                        ),
+        for m, n, k in itertools.product([0, 5], repeat=3):
+            yield SampleInput(
+                torch.eye(m, n, device=device, dtype=dtype)
+                .to_sparse_csr()
+                .requires_grad_(requires_grad),
+                args=(
+                    make_tensor(
+                        (m, k),
+                        device=device,
+                        dtype=dtype,
+                        requires_grad=requires_grad,
                     ),
-                    kwargs={"alpha": alpha, "beta": beta},
-                )
+                    make_tensor(
+                        (k, n),
+                        device=device,
+                        dtype=dtype,
+                        requires_grad=requires_grad,
+                    ),
+                ),
+                kwargs={"alpha": alpha, "beta": beta},
+            )
 
     return list(generator())
 
