@@ -72,6 +72,20 @@ namespace lazy_linalg {
 #endif
 
 #if AT_MAGMA_ENABLED()
+template <class scalar_t>
+void magmaLdlHermitian(
+    magma_uplo_t uplo,
+    magma_int_t n,
+    scalar_t* dA,
+    magma_int_t ldda,
+    magma_int_t* ipiv,
+    magma_int_t* info) {
+  TORCH_CHECK(
+      false,
+      "LDL decomposition is not available.",
+      "Please rebuild with MAGMA 2.5.4+.");
+}
+
 template<class scalar_t>
 void magmaLu(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
@@ -185,7 +199,67 @@ void magmaGels(
     scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb,
     scalar_t* hwork, magma_int_t lwork, magma_int_t* info);
 
-template<>
+#if MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 && \
+    MAGMA_VERSION_MICRO >= 4
+
+template <>
+void magmaLdlHermitian<double>(
+    magma_uplo_t uplo,
+    magma_int_t n,
+    double* dA,
+    magma_int_t ldda,
+    magma_int_t* ipiv,
+    magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_dsytrf_gpu(uplo, n, dA, ldda, ipiv, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaLdlHermitian<float>(
+    magma_uplo_t uplo,
+    magma_int_t n,
+    float* dA,
+    magma_int_t ldda,
+    magma_int_t* ipiv,
+    magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_ssytrf_gpu(uplo, n, dA, ldda, ipiv, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaLdlHermitian<c10::complex<double>>(
+    magma_uplo_t uplo,
+    magma_int_t n,
+    c10::complex<double>* dA,
+    magma_int_t ldda,
+    magma_int_t* ipiv,
+    magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_zhetrf_gpu(
+      uplo, n, reinterpret_cast<magmaDoubleComplex*>(dA), ldda, ipiv, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaLdlHermitian<c10::complex<float>>(
+    magma_uplo_t uplo,
+    magma_int_t n,
+    c10::complex<float>* dA,
+    magma_int_t ldda,
+    magma_int_t* ipiv,
+    magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_chetrf_gpu(
+      uplo, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, ipiv, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+#endif // MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 &&
+       // MAGMA_VERSION_MICRO >= 4
+
+template <>
 void magmaLu<double>(
     magma_int_t m, magma_int_t n, double* dA, magma_int_t ldda,
     magma_int_t* ipiv, magma_int_t* info) {
@@ -1190,6 +1264,121 @@ magma_trans_t to_magma(TransposeType trans) {
 #define ALLOCATE_ARRAY(name, type, size) \
   auto storage_##name = pin_memory<type>(size); \
   name = static_cast<type*>(storage_##name.data());
+
+template <typename scalar_t>
+void apply_ldl_factor_magma(
+    const Tensor& A,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper) {
+#if !AT_MAGMA_ENABLED()
+  TORCH_CHECK(
+      false,
+      "torch.linalg.ldl_factor: MAGMA library not found in "
+      "compilation. Please rebuild with MAGMA.");
+#else
+  auto batch_size = batchCount(A);
+  magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
+  magma_int_t leading_dim = magma_int_cast(A.stride(-1), "A.stride(-1)");
+  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
+
+  auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+
+  auto a_data = A.data_ptr<scalar_t>();
+  Tensor pivots_cpu =
+      at::empty_like(pivots, pivots.options().device(kCPU).pinned_memory(true));
+  auto pivots_data = pivots_cpu.data_ptr<magma_int_t>();
+  Tensor info_cpu =
+      at::empty_like(info, info.options().device(kCPU).pinned_memory(true));
+  auto info_data = info_cpu.data_ptr<magma_int_t>();
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* a_working_ptr = &a_data[i * a_stride];
+    magma_int_t* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    magma_int_t* info_working_ptr = &info_data[i];
+    magmaLdlHermitian<scalar_t>(
+        uplo,
+        n,
+        a_working_ptr,
+        leading_dim,
+        pivots_working_ptr,
+        info_working_ptr);
+  }
+  pivots.copy_(pivots_cpu);
+  info.copy_(info_cpu);
+#endif
+}
+
+void ldl_factor_magma(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian) {
+  if (LD.is_complex()) {
+    TORCH_CHECK(
+        hermitian,
+        "torch.linalg.ldl_factor: complex tensors with hermitian=False flag are not supported.");
+  }
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      LD.scalar_type(), "ldl_factor_magma", [&] {
+        apply_ldl_factor_magma<scalar_t>(LD, pivots, info, upper);
+      });
+}
+
+void ldl_factor_kernel(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian) {
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Cusolver:
+      return ldl_factor_cusolver(
+          LD, pivots, info, upper, hermitian);
+    case at::LinalgBackend::Magma:
+      return ldl_factor_magma(LD, pivots, info, upper, hermitian);
+    default:
+    // By default use cusolver if available and magma otherwise.
+    // If cusolver and magma 2.5.4+ are both available and hermitian=true,
+    // call magma for complex inputs
+#ifdef USE_CUSOLVER
+#if AT_MAGMA_ENABLED() && (MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 && MAGMA_VERSION_MICRO >= 4)
+      if (LD.is_complex() && hermitian) {
+        return ldl_factor_magma(
+            LD, pivots, info, upper, hermitian);
+      }
+#endif
+      return ldl_factor_cusolver(
+          LD, pivots, info, upper, hermitian);
+#else
+      return ldl_factor_magma(LD, pivots, info, upper, hermitian);
+#endif
+  }
+}
+
+void ldl_solve_kernel(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper,
+    bool hermitian) {
+  // TODO: It should be possible to add the MAGMA backend for this function when using MAGMA 2.6.0
+  // https://bitbucket.org/icl/magma/src/c703d112dcf19eb8c73676cef10888aa2ef73457/ReleaseNotes#lines-48
+  if (LD.is_complex()) {
+    TORCH_CHECK(
+        !hermitian,
+        "torch.linalg.ldl_solve: complex tensors with hermitian=True flag are not supported on CUDA.");
+  }
+
+  ldl_solve_cusolver(LD, pivots, B, upper);
+}
+
+
+REGISTER_CUDA_DISPATCH(ldl_factor_stub, &ldl_factor_kernel)
+REGISTER_CUDA_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
 
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2799,7 +2988,7 @@ static void apply_lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots,
 #endif
 }
 
-static void lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B,TransposeType trans) {
+static void lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   // There is a bug in MAGMA when TransposeType is transpose or conj-transpose.
   TORCH_INTERNAL_ASSERT(trans == TransposeType::NoTranspose);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_batched_magma", [&]{
@@ -2807,28 +2996,31 @@ static void lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots, const
   });
 }
 
-static void lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B,TransposeType trans) {
+static void lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_looped_magma", [&]{
     apply_lu_solve_looped_magma<scalar_t>(LU, pivots, B, trans);
   });
 }
 
-c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& b, const Tensor& lu) {
-  if (batchCount(b) != batchCount(lu)) {
-    auto expand_size = DimVector((size_t *) b.sizes().begin(), (size_t *) b.sizes().end() - 2);
-    expand_size.append({lu.size(-2), lu.size(-1)});
+c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& B, const Tensor& LU) {
+  // B and LU have the same number of dimensions
+  if (batchCount(B) != batchCount(LU)) {
+		auto n = B.dim();
+    auto expand_shape = DimVector(B.sizes().slice(0, n - 2));
+    expand_shape.append({LU.size(-2), LU.size(-1)});
     return c10::MaybeOwned<Tensor>::owned(
-        cloneBatchedColumnMajor(lu.expand(expand_size)));
+        cloneBatchedColumnMajor(LU.expand(expand_shape)));
   } else {
-    return c10::MaybeOwned<Tensor>::borrowed(lu);
+    return c10::MaybeOwned<Tensor>::borrowed(LU);
   }
 }
 
-c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& b,const Tensor& pivots) {
-  if (batchCount(b) != batchCount(pivots.unsqueeze(-1))) {
-    auto expand_size = DimVector((size_t *) b.sizes().begin(), (size_t *) b.sizes().end() - 2);
-    expand_size.push_back(pivots.size(-1));
-    return c10::MaybeOwned<Tensor>::owned(pivots.expand(expand_size).contiguous());
+c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& B, const Tensor& pivots) {
+  // B and pivots have the same number of dimensions
+  if (batchCount(B) != batchCount(pivots.unsqueeze(-1))) {
+    auto expand_shape = DimVector(B.sizes().slice(0, B.dim() - 2));
+    expand_shape.push_back(pivots.size(-1));
+    return c10::MaybeOwned<Tensor>::owned(pivots.expand(expand_shape).contiguous());
   } else {
     return c10::MaybeOwned<Tensor>::borrowed(pivots);
   }
@@ -2853,7 +3045,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   auto lu_solve_triangular = [m](const Tensor& LU, const Tensor& pivots, const Tensor& B, const TransposeType trans) {
     auto LU_ = maybe_expand_lu(B, LU);
     auto pivots_ = maybe_expand_pivots(B, pivots);
-    // LAPACK / cublas / etc returns the permutaiton in an odd format
+    // LAPACK / cublas / etc returns the permutation in an odd format
     // Here we transform it to a vector representing a permutation, i.e. a (batch of) vectors st. P(i) = j
     auto perm = at::arange(m, pivots_->options().dtype(kLong)).expand(pivots_->sizes()).contiguous();
     auto iter = TensorIteratorConfig()
@@ -2928,8 +3120,9 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     return;
   }
 
-  // Summary: Always use cusolver + cublas + lu_solve_trang when available, otherwise resort to MAGMA
-  // Magma is buggy and slow, so we make up for that in those cases by using solve_triangular
+  // Summary: In most cases we use cublas / cusolver
+  // MAGMA is faster for large matrices, but it is buggy for trans != NoTranspose or for large batches.
+  // LU solve is fast in some cases when adjoint=True
 #ifdef CUDART_VERSION
 #ifdef USE_CUSOLVER
   if (batch_size <= 2 && m >= 64) {
@@ -2939,7 +3132,13 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
 #endif // ifdef USE_CUSOLVER
   if (trans != TransposeType::NoTranspose && m <= 2 && batch_size >= 128) {
     lu_solve_triangular(LU, pivots, B, trans);
-  } else {
+  }
+#if AT_MAGMA_ENABLED()
+  else if (!over_batched_magma_dim_limit && trans == TransposeType::NoTranspose && m >= 256 && batch_size >= 128) {
+    lu_solve_batched_magma_fn(LU, pivots, B, trans);
+  }
+#endif
+  else {
     lu_solve_batched_cublas_fn(LU, pivots, B, trans);
   }
 #else
