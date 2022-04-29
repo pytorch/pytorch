@@ -15,7 +15,7 @@ namespace functorch {
 
 // Takes a BatchedTensorImpl, permutes all of the batch dims to the front,
 // and then returns a physical version of the Tensor.
-static Tensor permuteBatchDimsToFront(BatchedTensorImpl* batched) {
+static Tensor permuteBatchDimsToFront(const BatchedTensorImpl* batched) {
   const Tensor& physical_tensor = batched->value();
   if (batched->bdim() == 0) {
     return physical_tensor;
