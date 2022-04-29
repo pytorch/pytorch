@@ -44,7 +44,9 @@ __device__  __forceinline__ scalar_t dot(scalar_t *a, scalar_t *b, uint length){
 
     scalar_t local_prod = 0;
     for (uint i = 0; i < unroll; ++i){
-        local_prod += (idx < length)? a[idx] * b[idx] : (scalar_t) 0;
+        if (idx < length){
+          local_prod = fma(a[idx], b[idx], local_prod);
+        }
         idx += 32;
     }
 
@@ -96,7 +98,7 @@ __global__ void q_loop(scalar_t *Q, scalar_t *vs, const uint n, const uint m){
     int tx = threadIdx.x;
     int bx = blockIdx.x;
 
-    for (int v_idx = 0; v_idx < m; ++v_idx){
+    for (int v_idx = m - 1; v_idx >= 0; --v_idx){
         scalar_t *v = &vs[v_idx * n + v_idx];
         uint v_len = n - v_idx;
     
@@ -119,7 +121,7 @@ void householder_main(Tensor& R, Tensor& Q, const uint m, const uint n){
     
     reflections<BLOCK_THREADS, scalar_t><<<m, BLOCK_THREADS, 0, stream>>>(
         R.data_ptr<scalar_t>(), 
-        vs.data_ptr<scalar_t>(), 
+        vs.data_ptr<scalar_t>(),
         m, 
         n, 
         barriers.data_ptr<int>()
