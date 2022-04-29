@@ -102,8 +102,8 @@ class Transformer(Module):
               `(N, S, E)` if `batch_first=True`.
             - tgt: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if `batch_first=False` or
               `(N, T, E)` if `batch_first=True`.
-            - src_mask: :math:`(S, S)`.
-            - tgt_mask: :math:`(T, T)`.
+            - src_mask: :math:`(S, S)` or :math:`(N\cdot\text{num\_heads}, S, S)`.
+            - tgt_mask: :math:`(T, T)` or :math:`(N\cdot\text{num\_heads}, T, T)`.
             - memory_mask: :math:`(T, S)`.
             - src_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
             - tgt_key_padding_mask: :math:`(T)` for unbatched input otherwise :math:`(N, T)`.
@@ -289,6 +289,29 @@ class TransformerEncoderLayer(Module):
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True)
         >>> src = torch.rand(32, 10, 512)
         >>> out = encoder_layer(src)
+
+    Fast path:
+        forward() will use a special optimized implementation if all of the following
+        conditions are met:
+
+        - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor
+          argument ``requires_grad``
+        - training is disabled (using ``.eval()``)
+        - batch_first is ``True`` and the input is batched (i.e., ``src.dim() == 3``)
+        - norm_first is ``False`` (this restriction may be loosened in the future)
+        - activation is one of: ``"relu"``, ``"gelu"``, ``torch.functional.relu``, or ``torch.functional.gelu``
+        - at most one of ``src_mask`` and ``src_key_padding_mask`` is passed
+        - if src is a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_, neither ``src_mask``
+          nor ``src_key_padding_mask`` is passed
+        - the two ``LayerNorm`` instances have a consistent ``eps`` value (this will naturally be the case
+          unless the caller has manually modified one without modifying the other)
+
+        If the optimized implementation is in use, a
+        `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be
+        passed for ``src`` to represent padding more efficiently than using a padding
+        mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ will be
+        returned, and an additional speedup proportional to the fraction of the input that
+        is padding can be expected.
     """
     __constants__ = ['batch_first', 'norm_first']
 
@@ -313,16 +336,25 @@ class TransformerEncoderLayer(Module):
 
         # Legacy string support for activation function.
         if isinstance(activation, str):
-            self.activation = _get_activation_fn(activation)
+            activation = _get_activation_fn(activation)
+
+        # We can't test self.activation in forward() in TorchScript,
+        # so stash some information about it instead.
+        if activation is F.relu:
+            self.activation_relu_or_gelu = 1
+        elif activation is F.gelu:
+            self.activation_relu_or_gelu = 2
         else:
-            self.activation = activation
+            self.activation_relu_or_gelu = 0
+        self.activation = activation
 
     def __setstate__(self, state):
         if 'activation' not in state:
             state['activation'] = F.relu
         super(TransformerEncoderLayer, self).__setstate__(state)
 
-    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None,
+                src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -336,6 +368,53 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
+        if (not self.norm_first and not self.training and
+            self.self_attn.batch_first and src.dim() == 3 and self.self_attn._qkv_same_embed_dim and
+            self.activation_relu_or_gelu and self.norm1.eps == self.norm2.eps and
+            ((src_mask is None and src_key_padding_mask is None)
+             if src.is_nested
+             else (src_mask is None or src_key_padding_mask is None))):
+            tensor_args = (
+                src,
+                self.self_attn.in_proj_weight,
+                self.self_attn.in_proj_bias,
+                self.self_attn.out_proj.weight,
+                self.self_attn.out_proj.bias,
+                self.norm1.weight,
+                self.norm1.bias,
+                self.norm2.weight,
+                self.norm2.bias,
+                self.linear1.weight,
+                self.linear1.bias,
+                self.linear2.weight,
+                self.linear2.bias,
+            )
+            if (not torch.overrides.has_torch_function(tensor_args) and
+                    # We have to use a list comprehension here because TorchScript
+                    # doesn't support generator expressions.
+                    all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]) and
+                    (not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args]))):
+                return torch._transformer_encoder_layer_fwd(
+                    src,
+                    self.self_attn.embed_dim,
+                    self.self_attn.num_heads,
+                    self.self_attn.in_proj_weight,
+                    self.self_attn.in_proj_bias,
+                    self.self_attn.out_proj.weight,
+                    self.self_attn.out_proj.bias,
+                    self.activation_relu_or_gelu == 2,
+                    False,  # norm_first, currently not supported
+                    self.norm1.eps,
+                    self.norm1.weight,
+                    self.norm1.bias,
+                    self.norm2.weight,
+                    self.norm2.bias,
+                    self.linear1.weight,
+                    self.linear1.bias,
+                    self.linear2.weight,
+                    self.linear2.bias,
+                    src_mask if src_mask is not None else src_key_padding_mask,
+                )
         x = src
         if self.norm_first:
             x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)
@@ -488,7 +567,7 @@ def _get_clones(module, N):
     return ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-def _get_activation_fn(activation):
+def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
     if activation == "relu":
         return F.relu
     elif activation == "gelu":

@@ -19,7 +19,6 @@ ThreadLocalState::ThreadLocalState()
 
   saved_tensors_default_hooks_ = at::SavedTensorDefaultHooks::get_stack();
 
-  bumped_record_all_functions_ = at::checkRecordAllFunctions();
   python_mode_state_ = at::impl::PythonModeTLS::get_state();
 }
 
