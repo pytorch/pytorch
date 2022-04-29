@@ -495,13 +495,13 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
 }
 
 Tensor _log_softmax(const Tensor& input_, const int64_t dim_, bool half_to_float) {
-  TORCH_INTERNAL_ASSERT(false, "This operator is being removed. This is currently left only as a placeholder"
+  TORCH_INTERNAL_ASSERT(false, "This operator is being removed. This is left only as a placeholder"
                         "while updating other libraries that depend on - please don't use it.");
   return input_;
 }
 
-Tensor& _log_softmax(const Tensor& input_, const int64_t dim_, bool half_to_float, Tensor& output_) {
-  TORCH_INTERNAL_ASSERT(false, "This operator is being removed. This is currently left only as a placeholder"
+Tensor& _log_softmax_out(const Tensor& input_, const int64_t dim_, bool half_to_float, Tensor& output_) {
+  TORCH_INTERNAL_ASSERT(false, "This operator is being removed. This is left only as a placeholder"
                         "while updating other libraries that depend on - please don't use it.");
   return output_;
 }
