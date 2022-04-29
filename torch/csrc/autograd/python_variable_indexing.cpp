@@ -368,7 +368,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   const auto& self_ = THPVariable_Unpack(self);
-  if (self_.is_sparse())
+  if (self_.is_sparse() || self_.is_sparse_csr())
   {
     throw TypeError("Cannot assign to a sparse tensor");
   }

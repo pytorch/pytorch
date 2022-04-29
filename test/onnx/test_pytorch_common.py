@@ -50,17 +50,17 @@ def skipIfUnsupportedMinOpsetVersion(min_opset_version):
     def skip_dec(func):
         def wrapper(self):
             if self.opset_version < min_opset_version:
-                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+                raise unittest.SkipTest(f"Unsupported opset_version: {self.opset_version} < {min_opset_version}")
             return func(self)
         return wrapper
     return skip_dec
 
-# skips tests for all versions above min_opset_version.
-def skipIfUnsupportedMaxOpsetVersion(min_opset_version):
+# skips tests for all versions above max_opset_version.
+def skipIfUnsupportedMaxOpsetVersion(max_opset_version):
     def skip_dec(func):
         def wrapper(self):
-            if self.opset_version > min_opset_version:
-                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            if self.opset_version > max_opset_version:
+                raise unittest.SkipTest(f"Unsupported opset_version: {self.opset_version} > {max_opset_version}")
             return func(self)
         return wrapper
     return skip_dec
@@ -102,15 +102,6 @@ def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
     def skip_dec(func):
         def wrapper(self):
             if self.opset_version in unsupported_opset_versions:
-                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
-            return func(self)
-        return wrapper
-    return skip_dec
-
-def skipIfONNXShapeInference(onnx_shape_inference):
-    def skip_dec(func):
-        def wrapper(self):
-            if self.onnx_shape_inference is onnx_shape_inference:
                 raise unittest.SkipTest("Skip verify test for unsupported opset_version")
             return func(self)
         return wrapper

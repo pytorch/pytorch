@@ -7,14 +7,12 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 
-struct PythonRecordFunction: public torch::CustomClassHolder {
+struct PythonRecordFunction : public torch::CustomClassHolder {
   at::RecordFunction record;
 
-  PythonRecordFunction(
-      at::RecordScope scope = at::RecordScope::FUNCTION,
-      bool pre_sampled = false)
-    : record(scope, pre_sampled)
-    {}
+  explicit PythonRecordFunction(
+      at::RecordScope scope = at::RecordScope::FUNCTION)
+      : record(scope) {}
 };
 
 // Creates a new profiling scope using RecordFunction and invokes its starting

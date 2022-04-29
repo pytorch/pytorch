@@ -2,6 +2,13 @@ import torch.utils.data.graph
 from torch.utils.data.datapipes.iter import Shuffler
 import warnings
 
+__all__ = [
+    "get_all_graph_pipes",
+    "apply_sharding",
+    "apply_shuffle_settings",
+]
+
+
 def get_all_graph_pipes(graph):
     results = set()
     for datapipe, sub_graph in graph.items():
