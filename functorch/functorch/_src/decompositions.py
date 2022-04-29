@@ -473,10 +473,10 @@ def addcdiv(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
 @register_decomposition(aten.addcmul)
 def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
-    if self.is_floating_point():
-        return self + value * tensor1 * tensor2
-    else:
+    if not self.is_floating_point() and not self.is_complex():
         return self + int(value) * tensor1 * tensor2
+    else:
+        return self + value * tensor1 * tensor2
 
 
 @register_decomposition(aten.embedding)
@@ -548,7 +548,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
 
 @register_decomposition(aten.addmm)
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
-    if not self.is_floating_point():
+    if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
         alpha = int(alpha)
     out = alpha * torch.mm(mat1, mat2)
@@ -704,6 +704,11 @@ def native_layer_norm(input: Tensor, normalized_shape: List[int], weight: Option
     return (out, mean, rstd)
 
 
+@register_decomposition(aten.isnan)
+def isnan(self: Tensor) -> Tensor:
+    return torch.where(self != self, self.new_ones((), dtype=torch.bool), self.new_zeros((), dtype=torch.bool))
+
+
 @register_decomposition(aten.clamp_min)
 def clamp_min(self: Tensor, min: float):
     return torch.clamp(self, min=min)
@@ -751,31 +756,32 @@ def logical_not(self: Tensor) -> Tensor:
 #                                  self * aten.log(other)))
 
 
-@register_decomposition(aten.var.correction)
-def var_decomposition(x: Tensor, dims: Optional[List[int]], correction: int = 0, keepdim: bool = False):
-    if dims is None:
-        dims = []
-    if len(dims) == 0:
-        n = x.numel()
-    else:
-        n = 1
-        for dim in dims:
-            n *= x.shape[dim]
+# These are both currently incorrect for complex numbers
+# @register_decomposition(aten.var.correction)
+# def var_decomposition(x: Tensor, dims: Optional[List[int]], correction: int = 0, keepdim: bool = False):
+#     if dims is None:
+#         dims = []
+#     if len(dims) == 0:
+#         n = x.numel()
+#     else:
+#         n = 1
+#         for dim in dims:
+#             n *= x.shape[dim]
 
-    mean = torch.mean(x, dims, True)
-    sub = x - mean
-    sq = sub * sub
-    sum = torch.sum(sq, dims, keepdim)
+#     mean = torch.mean(x, dims, True)
+#     sub = x - mean
+#     sq = sub * sub
+#     sum = torch.sum(sq, dims, keepdim)
 
-    if correction:
-        n = n - correction
+#     if correction:
+#         n = n - correction
 
-    return sum / n
+#     return sum / n
 
 
-@register_decomposition(aten.std.correction)
-def std_decomposition(x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False):
-    return torch.sqrt(torch.var(x, dims, correction=correction, keepdim=keepdim))
+# @register_decomposition(aten.std.correction)
+# def std_decomposition(x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False):
+#     return torch.sqrt(torch.var(x, dims, correction=correction, keepdim=keepdim))
 
 
 # Questionable decompositions

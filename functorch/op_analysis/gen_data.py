@@ -3,6 +3,7 @@ import csv
 import torch
 import sys
 import os
+from collections import defaultdict
 
 
 class CapturedOutput(object):
@@ -189,6 +190,10 @@ def remove_suffix(input_string, suffix):
 if True:
     with open('run_ops.txt', 'r') as f:
         opinfo_ops = [remove_suffix(i.strip(), '.default') for i in f.readlines()]
+    with open('count_ops.txt', 'r') as f:
+        opinfo_counts = [i.strip() for i in f.readlines()]
+        opinfo_counts = defaultdict(int, {k: v for k, v in zip(opinfo_ops, opinfo_counts)})
+        count_fn = lambda x: opinfo_counts[x['full_name']]
     with open('run_decompositions.txt', 'r') as f:
         decomposed_ops = [remove_suffix(i.strip(), '.default') for i in f.readlines()]
-    gen_data([full_name_check(opinfo_ops), full_name_check(decomposed_ops)], 'decompositions.txt')
+    gen_data([full_name_check(opinfo_ops), full_name_check(decomposed_ops), count_fn], 'decompositions.txt')
