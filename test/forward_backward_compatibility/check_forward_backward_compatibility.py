@@ -34,6 +34,7 @@ ALLOW_LIST = [
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
+    ("prim::is_mlc", datetime.date(2022, 5, 20)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
@@ -92,6 +93,7 @@ ALLOW_LIST = [
     ("aten::miopen_depthwise_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_depthwise_convolution_backward_input", datetime.date(9999, 1, 1)),
     ("aten::miopen_depthwise_convolution_backward_weight", datetime.date(9999, 1, 1)),
+    ("aten::is_mlc", datetime.date(2022, 5, 20)),
     ("aten::_nested_tensor", datetime.date(9999, 1, 1)),
     ("caffe2::", datetime.date(2021, 10, 23)),
     ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
@@ -115,6 +117,9 @@ ALLOW_LIST = [
     ("quantized::conv2d_relu_cudnn", datetime.date(2022, 3, 22)),
     ("prim::infer_squeeze_size.dim", datetime.date(9999, 1, 1)),
     ("prim::infer_squeeze_size", datetime.date(9999, 1, 1)),
+    ("aten::_cat", datetime.date(2022, 5, 15)),
+    ("aten::nansum", datetime.date(2022, 5, 15)),
+    ("aten::zero", datetime.date(2022, 5, 15)),
 ]
 
 ALLOW_LIST_COMPILED = [

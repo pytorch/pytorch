@@ -83,7 +83,7 @@ the **Cholesky decomposition** of a complex Hermitian or real symmetric positive
 
     A = LL^{\text{H}}\mathrlap{\qquad L \in \mathbb{K}^{n \times n}}
 
-where :math:`L` is a lower triangular matrix and
+where :math:`L` is a lower triangular matrix with real positive diagonal (even in the complex case) and
 :math:`L^{\text{H}}` is the conjugate transpose when :math:`L` is complex, and the transpose when :math:`L` is real-valued.
 
 Supports input of float, double, cfloat and cdouble dtypes.
@@ -819,6 +819,155 @@ Examples::
 
 .. _Representation of Orthogonal or Unitary Matrices:
     https://www.netlib.org/lapack/lug/node128.html
+""")
+
+ldl_factor = _add_docstr(_linalg.linalg_ldl_factor, r"""
+linalg.ldl_factor(A, *, hermitian=False, out=None) -> (Tensor, Tensor)
+
+Computes a compact representation of the LDL factorization of a Hermitian or symmetric (possibly indefinite) matrix.
+
+When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian`\ `= True`)
+or symmetric (:attr:`hermitian`\ `= False`).
+
+The factorization is of the form the form :math:`A = L D L^T`.
+If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
+
+:math:`L` (or :math:`U`) and :math:`D` are stored in compact form in ``LD``.
+They follow the format specified by `LAPACK's sytrf`_ function.
+These tensors may be used in :func:`torch.linalg.ldl_solve` to solve linear systems.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+""" + fr"""
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.ldl_factor_ex")}
+""" + r"""
+
+Args:
+    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
+                                For real-valued matrices, this switch has no effect. Default: `False`.
+    out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(LD, pivots)`.
+
+Examples::
+
+    >>> A = torch.randn(3, 3)
+    >>> A = A @ A.mT # make symmetric
+    >>> A
+    tensor([[7.2079, 4.2414, 1.9428],
+            [4.2414, 3.4554, 0.3264],
+            [1.9428, 0.3264, 1.3823]])
+    >>> LD, pivots = torch.linalg.ldl_factor(A)
+    >>> LD
+    tensor([[ 7.2079,  0.0000,  0.0000],
+            [ 0.5884,  0.9595,  0.0000],
+            [ 0.2695, -0.8513,  0.1633]])
+    >>> pivots
+    tensor([1, 2, 3], dtype=torch.int32)
+
+.. _LAPACK's sytrf:
+    https://www.netlib.org/lapack/explore-html/d3/db6/group__double_s_ycomputational_gad91bde1212277b3e909eb6af7f64858a.html
+""")
+
+ldl_factor_ex = _add_docstr(_linalg.linalg_ldl_factor_ex, r"""
+linalg.ldl_factor_ex(A, *, hermitian=False, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
+
+This is a version of :func:`~ldl_factor` that does not perform error checks unless :attr:`check_errors`\ `= True`.
+It also returns the :attr:`info` tensor returned by `LAPACK's sytrf`_.
+``info`` stores integer error codes from the backend library.
+A positive integer indicates the diagonal element of :math:`D` that is zero.
+Division by 0 will occur if the result is used for solving a system of linear equations.
+``info`` filled with zeros indicates that the factorization was successful.
+If ``check_errors=True`` and ``info`` contains positive integers, then a `RuntimeError` is thrown.
+
+""" + fr"""
+.. note:: {common_notes["sync_note_ex"]}
+
+.. warning:: {common_notes["experimental_warning"]}
+""" + r"""
+
+Args:
+    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
+                                For real-valued matrices, this switch has no effect. Default: `False`.
+    check_errors (bool, optional): controls whether to check the content of ``info`` and raise
+                                   an error if it is non-zero. Default: `False`.
+    out (tuple, optional): tuple of three tensors to write the output to. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(LD, pivots, info)`.
+
+Examples::
+
+    >>> A = torch.randn(3, 3)
+    >>> A = A @ A.mT # make symmetric
+    >>> A
+    tensor([[7.2079, 4.2414, 1.9428],
+            [4.2414, 3.4554, 0.3264],
+            [1.9428, 0.3264, 1.3823]])
+    >>> LD, pivots, info = torch.linalg.ldl_factor_ex(A)
+    >>> LD
+    tensor([[ 7.2079,  0.0000,  0.0000],
+            [ 0.5884,  0.9595,  0.0000],
+            [ 0.2695, -0.8513,  0.1633]])
+    >>> pivots
+    tensor([1, 2, 3], dtype=torch.int32)
+    >>> info
+    tensor(0, dtype=torch.int32)
+
+.. _LAPACK's sytrf:
+    https://www.netlib.org/lapack/explore-html/d3/db6/group__double_s_ycomputational_gad91bde1212277b3e909eb6af7f64858a.html
+""")
+
+ldl_solve = _add_docstr(_linalg.linalg_ldl_solve, r"""
+linalg.ldl_solve(LD, pivots, B, *, hermitian=False, out=None) -> Tensor
+
+Computes the solution of a system of linear equations using the LDL factorization.
+
+:attr:`LD` and :attr:`pivots` are the compact representation of the LDL factorization and
+are expected to be computed by :func:`torch.linalg.ldl_factor_ex`.
+:attr:`hermitian` argument to this function should be the same
+as the corresponding argumens in :func:`torch.linalg.ldl_factor_ex`.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+""" + fr"""
+.. warning:: {common_notes["experimental_warning"]}
+""" + r"""
+
+Args:
+    LD (Tensor): the `n \times n` matrix or the batch of such matrices of size
+                      `(*, n, n)` where `*` is one or more batch dimensions.
+    pivots (Tensor): the pivots corresponding to the LDL factorization of :attr:`LD`.
+    B (Tensor): right-hand side tensor of shape `(*, n, k)`.
+
+Keyword args:
+    hermitian (bool, optional): whether to consider the decomposed matrix to be Hermitian or symmetric.
+                                For real-valued matrices, this switch has no effect. Default: `False`.
+    out (tuple, optional): output tensor. `B` may be passed as `out` and the result is computed in-place on `B`.
+                           Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A = A @ A.mT # make symmetric
+    >>> LD, pivots, info = torch.linalg.ldl_factor_ex(A)
+    >>> B = torch.randn(2, 3, 4)
+    >>> X = torch.linalg.ldl_solve(LD, pivots, B)
+    >>> torch.linalg.norm(A @ X - B)
+    >>> tensor(0.0001)
 """)
 
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""

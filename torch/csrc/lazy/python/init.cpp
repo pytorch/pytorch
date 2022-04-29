@@ -10,9 +10,10 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
-#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
+#include <torch/csrc/lazy/core/config.h>
 #if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
+#include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #endif // FBCODE_CAFFE2 || OVRSOURCE
 #include <string>
 #include <vector>
@@ -158,6 +159,17 @@ void initLazyBindings(PyObject* module){
       py::arg("tensors"), py::arg("devices"), py::arg("wait") = true,
       py::arg("sync_ltc_data") = true);
 
+  lazy.def(
+    "_get_force_fallback", []() {
+        return torch::lazy::getLTCForceFallback();
+    }
+  );
+  lazy.def(
+    "_set_force_fallback", [](std::string newval) {
+        torch::lazy::getLTCForceFallback() = newval;
+    }
+  );
+
   lazy_ts_backend.def(
     "_init",
     []() {
@@ -165,7 +177,7 @@ void initLazyBindings(PyObject* module){
       torch::lazy::InitTorchScriptBackend();
 #else
       TORCH_CHECK(false, "TorchScript backend not yet supported in FBCODE/OVRSOURCE builds");
-#endif // FBCODE_CAFFE2
+#endif  // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     });
 
   /*
@@ -174,7 +186,7 @@ void initLazyBindings(PyObject* module){
    */
   lazy_ts_backend.def("_get_tensors_ts_device_data_node",
         [](const std::vector<at::Tensor>& tensors) -> std::pair<std::vector<int64_t>, std::vector<at::IValue>> {
-        #ifndef FBCODE_CAFFE2
+#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
           std::vector<Node*> roots;
           for (auto& tensor : tensors) {
             auto xtensor = TryGetLtcTensor(tensor);
@@ -187,11 +199,11 @@ void initLazyBindings(PyObject* module){
           std::unordered_set<BackendData::Handle> data_handles_;
           for (auto nodeptr : post_order) {
             if (nodeptr->op() == *torch::lazy::ltc_device_data) {
-              const auto* device_data_node = torch::lazy::NodeCast<torch::lazy::DeviceData>(nodeptr, *torch::lazy::ltc_device_data);
+              const auto backend_data = getBackend()->GetComputationDataFromNode(nodeptr);
 
-              auto infoptr = device_data_node->data()->info();
+              auto infoptr = backend_data->info();
               auto deviceDataInfoPtr = (torch::lazy::LazyGraphExecutor::DeviceDataInfo*) infoptr;
-              auto* tsDataPtr = (torch::lazy::TSData*) device_data_node->data().get();
+              auto* tsDataPtr = (torch::lazy::TSData*) backend_data.get();
 
               // dedup DeviceData by handle
               auto handle = tsDataPtr->GetHandle();
@@ -215,13 +227,15 @@ void initLazyBindings(PyObject* module){
             }
           }
           return std::make_pair(tensor_ids, ivalues);
-        #else
+#else
           TORCH_CHECK(false, "TorchScript backend not yet supported in FBCODE builds");
           return std::make_pair(std::vector<int64_t>(), std::vector<at::IValue>());
-        #endif
+#endif  // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
         });
   // TODO(shunting) revisit this part for XLA
   lazy_ts_backend.def("_run_cached_graph", [](const std::string& hash_str, const std::vector<at::IValue>& graph_inputs) {
+    std::vector<at::Tensor> result;
+#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     TORCH_CHECK(hash_str.size() == sizeof(hash_t));
     hash_t hash = *(hash_t*) (hash_str.c_str());
     auto cachedComputation = LazyGraphExecutor::Get()->GetComputationCache()->Get(hash);
@@ -234,11 +248,13 @@ void initLazyBindings(PyObject* module){
       stack.emplace_back(arg);
     }
     computationPtr->graph_executor().run(stack);
-    std::vector<at::Tensor> result;
     result.reserve(stack.size());
     for (torch::jit::IValue elem : stack) {
       result.push_back(elem.toTensor());
     }
+#else
+    TORCH_CHECK(false, "TorchScript backend not yet supported in FBCODE builds");
+#endif  // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     return result;
   });
 
