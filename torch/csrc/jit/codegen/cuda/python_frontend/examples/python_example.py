@@ -1,5 +1,5 @@
 import torch
-
+import torch._C._nvfuser as f
 from torch._C._nvfuser import Fusion, FusionDefinition
 
 # Construct and Define Fusion
@@ -21,7 +21,7 @@ with FusionDefinition(fusion) as fd :
     t3 = fd.Ops.mul(t2, c0)
     t4 = fd.Ops.mul(t3, s0)
     t5 = fd.Ops.relu(t4)
-    t6 = fd.Ops.sum(t5, [-1], False)
+    t6 = fd.Ops.sum(t5, [-1], False, f.DataType.Float)
 
     fd.add_output(t6)
 
