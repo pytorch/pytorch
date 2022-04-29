@@ -10326,7 +10326,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
-               onlyCUDA,
                skipCUDAIf(_get_torch_cuda_version() < (11, 3), "cusparseSDDMM was added in 11.2.1"), ],
            skips=(
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
