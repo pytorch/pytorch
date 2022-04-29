@@ -10300,6 +10300,7 @@ op_db: List[OpInfo] = [
                     {
                         torch.bool: tol(atol=1e-4, rtol=0),
                         torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
                     },
                 ),
             ),
@@ -10317,6 +10318,7 @@ op_db: List[OpInfo] = [
                     {
                         torch.bool: tol(atol=1e-4, rtol=0),
                         torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
                     },
                 ),
             ),
@@ -10334,6 +10336,7 @@ op_db: List[OpInfo] = [
                     {
                         torch.bool: tol(atol=1e-4, rtol=0),
                         torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
                     },
                 ),
             ),
@@ -10351,6 +10354,7 @@ op_db: List[OpInfo] = [
                     {
                         torch.bool: tol(atol=1e-4, rtol=0),
                         torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
                     },
                 ),
             ),
@@ -10422,6 +10426,7 @@ op_db: List[OpInfo] = [
                     {
                         torch.bool: tol(atol=1e-4, rtol=0),
                         torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
                     },
                 ),
             ),
@@ -10439,6 +10444,7 @@ op_db: List[OpInfo] = [
                     {
                         torch.bool: tol(atol=1e-4, rtol=0),
                         torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
                     },
                 ),
             ),
@@ -10456,6 +10462,7 @@ op_db: List[OpInfo] = [
                     {
                         torch.bool: tol(atol=1e-4, rtol=0),
                         torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
                     },
                 ),
             ),
@@ -10473,6 +10480,7 @@ op_db: List[OpInfo] = [
                     {
                         torch.bool: tol(atol=1e-4, rtol=0),
                         torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
                     },
                 ),
             ),

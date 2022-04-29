@@ -1290,7 +1290,7 @@ chbevl(const T x, const T array[], size_t len) {
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
+static inline C10_HOST_DEVICE std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
    *
@@ -1316,7 +1316,7 @@ static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
 };
 
 template <typename T>
-static inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
+static inline C10_HOST_DEVICE std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I0(x)
    * in the inverted interval [8,infinity].
    *
@@ -1368,7 +1368,7 @@ chebyshev_coefficients_i1e_A() {
 };
 
 template <typename T>
-static inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+static inline C10_HOST_DEVICE typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
 chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -1423,7 +1423,7 @@ chebyshev_coefficients_i1e_B() {
 };
 
 template <typename T>
-static inline typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+static inline C10_HOST_DEVICE typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
 chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
@@ -1461,7 +1461,7 @@ calc_i0(T _x) {
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
-static inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
+static inline C10_HOST_DEVICE c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
 
 /*
  * This function is derived from the implementation of the i1 function in the Cephes Math Library.
@@ -1894,7 +1894,6 @@ bessel_k1(T x) {
             +2.72062619048444266945e+00,
     };
 
-
     if (x == T{0.0}) {
         return std::numeric_limits<T>::infinity();
     } else if (x < T{0.0}) {
@@ -2144,7 +2143,7 @@ bessel_y1(T x) {
 
         T z = x * x;
 
-        T w = x * (polevl(z, YP, 5) / p1evl(z, YQ, 8));
+        T w = x * (polevl(z, YP, 5) / polevl(z, YQ, 7));
 
         w += FRAC_2_PI * (bessel_j1(x) * log(x) - 1.0 / x);
 

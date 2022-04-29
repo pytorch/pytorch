@@ -483,6 +483,7 @@ const auto bessel_j0_string = jiterator_stringify(
         return y;
     }
 
+    template <typename T>
     T bessel_j0(T x) {
         constexpr T DR1 = 5.78318596294678452118e+00;
         constexpr T DR2 = 3.04712623436620863991e+01;
@@ -572,112 +573,97 @@ const auto bessel_j0_string = jiterator_stringify(
     }
 ); // bessel_j0_string
 
-const auto bessel_j1_string = jiterator_stringify(
+const auto bessel_j1_string = bessel_j0_string + jiterator_stringify(
     template <typename T>
-    static inline T polevl(T x, T c[], size_t n)
-    {
-      T y;
-      T *p;
-      size_t i;
-
-      p = c;
-      y = *p++;
-      i = n;
-
-      do y = y * x + *p++;
-      while (--i);
-
-      return y;
-    }
-
     T bessel_j1(T x) {
-      static const T PP[7] = {
-              +7.62125616208173112003e-04,
-              +7.31397056940917570436e-02,
-              +1.12719608129684925192e+00,
-              +5.11207951146807644818e+00,
-              +8.42404590141772420927e+00,
-              +5.21451598682361504063e+00,
-              +1.00000000000000000254e+00,
-      };
+        static const T PP[7] = {
+                +7.62125616208173112003e-04,
+                +7.31397056940917570436e-02,
+                +1.12719608129684925192e+00,
+                +5.11207951146807644818e+00,
+                +8.42404590141772420927e+00,
+                +5.21451598682361504063e+00,
+                +1.00000000000000000254e+00,
+        };
 
-      static const T PQ[7] = {
-              +5.71323128072548699714e-04,
-              +6.88455908754495404082e-02,
-              +1.10514232634061696926e+00,
-              +5.07386386128601488557e+00,
-              +8.39985554327604159757e+00,
-              +5.20982848682361821619e+00,
-              +9.99999999999999997461e-01,
-      };
+        static const T PQ[7] = {
+                +5.71323128072548699714e-04,
+                +6.88455908754495404082e-02,
+                +1.10514232634061696926e+00,
+                +5.07386386128601488557e+00,
+                +8.39985554327604159757e+00,
+                +5.20982848682361821619e+00,
+                +9.99999999999999997461e-01,
+        };
 
-      static const T QP[8] = {
-              +5.10862594750176621635e-02,
-              +4.98213872951233449420e+00,
-              +7.58238284132545283818e+01,
-              +3.66779609360150777800e+02,
-              +7.10856304998926107277e+02,
-              +5.97489612400613639965e+02,
-              +2.11688757100572135698e+02,
-              +2.52070205858023719784e+01,
-      };
+        static const T QP[8] = {
+                +5.10862594750176621635e-02,
+                +4.98213872951233449420e+00,
+                +7.58238284132545283818e+01,
+                +3.66779609360150777800e+02,
+                +7.10856304998926107277e+02,
+                +5.97489612400613639965e+02,
+                +2.11688757100572135698e+02,
+                +2.52070205858023719784e+01,
+        };
 
-      static const T QQ[7] = {
-              +7.42373277035675149943e+01,
-              +1.05644886038262816351e+03,
-              +4.98641058337653607651e+03,
-              +9.56231892404756170795e+03,
-              +7.99704160447350683650e+03,
-              +2.82619278517639096600e+03,
-              +3.36093607810698293419e+02,
-      };
+        static const T QQ[7] = {
+                +7.42373277035675149943e+01,
+                +1.05644886038262816351e+03,
+                +4.98641058337653607651e+03,
+                +9.56231892404756170795e+03,
+                +7.99704160447350683650e+03,
+                +2.82619278517639096600e+03,
+                +3.36093607810698293419e+02,
+        };
 
-      static const T RP[4] = {
-              -8.99971225705559398224e+08,
-              +4.52228297998194034323e+11,
-              -7.27494245221818276015e+13,
-              +3.68295732863852883286e+15,
-      };
+        static const T RP[4] = {
+                -8.99971225705559398224e+08,
+                +4.52228297998194034323e+11,
+                -7.27494245221818276015e+13,
+                +3.68295732863852883286e+15,
+        };
 
-      static const T RQ[8] = {
-              +6.20836478118054335476e+02,
-              +2.56987256757748830383e+05,
-              +8.35146791431949253037e+07,
-              +2.21511595479792499675e+10,
-              +4.74914122079991414898e+12,
-              +7.84369607876235854894e+14,
-              +8.95222336184627338078e+16,
-              +5.32278620332680085395e+18,
-      };
+        static const T RQ[8] = {
+                +6.20836478118054335476e+02,
+                +2.56987256757748830383e+05,
+                +8.35146791431949253037e+07,
+                +2.21511595479792499675e+10,
+                +4.74914122079991414898e+12,
+                +7.84369607876235854894e+14,
+                +8.95222336184627338078e+16,
+                +5.32278620332680085395e+18,
+        };
 
-      constexpr T Z1 = 1.46819706421238932572e+1;
-      constexpr T Z2 = 4.92184563216946036703e+1;
+        constexpr T Z1 = 1.46819706421238932572e+1;
+        constexpr T Z2 = 4.92184563216946036703e+1;
 
-      constexpr T SQRT_FRAC_2_PI = 0.797884560802865355879892119868763737;
-      constexpr T THREE_FRAC_PI_4 = 2.356194490192344928846982537459627163;
+        constexpr T SQRT_FRAC_2_PI = 0.797884560802865355879892119868763737;
+        constexpr T THREE_FRAC_PI_4 = 2.356194490192344928846982537459627163;
 
-      if (x < T{0}) return -bessel_j1(-x);
+        if (x < T{0}) return -bessel_j1(-x);
 
-      if (x <= T{5.0}) {
-          T z = x * x;
+        if (x <= T{5.0}) {
+            T z = x * x;
 
-          T p = polevl(z, RP, 3) / polevl(z, RQ, 7);
+            T p = polevl(z, RP, 3) / polevl(z, RQ, 7);
 
-          return p * x * (z - Z1) * (z - Z2);
-      }
+            return p * x * (z - Z1) * (z - Z2);
+        }
 
-      T w = T{5.0} / x;
+        T w = T{5.0} / x;
 
-      T p = polevl(w * w, PP, 6) / polevl(w * w, PQ, 6);
-      T q = polevl(w * w, QP, 7) / polevl(w * w, QQ, 6);
+        T p = polevl(w * w, PP, 6) / polevl(w * w, PQ, 6);
+        T q = polevl(w * w, QP, 7) / polevl(w * w, QQ, 6);
 
-      p = p * cos(x - THREE_FRAC_PI_4) - w * q * sin(x - THREE_FRAC_PI_4);
+        p = p * cos(x - THREE_FRAC_PI_4) - w * q * sin(x - THREE_FRAC_PI_4);
 
-      return p * SQRT_FRAC_2_PI / sqrt(x);
+        return p * SQRT_FRAC_2_PI / sqrt(x);
   }
 ); // bessel_j1_string
 
 const auto bessel_y0_string = bessel_j0_string + jiterator_stringify(
+    template <typename T>
     T bessel_y0(T x) {
         static const T PP[7] = {
                 +7.96936729297347051624e-04,
@@ -747,7 +733,7 @@ const auto bessel_y0_string = bessel_j0_string + jiterator_stringify(
 
         if (x <= T{5.0}) {
             if (x == T{0.0}) {
-                return -INFINITY;
+                return NEG_INFINITY;
             } else if (x < T{0.0}) {
                 return NAN;
             }
@@ -773,15 +759,16 @@ const auto bessel_y0_string = bessel_j0_string + jiterator_stringify(
 ); // bessel_y0_string
 
 const auto bessel_y1_string = bessel_j1_string + jiterator_stringify(
+    template <typename T>
     T bessel_y1(T x) {
         static const T PP[7] = {
-                +7.62125616208173112003e-04,
-                +7.31397056940917570436e-02,
-                +1.12719608129684925192e+00,
-                +5.11207951146807644818e+00,
-                +8.42404590141772420927e+00,
-                +5.21451598682361504063e+00,
-                +1.00000000000000000254e+00,
+                    +7.62125616208173112003e-04,
+                    +7.31397056940917570436e-02,
+                    +1.12719608129684925192e+00,
+                    +5.11207951146807644818e+00,
+                    +8.42404590141772420927e+00,
+                    +5.21451598682361504063e+00,
+                    +1.00000000000000000254e+00,
         };
 
         static const T PQ[7] = {
@@ -841,14 +828,14 @@ const auto bessel_y1_string = bessel_j1_string + jiterator_stringify(
 
         if (x <= T{5.0}) {
             if (x == T{0.0}) {
-                return -INFINITY;
+                return NEG_INFINITY;
             } else if (x <= T{0.0}) {
                 return NAN;
             }
 
             T z = x * x;
 
-            T w = x * (polevl(z, YP, 5) / p1evl(z, YQ, 8));
+            T w = x * (polevl(z, YP, 5) / polevl(z, YQ, 7));
 
             w += FRAC_2_PI * (bessel_j1(x) * log(x) - 1.0 / x);
 
@@ -1143,6 +1130,7 @@ const auto kaiser_window_string = i0_string + jiterator_stringify(
 ); // kaiser_window_string
 
 const auto bessel_k0_string = i0_string + jiterator_stringify(
+    template <typename T>
     T bessel_k0(T x) {
         static const T A[10] = {
                 +1.37446543561352307156e-16,
@@ -1194,7 +1182,7 @@ const auto bessel_k0_string = i0_string + jiterator_stringify(
         if (x <= T{2.0}) {
             T y = x * x - T{2.0};
 
-            return chbevl(y, A, 10) - log(0.5 * x) * calc_i0(x);
+            return chbevl(y, A, 10) - log(0.5 * x) * i0(x);
         }
 
         return exp(-x) * chbevl(T{8.0} / x - T{2.0}, B, 25) / sqrt(x);
@@ -1202,6 +1190,7 @@ const auto bessel_k0_string = i0_string + jiterator_stringify(
 ); // bessel_k0_string
 
 const auto bessel_k0e_string = i0_string + jiterator_stringify(
+    template <typename T>
     T bessel_k0e(T x) {
         static const T A[10] = {
                 +1.37446543561352307156e-16,
@@ -1253,7 +1242,7 @@ const auto bessel_k0e_string = i0_string + jiterator_stringify(
         if (x <= T{2.0}) {
             T y = x * x - T{2.0};
 
-            return (chbevl(y, A, 10) - log(T{0.5} * x) * calc_i0(x)) * exp(x);
+            return (chbevl(y, A, 10) - log(T{0.5} * x) * i0(x)) * exp(x);
         }
 
         return chbevl(T{8.0} / x - T{2.0}, B, 25) / sqrt(x);
@@ -1261,6 +1250,7 @@ const auto bessel_k0e_string = i0_string + jiterator_stringify(
 ); // bessel_k0e_string
 
 const auto bessel_k1_string = i1_string + jiterator_stringify(
+    template <typename T>
     T bessel_k1(T x) {
         static const T A[11] = {
                 -7.02386347938628759343e-18,
@@ -1304,7 +1294,6 @@ const auto bessel_k1_string = i1_string + jiterator_stringify(
                 +2.72062619048444266945e+00,
         };
 
-
         if (x == T{0.0}) {
             return INFINITY;
         } else if (x < T{0.0}) {
@@ -1316,7 +1305,7 @@ const auto bessel_k1_string = i1_string + jiterator_stringify(
         if (x <= T{2.0}) {
             T y = x * x - T{2.0};
 
-            return log(z) * calc_i1(x) + chbevl(y, A, 11) / x;
+            return log(z) * i1(x) + chbevl(y, A, 11) / x;
         }
 
         return exp(-x) * chbevl(T{8.0} / x - T{2.0}, B, 25) / sqrt(x);
@@ -1324,6 +1313,7 @@ const auto bessel_k1_string = i1_string + jiterator_stringify(
 ); // bessel_k1_string
 
 const auto bessel_k1e_string = i1_string + jiterator_stringify(
+    template <typename T>
     T bessel_k1e(T x) {
         static const T A[11] = {
                 -7.02386347938628759343e-18,
@@ -1376,7 +1366,7 @@ const auto bessel_k1e_string = i1_string + jiterator_stringify(
         if (x <= T{2.0}) {
             T y = x * x - T{2.0};
 
-            return (log(T{0.5} * x) * calc_i1(x) + chbevl(y, A, 11) / x) * exp(x);
+            return (log(T{0.5} * x) * i1(x) + chbevl(y, A, 11) / x) * exp(x);
         }
 
         return chbevl(T{8.0} / x - T{2.0}, B, 25) / sqrt(x);
