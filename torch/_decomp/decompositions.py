@@ -3,10 +3,13 @@ from torch import Tensor
 from torch._decomp import register_decomposition
 from enum import Enum
 from typing import Tuple, Optional, List
+import torch.nn.functional as F
+import functools
+from torch.utils._pytree import tree_map
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
-__all__ = []
+__all__: List[str] = []
 
 aten = torch.ops.aten
 
@@ -17,12 +20,47 @@ class Reduction(Enum):
     SUM = 2
 
 
+def cast_for_opmath(f):
+    @functools.wraps(f)
+    def inner(*args, **kwargs):
+        orig_prec = None
+
+        # TODO: pretty sure this is not quite right
+        def increase_prec(x):
+            if isinstance(x, Tensor) and x.dtype in (torch.float16, torch.bfloat16):
+                nonlocal orig_prec
+                if orig_prec is None:
+                    orig_prec = x.dtype
+                else:
+                    assert orig_prec == x.dtype
+                return x.to(torch.float32)
+            else:
+                return x
+
+        def decrease_prec(x):
+            if isinstance(x, Tensor) and x.dtype is torch.float32:
+                assert orig_prec is not None
+                return x.to(orig_prec)
+            else:
+                return x
+
+        r = f(*tree_map(increase_prec, args), **tree_map(increase_prec, kwargs))
+        if orig_prec:
+            return tree_map(decrease_prec, r)
+        else:
+            return r
+
+    return inner
+
+
 @register_decomposition(aten.tanh_backward)
+@cast_for_opmath
 def tanh_backward_decomposition(out_grad: Tensor, y: Tensor):
     return out_grad * (1 - y * y)
 
 
 @register_decomposition(aten.sigmoid_backward)
+@cast_for_opmath
 def sigmoid_backward_decomposition(out_grad: Tensor, y: Tensor):
     return out_grad * (y * (1 - y))
 
@@ -62,6 +100,7 @@ def elu_backward_decomposition(
 
 
 @register_decomposition(aten.hardsigmoid_backward)
+@cast_for_opmath
 def hardsigmoid_backward_decomposition(grad_output: Tensor, self: Tensor):
     return torch.where(
         (self > -3.0) & (self < 3.0),
@@ -87,6 +126,7 @@ def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
 
 
 @register_decomposition(aten.hardswish_backward)
+@cast_for_opmath
 def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return torch.where(
         self < -3,
@@ -99,10 +139,11 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 def threshold_backward_decomposition(
     grad_output: Tensor, self: Tensor, threshold: float
 ):
-    return torch.where(self <= threshold, grad_output.new_zeros((1,)), grad_output)
+    return torch.where(self <= threshold, grad_output.new_zeros(()), grad_output)
 
 
 @register_decomposition(aten.leaky_relu_backward)
+@cast_for_opmath
 def leaky_relu_backward(
     grad_output: Tensor, self: Tensor, negative_slope: float, self_is_result: bool
 ):
@@ -110,6 +151,7 @@ def leaky_relu_backward(
 
 
 @register_decomposition(aten.gelu_backward)
+@cast_for_opmath
 def gelu_backward_decomposition(grad: Tensor, self: Tensor, approximate: str = "none"):
     M_SQRT2 = 1.41421356237309504880
     M_SQRT1_2 = 0.70710678118654752440
@@ -205,6 +247,7 @@ def rrelu_with_noise_backward(
 
 
 @register_decomposition(aten.log_sigmoid_backward)
+@cast_for_opmath
 def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> Tensor:
     in_negative = self < 0
     max_deriv = torch.where(in_negative, 1, 0)
@@ -224,6 +267,7 @@ def mse_loss_backward(
 
 
 @register_decomposition(aten.huber_loss_backward)
+@cast_for_opmath
 def huber_loss_backward(
     grad_output: Tensor, self: Tensor, target: Tensor, reduction: int, delta: float
 ):
@@ -244,12 +288,13 @@ def binary_cross_entropy_backward(
     weight: Optional[Tensor] = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    if weight is None:
-        weight = self.new_ones(())
-    result = weight * (self - target) / self / (1 - self)
+    EPSILON = 1e-12
+    result = grad_output * (self - target) / torch.clamp(self * (1 - self), min=EPSILON)
+    if weight is not None:
+        result = result * weight
     if reduction == Reduction.MEAN.value:
-        result = result * (1.0 / self.numel())
-    return result * grad_output
+        result = result / self.numel()
+    return result
 
 
 @register_decomposition(aten.slice_backward)
@@ -280,6 +325,7 @@ def diagonal_backward(
 
 
 @register_decomposition(aten._softmax_backward_data)
+@cast_for_opmath
 def _softmax_backward_data(
     grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
 ):
@@ -288,6 +334,7 @@ def _softmax_backward_data(
 
 
 @register_decomposition(aten._log_softmax_backward_data)
+@cast_for_opmath
 def _log_softmax_backward_data(
     grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
 ):
@@ -295,6 +342,9 @@ def _log_softmax_backward_data(
         grad_output, dim=dim, keepdim=True
     )
     return grad_input
+
+
+# TODO: the type annotations on arguments are not quite right
 
 
 @register_decomposition(aten.im2col_backward)
@@ -306,7 +356,7 @@ def im2col_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.fold(grad_output, input_size, kernel_size, dilation, padding, stride)
+    return F.fold(grad_output, input_size, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
 
 
 @register_decomposition(aten.col2im_backward)
@@ -317,7 +367,7 @@ def col2im_backward(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    return F.unfold(grad_output, kernel_size, dilation, padding, stride)
+    return F.unfold(grad_output, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
 
 
 @register_decomposition(aten.native_dropout_backward)
@@ -353,6 +403,7 @@ def native_dropout_decomposition(input, p, generator=None):
 
 
 @register_decomposition(aten._softmax)
+@cast_for_opmath
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
     x_max = torch.max(x, dim, keepdim=True)[0]
     unnormalized = torch.exp(x - x_max)
@@ -360,6 +411,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 
 
 @register_decomposition(aten._log_softmax)
+@cast_for_opmath
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     x_max = torch.max(x, dim, keepdim=True)[0]
     shifted = x - x_max
@@ -368,12 +420,14 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
 
 
 @register_decomposition(aten.addcdiv)
+@cast_for_opmath
 def addcdiv(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
     return self + value * (tensor1 / tensor2)
 
 
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
 @register_decomposition(aten.addcmul)
+@cast_for_opmath
 def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
     if self.is_floating_point() or self.is_complex():
         return self + value * tensor1 * tensor2
@@ -478,7 +532,7 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition(aten.split)
+@register_decomposition(aten.split.Tensor)
 def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
@@ -491,6 +545,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
     return torch.split(self, split_sizes, dim)
 
 
+# TODO: this doesn't appear to have enough precision in bfloat16
 @register_decomposition(aten.addmm)
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
@@ -550,25 +605,25 @@ def native_layer_norm_backward(
     inner = a - b - c3
 
     if output_mask[0]:
-        d_input = (rstd / N) * inner
+        d_input: Optional[Tensor] = (rstd / N) * inner
     else:
-        d_input = None
+        d_input: Optional[Tensor] = None
 
     if output_mask[1] and weight is not None:
         if len(outer_dim_indices) > 0:
-            d_weight = torch.sum(grad_out * x_hat, outer_dim_indices, False)
+            d_weight: Optional[Tensor] = torch.sum(grad_out * x_hat, outer_dim_indices, False)
         else:
-            d_weight = grad_out * x_hat
+            d_weight: Optional[Tensor] = grad_out * x_hat
     else:
-        d_weight = None
+        d_weight: Optional[Tensor] = None
 
     if output_mask[2] and bias is not None:
         if len(outer_dim_indices) > 0:
-            d_bias = torch.sum(grad_out, outer_dim_indices, False)
+            d_bias: Optional[Tensor] = torch.sum(grad_out, outer_dim_indices, False)
         else:
-            d_bias = grad_out
+            d_bias: Optional[Tensor] = grad_out
     else:
-        d_bias = None
+        d_bias: Optional[Tensor] = None
     return (d_input, d_weight, d_bias)
 
 
@@ -590,6 +645,7 @@ def _fused_dropout_decomposition(input, p, generator=None):
 
 
 # TODO: these logical decomps are buggy for complex inputs
+
 
 @register_decomposition(aten.logical_and)
 def logical_and(self: Tensor, other: Tensor) -> Tensor:
@@ -623,7 +679,9 @@ def logical_not(self: Tensor) -> Tensor:
 
 # TODO: var and std OpInfo doesn't the next two decomps, how to get here?
 
-@register_decomposition(aten.var)
+
+@register_decomposition(aten.var.correction)
+@cast_for_opmath
 def var_decomposition(
     x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False
 ):
@@ -648,7 +706,8 @@ def var_decomposition(
     return sum / n
 
 
-@register_decomposition(aten.std)
+@register_decomposition(aten.std.correction)
+@cast_for_opmath
 def std_decomposition(
     x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False
 ):

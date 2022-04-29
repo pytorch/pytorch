@@ -2,10 +2,13 @@ import torch
 import torch._ops
 from typing import Callable, Union, Dict, Sequence
 from torch.utils._pytree import tree_map
+from collections import defaultdict
 
 __all__ = ["decomposition_table", "register_decomposition", "get_decompositions"]
 
-decomposition_table = {}
+# TODO: relax key type here; torch registrations should be possible to; but
+# right now this type is accurate
+decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 
 
 def register_decomposition(aten_op, registry=None):
@@ -61,14 +64,14 @@ def get_decompositions(
     not in this set.
     """
     packets_to_overloads = defaultdict(list)
-    for op in decomposition_table:
-        packets_to_overloads[op.overloadpacket].append(op)
+    for opo in decomposition_table:
+        packets_to_overloads[opo.overloadpacket].append(opo)
     decompositions = {}
     for op in aten_ops:
-        if op in packets_to_overloads:
+        if isinstance(op, torch._ops.OpOverloadPacket) and op in packets_to_overloads:
             for op_overload in packets_to_overloads[op]:
                 decompositions[op_overload] = decomposition_table[op_overload]
-        elif op in decomposition_table:
+        elif isinstance(op, torch._ops.OpOverload) and op in decomposition_table:
             decompositions[op] = decomposition_table[op]
     return decompositions
 
