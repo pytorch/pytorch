@@ -9003,7 +9003,7 @@ Example::
 
 add_docstr(torch.argsort,
            r"""
-argsort(input, *, dim=-1, descending=False, stable=False) -> Tensor
+argsort(input, dim=-1, descending=False, stable=False) -> Tensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
