@@ -416,6 +416,59 @@ ReductionOp::ReductionOp(
   addInput(in);
 }
 
+GroupedReductionOp::GroupedReductionOp(
+    IrBuilderPasskey passkey,
+    std::vector<BinaryOpType> reduction_op_types,
+    std::vector<Val*> init_vals,
+    std::vector<Val*> outputs,
+    std::vector<Val*> inputs,
+    bool is_fused,
+    ExprType expr_type)
+    : Expr(passkey, expr_type),
+      reduction_op_types_(std::move(reduction_op_types)),
+      init_vals_(std::move(init_vals)),
+      is_fused_(is_fused) {
+  for (auto out : outputs) {
+    addOutput(out);
+  }
+
+  for (auto in : inputs) {
+    addInput(in);
+  }
+}
+
+GroupedReductionOp::GroupedReductionOp(
+    const GroupedReductionOp* src,
+    IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      reduction_op_types_(src->reduction_op_types_),
+      init_vals_(ir_cloner->clone(src->init_vals_)),
+      is_fused_(src->is_fused_) {}
+
+bool GroupedReductionOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+
+  auto grouped_rop = dynamic_cast<const GroupedReductionOp*>(other);
+  if (grouped_rop == nullptr) {
+    return false;
+  }
+
+  if (!Expr::sameAs(other) ||
+      getReductionOpTypes() != grouped_rop->getReductionOpTypes()) {
+    return false;
+  }
+
+  for (const auto i : c10::irange(numReductions())) {
+    if (!initVal(i)->sameAs(grouped_rop->initVal(i))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 WelfordOp::WelfordOp(
     IrBuilderPasskey passkey,
     Val* out_avg,

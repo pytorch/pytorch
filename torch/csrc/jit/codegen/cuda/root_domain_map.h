@@ -189,6 +189,7 @@ class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
  private:
   using IterVisitor::handle;
   void handle(ReductionOp* op) override;
+  void handle(GroupedReductionOp* op) override;
   void handle(WelfordOp* op) override;
   void handle(MmaOp* op) override;
 
@@ -399,6 +400,10 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   }
 
   void handle(ReductionOp* op) override {
+    mapPointwiseOrReductionOp(op);
+  }
+
+  void handle(GroupedReductionOp* op) override {
     mapPointwiseOrReductionOp(op);
   }
 

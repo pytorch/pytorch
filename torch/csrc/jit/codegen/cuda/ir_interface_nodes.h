@@ -395,14 +395,12 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   //
   TensorView* rFactor(const std::vector<int>& axes);
 
-  //! Welford Version of rFactor, semantically similar with
-  //!  the reduction version except that the rfactor is done
-  //!  in a multi-output scan pattern
-  WelfordResult rFactor(
+  //! Multi-output version of rFactor, semantically similar with
+  //! the reduction version except that the rfactor is done
+  //! for all outputs in a consistent way
+  std::vector<TensorView*> rFactor(
       const std::vector<int>& axes,
-      TensorView* avg,
-      TensorView* var,
-      TensorView* n);
+      const std::vector<TensorView*>& tvs);
 
   // Create a TensorView before the original tensor. A common use case is to
   // write results into shared memory or registers before moving to global
@@ -463,6 +461,7 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   friend TORCH_CUDA_CU_API OptOutMutator;
   friend ComputeAt;
   friend class ir_utils::TVDomainGuard;
+  friend void groupReductions(const std::vector<TensorView*>&);
 
  protected:
   void setDomain(TensorDomain* td) {
@@ -481,9 +480,9 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return pos;
   }
 
-  //! A helper function to maintain the consistency of welford output
-  //! schedules when doing rfactor on welford ops.
-  TensorView* welfordRfactorHelper(
+  //! A helper function to maintain the consistency of schedules of
+  //! multiple outputs wheen doing rfactor on multi-output reduction ops.
+  TensorView* multiOutputRfactorHelper(
       TensorView* tv,
       const std::vector<int>& axes);
 

@@ -287,6 +287,8 @@ static const char* expr_type2string(ExprType t) {
       return "TernaryOp";
     case ExprType::ReductionOp:
       return "ReductionOp";
+    case ExprType::GroupedReductionOp:
+      return "GroupedReductionOp";
     case ExprType::BroadcastOp:
       return "BroadcastOp";
     case ExprType::WelfordOp:

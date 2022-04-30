@@ -143,8 +143,11 @@ void GpuLower::collectPaddedParallelDims() {
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
     for (auto id : tv->domain()->domain()) {
       if (tv->definition()) {
+        // TODO: Support GroupedReductionOp
         if (auto reduction = dynamic_cast<ReductionOp*>(tv->definition())) {
-          if (ir_utils::getMaybeWarpReductionDim(reduction).has_value()) {
+          if (ir_utils::getMaybeWarpReductionDim(
+                  reduction->out(), reduction->in())
+                  .has_value()) {
             warp_pad_info_.has_warp_reduction = true;
           }
         }

@@ -83,7 +83,9 @@ bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
 //! Returns the iterdomain that maps to the thread dimension grouped
 //!  to warps. Returns nullopt if the reduction is not to be lowered to
 //!  a warp reduction.
-c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node);
+c10::optional<IterDomain*> getMaybeWarpReductionDim(
+    const Val* output,
+    const Val* input);
 
 bool isScalarOp(const Expr*);
 

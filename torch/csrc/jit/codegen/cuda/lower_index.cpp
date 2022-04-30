@@ -298,6 +298,143 @@ void IndexLowering::handleGridReduction(
   }
 }
 
+void IndexLowering::handle(const GroupedReductionOp* grouped_rop) {
+  TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(grouped_rop));
+
+  const auto out_tv = ir_utils::getTvOutput(grouped_rop);
+  const auto out_domain = out_tv->domain();
+
+  const bool has_block_reduce = out_domain->hasBlockReduction();
+  const bool has_grid_reduce = out_domain->hasGridReduction();
+
+  std::vector<Val*> indexed_outputs(grouped_rop->numReductions());
+  std::vector<Val*> indexed_inputs(grouped_rop->numReductions());
+
+  for (const auto i : c10::irange(grouped_rop->numReductions())) {
+    indexed_outputs.at(i) = lowerDstIndex(grouped_rop->output(i));
+    indexed_inputs.at(i) =
+        lowerSrcIndex(grouped_rop->input(i), grouped_rop->output(i));
+  }
+
+  if (has_grid_reduce) {
+    handleGridReduction(grouped_rop, indexed_outputs, indexed_inputs);
+  } else if (has_block_reduce) {
+    handleBlockReduction(grouped_rop, indexed_outputs, indexed_inputs);
+  } else {
+    for (const auto i : c10::irange(grouped_rop->numReductions())) {
+      pushBack(IrBuilder::create<BinaryOp>(
+          grouped_rop->getReductionOpType(i),
+          indexed_outputs.at(i),
+          indexed_outputs.at(i),
+          indexed_inputs.at(i)));
+    }
+  }
+}
+
+void IndexLowering::handleBlockReduction(
+    const GroupedReductionOp* grouped_rop,
+    const std::vector<Val*>& outputs,
+    const std::vector<Val*>& inputs) {
+  TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(grouped_rop));
+
+  GroupedReductionOp* indexed_rop = IrBuilder::create<GroupedReductionOp>(
+      grouped_rop->getReductionOpTypes(),
+      grouped_rop->initVals(),
+      outputs,
+      inputs,
+      grouped_rop->isFused());
+  if (grouped_rop->predicate()) {
+    indexed_rop->setPredicate(grouped_rop->predicate());
+  }
+  if (grouped_rop->writePredicate()) {
+    indexed_rop->setWritePredicate(grouped_rop->writePredicate());
+  }
+
+  pushBack(indexed_rop);
+}
+
+void IndexLowering::handleGridReduction(
+    const GroupedReductionOp* grouped_rop,
+    const std::vector<Val*>& outputs,
+    const std::vector<Val*>& inputs) {
+  const auto out_tv = ir_utils::getTvOutput(grouped_rop);
+  const auto out_domain = out_tv->domain();
+
+  TORCH_INTERNAL_ASSERT(out_domain->hasGridReduction());
+
+  // If we do a grid reduction we can't have a reduction axis that is not bound
+  // to a grid or block dim.
+  TORCH_INTERNAL_ASSERT(
+      std::none_of(
+          out_domain->domain().begin(),
+          out_domain->domain().end(),
+          [](IterDomain* id) {
+            return !id->isThread() && id->isReduction() &&
+                !id->extent()->isOneInt();
+          }),
+      "Found a reduction stage that has both a non-parallelized ",
+      "reduction and a grid reduction. This is not supported, ",
+      "please use rfactor to do the serialized reduction first, ",
+      "then the grid reduction.");
+
+  // When using the fused reduction in a loop, the global work buffer
+  // is double buffered to save global synchronizations.
+  auto is_within_a_loop = std::any_of(
+      out_domain->domain().begin(),
+      out_domain->domain().end(),
+      [](IterDomain* id) { return !isTrivialIterDomain(id); });
+
+  std::vector<kir::Allocate*> reduce_buffers;
+  std::transform(
+      outputs.begin(),
+      outputs.end(),
+      std::back_inserter(reduce_buffers),
+      [&](Val* output) {
+        return ir_utils::allocGlobalBufferForGridComm(
+            getGridCommWorkBufferSize(
+                out_domain,
+                (grouped_rop->isFused() && is_within_a_loop ? 2 : 1)),
+            output->dtype(),
+            false);
+      });
+
+  const auto sync_buffer = ir_utils::allocGlobalBufferForGridComm(
+      getGridSyncBufferSize(out_domain), DataType::Int, true);
+
+  // The thread predicate for GridReduction needs to be set
+  // separately from the main predicate. Do not combine them like
+  // other expressions.
+  const auto& thread_pred =
+      GpuLower::current()->threadPredMap().getPredicatedParallelTypes(out_tv);
+
+  auto grid_reduction = IrBuilder::create<kir::GroupedGridReduction>(
+      grouped_rop->getReductionOpTypes(),
+      grouped_rop->initVals(),
+      outputs,
+      inputs,
+      reduce_buffers,
+      sync_buffer,
+      grouped_rop->isFused());
+
+  grid_reduction->setThreadPredicate(thread_pred);
+
+  if (grouped_rop->predicate()) {
+    grid_reduction->setPredicate(grouped_rop->predicate());
+  }
+  if (grouped_rop->writePredicate()) {
+    grid_reduction->setWritePredicate(grouped_rop->writePredicate());
+  }
+
+  for (auto reduce_buffer : reduce_buffers) {
+    pushBack(reduce_buffer);
+  }
+  pushBack(sync_buffer);
+  pushBack(grid_reduction);
+
+  // TODO: enable
+  TORCH_INTERNAL_ASSERT(!grouped_rop->isFused(), "Not supported yet");
+}
+
 void IndexLowering::handle(const WelfordOp* wop) {
   TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(wop));
 

@@ -396,6 +396,20 @@ void IrPrinter::handle(const ReductionOp* rop) {
            << ", fused = " << rop->isFused() << " )\n";
 }
 
+void IrPrinter::handle(const GroupedReductionOp* grouped_rop) {
+  indent() << "Grouped reduction(\n";
+  ++indent_size_;
+  for (const auto i : c10::irange(grouped_rop->numReductions())) {
+    indent() << grouped_rop->output(i) << " = reduction( "
+             << grouped_rop->input(i)
+             << ", op = " << grouped_rop->getReductionOpType(i)
+             << ", initial value = " << grouped_rop->initVal(i) << " )\n";
+  }
+  indent() << "fused = " << (grouped_rop->isFused() ? "true" : "false")
+           << " )\n";
+  --indent_size_;
+}
+
 void IrPrinter::handle(const WelfordOp* wop) {
   indent() << wop->outAvg() << "(Avg),\n"
            << wop->outVar() << "(Var),\n"
@@ -617,6 +631,44 @@ void IrPrinter::handle(const kir::GridReduction* node) {
   indent() << kTab << ".reduction_buffer=";
   handle(node->reduction_buffer()->buffer());
   os_ << "\n";
+  indent() << kTab << ".sync_buffer=";
+  handle(node->sync_buffer()->buffer());
+  os_ << "\n";
+}
+
+void IrPrinter::handle(const kir::GroupedGridReduction* node) {
+  indent() << "Grouped grid reduction(\n";
+  ++indent_size_;
+  for (const auto i : c10::irange(node->numReductions())) {
+    indent();
+    handle(node->output(i));
+    os_ << " = "
+        << "reduction(op='" << node->getReductionOpType(i) << "'"
+        << ", in=";
+    handle(node->input(i));
+    os_ << ", init=";
+    handle(node->initVal(i));
+    os_ << "\n";
+  }
+  indent() << kTab << ".read_pred=";
+  if (node->predicate() != nullptr) {
+    handle(node->predicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << "\n";
+  indent() << kTab << ".write_pred=";
+  if (node->writePredicate() != nullptr) {
+    handle(node->writePredicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << "\n";
+  for (const auto i : c10::irange(node->numReductions())) {
+    indent() << kTab << ".reduction_buffer=";
+    handle(node->reduction_buffers().at(i)->buffer());
+    os_ << "\n";
+  }
   indent() << kTab << ".sync_buffer=";
   handle(node->sync_buffer()->buffer());
   os_ << "\n";

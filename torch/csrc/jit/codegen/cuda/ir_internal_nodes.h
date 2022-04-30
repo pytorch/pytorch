@@ -186,6 +186,58 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
   bool is_fused_ = false;
 };
 
+//! Grouped reduction operation for horizontal fusions. It works like
+//! batched GEMMs in the sense that multiple independent reductions are
+//! performed together. The main benefit is when reducing tensors across thread
+//! blocks, a single grid sync can be done for all individual
+//! reductions. As grid sync is very expensive, this can be a
+//! significant performance impact.
+class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
+ public:
+  GroupedReductionOp(
+      IrBuilderPasskey,
+      std::vector<BinaryOpType> reduction_op_type,
+      std::vector<Val*> init,
+      std::vector<Val*> out,
+      std::vector<Val*> in,
+      bool is_fused = false,
+      ExprType expr_type = ExprType::GroupedReductionOp);
+
+  GroupedReductionOp(const GroupedReductionOp* src, IrCloner* ir_cloner);
+
+  size_t numReductions() const {
+    return reduction_op_types_.size();
+  }
+
+  const std::vector<Val*>& initVals() const {
+    return init_vals_;
+  }
+
+  Val* initVal(size_t index) const {
+    return init_vals_.at(index);
+  }
+
+  const std::vector<BinaryOpType>& getReductionOpTypes() const {
+    return reduction_op_types_;
+  }
+
+  BinaryOpType getReductionOpType(size_t index) const {
+    return reduction_op_types_.at(index);
+  }
+
+  bool isFused() const {
+    return is_fused_;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  const std::vector<BinaryOpType> reduction_op_types_;
+  const std::vector<Val*> init_vals_;
+  //! True if using the fused reduction kernel
+  bool is_fused_ = false;
+};
+
 //! Welford Scan operation.
 class TORCH_CUDA_CU_API WelfordOp : public Expr {
  public:

@@ -439,7 +439,8 @@ class AllocationInserter : public kir::ExprMutator {
 
     // // Found where the allocation needs to be inserted
 
-    for (auto out : expr->outputs()) {
+    for (const auto i : c10::irange(expr->outputs().size())) {
+      auto out = expr->output(i);
       if (!out->isA<TensorView>()) {
         continue;
       }
@@ -453,6 +454,11 @@ class AllocationInserter : public kir::ExprMutator {
             default_val == nullptr,
             "Reduction should not have a default initialization value for predicate elimination.");
         init = expr->as<ReductionOp>()->init();
+      } else if (expr->isA<GroupedReductionOp>() && out_tv->hasReduction()) {
+        TORCH_INTERNAL_ASSERT(
+            default_val == nullptr,
+            "Reduction should not have a default initialization value for predicate elimination.");
+        init = expr->as<GroupedReductionOp>()->initVal(i);
       } else if (expr->isA<MmaOp>()) {
         init = expr->as<MmaOp>()->init();
       } else if (expr->isA<WelfordOp>()) {

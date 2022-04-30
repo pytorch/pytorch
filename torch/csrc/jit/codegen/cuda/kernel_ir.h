@@ -59,6 +59,7 @@ class UpdateMagicZero;
 class ForLoop;
 class IfThenElse;
 class GridReduction;
+class GroupedGridReduction;
 class GridBroadcast;
 class GridWelford;
 class AllocateFusedReduction;
@@ -532,6 +533,47 @@ class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
 
  private:
   Allocate* reduction_buffer_ = nullptr;
+  Allocate* sync_buffer_ = nullptr;
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
+  ParallelTypeBitmap thread_predicate_;
+};
+
+class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
+ public:
+  GroupedGridReduction(
+      IrBuilderPasskey passkey,
+      std::vector<BinaryOpType> reduction_op_type,
+      std::vector<Val*> init,
+      std::vector<Val*> out,
+      std::vector<Val*> in,
+      std::vector<Allocate*> reduction_buffers,
+      Allocate* sync_buffer,
+      bool is_fused = false);
+
+  const std::vector<Allocate*>& reduction_buffers() const {
+    return reduction_buffers_;
+  }
+
+  Allocate* reduction_buffer(size_t i) const {
+    return reduction_buffers_.at(i);
+  }
+
+  Allocate* sync_buffer() const {
+    return sync_buffer_;
+  }
+
+  const ParallelTypeBitmap& threadPredicate() const {
+    return thread_predicate_;
+  }
+
+  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
+    thread_predicate_ = thread_predicate;
+  }
+
+ private:
+  std::vector<Allocate*> reduction_buffers_;
   Allocate* sync_buffer_ = nullptr;
   // gridReduce has template flags for thread predicates. In order to
   // use them, the thread predicate is held here separately from

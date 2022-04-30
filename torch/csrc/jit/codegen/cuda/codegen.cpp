@@ -1113,7 +1113,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     if (!has_block_reduce) {
       genSerialReduction(output, input, op_type);
-    } else if (auto reduction_id = ir_utils::getMaybeWarpReductionDim(rop)) {
+    } else if (
+        auto reduction_id = ir_utils::getMaybeWarpReductionDim(output, input)) {
       genWarpReduction(output, input, rop->init(), op_type, rop->predicate());
     } else {
       genBlockReduction(
@@ -1415,6 +1416,76 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     indent() << kTab << func_args << ");\n";
   }
 
+  void handle(const kir::GroupedGridReduction* grouped_grop) final {
+    const auto out = ir_utils::getTvOutput(grouped_grop);
+    const auto domain = out->domain();
+    TORCH_INTERNAL_ASSERT(domain->hasGridReduction());
+
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->sync_buffer()->buffer()->isA<TensorView>());
+    const auto sync_buffer =
+        grouped_grop->sync_buffer()->buffer()->as<TensorView>();
+
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->numReductions() == 2,
+        "Only grouping of 2 reductions is supported. ",
+        grouped_grop->toString());
+
+    // TODO: enable this
+    TORCH_INTERNAL_ASSERT(!grouped_grop->isFused());
+
+    const std::string flags_str = generateGridReduceTemplateFlags2(
+        grouped_grop, grouped_grop->threadPredicate());
+
+    const bool persistent_sync =
+        kernel_->summary().has_cooperative_grid_reduction;
+
+    // Since block-level reduction is already done, those dimensions
+    // with tidx/y/z being true do not participate in the grid
+    // reduction.
+    ArgumentBuilder template_args;
+    template_args.arg(flags_str).arg(persistent_sync);
+
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+
+    // Apped arguments for each reduction
+    for (const auto i : c10::irange(grouped_grop->numReductions())) {
+      TORCH_INTERNAL_ASSERT(
+          grouped_grop->reduction_buffers().at(i)->buffer()->isA<TensorView>());
+      const auto work_buffer =
+          grouped_grop->reduction_buffers().at(i)->buffer()->as<TensorView>();
+
+      func_args.arg(gen(grouped_grop->output(i)));
+      func_args.arg(gen(grouped_grop->input(i)));
+      func_args.arg(genCall(
+          grouped_grop->output(i)->dtype(),
+          genInline(grouped_grop->initVal(i))));
+      func_args.arg(genReductionOp(
+          grouped_grop->getReductionOpType(i),
+          grouped_grop->output(i)->dtype()));
+      func_args.arg("&").append(varName(work_buffer)).append("[0]");
+    }
+
+    // The rest of the arguments are common between the reductions
+    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    func_args.arg("shared_mem");
+    // read and write predicates
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->predicate() != nullptr &&
+        grouped_grop->predicate()->hasValue());
+    const auto read_pred = genInline(grouped_grop->predicate());
+    func_args.arg(read_pred);
+    if (grouped_grop->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(grouped_grop->writePredicate()->hasValue());
+      func_args.arg(genInline(grouped_grop->writePredicate()));
+    } else {
+      func_args.arg(read_pred);
+    }
+
+    indent() << "reduction::gridReduceGroup<" << template_args << ">(\n";
+    indent() << kTab << func_args << ");\n";
+  }
+
   void handle(const kir::GridBroadcast* grop) final {
     const auto bop = grop->broadcast_op();
     TORCH_INTERNAL_ASSERT(bop->out()->isA<kir::TensorIndex>());
@@ -1711,6 +1782,46 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     handleScope(loop->body());
     if (loop->vectorize()) {
       vectorize_scope_ = false;
+    }
+  }
+
+  void handle(const GroupedReductionOp* grouped_rop) final {
+    for (const auto i : c10::irange(grouped_rop->numReductions())) {
+      TORCH_INTERNAL_ASSERT(grouped_rop->output(i)->isA<kir::TensorIndex>());
+
+      const auto output = grouped_rop->output(i)->as<kir::TensorIndex>();
+      const auto input = grouped_rop->input(i)->as<kir::TensorIndex>();
+      const auto domain = output->view()->domain();
+      const auto op_type = grouped_rop->getReductionOpType(i);
+
+      const bool has_block_reduce = domain->hasBlockReduction();
+      const bool has_grid_reduce = domain->hasGridReduction();
+
+      TORCH_INTERNAL_ASSERT(
+          !has_grid_reduce,
+          "GroupedReductionOp does not support block parallelization. GroupedGridReductionOp must be used. ",
+          grouped_rop->toString());
+
+      if (!has_block_reduce) {
+        genSerialReduction(output, input, op_type);
+      } else if (
+          auto reduction_id =
+              ir_utils::getMaybeWarpReductionDim(output, input)) {
+        genWarpReduction(
+            output,
+            input,
+            grouped_rop->initVal(i),
+            op_type,
+            grouped_rop->predicate());
+      } else {
+        genBlockReduction(
+            output,
+            input,
+            grouped_rop->initVal(i),
+            op_type,
+            grouped_rop->predicate(),
+            grouped_rop->writePredicate());
+      }
     }
   }
 

@@ -197,6 +197,36 @@ struct SubstituteInExpr : public OptInDispatch {
         in);
   }
 
+  void handle(GroupedReductionOp* grouped_reduction_expr) final {
+    std::vector<Val*> outputs;
+    std::transform(
+        grouped_reduction_expr->outputs().begin(),
+        grouped_reduction_expr->outputs().end(),
+        std::back_inserter(outputs),
+        [&](Val* val) { return reference_->sameAs(val) ? substitute_ : val; });
+
+    std::vector<Val*> inputs;
+    std::transform(
+        grouped_reduction_expr->inputs().begin(),
+        grouped_reduction_expr->inputs().end(),
+        std::back_inserter(inputs),
+        [&](Val* val) { return reference_->sameAs(val) ? substitute_ : val; });
+
+    std::vector<Val*> init_vals;
+    std::transform(
+        grouped_reduction_expr->initVals().begin(),
+        grouped_reduction_expr->initVals().end(),
+        std::back_inserter(init_vals),
+        [&](Val* val) { return reference_->sameAs(val) ? substitute_ : val; });
+
+    expr_ = IrBuilder::create<GroupedReductionOp>(
+        grouped_reduction_expr->container(),
+        grouped_reduction_expr->getReductionOpTypes(),
+        init_vals,
+        outputs,
+        inputs);
+  }
+
   void handle(BroadcastOp* broadcast_expr) final {
     auto out = reference_->sameAs(broadcast_expr->out())
         ? substitute_
@@ -374,14 +404,15 @@ TensorView* rfactorHelper(
   auto w_var = welford->outVar()->as<TensorView>();
   auto w_n = welford->outN()->as<TensorView>();
 
-  WelfordResult rtvs = reduction_tv->rFactor(axes, w_avg, w_var, w_n);
+  auto rtvs =
+      reduction_tv->rFactor(axes, std::vector<TensorView*>{w_avg, w_var, w_n});
 
   if (reduction_tv == w_n) {
-    return rtvs.n;
+    return rtvs.at(2);
   } else if (reduction_tv == w_var) {
-    return rtvs.var_sum;
+    return rtvs.at(1);
   } else {
-    return rtvs.avg;
+    return rtvs.at(0);
   }
 }
 
@@ -530,29 +561,39 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
 
 std::vector<Expr*> getReductionOps(Fusion* fusion, bool ignore_trivial) {
   std::vector<Expr*> red_ops;
-  for (auto expr : fusion->exprs()) {
-    const Val* out_val = nullptr;
-    if (expr->isA<ReductionOp>()) {
-      out_val = expr->as<ReductionOp>()->out();
-    } else if (expr->isA<WelfordOp>()) {
-      out_val = expr->as<WelfordOp>()->outAvg();
-    } else {
-      continue;
-    }
+
+  auto isReduction = [&ignore_trivial](Val* out_val) {
     if (out_val == nullptr || !out_val->isA<TensorView>()) {
-      continue;
+      return false;
     }
     auto out_tv = out_val->as<TensorView>();
-    if (std::any_of(
-            out_tv->getRootDomain().begin(),
-            out_tv->getRootDomain().end(),
-            [&ignore_trivial](IterDomain* id) {
-              return id->isReduction() &&
-                  !(ignore_trivial && id->isTrivialReduction());
-            })) {
+    return std::any_of(
+        out_tv->getRootDomain().begin(),
+        out_tv->getRootDomain().end(),
+        [&ignore_trivial](IterDomain* id) {
+          return id->isReduction() &&
+              !(ignore_trivial && id->isTrivialReduction());
+        });
+  };
+
+  for (auto expr : fusion->exprs()) {
+    const Val* out_val = nullptr;
+    bool is_reduction = false;
+    if (expr->isA<ReductionOp>()) {
+      is_reduction = isReduction(expr->as<ReductionOp>()->out());
+    } else if (expr->isA<GroupedReductionOp>()) {
+      is_reduction = std::any_of(
+          expr->as<GroupedReductionOp>()->outputs().begin(),
+          expr->as<GroupedReductionOp>()->outputs().end(),
+          isReduction);
+    } else if (expr->isA<WelfordOp>()) {
+      is_reduction = isReduction(expr->as<WelfordOp>()->outAvg());
+    }
+    if (is_reduction) {
       red_ops.push_back(expr);
     }
   }
+
   return red_ops;
 }
 
@@ -632,6 +673,21 @@ Val* getReductionInitValOf(TensorView* tv) {
   Val* init = nullptr;
   if (auto rop = dynamic_cast<ReductionOp*>(def)) {
     init = rop->init();
+  } else if (auto grop = dynamic_cast<GroupedReductionOp*>(def)) {
+    int output_idx = -1;
+    for (const auto i : c10::irange(grop->numReductions())) {
+      if (tv == grop->output(i)) {
+        output_idx = static_cast<int>(i);
+        break;
+      }
+    }
+    TORCH_INTERNAL_ASSERT(
+        output_idx >= 0,
+        "Matching output not found for GroupedReductionOp: ",
+        tv->toString(),
+        ". Defined by: ",
+        def->toString());
+    init = grop->initVal(output_idx);
   } else if (auto wop = dynamic_cast<WelfordOp*>(def)) {
     if (tv == wop->outAvg()) {
       init = wop->initAvg();

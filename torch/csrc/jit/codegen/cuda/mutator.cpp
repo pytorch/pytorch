@@ -187,6 +187,41 @@ void OptOutMutator::mutate(ReductionOp* rop) {
       container, rop_type, init, out, in, rop->isFused());
 }
 
+void OptOutMutator::mutate(GroupedReductionOp* rop) {
+  bool is_same = true;
+
+  std::vector<Val*> outputs;
+  for (auto out : rop->outputs()) {
+    auto maybe_mutated = maybeMutated(out);
+    is_same = is_same && maybe_mutated->sameAs(out);
+    outputs.push_back(maybe_mutated);
+  }
+
+  std::vector<Val*> inputs;
+  for (auto in : rop->inputs()) {
+    auto maybe_mutated = maybeMutated(in);
+    is_same = is_same && maybe_mutated->sameAs(in);
+    inputs.push_back(maybe_mutated);
+  }
+
+  std::vector<Val*> init_vals;
+  for (auto init : rop->initVals()) {
+    auto maybe_mutated = maybeMutated(init);
+    is_same = is_same && maybe_mutated->sameAs(init);
+    init_vals.push_back(maybe_mutated);
+  }
+
+  if (is_same) {
+    return;
+  }
+
+  auto container = rop->container();
+  const auto& rop_types = rop->getReductionOpTypes();
+  container->removeExpr(rop);
+  IrBuilder::create<GroupedReductionOp>(
+      container, rop_types, init_vals, outputs, inputs, rop->isFused());
+}
+
 namespace {
 inline bool compareOptional(Val* a, Val* b) {
   if (!a || !b) {
@@ -399,6 +434,9 @@ void OptOutMutator::mutate(kir::IfThenElse*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridReduction*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::GroupedGridReduction*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridBroadcast*) {

@@ -103,6 +103,7 @@ enum class ExprType {
   BinaryOp,
   TernaryOp,
   ReductionOp,
+  GroupedReductionOp,
   BroadcastOp,
   WelfordOp,
   MmaOp,
@@ -121,6 +122,7 @@ enum class ExprType {
   ForLoop,
   IfThenElse,
   GridReduction,
+  GroupedGridReduction,
   GridBroadcast,
   GridWelford,
   AllocateFusedReduction

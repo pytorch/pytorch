@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
+#include <torch/csrc/jit/codegen/cuda/grouped_reduction.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
@@ -606,6 +607,370 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
       __FILE__,
       "",
       launch_params);
+}
+
+// Simple grouped reduction
+TEST_F(NVFuserTest, FusionGroupedReduction1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = sum(tv0, {1});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  groupReductions({tv1, tv2});
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({99, 999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum({1}) * 2;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Grouping reductions with different ops
+TEST_F(NVFuserTest, FusionGroupedReduction2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = sum(tv1, {1});
+
+  auto tv3 = add(tv0, IrBuilder::create<Double>(2));
+  auto tv4 = max(tv3, {1});
+
+  auto tv5 = add(tv2, tv4);
+  fusion.addOutput(tv5);
+
+  groupReductions({tv2, tv4});
+
+  tv2->split(1, 128);
+  TransformPropagator::from(tv2);
+
+  tv0->computeAt(tv4, -1, ComputeAtMode::MostInlined);
+
+  // tv4 is automatically parallelized in the same way
+  tv2->axis(0)->parallelize(ParallelType::BIDy);
+  tv2->axis(1)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
+
+  std::vector<int64_t> shape({99, 999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum({1}) + std::get<0>((t0 + 2).max(1));
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Grouped reduction with different types
+TEST_F(NVFuserTest, FusionGroupedReduction3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+
+  auto tv2 = castOp(DataType::Double, tv0);
+  auto tv3 = sum(tv2, {1});
+  auto tv4 = castOp(DataType::Float, tv3);
+
+  auto tv5 = add(tv1, tv4);
+  fusion.addOutput(tv5);
+
+  groupReductions({tv1, tv3});
+  tv1->split(1, 128);
+  TransformPropagator::from(tv1);
+
+  tv0->computeAt(tv5, -1, ComputeAtMode::MostInlined);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  tv1->axis(2)->parallelize(ParallelType::TIDx);
+
+  std::vector<int64_t> shape({99, 999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum({1}) + t0.to(c10::kDouble).sum({1}).to(c10::kFloat);
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Testing validation
+TEST_F(NVFuserTest, FusionGroupedReduction4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+
+  auto tv2 = sum(tv0, {1});
+  auto tv3 = sum(tv1, {1});
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  // Invalid grouping as tv2 and tv3 are not guaranteed to have the
+  // same shape
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(groupReductions({tv2, tv3}));
+}
+
+// Testing validation
+TEST_F(NVFuserTest, FusionGroupedReduction5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = sum(tv0, {1});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  tv1->split(1, 128);
+  tv2->split(1, 64);
+
+  // Invalid grouping as tv1 and tv2 don't have the same
+  // transformations
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(groupReductions({tv1, tv2}));
+}
+
+// Grouping 3 reductions
+TEST_F(NVFuserTest, FusionGroupedReduction6_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = sum(tv1, {1});
+
+  auto tv3 = add(tv0, IrBuilder::create<Double>(2));
+  auto tv4 = sum(tv3, {1});
+
+  auto tv5 = add(tv0, IrBuilder::create<Double>(3));
+  auto tv6 = sum(tv5, {1});
+
+  auto tv7 = add(add(tv2, tv4), tv6);
+
+  fusion.addOutput(tv7);
+
+  groupReductions({tv2, tv4, tv6});
+
+  // There's no runtime grid reduction function that can take more
+  // than 2 inputs, yet.
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({99, 999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum({1}) + (t0 + 2).sum({1}) + (t0 + 3).sum({1});
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionGroupedReduction7_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv0, tv2);
+  auto tv4 = sum(tv3, {1});
+  fusion.addOutput(tv4);
+
+  // Invalid grouping as tv3 depends on tv1
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(groupReductions({tv1, tv4}));
+}
+
+// Grouping rfactor'ed reductions
+TEST_F(NVFuserTest, FusionGroupedReductionRfactor1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = sum(tv0, {0});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  const size_t gdimx = 10;
+  const size_t bdimx = 128;
+
+  tv1->split(0, gdimx, false);
+  tv1->split(1, bdimx);
+  auto tv1_rf = tv1->rFactor({1});
+
+  tv2->split(0, gdimx, false);
+  tv2->split(1, bdimx);
+  auto tv2_rf = tv2->rFactor({1});
+
+  groupReductions({tv1_rf, tv2_rf});
+  groupReductions({tv1, tv2});
+
+  tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
+  tv1_rf->axis(2)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv1_rf, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({12345});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum({0}) * 2;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Rfactoring grouped reductions
+TEST_F(NVFuserTest, FusionGroupedReductionRfactor2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = sum(tv0, {0});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  groupReductions({tv1, tv2});
+
+  const size_t gdimx = 10;
+  const size_t bdimx = 128;
+
+  tv1->split(0, gdimx, false);
+  tv1->split(1, bdimx);
+
+  // This should rfactor tv2 as well
+  auto rf_tvs = tv1->rFactor({1}, {tv1, tv2});
+  auto tv1_rf = rf_tvs.at(0);
+
+  tv1_rf->axis(0)->parallelize(ParallelType::BIDx);
+  tv1_rf->axis(2)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv1_rf, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({12345});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum({0}) * 2;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Group reductions of tensors that have computeAt positions set
+TEST_F(NVFuserTest, FusionGroupedReductionAfterComputeAt_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = sum(tv1, {1});
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  const size_t bdimx = 128;
+
+  tv2->split(1, bdimx);
+  auto tv2_rf = tv2->rFactor({1});
+  tv2_rf->reorder({{1, 2}});
+
+  tv3->split(1, bdimx);
+  auto tv3_rf = tv3->rFactor({1});
+  tv3_rf->reorder({{1, 2}});
+
+  tv0->computeAt(tv4, -1, ComputeAtMode::MostInlined);
+
+  groupReductions({tv2_rf, tv3_rf});
+  groupReductions({tv2, tv3});
+
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({3, 1234});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum({1}) * 2;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit

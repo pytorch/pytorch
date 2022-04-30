@@ -451,6 +451,30 @@ GridReduction::GridReduction(
       "IR type only valid for Kernel container.");
 }
 
+GroupedGridReduction::GroupedGridReduction(
+    IrBuilderPasskey passkey,
+    std::vector<BinaryOpType> reduction_op_types,
+    std::vector<Val*> init_vals,
+    std::vector<Val*> outputs,
+    std::vector<Val*> inputs,
+    std::vector<Allocate*> reduction_buffers,
+    Allocate* sync_buffer,
+    bool is_fused)
+    : GroupedReductionOp(
+          passkey,
+          std::move(reduction_op_types),
+          std::move(init_vals),
+          std::move(outputs),
+          std::move(inputs),
+          is_fused,
+          ExprType::GroupedGridReduction),
+      reduction_buffers_(std::move(reduction_buffers)),
+      sync_buffer_(sync_buffer) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
 GridBroadcast::GridBroadcast(
     IrBuilderPasskey passkey,
     BroadcastOp* broadcast_op,

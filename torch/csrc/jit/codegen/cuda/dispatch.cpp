@@ -101,6 +101,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::ReductionOp:
       ptr(handler)->handle(expr->as<ReductionOp>());
       return;
+    case ExprType::GroupedReductionOp:
+      ptr(handler)->handle(expr->as<GroupedReductionOp>());
+      return;
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
       return;
@@ -156,6 +159,9 @@ void Expr::dispatch(T handler, Expr* expr) {
       return;
     case ExprType::GridReduction:
       ptr(handler)->handle(expr->as<kir::GridReduction>());
+      return;
+    case ExprType::GroupedGridReduction:
+      ptr(handler)->handle(expr->as<kir::GroupedGridReduction>());
       return;
     case ExprType::GridBroadcast:
       ptr(handler)->handle(expr->as<kir::GridBroadcast>());
@@ -242,6 +248,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::ReductionOp:
       ptr(handler)->handle(expr->as<ReductionOp>());
       return;
+    case ExprType::GroupedReductionOp:
+      ptr(handler)->handle(expr->as<GroupedReductionOp>());
+      return;
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
       return;
@@ -297,6 +306,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::GridReduction:
       ptr(handler)->handle(expr->as<kir::GridReduction>());
+      return;
+    case ExprType::GroupedGridReduction:
+      ptr(handler)->handle(expr->as<kir::GroupedGridReduction>());
       return;
     case ExprType::GridBroadcast:
       ptr(handler)->handle(expr->as<kir::GridBroadcast>());
@@ -394,6 +406,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
     case ExprType::ReductionOp:
       ptr(mutator)->mutate(expr->as<ReductionOp>());
       return;
+    case ExprType::GroupedReductionOp:
+      ptr(mutator)->mutate(expr->as<GroupedReductionOp>());
+      return;
     case ExprType::WelfordOp:
       ptr(mutator)->mutate(expr->as<WelfordOp>());
       return;
@@ -449,6 +464,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::GridReduction:
       ptr(mutator)->mutate(expr->as<kir::GridReduction>());
+      return;
+    case ExprType::GroupedGridReduction:
+      ptr(mutator)->mutate(expr->as<kir::GroupedGridReduction>());
       return;
     case ExprType::GridBroadcast:
       ptr(mutator)->mutate(expr->as<kir::GridBroadcast>());
@@ -611,6 +629,9 @@ void OptOutConstDispatch::handle(const TernaryOp* stmt) {
 void OptOutConstDispatch::handle(const ReductionOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const GroupedReductionOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const WelfordOp* stmt) {
   unhandled(stmt);
 }
@@ -665,6 +686,9 @@ void OptOutConstDispatch::handle(const kir::IfThenElse* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const kir::GridReduction* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::GroupedGridReduction* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const kir::GridBroadcast* stmt) {
@@ -725,6 +749,9 @@ void OptOutDispatch::handle(TernaryOp* stmt) {
 void OptOutDispatch::handle(ReductionOp* stmt) {
   unhandled(stmt);
 }
+void OptOutDispatch::handle(GroupedReductionOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutDispatch::handle(WelfordOp* stmt) {
   unhandled(stmt);
 }
@@ -779,6 +806,9 @@ void OptOutDispatch::handle(kir::IfThenElse* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::GridReduction* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::GroupedGridReduction* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::GridBroadcast* stmt) {

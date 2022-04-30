@@ -370,7 +370,7 @@ class PredicateChcker : public IterVisitor {
     // reduction omits the predicate, it means its input must be
     // initialized to its init value, so no predicate should be
     // needed in both of the two reduction ops if they use the same
-    // init value, which is guaranteed by the avove check, and the
+    // init value, which is guaranteed by the above check, and the
     // same reduction op.
     if (auto input_def_rop = dynamic_cast<ReductionOp*>(input_def)) {
       if (rop->getReductionOpType() != input_def_rop->getReductionOpType() &&
@@ -431,6 +431,70 @@ class PredicateChcker : public IterVisitor {
           non_predicated_exprs_.find(input_def) !=
               non_predicated_exprs_.end()) {
         needs_predicate_ = true;
+      }
+    }
+  }
+
+  void handle(GroupedReductionOp* grouped_rop) final {
+    for (const auto i : c10::irange(grouped_rop->numReductions())) {
+      auto input = grouped_rop->input(i)->as<TensorView>();
+      auto input_def = input->definition();
+      // When input_def is null, input must be an input to the fusion,
+      // so that must be allocated on global memory. Since we don't omit
+      // predication for expressions involving global memory, this
+      // should never occur.
+      TORCH_INTERNAL_ASSERT(
+          input_def != nullptr, "Inconsistent input found: ", input);
+
+      // The input needs to be initialized to the init value to omit
+      // the predicate, so if the input has its own init value, i.e.,
+      // produced by another reduction, they must use the same init
+      // value.
+      Val* input_init = ir_utils::getReductionInitValOf(input);
+      if (input_init != nullptr &&
+          !grouped_rop->initVal(i)->sameAs(input_init)) {
+        needs_predicate_ = true;
+        return;
+      }
+
+      // If input is not predicated, out-of-bound value may be
+      // overwritten by a garbage value. However, it doesn't matter if
+      // the input is also produced by another reduction. If the preceding
+      // reduction omits the predicate, it means its input must be
+      // initialized to its init value, so no predicate should be
+      // needed in both of the two reduction ops if they use the same
+      // init value, which is guaranteed by the above check, and the
+      // same reduction op.
+      if (auto input_def_rop = dynamic_cast<ReductionOp*>(input_def)) {
+        if (grouped_rop->getReductionOpType(i) !=
+                input_def_rop->getReductionOpType() &&
+            non_predicated_exprs_.find(input_def) !=
+                non_predicated_exprs_.end()) {
+          needs_predicate_ = true;
+          return;
+        }
+      } else if (
+          auto input_def_grouped_rop =
+              dynamic_cast<GroupedReductionOp*>(input_def)) {
+        auto input_index_as_output = std::distance(
+            input_def_grouped_rop->outputs().begin(),
+            std::find(
+                input_def_grouped_rop->outputs().begin(),
+                input_def_grouped_rop->outputs().end(),
+                input));
+        if (grouped_rop->getReductionOpType(i) !=
+                input_def_grouped_rop->getReductionOpType(
+                    input_index_as_output) &&
+            non_predicated_exprs_.find(input_def) !=
+                non_predicated_exprs_.end()) {
+          needs_predicate_ = true;
+          return;
+        }
+      } else if (
+          non_predicated_exprs_.find(input_def) !=
+          non_predicated_exprs_.end()) {
+        needs_predicate_ = true;
+        return;
       }
     }
   }
@@ -502,6 +566,9 @@ void PredicateElimination::handle(Expr* expr) {
 
     if (expr->isA<ReductionOp>()) {
       setReductionInitValue(input, expr->as<ReductionOp>()->init());
+      continue;
+    } else if (expr->isA<GroupedReductionOp>()) {
+      setReductionInitValue(input, expr->as<GroupedReductionOp>()->initVal(i));
       continue;
     } else if (auto wop = dynamic_cast<WelfordOp*>(expr)) {
       Val* init = wop->getInitVals().at(i);

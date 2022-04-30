@@ -306,6 +306,13 @@ void UnmappableReductionDomains::handle(ReductionOp* op) {
   handleReductionOutput(out_tv);
 }
 
+void UnmappableReductionDomains::handle(GroupedReductionOp* op) {
+  // Builds a map from reduction domains to consumer domains.
+  for (auto out : op->outputs()) {
+    handleReductionOutput(out->as<TensorView>());
+  }
+}
+
 void UnmappableReductionDomains::handle(MmaOp* mma) {
   // Builds a map from reduction domains to consumer domains.
   TensorView* out_tv = mma->out()->as<TensorView>();
@@ -834,7 +841,10 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
     for (const auto it : c10::irange(in_root.size())) {
       if (e->outputs().size() > 1) {
         TORCH_INTERNAL_ASSERT(
-            e->isA<WelfordOp>(), "Only supported multioutput op is welford");
+            e->isA<WelfordOp>() || e->isA<GroupedReductionOp>(),
+            "Multi-output mapping assumes WelforddOp or GroupedReductionOp but, ",
+            e->getExprType().value(),
+            " is found");
         for (auto o : e->outputs()) {
           auto o_tv = o->as<TensorView>();
           auto o_td = o_tv->domain();

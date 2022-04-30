@@ -271,4 +271,175 @@ __device__ void gridReduce(
   }
 }
 
+template <
+    bool X_BLOCK,
+    bool Y_BLOCK,
+    bool Z_BLOCK,
+    bool X_THREAD,
+    bool Y_THREAD,
+    bool Z_THREAD,
+    typename T,
+    typename Func>
+__device__ void gridReduce2PartialReduction(
+    const T& inp_val,
+    T init_val,
+    Func reduction_op,
+    volatile T* work_buf,
+    T* shared_buf,
+    bool read_pred,
+    nvfuser_index_t grid_reduction_segment_size,
+    nvfuser_index_t idx_in_grid_segment,
+    nvfuser_index_t block_reduction_segment_size) {
+  T block_reduction_val = init_val;
+
+  // Do block reduction when required
+  if (X_THREAD || Y_THREAD || Z_THREAD) {
+    blockReduce<X_THREAD, Y_THREAD, Z_THREAD>(
+        block_reduction_val,
+        inp_val,
+        reduction_op,
+        threadIdx,
+        blockDim,
+        shared_buf,
+        read_pred,
+        true,
+        init_val);
+  } else if (read_pred) {
+    block_reduction_val = inp_val;
+  }
+
+  if ((!X_THREAD || threadIdx.x == 0) && (!Y_THREAD || threadIdx.y == 0) &&
+      (!Z_THREAD || threadIdx.z == 0)) {
+    auto block_offset =
+        index_utils::maskedOffset<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
+    auto thread_offset =
+        index_utils::maskedOffset<!X_THREAD, !Y_THREAD, !Z_THREAD>(
+            threadIdx, blockDim);
+    auto work_buf_offset =
+        block_offset * block_reduction_segment_size + thread_offset;
+    work_buf[work_buf_offset] = block_reduction_val;
+  }
+}
+
+// 2-way horizontally fused grid reduction
+template <
+    bool X_BLOCK,
+    bool Y_BLOCK,
+    bool Z_BLOCK,
+    bool X_THREAD,
+    bool Y_THREAD,
+    bool Z_THREAD,
+    bool PERSISTENT_REDUCTION,
+    typename T1,
+    typename Func1,
+    typename T2,
+    typename Func2>
+__device__ void gridReduceGroup(
+    T1& out1,
+    const T1& inp_val1,
+    T1 init_val1,
+    Func1 reduction_op1,
+    volatile T1* work_buf1,
+    T2& out2,
+    const T2& inp_val2,
+    T2 init_val2,
+    Func2 reduction_op2,
+    volatile T2* work_buf2,
+    int64_t* sync_flags,
+    void* shared_buf,
+    bool read_pred,
+    bool write_pred) {
+  // Number of values to reduce in the reduction segment
+  const auto grid_reduction_segment_size =
+      index_utils::maskedSize<X_BLOCK, Y_BLOCK, Z_BLOCK>(gridDim);
+
+  // Index of the reduction we're performing out of the
+  // grid_reduction_segment_size
+  const auto idx_in_grid_segment =
+      index_utils::maskedOffset<!X_BLOCK, !Y_BLOCK, !Z_BLOCK>(
+          blockIdx, gridDim);
+
+  // Number of threads we can use in final reduction, Seems to assume all
+  // threads in the block participate
+  const auto block_reduction_segment_size =
+      index_utils::maskedSize<!X_THREAD, !Y_THREAD, !Z_THREAD>(blockDim);
+
+  // advance to the offset for this segment
+  // index of reduction * size of the reduction * size of threads
+  work_buf1 += idx_in_grid_segment * grid_reduction_segment_size *
+      block_reduction_segment_size;
+
+  work_buf2 += idx_in_grid_segment * grid_reduction_segment_size *
+      block_reduction_segment_size;
+
+  gridReduce2PartialReduction<
+      X_BLOCK,
+      Y_BLOCK,
+      Z_BLOCK,
+      X_THREAD,
+      Y_THREAD,
+      Z_THREAD>(
+      inp_val1,
+      init_val1,
+      reduction_op1,
+      work_buf1,
+      (T1*)shared_buf,
+      read_pred,
+      grid_reduction_segment_size,
+      idx_in_grid_segment,
+      block_reduction_segment_size);
+
+  gridReduce2PartialReduction<
+      X_BLOCK,
+      Y_BLOCK,
+      Z_BLOCK,
+      X_THREAD,
+      Y_THREAD,
+      Z_THREAD>(
+      inp_val2,
+      init_val2,
+      reduction_op2,
+      work_buf2,
+      (T2*)shared_buf,
+      read_pred,
+      grid_reduction_segment_size,
+      idx_in_grid_segment,
+      block_reduction_segment_size);
+
+  grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
+      sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
+
+  bool last_block =
+      index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
+
+  if (last_block) {
+    // Cleanup with block reduction
+    gridReduceLastBlock<!X_THREAD, !Y_THREAD, !Z_THREAD>(
+        out1,
+        work_buf1,
+        grid_reduction_segment_size,
+        block_reduction_segment_size,
+        reduction_op1,
+        (T1*)shared_buf,
+        write_pred,
+        init_val1);
+    gridReduceLastBlock<!X_THREAD, !Y_THREAD, !Z_THREAD>(
+        out2,
+        work_buf2,
+        grid_reduction_segment_size,
+        block_reduction_segment_size,
+        reduction_op2,
+        (T2*)shared_buf,
+        write_pred,
+        init_val2);
+  }
+
+  if (PERSISTENT_REDUCTION) {
+    // Make sure we're done with global memory before we allow the kernel to
+    // continue
+    grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
+        sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
+  }
+}
+
 } // namespace reduction

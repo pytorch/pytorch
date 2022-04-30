@@ -945,7 +945,8 @@ WelfordResult::WelfordResult(
 
 WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
   auto o_tv = avg->definition()->as<WelfordOp>()->out()->as<TensorView>();
-  return o_tv->rFactor(axes, avg, var_sum, n);
+  auto rf_tvs = o_tv->rFactor(axes, std::vector<TensorView*>{avg, var_sum, n});
+  return WelfordResult{rf_tvs.at(0), rf_tvs.at(1), rf_tvs.at(2)};
 }
 
 TensorView* transpose(

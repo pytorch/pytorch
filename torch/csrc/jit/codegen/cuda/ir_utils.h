@@ -10,6 +10,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
 namespace ir_utils {
 
 // Replace values in fusion using ValReplacementMutator
