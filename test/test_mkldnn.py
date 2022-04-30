@@ -142,15 +142,15 @@ class TestMkldnn(TestCase):
         b1 = torch.full((1,), 1, dtype=torch.float32)
         w2 = torch.full((1, 1, 2, 24,), 1, dtype=torch.float32)
         b2 = torch.full((2,), 1, dtype=torch.float32)
-        options = zip([-1, 0,  0,  0,  0,  0,  0],  # padding
-                      [1,  0,  1,  1,  1,  1,  1],  # stride
-                      [1,  1,  0,  1,  1,  1,  1],  # dilation
-                      [1,  1,  1,  0,  2,  1,  1],  # groups
-                      [w1, w1, w1, w1, w1, w1, w2], # weight
-                      [b1, b1, b1, b1, b1, b2, b1]) # bias
+        options = zip([-1, 0, 0, 0, 0, 0, 0],  # padding
+                      [1, 0, 1, 1, 1, 1, 1],  # stride
+                      [1, 1, 0, 1, 1, 1, 1],  # dilation
+                      [1, 1, 1, 0, 2, 1, 1],  # groups
+                      [w1, w1, w1, w1, w1, w1, w2],  # weight
+                      [b1, b1, b1, b1, b1, b2, b1])  # bias
         for pad, st, dil, gr, w, b in options:
             with self.assertRaises(RuntimeError) as _:
-                torch.mkldnn_convolution(input, w, b, [pad]*2, [st]*2, [dil]*2, gr)
+                torch.mkldnn_convolution(input, w, b, [pad] * 2, [st] * 2, [dil] * 2, gr)
 
     def test_autograd_to_mkldnn(self):
         # MKLDNN only supports float32
