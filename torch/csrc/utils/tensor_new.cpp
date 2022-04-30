@@ -690,7 +690,7 @@ Tensor sparse_compressed_tensor_ctor_worker(std::string name, c10::DispatchKey d
 }
 
 Tensor sparse_compressed_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
-  c10::optional<c10::Layout> required_layout;
+  c10::optional<c10::Layout> required_layout {};
   return sparse_compressed_tensor_ctor_worker("sparse_compressed_tensor", dispatch_key, scalar_type, r, required_layout);
 }
 
