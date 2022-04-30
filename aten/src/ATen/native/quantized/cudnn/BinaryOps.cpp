@@ -137,9 +137,9 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     std::vector<int64_t> uids;
     data_ptrs.reserve(8);
     uids.reserve(8);
-    data_ptrs = {reinterpret_cast<int8_t*>(qb.data_ptr()), rhs_multiplier_tensor.data_ptr(), add_output.data_ptr(),
-                 reinterpret_cast<int8_t*>(qa.data_ptr()), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
-                 reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    data_ptrs = {qb.data_ptr<int8_t>(), rhs_multiplier_tensor.data_ptr(), add_output.data_ptr(),
+                 qa.data_ptr<int8_t>(), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
+                 quantized_output.data_ptr<int8_t>()};
     uids = {'b', 'm', 'c', 'a', 'p', 'r', 'q'};
     if (kReluFused) {
         data_ptrs.emplace_back(add_output.data_ptr()),
@@ -241,7 +241,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation in Quantized Add Cudnn");
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {

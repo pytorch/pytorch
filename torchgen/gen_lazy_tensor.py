@@ -276,6 +276,10 @@ def run_gen_lazy_tensor(
     metrics_counter: str = 'TORCH_LAZY_FN_COUNTER("lazy::")',
     create_tensor: str = "LazyTensor::Create",
     create_from_first_tensor: bool = False,
+    create_aten_from_ltc_tensor: str = "torch::lazy::CreateAtenFromLtcTensor",
+    tuple_aten_from_ltc_tensors: str = "torch::lazy::TupleAtenFromLtcTensors",
+    lazy_value_class: str = "torch::lazy::Value",
+    lazy_tensor_ptr: str = "LazyTensorPtr",
 ) -> None:
 
     template_dir = os.path.join(aten_path, "templates")
@@ -476,6 +480,10 @@ def run_gen_lazy_tensor(
                         metrics_counter,
                         create_tensor,
                         create_from_first_tensor,
+                        create_aten_from_ltc_tensor,
+                        tuple_aten_from_ltc_tensors,
+                        lazy_value_class,
+                        lazy_tensor_ptr,
                     ),
                     grouped_native_functions,
                     codegenInplaceVariant=True,

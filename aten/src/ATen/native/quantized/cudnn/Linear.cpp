@@ -151,8 +151,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     std::vector<int64_t> uids;
     data_ptrs.reserve(9);
     uids.reserve(9);
-    data_ptrs = {reinterpret_cast<int8_t*>(input.data_ptr()), reinterpret_cast<int8_t*>(weight_transposed.data_ptr()),
-                 requantize_multiplier_tensor.data_ptr(), reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    data_ptrs = {input.data_ptr<int8_t>(), weight_transposed.data_ptr<int8_t>(),
+                 requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr<int8_t>()};
     uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
@@ -292,7 +292,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation Quantized Linear Cudnn");
 }
 
 // output Tensor will be a clampped int8 Tensor
