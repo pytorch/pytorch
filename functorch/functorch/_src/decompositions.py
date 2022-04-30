@@ -480,12 +480,12 @@ def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
 
 
 @register_decomposition(aten.rsub.Tensor)
-def rsub(self: Tensor, other: Tensor, alpha: float = 1) -> Tensor:
+def rsub_Tensor(self: Tensor, other: Tensor, alpha: float = 1) -> Tensor:
     return torch.sub(other, self, alpha=alpha)
 
 
 @register_decomposition(aten.rsub.Scalar)
-def rsub(self: Tensor, other: float, alpha: float = 1) -> Tensor:
+def rsub_Scalar(self: Tensor, other: float, alpha: float = 1) -> Tensor:
     return torch.sub(other, self, alpha=alpha)
 
 
