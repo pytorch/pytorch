@@ -1645,7 +1645,8 @@ Differences with `numpy.linalg.svd`:
       but it may get less accurate results for ill-conditioned matrices or matrices with very large sizes
       (be cautious if matrix size > 2048).
     - The `gesvda` driver directly calls the cuSOLVER `cusolverDn<t>gesvdaStridedBatch` method. This is an
-      approximation method that only works when the input matrices satisfy `m > n` ("tall skinny").
+      approximation method that is preferred when the number of rows is much different from the number of columns
+      (`m >> n` or `n >> m`).
 
 .. note:: When :attr:`full_matrices`\ `= True`, the gradients with respect to `U[..., :, min(m, n):]`
           and `Vh[..., min(m, n):, :]` will be ignored, as those vectors can be arbitrary bases
