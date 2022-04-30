@@ -595,7 +595,7 @@ Tensor indexing_tensor_from_data(
   }
 }
 
-Tensor sparse_compressed_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
+Tensor sparse_compressed_tensor_ctor_worker(std::string name, c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r, c10::optional<c10::Layout> required_layout) {
   TORCH_INTERNAL_ASSERT(!isSparseCsr(dispatchKeyToBackend(dispatch_key)));
   TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
   enum {
@@ -657,8 +657,12 @@ Tensor sparse_compressed_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarTy
       plain_indices_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_PLAIN_INDICES),
       /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
+    c10::optional<c10::Layout> layout = (required_layout ? r.layoutWithDefault(ARG_LAYOUT, required_layout.value()) : r.layoutOptional(ARG_LAYOUT));
+    if (required_layout && layout) {
+      TORCH_CHECK(layout.value() == required_layout.value(), name, ": layout must be ", required_layout.value(), " but got ", layout.value());
+    }
     return at::sparse_compressed_tensor(compressed_indices, plain_indices, values, r.intlist(ARG_SIZE),
-                                 values.options().layout(r.layoutOptional(ARG_LAYOUT))).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
+                                 values.options().layout(layout)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(ARG_TYPE1);
     const auto inferred_options = typeIdWithDefault(r, ARG_DEVICE1, dispatch_key);
@@ -675,115 +679,39 @@ Tensor sparse_compressed_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarTy
     Tensor plain_indices = internal_new_from_data(values.options(), plain_indices_scalar_type, r.deviceOptional(ARG_DEVICE1),
       r.pyobject(ARG_PLAIN_INDICES), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
+    c10::optional<c10::Layout> layout = (required_layout ? r.layoutWithDefault(ARG_LAYOUT1, required_layout.value()) : r.layoutOptional(ARG_LAYOUT1));
+    if (required_layout && layout) {
+      TORCH_CHECK(layout.value() == required_layout.value(), name, ": layout must be ", required_layout.value(), " but got ", layout.value());
+    }
     return at::sparse_compressed_tensor(compressed_indices, plain_indices, values,
-                                 values.options().layout(r.layoutOptional(ARG_LAYOUT))).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
+                                 values.options().layout(layout)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
   }
-  throw std::runtime_error("sparse_compressed_tensor(): invalid arguments");
+  throw std::runtime_error(name + ": invalid arguments");
 }
- 
-template <c10::Layout required_layout>
-Tensor sparse_compressed_tensor_ctor_template(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
-  TORCH_INTERNAL_ASSERT(!isSparseCsr(dispatchKeyToBackend(dispatch_key)));
-  TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
-  enum {
-        ARG_COMPRESSED_INDICES = 0,
-        ARG_PLAIN_INDICES,
-        ARG_VALUES,
-        ARG_SIZE,
-        ARG_TYPE,
-        ARG_LAYOUT,
-        ARG_DEVICE,
-        ARG_PIN_MEMORY,
-        ARG_REQUIRES_GRAD,
-        ARGS_COUNT
-  };
-  enum {
-        ARG_VALUES1 = ARG_VALUES,
-        ARG_TYPE1,
-        ARG_LAYOUT1,
-        ARG_DEVICE1,
-        ARG_PIN_MEMORY1,
-        ARG_REQUIRES_GRAD1,
-        ARGS_COUNT1
-  };
 
-  const std::string layout_name = at::sparse_csr::layoutToString(required_layout, /*upper=*/false, /*lower=*/true);
-  auto safe_get_attr_string = [](PyObject *o, const char *attr_name) -> PyObject* {
-    // Clear error indicator if attribute does not exists.
-    // Otherwise subsequent Python C API calls might return bogus values.
-    // See https://github.com/pytorch/pytorch/issues/58520 for more details
-    auto rc = PyObject_GetAttrString(o, attr_name);
-    if (!rc) {
-      if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
-        throw python_error();
-      }
-      // Warning: a wrong attribute error may be suppressed here
-      PyErr_Clear();
-    }
-    return rc;
-  };
-  THPObjectPtr compressed_indices_dtype_attr(safe_get_attr_string(r.pyobject(ARG_COMPRESSED_INDICES), "dtype"));
-  THPObjectPtr plain_indices_dtype_attr(safe_get_attr_string(r.pyobject(ARG_PLAIN_INDICES), "dtype"));
-  at::ScalarType compressed_indices_scalar_type = compressed_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
-    compressed_indices_dtype_attr.get())->scalar_type : kInt;
-  at::ScalarType plain_indices_scalar_type = plain_indices_dtype_attr ? reinterpret_cast<THPDtype*>(
-    plain_indices_dtype_attr.get())->scalar_type : kInt;
-
-  if (r.idx == 0) {
-    bool type_inference = r.isNone(ARG_TYPE);
-    const auto inferred_options = typeIdWithDefault(r, ARG_DEVICE, dispatch_key);
-    const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
-    at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
-
-    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(ARG_DEVICE),
-                                           r.pyobject(ARG_VALUES), /*copy_variables=*/false, /*copy_numpy=*/true,
-                                           /*type_inference=*/type_inference);
-    Tensor compressed_indices =  internal_new_from_data(values.options(),
-      compressed_indices_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_COMPRESSED_INDICES),
-      /*copy_variables=*/false, /*copy_numpy=*/true,
-      /*type_inference=*/true);
-    Tensor plain_indices = internal_new_from_data(values.options(),
-      plain_indices_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_PLAIN_INDICES),
-      /*copy_variables=*/false, /*copy_numpy=*/true,
-      /*type_inference=*/true);
-    return at::sparse_compressed_tensor(compressed_indices, plain_indices, values, r.intlist(ARG_SIZE),
-                                 values.options().layout(required_layout)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
-  } else if (r.idx == 1) {
-    bool type_inference = r.isNone(ARG_TYPE1);
-    const auto inferred_options = typeIdWithDefault(r, ARG_DEVICE1, dispatch_key);
-    const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE1, scalar_type);
-    at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE1));
-
-    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(ARG_DEVICE1),
-                                           r.pyobject(ARG_VALUES), /*copy_variables=*/false, /*copy_numpy=*/true,
-                                           /*type_inference=*/type_inference);
-    Tensor compressed_indices = internal_new_from_data(values.options(),
-      compressed_indices_scalar_type, r.deviceOptional(ARG_DEVICE1),
-      r.pyobject(ARG_COMPRESSED_INDICES), /*copy_variables=*/false, /*copy_numpy=*/true,
-      /*type_inference=*/true);
-    Tensor plain_indices = internal_new_from_data(values.options(), plain_indices_scalar_type, r.deviceOptional(ARG_DEVICE1),
-      r.pyobject(ARG_PLAIN_INDICES), /*copy_variables=*/false, /*copy_numpy=*/true,
-      /*type_inference=*/true);
-    return at::sparse_compressed_tensor(compressed_indices, plain_indices, values,
-                                 values.options().layout(required_layout)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
-  }
-  throw std::runtime_error("sparse_" + layout_name + "_tensor(): invalid arguments");
+Tensor sparse_compressed_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
+  c10::optional<c10::Layout> required_layout;
+  return sparse_compressed_tensor_ctor_worker("sparse_compressed_tensor", dispatch_key, scalar_type, r, required_layout);
 }
 
 Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
-  return sparse_compressed_tensor_ctor_template<c10::kSparseCsr>(dispatch_key, scalar_type, r);
+  c10::optional<c10::Layout> required_layout(c10::Layout::SparseCsr);
+  return sparse_compressed_tensor_ctor_worker("sparse_csr_tensor", dispatch_key, scalar_type, r, required_layout);
 }
 
 Tensor sparse_csc_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
-  return sparse_compressed_tensor_ctor_template<c10::kSparseCsc>(dispatch_key, scalar_type, r);
+  c10::optional<c10::Layout> required_layout(c10::Layout::SparseCsc);
+  return sparse_compressed_tensor_ctor_worker("sparse_csc_tensor", dispatch_key, scalar_type, r, required_layout);
 }
 
 Tensor sparse_bsr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
-  return sparse_compressed_tensor_ctor_template<c10::kSparseBsr>(dispatch_key, scalar_type, r);
+  c10::optional<c10::Layout> required_layout(c10::Layout::SparseBsr);
+  return sparse_compressed_tensor_ctor_worker("sparse_bsr_tensor", dispatch_key, scalar_type, r, required_layout);
 }
 
 Tensor sparse_bsc_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
-  return sparse_compressed_tensor_ctor_template<c10::kSparseBsc>(dispatch_key, scalar_type, r);
+  c10::optional<c10::Layout> required_layout(c10::Layout::SparseBsc);
+  return sparse_compressed_tensor_ctor_worker("sparse_bsc_tensor", dispatch_key, scalar_type, r, required_layout);
 }
 
 Tensor _sparse_compressed_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {

@@ -3560,6 +3560,20 @@ class TestBinaryUfuncs(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
+    @onlyCUDA
+    @dtypes(torch.chalf,)
+    def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
+        # Tests that Tensor and CPU Scalar work for `mul` for chalf.
+        # Ideally, this should be covered by `test_complex_half_reference_testing`
+        # from test_ops.py by checking reference_samples from the OpInfo.
+        # But currently that doesn't work as sample generation requires support of
+        # `index_select` which is not implemented for `complex32` at the
+        # time of writing this test.
+        # TODO: Remove this test once above issue is fixed.
+        # Ref: https://github.com/pytorch/pytorch/pull/76364
+        x = make_tensor((2, 2), device=device, dtype=dtype)
+        self.assertEqual(x * 2.5, x * torch.tensor(2.5, device=device, dtype=dtype))
+
 
 tensor_binary_ops = [
     '__lt__', '__le__',
