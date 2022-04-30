@@ -20,9 +20,8 @@ TEST(BackendDeviceTest, Basic1) {
   auto device = BackendDevice();
 
   EXPECT_EQ(device.type(), 0);
-  EXPECT_EQ(device.ordinal(), -1);
-  EXPECT_FALSE(device.has_index());
-  EXPECT_STREQ(device.toString().c_str(), "Unknown");
+  EXPECT_EQ(device.ordinal(), 0);
+  EXPECT_STREQ(device.toString().c_str(), "Unknown0");
 }
 
 TEST(BackendDeviceTest, Basic2) {
@@ -32,7 +31,6 @@ TEST(BackendDeviceTest, Basic2) {
 
   EXPECT_EQ(device.type(), 1);
   EXPECT_EQ(device.ordinal(), 1);
-  EXPECT_TRUE(device.has_index());
   EXPECT_STREQ(device.toString().c_str(), "Unknown1");
 }
 
@@ -45,7 +43,6 @@ TEST(BackendDeviceTest, Basic3) {
 
   EXPECT_EQ(device.type(), 0);
   EXPECT_EQ(device.ordinal(), 1);
-  EXPECT_TRUE(device.has_index());
   EXPECT_STREQ(device.toString().c_str(), "Test1");
 }
 
@@ -89,8 +86,8 @@ TEST(BackendDeviceTest, FromAten) {
 TEST(BackendDeviceTest, ToAten) {
   auto device = backendDeviceToAtenDevice(BackendDevice());
   EXPECT_EQ(device.type(), c10::kLazy);
-  EXPECT_FALSE(device.has_index());
-  EXPECT_EQ(device.index(), -1);
+  EXPECT_TRUE(device.has_index());
+  EXPECT_EQ(device.index(), 0);
 }
 
 // TODO(alanwaketan): Update the following test once we have TorchScript backend upstreamed.
