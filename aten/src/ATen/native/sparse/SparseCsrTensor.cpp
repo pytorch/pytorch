@@ -415,7 +415,7 @@ Tensor sparse_compressed_tensor(const Tensor& compressed_indices,
       TORCH_CHECK(layout.value() == REQUIRED_LAYOUT, "sparse " # KIND " layout must be ", REQUIRED_LAYOUT, " but got ", layout.value()); \
     }                                                                   \
     c10::optional<Layout> layout_(REQUIRED_LAYOUT);                     \
-    return sparse_compressed_tensor(compressed_indices, plain_indices, values, dtype, layout_, device, pin_memory); \
+    return at::native::sparse_compressed_tensor(compressed_indices, plain_indices, values, dtype, layout_, device, pin_memory); \
   }                                                                     \
   Tensor sparse_##KIND##_tensor(const Tensor& compressed_indices,       \
                                 const Tensor& plain_indices,            \
@@ -429,7 +429,7 @@ Tensor sparse_compressed_tensor(const Tensor& compressed_indices,
       TORCH_CHECK(layout.value() == REQUIRED_LAYOUT, "sparse " # KIND " layout must be ", REQUIRED_LAYOUT, " but got ", layout.value()); \
     }                                                                   \
     c10::optional<Layout> layout_(REQUIRED_LAYOUT);                     \
-    return sparse_compressed_tensor(compressed_indices, plain_indices, values, size, dtype, layout_, device, pin_memory); \
+    return at::native::sparse_compressed_tensor(compressed_indices, plain_indices, values, size, dtype, layout_, device, pin_memory); \
   }
 
 SPARSE_COMPRESSED_TENSOR(csr, kSparseCsr)
