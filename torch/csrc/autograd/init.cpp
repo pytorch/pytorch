@@ -171,7 +171,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("ORT", c10::DeviceType::ORT)
       .value("XLA", c10::DeviceType::XLA)
       .value("Lazy", c10::DeviceType::Lazy)
-      .value("MLC", c10::DeviceType::MLC)
+      .value("MPS", c10::DeviceType::MPS)
       .value("HPU", c10::DeviceType::HPU)
       .value("Meta", c10::DeviceType::Meta)
       .value("Vulkan", c10::DeviceType::Vulkan)
