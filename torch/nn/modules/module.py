@@ -1586,6 +1586,7 @@ class Module:
                 if child is not None:
                     load(child, prefix + name + '.')
 
+            # Note that the hook can modify missing_keys and unexpected_keys.
             incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
             for hook in module._load_state_dict_post_hooks.values():
                 hook(module, incompatible_keys)
