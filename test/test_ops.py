@@ -14,12 +14,11 @@ from torch.testing._internal.common_utils import \
      IS_IN_CI, suppress_warnings, noncontiguous_like,
      TEST_WITH_ASAN, IS_WINDOWS, IS_FBCODE, first_sample)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo, ops_and_refs,
-     python_ref_db)
+    (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo, ops_and_refs)
 from torch.testing._internal.common_device_type import \
     (deviceCountAtLeast, instantiate_device_type_tests, ops,
      onlyCUDA, onlyNativeDeviceTypes, OpDTypes, skipMeta)
-import torch._prims as prims
+# import torch._prims as prims
 
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
@@ -226,8 +225,7 @@ class TestCommon(TestCase):
             # Sets the default dtype to NumPy's default dtype of double
             cur_default = torch.get_default_dtype()
             torch.set_default_dtype(torch.double)
-            reference_inputs = op.reference_inputs(device, dtype)
-            for sample_input in reference_inputs:
+            for sample_input in op.reference_inputs(device, dtype):
                 self.compare_with_reference(op, op.ref, sample_input, exact_dtype=(dtype is not torch.long))
         finally:
             torch.set_default_dtype(cur_default)
@@ -235,21 +233,21 @@ class TestCommon(TestCase):
     # Tests that experimental Python References' can propagate shape, dtype,
     # and device metadata properly.
     # TODO: include stride propagation.
-    @onlyNativeDeviceTypes
-    @ops(python_ref_db)
-    def test_python_reference_meta_functions(self, device, dtype, op):
-        def _to_tensormeta(x):
-            if isinstance(x, torch.Tensor):
-                return prims.utils.TensorMeta(x)
+    # @onlyNativeDeviceTypes
+    # @ops(python_ref_db)
+    # def test_python_reference_meta_functions(self, device, dtype, op):
+    #     def _to_tensormeta(x):
+    #         if isinstance(x, torch.Tensor):
+    #             return prims.utils.TensorMeta(x)
 
-        # TODO: iterate over requires_grad true/false
-        for sample in op.reference_inputs(device, dtype, requires_grad=False):
-            result = op(sample.input, *sample.args, **sample.kwargs)
+    #     # TODO: iterate over requires_grad true/false
+    #     for sample in op.reference_inputs(device, dtype, requires_grad=False):
+    #         result = op(sample.input, *sample.args, **sample.kwargs)
 
-            meta_sample = sample.transform(_to_tensormeta)
-            meta_result = op(meta_sample[0], *meta_sample[1], **meta_sample[2])
+    #         meta_sample = sample.transform(_to_tensormeta)
+    #         meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
 
-            prims.utils.compare_tensor_meta(result, meta_result)
+    #         prims.utils.compare_tensor_meta(result, meta_result)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -275,7 +273,8 @@ class TestCommon(TestCase):
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
-            n_inp, n_args, n_kwargs = sample_input.noncontiguous()
+            noncontig_sample = sample_input.noncontiguous()
+            n_inp, n_args, n_kwargs = noncontig_sample.input, noncontig_sample.args, noncontig_sample.kwargs
 
             # Verifies sample input tensors should have no grad or history
             sample_tensor = t_inp if isinstance(t_inp, torch.Tensor) else t_inp[0]
@@ -737,8 +736,8 @@ class TestCommon(TestCase):
 
         for sample in op.sample_inputs(device, dtype):
             actual = op(sample.input, *sample.args, **sample.kwargs)
-            (inp, args, kwargs) = sample.transform(lambda x: x.to(torch.complex64))
-            expected = op(inp, *args, **kwargs)
+            transformed_sample = sample.transform(lambda x: x.to(torch.complex64))
+            expected = op(transformed_sample.input, *transformed_sample.args, **transformed_sample.kwargs)
             self.assertEqual(actual, expected, exact_dtype=False, atol=atol, rtol=rtol)
 
 class TestCompositeCompliance(TestCase):
