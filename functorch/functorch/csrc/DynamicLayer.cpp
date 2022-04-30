@@ -398,6 +398,10 @@ WithoutTop::~WithoutTop() {
 enum class ATenOpId {
   nll_loss_backward,
   nll_loss2d_backward,
+  mse_loss_backward,
+  l1_loss_backward,
+  _log_softmax_backward_data,
+  _softmax_backward_data,
 };
 
 static void call_decomposition_for_jvp(
@@ -421,6 +425,54 @@ static void call_decomposition_for_jvp(
       torch::jit::push(stack, result);
       return;
     }
+    case ATenOpId::mse_loss_backward: {
+      ArrayRef<IValue> args = torch::jit::last(stack, 4);
+      auto result = mse_loss_backward_decomp(
+        args[0].toTensor(),
+        args[1].toTensor(),
+        args[2].toTensor(),
+        args[3].toInt()
+      );
+      torch::jit::pop(*stack, 4);
+      torch::jit::push(stack, result);
+      return;
+    }
+    case ATenOpId::l1_loss_backward: {
+      ArrayRef<IValue> args = torch::jit::last(stack, 4);
+      auto result = l1_loss_backward_decomp(
+        args[0].toTensor(),
+        args[1].toTensor(),
+        args[2].toTensor(),
+        args[3].toInt()
+      );
+      torch::jit::pop(*stack, 4);
+      torch::jit::push(stack, result);
+      return;
+    }
+    // case ATenOpId::_softmax_backward_data: {
+    //   ArrayRef<IValue> args = torch::jit::last(stack, 4);
+    //   auto result = _softmax_backward_data_decomp(
+    //     args[0].toTensor(),
+    //     args[1].toTensor(),
+    //     args[2].toInt(),
+    //     args[3].toScalarType()
+    //   );
+    //   torch::jit::pop(*stack, 4);
+    //   torch::jit::push(stack, result);
+    //   return;
+    // }
+    // case ATenOpId::_log_softmax_backward_data: {
+    //   ArrayRef<IValue> args = torch::jit::last(stack, 4);
+    //   auto result = _log_softmax_backward_data_decomp(
+    //     args[0].toTensor(),
+    //     args[1].toTensor(),
+    //     args[2].toInt(),
+    //     args[3].toScalarType()
+    //   );
+    //   torch::jit::pop(*stack, 4);
+    //   torch::jit::push(stack, result);
+    //   return;
+    // }
     default:
       TORCH_INTERNAL_ASSERT(false);
   }
@@ -500,6 +552,10 @@ TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_BACK_MODE_KEY, m) {
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   FALLBACK_WITH_ID(nll_loss_backward);
   FALLBACK_WITH_ID(nll_loss2d_backward);
+  FALLBACK_WITH_ID(mse_loss_backward);
+  FALLBACK_WITH_ID(l1_loss_backward);
+  // FALLBACK_WITH_ID(_log_softmax_backward_data);
+  // FALLBACK_WITH_ID(_softmax_backward_data);
 }
 
 
