@@ -26,6 +26,8 @@ import functools
 from functools import partial
 import unittest
 
+aten = torch.ops.aten
+
 
 # TODO: this isn't going to work with non-aten namespaces
 def overload_to_aten_name(overload):
@@ -161,8 +163,8 @@ def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
         )
 
 
-def op_assert_equal(test_case, op, a, b, args, kwargs):
-    assert a.dtype == b.dtype
+def op_assert_equal(test_case, op, orig, decomp, args, kwargs):
+    assert orig.dtype == decomp.dtype, f"Operation:  {op}"
     # Before adding an entry to this table, make sure your decomposition is right :)
     tol_table = {
         # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
@@ -172,11 +174,11 @@ def op_assert_equal(test_case, op, a, b, args, kwargs):
             1e-3,
         ),
     }
-    if (b.dtype, op) in tol_table:
-        rtol, atol = tol_table[(b.dtype, op)]
+    if (decomp.dtype, op) in tol_table:
+        rtol, atol = tol_table[(decomp.dtype, op)]
     else:
-        rtol, atol = _getDefaultRtolAndAtol(a.dtype, b.dtype)
-    test_case.assertEqual(a, b, rtol=rtol, atol=atol)
+        rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
+    test_case.assertEqual(orig, decomp, rtol=rtol, atol=atol, msg = f"{op.__name__}\nargs = {args}\nkwargs = {kwargs}")
 
 
 # Given f, returns an f' such that:
@@ -265,18 +267,18 @@ CROSS_REF_EXCLUDE_SET = {
         torch.bfloat16,
         "nn.functional.layer_norm",
     ),  # "batch_norm" not implemented for 'BFloat16'
-    ("cpu", torch.bfloat16, "addmm"),  # decomposition loses precision
-    ("cpu", torch.bfloat16, "softmax"),  # needs relaxed prec
-    ("cpu", torch.bfloat16, "log_softmax"),  # needs relaxed prec
     # CUBLAS_STATUS_NOT_SUPPORTED when calling
     # `cublasGemmStridedBatchedExFix(handle, opa, opb, (int)m, (int)n, (int)k,
     # (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea, b, CUDA_R_16BF,
     # (int)ldb, strideb, (void*)&fbeta, c, CUDA_R_16BF, (int)ldc, stridec,
     # (int)num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP)`
     ("cuda", torch.bfloat16, "nn.functional.bilinear"),
+    # randomness
     # decomp has problem even with opmath
     ("cuda", torch.bfloat16, "nn.functional.layer_norm"),
     ("cuda", torch.float16, "nn.functional.layer_norm"),
+    ("cuda", torch.bfloat16, "nn.functional.batch_norm"),
+    ("cuda", torch.float16, "nn.functional.batch_norm"),
     ("cuda", torch.float16, "nn.functional.dropout"),
     ("cuda", torch.bfloat16, "nn.functional.dropout"),
     # decomp doesn't return correct dtype
@@ -289,13 +291,6 @@ CROSS_REF_EXCLUDE_SET = {
     # complex is not handled
     (None, torch.complex64, "var"),
     (None, torch.complex128, "var"),
-    (None, torch.complex64, "nn.functional.tanhshrink"),
-    (None, torch.complex128, "nn.functional.tanhshrink"),
-    (None, torch.complex32, "sigmoid"),
-    (None, torch.complex64, "sigmoid"),
-    (None, torch.complex128, "sigmoid"),
-    (None, torch.complex64, "tanh"),
-    (None, torch.complex128, "tanh"),
 }
 
 all_decomposed = set()
@@ -474,11 +469,11 @@ class TestDecomp(TestCase):
                 )
 
     def test_torchscriptable(self, device):
-        skip_list = []
+        skip_list = [aten.rsub.Scalar]
         for op, decomposition in decomposition_table.items():
             if op in skip_list:
                 continue
-            torch.jit.script(decomposition)
+            f = torch.jit.script(decomposition)
 
 
 instantiate_device_type_tests(TestDecomp, globals())
