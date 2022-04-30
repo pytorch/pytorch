@@ -3144,6 +3144,7 @@
     "assert_allclose",
     "assert_close",
     "complex_types",
+    "complex_types_and",
     "double_types",
     "empty_types",
     "floating_and_complex_types",
