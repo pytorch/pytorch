@@ -368,7 +368,7 @@ class CMake:
         # Options starting with CMAKE_
         cmake__options = {
             "CMAKE_INSTALL_PREFIX": install_dir,
-            "CMAKE_VERBOSE_MAKEFILE": "BOOL=ON"
+            "CMAKE_VERBOSE_MAKEFILE": "BOOL=ON",
         }
 
         # We set some CMAKE_* options in our Python build code instead of relying on the user's direct settings. Emit an
