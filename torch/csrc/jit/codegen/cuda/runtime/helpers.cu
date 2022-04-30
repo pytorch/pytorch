@@ -419,7 +419,7 @@ bool isfinite(T x) {
 
 template <typename T>
 bool isfinite(std::complex<T> x) {
-  return ::isfinite(abs(x));
+  return ::isfinite(std::real(x)) && ::isfinite(std::imag(x));
 }
 
 template <typename T>
