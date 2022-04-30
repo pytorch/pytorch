@@ -32,6 +32,7 @@
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/select_native.h>
+#include <ATen/ops/sparse_compressed_tensor_native.h>
 #include <ATen/ops/sparse_csr_tensor_native.h>
 #include <ATen/ops/values_native.h>
 #endif
