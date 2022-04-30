@@ -279,6 +279,8 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float16, "nn.functional.layer_norm"),
     ("cuda", torch.bfloat16, "nn.functional.batch_norm"),
     ("cuda", torch.float16, "nn.functional.batch_norm"),
+    ("cuda", torch.bfloat16, "nn.functional.instance_norm"),
+    ("cuda", torch.float16, "nn.functional.instance_norm"),
     ("cuda", torch.float16, "nn.functional.dropout"),
     ("cuda", torch.bfloat16, "nn.functional.dropout"),
     # decomp doesn't return correct dtype
