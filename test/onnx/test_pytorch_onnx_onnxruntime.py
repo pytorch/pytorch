@@ -10993,9 +10993,9 @@ class _TestONNXRuntime:
     def test_grid_sample(self):
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
 
-        class Module(torch.nn.Module):
+        class GridSampleModule(torch.nn.Module):
 
-            def __init__(self, mode: str, padding_mode: str, align_corners: bool) -> None:
+            def __init__(self, mode, padding_mode, align_corners) -> None:
                 super().__init__()
                 self.mode, self.padding_mode, self.align_corners = mode, padding_mode, align_corners
 
@@ -11003,18 +11003,18 @@ class _TestONNXRuntime:
                 return torch.nn.functional.grid_sample(input, grid, self.mode, self.padding_mode, self.align_corners)
 
         for mode, padding_mode, align_corners in itertools.product(
-            ("bilinear", "nearest", "bicubic"),  # mode
-            ("zeros", "border", "reflection"),  # padding_mode
-            (True, False),  # align_corners
+            ("bilinear", "nearest", "bicubic"),
+            ("zeros", "border", "reflection"),
+            (True, False),
         ):
-            # note (mkozuki): Skip the combinations that fail locally.
-            if (mode, padding_mode, align_corners) in (
-                ("bicubic", "border", True),
-                ("bicubic", "border", False),
-            ):
-                continue
+            atol_rtol = {}
+            if (mode, padding_mode) == ("bicubic", "border"):
+                if align_corners:
+                    atol_rtol.update({"atol": 0.3, "rtol": 0.4})
+                else:
+                    atol_rtol.update({"atol": 0.02, "rtol": 0.02})
             input, grid = torch.randn(n, c, h_in, w_in), torch.randn(n, h_out, w_out, 2)
-            self.run_test(Module(mode, padding_mode, align_corners), (input, grid))
+            self.run_test(GridSampleModule(mode, padding_mode, align_corners), (input, grid), **atol_rtol)
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
