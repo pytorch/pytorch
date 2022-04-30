@@ -99,7 +99,7 @@ TORCH_META_FUNC(_log_softmax_backward_data)
       grad.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 
   bool half_to_float = grad.scalar_type() != input_dtype;
-  if (half_to_float) {
+  if (half_to_float && grad.device().is_cuda()) {
     // The code below is only valid for the CUDA implementation. It's "okay"
     // to put it here because half-to-float conversion is not supported by
     // the CPU implementation of _softmax. There is a TORCH_CHECK in the CUDA
