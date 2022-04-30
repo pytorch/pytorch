@@ -21337,6 +21337,8 @@ class TestStateDictHooks(TestCase):
             def my_post_load_hook(self, module, incompatible_keys):
                 assert module is self
                 nonlocal hook_called
+                incompatible_keys.missing_keys.append("foo")
+                incompatible_keys.unexpected_keys.append("bar")
                 hook_called += 1
 
         class MyModuleContainer(nn.Module):
@@ -21349,16 +21351,14 @@ class TestStateDictHooks(TestCase):
         nested.register_load_state_dict_post_hook(
             nested.my_post_load_hook,
         )
-        wrapped.load_state_dict(wrapped.state_dict())
+        # Hook must be called even if it is wrapped
+        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
         self.assertEqual(hook_called, 1)
-        return
-        nested._register_load_state_dict_post_hook(
-            nested.my_post_load_hook_with_module,
-            with_module=True
-        )
-        wrapped.load_state_dict(wrapped.state_dict())
-        # Since both hooks are called, incremented by 2
-        self.assertEqual(hook_called, 3)
+        # Ensure that the hook modified missing_keys and unexpected_keys
+        missing = ret.missing_keys
+        unexpected = ret.unexpected_keys
+        self.assertEqual(missing, ["foo"])
+        self.assertEqual(unexpected, ["bar"])
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())

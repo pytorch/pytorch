@@ -1586,6 +1586,10 @@ class Module:
                 if child is not None:
                     load(child, prefix + name + '.')
 
+            incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
+            for hook in module._load_state_dict_post_hooks.values():
+                hook(module, incompatible_keys)
+
         load(self)
         del load
 
@@ -1603,9 +1607,7 @@ class Module:
             raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
                                self.__class__.__name__, "\n\t".join(error_msgs)))
 
-        incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
-        for hook in self._load_state_dict_post_hooks.values():
-            hook(self, incompatible_keys)
+        return _IncompatibleKeys(missing_keys, unexpected_keys)
 
         return incompatible_keys
 
