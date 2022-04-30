@@ -1147,7 +1147,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.instance_norm', ''),
         xfail('nn.functional.layer_norm', ''),
         xfail('nn.functional.logsigmoid', ''),
-        xfail('nn.functional.mse_loss', ''),
         xfail('nn.functional.pad', 'circular'),
         xfail('nn.functional.prelu', ''),
         xfail('nn.functional.softmin', ''),
@@ -1181,7 +1180,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
         xfail('nn.functional.multi_margin_loss', ''),
-        xfail('nn.functional.l1_loss', ''),
         xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.smooth_l1_loss', ''),
         xfail('nn.functional.max_unpool2d', ''),
@@ -1259,6 +1257,8 @@ class TestOperators(TestCase):
             # HACK: obviously pytorch should also have the same coverage
             FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH = {
                 'nn.functional.nll_loss',
+                'nn.functional.l1_loss',
+                'nn.functional.mse_loss',
             }
             if op.name in FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH:
                 expected = double_backward_trick_reference(primals, cotangents, primals_tangents, cotangents_tangents)
