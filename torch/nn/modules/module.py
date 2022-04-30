@@ -1610,8 +1610,6 @@ class Module:
 
         return _IncompatibleKeys(missing_keys, unexpected_keys)
 
-        return incompatible_keys
-
     def _named_members(self, get_members_fn, prefix='', recurse=True):
         r"""Helper method for yielding various names + members of modules."""
         memo = set()
