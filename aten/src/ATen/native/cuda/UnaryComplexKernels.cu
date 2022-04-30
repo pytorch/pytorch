@@ -40,15 +40,33 @@ __host__ __device__ static inline scalar_t real_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> real_wrapper(c10::complex<T> v) {
-  return v.real();
+  return c10::complex<T>{v.real(), 0};
 }
 
+const char real_name[] = "real_kernel";
 void real_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "real_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return real_wrapper(a);
+  if (iter.dtype() == kComplexHalf) {
+    using scalar_t = c10::complex<at::Half>;
+    #if AT_USE_JITERATOR()
+      static const auto real_string = jiterator_stringify(
+        template <typename T>
+        T real_kernel(T z) {
+          return T{z.real(), 0};
+        }
+      );
+      jitted_gpu_kernel<real_name, scalar_t, scalar_t, 1>(iter, real_string);
+    #else
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return real_wrapper(a);
+      });
+    #endif
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "real_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return real_wrapper(a);
+      });
     });
-  });
+  }
 }
 
 // We manually overload imag because std::imag does not work types other than c10::complex.
@@ -59,15 +77,33 @@ __host__ __device__ static inline scalar_t imag_wrapper(scalar_t v) {
 
 template<typename T>
 __host__ __device__ static inline c10::complex<T> imag_wrapper(c10::complex<T> v) {
-  return v.imag();
+  return c10::complex<T>{v.imag(), 0};
 }
 
+const char imag_name[] = "imag_kernel";
 void imag_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "imag_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return imag_wrapper(a);
+  if (iter.dtype() == kComplexHalf) {
+    using scalar_t = c10::complex<at::Half>;
+    #if AT_USE_JITERATOR()
+      static const auto imag_string = jiterator_stringify(
+        template <typename T>
+        T imag_kernel(T z) {
+          return T{z.imag(), 0};
+        }
+      );
+      jitted_gpu_kernel<imag_name, scalar_t, scalar_t, 1>(iter, imag_string);
+    #else
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return imag_wrapper(a);
+      });
+    #endif
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "imag_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return imag_wrapper(a);
+      });
     });
-  });
+  }
 }
 
 // We manually overload conj because std::conj does not work types other than c10::complex.
