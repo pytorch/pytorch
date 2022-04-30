@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-    macos-11-py3-x86-64-build:
+  macos-11-py3-x86-64-build:
     name: macos-11-py3-x86-64
     uses: ./.github/workflows/_mac-build.yml
     with:
