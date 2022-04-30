@@ -13229,7 +13229,6 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_autodiffed=True),
     OpInfo('split',
-           aten_name='split_with_sizes',
            variant_test_name='list_args',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=True),
