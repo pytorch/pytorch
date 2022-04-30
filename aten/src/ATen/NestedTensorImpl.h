@@ -32,6 +32,16 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   const Tensor& get_nested_size_tensor() const {
     return nested_size_tensor_;
   }
+  // Returns nullopt if the ith dimension is irregular. The ith dimension
+  // of a NestedTensor is regular if the unbound tensors match in
+  // size at the (i-1)th dimension.
+  c10::optional<int64_t> opt_size(int64_t d) const {
+    d = at::maybe_wrap_dim(d, dim(), false);
+    if (opt_sizes_[d] == -1) {
+      return c10::nullopt;
+    }
+    return opt_sizes_[d];
+  }
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   IntArrayRef sizes() const override {
     TORCH_CHECK(
@@ -63,6 +73,8 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
 
   at::Tensor buffer_;
   const at::Tensor nested_size_tensor_;
+  // NOTE: -1 here means the size is missing
+  std::vector<int64_t> opt_sizes_;
 };
 
 inline NestedTensorImpl* get_nested_tensor_impl_or_null(const at::Tensor& tensor) {
