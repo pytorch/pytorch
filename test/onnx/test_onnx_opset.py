@@ -372,8 +372,7 @@ class TestONNXOpset(TestCase):
 
     def test_grid_sample(self):
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
-        ops = [{"op_name": "GridSample"}]
-        ops = {16: ops}
+        ops = {16: [{"op_name": "GridSample"}]}
 
         class MyModule(Module):
             def forward(self, x, grid, mode, padding_mode, align_corers):
