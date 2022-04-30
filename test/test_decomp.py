@@ -268,6 +268,12 @@ CROSS_REF_EXCLUDE_SET = {
     ("cpu", torch.bfloat16, "addmm"),  # decomposition loses precision
     ("cpu", torch.bfloat16, "softmax"),  # needs relaxed prec
     ("cpu", torch.bfloat16, "log_softmax"),  # needs relaxed prec
+    # CUBLAS_STATUS_NOT_SUPPORTED when calling
+    # `cublasGemmStridedBatchedExFix(handle, opa, opb, (int)m, (int)n, (int)k,
+    # (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea, b, CUDA_R_16BF,
+    # (int)ldb, strideb, (void*)&fbeta, c, CUDA_R_16BF, (int)ldc, stridec,
+    # (int)num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP)`
+    ("cuda", torch.bfloat16, "nn.functional.bilinear"),
     # decomp has problem even with opmath
     ("cuda", torch.bfloat16, "nn.functional.layer_norm"),
     ("cuda", torch.float16, "nn.functional.layer_norm"),

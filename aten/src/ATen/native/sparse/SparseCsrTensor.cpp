@@ -15,8 +15,11 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_validate_sparse_compressed_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
 #include <ATen/ops/clone_native.h>
@@ -28,6 +31,7 @@
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
+#include <ATen/ops/select_native.h>
 #include <ATen/ops/sparse_csr_tensor_native.h>
 #include <ATen/ops/values_native.h>
 #endif
@@ -207,26 +211,31 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
 
 }
 
-void _validate_sparse_compressed_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size, Layout layout) {
-  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, layout);
+void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, Layout layout) {
+  _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout);
 }
 
 void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
   _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseCsr);
 }
 
-// Construction of CSR tensors.
-SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
+// Construction of CSR, CSC, BSR, and BSC tensors.
+
+// Note: The usage of "Csr" in names like SparseCsrTensor,
+// SparseCsrCPU, SparseCsrCUDA, and SparseCsrTensorImpl exists because
+// of historical reasons (that ought to be removed in future) and does
+// not mean that the corresponding functionality would be CSR layout
+// only specific.
+SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor
   // constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  Layout layout = options.layout();
-  TORCH_INTERNAL_ASSERT(layout == kSparseCsr);
+  Layout layout = AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(options.layout(), "new_compressed_tensor", [&] { return the_layout; });
   DispatchKey dispatch_key;
 
   TORCH_CHECK_NOT_IMPLEMENTED(
     options.device().type() == kCPU || options.device().type() == kCUDA,
-     "Could not run '", "sparse_csr_tensor", "' from the '", options.device(), "' device.)");
+     "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
 
   if (options.device().is_cuda()) {
     dispatch_key = DispatchKey::SparseCsrCUDA;
@@ -238,20 +247,56 @@ SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
       DispatchKeySet(dispatch_key), layout, options.dtype());
 }
 
-Tensor _sparse_csr_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
-    const Tensor& values,
-    IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
 
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  SparseCsrTensor self = new_csr_tensor(options);
-  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values, size);
+Tensor _sparse_compressed_tensor_unsafe(const Tensor& compressed_indices,
+                                        const Tensor& plain_indices,
+                                        const Tensor& values,
+                                        IntArrayRef size,
+                                        c10::optional<ScalarType> dtype,
+                                        c10::optional<Layout> layout,
+                                        c10::optional<Device> device,
+                                        c10::optional<bool> pin_memory) {
+  if (!layout) {
+    AT_ERROR("sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
+  }
+  Layout layout_ = layout.value();
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
+  SparseCsrTensor self = new_compressed_tensor(options);
+  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
   return self;
 }
+
+template <Layout required_layout>
+Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
+                                                 const Tensor& plain_indices,
+                                                 const Tensor& values,
+                                                 IntArrayRef size,
+                                                 c10::optional<ScalarType> dtype,
+                                                 c10::optional<Layout> layout,
+                                                 c10::optional<Device> device,
+                                                 c10::optional<bool> pin_memory) {
+  Layout layout_ = layout.value_or(required_layout);
+  TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
+  SparseCsrTensor self = new_compressed_tensor(options);
+  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  return self;
+}
+
+#define SPARSE_COMPRESSED_TENSOR_UNSAFE(KIND, REQUIRED_LAYOUT)          \
+  Tensor _sparse_##KIND##_tensor_unsafe(const Tensor& compressed_indices, \
+                                        const Tensor& plain_indices,    \
+                                        const Tensor& values,           \
+                                        IntArrayRef size,               \
+                                        c10::optional<ScalarType> dtype, \
+                                        c10::optional<Layout> layout,   \
+                                        c10::optional<Device> device,   \
+                                        c10::optional<bool> pin_memory) { \
+    return _sparse_compressed_tensor_unsafe_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
+  }
+
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
 
 // TODO: This constructor should probably use an ATen abstract method in order
 // to make autograd dispatch available for the CSR constructor. See the relevant
@@ -465,6 +510,44 @@ Tensor empty_like_sparse_csr(
     return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
   } else {
     TORCH_CHECK(false, "Layout ", options.layout(), " is not supported");
+  }
+}
+
+Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  TORCH_CHECK_INDEX(self.dim() != 0, "select() cannot be applied to a 0-dim tensor.");
+  dim = maybe_wrap_dim(dim, self.dim());
+  auto size = self.size(dim);
+  if (index < -size || index >= size) {
+    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
+                   self.sizes(), " at dimension ", dim);
+  }
+  if (index < 0) {
+    index += size;
+  }
+
+  TORCH_INTERNAL_ASSERT(dim >= 0 && dim < self.dim());
+
+  auto new_sizes = DimVector(self.sizes());
+  new_sizes.erase(new_sizes.begin() + dim);
+  auto options = self.options();
+
+  // Selecting batch dimension
+  if (dim < self.dim() - 2) {
+    return at::native::_sparse_csr_tensor_unsafe(
+        self.crow_indices().select(dim, index),
+        self.col_indices().select(dim, index),
+        self.values().select(dim, index),
+        new_sizes,
+        optTypeMetaToScalarType(options.dtype_opt()),
+        options.layout_opt(),
+        options.device_opt(),
+        options.pinned_memory_opt());
+  } else {
+    TORCH_CHECK(self.dim() == 2, "select(): selecting rows or columns is not implemented for batched sparse CSR tensors.")
+    // Converting to COO and calling select is slighly slower than operating on the CSR indices directly
+    // for constructing a COO vector, however current version is more readable and easier to understand.
+    return self.to_sparse().select(dim, index);
   }
 }
 

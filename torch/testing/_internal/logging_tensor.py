@@ -38,6 +38,8 @@ class LoggingTensor(torch.Tensor):
 
     context = contextlib.nullcontext
 
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
         # The wrapping tensor (LoggingTensor) shouldn't hold any
@@ -55,7 +57,7 @@ class LoggingTensor(torch.Tensor):
         return r
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.elem})"
+        return super().__repr__(tensor_contents=f"{self.elem}")
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
