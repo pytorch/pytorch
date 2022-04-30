@@ -636,6 +636,7 @@ class OpInfo(object):
 
                  # the following metadata relates to JIT support and is tested for correctness in test_ops_jit.py
                  aten_name=None,  # name of the corresponding aten:: operator
+                 decomp_aten_name=None,  # if this is a composite implicit autograd op, the decomposed op
                  aten_backward_name=None,  # name of the corresponding aten:: operator for backwards
                  assert_autodiffed=False,  # if a op's aten::node is expected to be symbolically autodiffed
                  autodiff_nonfusible_nodes=None,  # a list of strings with node names that are expected to be in a
@@ -673,6 +674,7 @@ class OpInfo(object):
         # unlike aten_name, this can be None when there isn't actually
         # a backward operator in aten
         self.aten_backward_name = aten_backward_name
+        self.decomp_aten_name = decomp_aten_name
         self.variant_test_name = variant_test_name
 
         # Attribute to verify dynamic_dtypes are used.
@@ -13229,10 +13231,12 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_autodiffed=True),
     OpInfo('split',
+           # Cannot declare this aten_name because of
+           # test_variant_consistency_jit_split_list_args_cpu_float32
+           decomp_aten_name='split_with_sizes',
            variant_test_name='list_args',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=True),
-           # Weird, this hits split_with_sizes
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),

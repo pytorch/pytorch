@@ -66,6 +66,7 @@ def sigmoid_backward_decomposition(out_grad: Tensor, y: Tensor):
 
 
 @register_decomposition(aten.softplus_backward)
+@cast_for_opmath
 def softplus_backward_decomposition(
     out_grad: Tensor, x: Tensor, beta: float, threshold: float
 ):
@@ -74,6 +75,7 @@ def softplus_backward_decomposition(
 
 
 @register_decomposition(aten.elu_backward)
+@cast_for_opmath
 def elu_backward_decomposition(
     grad_output: Tensor,
     alpha: float,
@@ -110,6 +112,7 @@ def hardsigmoid_backward_decomposition(grad_output: Tensor, self: Tensor):
 
 
 @register_decomposition(aten.hardtanh_backward)
+@cast_for_opmath
 def hardtanh_backward_decomposition(
     grad_output: Tensor, self: Tensor, min_val: float, max_val: float
 ):
@@ -119,6 +122,7 @@ def hardtanh_backward_decomposition(
 
 
 @register_decomposition(aten.hardshrink_backward)
+@cast_for_opmath
 def hardshrink_backward(grad_out: Tensor, self: Tensor, lambd: float):
     return torch.where(
         (self >= -lambd) & (self <= lambd), grad_out.new_zeros(()), grad_out
@@ -136,6 +140,7 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 
 
 @register_decomposition(aten.threshold_backward)
+@cast_for_opmath
 def threshold_backward_decomposition(
     grad_output: Tensor, self: Tensor, threshold: float
 ):
@@ -183,6 +188,7 @@ def gelu_backward_decomposition(grad: Tensor, self: Tensor, approximate: str = "
 
 
 @register_decomposition(aten.mish_backward)
+@cast_for_opmath
 def mish_backward_decomposition(grad_output: Tensor, input: Tensor):
     input_tanh_softplus = torch.tanh(F.softplus(input))
     input_sigmoid = torch.sigmoid(input)
@@ -191,11 +197,13 @@ def mish_backward_decomposition(grad_output: Tensor, input: Tensor):
 
 
 @register_decomposition(aten.silu)
+@cast_for_opmath
 def silu(self: Tensor) -> Tensor:
     return self * torch.sigmoid(self)
 
 
 @register_decomposition(aten.silu_backward)
+@cast_for_opmath
 def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     sigmoid = 1 / (1 + torch.exp(-self))
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
@@ -209,6 +217,7 @@ def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tens
 
 
 @register_decomposition(aten.prelu_backward)
+@cast_for_opmath
 def prelu_backward(
     grad_output: Tensor, self: Tensor, weight: Tensor
 ) -> Tuple[Tensor, Tensor]:
@@ -230,6 +239,7 @@ def prelu_backward(
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)
+@cast_for_opmath
 def rrelu_with_noise_backward(
     grad_output: Tensor,
     self: Tensor,
@@ -259,6 +269,7 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
 
 
 @register_decomposition(aten.mse_loss_backward)
+@cast_for_opmath
 def mse_loss_backward(
     grad_output: Tensor, input: Tensor, target: Tensor, reduction: int
 ):
@@ -281,6 +292,7 @@ def huber_loss_backward(
 
 
 @register_decomposition(aten.binary_cross_entropy_backward)
+@cast_for_opmath
 def binary_cross_entropy_backward(
     grad_output: Tensor,
     self: Tensor,
@@ -371,11 +383,13 @@ def col2im_backward(
 
 
 @register_decomposition(aten.native_dropout_backward)
+@cast_for_opmath
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
 
 
 @register_decomposition(aten.logit_backward)
+@cast_for_opmath
 def logit_backward(
     grad_output: Tensor, self: Tensor, eps: Optional[float] = None
 ) -> Tensor:
@@ -396,6 +410,7 @@ def logit_backward(
 
 
 @register_decomposition(aten.native_dropout)
+@cast_for_opmath
 def native_dropout_decomposition(input, p, generator=None):
     bool_mask = torch.rand_like(input) < p
     res = bool_mask * input * float(1.0 / p)
@@ -436,6 +451,7 @@ def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
 
 
 @register_decomposition(aten.embedding_dense_backward)
+@cast_for_opmath
 def embedding_dense_backward(
     grad_output: Tensor,
     indices: Tensor,
@@ -469,6 +485,7 @@ def prod(x: List[int]):
 
 
 @register_decomposition(aten.native_layer_norm)
+@cast_for_opmath
 def native_layer_norm(
     input: Tensor,
     normalized_shape: List[int],
@@ -547,6 +564,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
 
 # TODO: this doesn't appear to have enough precision in bfloat16
 @register_decomposition(aten.addmm)
+@cast_for_opmath
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
@@ -558,6 +576,7 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
 
 
 @register_decomposition(aten.native_layer_norm_backward)
+@cast_for_opmath
 def native_layer_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -638,6 +657,7 @@ def clamp_max(self: Tensor, max: float):
 
 
 @register_decomposition(aten._fused_dropout)
+@cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)

@@ -268,11 +268,24 @@ CROSS_REF_EXCLUDE_SET = {
     ("cpu", torch.bfloat16, "addmm"),  # decomposition loses precision
     ("cpu", torch.bfloat16, "softmax"),  # needs relaxed prec
     ("cpu", torch.bfloat16, "log_softmax"),  # needs relaxed prec
+    # decomp has problem even with opmath
+    ("cuda", torch.bfloat16, "nn.functional.layer_norm"),
+    ("cuda", torch.float16, "nn.functional.layer_norm"),
+    ("cuda", torch.float16, "nn.functional.dropout"),
+    ("cuda", torch.bfloat16, "nn.functional.dropout"),
+    # decomp doesn't return correct dtype
+    ("cuda", torch.float64, "nn.functional.instance_norm"),
+    ("cuda", torch.float32, "nn.functional.instance_norm"),
+    ("cuda", torch.float64, "nn.functional.dropout"),
+    ("cuda", torch.float32, "nn.functional.dropout"),
+    ("cuda", torch.float64, "nn.functional.batch_norm"),
+    ("cuda", torch.float32, "nn.functional.batch_norm"),
     # complex is not handled
     (None, torch.complex64, "var"),
     (None, torch.complex128, "var"),
     (None, torch.complex64, "nn.functional.tanhshrink"),
     (None, torch.complex128, "nn.functional.tanhshrink"),
+    (None, torch.complex32, "sigmoid"),
     (None, torch.complex64, "sigmoid"),
     (None, torch.complex128, "sigmoid"),
     (None, torch.complex64, "tanh"),
@@ -314,7 +327,7 @@ class TestDecomp(TestCase):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
     def do_cross_ref(self, device, dtype, op, *, run_all):
-        if (device, dtype, op.name) in CROSS_REF_EXCLUDE_SET or (
+        if (torch.device(device).type, dtype, op.name) in CROSS_REF_EXCLUDE_SET or (
             None,
             dtype,
             op.name,
@@ -329,6 +342,9 @@ class TestDecomp(TestCase):
         called = set()
         decomposed = set()
 
+        saved_precision = self.precision
+        saved_rel_tol = self.rel_tol
+
         class DecompCrossRefMode(torch.Tensor):
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -337,6 +353,9 @@ class TestDecomp(TestCase):
 
             @classmethod
             def _torch_dispatch(cls, func, types, args=(), kwargs=None):
+                self.precision = saved_precision
+                self.rel_tol = saved_rel_tol
+
                 called.add(func)
 
                 # Stuff we shouldn't bother testing
@@ -391,8 +410,10 @@ class TestDecomp(TestCase):
             op.supports_autograd
             and dtype in op.supported_backward_dtypes(torch.device(device).type)
             # TODO: OpInfo really ought to error out for this case, but it's
-            # not exercised in test_ops_gradients atm
-            and not (dtype == torch.complex32 and torch.device(device).type == "cpu")
+            # not exercised in test_ops_gradients atm.  The problem is not
+            # complex32 per-se (which is supported by data movement only ops)
+            # but that when we do backwards we expect other ops like add to work
+            and not dtype == torch.complex32
         )
         samples = op.sample_inputs(device, test_dtype, requires_grad=requires_grad)
 
@@ -402,6 +423,8 @@ class TestDecomp(TestCase):
                 msg=f"aten.{aten_name} was not decomposed, saw calls for: "
                 + ", ".join(map(str, list(called))),
             )
+
+        aten_name = op.decomp_aten_name or op.aten_name
 
         func = op.get_op()
         for sample_input in samples:
@@ -418,8 +441,8 @@ class TestDecomp(TestCase):
                 decomposed.clear()
                 with enable_python_mode(DecompCrossRefMode):
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
-                if op.aten_name in decomposition_names:
-                    check_decomposed(op.aten_name)
+                if aten_name in decomposition_names:
+                    check_decomposed(aten_name)
 
                 if op.aten_backward_name in decomposition_names or run_all:
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
@@ -430,14 +453,14 @@ class TestDecomp(TestCase):
                     if not run_all:
                         check_decomposed(op.aten_backward_name)
 
-            elif op.aten_name in decomposition_names or run_all:
+            elif aten_name in decomposition_names or run_all:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 decomposed.clear()
                 with enable_python_mode(DecompCrossRefMode):
                     func(*args, **kwargs)
                 if not run_all:
-                    check_decomposed(op.aten_name)
+                    check_decomposed(aten_name)
             else:
                 assert op.supports_autograd
                 self.skipTest(
