@@ -8,6 +8,17 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+DataType indexModeToDtype(KernelIndexMode index_mode) {
+  switch (index_mode) {
+    case KernelIndexMode::INT32:
+      return DataType::Int32;
+    case KernelIndexMode::INT64:
+      return DataType::Int;
+    default:
+      TORCH_CHECK(false, "Invalid kernel index mode type.");
+  }
+}
+
 bool isFloatingPointType(DataType dtype) {
   switch (dtype) {
     case DataType::Bool:
@@ -1002,6 +1013,17 @@ size_t dataTypeSize(DataType type) {
     default:
       TORCH_INTERNAL_ASSERT(false, "Size undefined for data type, ", type);
   }
+}
+
+size_t dataTypeSize(DataType type, DataType index_type) {
+  if (type == DataType::Index) {
+    TORCH_INTERNAL_ASSERT(
+        index_type == DataType::Int32 || index_type == DataType::Int,
+        "Invalid index type of ",
+        index_type);
+    return dataTypeSize(index_type);
+  }
+  return dataTypeSize(type);
 }
 
 } // namespace cuda

@@ -101,7 +101,12 @@ void ContigIDs::handle(Merge* merge) {
   // If any root input is not contig, output is not contig
   if (!(std::all_of(
           ordered_inputs.begin(), ordered_inputs.end(), [this](IterDomain* id) {
-            return is_contig_root_.at(id) && !id->isReduction();
+            // Allow reduction tensors in contiguity check since we're using
+            // this to check contiguous vectors of reference tensors in
+            // schedulers (to set vectorization sizes), those reference tensors
+            // may have reduction dims, don't bail on contiguity just because
+            // it's a reduction dimension.
+            return is_contig_root_.at(id);
           }))) {
     return;
   }

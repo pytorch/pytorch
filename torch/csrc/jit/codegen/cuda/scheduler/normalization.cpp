@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/vectorize_helper.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -907,13 +908,22 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getPersistentHeuristics(
   size_t vectorize_factor = std::numeric_limits<size_t>::max();
 
   for (auto tv : vectorizable_inputs_outputs) {
-    const auto tv_vectorize_factor = runtime_info.getVectorizableWidth(tv);
+    const auto tv_vectorize_factor = runtime_info.getInnerDimVectorizableWidth(tv);
     vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
   }
 
   if (vectorize_factor == std::numeric_limits<size_t>::max()) {
     vectorize_factor = 1;
   }
+
+  // Try expanding vectorization to contig merged domains
+  vectorize_factor = scheduler_utils::expandVectorizationToContigMergedDomains(
+      fusion,
+      runtime_info,
+      vectorizable_inputs_outputs,
+      first_red_tv,
+      (int)(first_red_tv->nDims() - properties.inner_most_dimension_ndims),
+      vectorize_factor);
 
   // Base max dtype and n_tensor_inputs on tensors that are vectorizable (i.e.
   // share inner dimension with data pattern we're looking at).
@@ -923,8 +933,12 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getPersistentHeuristics(
     if (!tv->isFusionInput()) {
       continue;
     }
-    max_dtype_size =
-        std::max(max_dtype_size, dataTypeSize(tv->getDataType().value()));
+
+    max_dtype_size = std::max(
+        max_dtype_size,
+        dataTypeSize(
+            tv->getDataType().value(),
+            indexModeToDtype(runtime_info.getIndexMode())));
     n_tensor_inputs++;
   }
 

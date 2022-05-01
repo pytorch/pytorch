@@ -410,7 +410,19 @@ SchedulerRuntimeInfo::SchedulerRuntimeInfo(
     const at::ArrayRef<IValue>& inputs,
     bool create_expr_evaluator)
     : complete_fusion_(complete_fusion) {
-  collectVectorizationInfo(inputs);
+  TORCH_INTERNAL_ASSERT(
+      complete_fusion_->inputs().size() == inputs.size(),
+      "Invalid number of arguments passed in for provided fusion group.");
+
+  for (auto inp_i : c10::irange(inputs.size())) {
+    auto aten_inp = inputs[inp_i];
+    if (aten_inp.isTensor()) {
+      auto fusion_inp = complete_fusion_->inputs()[inp_i];
+      auto data_ptr = aten_inp.toTensor().data_ptr();
+      input_ptrs_[fusion_inp] = (size_t)data_ptr;
+    }
+  }
+
   expression_evaluator_ =
       std::make_unique<ExpressionEvaluator>(complete_fusion_);
   if (create_expr_evaluator) {
@@ -419,22 +431,13 @@ SchedulerRuntimeInfo::SchedulerRuntimeInfo(
   collectIndexModeInfo(inputs);
 }
 
-SchedulerRuntimeInfo::SchedulerRuntimeInfo(
-    const SchedulerRuntimeInfo& copy_from)
-    : complete_fusion_(copy_from.complete_fusion_),
-      alignment_map_(copy_from.alignment_map_),
-      common_alignment_size_(copy_from.common_alignment_size_) {
-  expression_evaluator_ =
-      std::make_unique<ExpressionEvaluator>(complete_fusion_);
-}
-
-size_t SchedulerRuntimeInfo::getAlignmentSize(TensorView* tv) {
-  auto alignment_entry = alignment_map_.find(tv);
-  if (alignment_entry == alignment_map_.end()) {
-    return max_alignment_size_in_byte;
-  } else {
-    return alignment_entry->second;
+// TODO: Output tensors could have an alignment that is not 16 Bytes passed in
+// from user.
+size_t SchedulerRuntimeInfo::ptrOf(TensorView* tv) {
+  if (input_ptrs_.find(tv) != input_ptrs_.end()) {
+    return input_ptrs_.at(tv);
   }
+  return max_alignment_size_in_byte;
 }
 
 void SchedulerRuntimeInfo::initializeExpressionEvaluator(
@@ -445,148 +448,49 @@ void SchedulerRuntimeInfo::initializeExpressionEvaluator(
       executor_utils::bindFusionInputs(inputs, complete_fusion_);
 }
 
-size_t SchedulerRuntimeInfo::collectAlignmentSize(
-    const at::Tensor& tensor) const {
-  const size_t address = reinterpret_cast<size_t>(tensor.data_ptr());
+size_t SchedulerRuntimeInfo::computeAlignmentSize(size_t ptr_address) {
   size_t alignment_size = 1;
   size_t next_alignment_size = 2;
 
-  while (alignment_size <= max_alignment_size_in_byte &&
-         address % next_alignment_size == 0) {
+  while (next_alignment_size <= max_alignment_size_in_byte &&
+         ptr_address % next_alignment_size == 0) {
     alignment_size = next_alignment_size;
     next_alignment_size *= 2;
   }
-
   return alignment_size;
 }
 
-void SchedulerRuntimeInfo::collectVectorizationInfo(
-    const at::ArrayRef<IValue>& inputs) {
-  common_alignment_size_ = max_alignment_size_in_byte;
-  size_t number_of_inputs = complete_fusion_->inputs().size();
-  std::unordered_map<TensorView*, size_t> cg_tensor_to_at_tensor_index;
-
-  for (auto input_index : c10::irange(number_of_inputs)) {
-    if (auto input_tensor = dynamic_cast<TensorView*>(
-            complete_fusion_->inputs()[input_index])) {
-      if (input_tensor->nDims() == 0) {
-        // A 0-dim tensor input would not need vectorization
-        continue;
-      }
-      if (input_tensor->domain()
-              ->domain()[input_tensor->nDims() - 1]
-              ->isBroadcast()) {
-        // skip the tensors with innermost iterdomain broadcasted,
-        //  as we will not vectorize these.
-        continue;
-      }
-
-      // Collect strides of the input tensor
-      TORCH_INTERNAL_ASSERT(inputs[input_index].isTensor());
-      const auto& at_tensor = inputs[input_index].toTensor();
-
-      cg_tensor_to_at_tensor_index.emplace(
-          std::make_pair(input_tensor, input_index));
-
-      // Collect alignment of the input tensor
-      auto alignment_size = collectAlignmentSize(at_tensor);
-      common_alignment_size_ = std::min(alignment_size, common_alignment_size_);
-      alignment_map_[input_tensor] = alignment_size;
-    }
+size_t SchedulerRuntimeInfo::getAlignmentSize(TensorView* tv) {
+  auto alignment_entry = alignment_map_.find(tv);
+  if (alignment_entry != alignment_map_.end()) {
+    return alignment_entry->second;
   }
 
-  // Compute max vector word size for each input,
-  //  tensors with inner most broadcast already
-  //  filtered out.  common_alignment_size_ is
-  //  computed up to this point.
-  for (auto it : cg_tensor_to_at_tensor_index) {
-    vectorword_map_[it.first] = collectMaxVectorizeSize(
-        inputs[it.second].toTensor(), common_alignment_size_);
-  }
+  const size_t address = ptrOf(tv);
+
+  auto alignment_size = SchedulerRuntimeInfo::computeAlignmentSize(ptrOf(tv));
+  alignment_map_[tv] = alignment_size;
+  return alignment_size;
 }
 
-// This can be made more aggressive in the presence of broadcasts. For
-// example, when the innermost is a broadcast, its stride may not matter.
-size_t SchedulerRuntimeInfo::collectMaxVectorizeSize(
-    const at::Tensor& tensor,
-    size_t max_vector_size_in_byte) {
-  const size_t max_vector_size = max_vector_size_in_byte / tensor.itemsize();
-
-  // If all dimensions are size 1, do not impose any restriction on
-  // vector size.
-  const bool all_dim_size_one = std::all_of(
-      tensor.sizes().begin(), tensor.sizes().end(), [](const auto size) {
-        return size == 1;
-      });
-  if (all_dim_size_one) {
-    return max_vector_size;
+// Gets maximum vectorizable width of tv, assumes we can merge across all
+// iteration domains if contiguous. Cannot permute the dimensions to fix
+// contiguity.
+size_t SchedulerRuntimeInfo::getMaxVectorizableWidth(TensorView* tv) {
+  // Gets the vectorizable width of the tv starting from the inner most
+  // dimension, working its way towards the outer most dimension, if they're
+  // contiguous. Ignores broadcast and reduction domains.
+  auto max_vectorword_map_it_ = max_vectorword_map_.find(tv);
+  if (max_vectorword_map_it_ != max_vectorword_map_.end()) {
+    return max_vectorword_map_it_->second;
   }
 
-  int64_t vectorized_axis = -1;
-  int64_t innermost_size = 0;
-
-  for (const auto i : c10::irange(tensor.ndimension())) {
-    auto axis = tensor.ndimension() - 1 - i;
-    auto stride = tensor.stride(axis);
-    auto size = tensor.size(axis);
-    // If size is 1, the dimension is a broadcast and can be ignored.
-    if (size == 1) {
-      continue;
-    }
-    // Vectorization isn't allowed if the stride is not 1.
-    if (stride != 1) {
-      return 1;
-    }
-    // Vectorize this dimension
-    vectorized_axis = axis;
-    innermost_size = size;
-  }
-
-  if (vectorized_axis < 0) {
-    // No vectorized axis found
-    return 1;
-  }
-
-  size_t vector_size = 1;
-  size_t next_vector_size = vector_size * 2;
-
-  // Try until vector size exceeds the max allowed size
-  while (next_vector_size <= max_vector_size) {
-    if (innermost_size % next_vector_size != 0) {
-      break;
-    }
-
-    // If any stride is not divisible by the next word size,
-    //  we cannot vectorize with this width. Note that the innermost
-    //  stride is already validated to be 1.
-    bool stride_validated = true;
-    for (const auto i : c10::irange(vectorized_axis)) {
-      if (tensor.strides().at(i) % next_vector_size != 0) {
-        stride_validated = false;
-        break;
-      }
-    }
-
-    if (!stride_validated) {
-      break;
-    }
-
-    vector_size = next_vector_size;
-    next_vector_size *= 2;
-  }
-
-  return vector_size;
-}
-
-size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
-  auto recorded_size_it = vectorword_map_.find(tv);
-  if (recorded_size_it != vectorword_map_.end()) {
-    return recorded_size_it->second;
-  }
-
-  // If we don't have an record, either it is a tv with innermost
-  //  broadcast, or it is an intermediate tensor allocated by fuser
-  auto tv_root = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  // If we don't have an record, either it is a tv with innermost broadcast,
+  // or it is an intermediate tensor allocated by fuser. Logic copied to get
+  // root according to scheduler_utils::innerMostRootDim.
+  auto tv_root = TensorDomain::noReductions(
+      tv->hasReduction() && tv->hasRFactor() ? tv->getRootDomain()
+                                             : tv->getMaybeRFactorDomain());
   auto tv_root_size = tv_root.size();
 
   // Filter out 0-dim tensors
@@ -599,25 +503,111 @@ size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
     return 1;
   }
 
-  // Filter out innermost broadcast tensors
-  auto inner_dimension = tv_root[tv_root_size - 1];
-  if (inner_dimension->isBroadcast()) {
+  size_t item_size =
+      dataTypeSize(tv->dtype(), indexModeToDtype(getIndexMode()));
+
+  // Alignment should always at least be the data type size
+  TORCH_INTERNAL_ASSERT(getAlignmentSize(tv) % item_size == 0);
+  size_t max_vector_size = getAlignmentSize(tv) / item_size;
+
+  if (max_vector_size == 1) {
     return 1;
   }
 
-  // Handle intermediate or output tensors that
-  //  will be allocated by fuser
-  auto maybe_data_type = tv->getDataType();
+  auto numel = 1;
+  for (auto i : c10::irange(tv_root_size)) {
+    auto root_i = tv_root_size - i - 1;
+    auto root_id = tv_root[root_i];
 
-  // Do not vectorize on data with unknown type
-  if (!maybe_data_type.has_value()) {
+    if (root_id->extent()->isOneInt() || root_id->isBroadcast()) {
+      continue;
+    }
+
+    // Not contiguous
+    if (!tv->domain()->contiguity()[root_i]) {
+      break;
+    }
+
+    auto dim_size = expression_evaluator_->evaluate(root_id->extent());
+    // Inference failed for some reason, assume not-contiguous at this point
+    if (!dim_size.has_value()) {
+      break;
+    }
+
+    // Still contiguous
+    numel *= dim_size.value();
+  }
+
+  // Assuming intermediate tensors have friendly alignment, and
+  //  all contiguity true. Determine the largest power of 2 below
+  //  innermost dimension size for the word size of vectorizaiton
+  size_t vector_size = 1;
+  size_t next_vector_size = 2;
+  while (next_vector_size <= max_vector_size && next_vector_size <= numel &&
+         numel % next_vector_size == 0) {
+    vector_size = next_vector_size;
+    next_vector_size *= 2;
+  }
+
+  // save output to avoid re-compute
+  max_vectorword_map_[tv] = vector_size;
+
+  return vector_size;
+}
+
+// Gets the vectorizable width of the inner most dimension of tv if it's
+// contiguous. Ignores inner most dimensions that are broadcast or reduction.
+size_t SchedulerRuntimeInfo::getInnerDimVectorizableWidth(TensorView* tv) {
+  auto inner_vectorword_map_it_ = inner_vectorword_map_.find(tv);
+  if (inner_vectorword_map_it_ != inner_vectorword_map_.end()) {
+    return inner_vectorword_map_it_->second;
+  }
+
+  // If we don't have an record, either it is a tv with innermost broadcast,
+  // or it is an intermediate tensor allocated by fuser. Logic copied to get
+  // root according to scheduler_utils::innerMostRootDim.
+  auto tv_root = TensorDomain::noReductions(
+      tv->hasReduction() && tv->hasRFactor() ? tv->getRootDomain()
+                                             : tv->getMaybeRFactorDomain());
+  auto tv_root_size = tv_root.size();
+
+  // Filter out 0-dim tensors
+  if (tv_root_size < 1) {
     return 1;
   }
 
-  size_t item_size = dataTypeSize(maybe_data_type.value());
-  // Assume we don't have non-divisible types for now.
-  TORCH_INTERNAL_ASSERT(max_alignment_size_in_byte % item_size == 0);
-  size_t max_vector_size = max_alignment_size_in_byte / item_size;
+  // Filter out mismatched contiguity info
+  if (tv_root_size != tv->domain()->contiguity().size()) {
+    return 1;
+  }
+
+  auto inner_most_dim = scheduler_utils::innerMostRootDim(tv);
+
+  int id_pos = -1;
+  for (auto root_i : c10::irange(tv_root_size)) {
+    if (tv_root[root_i] == inner_most_dim) {
+      id_pos = root_i;
+      break;
+    }
+  }
+
+  // Something went wrong with finding the inner most dimension, just
+  // return 1.
+  if (id_pos == -1) {
+    return 1;
+  }
+
+  // If the inner most dimension is not contiguous return 1
+  if (!tv->domain()->contiguity()[id_pos]) {
+    return 1;
+  }
+
+  size_t item_size =
+      dataTypeSize(tv->dtype(), indexModeToDtype(getIndexMode()));
+
+  // Alignment should always at least be the data type size
+  TORCH_INTERNAL_ASSERT(getAlignmentSize(tv) % item_size == 0);
+  size_t max_vector_size = getAlignmentSize(tv) / item_size;
 
   // Assuming intermediate tensors have friendly alignment, and
   //  all contiguity true. Determine the largest power of 2 below
@@ -625,7 +615,7 @@ size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
   size_t vector_size = 1;
   size_t next_vector_size = 2;
   auto maybe_inner_dimension_size =
-      expression_evaluator_->evaluate(inner_dimension->extent());
+      expression_evaluator_->evaluate(inner_most_dim->extent());
   TORCH_INTERNAL_ASSERT(maybe_inner_dimension_size.has_value());
   size_t inner_dimension_size = maybe_inner_dimension_size.value();
 
@@ -637,7 +627,7 @@ size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
   }
 
   // save output to avoid re-compute
-  vectorword_map_[tv] = vector_size;
+  inner_vectorword_map_[tv] = vector_size;
 
   return vector_size;
 }

@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/vectorize_helper.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -805,6 +806,9 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
            red_expr->getExprType().value() == ExprType::WelfordOp),
       "TensorView doesn't have a reduction.");
 
+  auto properties =
+      scheduler_utils::getProperties(fusion, runtime_info, reduction_tv);
+
   auto tv_inps = ir_utils::filterByType<TensorView>(fusion->inputs());
   TORCH_INTERNAL_ASSERT(
       !tv_inps.empty(),
@@ -835,13 +839,23 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
   size_t vectorize_factor = std::numeric_limits<size_t>::max();
 
   for (auto tv : vectorizable_inputs_outputs) {
-    const auto tv_vectorize_factor = runtime_info.getVectorizableWidth(tv);
+    const auto tv_vectorize_factor =
+        runtime_info.getInnerDimVectorizableWidth(tv);
     vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
   }
 
   if (vectorize_factor == std::numeric_limits<size_t>::max()) {
     vectorize_factor = 1;
   }
+
+  // Try expanding vectorization to contig merged domains
+  vectorize_factor = scheduler_utils::expandVectorizationToContigMergedDomains(
+      fusion,
+      runtime_info,
+      vectorizable_inputs_outputs,
+      reduction_tv,
+      (int)(reduction_tv->nDims() - properties.inner_most_dimension_ndims),
+      vectorize_factor);
 
   // Base max dtype and n_tensor_inputs on tensors that are vectorizable (i.e.
   // share inner dimension with data pattern we're looking at).
@@ -851,13 +865,13 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     if (!tv->isFusionInput()) {
       continue;
     }
-    max_dtype_size =
-        std::max(max_dtype_size, dataTypeSize(tv->getDataType().value()));
+    max_dtype_size = std::max(
+        max_dtype_size,
+        dataTypeSize(
+            tv->getDataType().value(),
+            indexModeToDtype(runtime_info.getIndexMode())));
     n_tensor_inputs++;
   }
-
-  auto properties =
-      scheduler_utils::getProperties(fusion, runtime_info, reduction_tv);
 
   return reductionHeuristic(
       properties.total_reduction_numel,

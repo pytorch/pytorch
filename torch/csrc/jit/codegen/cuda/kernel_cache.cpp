@@ -79,6 +79,11 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
         encodeBuffer(stride, encoding_);
         encoding_.push_back(' ');
       }
+      encoding_.push_back('a');
+      encodeBuffer(
+          SchedulerRuntimeInfo::computeAlignmentSize(
+              (size_t)input_tensor.data_ptr()),
+          encoding_);
       encoding_.push_back('d');
       encodeBuffer(input_tensor.device().index(), encoding_);
     } else {
@@ -86,9 +91,6 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
       encoding_.push_back('s');
     }
     encoding_.push_back(';');
-  }
-  if (additional_info) {
-    encodeBuffer(additional_info->getCommonAlignmentSize(), encoding_);
   }
 
   auto& entry = encoding_lookup_[encoding_];

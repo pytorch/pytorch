@@ -15,8 +15,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-enum class KernelIndexMode { INT32, INT64 };
-
 // https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
 struct TypeHash {
   template <typename T>
@@ -77,6 +75,10 @@ enum class DataType {
   // Null
   Null
 };
+
+enum class KernelIndexMode { INT32, INT64 };
+
+DataType indexModeToDtype(KernelIndexMode index_mode);
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
@@ -341,6 +343,9 @@ TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
 
 TORCH_CUDA_CU_API size_t dataTypeSize(DataType type);
+
+// If the index type is known it will be automatically used here
+TORCH_CUDA_CU_API size_t dataTypeSize(DataType type, DataType index_type);
 
 enum class LaunchConfigType {
   Compatible,
