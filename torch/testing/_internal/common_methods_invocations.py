@@ -9270,6 +9270,8 @@ op_db: List[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad',
                                     dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_method_grad',
@@ -9906,12 +9908,7 @@ op_db: List[OpInfo] = [
                    supports_sparse=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   supports_out=False,
-                   skips=(
-                       # numpy() raises TypeError: Got unsupported ScalarType ComplexHalf
-                       DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_small",
-                                    dtypes=(torch.complex32,)),
-                   )),
+                   supports_out=False),
     UnaryUfuncInfo('conj_physical',
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16,
@@ -9927,9 +9924,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, )),
                        DecorateInfo(unittest.skip("Skipped! conj_physical_ not implemented for sparse"),
                                     'TestSparseUnaryUfuncs', 'test_inplace'),
-                       # numpy() raises TypeError: Got unsupported ScalarType ComplexHalf
-                       DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_small",
-                                    dtypes=(torch.complex32,)),
                        # RuntimeError: "nonzero_count_cpu" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, "TestSparseCSR", "test_sparse_csr_consistency",
                                     dtypes=(torch.complex32,)),
@@ -10013,6 +10007,8 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                                    dtypes=(torch.cdouble,), device_type='cuda'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
@@ -10343,6 +10339,8 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64)),
                        # 76047
                        DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                                     dtypes=(torch.float32, torch.float64)),
@@ -12935,6 +12933,10 @@ op_db: List[OpInfo] = [
                 }),
                 'TestUnaryUfuncs', device_type='cuda',
             ), ],
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
+                         dtypes=(torch.cfloat,), device_type='cpu'),
+        )
     ),
     # TODO: combine this with the nn.functional.silu OpInfo when
     # complex autodiff for silu is supported or when
@@ -12966,6 +12968,8 @@ op_db: List[OpInfo] = [
                 'TestUnaryUfuncs', device_type='cuda',
             ), ],
         skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
+                         dtypes=(torch.cfloat,), device_type='cpu'),
             # FIXME: intentionally misreports dtypes
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
             # FIXME: numpy reference diverges: Comparing (nan+nanj) and (-0+0j)
@@ -13413,7 +13417,8 @@ op_db: List[OpInfo] = [
     MvlGammaInfo(variant_test_name='mvlgamma_p_1',
                  domain=(1, None),
                  skips=skips_mvlgamma() + \
-                 (DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                 (DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                  DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                dtypes=(torch.float16, torch.int8)),
                   DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
                                dtypes=(torch.int8,)),),
@@ -13421,6 +13426,7 @@ op_db: List[OpInfo] = [
     MvlGammaInfo(variant_test_name='mvlgamma_p_3',
                  domain=(2, None),
                  skips=skips_mvlgamma(skip_redundant=True) + (
+                     DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                      DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                   dtypes=(torch.float16, torch.int8)),
                      DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
@@ -13430,6 +13436,7 @@ op_db: List[OpInfo] = [
     MvlGammaInfo(variant_test_name='mvlgamma_p_5',
                  domain=(3, None),
                  skips=skips_mvlgamma(skip_redundant=True) + (
+                     DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                      DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                   dtypes=(torch.float16, torch.int8)),
                      DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
@@ -13664,6 +13671,8 @@ op_db: List[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                                    dtypes=(torch.cdouble,), device_type='cuda'),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    ),
@@ -14165,7 +14174,11 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.half: 5e-2}),),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
-                   supports_fwgrad_bwgrad=True),
+                   supports_fwgrad_bwgrad=True,
+                   skips=(
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    dtypes=(torch.cfloat, torch.cdouble)),
+                   )),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
                    supports_sparse=True,
@@ -15841,10 +15854,12 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/56012
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                    dtypes=(torch.chalf,)),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=[torch.complex64, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=[torch.complex64, torch.cdouble]),
+                                    dtypes=[torch.chalf, torch.complex64, torch.cdouble]),
                        # RuntimeError: "div_true_cuda" not implemented for 'ComplexHalf'
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
                                     dtypes=(torch.complex32,)),
