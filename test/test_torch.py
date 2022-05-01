@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize)
+    skipIfNotRegistered, bytes_to_scalar, parametrize, noncontiguous_like)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -2754,6 +2754,55 @@ else:
             sz = list(x.size())
             sz[d] = 0
             self.assertEqual(sz, y.size())
+
+    # FIXME: move to indexing test suite
+    @onlyCPU
+    @parametrize("reduce", ['prod', 'amin', 'amax', 'mean'])
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_index_reduce(self, device, dtype, reduce):
+        size = (3, 4, 5)
+        index_dtypes = [torch.int, torch.long]
+        include_selfs = [True, False]
+        reduction_init = {'prod': 1, 'mean': 0, 'amin': float('inf'), 'amax': -float('inf')}
+
+        for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
+            for idx_dtype, include_self in product(index_dtypes, include_selfs):
+                for dim in range(len(size)):
+                    num_src = np.random.randint(10)
+                    num_dest = size[dim]
+                    dest = torch.randn(size, dtype=dtype, device=device)
+                    if not dest_contig:
+                        dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=True)
+                    src = torch.randn(*size[:dim], num_src, *size[dim + 1:], dtype=dtype, device=device)
+                    if not src_contig:
+                        src = noncontiguous_like(src)
+                    idx = torch.randint(num_dest, (num_src,), dtype=idx_dtype, device=device)
+                    if not index_contig:
+                        idx = noncontiguous_like(idx)
+                    expected = dest.clone()
+                    dest._index_reduce_(dim, idx, src, reduce, include_self=include_self)
+                    # fill rows in idx with reduction inits if include_self=False
+                    if (not include_self):
+                        expected.index_fill_(dim, idx.long(), reduction_init[reduce])
+                    expected = expected.transpose(0, dim)
+                    src = src.transpose(0, dim)
+                    for i in range(num_src):
+                        if reduce == 'prod':
+                            expected[idx[i]] *= src[i]
+                        elif reduce == 'amin':
+                            torch.minimum(expected[idx[i]], src[i], out=expected[idx[i]])
+                        elif reduce == 'amax':
+                            torch.maximum(expected[idx[i]], src[i], out=expected[idx[i]])
+                        else:
+                            expected[idx[i]] += src[i]
+                    if reduce == 'mean':
+                        counts = torch.ones_like(expected) if include_self else torch.zeros_like(expected)
+                        counts.index_add_(0, idx, torch.ones_like(src))
+                        counts.masked_fill_(counts == 0, 1)
+                        expected /= counts
+                    expected = expected.transpose(0, dim)
+
+                    self.assertEqual(dest, expected)
 
     # FIXME: move to test indexing
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))

@@ -65,6 +65,7 @@ const auto& intAttr = Symbol::attr("profiled_int");
 const auto& boolListAttr = Symbol::attr("profiled_bool_list");
 const auto& boolAttr = Symbol::attr("profiled_bool");
 const auto& strAttr = Symbol::attr("profiled_str");
+const auto& ivalAttr = Symbol::attr("profiled_ival");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
@@ -558,13 +559,10 @@ class IrParser {
       auto tensor_type = jit_output->type()->cast<TensorType>();
       TORCH_INTERNAL_ASSERT(
           tensor_type, "output of fusion group is not TensorType.");
-      if (tensor_type->scalarType() == at::ScalarType::Half) {
-        // No need to update value_map_ after this point.
-        out = castOp(DataType::Half, out)->as<TensorView>();
-      }
-      if (tensor_type->scalarType() == at::ScalarType::BFloat16) {
-        // No need to update value_map_ after this point.
-        out = castOp(DataType::BFloat16, out)->as<TensorView>();
+      if (tensor_type->scalarType().has_value()) {
+        out = optionalCastStrict(
+                  aten_to_data_type(*tensor_type->scalarType()), out)
+                  ->as<TensorView>();
       }
       fusion->addOutput(out);
 
@@ -1142,26 +1140,7 @@ class IrParser {
                 ? *value_map[node->inputs()[2]->unique()]
                 : nullptr;
 
-            Val* out = nullptr;
-            if (min && max) {
-              out = clamp(operand, min, max);
-            } else if (min) {
-              out = binaryOp(
-                  BinaryOpType::Max,
-                  operand,
-                  min,
-                  TypePromotion::default_op_config);
-            } else if (max) {
-              out = binaryOp(
-                  BinaryOpType::Min,
-                  operand,
-                  max,
-                  TypePromotion::default_op_config);
-            } else {
-              TORCH_INTERNAL_ASSERT(
-                  false,
-                  "clamp: At least one of 'min' or 'max' must not be None");
-            }
+            Val* out = clamp(operand, min, max);
             value_map.emplace(node->output()->unique(), out);
           },
           isInputNonSizeZeroTensor,
@@ -1973,12 +1952,24 @@ class IrParser {
               TORCH_INTERNAL_ASSERT(
                   dim_value.has_value(), "dim in softmax is not valid");
 
+              auto data_type = DataType::Null;
+              if (const auto opt_ivalue = toIValue(node->input(2))) {
+                if (!opt_ivalue.value().isNone()) {
+                  data_type = aten_to_data_type(opt_ivalue->toScalarType());
+                }
+              }
+
+              input = (data_type != DataType::Null)
+                  ? optionalCastStrict(data_type, input)->as<TensorView>()
+                  : input;
+
               bool is_log_softmax = node->kind() ==
                   c10::Symbol::fromQualString("aten::log_softmax");
 
               auto output = (is_log_softmax)
                   ? log_softmax(input, dim_value.value())
                   : softmax(input, dim_value.value());
+
               value_map.emplace(node->output()->unique(), output);
             },
             [](const Node* node) -> bool {
@@ -3177,6 +3168,32 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
   pn->setCallback(ivalue_profiler);
 }
 
+// profile ivalue, used for optional arguments
+void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    if (!pn->hasAttribute(ivalAttr)) {
+      pn->ival_(ivalAttr, value);
+    } else {
+      auto profiled_ival = pn->ival(ivalAttr);
+      TORCH_INTERNAL_ASSERT(
+          value == profiled_ival, "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
 void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
@@ -3568,6 +3585,25 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     switch (offset) {
       case 1:
         profileInt(pr, node, offset);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  static auto log_softmax_data_schema =
+      getOperatorForLiteral(
+          "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor")
+          ->schema();
+  static auto softmax_data_schema =
+      getOperatorForLiteral(
+          "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor")
+          ->schema();
+  if (node->matches(log_softmax_data_schema) ||
+      node->matches(softmax_data_schema)) {
+    switch (offset) {
+      case 2:
+        profileIval(pr, node, offset);
         return true;
       default:
         return false;
