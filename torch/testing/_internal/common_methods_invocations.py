@@ -6,7 +6,6 @@ import copy
 from enum import Enum
 import operator
 import random
-from this import s
 import unittest
 import math
 
