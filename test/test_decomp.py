@@ -1,5 +1,6 @@
 # Owner(s): ["module: primTorch"]
 
+from collections import defaultdict
 from torch import Tensor
 import torch.autograd
 from torch.utils._python_dispatch import enable_python_mode
@@ -287,6 +288,7 @@ CROSS_REF_EXCLUDE_SET = {
 }
 
 all_decomposed = set()
+all_called = defaultdict(int)
 
 # Helpful snippet for testing coverage
 """
@@ -295,6 +297,21 @@ def check_coverage():
     print("missing coverage:")
     print("\n".join(map(str, decomposition_table.keys() - all_decomposed)))
 atexit.register(check_coverage)
+"""
+
+# Helpful snippet for Horace to create his google sheet :)
+"""
+import atexit
+def dump_ops():
+    with open('run_ops.txt', 'w') as f, open('count_ops.txt', 'w') as g:
+        for op, count in sorted(all_called.items(), key=lambda x: x[0].__name__):
+            f.write(f'{op.__name__}\n')
+            g.write(f'{count}\n')
+    with open('run_decompositions.txt', 'w') as f:
+        for op in sorted([i.__name__ for i in all_decomposed]):
+            f.write(f'{op}\n')
+
+atexit.register(dump_ops)
 """
 
 
@@ -351,6 +368,7 @@ class TestDecomp(TestCase):
                 self.rel_tol = saved_rel_tol
 
                 called.add(func)
+                all_called[func] += 1
 
                 # Stuff we shouldn't bother testing
                 # (TODO: remove detach from the decomp table?)
