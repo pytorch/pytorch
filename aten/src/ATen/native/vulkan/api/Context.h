@@ -40,6 +40,7 @@ class Context final {
   GPU gpu();
   Command& command();
   Shader& shader();
+  QueryPool& querypool();
   Pipeline& pipeline();
   Descriptor& descriptor();
   Resource& resource();
@@ -119,6 +120,10 @@ inline Descriptor& Context::descriptor() {
 
 inline Resource& Context::resource() {
   return threadcontext_.resource();
+}
+
+inline QueryPool& Context::querypool() {
+  return threadcontext_.querypool();
 }
 
 inline VkDevice Context::device() {
