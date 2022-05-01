@@ -468,17 +468,10 @@ const auto entr_string = jiterator_stringify(
 
 const auto bessel_j0_string = jiterator_stringify(
     template <typename T>
-    static inline T polevl(T x, const T c[], size_t n) {
-        T y;
-        const T *p;
-        size_t i;
+    static inline T polevl(const T x, const T c[], size_t n) {
+        T y = 0;
 
-        p = c;
-        y = x + *p++;
-        i = n - 1;
-
-        do y = y * x + *p++;
-        while (--i);
+        for (size_t index = 0; index <= n; index++) y = y * x + c[index];
 
         return y;
     }
@@ -762,13 +755,13 @@ const auto bessel_y1_string = bessel_j1_string + jiterator_stringify(
     template <typename T>
     T bessel_y1(T x) {
         static const T PP[7] = {
-                    +7.62125616208173112003e-04,
-                    +7.31397056940917570436e-02,
-                    +1.12719608129684925192e+00,
-                    +5.11207951146807644818e+00,
-                    +8.42404590141772420927e+00,
-                    +5.21451598682361504063e+00,
-                    +1.00000000000000000254e+00,
+                +7.62125616208173112003e-04,
+                +7.31397056940917570436e-02,
+                +1.12719608129684925192e+00,
+                +5.11207951146807644818e+00,
+                +8.42404590141772420927e+00,
+                +5.21451598682361504063e+00,
+                +1.00000000000000000254e+00,
         };
 
         static const T PQ[7] = {
