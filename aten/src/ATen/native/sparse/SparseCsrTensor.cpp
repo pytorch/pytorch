@@ -17,6 +17,7 @@
 #else
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_validate_sparse_compressed_tensor_args_native.h>
@@ -210,26 +211,31 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
 
 }
 
-void _validate_sparse_compressed_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size, Layout layout) {
-  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, layout);
+void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, Layout layout) {
+  _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout);
 }
 
 void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
   _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseCsr);
 }
 
-// Construction of CSR tensors.
-SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
+// Construction of CSR, CSC, BSR, and BSC tensors.
+
+// Note: The usage of "Csr" in names like SparseCsrTensor,
+// SparseCsrCPU, SparseCsrCUDA, and SparseCsrTensorImpl exists because
+// of historical reasons (that ought to be removed in future) and does
+// not mean that the corresponding functionality would be CSR layout
+// only specific.
+SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor
   // constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  Layout layout = options.layout();
-  TORCH_INTERNAL_ASSERT(layout == kSparseCsr);
+  Layout layout = AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(options.layout(), "new_compressed_tensor", [&] { return the_layout; });
   DispatchKey dispatch_key;
 
   TORCH_CHECK_NOT_IMPLEMENTED(
     options.device().type() == kCPU || options.device().type() == kCUDA,
-     "Could not run '", "sparse_csr_tensor", "' from the '", options.device(), "' device.)");
+     "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
 
   if (options.device().is_cuda()) {
     dispatch_key = DispatchKey::SparseCsrCUDA;
@@ -241,20 +247,56 @@ SparseCsrTensor new_csr_tensor(const TensorOptions& options) {
       DispatchKeySet(dispatch_key), layout, options.dtype());
 }
 
-Tensor _sparse_csr_tensor_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
-    const Tensor& values,
-    IntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
 
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  SparseCsrTensor self = new_csr_tensor(options);
-  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values, size);
+Tensor _sparse_compressed_tensor_unsafe(const Tensor& compressed_indices,
+                                        const Tensor& plain_indices,
+                                        const Tensor& values,
+                                        IntArrayRef size,
+                                        c10::optional<ScalarType> dtype,
+                                        c10::optional<Layout> layout,
+                                        c10::optional<Device> device,
+                                        c10::optional<bool> pin_memory) {
+  if (!layout) {
+    AT_ERROR("sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
+  }
+  Layout layout_ = layout.value();
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
+  SparseCsrTensor self = new_compressed_tensor(options);
+  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
   return self;
 }
+
+template <Layout required_layout>
+Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indices,
+                                                 const Tensor& plain_indices,
+                                                 const Tensor& values,
+                                                 IntArrayRef size,
+                                                 c10::optional<ScalarType> dtype,
+                                                 c10::optional<Layout> layout,
+                                                 c10::optional<Device> device,
+                                                 c10::optional<bool> pin_memory) {
+  Layout layout_ = layout.value_or(required_layout);
+  TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
+  SparseCsrTensor self = new_compressed_tensor(options);
+  get_sparse_csr_impl(self)->set_member_tensors(compressed_indices, plain_indices, values, size);
+  return self;
+}
+
+#define SPARSE_COMPRESSED_TENSOR_UNSAFE(KIND, REQUIRED_LAYOUT)          \
+  Tensor _sparse_##KIND##_tensor_unsafe(const Tensor& compressed_indices, \
+                                        const Tensor& plain_indices,    \
+                                        const Tensor& values,           \
+                                        IntArrayRef size,               \
+                                        c10::optional<ScalarType> dtype, \
+                                        c10::optional<Layout> layout,   \
+                                        c10::optional<Device> device,   \
+                                        c10::optional<bool> pin_memory) { \
+    return _sparse_compressed_tensor_unsafe_template<REQUIRED_LAYOUT>(compressed_indices, plain_indices, values, size, dtype, layout, device, pin_memory); \
+  }
+
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
 
 // TODO: This constructor should probably use an ATen abstract method in order
 // to make autograd dispatch available for the CSR constructor. See the relevant

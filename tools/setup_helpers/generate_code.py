@@ -12,10 +12,12 @@ except ImportError:
     from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
 
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
+TAGS_PATH = "aten/src/ATen/native/tags.yaml"
 
 
 def generate_code(
     native_functions_path: Optional[str] = None,
+    tags_path: Optional[str] = None,
     install_dir: Optional[str] = None,
     subset: Optional[str] = None,
     disable_autograd: bool = False,
@@ -40,6 +42,7 @@ def generate_code(
     if subset == "pybindings" or not subset:
         gen_autograd_python(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
+            tags_path or TAGS_PATH,
             autograd_gen_dir,
             autograd_dir,
         )
@@ -51,6 +54,7 @@ def generate_code(
 
         gen_autograd(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
+            tags_path or TAGS_PATH,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
@@ -60,6 +64,7 @@ def generate_code(
     if subset == "python" or not subset:
         gen_annotated(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
+            tags_path or TAGS_PATH,
             python_install_dir,
             autograd_dir,
         )
@@ -122,6 +127,7 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Autogenerate code")
     parser.add_argument("--native-functions-path")
+    parser.add_argument("--tags-path")
     parser.add_argument("--install_dir")
     parser.add_argument(
         "--subset",
@@ -161,6 +167,7 @@ def main() -> None:
 
     generate_code(
         options.native_functions_path,
+        options.tags_path,
         options.install_dir,
         options.subset,
         options.disable_autograd,
