@@ -1097,10 +1097,6 @@ class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvpvjp', vjp_fail.union({
         # These are weirdly non-deterministic
-        skip('nn.functional.conv2d', '', device_type='cpu'),
-        skip('nn.functional.conv2d', 'no_bias', device_type='cpu'),
-        skip('nn.functional.conv2d', 'stride_no_bias', device_type='cpu'),
-        skip('nn.functional.conv2d', 'stride_padding_no_bias', device_type='cpu'),
         skip('nn.functional.fractional_max_pool2d'),  # Random
         skip('nn.functional.fractional_max_pool3d'),  # Random
 
