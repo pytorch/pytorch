@@ -811,8 +811,8 @@ class TestTypePromotion(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
     @onlyCPU
-    @dtypes(*list(itertools.product(numpy_to_torch_dtype_dict.values(),
-                                    numpy_to_torch_dtype_dict.values())))
+    @dtypes(*list(itertools.product(set(numpy_to_torch_dtype_dict.values()),
+                                    set(numpy_to_torch_dtype_dict.values()))))
     def test_numpy_array_binary_ufunc_promotion(self, device, dtypes):
         import operator
         np_type = torch_to_numpy_dtype_dict[dtypes[0]]
