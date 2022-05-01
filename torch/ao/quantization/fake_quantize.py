@@ -352,8 +352,12 @@ default_dynamic_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMax
 Default dynamic fake_quant for activations.
 """
 
-default_symmetric_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(observer=default_symmetric_fixed_qparams_range_neg1to1_observer)
-default_affine_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(observer=default_affine_fixed_qparams_range_0to1_observer)
+default_symmetric_fixed_qparams_fake_quant = (
+    FixedQParamsFakeQuantize.with_args(observer=default_symmetric_fixed_qparams_range_neg1to1_observer)
+)
+default_affine_fixed_qparams_fake_quant = (
+    FixedQParamsFakeQuantize.with_args(observer=default_affine_fixed_qparams_range_0to1_observer)
+)
 
 default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                                quant_min=-128,
