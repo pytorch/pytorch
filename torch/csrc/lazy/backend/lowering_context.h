@@ -24,6 +24,8 @@ class TORCH_API Computation {
 
   virtual const Shape& result_shape() const = 0;
 
+  virtual const std::string to_string() const = 0;
+
   virtual ~Computation() = default;
 };
 
