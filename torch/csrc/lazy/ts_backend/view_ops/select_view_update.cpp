@@ -1,8 +1,8 @@
-#include <torch/csrc/lazy/core/view_ops/select_view_update.h>
+#include <torch/csrc/lazy/ts_backend/view_ops/select_view_update.h>
 
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
-#include <torch/csrc/lazy/core/view_ops/select.h>
+#include <torch/csrc/lazy/ts_backend/view_ops/select.h>
 
 namespace torch {
 namespace lazy {
