@@ -522,6 +522,8 @@ static const char* ternary_op_type2string(TernaryOpType t) {
   switch (t) {
     case TernaryOpType::Clamp:
       return "clamp";
+    case TernaryOpType::Lerp:
+      return "lerp";
     case TernaryOpType::Threshold:
       return "threshold";
     case TernaryOpType::Where:
