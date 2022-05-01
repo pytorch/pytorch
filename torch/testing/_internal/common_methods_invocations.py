@@ -9586,6 +9586,8 @@ op_db: List[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
@@ -13085,6 +13087,8 @@ op_db: List[OpInfo] = [
         supports_gradgrad=True,
         supports_out=False,
         decorators=[
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
+                         device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
