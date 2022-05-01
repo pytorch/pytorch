@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyNativeDeviceTypes,
-    skipCUDAIfRocm, skipIf, ops, OpDTypes, skipMeta)
+    skipIf, ops, OpDTypes, skipMeta)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, integral_types, complex_types, integral_types_and,
@@ -95,9 +95,9 @@ class TestBinaryUfuncs(TestCase):
             l = sample.input
             r = sample.args[0]
 
-            np_input, np_args, np_kwargs = sample.numpy()
-            l_numpy = np_input
-            r_numpy = np_args[0]
+            numpy_sample = sample.numpy()
+            l_numpy = numpy_sample.input
+            r_numpy = numpy_sample.args[0]
 
             actual = op(l, r)
             expected = op.ref(l_numpy, r_numpy)
@@ -2143,7 +2143,6 @@ class TestBinaryUfuncs(TestCase):
             self.assertTrue(torch.all(fn(x, zero).isnan()))
 
     @onlyNativeDeviceTypes  # Check Issue https://github.com/pytorch/pytorch/issues/48130
-    @skipCUDAIfRocm  # Error happens on both ROCM and XLA
     @dtypes(*integral_types())
     def test_fmod_remainder_by_zero_integral(self, device, dtype):
         fn_list = (torch.fmod, torch.remainder)
@@ -2155,13 +2154,16 @@ class TestBinaryUfuncs(TestCase):
             if self.device_type == 'cpu':
                 with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
                     fn(x, zero)
-            # Different value for different dtype on CUDA:
-            # Due to it's an undefined behavior, CUDA returns a pattern of all 1s
-            # for integral dividend (other than int64) divided by zero. For int64,
-            # CUDA returns all 1s for negative dividend, half 1s for positive dividend.
-            # uint8: 0xff -> 255
-            # int32: 0xffffffff -> -1
+            elif torch.version.hip is not None:
+                # ROCm behavior: x % 0 is a no-op; x is returned
+                self.assertEqual(fn(x, zero), x)
             else:
+                # CUDA behavior: Different value for different dtype
+                # Due to it's an undefined behavior, CUDA returns a pattern of all 1s
+                # for integral dividend (other than int64) divided by zero. For int64,
+                # CUDA returns all 1s for negative dividend, half 1s for positive dividend.
+                # uint8: 0xff -> 255
+                # int32: 0xffffffff -> -1
                 if dtype == torch.int64:
                     self.assertEqual(fn(x, zero) == 4294967295, x >= 0)
                     self.assertEqual(fn(x, zero) == -1, x < 0)
@@ -3557,6 +3559,20 @@ class TestBinaryUfuncs(TestCase):
                 x_dtype = torch.get_default_dtype()
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
+
+    @onlyCUDA
+    @dtypes(torch.chalf,)
+    def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
+        # Tests that Tensor and CPU Scalar work for `mul` for chalf.
+        # Ideally, this should be covered by `test_complex_half_reference_testing`
+        # from test_ops.py by checking reference_samples from the OpInfo.
+        # But currently that doesn't work as sample generation requires support of
+        # `index_select` which is not implemented for `complex32` at the
+        # time of writing this test.
+        # TODO: Remove this test once above issue is fixed.
+        # Ref: https://github.com/pytorch/pytorch/pull/76364
+        x = make_tensor((2, 2), device=device, dtype=dtype)
+        self.assertEqual(x * 2.5, x * torch.tensor(2.5, device=device, dtype=dtype))
 
 
 tensor_binary_ops = [

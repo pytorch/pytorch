@@ -56,7 +56,7 @@ sudo apt-get -y install doxygen
 # Generate ATen files
 pushd "${pt_checkout}"
 pip install -r requirements.txt
-time python -m tools.codegen.gen \
+time python -m torchgen.gen \
   -s aten/src/ATen \
   -d build/aten/src/ATen
 
@@ -65,7 +65,8 @@ cp torch/_utils_internal.py tools/shared
 
 # Generate PyTorch files
 time python tools/setup_helpers/generate_code.py \
-  --native-functions-path aten/src/ATen/native/native_functions.yaml
+  --native-functions-path aten/src/ATen/native/native_functions.yaml \
+  --tags-path aten/src/ATen/native/tags.yaml
 
 # Build the docs
 pushd docs/cpp
