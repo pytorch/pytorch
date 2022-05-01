@@ -1,5 +1,4 @@
 import torch
-from torch._C import _add_docstr  # type: ignore[attr-defined]
 
 import torch._prims as prims
 import torch._prims.utils as utils
