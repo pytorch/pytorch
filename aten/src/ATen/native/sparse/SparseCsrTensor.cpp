@@ -19,9 +19,15 @@
 #include <ATen/ops/_nnz_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csc_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_validate_sparse_compressed_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
+#include <ATen/ops/_validate_sparse_csc_tensor_args_native.h>
+#include <ATen/ops/_validate_sparse_bsr_tensor_args_native.h>
+#include <ATen/ops/_validate_sparse_bsc_tensor_args_native.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/col_indices_native.h>
 #include <ATen/ops/copy_native.h>
@@ -34,6 +40,9 @@
 #include <ATen/ops/select_native.h>
 #include <ATen/ops/sparse_compressed_tensor_native.h>
 #include <ATen/ops/sparse_csr_tensor_native.h>
+#include <ATen/ops/sparse_csc_tensor_native.h>
+#include <ATen/ops/sparse_bsr_tensor_native.h>
+#include <ATen/ops/sparse_bsc_tensor_native.h>
 #include <ATen/ops/values_native.h>
 #endif
 
@@ -227,6 +236,18 @@ void _validate_sparse_bsc_tensor_args(const Tensor& ccol_indices, const Tensor& 
   _validate_sparse_compressed_tensor_args(ccol_indices, row_indices, values, size, kSparseBsc);
 }
 
+void _validate_sparse_csc_tensor_args(const Tensor& ccol_indices, const Tensor& row_indices, const Tensor& values, IntArrayRef size) {
+  _validate_sparse_compressed_tensor_args_worker(ccol_indices, row_indices, values, size, kSparseCsc);
+}
+
+void _validate_sparse_bsr_tensor_args(const Tensor& crow_indices, const Tensor& col_indices, const Tensor& values, IntArrayRef size) {
+  _validate_sparse_compressed_tensor_args_worker(crow_indices, col_indices, values, size, kSparseBsr);
+}
+
+void _validate_sparse_bsc_tensor_args(const Tensor& ccol_indices, const Tensor& row_indices, const Tensor& values, IntArrayRef size) {
+  _validate_sparse_compressed_tensor_args_worker(ccol_indices, row_indices, values, size, kSparseBsc);
+}
+
 // Construction of CSR, CSC, BSR, and BSC tensors.
 
 // Note: The usage of "Csr" in names like SparseCsrTensor,
@@ -304,29 +325,9 @@ Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed_indice
   }
 
 SPARSE_COMPRESSED_TENSOR_UNSAFE(csr, kSparseCsr);
-SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc)
-SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr)
-SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc)
-
-inline DimVector _estimate_sparse_compressed_tensor_size(
-    const Tensor& compressed_indices,
-    const Tensor& plain_indices,
-    const Tensor& values,
-    Layout layout) {
-  DimVector size = DimVector(IntArrayRef(plain_indices.sizes().data(), plain_indices.dim() - 1));
-  int64_t compressed_dim = (plain_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
-  int64_t plain_dim = AT_DISPATCH_INDEX_TYPES(plain_indices.scalar_type(), "csr_construct_check", [&]() -> int64_t { return plain_indices.max().item<index_t>() + 1; });
-  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "estimate_sparse_compressed_tensor_size",
-      [&]{
-        size.push_back(compressed_dim);
-        size.push_back(plain_dim);
-      },
-      [&]{
-        size.push_back(plain_dim);
-        size.push_back(compressed_dim);
-      });
-  return size;
-}
+SPARSE_COMPRESSED_TENSOR_UNSAFE(csc, kSparseCsc);
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsr, kSparseBsr);
+SPARSE_COMPRESSED_TENSOR_UNSAFE(bsc, kSparseBsc);
 
 DimVector _estimate_sparse_compressed_tensor_size(
     const Tensor& compressed_indices,
