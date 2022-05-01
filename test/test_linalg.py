@@ -28,7 +28,8 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
+from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9, _get_magma_version, \
+    _get_torch_cuda_version
 from torch.distributions.binomial import Binomial
 
 # Protects against includes accidentally setting the default dtype
@@ -2894,6 +2895,7 @@ class TestLinalg(TestCase):
     @slowTest
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
+    @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
                         torch.float64: 1e-5, torch.complex128: 1e-5})
@@ -5073,6 +5075,35 @@ class TestLinalg(TestCase):
             self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
             A_LU, pivots = fn(torch.lu, (2, 0, 0))
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
+
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
+                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypesIfCUDA(*floating_and_complex_types_and(
+                  *[torch.half] if not CUDA9 else [],
+                  *[torch.bfloat16] if CUDA11OrLater and SM53OrLater else []
+                  ))
+    @dtypes(*all_types_and_complex_and(torch.bfloat16))
+    def test_corner_cases_of_cublasltmatmul(self, device, dtype):
+        # common case
+        M = torch.randn(128, device=device).to(dtype)
+        m1 = torch.randn(2048, 2400, device=device).to(dtype)
+        m2 = torch.randn(128, 2400, device=device).to(dtype)
+        torch.nn.functional.linear(m1, m2, M)
+        # Ntrans_B has ld >> rows
+        m1 = torch.rand([128, 2400]).to(dtype).to(device).t()
+        m2 = torch.rand([2048, 25272]).to(dtype).to(device).t()[21940:24340]
+        M = torch.rand([128]).to(dtype).to(device)
+        torch.addmm(M, m2.t(), m1)
+        # trans_A has ld >> rows
+        m1 = torch.rand([128, 25272]).to(dtype).to(device)[:, 21940:24340].t()
+        m2 = torch.randn(2048, 2400, device=device).to(dtype)
+        M = torch.rand([128]).to(dtype).to(device)
+        torch.addmm(M, m2, m1)
+        # large tensor dim > 65535
+        M = torch.randn(16, device=device).to(dtype)
+        m1 = torch.randn(32, 131071 , device=device).to(dtype)
+        m2 = torch.randn(16, 131071, device=device).to(dtype)
+        torch.nn.functional.linear(m1, m2, M)
 
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if not CUDA9 else [],
@@ -7313,6 +7344,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         if self.device_type == 'cuda':
             sub_test(False)
 
+    @skipCUDAIfRocm  # ROCm: test was exceptionally slow, even for slow tests. Skip until triage.
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -7805,6 +7837,104 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
         self.assertEqual(a, an)
+
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @skipCUDAIfRocm
+    @dtypes(*floating_and_complex_types())
+    def test_ldl_factor(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        from scipy.linalg import ldl as scipy_ldl
+
+        def run_test(shape, batch, hermitian):
+            A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
+            actual_factors, actual_pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+            actual_L = torch.tril(actual_factors, diagonal=-1)
+            actual_L.diagonal(0, -2, -1).fill_(1.0)
+
+            # This test is designed only for inputs with 1x1 block diagonal matrix D.
+            # That is for positive definite input matrices, the pivots tensor is always > 0.
+            # If negative pivots are encountered, it means that the input matrix is not positive definite.
+            # And matrix D is a 2x2 block diagonal matrix.
+            self.assertTrue((actual_pivots > 0).all())
+
+            # Construct a 1x1 block diagonal matrix D from factors.
+            actual_D = torch.diag_embed(actual_factors.diagonal(0, -2, -1))
+
+            def T(x):
+                return x.mH if hermitian else x.mT
+            A_reconstructed = actual_L @ actual_D @ T(actual_L)
+
+            def symmetric(A):
+                return A.tril() + A.tril(-1).mT
+
+            self.assertEqual(symmetric(A) if not hermitian else A, A_reconstructed)
+
+            # Now test against SciPy implementation
+            if TEST_SCIPY:
+                A_np = A.cpu().numpy()
+                np_dtype = A_np.dtype
+                scipy_ldl_batched = np.vectorize(
+                    lambda x: scipy_ldl(x, hermitian=hermitian, lower=True),
+                    otypes=[np_dtype, np_dtype, np.dtype('int64')],
+                    signature='(m,m)->(m,m),(m,m),(m)')
+
+                expected = scipy_ldl_batched(A_np)
+                expected_L, expected_D, expected_pivots = expected
+
+                if expected_pivots.ndim > 1:
+                    permuted_expected_L = np.stack(
+                        [expected_L[i][expected_pivots[i], :] for i in range(expected_pivots.shape[0])]
+                    )
+                else:
+                    permuted_expected_L = expected_L[expected_pivots, :]
+                self.assertEqual(actual_L, permuted_expected_L)
+                self.assertEqual(actual_D, expected_D)
+            else:
+                self.assertEqual(actual_factors.shape, A.shape)
+                self.assertEqual(actual_pivots.shape, A.shape[:-1])
+                self.assertEqual(info.shape, A.shape[:-2])
+
+        # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
+        magma_254_available = self.device_type == 'cuda' and _get_magma_version() >= (2, 5, 4)
+        hermitians = (True, False) if dtype.is_complex and (self.device_type == 'cpu' or magma_254_available) else (False,)
+
+        shapes = (5,)
+        batches = ((), (4,),)
+        for shape, batch, hermitian in itertools.product(shapes, batches, hermitians):
+            run_test(shape, batch, hermitian)
+
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @skipCUDAIfRocm
+    @skipCUDAIf(_get_torch_cuda_version() < (11, 4), "not available before CUDA 11.3.1")
+    @dtypes(*floating_and_complex_types())
+    def test_ldl_solve(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_test(shape, batch, nrhs, hermitian):
+            A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
+            B = make_tensor((*A.shape[:-1], nrhs), dtype=dtype, device=device)
+            factors, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+            X = torch.linalg.ldl_solve(factors, pivots, B, hermitian=hermitian)
+
+            def symmetric(A):
+                return A.tril() + A.tril(-1).mT
+
+            # verify A @ X == B
+            expected_B = symmetric(A) @ X if not hermitian else A @ X
+            self.assertEqual(B, expected_B)
+
+        # hermitian=True is not supported on CUDA yet
+        hermitians = (True, False) if dtype.is_complex and self.device_type == 'cpu' else (False,)
+
+        shapes = (5,)
+        batches = ((), (4,), (2, 2))
+        nrhss = (1, 7)
+        for shape, batch, nrhs, hermitian in itertools.product(shapes, batches, nrhss, hermitians):
+            run_test(shape, batch, nrhs, hermitian)
 
     @onlyCUDA
     @skipCUDAIfNoMagma

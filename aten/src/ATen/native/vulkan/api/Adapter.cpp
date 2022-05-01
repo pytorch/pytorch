@@ -105,7 +105,9 @@ Adapter::Adapter(const VkPhysicalDevice handle, const uint32_t num_queues)
     handle_(VK_NULL_HANDLE),
     queues_{},
     num_compute_queues_{},
-    has_unified_memory_{false} {
+    has_unified_memory_{false},
+    timestamp_compute_and_graphics_{false},
+    timestamp_period_{0.f} {
   // This should never happen, but double check to be safe
   TORCH_CHECK(
       VK_NULL_HANDLE != physical_handle_,
@@ -113,6 +115,9 @@ Adapter::Adapter(const VkPhysicalDevice handle, const uint32_t num_queues)
 
   vkGetPhysicalDeviceProperties(physical_handle_, &properties_);
   vkGetPhysicalDeviceMemoryProperties(physical_handle_, &memory_properties_);
+
+  timestamp_compute_and_graphics_ = properties_.limits.timestampComputeAndGraphics;
+  timestamp_period_ = properties_.limits.timestampPeriod;
 
   // Check if there are any memory types have both the HOST_VISIBLE and the
   // DEVICE_LOCAL property flags
@@ -156,7 +161,9 @@ Adapter::Adapter(Adapter&& other) noexcept
     handle_(other.handle_),
     queues_(std::move(other.queues_)),
     num_compute_queues_(other.num_compute_queues_),
-    has_unified_memory_(other.has_unified_memory_) {
+    has_unified_memory_(other.has_unified_memory_),
+    timestamp_compute_and_graphics_(other.timestamp_compute_and_graphics_),
+    timestamp_period_(other.timestamp_period_) {
   other.physical_handle_ = VK_NULL_HANDLE;
   other.handle_ = VK_NULL_HANDLE;
 }
