@@ -178,7 +178,7 @@ def op_assert_equal(test_case, op, orig, decomp, args, kwargs):
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
-    test_case.assertEqual(orig, decomp, rtol=rtol, atol=atol, msg = f"{op.__name__}\nargs = {args}\nkwargs = {kwargs}")
+    test_case.assertEqual(orig, decomp, rtol=rtol, atol=atol, msg=f"{op.__name__}\nargs = {args}\nkwargs = {kwargs}")
 
 
 # Given f, returns an f' such that:

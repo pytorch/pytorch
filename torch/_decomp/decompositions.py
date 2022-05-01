@@ -52,6 +52,7 @@ def cast_for_opmath(f):
 
     return inner
 
+
 # This expands x until x.dim() == dim. Might be useful as an operator
 def _unsqueeze_to_dim(x: Tensor, dim: int):
     for _ in range(dim - x.dim()):
@@ -73,20 +74,22 @@ def sigmoid_backward(out_grad: Tensor, y: Tensor):
 
 @register_decomposition(aten.softplus_backward)
 @cast_for_opmath
-def softplus_backward(
-    out_grad: Tensor, x: Tensor, beta: float, threshold: float
-):
+def softplus_backward(out_grad: Tensor, x: Tensor, beta: float, threshold: float):
     z = (x * beta).exp()
     return torch.where((x * beta) > threshold, out_grad, out_grad * z / (z + 1.0))
 
 
 @register_decomposition(aten.elu)
 @cast_for_opmath
-def elu(self: Tensor, alpha: float = 1, scale: float = 1, input_scale: float = 1) -> Tensor:
+def elu(
+    self: Tensor, alpha: float = 1, scale: float = 1, input_scale: float = 1
+) -> Tensor:
     negcoef = alpha * scale
     poscoef = scale
     negiptcoef = input_scale
-    return torch.where(self > 0, self * poscoef, (torch.exp(self * negiptcoef) - 1) * negcoef)
+    return torch.where(
+        self > 0, self * poscoef, (torch.exp(self * negiptcoef) - 1) * negcoef
+    )
 
 
 @register_decomposition(aten.elu_backward)
@@ -174,9 +177,7 @@ def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
 
 @register_decomposition(aten.threshold_backward)
 @cast_for_opmath
-def threshold_backward(
-    grad_output: Tensor, self: Tensor, threshold: float
-):
+def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
     return torch.where(self <= threshold, grad_output.new_zeros(()), grad_output)
 
 
@@ -326,7 +327,9 @@ def to_real_dtype(dtype: torch.dtype):
 
 
 @register_decomposition(aten.l1_loss)
-def l1_loss(self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value) -> Tensor:
+def l1_loss(
+    self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
+) -> Tensor:
     loss = (self - target).abs()
     # PyTorch semantics result in the output of l1_loss having the corresponding
     # real dtype to self.  This may not happen without explicit casting if say
@@ -337,7 +340,12 @@ def l1_loss(self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value)
 
 @register_decomposition(aten.l1_loss_backward)
 @cast_for_opmath
-def l1_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value):
+def l1_loss_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+):
     sign = torch.sign(self - target)
 
     norm = sign / self.numel() if reduction == Reduction.MEAN.value else sign
@@ -345,7 +353,9 @@ def l1_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, reductio
 
 
 @register_decomposition(aten.mse_loss)
-def mse_loss(self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value) -> Tensor:
+def mse_loss(
+    self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
+) -> Tensor:
     loss = (self - target) ** 2
     return apply_loss_reduction(loss, reduction)
 
@@ -361,7 +371,12 @@ def mse_loss_backward(
 
 @register_decomposition(aten.huber_loss)
 @cast_for_opmath
-def huber_loss(self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value, delta: float = 1.0) -> Tensor:
+def huber_loss(
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+    delta: float = 1.0,
+) -> Tensor:
     assert delta > 0, "huber_loss does not support non-positive values for delta."
     z = (self - target).abs()
     loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
@@ -383,22 +398,32 @@ def huber_loss_backward(
 
 
 @register_decomposition(aten.nll_loss_backward)
-def nll_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, weight: Optional[Tensor], reduction: int, ignore_index: int, total_weight: Tensor) -> Tensor:
+def nll_loss_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor],
+    reduction: int,
+    ignore_index: int,
+    total_weight: Tensor,
+) -> Tensor:
     assert 0 <= self.dim() <= 2, "input tensor should be 1D or 2D"
-    assert target.dim() <= 1, "0D or 1D target tensor expected, multi-target not supported"
+    assert (
+        target.dim() <= 1
+    ), "0D or 1D target tensor expected, multi-target not supported"
 
     no_batch_dim = self.dim() == 1 and target.dim() == 0
-    assert no_batch_dim or (self.shape[0] == target.shape[0]), (
-        f"size mismatch (got input: {self.shape}, target: {target.shape})"
-    )
+    assert no_batch_dim or (
+        self.shape[0] == target.shape[0]
+    ), f"size mismatch (got input: {self.shape}, target: {target.shape})"
     assert total_weight.numel() == 1, (
         "expected total_weight to be a single element tensor, got: ",
-        f"{total_weight.shape} ({total_weight.numel()} elements)"
+        f"{total_weight.shape} ({total_weight.numel()} elements)",
     )
 
-    assert weight is None or weight.numel() == self.shape[-1], (
-        "weight tensor should be defined either for all or no classes"
-    )
+    assert (
+        weight is None or weight.numel() == self.shape[-1]
+    ), "weight tensor should be defined either for all or no classes"
 
     if reduction == Reduction.NONE.value and self.dim() == 2:
         assert grad_output.dim() == 1 and grad_output.shape[0] == self.shape[0], (
@@ -406,9 +431,9 @@ def nll_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, weight:
             f"got: dimension {grad_output.dim()} and tensor.size[0] == {grad_output.shape[0]}"
         )
     else:
-        assert grad_output.dim() <= 1 and grad_output.numel() == 1, (
-            f"Expected a single element grad_output tensor, but got: {grad_output.shape}"
-        )
+        assert (
+            grad_output.dim() <= 1 and grad_output.numel() == 1
+        ), f"Expected a single element grad_output tensor, but got: {grad_output.shape}"
 
     channel_dim = 0 if self.dim() < 2 else 1
     if reduction == Reduction.MEAN.value:
@@ -416,7 +441,7 @@ def nll_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, weight:
 
     target = target.unsqueeze(channel_dim)
     grad_input = torch.zeros_like(self)
-    grad_input = torch.scatter(grad_input, channel_dim, target, -1.)
+    grad_input = torch.scatter(grad_input, channel_dim, target, -1.0)
 
     if grad_input.dim() > grad_output.dim() > 0:
         grad_output = grad_output.unsqueeze(channel_dim)
@@ -627,8 +652,14 @@ def rsub_Scalar(self: Tensor, other: float, alpha: float = 1) -> Tensor:
 
 
 @register_decomposition(aten.embedding)
-def embedding(weight: Tensor, indices: Tensor, padding_idx: int = -1, scale_grad_by_freq: bool = False, sparse: bool = False) -> Tensor:
-    assert weight.dim() == 2,  "'weight' must be 2-D"
+def embedding(
+    weight: Tensor,
+    indices: Tensor,
+    padding_idx: int = -1,
+    scale_grad_by_freq: bool = False,
+    sparse: bool = False,
+) -> Tensor:
+    assert weight.dim() == 2, "'weight' must be 2-D"
     # TODO: Assert not ported over yet
     #   auto indices_arg = TensorArg(indices, "indices", 1);
     #   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
@@ -715,7 +746,6 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     if beta == 0:
         return out
     return beta * self + out
-
 
 
 @register_decomposition(aten.native_layer_norm)
@@ -824,7 +854,9 @@ def native_layer_norm_backward(
 
     if output_mask[1] and weight is not None:
         if len(outer_dim_indices) > 0:
-            d_weight: Optional[Tensor] = torch.sum(grad_out * x_hat, outer_dim_indices, False)
+            d_weight: Optional[Tensor] = torch.sum(
+                grad_out * x_hat, outer_dim_indices, False
+            )
         else:
             d_weight = grad_out * x_hat
     else:
@@ -842,11 +874,22 @@ def native_layer_norm_backward(
 
 @register_decomposition(aten.native_batch_norm)
 @cast_for_opmath
-def native_batch_norm(input: Tensor, weight: Optional[Tensor], bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, momentum: float, eps: float) -> Tuple[Tensor, Tensor, Tensor]:
+def native_batch_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
     reduction_dims = [0] + list(range(2, input.dim()))
     if training:
         # save_mean = torch.sum(input / (input.shape[0] * input.shape[2]), dim=reduction_dims)
-        biased_var, save_mean = torch.var_mean(input, dim=reduction_dims, unbiased=False)
+        biased_var, save_mean = torch.var_mean(
+            input, dim=reduction_dims, unbiased=False
+        )
         save_invstd = 1 / (torch.sqrt(biased_var + eps))
 
         if running_mean is not None:
@@ -865,7 +908,7 @@ def native_batch_norm(input: Tensor, weight: Optional[Tensor], bias: Optional[Te
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
-        if input.device.type == 'cuda':
+        if input.device.type == "cuda":
             save_mean = running_mean
             save_invstd = invstd
         else:
@@ -888,7 +931,11 @@ def native_batch_norm(input: Tensor, weight: Optional[Tensor], bias: Optional[Te
 
 @register_decomposition(aten.isnan)
 def isnan(self: Tensor) -> Tensor:
-    return torch.where(self != self, self.new_ones((), dtype=torch.bool), self.new_zeros((), dtype=torch.bool))
+    return torch.where(
+        self != self,
+        self.new_ones((), dtype=torch.bool),
+        self.new_zeros((), dtype=torch.bool),
+    )
 
 
 @register_decomposition(aten.clamp_min)
