@@ -1,3 +1,4 @@
 from .api import (
-    ShardingPlan
+    ShardingPlan,
+    ShardingPlanner
 )

@@ -9,7 +9,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipMeta,
 )
-from torch.testing._internal.common_utils import TestCase, IS_FBCODE
+from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests
 from torch import nested_tensor
 
 # Tests are ported from pytorch/nestedtensor.
@@ -336,3 +336,6 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt.is_cuda, is_cuda)
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
+
+if __name__ == '__main__':
+    run_tests()
