@@ -597,6 +597,30 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
 
 
+@register_decomposition(aten.reciprocal)
+def reciprocal(self: Tensor) -> Tensor:
+    return 1 / self
+
+
+# Used for implementing ops that implicitly promote ints to floats. Could be in Primtorch refs?
+def _promote_to_float(self: Tensor) -> Tensor:
+    if self.dtype == torch.float64:
+        return self
+    return self.to(torch.float)
+
+
+@register_decomposition(aten.logit)
+def logit(self: Tensor, eps: Optional[float] = None) -> Tensor:
+    self = _promote_to_float(self)
+    if eps is None:
+        eps = -1.0
+    lo = eps
+    hi = 1 - eps
+    self = torch.clamp(self, lo, hi)
+    print(self.dtype)
+    return (self / (1 - self)).log()
+
+
 @register_decomposition(aten.logit_backward)
 @cast_for_opmath
 def logit_backward(
@@ -997,7 +1021,7 @@ def logical_not(self: Tensor) -> Tensor:
     return ~self.to(dtype=torch.bool)
 
 
-# Commented out due to requiring type conversions for correct behavior on OpInfo tests
+# Actually, I'm just not sure how to implement this correctly (maybe you need a special case for floating point?)
 # @register_decomposition(aten.xlogy)
 # def xlogy(self: Tensor, other: Tensor) -> Tensor:
 #     return aten.where(aten.isnan(self),
@@ -1013,13 +1037,26 @@ def logical_not(self: Tensor) -> Tensor:
 @register_decomposition(aten.var.correction)
 @cast_for_opmath
 def var_decomposition(
-    x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False
+    x: Tensor,
+    dims: Optional[List[int]],
+    correction: Optional[int] = None,
+    keepdim: bool = False,
 ):
     if dims is None:
         dims = []
 
-    if isinstance(dims, (tuple, list)) and len(dims) == 0:
-        n = x.numel()
+    if x.is_complex():
+        real_in = x.real
+        var_real = torch.var(real_in, dims, correction=correction, keepdim=keepdim)
+        imag_in = x.imag
+        var_imag = torch.var(imag_in, dims, correction=correction, keepdim=keepdim)
+        return var_real + var_imag
+
+    if correction is None:
+        correction = 0
+
+    if len(dims) == 0:
+        n = prod(x.shape)
     else:
         n = 1
         for dim in dims:

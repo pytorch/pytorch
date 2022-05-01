@@ -283,9 +283,6 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float16, "nn.functional.batch_norm"),
     ("cuda", torch.bfloat16, "nn.functional.instance_norm"),
     ("cuda", torch.float16, "nn.functional.instance_norm"),
-    # complex is not handled
-    (None, torch.complex64, "var"),
-    (None, torch.complex128, "var"),
 }
 
 all_decomposed = set()
