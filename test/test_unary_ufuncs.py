@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     skipIfNoSciPy,
     IS_WINDOWS,
     gradcheck,
+    TEST_WITH_ASAN,
 )
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
@@ -309,6 +310,7 @@ class TestUnaryUfuncs(TestCase):
     #   values on a range of tensors, including empty tensors, scalar tensors,
     #   1D tensors and a large 2D tensor with interesting and extremal values
     #   and noncontiguities.
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
@@ -317,6 +319,7 @@ class TestUnaryUfuncs(TestCase):
         )
         self._test_reference_numerics(dtype, op, tensors)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @ops(reference_filtered_ops)
     def test_reference_numerics_small(self, device, dtype, op):
@@ -328,6 +331,7 @@ class TestUnaryUfuncs(TestCase):
         )
         self._test_reference_numerics(dtype, op, tensors)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @ops(reference_filtered_ops)
     def test_reference_numerics_large(self, device, dtype, op):
@@ -339,6 +343,7 @@ class TestUnaryUfuncs(TestCase):
         )
         self._test_reference_numerics(dtype, op, tensors)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @ops(
         reference_filtered_ops,
