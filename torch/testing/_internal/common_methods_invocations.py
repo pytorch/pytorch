@@ -709,6 +709,12 @@ class OpInfo(object):
     # name of the corresponding aten:: operator
     aten_name: str = None
 
+    # if this is a composite implicit autograd op, the decomposed op
+    decomp_aten_name: Optional[str] = None
+
+    # name of the corresponding aten:: operator for backwards
+    aten_backward_name: Optional[str] = None
+
     # if a op's aten::node is expected to be symbolically autodiffed
     assert_autodiffed: bool = False
 
@@ -9966,6 +9972,7 @@ op_db: List[OpInfo] = [
            # They are not strictly aliases as they have diverging defaults, but we can see them as aliases for testing purposes
            # If we add tests that test the function against the alias, make linalg.diagonal into its own OpInfo
            aliases=('linalg.diagonal',),
+           aten_backward_name='diagonal_backward',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
@@ -11514,6 +11521,7 @@ op_db: List[OpInfo] = [
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
            aten_name='softmax',
+           aten_backward_name='_softmax_backward_data',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_softmax_variant,
@@ -11932,6 +11940,7 @@ op_db: List[OpInfo] = [
            supports_expanded_weight=True,),
     OpInfo('nn.functional.layer_norm',
            aten_name='layer_norm',
+           aten_backward_name='layer_norm_backward',
            aliases=('layer_norm',),
            ref=reference_layer_norm,
            dtypes=floating_types_and(torch.bfloat16),
@@ -12016,6 +12025,7 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
+           aten_backward_name='hardswish_backward',
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardswish,
@@ -12028,6 +12038,7 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
+           aten_backward_name='im2col_backward',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=sample_inputs_nn_unfold,
@@ -12212,6 +12223,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.leaky_relu',
            aliases=None,
            aten_name="leaky_relu",
+           aten_backward_name='leaky_relu_backward',
            sample_inputs_func=sample_inputs_leaky_relu,
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12488,6 +12500,7 @@ op_db: List[OpInfo] = [
            supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.elu',
+        aten_backward_name='elu_backward',
         ref=lambda x, alpha=1.0, inplace=False:
             np.maximum(0., x) + np.minimum(0., alpha * (np.exp(x) - 1)),
         dtypes=floating_types(),
@@ -12515,6 +12528,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         'nn.functional.prelu',
+        aten_backward_name='prelu_backward',
         ref=lambda x, weight:
             np.maximum(0., x) + np.minimum(0., x) *
             (weight if x.ndim == 1 else weight.reshape([weight.size if i == 1 else 1 for i in range(0, x.ndim)])),
@@ -12564,6 +12578,7 @@ op_db: List[OpInfo] = [
     ),
     UnaryUfuncInfo(
         'nn.functional.rrelu',
+        aten_backward_name='rrelu_with_noise_backward',
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.rrelu, input, *args, **kwargs),
         ref=_NOTHING,
@@ -12619,6 +12634,7 @@ op_db: List[OpInfo] = [
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
+        aten_backward_name='silu_backward',
         ref=lambda x, inplace=False: x / (1 + np.exp(-x)),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12681,6 +12697,7 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.complex64,)))),
     UnaryUfuncInfo(
         'nn.functional.hardsigmoid',
+        aten_backward_name='hardsigmoid_backward',
         ref=reference_hardsigmoid,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12705,6 +12722,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
         aten_name="log_sigmoid",
+        aten_backward_name='log_sigmoid_backward',
         ref=reference_logsigmoid,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16),
@@ -12730,6 +12748,7 @@ op_db: List[OpInfo] = [
     ),
     UnaryUfuncInfo(
         'nn.functional.mish',
+        aten_backward_name='mish_backward',
         ref=lambda x: x * np.tanh(reference_softplus(x)),
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -12800,6 +12819,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         'nn.functional.threshold',
+        aten_backward_name='threshold_backward',
         ref=lambda x, threshold, value: np.where(x > threshold, x, value).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
@@ -12892,6 +12912,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_batch_norm),
     OpInfo(
         "nn.functional.binary_cross_entropy",
+        aten_backward_name='binary_cross_entropy_backward',
         sample_inputs_func=sample_inputs_binary_cross_entropy,
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
@@ -13018,6 +13039,7 @@ op_db: List[OpInfo] = [
     #                 )),
     OpInfo('nn.functional.softshrink',
            aten_name="softshrink",
+           aten_backward_name='softshrink_backward',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
@@ -13029,6 +13051,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
+           aten_backward_name='hardshrink_backward',
            dtypes=floating_types_and(torch.bfloat16,),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
@@ -13040,6 +13063,7 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=["aten::hardshrink"]),
     OpInfo('nn.functional.hardtanh',
            aten_name="hardtanh",
+           aten_backward_name='hardtanh_backward',
            dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.bfloat16),
            backward_dtypes=all_types(),
            dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.float16, torch.bfloat16),
@@ -13055,6 +13079,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('nn.functional.gelu',
            aten_name="gelu",
+           aten_backward_name='gelu_backward',
            ref=reference_gelu if TEST_SCIPY else _NOTHING,
            supports_autograd=True,
            assert_autodiffed=True,
@@ -13455,6 +13480,9 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_autodiffed=True),
     OpInfo('split',
+           # Cannot declare this aten_name because of
+           # test_variant_consistency_jit_split_list_args_cpu_float32
+           decomp_aten_name='split_with_sizes',
            variant_test_name='list_args',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=True),
@@ -13630,6 +13658,7 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=None,
                     sample_inputs_func=sample_inputs_add_sub),
     OpInfo('select',
+           aten_backward_name='select_backward',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_select,
            assert_jit_shape_analysis=True,
@@ -13693,6 +13722,7 @@ op_db: List[OpInfo] = [
                        condition=lambda x: close_to_int(x / (math.pi * 0.5)), safe_val=math.pi)),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
+                   aten_backward_name='tanh_backward',
                    aliases=('nn.functional.tanh',),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -15525,6 +15555,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_logcumsumexp),
     UnaryUfuncInfo('sigmoid',
                    aliases=('special.expit', 'nn.functional.sigmoid'),
+                   aten_backward_name='sigmoid_backward',
                    ref=reference_sigmoid if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.complex64: 1e-1,
@@ -15653,6 +15684,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.l1_loss",
         ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
+        aten_backward_name='l1_loss_backward',
         sample_inputs_func=sample_inputs_l1_loss,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         backward_dtypes=all_types_and(torch.float16, torch.bfloat16),
@@ -15705,6 +15737,7 @@ op_db: List[OpInfo] = [
         'log_softmax',
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=True,
+        aten_backward_name='_log_softmax_backward_data',
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_softmax_variant,
@@ -15720,6 +15753,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
+                   aten_backward_name='logit_backward',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
                    domain=(0, 1),
                    aliases=('special.logit', ),
@@ -15990,6 +16024,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.embedding",
+        aten_backward_name="embedding_dense_backward",
         # We use lambda to reshuffle the positional arguments.
         # This is because currently only the `input` field of SampleInput
         # is tested in gradient tests.
@@ -16034,6 +16069,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.softplus",
+        aten_backward_name='softplus_backward',
         ref=reference_softplus,
         sample_inputs_func=sample_inputs_softplus,
         supports_forward_ad=True,
@@ -16060,6 +16096,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.mse_loss",
+        aten_backward_name='mse_loss_backward',
         ref=loss_reference_reduction_wrapper(lambda input, target: (input - target) ** 2),
         sample_inputs_func=sample_inputs_loss,
         supports_out=False,
@@ -16834,6 +16871,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.huber_loss",
+        aten_backward_name='huber_loss_backward',
         ref=_NOTHING,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
