@@ -1035,7 +1035,7 @@ def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
 
 
 def _convert_element_type_nvfuser(fd: Any, a: Tensor, dtype: torch.dtype) -> Tensor:
-    nvfuser_dtype = _torch_dtype_to_nvfuser_dtype_map[dtype]
+    nvfuser_dtype = getnvFuserDtype(dtype)
     return fd.Ops.cast(nvfuser_dtype, a)  # type: ignore[attr-defined]
 
 

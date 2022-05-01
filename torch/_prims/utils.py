@@ -10,7 +10,7 @@ from torch.fx import Node
 
 # nvFuser imports are conditional on CUDA being available
 if torch.cuda.is_available():
-    from torch._C._nvfuser import DataType
+    from torch._C._nvfuser import DataType  # type: ignore[import]
 
     _torch_dtype_to_nvfuser_dtype_map = {
         torch.cdouble: DataType.ComplexDouble,

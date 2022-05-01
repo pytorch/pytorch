@@ -7,7 +7,7 @@ from torch._prims.utils import TensorMeta, getnvFuserDtype
 from torch._prims.context import PrimContext
 
 if torch.cuda.is_available():
-    from torch._C._nvfuser import Fusion, FusionDefinition
+    from torch._C._nvfuser import Fusion, FusionDefinition  # type: ignore[import]
 
 
 def execute(ctx: PrimContext, *args, executor: str = "aten", **kwargs):
