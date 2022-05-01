@@ -21326,6 +21326,40 @@ class TestStateDictHooks(TestCase):
             m.load_state_dict(state_dict)
             self.assertEqual(2, hook_called)
 
+    def test_load_state_dict_post_hook(self):
+        hook_called = 0
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.foo = torch.nn.Parameter(torch.rand(10))
+
+            def my_post_load_hook(self, module, incompatible_keys):
+                assert module is self
+                nonlocal hook_called
+                incompatible_keys.missing_keys.append("foo")
+                incompatible_keys.unexpected_keys.append("bar")
+                hook_called += 1
+
+        class MyModuleContainer(nn.Module):
+            def __init__(self, mod):
+                super().__init__()
+                self.mod = mod
+
+        nested = MyModule()
+        wrapped = MyModuleContainer(nested)
+        nested.register_load_state_dict_post_hook(
+            nested.my_post_load_hook,
+        )
+        # Hook must be called even if it is wrapped
+        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
+        self.assertEqual(hook_called, 1)
+        # Ensure that the hook modified missing_keys and unexpected_keys
+        missing = ret.missing_keys
+        unexpected = ret.unexpected_keys
+        self.assertEqual(missing, ["foo"])
+        self.assertEqual(unexpected, ["bar"])
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)
