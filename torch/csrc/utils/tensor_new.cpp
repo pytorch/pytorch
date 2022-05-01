@@ -20,6 +20,7 @@
 #include <ATen/dlpack.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/Backend.h>
 #include <c10/core/DispatchKeySet.h>
@@ -283,6 +284,8 @@ Tensor internal_new_from_data(
     // what the extensibility mechanism for this function (internal_new_from_data)
     // looks like for mode-based dispatch keys and C++ tensor extensions.
     c10::impl::ExcludeDispatchKeyGuard functorch_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
+    // We disable DeferredInit handler for similar reasons as functorch.
+    c10::impl::ExcludeDispatchKeyGuard deferred_init_guard(c10::DispatchKey::DeferredInit);
 
     if (isStorage(data)) {
       ScalarType storage_scalar_type;
@@ -664,21 +667,19 @@ Tensor sparse_csr_tensor_ctor(
   throw std::runtime_error("sparse_csr_tensor(): invalid arguments");
 }
 
-Tensor _sparse_csr_tensor_unsafe_ctor(
-    c10::DispatchKey dispatch_key,
-    at::ScalarType scalar_type,
-    PythonArgs& r) {
+Tensor _sparse_compressed_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
   TORCH_INTERNAL_ASSERT(!isSparseCsr(dispatchKeyToBackend(dispatch_key)));
   TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
   enum {
-    ARG_CROW_INDICES = 0,
-    ARG_COL_INDICES,
-    ARG_VALUES,
-    ARG_SIZE,
-    ARG_TYPE,
-    ARG_DEVICE,
-    ARG_REQUIRES_GRAD,
-    ARGS_COUNT
+        ARG_COMPRESSED_INDICES = 0,
+        ARG_PLAIN_INDICES,
+        ARG_VALUES,
+        ARG_SIZE,
+        ARG_TYPE,
+        ARG_LAYOUT,
+        ARG_DEVICE,
+        ARG_REQUIRES_GRAD,
+        ARGS_COUNT
   };
   bool type_inference = r.isNone(ARG_TYPE);
   const auto inferred_options = typeIdWithDefault(r, ARG_DEVICE, dispatch_key);
@@ -688,15 +689,52 @@ Tensor _sparse_csr_tensor_unsafe_ctor(
                                          /*copy_variables=*/false, /*copy_numpy=*/true,
                                          /*type_inference=*/type_inference);
 
-  Tensor crow_indices = internal_new_from_data(values.options(), kInt, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_CROW_INDICES),
+  Tensor compressed_indices = internal_new_from_data(values.options(), kInt, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_COMPRESSED_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
                                           /*type_inference=*/true);
 
-  Tensor col_indices = internal_new_from_data(values.options(), kInt, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_COL_INDICES),
+  Tensor plain_indices = internal_new_from_data(values.options(), kInt, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_PLAIN_INDICES),
+                                          /*copy_variables=*/false, /*copy_numpy=*/true,
+                                          /*type_inference=*/true);
+  return at::_sparse_compressed_tensor_unsafe(compressed_indices, plain_indices, values, r.intlist(ARG_SIZE),
+                                              values.options().layout(r.layoutOptional(ARG_LAYOUT))).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
+}
+
+template <c10::Layout required_layout>
+Tensor _sparse_compressed_tensor_unsafe_ctor_template(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
+  TORCH_INTERNAL_ASSERT(!isSparseCsr(dispatchKeyToBackend(dispatch_key)));
+  TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
+  enum {
+        ARG_COMPRESSED_INDICES = 0,
+        ARG_PLAIN_INDICES,
+        ARG_VALUES,
+        ARG_SIZE,
+        ARG_TYPE,
+        ARG_DEVICE,
+        ARG_REQUIRES_GRAD,
+        ARGS_COUNT
+  };
+  bool type_inference = r.isNone(ARG_TYPE);
+  const auto inferred_options = typeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+  const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
+  at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
+  Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES),
+                                         /*copy_variables=*/false, /*copy_numpy=*/true,
+                                         /*type_inference=*/type_inference);
+
+  Tensor compressed_indices = internal_new_from_data(values.options(), kInt, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_COMPRESSED_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
                                           /*type_inference=*/true);
 
-  return at::_sparse_csr_tensor_unsafe(crow_indices, col_indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
+  Tensor plain_indices = internal_new_from_data(values.options(), kInt, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_PLAIN_INDICES),
+                                          /*copy_variables=*/false, /*copy_numpy=*/true,
+                                          /*type_inference=*/true);
+  return at::_sparse_compressed_tensor_unsafe(compressed_indices, plain_indices, values, r.intlist(ARG_SIZE),
+                                              values.options().layout(required_layout)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
+}
+
+Tensor _sparse_csr_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PythonArgs& r) {
+  return _sparse_compressed_tensor_unsafe_ctor_template<c10::kSparseCsr>(dispatch_key, scalar_type, r);
 }
 
 // Note [Ensuring sparse values and indices match devices]

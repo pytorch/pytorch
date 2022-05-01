@@ -440,7 +440,8 @@ bool IValue::isOptionalTensorList() const {
     return false;
   }
   const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
-  return ty == c10::getTypePtr<c10::optional<at::Tensor>>();
+  const auto expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
+  return expected_ty == ty;
 }
 
 bool IValue::isIntList() const {
