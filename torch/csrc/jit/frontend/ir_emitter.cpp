@@ -3547,6 +3547,7 @@ struct to_ir {
         }
         auto createNode =
             graph->insertNode(graph->createObject(class_arg->type_));
+        createNode->setSourceRange(apply.range());
         return std::make_shared<SimpleValue>(createNode->output());
       }
       // We construct the iterable tree here using the IterableTree

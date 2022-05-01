@@ -779,10 +779,12 @@ def op_with_optional_float_cast(g, op_name, *args, **kwargs):
     return self
 
 
+@quantized_args(True)
 def relu(g, input):
     return op_with_optional_float_cast(g, "Relu", input, opset_before=14)
 
 
+@quantized_args(True)
 def relu6(g, input):
     relu = op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     return clamp_max(g, relu, 6)
@@ -1097,6 +1099,50 @@ def constant_pad_nd(g, input, padding, value):
     paddings = _prepare_onnx_paddings(sym_help._get_tensor_rank(input), padding)
     return op_with_optional_float_cast(g, "Pad", input, pads_i=paddings, mode_s=mode, value_f=value, opset_before=11)
 
+def _pad_circular(g, input, pad):
+    padding = _convert_padding_node(pad)
+    assert len(padding) % 2 == 0
+    ndim = len(padding) // 2
+
+    cur = input
+    for idx in range(ndim):
+        pad_l = padding[-(2 * idx + 1)]
+        pad_r = padding[-(2 * idx + 2)]
+
+        tensors = []
+        if pad_l > 0:
+            left = sym_help._slice_helper(
+                g,
+                cur,
+                axes=[2 + idx],
+                starts=[-(pad_l + 1)],
+                ends=[-1])
+            tensors.append(left)
+
+        if pad_l < 0 or pad_r < 0:
+            middle = sym_help._slice_helper(
+                g,
+                cur,
+                axes=[2 + idx],
+                starts=[max(0, -pad_l)],
+                ends=[-(1 + max(0, -pad_r))])
+            tensors.append(middle)
+        else:
+            tensors.append(cur)
+
+        if pad_r > 0:
+            right = sym_help._slice_helper(
+                g,
+                cur,
+                axes=[2 + idx],
+                starts=[0],
+                ends=[pad_r])
+            tensors.append(right)
+
+        cur = g.op("Concat", *tensors, axis_i=(2 + idx))
+
+    return cur
+
 
 def reflection_pad(g, input, padding):
     mode = "reflect"
@@ -1119,6 +1165,19 @@ replication_pad1d = replication_pad
 replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
+
+def pad(g, input, pad, mode, value):
+    mode = sym_help._parse_arg(mode, "s")
+    if mode == "replicate":
+        return replication_pad(g, input, pad)
+    elif mode == "reflect":
+        return reflection_pad(g, input, pad)
+    elif mode == "constant":
+        return constant_pad_nd(g, input, pad, value)
+    elif mode == "circular":
+        return _pad_circular(g, input, pad)
+    else:
+        raise RuntimeError(f"Unrecognized padding mode {mode}")
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):
@@ -2189,33 +2248,54 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 
 def to(g, self, *args):
-    # ONNX doesn't have a concept of a device, so we ignore device casts
-    if len(args) == 4:
-        if args[0].node().kind() == "prim::device" or args[0].type().isSubtypeOf(ListType.ofInts()):
-            # aten::to(Tensor, Device, bool, bool, memory_format)
-            return self
-        else:
-            # TestONNXRuntime::test_ones_bool shows args[0] of aten::to() can be onnx::Constant[value=<Tensor>]()
-            # In this case, the constant value is a tensor not int,
-            # so sym_help._maybe_get_const(args[0], 'i') would not work.
-            dtype = args[0]
-            if sym_help._is_value(args[0]) and args[0].node().kind() == "onnx::Constant":
-                tval = args[0].node()["value"]
-                if isinstance(tval, torch.Tensor):
-                    if len(tval.shape) == 0:
-                        tval = tval.item()
-                        dtype = int(tval)
-                    else:
-                        dtype = tval
 
-            if sym_help._is_value(dtype) or isinstance(dtype, torch.Tensor):
-                # aten::to(Tensor, Tensor, bool, bool, memory_format)
-                dtype = args[0].type().scalarType()
-                return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[dtype])
-            else:
-                # aten::to(Tensor, ScalarType, bool, bool, memory_format)
-                # memory_format is ignored
-                return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+    def is_aten_to_device_only(args):
+        if len(args) == 4:
+            # aten::to(Tensor, Device, bool, bool, memory_format)
+            return args[0].node().kind() == "prim::device" or \
+                args[0].type().isSubtypeOf(ListType.ofInts()) or \
+                (sym_help._is_value(args[0]) and
+                    args[0].node().kind() == "onnx::Constant" and
+                    isinstance(args[0].node()["value"], str))
+        elif len(args) == 5:
+            # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
+            # When dtype is None, this is a aten::to(device) call
+            dtype = sym_help._get_const(args[1], "i", "dtype")
+            return dtype is None
+        elif len(args) in (6, 7):
+            # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, memory_format) -> Tensor
+            # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool, memory_format) -> Tensor
+            # When dtype is None, this is a aten::to(device) call
+            dtype = sym_help._get_const(args[0], "i", "dtype")
+            return dtype is None
+        return False
+
+    # ONNX doesn't have a concept of a device, so we ignore device-only casts
+    if is_aten_to_device_only(args):
+        return self
+
+    if len(args) == 4:
+        # TestONNXRuntime::test_ones_bool shows args[0] of aten::to() can be onnx::Constant[value=<Tensor>]()
+        # In this case, the constant value is a tensor not int,
+        # so sym_help._maybe_get_const(args[0], 'i') would not work.
+        dtype = args[0]
+        if sym_help._is_value(args[0]) and args[0].node().kind() == "onnx::Constant":
+            tval = args[0].node()["value"]
+            if isinstance(tval, torch.Tensor):
+                if len(tval.shape) == 0:
+                    tval = tval.item()
+                    dtype = int(tval)
+                else:
+                    dtype = tval
+
+        if sym_help._is_value(dtype) or isinstance(dtype, torch.Tensor):
+            # aten::to(Tensor, Tensor, bool, bool, memory_format)
+            dtype = args[0].type().scalarType()
+            return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[dtype])
+        else:
+            # aten::to(Tensor, ScalarType, bool, bool, memory_format)
+            # memory_format is ignored
+            return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 5:
         # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
         dtype = sym_help._get_const(args[1], "i", "dtype")
@@ -2232,7 +2312,7 @@ def to(g, self, *args):
         # Layout, device and memory_format are ignored
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     else:
-        raise NotImplementedError("Unknown aten::to signature")
+        return sym_help._onnx_unsupported("Unknown aten::to signature")
 
 
 def repeat(g, self, repeats):
@@ -3273,10 +3353,8 @@ def remainder(g, input, other):
     return g.op("Sub", input, quo)
 
 @parse_args("v", "s")
-def gelu(g, self, approximate):
-    # none approximate : onnx::Constant[value={0}]
-    # tanh approximate : onnx::Constant[value={1}]
-    if approximate == 'tanh':
+def gelu(g, self: torch._C.Value, approximate: str = "none"):
+    if approximate == "tanh":
         kBeta = math.sqrt(2 / math.pi)
         kKappa = 0.044715
 
