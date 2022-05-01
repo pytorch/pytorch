@@ -23,12 +23,6 @@ class TORCH_API Diagonal : public TsNode {
     return dim2_;
   }
 
-  static Shape MakeDiagonalShape(
-      const Shape& shape,
-      int64_t offset,
-      int64_t dim1,
-      int64_t dim2);
-
  private:
   int64_t offset_;
   int64_t dim1_;
