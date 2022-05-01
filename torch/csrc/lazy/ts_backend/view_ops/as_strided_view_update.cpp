@@ -1,8 +1,8 @@
-#include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
+#include <torch/csrc/lazy/ts_backend/view_ops/as_strided_view_update.h>
 
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
-#include <torch/csrc/lazy/core/view_ops/as_strided.h>
+#include <torch/csrc/lazy/ts_backend/view_ops/as_strided.h>
 
 namespace torch {
 namespace lazy {
