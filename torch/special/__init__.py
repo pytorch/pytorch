@@ -51,7 +51,7 @@ bessel_j0 = _add_docstr(_special.special_bessel_j0,
                         r"""
 bessel_j0(input, *, out=None) -> Tensor
 
-Computes the zero order Bessel function of the first kind for each element of 
+Computes the zero order Bessel function of the first kind for each element of
 :attr:`input`.
 
 Args:
@@ -69,7 +69,7 @@ bessel_j1 = _add_docstr(_special.special_bessel_j1,
                         r"""
 bessel_j1(input, *, out=None) -> Tensor
 
-Computes the first order Bessel function of the first kind for each element of 
+Computes the first order Bessel function of the first kind for each element of
 :attr:`input`.
 
 Args:
@@ -87,7 +87,7 @@ bessel_y0 = _add_docstr(_special.special_bessel_y0,
                         r"""
 bessel_y0(input, *, out=None) -> Tensor
 
-Computes the zero order Bessel function of the second kind for each element of 
+Computes the zero order Bessel function of the second kind for each element of
 :attr:`input`.
 
 Args:
@@ -105,7 +105,7 @@ bessel_y1 = _add_docstr(_special.special_bessel_y1,
                         r"""
 bessel_y1(input, *, out=None) -> Tensor
 
-Computes the first order Bessel function of the second kind for each element of 
+Computes the first order Bessel function of the second kind for each element of
 :attr:`input`.
 
 Args:
@@ -123,7 +123,7 @@ bessel_k0 = _add_docstr(_special.special_bessel_k0,
                         r"""
 bessel_k0(input, *, out=None) -> Tensor
 
-Computes the zero order modified Bessel function of the second kind for each 
+Computes the zero order modified Bessel function of the second kind for each
 element of :attr:`input`.
 
 Args:
@@ -141,7 +141,7 @@ bessel_k0e = _add_docstr(_special.special_bessel_k0e,
                          r"""
 bessel_k0e(input, *, out=None) -> Tensor
 
-Computes the exponentially scaled zero order modified Bessel function of the 
+Computes the exponentially scaled zero order modified Bessel function of the
 second kind for each element of :attr:`input`.
 
 Args:
@@ -159,7 +159,7 @@ bessel_k1 = _add_docstr(_special.special_bessel_k1,
                         r"""
 bessel_k1(input, *, out=None) -> Tensor
 
-Computes the first order modified Bessel function of the second kind for each 
+Computes the first order modified Bessel function of the second kind for each
 element of :attr:`input`.
 
 Args:
@@ -177,7 +177,7 @@ bessel_k1e = _add_docstr(_special.special_bessel_k1e,
                          r"""
 bessel_k1e(input, *, out=None) -> Tensor
 
-Computes the exponentially scaled first order modified Bessel function of the 
+Computes the exponentially scaled first order modified Bessel function of the
 second kind for each element of :attr:`input`.
 
 Args:
@@ -596,8 +596,6 @@ Example::
     >>> torch.special.xlogy(2, y)
     tensor([2.1972, 1.3863, 0.0000])
 """.format(**common_args))
-
-
 
 i0 = _add_docstr(_special.special_i0,
                  r"""
