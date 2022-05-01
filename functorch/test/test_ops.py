@@ -1133,7 +1133,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.bilinear', ''),
         xfail('nn.functional.binary_cross_entropy', ''),
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
-        xfail('nn.functional.cross_entropy', ''),
         xfail('nn.functional.embedding', ''),
         xfail('nn.functional.embedding', 'functorch'),
         xfail('nn.functional.embedding_bag', ''),
@@ -1258,6 +1257,7 @@ class TestOperators(TestCase):
                 'nn.functional.mse_loss',
                 'softmax',
                 'log_softmax',
+                'nn.functional.cross_entropy'
             }
             if op.name in FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH:
                 compare_jacobians(primals, cotangents)
