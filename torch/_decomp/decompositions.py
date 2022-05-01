@@ -1046,6 +1046,8 @@ def var_decomposition(
         dims = []
 
     if x.is_complex():
+        # For complex, calculate variance of real and imaginary components
+        # separately then add to get overall variance.
         real_in = x.real
         var_real = torch.var(real_in, dims, correction=correction, keepdim=keepdim)
         imag_in = x.imag
