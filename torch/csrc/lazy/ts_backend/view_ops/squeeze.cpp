@@ -1,23 +1,10 @@
 #include <c10/util/irange.h>
-#include <torch/csrc/lazy/core/view_ops/squeeze.h>
+#include <torch/csrc/lazy/core/ops/utils.h>
+#include <torch/csrc/lazy/ts_backend/view_ops/squeeze.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 namespace torch {
 namespace lazy {
-
-// This is almost like at::inferSqueezeGeometry, but that requires a Tensor input
-// and also computes new strides.  This logic seems correct.
-std::vector<int64_t> BuildSqueezedDimensions(c10::ArrayRef<int64_t> dimensions,
-                                             int64_t squeeze_dim) {
-  std::vector<int64_t> output_dimensions;
-  for (const auto i : c10::irange(dimensions.size())) {
-    int64_t dim = dimensions[i];
-    if (dim != 1 || (i != squeeze_dim && squeeze_dim >= 0)) {
-      output_dimensions.push_back(dim);
-    }
-  }
-  return output_dimensions;
-}
 
 Squeeze::Squeeze(const torch::lazy::Value& input, int dim)
     : torch::lazy::TsNode(torch::lazy::OpKind(at::aten::squeeze), {input},
