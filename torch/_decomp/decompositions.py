@@ -1058,7 +1058,7 @@ def cudnn_batch_norm(
     # Cudnn return running mean and variance when training is True
     if training:
         return (a, b, c, input.new_zeros((0,), dtype=torch.uint8))
-    return (a, input.new_zeros((1,)), input.new_zeros((1,)), input.new_zeros((1,)))
+    return (a, input.new_zeros((0,)), input.new_zeros((0,)), input.new_zeros((0,), dtype=torch.uint8))
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)

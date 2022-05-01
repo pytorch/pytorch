@@ -178,6 +178,7 @@ def op_assert_equal(test_case, op, orig, decomp, args, kwargs):
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
+
     test_case.assertEqual(orig, decomp, rtol=rtol, atol=atol, msg=f"{op.__name__}\nargs = {args}\nkwargs = {kwargs}")
 
 
@@ -262,11 +263,6 @@ def normalize_op_input_output(f, sample, requires_grad=True):
 
 
 CROSS_REF_EXCLUDE_SET = {
-    (
-        "cpu",
-        torch.bfloat16,
-        "nn.functional.layer_norm",
-    ),  # "batch_norm" not implemented for 'BFloat16'
     # CUBLAS_STATUS_NOT_SUPPORTED when calling
     # `cublasGemmStridedBatchedExFix(handle, opa, opb, (int)m, (int)n, (int)k,
     # (void*)&falpha, a, CUDA_R_16BF, (int)lda, stridea, b, CUDA_R_16BF,
@@ -274,6 +270,10 @@ CROSS_REF_EXCLUDE_SET = {
     # (int)num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP)`
     ("cuda", torch.bfloat16, "nn.functional.bilinear"),
     # randomness
+    ("cuda", torch.float16, "nn.functional.dropout"),
+    ("cuda", torch.bfloat16, "nn.functional.dropout"),
+    ("cuda", torch.float64, "nn.functional.dropout"),
+    ("cuda", torch.float32, "nn.functional.dropout"),
     # decomp has problem even with opmath
     ("cuda", torch.bfloat16, "nn.functional.layer_norm"),
     ("cuda", torch.float16, "nn.functional.layer_norm"),
@@ -281,15 +281,6 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float16, "nn.functional.batch_norm"),
     ("cuda", torch.bfloat16, "nn.functional.instance_norm"),
     ("cuda", torch.float16, "nn.functional.instance_norm"),
-    ("cuda", torch.float16, "nn.functional.dropout"),
-    ("cuda", torch.bfloat16, "nn.functional.dropout"),
-    # decomp doesn't return correct dtype
-    ("cuda", torch.float64, "nn.functional.instance_norm"),
-    ("cuda", torch.float32, "nn.functional.instance_norm"),
-    ("cuda", torch.float64, "nn.functional.dropout"),
-    ("cuda", torch.float32, "nn.functional.dropout"),
-    ("cuda", torch.float64, "nn.functional.batch_norm"),
-    ("cuda", torch.float32, "nn.functional.batch_norm"),
     # complex is not handled
     (None, torch.complex64, "var"),
     (None, torch.complex128, "var"),
@@ -384,7 +375,6 @@ class TestDecomp(TestCase):
                 decomposition = decomposition_table[func]
 
                 do_relative_check = test_dtype in [torch.float16, torch.bfloat16]
-
                 real_out_unflat = func(*args, **kwargs)
                 real_out, _ = tree_flatten(real_out_unflat)
                 decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
