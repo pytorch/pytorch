@@ -30,7 +30,7 @@ from common_utils import (
     IS_FBCODE,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
-from functorch import grad, vjp, vmap
+from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
 from functorch._src.eager_transforms import _as_tuple, jvp
 from functorch.compile import decomposition_table
@@ -1121,8 +1121,6 @@ class TestOperators(TestCase):
         xfail('linalg.det', ''),
         xfail('linalg.matrix_norm', ''),
         xfail('linalg.slogdet', ''),
-        xfail('log_softmax', ''),
-        xfail('log_softmax', 'dtype'),
         xfail('logcumsumexp', ''),
         xfail('logdet', ''),
         xfail('lu', ''),
@@ -1154,8 +1152,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.softplus', ''),
         xfail('put', ''),
         xfail('renorm', ''),
-        xfail('softmax', ''),
-        xfail('softmax', 'with_dtype'),
         xfail('solve', ''),
         xfail('std_mean', ''),
         xfail('symeig', ''),
@@ -1237,33 +1233,37 @@ class TestOperators(TestCase):
                     expected = (tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec))
                 return expected
 
-            def double_backward_trick_reference(primals, cotangents, primals_tangents, cotangents_tangents):
-                def f(*all_inputs):
-                    p = all_inputs[:len(primals)]
-                    c = all_inputs[len(primals):]
-                    _, vjp_fn = ref_vjp(fn, *p)
-                    return vjp_fn(c)
+            def compare_jacobians(primals, cotangents):
+                def get_vjp(primals, cotangents):
+                    _, vjp_fn = vjp(fn, *primals)
+                    return vjp_fn(cotangents)
 
-                flat_primals, _ = tree_flatten((primals, cotangents))
-                flat_tangents, _ = tree_flatten((primals_tangents, cotangents_tangents))
-                flat_primals = tuple(flat_primals)
-                flat_tangents = tuple(flat_tangents)
+                jacobian_jvp = jacfwd(get_vjp, (0, 1))(primals, cotangents)
+                jacobian_vjp = jacrev(get_vjp, (0, 1))(primals, cotangents)
 
-                # doesn't actually invoke forward-mode AD, it does the
-                # "double backward trick"
-                result = torch.autograd.functional.jvp(f, flat_primals, v=flat_tangents)
-                return result
+                # For dtype changing operations, the jacobians have different dtype.
+                jacobian_jvp = tree_map(lambda x: x.to(torch.float), jacobian_jvp)
+                jacobian_vjp = tree_map(lambda x: x.to(torch.float), jacobian_vjp)
+
+                self.assertEqual(jacobian_jvp, jacobian_vjp)
 
             # HACK: obviously pytorch should also have the same coverage
+            # For things that do have the same coverage, we test that jvp x vjp
+            # are the same between PyTorch and functorch. For things that don't,
+            # we check that jacfwd(vjp) and jacrev(vjp) are the same. This results
+            # in slower tests.
             FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH = {
                 'nn.functional.nll_loss',
                 'nn.functional.l1_loss',
                 'nn.functional.mse_loss',
+                'softmax',
+                'log_softmax',
             }
             if op.name in FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH:
-                expected = double_backward_trick_reference(primals, cotangents, primals_tangents, cotangents_tangents)
-            else:
-                expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
+                compare_jacobians(primals, cotangents)
+                return
+
+            expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
             self.assertEqual(result, expected)
 
 
