@@ -116,7 +116,7 @@ def skip_helper(device, dtype):
     device_type = torch.device(device).type
     if dtype not in (torch.half, torch.complex32):
         return
-        
+
     if device_type == 'cpu':
         raise unittest.SkipTest("half and complex32 not supported on CPU")
     if TEST_WITH_ROCM:
@@ -536,13 +536,13 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
+    @toleranceOverride({
+        torch.half : tol(1e-2, 1e-2),
+    })
     @dtypes(torch.half, torch.float, torch.double)
     def test_hfftn(self, device, dtype):
         skip_helper(device, dtype)
-        if dtype is torch.half:
-            rtol, atol = 1e-2, 1e-2
-        else:
-            rtol, atol = None, None
+
         # input_ndim, dim
         transform_desc = [
             *product(range(2, 5), (None, (0,), (0, -1))),
@@ -571,17 +571,17 @@ class TestFFT(TestCase):
             s = [shape[dim] for dim in actual_dims]
             actual = torch.fft.hfftn(input, s=s, dim=dim, norm="ortho")
 
-            self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+            self.assertEqual(expect, actual)
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
+    @toleranceOverride({
+        torch.half : tol(1e-2, 1e-2),
+    })
     @dtypes(torch.half, torch.float, torch.double)
     def test_ihfftn(self, device, dtype):
         skip_helper(device, dtype)
-        if dtype is torch.half:
-            rtol, atol = 1e-2, 1e-2
-        else:
-            rtol, atol = None, None
+
         # input_ndim, dim
         transform_desc = [
             *product(range(2, 5), (None, (0,), (0, -1))),
@@ -609,7 +609,7 @@ class TestFFT(TestCase):
             expect = expect[idx]
 
             actual = torch.fft.ihfftn(input, dim=dim, norm="ortho")
-            self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+            self.assertEqual(expect, actual)
 
 
     # 2d-fft tests

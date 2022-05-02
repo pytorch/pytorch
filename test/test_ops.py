@@ -930,11 +930,6 @@ class TestCommon(TestCase):
         if not op.supports_dtype(torch.complex32, device):
             unittest.skip("Does not support complex32")
 
-        if isinstance(op, SpectralFuncInfo):
-            atol, rtol = 4e-2, 4e-2
-        else:
-            atol, rtol = None, None
-
         for sample in op.sample_inputs(device, dtype):
             actual = op(sample.input, *sample.args, **sample.kwargs)
             transformed_sample = sample.transform(lambda x: x.to(torch.complex64))
@@ -943,7 +938,7 @@ class TestCommon(TestCase):
                 *transformed_sample.args,
                 **transformed_sample.kwargs,
             )
-            self.assertEqual(actual, expected, exact_dtype=False, atol=atol, rtol=rtol)
+            self.assertEqual(actual, expected, exact_dtype=False)
 
 
 class TestCompositeCompliance(TestCase):
