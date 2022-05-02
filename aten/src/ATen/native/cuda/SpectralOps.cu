@@ -6,7 +6,6 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
-#include <ATen/OpMathType.h>
 
 #include <cmath>
 #include <vector>
