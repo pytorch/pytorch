@@ -13558,7 +13558,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
                                      dtypes=[torch.int16, torch.int32, torch.int64, torch.complex64, torch.complex128]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
-                                     dtypes=[torch.complex64]),
+                                     dtypes=[torch.complex64, torch.complex128]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics',
                                      dtypes=[torch.int8, torch.int16, torch.int32, torch.int64, torch.complex64]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_scalar_support',
