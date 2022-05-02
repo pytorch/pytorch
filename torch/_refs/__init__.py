@@ -38,6 +38,7 @@ all = [
     "expm1",
     "floor",
     "isfinite",
+    "isnan",
     "lgamma",
     "log",
     "log1p",
