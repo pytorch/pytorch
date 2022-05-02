@@ -114,11 +114,14 @@ def _stft_reference(x, hop_length, window):
 
 def skip_helper(device, dtype):
     device_type = torch.device(device).type
-    if dtype in (torch.half, torch.complex32) and device_type == 'cpu':
+    if dtype not in (torch.half, torch.complex32):
+        return
+        
+    if device_type == 'cpu':
         raise unittest.SkipTest("half and complex32 not supported on CPU")
-    elif dtype in (torch.half, torch.complex32) and device_type == 'cuda' and TEST_WITH_ROCM:
+    if TEST_WITH_ROCM:
         raise unittest.SkipTest("half and complex32 not supported on ROCM")
-    elif dtype in (torch.half, torch.complex32) and device_type == 'cuda' and not SM53OrLater:
+    if not SM53OrLater:
         raise unittest.SkipTest("half and complex32 is only supported on CUDA device with SM>53")
 
 
