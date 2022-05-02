@@ -1,4 +1,4 @@
-#include <torch/csrc/lazy/core/view_ops/resize.h>
+#include <torch/csrc/lazy/ts_backend/view_ops/resize.h>
 
 namespace torch {
 namespace lazy {
