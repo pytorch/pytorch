@@ -5,6 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <functorch/csrc/BatchRulesHelper.h>
+#include <torch/csrc/jit/runtime/decomposition_registry.h>
 #include <ATen/WrapDimUtils.h>
 
 namespace at { namespace functorch {
@@ -63,7 +64,7 @@ VmapDimVector getPhysicalDims(const Tensor& tensor, bool has_batch_dim, IntArray
       result.push_back(maybe_wrap_dim(d, rank)+1);
     } else {
       result.push_back(maybe_wrap_dim(d, rank));
-    } 
+    }
   }
   return result;
 }
@@ -130,6 +131,13 @@ void vmapIncompatibleInplaceError(const char* schema_name) {
     "Please try to use out-of-place operators instead of ", schema_name, ". ",
     "If said operator is being called inside the PyTorch framework, ",
     "please file a bug report instead.");
+}
+
+void run_jit_decomposition(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+  // TODO: templatize based on op and keep static trace_exec
+  auto * trace_exec = torch::jit::GetDecompositionExecutor(schema);
+  trace_exec->run((*stack));
 }
 
 }}

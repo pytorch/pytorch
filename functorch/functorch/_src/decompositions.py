@@ -204,6 +204,11 @@ def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return grad_output * sigmoid * (1 + self * (1 - sigmoid))
 
 
+@register_decomposition(aten.trace)
+def trace(x):
+    return torch.sum(torch.diagonal(x))
+
+
 @register_decomposition(aten.softshrink_backward)
 def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
     return torch.where((self >= -lambd) & (self <= lambd), grad_output.new_zeros(()), grad_output)
