@@ -33,6 +33,7 @@ def define_targets(rules):
             "torch/csrc/lazy/core/shape_inference.h",
             "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
             ":native_functions.yaml",
+            ":tags.yaml",
         ],
         tools = ["//tools/setup_helpers:generate_code"],
         outs = _GENERATED_CPP + GENERATED_AUTOGRAD_H + GENERATED_LAZY_H + GENERATED_TESTING_PY,
