@@ -634,13 +634,6 @@
     "amp_definitely_not_available",
     "defaultdict"
   ],
-  "torch.cuda.memory": [
-    "Any",
-    "Device",
-    "Dict",
-    "Union",
-    "is_initialized"
-  ],
   "torch.cuda.nccl": [
     "init_rank",
     "is_available",
@@ -998,6 +991,7 @@
     "Iterable",
     "Iterator",
     "List",
+    "Mapping",
     "NamedTuple",
     "Optional",
     "Parameter",
@@ -1065,6 +1059,7 @@
     "Dict",
     "Iterator",
     "List",
+    "Mapping",
     "Module",
     "Optional",
     "Parameter",
@@ -2087,6 +2082,9 @@
     "householder_product",
     "inv",
     "inv_ex",
+    "ldl_factor",
+    "ldl_factor_ex",
+    "ldl_solve",
     "lstsq",
     "lu_factor",
     "lu_factor_ex",
@@ -2106,6 +2104,7 @@
     "svdvals",
     "tensorinv",
     "tensorsolve",
+    "vander",
     "vector_norm"
   ],
   "torch.multiprocessing": [

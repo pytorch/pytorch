@@ -254,6 +254,9 @@ def _tensor_str(self, indent):
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
 
+    if self.dtype is torch.complex32:
+        self = self.cfloat()
+
     if self.dtype.is_complex:
         # handle the conjugate bit
         self = self.resolve_conj()
@@ -299,10 +302,10 @@ def get_summarized_data(self):
 
 def _str_intern(inp, *, tensor_contents=None):
     is_plain_tensor = type(inp) is torch.Tensor or type(inp) is torch.nn.Parameter
-    if is_plain_tensor:
-        prefix = 'tensor('
-    elif inp.is_nested:
+    if inp.is_nested:
         prefix = "nested_tensor("
+    elif is_plain_tensor:
+        prefix = 'tensor('
     else:
         prefix = f"{type(inp).__name__}("
     indent = len(prefix)
