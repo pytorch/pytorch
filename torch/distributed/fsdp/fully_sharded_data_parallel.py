@@ -2108,8 +2108,9 @@ class FullyShardedDataParallel(nn.Module):
                 return
             # TODO: (Race) If two autograd threads enter this function and see
             # that `_pre_backward_hook_has_run == False` before either can set
-            # it to `True`, then both threads duplicate the hook logic.
-            # self._pre_backward_hook_has_run = True
+            # it to `True`, then both threads duplicate the hook logic. We set
+            # this to `True` as early as possible to minimize the race window.
+            self._pre_backward_hook_has_run = True
             # try to queue final backward callback only once for root, so
             # that final backward callback is attached to the outer most
             # backward graph task and called after all the backward
@@ -2133,7 +2134,6 @@ class FullyShardedDataParallel(nn.Module):
             # Wait for all_gather to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
-            self._pre_backward_hook_has_run = True
             # Prefetch next layer's full params in backward pass,
             # since it is prefetching, no need to wait for all_gather stream.
             if self._need_prefetch_pre_backward_hook():
