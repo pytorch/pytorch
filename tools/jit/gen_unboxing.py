@@ -209,9 +209,9 @@ def main() -> None:
         "The operator names also contain the namespace prefix (e.g. aten::)",
     )
     parser.add_argument(
-        "--op_registration_whitelist",
+        "--op_registration_allowlist",
         nargs="*",
-        help="filter op registrations by the whitelist (if set); "
+        help="filter op registrations by the allowlist (if set); "
         "each item is `namespace`::`operator name` without overload name; "
         "e.g.: aten::empty aten::conv2d ...",
     )
@@ -220,7 +220,7 @@ def main() -> None:
     options = parser.parse_args()
 
     selector = get_custom_build_selector(
-        options.op_registration_whitelist,
+        options.op_registration_allowlist,
         options.op_selection_yaml_path,
     )
 
