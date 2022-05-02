@@ -2106,6 +2106,10 @@ class FullyShardedDataParallel(nn.Module):
             # Run ``_pre_backward_hook`` only once per backward pass
             if self._pre_backward_hook_has_run:
                 return
+            # TODO: (Race) If two autograd threads enter this function and see
+            # that `_pre_backward_hook_has_run == False` before either can set
+            # it to `True`, then both threads duplicate the hook logic.
+            self._pre_backward_hook_has_run = True
             # try to queue final backward callback only once for root, so
             # that final backward callback is attached to the outer most
             # backward graph task and called after all the backward
@@ -2134,7 +2138,7 @@ class FullyShardedDataParallel(nn.Module):
             if self._need_prefetch_pre_backward_hook():
                 self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
 
-            self._pre_backward_hook_has_run = True
+            
             # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
             self._prep_grads_for_backward()
 
