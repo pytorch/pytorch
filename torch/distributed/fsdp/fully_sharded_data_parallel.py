@@ -3543,7 +3543,5 @@ def _get_param_name_to_param(
     model: torch.nn.Module,
 ) -> Dict[str, torch.nn.Parameter]:
     """Constructs the inverse mapping of :meth:`_get_param_to_param_name`."""
-    return {
-        param_name: param
-        for param, param_name in _get_param_to_param_name(model).items()
-    }
+    param_to_param_name = _get_param_to_param_name(model)
+    return dict(zip(param_to_param_name.values(), param_to_param_name.keys()))
