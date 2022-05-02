@@ -1852,10 +1852,16 @@ test_suite(
     ],
 )
 
-# An internal genrule that we are converging with refers to this file
-# as ":native_functions.yaml" from this package, so we alias it for
+# An internal genrule that we are converging with refers to these file
+# as if they are from this package, so we alias them for
 # compatibility.
+
 alias(
     name = "native_functions.yaml",
     actual = "aten/src/ATen/native/native_functions.yaml",
+)
+
+alias(
+    name = "tags.yaml",
+    actual = "aten/src/ATen/native/tags.yaml",
 )
