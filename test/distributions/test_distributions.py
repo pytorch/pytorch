@@ -4665,6 +4665,87 @@ class TestAgainstScipy(TestCase):
             else:
                 self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), msg=pytorch_dist)
 
+    def _test_discrete_distribution_mode(self, dist, sanitized_mode):
+        # We cannot easily check the mode for discrete distributions, but we can look left and right
+        # to ensure the log probability is smaller than at the mode.
+        isfinite = dist.mode.isfinite().reshape(dist.batch_shape + (dist.event_shape.numel(),)).all(-1)
+        for step in [-1, 1]:
+            log_prob_mode = dist.log_prob(sanitized_mode)
+            if isinstance(dist, OneHotCategorical):
+                idx = (dist._categorical.mode + 1) % dist.probs.shape[-1]
+                other = torch.nn.functional.one_hot(idx, num_classes=dist.probs.shape[-1]).to(dist.mode)
+            else:
+                other = dist.mode + step
+            mask = isfinite & dist.support.check(other)
+            self.assertTrue(mask.any() or dist.mode.unique().numel() == 1)
+            other = torch.where(mask, other, dist.sample())
+            log_prob_other = dist.log_prob(other)
+            np.testing.assert_array_less(log_prob_other[mask], log_prob_mode[mask])
+
+    def _test_continuous_distribution_mode(self, dist, sanitized_mode):
+        sanitized_mode = sanitized_mode.requires_grad_()
+        log_probs = dist.log_prob(sanitized_mode)
+        assert log_probs.shape == dist.batch_shape
+
+        # We evaluate the "boundary sign" which is -1 if the mode is on the left boundary of its
+        # support, +1 if on the right boundary, and 0 if not on the boundary.
+        if isinstance(dist.support, torch.distributions.constraints._GreaterThanEq):
+            boundary_sign = torch.where(dist.support.lower_bound == dist.mode, -1., 0.)
+        elif isinstance(dist.support, torch.distributions.constraints._Interval):
+            boundary_sign = torch.where(
+                dist.support.lower_bound == dist.mode, -1.,
+                torch.where(dist.support.upper_bound == dist.mode, 1., 0.)
+            )
+        else:
+            boundary_sign = torch.zeros_like(sanitized_mode)
+
+        flat_shape = (dist.batch_shape.numel(),) + dist.event_shape
+        flat_mode = dist.mode.reshape(flat_shape)
+        flat_boundary_sign = boundary_sign.reshape(flat_shape)
+        for i, log_prob in enumerate(log_probs.ravel()):
+            # Mode is undefined, nothing to be done here.
+            if not flat_mode[i].isfinite().any():
+                continue
+
+            # Check if the gradients are zero.
+            sanitized_mode.grad = None
+            log_prob.backward(retain_graph=True)
+            grad = sanitized_mode.grad.reshape(flat_shape)[i]
+            try:
+                np.testing.assert_allclose(grad, 0, atol=1e-3)
+            except AssertionError:
+                # Check whether we are on a boundary. If so, demand that the log prob decreases as
+                # we move away from the boundary. We clamp gradients to large absolute values
+                # because some distributions (like Beta) may have infinite gradients.
+                np.testing.assert_array_less(0, grad.clamp(-1e12, 1e12) * flat_boundary_sign[i])
+
+
+    def test_mode(self):
+        discrete_distributions = (
+            Bernoulli, Binomial, Geometric, OneHotCategorical, Poisson,
+        )
+        no_mode_available = (ContinuousBernoulli, Multinomial)
+
+        for dist, _ in self.distribution_pairs:
+            if isinstance(dist, no_mode_available):
+                with self.assertRaises(NotImplementedError):
+                    dist.mode
+                continue
+
+            # Check that either all or no elements in the event shape are nan: the mode cannot be
+            # defined for part of an event.
+            isfinite = dist.mode.isfinite().reshape(dist.batch_shape + (dist.event_shape.numel(),))
+            np.testing.assert_array_equal(isfinite.all(-1) | ~isfinite.any(-1), True)
+
+            # Evaluate the Jacobian of the log probability at the mode. We sanitize undefined modes by
+            # sampling from the distribution.
+            sanitized_mode = torch.where(dist.mode.isfinite(), dist.mode, dist.sample())
+
+            if isinstance(dist, discrete_distributions):
+                self._test_discrete_distribution_mode(dist, sanitized_mode)
+            else:
+                self._test_continuous_distribution_mode(dist, sanitized_mode)
+
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, (Cauchy, HalfCauchy, VonMises)):

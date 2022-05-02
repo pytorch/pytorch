@@ -46,6 +46,10 @@ class HalfCauchy(TransformedDistribution):
         return torch.full(self._extended_shape(), math.inf, dtype=self.scale.dtype, device=self.scale.device)
 
     @property
+    def mode(self):
+        return torch.zeros_like(self.scale)
+
+    @property
     def variance(self):
         return self.base_dist.variance
 

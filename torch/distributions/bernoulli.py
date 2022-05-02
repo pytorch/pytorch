@@ -68,6 +68,10 @@ class Bernoulli(ExponentialFamily):
         return self.probs
 
     @property
+    def mode(self):
+        return (self.probs >= 0.5).to(self.probs)
+
+    @property
     def variance(self):
         return self.probs * (1 - self.probs)
 

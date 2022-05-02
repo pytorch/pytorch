@@ -1,5 +1,6 @@
 import math
 
+import torch
 from torch._six import inf
 from torch.distributions import constraints
 from torch.distributions.transforms import AbsTransform
@@ -43,6 +44,10 @@ class HalfNormal(TransformedDistribution):
     @property
     def mean(self):
         return self.scale * math.sqrt(2 / math.pi)
+
+    @property
+    def mode(self):
+        return torch.zeros_like(self.scale)
 
     @property
     def variance(self):

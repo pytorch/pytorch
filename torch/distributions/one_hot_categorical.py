@@ -71,6 +71,11 @@ class OneHotCategorical(Distribution):
         return self._categorical.probs
 
     @property
+    def mode(self):
+        max_prob, _ = self._categorical.probs.max(-1, True)
+        return (self._categorical.probs == max_prob).to(self._categorical.probs)
+
+    @property
     def variance(self):
         return self._categorical.probs * (1 - self._categorical.probs)
 
