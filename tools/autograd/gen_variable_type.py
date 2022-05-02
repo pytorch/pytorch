@@ -329,7 +329,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "im2col",
     "im2col_backward",
     "cholesky_inverse",
-    'linalg_lu',
+    "linalg_lu",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
