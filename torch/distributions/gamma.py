@@ -27,7 +27,7 @@ class Gamma(ExponentialFamily):
             (often referred to as beta)
     """
     arg_constraints = {'concentration': constraints.positive, 'rate': constraints.positive}
-    support = constraints.positive
+    support = constraints.nonnegative
     has_rsample = True
     _mean_carrier_measure = 0
 
