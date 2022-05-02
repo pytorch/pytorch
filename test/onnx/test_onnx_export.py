@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import onnx
 import torch
+from typing import Callable
 
 from test_pytorch_common import TestCase
 from torch.onnx.symbolic_helper import _onnx_unsupported
@@ -60,3 +61,32 @@ class TestONNXExport(TestCase):
                               operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
         onnx_model = onnx.load_from_string(f.getvalue())
         self.assertAtenOp(onnx_model, "clamp", "Tensor")
+
+
+    def _helper_test_to_(self, cast_fn: Callable[[torch.Tensor], torch.Tensor]):
+        """Helper to test aten::to(device) variants
+
+        `cast_fn` is converted into a `torch.jit.script`. It wraps `aten::to`
+        during export to preventing the devices to be hard-coded.
+
+        Needed by detectron2 after https://github.com/facebookresearch/detectron2/pull/4132/
+        """
+        cast_fn = torch.jit.script(cast_fn)
+
+        f = io.BytesIO()
+        x = torch.zeros([1, 3, 32, 32])
+        torch.onnx.export(cast_fn, (x,), f)
+        onnx_model = onnx.load_from_string(f.getvalue())
+        for n in onnx_model.graph.node:
+            self.assertNotEqual(n.op_type, "To")
+            self.assertNotEqual(n.op_type, "Cast")
+
+    def test_to__cpu_string(self):
+        def cast_cpu_string(src: torch.Tensor) -> torch.Tensor:
+            return src.to("cpu")
+        self._helper_test_to_(cast_cpu_string)
+
+    def test_to__device_cpu_string(self):
+        def cast_device_cpu_string(src: torch.Tensor) -> torch.Tensor:
+            return src.to(device="cpu")
+        self._helper_test_to_(cast_device_cpu_string)
