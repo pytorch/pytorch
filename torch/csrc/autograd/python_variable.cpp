@@ -649,22 +649,25 @@ int THPVariable_set_data(THPVariable *self, PyObject *data, void *unused)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject *THPVariable_get_grad(THPVariable *self, void *unused)
+PyObject *THPVariable_get__grad(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_getter(self, "grad");
-  }
   return THPVariable_Wrap(THPVariable_Unpack(self).grad());
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
-{
+PyObject *THPVariable_get_grad(THPVariable *self, void *unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_setter(self, "grad", py_grad);
+    return handle_torch_function_getter(self, "grad");
   }
+  return THPVariable_get__grad(self, unused);
+  END_HANDLE_TH_ERRORS
+}
+
+int THPVariable_set__grad(THPVariable *self, PyObject *py_grad, void *unused)
+{
+  HANDLE_TH_ERRORS
   const auto& var = THPVariable_Unpack(self);
   if (!py_grad || py_grad == Py_None) {
     var.mutable_grad().reset();
@@ -691,6 +694,15 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
 
   var.mutable_grad() = grad;
   return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
+int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_setter(self, "grad", py_grad);
+  }
+  return THPVariable_set__grad(self, py_grad, unused);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
@@ -1184,7 +1196,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_leaf", (getter)THPVariable_is_leaf, nullptr, nullptr, nullptr},
   {"retains_grad", (getter)THPVariable_retains_grad, nullptr, nullptr, nullptr},
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, nullptr, nullptr},
-  {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr}, // Allows the python class to override .grad
+  {"_grad", (getter)THPVariable_get__grad, (setter)THPVariable_set__grad, nullptr, nullptr}, // Allows the python class to override .grad
   {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr},
   {"_base", (getter)THPVariable_get_base, nullptr, nullptr, nullptr},
   {"volatile", (getter)THPVariable_get_volatile, (setter)THPVariable_set_volatile, nullptr, nullptr},
