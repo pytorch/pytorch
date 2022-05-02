@@ -5269,7 +5269,6 @@ class TestLinalg(TestCase):
             k = min(A.shape[-2:])
             batch = A.shape[:-2]
             check_errors = (fn == torch.linalg.lu_factor)
-            # Test linalg.lu_factor / linalg.lu_factor_ex / torch.lu
             if singular and check_errors:
                 # It may or may not throw as the LU decomposition without pivoting
                 # may still succeed for singular matrices
@@ -5286,12 +5285,10 @@ class TestLinalg(TestCase):
             if not pivot:
                 self.assertEqual(pivots, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(batch + (k, )))
 
-            # Test linalg.lu_unpack
             P, L, U = torch.lu_unpack(LU, pivots, unpack_pivots=pivot)
 
             self.assertEqual(P @ L @ U if pivot else L @ U, A)
 
-            # Test linalg.lu_
             PLU = torch.linalg.lu(A, pivot=pivot)
             self.assertEqual(P, PLU.P)
             self.assertEqual(L, PLU.L)
@@ -5308,20 +5305,22 @@ class TestLinalg(TestCase):
                     else:
                         shape_B = A.shape[:-2] + rhs + A.shape[-1:]
                     B = make_arg(shape_B)
-                    B_ = B.unsqueeze(-1) if rhs == () else B
-                    # Test linalg.lu_solve
-                    for adjoint in (True, False):
-                        X = torch.linalg.lu_solve(LU, pivots, B, left=left, adjoint=adjoint)
-                        X_ = X.unsqueeze(-1) if rhs == () else X
-                        A_adj = A.mH if adjoint else A
-                        if left:
-                            self.assertEqual(B_, A_adj @ X_)
-                        else:
-                            self.assertEqual(B_, X_ @ A_adj)
+
+                    # Test linalg.lu_solve. It does not support vectors as rhs
+                    # See https://github.com/pytorch/pytorch/pull/74045#issuecomment-1112304913
+                    if rhs != ():
+                        for adjoint in (True, False):
+                            X = torch.linalg.lu_solve(LU, pivots, B, left=left, adjoint=adjoint)
+                            A_adj = A.mH if adjoint else A
+                            if left:
+                                self.assertEqual(B, A_adj @ X)
+                            else:
+                                self.assertEqual(B, X @ A_adj)
 
                     # Test linalg.solve
                     X = torch.linalg.solve(A, B, left=left)
                     X_ = X.unsqueeze(-1) if rhs == () else X
+                    B_ = B.unsqueeze(-1) if rhs == () else B
                     if left:
                         self.assertEqual(B_, A @ X_)
                     else:

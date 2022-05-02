@@ -4640,7 +4640,6 @@ Tensor linalg_lu_solve_LU(
   const Tensor& X,
   const bool left,
   const bool adjoint) {
-  at::NoTF32Guard disable_tf32;
   // From linalg_lu_solve_jvp we have that:
   // left = True, adjoint = True: A^HX = B
   // left = True, adjoint = False: AX = B
@@ -4664,32 +4663,28 @@ Tensor linalg_lu_solve_LU(
   //   gL = gR.tril(-1)
   //   gU = (L^H gR U^{-H}).triu()
   // gLU = gL + gU
+
+  at::NoTF32Guard disable_tf32;
   Tensor P, L, U;
   std::tie(P, L, U) = at::lu_unpack(LU, pivots, /*unpack_data=*/true, /*unpack_pivots=*/left == adjoint);
-
-  const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, X);
-  const auto gX_ = vector_case ? gX.unsqueeze(-1) : gX;
-  const auto X_ = vector_case ? X.unsqueeze(-1) : X;
   // TODO Optimise the order of the operations to avoid operating on large tensors unnecessarily
   //      The logic should be: if n < k == left then multiply the gX and X first (as it's done now)
   //      Otherwise multiply them last
-  Tensor ret;
   if (left != adjoint) {
     // gR = U^{-H}op_2(-gX)op_2(X)^H
-    auto gR = at::linalg_solve_triangular(U.mH(), -(left ? gX_ : gX_.mH()).matmul(left ? X_.mH() : X_), /*upper*/false);
+    auto gR = at::linalg_solve_triangular(U.mH(), -(left ? gX : gX.mH()).matmul(left ? X.mH() : X), /*upper*/false);
     // gL = (L^{-H} gR U^H).tril(-1)
     auto gL = at::linalg_solve_triangular(L.mH(), gR.matmul(U.mH()), /*upper*/true, /*left*/true, /*unitriangular*/true).tril(-1);;
-    ret = gL + gR.triu();
+    return gL + gR.triu();
   } else {
     // gR = -P^T op_3(X)op_1(op_2(gX))P
-    auto gR = -P.mT().matmul(left ? X_ : X_.mH()).matmul(left ? gX_.mH() : gX_).matmul(P);
+    auto gR = -P.mT().matmul(left ? X : X.mH()).matmul(left ? gX.mH() : gX).matmul(P);
     // gR = gR L^{-H}
     gR = at::linalg_solve_triangular(L.mH(), gR, /*upper*/true, /*left*/false, /*unitriangular*/true);
     // gU = (L^H gR U^{-H}).triu()
     auto gU = at::linalg_solve_triangular(U.mH(), L.mH().matmul(gR), /*upper*/false, /*left*/false).triu();
-    ret = gR.tril(-1) + gU;
+    return gR.tril(-1) + gU;
   }
-  return vector_case ? ret.squeeze(-1) : ret;
 }
 
 Tensor linalg_lu_solve_jvp(
@@ -4716,11 +4711,8 @@ Tensor linalg_lu_solve_jvp(
   // the JVP formula reads
   // dX = op_2(op_1(-U^{-1}(dUU^{-1} + L^{-1}dL)L^{-1} P^T)op_3(B)) + S
 
-  const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, X);
-  const auto dB_ = vector_case ? dB.unsqueeze(-1) : dB;
-  const auto X_ = vector_case ? X.unsqueeze(-1) : X;
-  auto S = at::linalg_lu_solve(LU, pivots, dB_, left, adjoint);
-  Tensor dX;
+  at::NoTF32Guard disable_tf32;
+  auto S = at::linalg_lu_solve(LU, pivots, dB, left, adjoint);
   if (left != adjoint) {
     // We see that when left != adjoint, op_1(A) = A, and we can substitute A^{-1}op_3(B) by op_2(X)
     // dX = op_2(-U^{-1}(dU + L^{-1}dL U)op_2(X)) + S
@@ -4729,7 +4721,7 @@ Tensor linalg_lu_solve_jvp(
     auto U = LU.triu();
     R = -at::linalg_solve_triangular(U, dLU.triu() + R.matmul(U), /*upper*/true);
     // dX = op_2(R op_2(X)) + S
-    dX = (left ? R.matmul(X_) : X_.matmul(R.mH())) + S;
+    return (left ? R.matmul(X) : X.matmul(R.mH())) + S;
   } else {
     // We see that when left == adjoint, op_1(A) = A^H
     // dX = op_2(op_1(-op_3(B)^H U^{-1}(dUU^{-1} + L^{-1}dL)L^{-1} P^T)) + S
@@ -4740,15 +4732,14 @@ Tensor linalg_lu_solve_jvp(
     Tensor P, L, U;
     std::tie(P, L, U) = at::lu_unpack(LU, pivots);
     // Compute V = op_3(X)^H
-    auto V = left ? X_.mH() : X_;
+    auto V = left ? X.mH() : X;
     // Compute the inner parens LdUU^{-1} + dL
     auto R = at::linalg_solve_triangular(U, L.matmul(dLU.triu()), /*upper*/true, /*left*/false) + dLU.tril(-1);
     // dX = op_2(op_1(-op_3(X)^H PRL^{-1} P^T)) + S
     R = at::linalg_solve_triangular(L, -V.matmul(P).matmul(R), /*upper*/false, /*left*/false, /*unitriangular*/true).matmul(P.mT());
     // dX = op_2(R^H) + S
-    dX = (left ? R.mH() : R) + S;
+    return (left ? R.mH() : R) + S;
   }
-  return vector_case ? dX.squeeze(-1) : dX;
 }
 
 Tensor linalg_solve_jvp(

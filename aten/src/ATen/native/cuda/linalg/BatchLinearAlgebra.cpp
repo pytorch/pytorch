@@ -3005,7 +3005,7 @@ static void lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, const 
 c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& B, const Tensor& LU) {
   // B and LU have the same number of dimensions
   if (batchCount(B) != batchCount(LU)) {
-		auto n = B.dim();
+        auto n = B.dim();
     auto expand_shape = DimVector(B.sizes().slice(0, n - 2));
     expand_shape.append({LU.size(-2), LU.size(-1)});
     return c10::MaybeOwned<Tensor>::owned(
@@ -3027,11 +3027,6 @@ c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& B, const Tensor& pivot
 }
 
 static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
-  // Trivial case. We need it here as it makes some backends fail
-  if (B.numel() == 0) {
-    return;
-  }
-
   auto batch_size = batchCount(B);
   auto m = LU.size(-2);
   auto b2 = B.size(-1);
