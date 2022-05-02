@@ -279,6 +279,10 @@ def _flatten_full_optim_state_dict(
         else:
             assert len(unflat_param_names) == 1
             unflat_param_name = unflat_param_names[0]
+            if unflat_param_name not in full_osd_state:
+                # A non-FSDP module's parameter may be ignored and hence not
+                # have an entry in the optimizer state
+                continue
             # Remap from unflattened to flattened parameter ID -- do not
             # deepcopy to avoid unnecessarily duplicating tensor storage
             flat_osd_state[flat_param_id] = \
