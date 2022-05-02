@@ -95,6 +95,15 @@ Tensor Operations
     tensorinv
     tensorsolve
 
+Misc
+----
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    vander
+
 Experimental Functions
 ----------------------
 .. autosummary::
@@ -104,3 +113,6 @@ Experimental Functions
     cholesky_ex
     inv_ex
     lu_factor_ex
+    ldl_factor
+    ldl_factor_ex
+    ldl_solve
