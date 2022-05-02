@@ -317,7 +317,6 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
     # return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 
-
 def to_real_dtype(dtype: torch.dtype):
     if dtype == torch.complex32:
         return torch.float16
@@ -462,13 +461,20 @@ def nll_loss_backward(
 
 
 @register_decomposition(aten.binary_cross_entropy)
-def binary_cross_entropy(self: Tensor, target: Tensor, weight: Optional[Tensor]=None, reduction: int = Reduction.MEAN.value) -> Tensor:
+def binary_cross_entropy(
+    self: Tensor,
+    target: Tensor,
+    weight: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
     # We cannot currently model this without introducing data-dependent control flow
     # TORCH_CHECK(
     #     (input_val >= 0) && (input_val <= 1),
     #     "all elements of input should be between 0 and 1"
     # )
-    loss = (target - 1) * torch.maximum(torch.log(1 - self), self.new_full((), -100)) - target * torch.maximum(torch.log(self), self.new_full((), -100))
+    loss = (target - 1) * torch.maximum(
+        torch.log(1 - self), self.new_full((), -100)
+    ) - target * torch.maximum(torch.log(self), self.new_full((), -100))
     if weight is not None:
         loss = loss * weight
     return apply_loss_reduction(loss, reduction)
@@ -1072,7 +1078,12 @@ def cudnn_batch_norm(
     # Cudnn return running mean and variance when training is True
     if training:
         return (a, b, c, input.new_zeros((0,), dtype=torch.uint8))
-    return (a, input.new_zeros((0,)), input.new_zeros((0,)), input.new_zeros((0,), dtype=torch.uint8))
+    return (
+        a,
+        input.new_zeros((0,)),
+        input.new_zeros((0,)),
+        input.new_zeros((0,), dtype=torch.uint8),
+    )
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)
