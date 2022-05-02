@@ -1366,7 +1366,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       if dim < len(sparse_shape):
           # Find new_indices[dim] of the output sparse tensor and
           # indices at which to select values/indices.
-          # The CPP code uses binary search to find matches and may
+          # The CPP code uses (binary/in a count table) search to find matches and may
           # swap the loop order for better algorithmic complexity.
           new_dim_indices = []
           selected_dim_indices = []
@@ -1455,7 +1455,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     const auto dim_indices = indices[dim].contiguous();
 
     // If nnz is smaller than size, then either indices[dim] or index gets sorted,
-    // then this follows by a binary search to find interesections.
+    // then this is followed by a binary search to find interesections.
     const auto get_selected_indices_small_nnz_large_size = [&]() -> std::tuple<Tensor, Tensor> {
       const auto grain_size = at::internal::GRAIN_SIZE;
       const auto n_threads_nnz = std::max<int64_t>(
