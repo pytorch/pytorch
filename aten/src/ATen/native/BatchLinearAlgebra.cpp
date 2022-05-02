@@ -538,14 +538,10 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
   TORCH_CHECK(pivots.dtype() == at::kInt,
               "linalg.lu_solve: pivots should be a Tensor of scalar type torch.int32");
 
-  // NumPy compat: Two types of 'B' tensors are supported:
-  // - 1D tensor or batch of 1D tensors (vector case)
-  // - 2D tensor or batch of 2D tensors (matrix case)
-  const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, B);
-  auto B_ = vector_case ? B.unsqueeze(-1) : B;
-
   // matrix shapes
-  at::native::checkInputsSolver(LU, B_, left, "linalg.lu_solve");
+  at::native::squareCheckInputs(LU, "torch.linalg.lu_solve");
+  at::native::checkInputsSolver(LU, B, left, "linalg.lu_solve");
+  //
   TORCH_CHECK(LU.size(-1) == pivots.size(-1),
               "linalg.lu_solve: Number of pivots per batch should be same as the dimension of the matrix");
 
@@ -555,16 +551,11 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
       "linalg.lu_solve: Expected LU.shape[:-1] and pivots.shape to be the same, but got pivots with shape ",
       pivots.sizes(), " instead");
 
-  // Check that B can be broadcasted to the shape of LU
-  auto B_broad_shape = std::get<0>(at::native::_linalg_broadcast_batch_dims(B_, LU));
-  // We disallow the broadcasting of B as a vector when left=False as, in that case, A.shape = (*, 1, 1)
-  TORCH_CHECK(left || !vector_case, "linalg.lu_solve: Vector broadcasting of the left hand side is not supported for left=False. In this case linalg.lu_solve is equivalent to B / A.squeeze(-1)");
+  // This one checks that B can be broadcasted to the shape of A
+  auto B_broadcast_size = std::get<0>(at::native::_linalg_broadcast_batch_dims(B, LU));
+  auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/left);
 
-  auto result_shape = vector_case ? IntArrayRef(B_broad_shape.data(), B_broad_shape.size() - 1)
-                                  : B_broad_shape;
-  auto result_strides = at::native::contiguous_strides(result_shape, /*column_major=*/left);
-
-  set_output(0, result_shape, result_strides, B.options(), {});
+  set_output(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
 
@@ -2030,7 +2021,12 @@ TORCH_IMPL_FUNC(_linalg_solve_out)(const Tensor& A,
                               /*pivot=*/true,
                               /*check_errors=*/false);
   at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);
-  at::linalg_lu_solve_out(const_cast<Tensor&>(result), LU, pivots, B, left, /*adjoint*/use_A_T);
+
+  // [numpy-compat] Handle vectors on the rhs
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, B);
+  auto result_ = vector_case ? result.unsqueeze(-1) : result;
+  auto B_ = vector_case ? B.unsqueeze(-1) : B;
+  at::linalg_lu_solve_out(result_, LU, pivots, B_, left, /*adjoint*/use_A_T);
 }
 
 Tensor& linalg_solve_out(const Tensor& A,
@@ -2262,18 +2258,16 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
                                      bool left,
                                      bool adjoint,
                                      const Tensor& result) {
+  // Trivial case
   if (result.numel() == 0) {
     return;
   }
 
   // B will be cloned into result, so it needn't be contiguous
-  const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, B);
-  auto result_aux = vector_case ? result.unsqueeze(-1) : result;
-  auto B_ = vector_case ? B.unsqueeze(-1) : B;
-  B_ = B_.expand_as(result_aux);
+  auto B_ = B.expand_as(result);
 
   // Expand LU / pivots
-  auto broadcasted_dim = result_aux.sizes().vec();
+  auto broadcasted_dim = result.sizes().vec();
   broadcasted_dim.end()[-2] = LU.size(-2);
   broadcasted_dim.end()[-1] = LU.size(-1);
   auto LU_expanded = LU.expand(broadcasted_dim);
@@ -2284,8 +2278,11 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
   // Solve A^H X = B^H. Then we return X^H
   if (!left) {
     adjoint = !adjoint;
-    result_aux = result_aux.mT();
-    B_ = B_.mH();
+    result.transpose_(-2, -1);
+    B_.transpose_(-2, -1);
+    if (B_.is_complex()) {
+      B_._set_conj(!B_.is_conj());
+    }
   }
 
   // Make LU / pivots / result C or F contiguous and copy B into result
@@ -2293,8 +2290,8 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
   auto LU_ = at::native::borrow_else_clone(
       LU_expanded.mT().is_contiguous(), LU_expanded, LU_expanded, /*row_major=*/false);
   auto result_ = at::native::borrow_else_clone(
-      result_aux.mT().is_contiguous(), result_aux, B_, /*row_major=*/false);
-  if (result_aux.is_same(*result_)) {
+      result.mT().is_contiguous(), result, B_, /*row_major=*/false);
+  if (result.is_same(*result_)) {
     result_->copy_(B_);
   }
 
@@ -2304,17 +2301,22 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
 
   lu_solve_stub(LU_->device().type(), *LU_, *pivots_, *result_, trans);
 
-  if (!result_aux.is_same(*result_)) {
-    // Note that result_aux is a view into result (perhaps into result.mT())
-    // so we're effectively copying *result_ into result
-    if (left || !result_aux.is_complex()) {
-      result_aux.copy_(*result_);
+  if (!result.is_same(*result_)) {
+    if (left) {
+      result.copy_(*result_);
     } else {
-      result_aux.copy_(result_->conj());
+      // Fuse the copy with the conj
+      result.copy_(result_->conj());
+      result.transpose_(-2, -1);
     }
-  } else if (!left && result.is_complex()) {
-    // Conjugate the result in place
-    result._set_conj(!result.is_conj());
+  } else {
+    // Conj-transpose back in-place
+    if (!left) {
+      result.transpose_(-2, -1);
+      if (result.is_complex()) {
+        result._set_conj(!result.is_conj());
+      }
+    }
   }
 }
 
