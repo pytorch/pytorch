@@ -1,4 +1,4 @@
-#include <torch/csrc/lazy/core/view_ops/as_strided.h>
+#include <torch/csrc/lazy/ts_backend/view_ops/as_strided.h>
 
 #include <algorithm>
 
