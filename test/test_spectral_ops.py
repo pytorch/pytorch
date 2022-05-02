@@ -395,9 +395,12 @@ class TestFFT(TestCase):
         }
         if dtype in (torch.half, torch.complex32):
             # cuFFT supports powers of 2 for half and complex half precision
+            # NOTE: With hfft and default args where output_size n=2*(input_dim - 1),
+            # we make sure that logical fft size is a power of two.
             x = torch.randn(65, device=device, dtype=dtype)
             R = torch.fft.hfft(x)
         else:
+            # cuFFT supports powers of 2 for half and complex half precision
             R = torch.fft.hfft(t)
         self.assertEqual(R.dtype, PROMOTION_MAP_C2R[dtype])
 
@@ -432,7 +435,7 @@ class TestFFT(TestCase):
     def test_fft_half_and_chalf_not_power_of_two_error(self, device, dtype, op):
         t = make_tensor(13, 13, device=device, dtype=dtype)
         err_msg = "cuFFT only supports dimensions whose sizes are powers of two"
-        with self.assertRaisesRegex(RuntimeError, err_msg): 
+        with self.assertRaisesRegex(RuntimeError, err_msg):
             op(t)
 
         if op.ndimensional in (SpectralFuncType.ND, SpectralFuncType.TwoD):
