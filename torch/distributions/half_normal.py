@@ -24,7 +24,7 @@ class HalfNormal(TransformedDistribution):
         scale (float or Tensor): scale of the full Normal distribution
     """
     arg_constraints = {'scale': constraints.positive}
-    support = constraints.positive
+    support = constraints.nonnegative
     has_rsample = True
 
     def __init__(self, scale, validate_args=None):
