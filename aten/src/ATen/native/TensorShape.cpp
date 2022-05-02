@@ -1722,15 +1722,34 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       const auto index_counts = index_offset_counts_per_thread.select(0, -1);
       const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1);
       const auto intersection_counts = index_counts.mul(dim_indices_counts);
-      const auto intersection_offsets = intersection_counts.cumsum(0);
       const auto res_len = intersection_counts.sum().item<int64_t>();
       // Short-circuit if empty intersection
       if (!res_len) {
         auto empty_idx = at::empty({0}, index.options());
         return std::make_tuple(empty_idx, empty_idx);
       }
+      const auto intersection_offsets = intersection_counts.cumsum(0);
 
-      const bool search_in_dim_indices = true;
+      const auto search_in_dim_indices = [&]() -> bool {
+        const auto grain_size = at::internal::GRAIN_SIZE;
+        const auto n_threads_index = std::max<int64_t>(
+            1, std::min<int64_t>((index_len + grain_size - 1) / grain_size, at::get_num_threads())
+        );
+        const auto n_threads_dim_indices = std::max<int64_t>(
+            1, std::min<int64_t>((nnz + grain_size - 1) / grain_size, at::get_num_threads())
+        );
+
+        const auto index_max_copy_work_per_thread =
+          index_counts_per_thread.mul(dim_indices_counts).sum(-1).max().item<int64_t>();
+        const auto dim_indices_max_copy_work_per_thread
+          = dim_indices_counts_per_thread.mul(index_counts).sum(-1).max().item<int64_t>();
+
+        const auto index_max_work_per_thread = index_max_copy_work_per_thread * index_len / n_threads_index;
+        const auto dim_indices_max_work_per_thread = dim_indices_max_copy_work_per_thread * nnz / n_threads_dim_indices;
+        return index_max_work_per_thread <= dim_indices_max_work_per_thread
+          ? true
+          : false;
+      }();
 
       Tensor idx, idx_counts_per_thread, idx_offset_counts_per_thread;
       Tensor src, src_counts_per_thread, src_offset_counts_per_thread;
