@@ -1278,7 +1278,7 @@ class RecordingObserver(ObserverBase):
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
     def __init__(self, dtype=torch.quint8, **kwargs):
-        super(RecordingObserver, self).__init__(dtype=dtype, **kwargs)
+        super(RecordingObserver, self).__init__(dtype=dtype, **kwargs)  # type: ignore[call-arg]
         self.tensor_val = []
 
     def forward(self, x):
