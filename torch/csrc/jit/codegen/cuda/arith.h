@@ -27,11 +27,8 @@ TORCH_CUDA_CU_API TensorView* castOp(DataType dtype, TensorView* v1);
 // Perform unary op type and return the output
 TORCH_CUDA_CU_API Val* unaryOp(UnaryOpType type, Val* v1);
 TORCH_CUDA_CU_API TensorView* unaryOp(UnaryOpType type, TensorView* v1);
-TORCH_CUDA_CU_API Val* unaryOp(UnaryOpType type, Val* v1, DataType dtype);
-TORCH_CUDA_CU_API TensorView* unaryOp(
-    UnaryOpType type,
-    TensorView* v1,
-    DataType dtype);
+TORCH_CUDA_CU_API Val* unaryIsOp(UnaryOpType type, Val* v1);
+TORCH_CUDA_CU_API TensorView* unaryIsOp(UnaryOpType type, TensorView* v1);
 TORCH_CUDA_CU_API Val* unaryOp(
     UnaryOpType type,
     Val* v1,

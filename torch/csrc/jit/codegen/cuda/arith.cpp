@@ -293,14 +293,14 @@ TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
   return unaryOp(type, v1->as<Val>())->as<TensorView>();
 }
 
-Val* unaryOp(UnaryOpType type, Val* v, DataType dtype) {
+Val* unaryIsOp(UnaryOpType type, Val* v) {
   Val* out = newValLike(v, DataType::Bool);
   IrBuilder::create<UnaryOp>(type, out, v);
   return out;
 }
 
-TensorView* unaryOp(UnaryOpType type, TensorView* v, DataType dtype) {
-  return unaryOp(type, v->asVal(), dtype)->as<TensorView>();
+TensorView* unaryIsOp(UnaryOpType type, TensorView* v) {
+  return unaryOp(type, v->asVal())->as<TensorView>();
 }
 
 Val* unaryOp(UnaryOpType type, Val* v1, const TypePromotionConfig& config) {
@@ -393,12 +393,12 @@ NVFUSER_DEFINE_UNARY_FLOAT_OP(tan, Tan)
 NVFUSER_DEFINE_UNARY_FLOAT_OP(tanh, Tanh)
 #undef NVFUSER_DEFINE_UNARY_FLOAT_OP
 
-#define NVFUSER_DEFINE_UNARY_IS_OP(op_name, op_type)          \
-  Val* op_name(Val* v) {                                      \
-    return unaryOp(UnaryOpType::op_type, v, DataType::Bool);  \
-  }                                                           \
-  TensorView* op_name(TensorView* tv) {                       \
-    return unaryOp(UnaryOpType::op_type, tv, DataType::Bool); \
+#define NVFUSER_DEFINE_UNARY_IS_OP(op_name, op_type) \
+  Val* op_name(Val* v) {                             \
+    return unaryIsOp(UnaryOpType::op_type, v);       \
+  }                                                  \
+  TensorView* op_name(TensorView* tv) {              \
+    return unaryIsOp(UnaryOpType::op_type, tv);      \
   }
 
 NVFUSER_DEFINE_UNARY_IS_OP(isfinite, IsFinite)

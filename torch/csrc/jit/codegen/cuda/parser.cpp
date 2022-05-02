@@ -1051,7 +1051,7 @@ class IrParser {
             auto operand = list_val.front();
             list_val.pop_front();
             auto out =
-                unaryOp(op_mapping[node->kind()], operand, DataType::Bool);
+                unaryIsOp(op_mapping[node->kind()], operand);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
