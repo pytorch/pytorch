@@ -45,7 +45,6 @@ __all__ = [
     "expm1",
     "floor",
     "is_finite",
-    "isnan",
     "lgamma",
     "log",
     "log1p",
