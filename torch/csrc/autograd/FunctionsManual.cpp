@@ -5371,16 +5371,19 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = grad.gather(dim, index);
   } else if (reduce == "prod") {
     // Explicitly compute exclusive prod for elements in self/src that are 0
-    Tensor self_zero = self == 0;
-    Tensor masked_self = self.masked_fill(self_zero, 1);
+    Tensor masked_self = self.masked_fill(self == 0, 1);
     Tensor masked_self_result = masked_self.scatter_reduce(dim, index, src, reduce, include_self);
-    grad_self = at::where(self_zero, grad * masked_self_result, grad * result / self);
+    grad_self = grad * masked_self_result / masked_self;
     Tensor src_zero = src == 0;
-    Tensor masked_src = src.masked_fill(src_zero, 1);
+    Tensor src_num_zeros = zeros_like(self).scatter_add(dim, index, src_zero.to(self.dtype())).gather(dim, index);
+    Tensor src_single_zero = bitwise_and(src_zero, src_num_zeros == 1);
+    // For src positions with src_single_zero, grad * result.gather(dim,index) / src.masked_fill(src_zero, 1)
+    // would incorrectly propagate zeros as the gradient
+    Tensor masked_src = src.masked_fill(src_single_zero, 1);
     Tensor masked_src_result = self.scatter_reduce(dim, index, masked_src, reduce, include_self);
-    grad_src = at::where(src_zero,
-                           (grad * masked_src_result).gather(dim, index),
-                           (grad * result).gather(dim, index) / src);
+    grad_src = where(src_single_zero,
+                     (grad * masked_src_result).gather(dim, index),
+                     (grad * result).gather(dim, index) / src.masked_fill(src_zero, 1));
   } else if (reduce == "mean") {
     Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N = N.scatter_add(dim, index, ones_like(src));

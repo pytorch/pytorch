@@ -7067,6 +7067,41 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
             )
         )
 
+    # Sample inputs to test edge cases for backward
+    # Check that gradients are propagated correctly for prod when zeros in self/src are reduced
+    if requires_grad and reduce == 'prod':
+        # This sample tests gradients for the following cases
+        # (a) 1 zero reduced (from src (self[0, 1]), from self (self[0, 0]))
+        # (b) 2 zeros reduced (1 from src and 1 from self (self[1, 0]), 2 from src (self[1, 1]))
+        # (c) > 2 zeros reduced (2 from src, 1 from self (self[2, 0]))
+        # (d) no zeros reduced (self([2, 1]))
+        input = torch.tensor([[0, 13], [0, 17], [0, 19]], dtype=dtype, device=device, requires_grad=requires_grad)
+        src = torch.tensor([[0, 1, 2, 3], [0, 4, 0, 0], [0, 0, 5, 6]], dtype=dtype, device=device, requires_grad=requires_grad)
+        idx = torch.tensor([[1, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 1]], dtype=torch.long, device=device)
+
+        sample_inputs.append(
+            SampleInput(
+                input,
+                args=(1, idx, src, reduce),
+                kwargs={'include_self': True}
+            )
+        )
+
+
+    # Check that gradients are evenly distributed for amax/amin
+    if requires_grad and (reduce in ['amax', 'amin']):
+        input = _tensor((M, S))
+        src = input.clone().detach_().requires_grad_(requires_grad)
+        idx = torch.arange(S).expand((M, S)).to(dtype=torch.long, device=device)
+
+        sample_inputs.append(
+            SampleInput(
+                _tensor((M, S)),
+                args=(1, idx, src, reduce),
+                kwargs={'include_self': True}
+            )
+        )
+
     return sample_inputs
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
