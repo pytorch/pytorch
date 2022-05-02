@@ -1953,6 +1953,23 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(1, 1, 4, 4),),
             results_len=0)
 
+    def test_unsupported_op_copy_skips_shadowing(self):
+        """
+        Copying a `call_function` node is not implemented, test that this
+        does not crash shadowing but instead skips the node.
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                # the second argument leads to attempting to copy a
+                # call_function node
+                x = F.layer_norm(x, x.shape[1:])
+                return x
+
+        m = M().eval()
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 1, 4, 4),),
+            results_len=0)
+
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
