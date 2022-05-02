@@ -17,6 +17,7 @@ def cleanup():
     dist.destroy_process_group()
 
 def broadcast(x):
+    torch.add(x, 1) # Just to see if __torch_dispatch__ functions.
     dist.broadcast(x, 0)
     print(f"{os.getpid()} broadcast: {x}")
     return x
@@ -61,4 +62,5 @@ if __name__ == "__main__":
     n_gpus = torch.cuda.device_count()
     assert n_gpus >= 2, f"Requires at least 2 GPUs to run, but got {n_gpus}"
     world_size = n_gpus
-    run_demo(demo_basic, world_size)
+    # run_demo(demo_basic, world_size)
+    demo_basic(0,1)

@@ -6,6 +6,10 @@ namespace c10d {
 
 c10::intrusive_ptr<ProcessGroup::Work> broadcast(const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors, int64_t root_rank = 0, int64_t root_tensor = 0, int64_t timeout = -1) {
+  for (auto& tensor : tensors) {
+    TORCH_INTERNAL_ASSERT(tensor.unsafeGetTensorImpl()->is_python_dispatch());
+  }
+
   auto tensor_vec = tensors.vec();
   return process_group->broadcast(tensor_vec,
       BroadcastOptions {root_rank, root_tensor, std::chrono::milliseconds(timeout)});

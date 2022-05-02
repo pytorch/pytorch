@@ -978,6 +978,12 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
                  ::c10d::BroadcastOptions opts) {
+                for (auto& tensor : tensors) {
+                  auto* tensor_impl = tensor.unsafeGetTensorImpl();
+                  if (!tensor_impl->is_python_dispatch()) {
+                    tensor_impl->set_python_dispatch(true);
+                  }
+                }
                 auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast", "")
                     .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                         const c10::intrusive_ptr<::c10d::ProcessGroup>&, at::TensorList, int64_t, int64_t, int64_t)>();
