@@ -3081,8 +3081,7 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
       break;
   }
 
-  GRAPH_DEBUG(
-      "(SimplifierUnderContext) after simplify: ", std::to_string(ret_expr));
+  GRAPH_DEBUG("(SimplifierUnderContext) Final: ", std::to_string(ret_expr));
   return ret_expr;
 }
 
