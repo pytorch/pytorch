@@ -1281,4 +1281,3 @@ def _register_jit_decomposition(decomp):
 
 
 _register_jit_decomposition(torch.ops.aten.trace.default)
-_register_jit_decomposition(torch.ops.aten.nll_loss_backward.default)
