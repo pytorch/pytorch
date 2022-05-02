@@ -22,7 +22,7 @@ Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level) 
 std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, optional<int64_t> bdim, int64_t level) {
   std::vector<Tensor> res;
   for (size_t idx = 0; idx < tensors.size(); idx++) {
-    res.push_back(makeBatched(tensors[idx], bdim, level));
+    res.emplace_back(makeBatched(tensors[idx], bdim, level));
   }
   return res;
 }
