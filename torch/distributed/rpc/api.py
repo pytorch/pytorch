@@ -470,7 +470,8 @@ def method_factory(method_name, docstring):
     def method(self, *args, **kwargs):
         return getattr(super(RRef, self), method_name)(*args, **kwargs)
 
-    method.__doc__ = docstring
+    if method.__doc__:
+        method.__doc__ = docstring
     return method
 
 
@@ -604,7 +605,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     torch._C._log_api_usage_once("torch.distributed.rpc_remote")
     qualified_name = torch.jit._builtins._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
-    should_profile = torch.autograd._profiler_enabled()
+    should_profile = _get_should_profile()
 
     ctx_manager = _enable_rpc_profiler(should_profile, qualified_name, func, RPCExecMode.REMOTE, dst_worker_info)
 
@@ -657,7 +658,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
     qualified_name = torch.jit._builtins._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
 
-    should_profile = torch.autograd._profiler_enabled()
+    should_profile = _get_should_profile()
 
     ctx_manager = _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info)
 
@@ -879,6 +880,14 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         _thread_local_var.future_list.append(fut)
     return fut
 
+def _get_should_profile():
+    # Legacy profiler should be enabled. RPC profiling is not supported with
+    # Kineto profiler.
+    ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+    return (
+        torch.autograd._profiler_enabled() and
+        torch._C._autograd._profiler_type() == ActiveProfilerType.LEGACY  # type: ignore[attr-defined]
+    )
 
 def _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info):
     ctx_manager = contextlib.suppress()
