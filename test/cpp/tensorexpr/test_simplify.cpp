@@ -4824,7 +4824,7 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
   }
 }
 
-TEST(Simplify, bound_CompareSelectCondAlwaysInLoopBounds) {
+TEST(Simplify, CompareSelectCondAlwaysInLoopBounds) {
   // Before:
   //   for (const auto n : c10::irange(1, N)) {
   //     b[n] = n < 1 ? 0.f : 1.f;
@@ -4848,7 +4848,7 @@ TEST(Simplify, bound_CompareSelectCondAlwaysInLoopBounds) {
       oss.str());
 }
 
-TEST(Simplify, bound_IfThenCondAlwaysInLoopBounds) {
+TEST(Simplify, IfThenCondAlwaysInLoopBounds) {
   // Before:
   //   for (const auto n : c10::irange(1, N)) {
   //     b[n] = IfThenElse(n < 1 ? 1 : 0, 0.f, 1.f);
@@ -4872,7 +4872,7 @@ TEST(Simplify, bound_IfThenCondAlwaysInLoopBounds) {
       oss.str());
 }
 
-TEST(Simplify, bound_MultiClauseCondAlwaysInLoopBounds) {
+TEST(Simplify, MultiClauseCondAlwaysInLoopBounds) {
   // This test mimics the unpadded region of a conv2d.  We want to remove any
   // conditional that is provably satisfied (or unsatisfied) by the entire loop
   // range.
@@ -4906,7 +4906,7 @@ TEST(Simplify, bound_MultiClauseCondAlwaysInLoopBounds) {
       oss.str());
 }
 
-TEST(Simplify, bound_SimplifyLoopBounds) {
+TEST(Simplify, DISABLED_SimplifyLoopBounds) {
   // This test mimics the padded region of a conv2d.  We want to adjust the
   // loop bounds such that the condition will be always met.  Note that this
   // could be solved by peeling, and applying the range-based conditional
