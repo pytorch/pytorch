@@ -33,7 +33,7 @@
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/autograd/torch_dispatch_mode.h>
+#include <torch/csrc/autograd/python_mode.h>
 
 
 #include <ATen/ATen.h>
@@ -1739,9 +1739,9 @@ bool isPythonTensor(const Tensor& tensor) {
 }
 
 // NOTE [dispatch_fn's type argument]
-// `type` is nullable and represents the TorchDispatchMode going on.
-// Right now we only support a single TorchDispatchMode, but in the future we could
-// change this to a stack of TorchDispatchModes.
+// `type` is nullable and represents the PythonMode going on.
+// Right now we only support a single PythonMode, but in the future we could
+// change this to a stack of PythonModes.
 //
 // If `type` isn't null, then we consider the type for dispatch by prepending
 // it to the overloaded_args list. `handle_torch_funciton_no_python_arg_parser`
