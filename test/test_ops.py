@@ -336,6 +336,7 @@ class TestCommon(TestCase):
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference.
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_reference_consistency(self, device, dtype, op):
