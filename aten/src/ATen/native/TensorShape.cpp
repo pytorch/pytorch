@@ -1692,6 +1692,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const auto n_threads = std::max<int64_t>(
             1, std::min<int64_t>((idx_len + grain_size - 1) / grain_size, at::get_num_threads())
         );
+        const auto run_in_parallel = (n_threads == 1);
 
         auto counts_per_thread = at::zeros({n_threads, size}, idx.options());
         at::parallel_for(0, idx_len, grain_size, [&](int64_t start, int64_t end) {
@@ -1699,7 +1700,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           const auto tid_idx = idx.slice(0, start, end);
           auto tid_counts = counts_per_thread.select(0, tid);
           get_counts(tid_counts, tid_idx, /*bins=*/size,
-              /*is_sorted=*/is_sorted, /*run_in_parallel=*/false);
+              /*is_sorted=*/is_sorted, /*run_in_parallel=*/run_in_parallel);
         });
 
         return counts_per_thread;
