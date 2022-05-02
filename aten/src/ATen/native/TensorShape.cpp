@@ -1385,12 +1385,10 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           new_values = values.index_select(dim - sparse_dim + 1, index);
     */
   const auto ndim = self.dim();
-  if (ndim == 0) {
-    TORCH_CHECK_INDEX(false, "index_select() cannot be applied to a 0-dim tensor.");
-  }
-  if (!(index.dim() == 1 && index.dtype() == at::kLong)) {
-    TORCH_CHECK_INDEX(false, "index_select() argument index must be 1-D long-tensor.");
-  }
+  TORCH_CHECK_INDEX(ndim, "index_select() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK_INDEX(
+      index.dim() == 1 && index.dtype() == at::kLong && index.options().layout() == at::kStrided,
+      "index_select() argument index must be 1-D strided (non-sparse) long-tensor.");
   dim = maybe_wrap_dim(dim, ndim);
   const auto size = self.size(dim);
   const auto sparse_dim = self.sparse_dim();
