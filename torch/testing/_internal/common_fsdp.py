@@ -18,6 +18,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     MultiProcessTestCase,
 )
+from torch.distributed.fsdp.wrap import wrap
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
@@ -30,13 +31,13 @@ class FSDPInitMode(Enum):
     CUDA_NEVER = 3
 
 def _get_full_detached_param(fsdp_model: FullyShardedDataParallel):
-    with fsdp_model.summon_full_params():
+    with FullyShardedDataParallel.summon_full_params(fsdp_model):
         params = list(p.clone().detach_() for p in fsdp_model.parameters())
 
     return params
 
 def _zero_model(fsdp_model: FullyShardedDataParallel):
-    with fsdp_model.summon_full_params():
+    with FullyShardedDataParallel.summon_full_params(fsdp_model):
         for param in fsdp_model.parameters():
             with torch.no_grad():
                 param.zero_()
@@ -58,7 +59,7 @@ def subtest_name(test_name_mapping, *args):
 # also automatically move the parameters to GPU, due to _rebuild_full_params
 # call.
 def get_full_params(model, recurse=True):
-    with model.summon_full_params(recurse=recurse):
+    with FullyShardedDataParallel.summon_full_params(model, recurse=recurse):
         return deepcopy(list(model.parameters()))
 
 def _maybe_cuda(model, move_to_cuda):
@@ -153,6 +154,9 @@ class TransformerWithSharedParams(nn.Module):
 
     def run_backward(self, loss):
         loss.backward()
+
+    def get_ignored_modules(self):
+        return [self.transformer]
 
 
 class NestedWrappedModule(nn.Module):
@@ -606,26 +610,24 @@ class FSDPTest(MultiProcessTestCase):
             )
 
     def _get_wrapped_model(
-        self, group, cuda_first=False, config=None, **model_kwargs,
+        self, group, cuda_first=False, ignore_modules=False, config=None,
+        **model_kwargs,
     ) -> FullyShardedDataParallel:
         if config is None:
             config = {}
         move_to_cuda = not (
             "cpu_offload" in config and config["cpu_offload"].offload_params
         )
-        if cuda_first:
-            transformer = TransformerWithSharedParams(group, **model_kwargs)
-            if move_to_cuda:
-                transformer = transformer.cuda()
-            model = FullyShardedDataParallel(transformer, group, **config)
-        else:
-            model = FullyShardedDataParallel(
-                TransformerWithSharedParams(group, **model_kwargs),
-                group,
-                **config,
-            )
-            if move_to_cuda:
-                model = model.cuda()
+        transformer = TransformerWithSharedParams(group, **model_kwargs)
+        if cuda_first and move_to_cuda:
+            transformer = transformer.cuda()
+        if ignore_modules:
+            assert "ignored_modules" not in config, \
+                "Do not pass in `ignored_modules` via `config`"
+            config["ignored_modules"] = transformer.get_ignored_modules()
+        model = FullyShardedDataParallel(transformer, group, **config)
+        if not cuda_first and move_to_cuda:
+            model = model.cuda()
         return model
 
     def _get_nonwrapped_model(
@@ -635,6 +637,41 @@ class FSDPTest(MultiProcessTestCase):
         :meth:`_get_wrapped_model`. The model used in these two methods should
         be kept in sync for tests that use both for parity comparisons."""
         return TransformerWithSharedParams(group, **model_kwargs).cuda()
+
+
+class SkipModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = nn.Linear(10, 10, bias=False)
+
+    def forward(self, x):
+        return self.lin(x)
+
+
+class NestedLinear(nn.Module):
+    def __init__(self, fsdp_wrap):
+        super().__init__()
+        if fsdp_wrap:
+            self.nested_linear = wrap(nn.Linear(10, 10, bias=False).cuda())
+        else:
+            self.nested_linear = nn.Linear(10, 10, bias=False).cuda()
+
+    def forward(self, x):
+        return self.nested_linear(x)
+
+
+class SkipModel(nn.Module):
+    def __init__(self, double_nest):
+        super().__init__()
+        self.linear = nn.Linear(10, 10, bias=False).cuda()
+        self.linear_skip = SkipModule().cuda()
+        self.nested_linear = wrap(NestedLinear(fsdp_wrap=double_nest))
+
+    def forward(self, x):
+        x = self.linear(x)
+        x = self.linear_skip(x)
+        x = self.nested_linear(x)
+        return x
 
 
 def _collect_total_grad_norm_fsdp(model, norm_type, rank):

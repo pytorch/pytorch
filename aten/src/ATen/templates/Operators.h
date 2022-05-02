@@ -17,6 +17,8 @@
   and see NOTE [TORCH_ASSERT_ONLY_METHOD_OPERATORS].
 #endif
 
+#include <ATen/core/SymInt.h>
+#include <ATen/core/SymIntArrayRef.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/QScheme.h>

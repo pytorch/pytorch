@@ -128,8 +128,11 @@ class CommitList:
             if CommitList.keywordInFile(file, ['torch/fx', 'test_fx']):
                 category = 'fx'
                 break
+            if CommitList.keywordInFile(file, ['torch/ao', 'test/ao']):
+                category = 'ao'
+                break
             # torch/quantization, test/quantization, aten/src/ATen/native/quantized, torch/nn/{quantized, quantizable}
-            if CommitList.keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz', 'torch/ao/quantization']):
+            if CommitList.keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz']):
                 category = 'quantization'
                 break
             if CommitList.keywordInFile(file, ['torch/package', 'test/package']):
@@ -141,7 +144,7 @@ class CommitList:
             if CommitList.keywordInFile(file, ['aten/src/ATen/native/LinearAlgebra.cpp', 'test/test_linalg.py', 'torch/linalg']):
                 category = 'linalg_frontend'
                 break
-            if CommitList.keywordInFile(file, ['torch/sparse', 'torch/ao/sparsity', 'test/ao/sparsity', 'aten/src/ATen/native/sparse', 'torch/_masked/__init__.py']):
+            if CommitList.keywordInFile(file, ['torch/sparse', 'aten/src/ATen/native/sparse', 'torch/_masked/__init__.py']):
                 category = 'sparse_frontend'
                 break
             if CommitList.keywordInFile(file, ['tools/autograd']):

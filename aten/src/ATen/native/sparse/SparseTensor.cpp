@@ -345,7 +345,7 @@ void _validate_sparse_coo_tensor_args(
     Tensor max_indices =
         std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
     Tensor cpu_min_indices, cpu_max_indices;
-    if (indices.is_cuda()) {
+    if (!indices.is_cpu()) {
       cpu_min_indices = min_indices.to(at::DeviceType::CPU);
       cpu_max_indices = max_indices.to(at::DeviceType::CPU);
     } else {

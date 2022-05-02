@@ -160,9 +160,10 @@ Tensor MakeStridedQTensorCPU(
       allocator->allocate(size_bytes),
       allocator,
       /* resizable = */ true);
+  constexpr auto quantized_cpu_ks = at::DispatchKeySet(at::DispatchKey::QuantizedCPU);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage,
-      at::DispatchKeySet(at::DispatchKey::QuantizedCPU),
+      quantized_cpu_ks,
       dtype,
       quantizer);
   get_qtensorimpl(tensor)->set_sizes_and_strides(sizes, strides);
@@ -553,9 +554,9 @@ int register_embedding_params() {
 
 namespace {
 
-static auto conv2d_params = register_conv_params<2>();
-static auto conv3d_params = register_conv_params<3>();
-static auto linear_params = register_linear_params();
-static auto embedding_params = register_embedding_params();
+static C10_UNUSED auto conv2d_params = register_conv_params<2>();
+static C10_UNUSED auto conv3d_params = register_conv_params<3>();
+static C10_UNUSED auto linear_params = register_linear_params();
+static C10_UNUSED auto embedding_params = register_embedding_params();
 
 } // namespace
