@@ -60,6 +60,15 @@ def _unsqueeze_to_dim(x: Tensor, dim: int):
     return x
 
 
+def apply_loss_reduction(loss: Tensor, reduction: int):
+    if reduction == Reduction.MEAN.value:
+        return torch.mean(loss)
+    elif reduction == Reduction.SUM.value:
+        return torch.sum(loss)
+    else:
+        return loss
+
+
 @register_decomposition(aten.tanh_backward)
 @cast_for_opmath
 def tanh_backward(out_grad: Tensor, y: Tensor):
@@ -308,14 +317,6 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
     # return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 
-def apply_loss_reduction(loss: Tensor, reduction: int):
-    if reduction == Reduction.MEAN.value:
-        return torch.mean(loss)
-    elif reduction == Reduction.SUM.value:
-        return torch.sum(loss)
-    else:
-        return loss
-
 
 def to_real_dtype(dtype: torch.dtype):
     if dtype == torch.complex32:
@@ -458,6 +459,19 @@ def nll_loss_backward(
         grad_output = grad_output * ignore_index_mask
 
     return grad_input * grad_output
+
+
+@register_decomposition(aten.binary_cross_entropy)
+def binary_cross_entropy(self: Tensor, target: Tensor, weight: Optional[Tensor]=None, reduction: int = Reduction.MEAN.value) -> Tensor:
+    # We cannot currently model this without introducing data-dependent control flow
+    # TORCH_CHECK(
+    #     (input_val >= 0) && (input_val <= 1),
+    #     "all elements of input should be between 0 and 1"
+    # )
+    loss = (target - 1) * torch.maximum(torch.log(1 - self), self.new_full((), -100)) - target * torch.maximum(torch.log(self), self.new_full((), -100))
+    if weight is not None:
+        loss = loss * weight
+    return apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(aten.binary_cross_entropy_backward)
