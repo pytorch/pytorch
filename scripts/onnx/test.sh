@@ -51,7 +51,7 @@ fi
 
 # onnxruntime only support py3
 # "Python.h" not found in py2, needed by TorchScript custom op compilation.
-if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ||  "${SHARD_NUMBER}" == "1" ]]; then
+if [[ "${SHARD_NUMBER}" == "1" ]]; then
   # These exclusions are for tests that take a long time / a lot of GPU
   # memory to run; they should be passing (and you will test them if you
   # run them locally
@@ -79,7 +79,7 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ||  "${SHARD_NUMBER}" == "1" ]]; then
     "$top_dir/test/onnx/test_onnx_export.py"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *ort_test2* || "${SHARD_NUMBER}" == "2" ]]; then
+if [[ "${SHARD_NUMBER}" == "2" ]]; then
   # Update the loop for new opsets
   for i in $(seq 10 15); do
     pytest "${args[@]}" \
