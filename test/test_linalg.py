@@ -5310,7 +5310,6 @@ class TestLinalg(TestCase):
             k = min(A.shape[-2:])
             batch = A.shape[:-2]
             check_errors = (fn == torch.linalg.lu_factor)
-            # Test linalg.lu_factor / linalg.lu_factor_ex / torch.lu
             if singular and check_errors:
                 # It may or may not throw as the LU decomposition without pivoting
                 # may still succeed for singular matrices
@@ -5327,38 +5326,29 @@ class TestLinalg(TestCase):
             if not pivot:
                 self.assertEqual(pivots, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(batch + (k, )))
 
-            # Test linalg.lu_unpack
             P, L, U = torch.lu_unpack(LU, pivots, unpack_pivots=pivot)
 
             self.assertEqual(P @ L @ U if pivot else L @ U, A)
 
-            # Test linalg.lu_
             PLU = torch.linalg.lu(A, pivot=pivot)
             self.assertEqual(P, PLU.P)
             self.assertEqual(L, PLU.L)
             self.assertEqual(U, PLU.U)
 
+            rhs = 3
             if not singular and A.size(-2) == A.size(-1):
-                nrhs = ((), (1,), (3,))
-                for left, rhs in product((True, False), nrhs):
-                    # Vector case when left = False is not allowed
-                    if not left and rhs == ():
-                        continue
-                    if left:
-                        shape_B = A.shape[:-1] + rhs
-                    else:
-                        shape_B = A.shape[:-2] + rhs + A.shape[-1:]
+                for left in (True, False):
+                    shape_B = list(A.shape)
+                    dim = -1 if left else -2
+                    shape_B[dim] = rhs
                     B = make_arg(shape_B)
-                    B_ = B.unsqueeze(-1) if rhs == () else B
-                    # Test linalg.lu_solve
                     for adjoint in (True, False):
                         X = torch.linalg.lu_solve(LU, pivots, B, left=left, adjoint=adjoint)
-                        X_ = X.unsqueeze(-1) if rhs == () else X
                         A_adj = A.mH if adjoint else A
                         if left:
-                            self.assertEqual(B_, A_adj @ X_)
+                            self.assertEqual(B, A_adj @ X)
                         else:
-                            self.assertEqual(B_, X_ @ A_adj)
+                            self.assertEqual(B, X @ A_adj)
 
 
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
