@@ -2316,9 +2316,11 @@ def _reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwa
         yield from generate_elementwise_binary_large_value_tensors(
             op, device=device, dtype=dtype, requires_grad=requires_grad
         )
-    yield from generate_elementwise_binary_broadcasting_tensors(
-        op, device=device, dtype=dtype, requires_grad=requires_grad
-    )
+    # TODO: FIXME: RuntimeError: "index_select" not implemented for 'ComplexHalf'
+    if dtype not in (torch.chalf,):
+        yield from generate_elementwise_binary_broadcasting_tensors(
+            op, device=device, dtype=dtype, requires_grad=requires_grad
+        )
     yield from generate_elementwise_binary_with_scalar_samples(
         op, device=device, dtype=dtype, requires_grad=requires_grad
     )
@@ -2338,6 +2340,10 @@ def reference_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwar
 
     # yields "normal" samples
     yield from gen()
+
+    # TODO: RuntimeError: "index_select" not implemented for 'ComplexHalf'
+    if dtype is torch.chalf:
+        return
 
     # yields noncontiguous samples
     for sample in gen():
@@ -2725,6 +2731,7 @@ class UnaryUfuncInfo(OpInfo):
         handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
         supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
         sample_inputs_func=sample_inputs_elementwise_unary,
+        reference_inputs_func=reference_inputs_elementwise_unary,
         sample_kwargs=lambda device, dtype, input: ({}, {}),
         supports_sparse=False,
         reference_numerics_filter=None,  # Filters values in the range of the domain specified above but that should not be tested
@@ -17531,8 +17538,122 @@ python_ref_db = [
     # Elementwise unary OpInfos
     #
     ElementwiseUnaryPythonRefInfo(
+        "_refs.abs",
+        torch_opinfo_name="abs",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.acos",
+        torch_opinfo_name="acos",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.acosh",
+        torch_opinfo_name="acosh",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.asin",
+        torch_opinfo_name="asin",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.atan",
+        torch_opinfo_name="atan",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.ceil",
+        torch_opinfo_name="ceil",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.cos",
+        torch_opinfo_name="cos",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.cosh",
+        torch_opinfo_name="cosh",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.digamma",
+        torch_opinfo_name="digamma",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.erf",
+        torch_opinfo_name="erf",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.erfinv",
+        torch_opinfo_name="erfinv",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.erfc",
+        torch_opinfo_name="erfc",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.exp",
+        torch_opinfo_name="exp",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.expm1",
+        torch_opinfo_name="expm1",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.floor",
         torch_opinfo_name="floor",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.isfinite",
+        torch_opinfo_name="isfinite",
+        supports_out=True,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.isnan",
+        torch_opinfo_name="isnan",
+        supports_out=True,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.lgamma",
+        torch_opinfo_name="lgamma",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.log",
+        torch_opinfo_name="log",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.log1p",
+        torch_opinfo_name="log1p",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.neg",
+        torch_opinfo_name="neg",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.reciprocal",
+        torch_opinfo_name="reciprocal",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.round",
+        torch_opinfo_name="round",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.sign",
+        torch_opinfo_name="sign",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.sin",
+        torch_opinfo_name="sin",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.sinh",
+        torch_opinfo_name="sinh",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.sqrt",
+        torch_opinfo_name="sqrt",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.square",
+        torch_opinfo_name="square",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.tan",
+        torch_opinfo_name="tan",
     ),
     #
     # Elementwise binary OpInfos
@@ -17550,8 +17671,110 @@ python_ref_db = [
                 ),
                 "TestCommon",
                 "test_python_reference_consistency",
+                device_type='cpu'
             ),
         ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.atan2",
+        torch_opinfo_name="atan2",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.bitwise_and",
+        torch_opinfo_name="bitwise_and",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.bitwise_left_shift",
+        torch_opinfo_name="bitwise_left_shift",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.bitwise_or",
+        torch_opinfo_name="bitwise_or",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.bitwise_xor",
+        torch_opinfo_name="bitwise_xor",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.eq",
+        torch_opinfo_name="eq",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.float_power",
+        torch_opinfo_name="float_power",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.ge",
+        torch_opinfo_name="ge",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.gt",
+        torch_opinfo_name="gt",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.igamma",
+        torch_opinfo_name="igamma",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.igammac",
+        torch_opinfo_name="igammac",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.le",
+        torch_opinfo_name="le",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.lt",
+        torch_opinfo_name="lt",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.maximum",
+        torch_opinfo_name="maximum",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.minimum",
+        torch_opinfo_name="minimum",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.mul",
+        torch_opinfo_name="mul",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf,), device_type='cuda', active_if=(not TEST_WITH_ROCM)),
+        )
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.ne",
+        torch_opinfo_name="ne",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.nextafter",
+        torch_opinfo_name="nextafter",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.pow",
+        torch_opinfo_name="pow",
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.sub",
+        torch_opinfo_name="sub",
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=1, rtol=0),
+                        torch.float16: tol(atol=1e-2, rtol=0),
+                    }
+                ),
+                "TestCommon",
+                "test_python_reference_consistency",
+                device_type='cpu'
+            ),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.true_divide",
+        torch_opinfo_name="true_divide",
     ),
 ]
 
