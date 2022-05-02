@@ -982,11 +982,12 @@ Arguments:
                 TORCH_INTERNAL_ASSERT(!at::impl::PythonModeTLS::get_state());
                 for (auto& tensor : tensors) {
                   auto* tensor_impl = tensor.unsafeGetTensorImpl();
-                  if (!tensor_impl->is_python_dispatch()) {
-                    tensor_impl->set_python_dispatch(true);
-                    // torch::autograd::PythonMode::enter(tensor_impl->_unchecked_untagged_pyobj());
-                  }
+                //   if (!tensor_impl->is_python_dispatch()) {
+                //     tensor_impl->set_python_dispatch(true);
+                //   }
+                  torch::autograd::PythonMode::enter(tensor_impl->_unchecked_untagged_pyobj());
                 }
+                TORCH_INTERNAL_ASSERT(at::impl::PythonModeTLS::get_state());
 
                 auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast", "")
                     .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
@@ -996,13 +997,13 @@ Arguments:
                 auto result = op.call(self, tensors, opts.rootRank, opts.rootTensor, opts.timeout.count());
 
                 // Scope it or not?
-                for (auto& tensor : tensors) {
-                  auto* tensor_impl = tensor.unsafeGetTensorImpl();
-                  if (tensor_impl->is_python_dispatch()) {
-                    tensor_impl->set_python_dispatch(false);
-                  }
-                }
-                // torch::autograd::PythonMode::exit();
+                // for (auto& tensor : tensors) {
+                //   auto* tensor_impl = tensor.unsafeGetTensorImpl();
+                //   if (tensor_impl->is_python_dispatch()) {
+                //     tensor_impl->set_python_dispatch(false);
+                //   }
+                // }
+                torch::autograd::PythonMode::exit();
                 return result;
               },
               py::arg("tensors"),

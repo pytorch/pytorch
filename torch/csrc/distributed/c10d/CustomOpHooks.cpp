@@ -1,3 +1,4 @@
+#include <aten/src/ATen/core/PythonModeTLS.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/library.h>
@@ -6,6 +7,7 @@ namespace c10d {
 
 c10::intrusive_ptr<ProcessGroup::Work> broadcast(const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors, int64_t root_rank = 0, int64_t root_tensor = 0, int64_t timeout = -1) {
+  TORCH_INTERNAL_ASSERT(at::impl::PythonModeTLS::get_state());
   for (auto& tensor : tensors) {
     TORCH_INTERNAL_ASSERT(tensor.unsafeGetTensorImpl()->is_python_dispatch());
   }
