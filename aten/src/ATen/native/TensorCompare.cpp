@@ -310,7 +310,8 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  Tensor ret = at::empty({0}, self.options());
+  auto result_type = at::native::result_type(self, other);
+  Tensor ret = at::empty({0}, self.options().dtype(result_type));
   at::native::where_self_out(condition, self, other, ret);
   return ret;
 }
