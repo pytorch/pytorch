@@ -5,10 +5,10 @@ import unittest
 import yaml
 import textwrap
 
-from tools.codegen.model import NativeFunctionsGroup, DispatchKey
-import tools.codegen.dest as dest
-import tools.codegen.gen as gen
-from tools.codegen.gen import LineLoader, parse_native_yaml_struct
+from torchgen.model import NativeFunctionsGroup, DispatchKey
+import torchgen.dest as dest
+import torchgen.gen as gen
+from torchgen.gen import LineLoader, parse_native_yaml_struct
 
 
 class TestCodegenModel(expecttest.TestCase):

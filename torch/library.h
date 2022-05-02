@@ -555,7 +555,7 @@ class TORCH_API Library final {
   Library& operator=(const Library&) = delete;
   Library(Library&&) = default;
   Library& operator=(Library&&) = default;
-
+  // add gen_python_error boolean flag
   // Some notes about the API design here.  We had the following constraints:
   //
   //  - We need to support multiple "types" of arguments for schema and

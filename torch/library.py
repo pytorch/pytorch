@@ -1,12 +1,15 @@
 import torch
 from ._ops import OpOverload
 from typing import Set
-import warnings
+import traceback
+import torch._C as C
 
 __all__ = ['extend_library']
 
-# User created fragment libraries to extend existing libraries
-fragments_for_existing_libraries = {}
+# User created libraries to extend existing libraries
+# Each user created library is added here to ensure that it's not automatically removed outside the
+# scope of the function it was created in.
+impls_for_existing_libraries = {}
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -16,59 +19,47 @@ impls: Set[str] = set()
 
 class Library:
     # kind can be DEF, FRAGMENT (in C++ IMPL)
-    def __init__(self, kind, ns, dispatch_key=""):
-        # also prevent users from creating libraries with existing C++ libraries, e.g., aten
-        # if ns in existing_libraries and kind == "DEF":
-        #     raise ValueError("A library with name '" + ns + "' already exists. "
-        #                      "It's not allowed to have more than one library with the same name")
-        # elif kind == "FRAGMENT":
-        #     self.m = torch._C._dispatch_library(kind, ns, dispatch_key)
-        #     self.ns = ns
-        #     fragments_for_existing_libraries[id(self)] = self
-        #     self.op_impls = set()
-        # else:
-        #     raise ValueError("Unsupported kind: ", kind)
-        self.m = torch._C._dispatch_library(kind, ns, dispatch_key)
+    def __init__(self, kind, ns, dispatch_key="", message=""):
+        self.m = C._dispatch_library(kind, ns, dispatch_key, message)
         self.ns = ns
-        fragments_for_existing_libraries[id(self)] = self
         self.op_impls = set()
+        if kind == "IMPL":
+            impls_for_existing_libraries[id(self)] = self
+        else:
+            raise ValueError("Unsupported kind: ", kind)
 
     def impl(self, op_name, dispatch_key, fn):
         if isinstance(op_name, str):
-            name = self.ns + '.' + op_name
+            name = op_name
         elif isinstance(op_name, OpOverload):
-            name = op_name.__str__() if op_name.overloadname != 'default' else op_name.overloadpacket.__str__()
+            name = op_name._schema.name
         else:
             raise RuntimeError("impl should be passed either a name or an OpOverload object as the first argument")
 
-        print("--------", name, self.ns)
         key = self.ns + "/" + name + "/" + dispatch_key
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            # try:
-            self.m.impl(name, dispatch_key, fn)
-        #     except RuntimeWarning:
-        #         if key in impls:
-        # if key in impls:
-            # raise RuntimeError("This is not allowed since there's already a kernel overriding "
-            #                    + str(getattr(getattr(torch.ops, self.ns), name)) + "'s behavior for " + dispatch_key + " dispatch key.")
-        # else:
+        if key in impls:
+            raise RuntimeError("This is not allowed since there's already a kernel overriding "
+                               + str(getattr(getattr(torch.ops, self.ns), name)) + "'s behavior for " + dispatch_key + " dispatch key.")
+        self.m.impl(name, dispatch_key, fn)
         impls.add(key)
         self.op_impls.add(key)
+        print("name: ", name, " key: ", key)
 
-
+    # Libraries can be removed at any point by explicitly calling .remove()
     def remove(self):
         for key in self.op_impls:
             impls.remove(key)
-        del fragments_for_existing_libraries[id(self)]
+        del impls_for_existing_libraries[id(self)]
         del self.m
 
 # Every user can create their own fragment to extend existing C++ libraries
 # We don't guarantee the user that another library that they imported is not overriding aten
 # However two libraries are not allowed to override the same operator in the same namespace for the same dispatch key
 def extend_library(ns, dispatch_key=""):
-    return Library("IMPL", ns, dispatch_key)
-    # if ns in existing_libraries:
-    #     return Library("FRAGMENT", ns, dispatch_key)
-    # else:
-    #     raise ValueError("A library with name " + ns + " does not exist.")
+    '''
+    something
+    '''
+    message  = "Library IMPL created at : \n"
+    message += ''.join(traceback.format_stack())
+    # TODO: check if there's an existing library with name ns
+    return Library("IMPL", ns, dispatch_key, message)
