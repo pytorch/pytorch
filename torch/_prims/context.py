@@ -2,6 +2,7 @@ import string
 from typing import Callable, Sequence, Any, Dict
 from itertools import chain
 
+
 import torch
 from torch.fx.graph import Graph, Node
 
@@ -9,8 +10,16 @@ from torch._prims.utils import TensorMeta
 import torch._refs as refs
 
 
+# TODO:  automap torch operations to references
+# (need to throw a good assertion if the mapping doesn't exist)
 _torch_to_reference_map = {
     torch.add: refs.add,
+    # torch.div: refs.div,
+    torch.mul: refs.mul,
+    torch.ge: refs.ge,
+    torch.gt: refs.gt,
+    torch.le: refs.le,
+    torch.lt: refs.lt,
 }
 
 
@@ -28,7 +37,7 @@ class PrimContext(object):
     b = torch.randn((2, 2))
 
     ctx = PrimContext()
-    with ctx as tracing_ctx:
+    with ctx:
       meta_a = ctx.placeholder(utils.TensorMeta(a))
       meta_b = ctx.placeholder(utils.TensorMeta(b))
       result = torch.add(meta_a, meta_b)
@@ -83,18 +92,17 @@ class PrimContext(object):
         assert tm.node is not None
         tm.node.users[node] = None
 
-    def placeholder(self, tm: TensorMeta):
-        # TODO: allow other input types
-        assert isinstance(tm, TensorMeta)
-
-        if tm.node is not None:
-            raise ValueError("Attempting to reuse a TensorMeta in a new trace!")
-
+    def placeholder(self, a: Any):
         name = self._tensor_name()
         node = self.graph.placeholder(name)
-        tm.name = name
-        tm.node = node
-        return tm
+
+        if isinstance(a, TensorMeta):
+            if a.node is not None:
+                raise ValueError("Attempting to reuse a TensorMeta in a new trace!")
+            a.name = name
+            a.node = node
+
+        return a
 
     def output(self, tm: TensorMeta):
         # TODO: allow other output types
@@ -147,6 +155,6 @@ class PrimContext(object):
         # Remaps torch operations to their references
         if func in _torch_to_reference_map:
             fn = _torch_to_reference_map[func]
-            return fn(*args, **kwargs)
+            return fn(*args, **kwargs)  # type: ignore[operator]
 
         return func(*args, **kwargs)
