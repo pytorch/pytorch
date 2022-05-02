@@ -2,11 +2,21 @@ from typing import Dict, List, Tuple, Union, Any, Callable, Set
 from torch.nn.utils.rnn import PackedSequence
 
 import torch
+from torch.nn.modules.batchnorm import _BatchNorm
 
 from collections import OrderedDict
 
 """Useful functions to deal with tensor types with other python container types."""
 
+def _contains_batchnorm(module):
+    return any(
+        isinstance(mod, _BatchNorm) for mod in module.modules()
+    )
+
+def _override_batchnorm_mixed_precision(module):
+    for mod in module.modules():
+        if isinstance(mod, _BatchNorm):
+            mod._wrap_overrides = {"mixed_precision": None}
 
 def _apply_to_tensors(
     fn: Callable, container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]

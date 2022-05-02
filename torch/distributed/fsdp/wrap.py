@@ -17,6 +17,7 @@ from typing import (
 )
 
 import torch.nn as nn
+from torch.nn.modules.batchnorm import _BatchNorm
 
 
 def always_wrap_policy(*args, **kwargs) -> bool:
@@ -27,6 +28,36 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     distinct FSDP instances.
     """
     return True
+
+def wrap_batchnorm_individually(
+    module: nn.Module,
+    recurse: bool,
+    *args,
+    **kwargs,
+) -> bool:
+    """
+    A policy that wraps ``BatchNorm`` instances in their own FSDP unit.
+    """
+    if recurse:
+        # always recurse
+        return True
+    # if not recursing, decide whether we should wrap based on whether it is a
+    # BN layer or not.
+    return isinstance(module, _BatchNorm)
+
+def or_policy(
+    module: nn.Module,
+    recurse: bool,
+    unwrapped_params: int,
+    policies,
+) -> bool:
+    """
+    A policy that wraps ``module`` if any policy in the passed in iterable of
+    ``policies`` returns ``True``.
+    """
+    return any(
+        policy(module, recurse, unwrapped_params) for policy in policies
+    )
 
 def default_auto_wrap_policy(
     module: nn.Module,
@@ -165,6 +196,14 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
     assert wrapper_cls is not None
+    if hasattr(module, '_wrap_overrides'):
+        # If module has a _wrap_overrides attribute, we force overriding the
+        # FSDP config with these attributes for this module. Currently this
+        # is only used to disable mixed precision for BatchNorm when
+        # auto_wrapping.
+        overrides = {**kwargs, **module._wrap_overrides}
+        return wrapper_cls(module, **overrides)
+
     return wrapper_cls(module, **kwargs)
 
 
