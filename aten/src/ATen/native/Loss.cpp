@@ -8,6 +8,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 constexpr float EPSILON = 1e-12;
 
@@ -337,30 +338,47 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
     return apply_loss_reduction(loss, reduction);
 }
 
-Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
+Tensor binary_cross_entropy_with_logits_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& pos_weight_opt,
+    int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+  const Tensor& pos_weight =
+      c10::value_or_else(pos_weight_opt, [] { return Tensor(); });
 
-    Tensor grad_input;
-    if (pos_weight.defined()) {
-        // pos_weight need to be broadcasted, thus mul(target) is not inplace.
-        auto t = pos_weight.mul(target);
-        grad_input = t.add(1).sub_(target).mul_(input.sigmoid()).sub_(t).mul_(grad);
+  Tensor grad_input;
+  auto hasSubclassTensors = at::areAnyTensorSubclassLike({grad, input, target});
+
+  // If there are subclassed tensors use the out of place version
+  if (pos_weight.defined()) {
+    // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
+    auto t = pos_weight.mul(target);
+    grad_input = hasSubclassTensors
+        ? t.add(1).sub(target).mul(input.sigmoid()).sub(t).mul(grad)
+        : t.add(1).sub_(target).mul_(input.sigmoid()).sub_(t).mul_(grad);
+  } else {
+    grad_input = hasSubclassTensors ? (input.sigmoid() - target).mul(grad)
+                                    : (input.sigmoid() - target).mul_(grad);
+  }
+  if (weight.defined()) {
+    if (at::areAnyTensorSubclassLike({grad_input, weight})) {
+      grad_input = grad_input.mul(weight);
     } else {
-        grad_input = (input.sigmoid() - target).mul_(grad);
+      grad_input.mul_(weight);
     }
+  }
 
-    if (weight.defined()) {
-        grad_input.mul_(weight);
-    }
+  if (reduction == at::Reduction::Mean) {
+    return grad_input / input.numel();
+  }
 
-    if (reduction == at::Reduction::Mean) {
-        return grad_input / input.numel();
-    }
-
-    return grad_input;
+  return grad_input;
 }
 
 Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool log_input, const bool full, const double eps, const int64_t reduction)
