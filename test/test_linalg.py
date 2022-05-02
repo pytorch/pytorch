@@ -3158,48 +3158,6 @@ class TestLinalg(TestCase):
         for n, batch, rhs in itertools.product(ns, batches, nrhs):
             run_test(n, batch, rhs)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_solve_errors_and_warnings(self, device, dtype):
-        # solve expects batches of square matrices as input
-        with self.assertRaisesRegex(RuntimeError, "Expected A to be a square matrix"):
-            a = torch.randn(2, 3, 4, 3, dtype=dtype, device=device)
-            b = torch.randn(2, 3, 4, 1, dtype=dtype, device=device)
-            torch.linalg.solve(a, b)
-
-        # solve expects compatible shapes for A x = b
-        with self.assertRaisesRegex(RuntimeError, "Incompatible shapes of A and B"):
-            a = torch.randn(2, 3, 3, 3, dtype=dtype, device=device)
-            b = torch.randn(2, 3, 2, 1, dtype=dtype, device=device)
-            torch.linalg.solve(a, b)
-
-        # if input is not solvable, RuntimeError is raised mentioning the first non-solvable batch
-        def run_test_singular_input(batch_dim, n):
-            a = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
-            a[n, -1, -1] = 0
-            b = torch.randn(batch_dim, 3, 1, dtype=dtype, device=device)
-            with self.assertRaisesRegex(torch.linalg.LinAlgError, 'the input matrix is singular'):
-                torch.linalg.solve(a, b)
-
-        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
-            run_test_singular_input(*params)
-
-        # dtypes should be safely castable
-        a = torch.eye(2, dtype=dtype, device=device)
-        b = torch.randn(2, 1, dtype=dtype, device=device)
-        out = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
-            torch.linalg.solve(a, b, out=out)
-
-        # device should match
-        if torch.cuda.is_available():
-            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-            out = torch.empty(0, dtype=dtype, device=wrong_device)
-            clone_a = torch.empty_like(a)
-            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
-                torch.linalg.solve(a, b, out=out)
-
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
