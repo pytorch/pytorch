@@ -565,4 +565,36 @@ inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType>
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Airy function Ai(input).
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_ai.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::airy_ai(t);
+/// ```
+inline Tensor airy_ai(const Tensor& self) {
+  return torch::special_airy_ai(self);
+}
+
+inline Tensor& airy_ai_out(Tensor& result, const Tensor& self) {
+  return torch::special_airy_ai_out(result, self);
+}
+
+/// Airy function Bi(input).
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_bi.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::airy_bi(t);
+/// ```
+inline Tensor airy_bi(const Tensor& self) {
+  return torch::special_airy_bi(self);
+}
+
+inline Tensor& airy_bi_out(Tensor& result, const Tensor& self) {
+  return torch::special_airy_bi_out(result, self);
+}
+
 }} // torch::special

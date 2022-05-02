@@ -17374,6 +17374,38 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
+    UnaryUfuncInfo(
+        "special.airy_ai",
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        "special.airy_bi",
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=1e-4, rtol=0),
+                        torch.float64: tol(atol=1e-4, rtol=0),
+                    },
+                ),
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.airy(x)[2] if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
 ]
 
 # NOTE [Python References]

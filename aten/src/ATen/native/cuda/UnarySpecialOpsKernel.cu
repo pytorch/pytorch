@@ -56,7 +56,7 @@ void airy_ai_kernel_cuda(TensorIteratorBase& iterator) {
   #endif
 }
 
-const char airy_ai_name[] = "airy_bi";
+const char airy_bi_name[] = "airy_bi";
 void airy_bi_kernel_cuda(TensorIteratorBase& iterator) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "airy_bi_cuda", [&]() {

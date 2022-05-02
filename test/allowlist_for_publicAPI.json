@@ -3092,6 +3092,8 @@
     "softmax"
   ],
   "torch.special": [
+    "airy_ai",
+    "airy_bi",
     "digamma",
     "entr",
     "erf",

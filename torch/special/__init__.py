@@ -45,7 +45,7 @@ airy_ai = _add_docstr(_special.special_airy_ai,
                       r"""
 airy_ai(input, *, out=None) -> Tensor
 
-The Airy function :math:`Ai`.
+Airy function :math:`Ai(\text{input})`.
 
 Args:
     {input}
@@ -58,7 +58,7 @@ airy_bi = _add_docstr(_special.special_airy_bi,
                       r"""
 airy_bi(input, *, out=None) -> Tensor
 
-The Airy function :math:`Bi`.
+Airy function :math:`Bi(\text{input})`.
 
 Args:
     {input}
