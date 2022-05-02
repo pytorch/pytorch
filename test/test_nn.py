@@ -16207,13 +16207,15 @@ class TestNNDeviceType(NNTestCase):
                 input = input[:, ::2, :, :]
                 grad = grad[:, ::2, :, :]
             input.requires_grad_(True)
-            pool = torch.nn.MaxPool2d(kernel_size, stride, padding, dilation, 
-                                      return_indices=True, ceil_mode=False)
+            pool = torch.nn.MaxPool2d(
+                kernel_size, stride, padding, dilation, return_indices=True, ceil_mode=False
+                )
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_pool = torch.nn.MaxPool2d(kernel_size, stride, padding, dilation, 
-                                          return_indices=True, ceil_mode=False).to(device)
+            ref_pool = torch.nn.MaxPool2d(
+                kernel_size, stride, padding, dilation, return_indices=True, ceil_mode=False
+                ).to(device)
 
             out, ind = pool(input)
             out.backward(grad)
