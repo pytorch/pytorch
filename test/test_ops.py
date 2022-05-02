@@ -74,6 +74,7 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
+_ops_and_refs = op_db + python_ref_db
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
@@ -229,6 +230,14 @@ class TestCommon(TestCase):
         ) == 0:
             return
 
+        # Reference operators often support additional dtypes, and that's OK
+        if op in python_ref_db:
+            if (
+                len(claimed_but_unsupported_forward)
+                + len(claimed_but_unsupported_backward)
+            ) == 0:
+                return
+
         # Generates error msg
         msg = "The supported dtypes for {0} on device type {1} are incorrect!\n".format(
             op.name, device_type
@@ -317,12 +326,12 @@ class TestCommon(TestCase):
                 return prims.utils.TensorMeta(x)
 
         # TODO: iterate over requires_grad true/false
+        inps = tuple(op.reference_inputs(device, dtype, requires_grad=False))
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
             result = op(sample.input, *sample.args, **sample.kwargs)
 
             meta_sample = sample.transform(_to_tensormeta)
             meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
-
             prims.utils.compare_tensor_meta(result, meta_result)
 
     # Tests that experimental Python References perform the same computation
@@ -455,7 +464,7 @@ class TestCommon(TestCase):
     #   incorrectly sized out parameter warning properly yet
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
-    @ops(op_db, dtypes=OpDTypes.none)
+    @ops(_ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
@@ -579,7 +588,7 @@ class TestCommon(TestCase):
     #   - Case 3: out has the correct shape and dtype, but is on a different device type
     #   - Case 4: out has the with correct shape and device, but a dtype that cannot
     #       "safely" cast to
-    @ops(op_db, dtypes=OpDTypes.none)
+    @ops(_ops_and_refs, dtypes=OpDTypes.none)
     def test_out(self, device, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
