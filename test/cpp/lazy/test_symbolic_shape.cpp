@@ -135,7 +135,7 @@ TEST_F(LazyShapeTest, TestCatBasic) {
   torch::Tensor c = tensorWithSymbolicShape({2, 2}, {true, false});
 
   auto res = torch::cat({a, b, c}, 1);
-  std::vector<bool> expected = {false, true};
+  std::vector<bool> expected = {true, false};
   EXPECT_EQ(getIsSymbolic(res), expected);
 
   torch::Tensor d = tensorWithSymbolicShape({2, 2}, {false, true});
