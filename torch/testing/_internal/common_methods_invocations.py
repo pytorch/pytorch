@@ -17713,7 +17713,7 @@ python_ref_db = [
         torch_opinfo_name="mul",
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,), device_type='cuda'),
+                         dtypes=(torch.chalf,), device_type='cuda', active_if=(not TEST_WITH_ROCM)),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
