@@ -1110,6 +1110,8 @@ public:
       case Tag::Enum:
         return true;
     }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false, "unexpected tag ", static_cast<int>(tag));
+    return false;
   }
 
   // Storage and Generator were treated specially when
