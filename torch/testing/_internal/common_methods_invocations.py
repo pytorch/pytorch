@@ -5416,8 +5416,8 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     return wrapped_fn
 
 def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwargs):
-    is_not_half_or_chalf = dtype != torch.complex32 and dtype != torch.half
-    if is_not_half_or_chalf:
+    is_fp16_or_chalf = dtype == torch.complex32 or dtype == torch.half
+    if not is_fp16_or_chalf:
         nd_tensor = partial(make_tensor, (S, S + 1, S + 2), device=device,
                             dtype=dtype, requires_grad=requires_grad)
         oned_tensor = partial(make_tensor, (31,), device=device,
@@ -5436,16 +5436,10 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         oned_tensor = partial(make_tensor, shapes[1], device=device,
                               dtype=dtype, requires_grad=requires_grad)
 
-    def if_is_not_half_or_chalf(then_val, else_val):
-        if is_not_half_or_chalf:
-            return then_val
-        else:
-            return else_val
-
     if self.ndimensional == SpectralFuncType.ND:
         return [
             SampleInput(nd_tensor(),
-                        kwargs=dict(s=if_is_not_half_or_chalf((3, 10), (4, 8)), dim=(1, 2), norm='ortho')),
+                        kwargs=dict(s=(3, 10) if not is_fp16_or_chalf else (4, 8), dim=(1, 2), norm='ortho')),
             SampleInput(nd_tensor(),
                         kwargs=dict(norm='ortho')),
             SampleInput(nd_tensor(),
@@ -5459,11 +5453,11 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
     elif self.ndimensional == SpectralFuncType.TwoD:
         return [
             SampleInput(nd_tensor(),
-                        kwargs=dict(s=if_is_not_half_or_chalf((3, 10), (4, 8)), dim=(1, 2), norm='ortho')),
+                        kwargs=dict(s=(3, 10) if not is_fp16_or_chalf else (4, 8), dim=(1, 2), norm='ortho')),
             SampleInput(nd_tensor(),
                         kwargs=dict(norm='ortho')),
             SampleInput(nd_tensor(),
-                        kwargs=dict(s=if_is_not_half_or_chalf((6, 8), (4, 8)))),
+                        kwargs=dict(s=(6, 8) if not is_fp16_or_chalf else (4, 8))),
             SampleInput(nd_tensor(),
                         kwargs=dict(dim=0)),
             SampleInput(nd_tensor(),
@@ -5474,11 +5468,11 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
     else:
         return [
             SampleInput(nd_tensor(),
-                        kwargs=dict(n=if_is_not_half_or_chalf(10, 8), dim=1, norm='ortho')),
+                        kwargs=dict(n=10 if not is_fp16_or_chalf else 8, dim=1, norm='ortho')),
             SampleInput(nd_tensor(),
                         kwargs=dict(norm='ortho')),
             SampleInput(nd_tensor(),
-                        kwargs=dict(n=if_is_not_half_or_chalf(7, 8))
+                        kwargs=dict(n=7 if not is_fp16_or_chalf else 8)
                         ),
             SampleInput(oned_tensor()),
 
@@ -5508,7 +5502,6 @@ class SpectralFuncInfo(OpInfo):
                  *,
                  ref=None,  # Reference implementation (probably in np.fft namespace)
                  dtypes=floating_and_complex_types(),
-                 dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.complex32),
                  ndimensional: SpectralFuncType,
                  sample_inputs_func=sample_inputs_spectral_ops,
                  decorators=None,
@@ -5516,11 +5509,12 @@ class SpectralFuncInfo(OpInfo):
         decorators = list(decorators) if decorators is not None else []
         decorators += [
             skipCPUIfNoFFT,
+            DecorateInfo(toleranceOverride({torch.chalf: tol(4e-2, 4e-2)}),
+                         "TestCommon", "test_complex_half_reference_testing")
         ]
 
         super().__init__(name=name,
                          dtypes=dtypes,
-                         dtypesIfCUDA=dtypesIfCUDA,
                          decorators=decorators,
                          sample_inputs_func=sample_inputs_func,
                          **kwargs)

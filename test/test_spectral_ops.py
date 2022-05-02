@@ -12,7 +12,7 @@ import inspect
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
+    (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes, toleranceOverride, tol,
      skipCPUIfNoFFT, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncInfo, SpectralFuncType)
@@ -264,6 +264,10 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
+    @toleranceOverride({
+        torch.half : tol(1e-2, 1e-2),
+        torch.chalf : tol(1e-2, 1e-2),
+    })
     @dtypes(torch.half, torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
     def test_fft_round_trip(self, device, dtype):
         skip_helper(device, dtype)
@@ -294,11 +298,6 @@ class TestFFT(TestCase):
                 (None, "forward", "backward", "ortho")
             ))
 
-        if dtype in (torch.half, torch.complex32):
-            atol, rtol = 1e-2, 1e-2
-        else:
-            atol, rtol = None, None
-
         fft_functions = [(torch.fft.fft, torch.fft.ifft)]
         # Real-only functions
         if not dtype.is_complex:
@@ -322,7 +321,7 @@ class TestFFT(TestCase):
                     x = x.to(torch.complex32)
                 # For real input, ifft(fft(x)) will convert to complex
                 self.assertEqual(x, y, exact_dtype=(
-                    forward != torch.fft.fft or x.is_complex()), rtol=rtol, atol=atol)
+                    forward != torch.fft.fft or x.is_complex()))
 
     # Note: NumPy will throw a ValueError for an empty input
     @onlyNativeDeviceTypes
@@ -463,14 +462,14 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
+    @toleranceOverride({
+        torch.half : tol(1e-2, 1e-2),
+        torch.chalf : tol(1e-2, 1e-2),
+    })
     @dtypes(torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
     def test_fftn_round_trip(self, device, dtype):
         skip_helper(device, dtype)
 
-        if dtype in (torch.complex32, torch.half):
-            rtol, atol = 1e-2, 1e-2
-        else:
-            rtol, atol = None, None
         norm_modes = (None, "forward", "backward", "ortho")
 
         # input_ndim, dim
@@ -509,7 +508,7 @@ class TestFFT(TestCase):
                 y = backward(forward(x, **kwargs), **kwargs)
                 # For real input, ifftn(fftn(x)) will convert to complex
                 self.assertEqual(x, y, exact_dtype=(
-                    forward != torch.fft.fftn or x.is_complex()), rtol=rtol, atol=atol)
+                    forward != torch.fft.fftn or x.is_complex()))
 
     @onlyNativeDeviceTypes
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],

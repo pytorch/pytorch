@@ -76,11 +76,10 @@ C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
 __global__ void _fft_conjugate_copy_kernel(
     int64_t numel, scalar_t * out_data, const scalar_t * in_data,
     inp_calc_t ic, out_calc_t oc) {
-  using comp_t = at::opmath_type<scalar_t>;
   CUDA_KERNEL_LOOP_TYPE(index, numel, int64_t) {
     auto in_offset = ic.get(index)[0];
     auto out_offset = oc.get(index)[0];
-    out_data[out_offset] = std::conj(static_cast<comp_t>(in_data[in_offset]));
+    out_data[out_offset] = std::conj(in_data[in_offset]);
   }
 }
 
