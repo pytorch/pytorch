@@ -254,6 +254,9 @@ def _tensor_str(self, indent):
     if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
         self = self.float()
 
+    if self.dtype is torch.complex32:
+        self = self.cfloat()
+
     if self.dtype.is_complex:
         # handle the conjugate bit
         self = self.resolve_conj()
