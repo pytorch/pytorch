@@ -39,6 +39,7 @@ def define_targets(rules):
         cmd = "$(location //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
+              "--tags-path=$(location :tags.yaml) " +
               "--gen_lazy_ts_backend",
     )
 
