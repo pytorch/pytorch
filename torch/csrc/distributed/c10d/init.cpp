@@ -33,6 +33,7 @@
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
 
+#include <torch/csrc/autograd/python_mode.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -978,18 +979,31 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
                  ::c10d::BroadcastOptions opts) {
+                TORCH_INTERNAL_ASSERT(!at::impl::PythonModeTLS::get_state());
                 for (auto& tensor : tensors) {
                   auto* tensor_impl = tensor.unsafeGetTensorImpl();
                   if (!tensor_impl->is_python_dispatch()) {
                     tensor_impl->set_python_dispatch(true);
+                    // torch::autograd::PythonMode::enter(tensor_impl->_unchecked_untagged_pyobj());
                   }
                 }
+
                 auto op = c10::Dispatcher::singleton().findSchemaOrThrow("c10d::broadcast", "")
                     .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                         const c10::intrusive_ptr<::c10d::ProcessGroup>&, at::TensorList, int64_t, int64_t, int64_t)>();
                 // It's awakward to unbox the opts here and box them again in the custom C++ op.
                 // But it's also complicated to make opts as a CustomClassHolder. Leave it as it is now.
-                return op.call(self, tensors, opts.rootRank, opts.rootTensor, opts.timeout.count());
+                auto result = op.call(self, tensors, opts.rootRank, opts.rootTensor, opts.timeout.count());
+
+                // Scope it or not?
+                for (auto& tensor : tensors) {
+                  auto* tensor_impl = tensor.unsafeGetTensorImpl();
+                  if (tensor_impl->is_python_dispatch()) {
+                    tensor_impl->set_python_dispatch(false);
+                  }
+                }
+                // torch::autograd::PythonMode::exit();
+                return result;
               },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::BroadcastOptions(),

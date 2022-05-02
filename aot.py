@@ -17,7 +17,7 @@ def cleanup():
     dist.destroy_process_group()
 
 def broadcast(x):
-    torch.add(x, 1) # Just to see if __torch_dispatch__ functions.
+    # torch.add(x, 1) # Just to see if __torch_dispatch__ functions.
     dist.broadcast(x, 0)
     print(f"{os.getpid()} broadcast: {x}")
     return x
