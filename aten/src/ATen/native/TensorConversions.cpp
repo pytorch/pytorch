@@ -56,6 +56,24 @@ Tensor _to_copy(
   bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
                   (options.layout() == c10::kStrided));
 
+  // TODO: Use the dispatcher for this.
+  // Currently there are unenumerated extensibility issues preventing this.
+  if (self.is_sparse_csr()) {
+    TORCH_CHECK(
+        memory_format == MemoryFormat::Preserve,
+        "sparse_csr only supports memory format Preserve, but got ",
+        memory_format,
+        " instead.");
+    return at::sparse_csr::map_sparse_csr_values(
+        self,
+        _to_copy,
+        dtype,
+        c10::kStrided, // values are strided
+        device,
+        pin_memory,
+        non_blocking,
+        memory_format);
+  }
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
       Tensor r;
@@ -173,10 +191,10 @@ Tensor _autocast_to_full_precision(const Tensor& self, bool cuda_enabled, bool c
 
 Tensor to(
   const Tensor& self,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
+  c10::optional<ScalarType> dtype,
+  c10::optional<Layout> layout,
+  c10::optional<Device> device,
+  c10::optional<bool> pin_memory,
   bool non_blocking,
   bool copy,
   c10::optional<c10::MemoryFormat> optional_memory_format
@@ -210,27 +228,6 @@ Tensor to(
     bool non_blocking,
     bool copy,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  // TODO: Use the dispatcher for this.
-  // Currently there are unenumerated extensibility issues preventing this.
-  if (self.is_sparse_csr()) {
-    auto memory_format =
-        optional_memory_format.value_or(MemoryFormat::Preserve);
-    TORCH_CHECK(
-        memory_format == MemoryFormat::Preserve,
-        "sparse_csr only supports memory format Preserve, but got ",
-        memory_format,
-        " instead.");
-    return at::sparse_csr::map_sparse_csr_values(
-        self,
-        to_impl,
-        dtype,
-        c10::nullopt,
-        c10::nullopt,
-        c10::nullopt,
-        non_blocking,
-        copy,
-        memory_format);
-  }
   return to_impl(
       self,
       dtype,
