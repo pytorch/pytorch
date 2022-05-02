@@ -2,14 +2,14 @@ import argparse
 import collections
 from pprint import pformat
 
-from tools.codegen.model import Variant
-from tools.codegen.api.python import (
+from torchgen.model import Variant
+from torchgen.api.python import (
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
     returns_named_tuple_pyi,
 )
-from tools.codegen.gen import parse_native_yaml
-from tools.codegen.utils import FileManager
+from torchgen.gen import parse_native_yaml
+from torchgen.utils import FileManager
 from typing import Sequence, List, Dict
 
 from tools.autograd.gen_python_functions import (
@@ -320,7 +320,12 @@ def gen_nn_functional(fm: FileManager) -> None:
     )
 
 
-def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -> None:
+def gen_pyi(
+    native_yaml_path: str,
+    tags_yaml_path: str,
+    deprecated_yaml_path: str,
+    fm: FileManager,
+) -> None:
     """gen_pyi()
 
     This function generates a pyi file for torch.
@@ -511,7 +516,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
             )
         )
 
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = parse_native_yaml(
+        native_yaml_path, tags_yaml_path
+    ).native_functions
     native_functions = list(filter(should_generate_py_binding, native_functions))
 
     function_signatures = load_signatures(
@@ -900,6 +907,12 @@ def main() -> None:
         help="path to native_functions.yaml",
     )
     parser.add_argument(
+        "--tags-path",
+        metavar="TAGS",
+        default="aten/src/ATen/native/tags.yaml",
+        help="path to tags.yaml",
+    )
+    parser.add_argument(
         "--deprecated-functions-path",
         metavar="DEPRECATED",
         default="tools/autograd/deprecated.yaml",
@@ -910,7 +923,9 @@ def main() -> None:
     )
     args = parser.parse_args()
     fm = FileManager(install_dir=args.out, template_dir=".", dry_run=False)
-    gen_pyi(args.native_functions_path, args.deprecated_functions_path, fm)
+    gen_pyi(
+        args.native_functions_path, args.tags_path, args.deprecated_functions_path, fm
+    )
 
 
 if __name__ == "__main__":
