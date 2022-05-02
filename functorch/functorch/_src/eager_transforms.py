@@ -13,6 +13,8 @@ from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
 from .vmap import vmap
+from .decompositions import decomposition_table
+
 
 from functorch._C import (
     _wrap_for_grad,
@@ -1269,3 +1271,13 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
         finally:
             _func_decrement_nesting()
     return wrapped
+
+
+def _register_jit_decomposition(decomp):
+    assert decomp in decomposition_table, f"could not find {decomp}"
+    decomp_fn = decomposition_table[decomp]
+    scripted_decomp_fn = torch.jit.script(decomp_fn)
+    torch.jit._register_decomposition(decomp, scripted_decomp_fn.graph)
+
+
+_register_jit_decomposition(torch.ops.aten.trace.default)
