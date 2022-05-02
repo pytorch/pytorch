@@ -95,6 +95,7 @@ class Tensor(torch._C._TensorBase):
             # does accurate alias tracking; however, the code below
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
+            # Update the test in test_serialization if you remove 'meta' from here
             if self.is_sparse or self.device.type in ['lazy', 'xla', 'mlc', 'ort', 'meta', 'hpu'] or \
                     (type(self) is not Tensor and self.data_ptr() == 0):
                 new_tensor = self.clone()
@@ -150,7 +151,8 @@ class Tensor(torch._C._TensorBase):
                         new_tensor = new_tensor.conj_physical()
                     if self.is_neg():
                         new_tensor = new_tensor.neg()
-                    new_tensor.requires_grad = self.requires_grad
+            if self.requires_grad:
+                new_tensor.requires_grad_()
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 

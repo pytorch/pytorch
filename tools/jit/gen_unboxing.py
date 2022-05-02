@@ -3,15 +3,15 @@ import argparse
 import os
 import pathlib
 from dataclasses import dataclass
-from tools.codegen.api import unboxing
-from tools.codegen.api.translate import translate
-from tools.codegen.api.types import CppSignatureGroup
-from tools.codegen.api.unboxing import convert_arguments
-from tools.codegen.context import method_with_native_function
-from tools.codegen.gen import parse_native_yaml, cpp_string
-from tools.codegen.model import NativeFunction, NativeFunctionsGroup, Variant
-from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import Target, FileManager, mapMaybe, make_file_manager
+from torchgen.api import unboxing
+from torchgen.api.translate import translate
+from torchgen.api.types import CppSignatureGroup
+from torchgen.api.unboxing import convert_arguments
+from torchgen.context import method_with_native_function
+from torchgen.gen import parse_native_yaml, cpp_string
+from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import Target, FileManager, mapMaybe, make_file_manager
 from typing import Union, Sequence
 from typing_extensions import Literal
 
