@@ -6581,6 +6581,11 @@ class TestTorch(TestCase):
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor([2.3000+4.j, 7.0000+6.j])''')
 
+        # test complex half tensor
+        x = torch.tensor([1.25 + 4j, -7. + 6j], dtype=torch.chalf)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpectedInline(str(x), '''tensor([ 1.2500+4.j, -7.0000+6.j], dtype=torch.complex32)''')
+
         # test scientific notation for complex tensors
         x = torch.tensor([1e28 + 2j , -1e-28j])
         self.assertEqual(x.__repr__(), str(x))
