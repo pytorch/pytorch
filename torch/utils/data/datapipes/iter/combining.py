@@ -187,6 +187,9 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.leading_ptr = 0
         self.end_ptr = None
 
+    def __del__(self):
+        self.buffer.clear()
+
 
 class _ChildDataPipe(IterDataPipe):
     r"""
@@ -378,6 +381,10 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.child_buffers = [deque() for _ in range(self.num_instances)]
         self.instance_started = [False] * self.num_instances
         self.main_datapipe_exhausted = False
+
+    def __del__(self):
+        for dq in self.child_buffers:
+            dq.clear()
 
 
 @functional_datapipe('mux')
