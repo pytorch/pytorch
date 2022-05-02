@@ -39,6 +39,7 @@ def define_targets(rules):
         cmd = "$(location //tools/setup_helpers:generate_code) " +
               "--install_dir $(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
+              "--tags-path=$(location :tags.yaml) " +
               "--gen_lazy_ts_backend",
         tags = [
             # Filter this target out for Bazel until we are ready to
