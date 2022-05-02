@@ -7,6 +7,54 @@ on:
   pull_request:
 
 jobs:
+  lintrunner:
+    runs-on: ubuntu-18.04
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+
+      - name: Checkout PyTorch
+        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+
+      - name: Install lintrunner
+        run: pip install lintrunner==0.6.*
+
+      - name: Initialize lint dependencies
+        run: lintrunner init
+
+      - name: Run lintrunner on all files
+        if: github.event_name == 'push'
+        run: lintrunner -vv --paths-cmd='git grep -Il .' --force-color
+
+      - name: Run lintrunner on PR files
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}"
+          echo ""
+          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
+          echo -e "\e[1m\e[36mSee https://github.com/csarofeen/pytorch/wiki/lintrunner for setup instructio.\e[0m"
+
+      - name: Store annotations
+        if: always() && github.event_name == 'pull_request'
+        # Don't show this as an error; the above step will have already failed.
+        continue-on-error: true
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # The easiest way to get annotations is to just run lintrunner again
+          # in JSON mode and use jq to massage the output into GitHub Actions
+          # workflow commands.
+          lintrunner --merge-base-with "${PR_BASE_SHA}" --json | \
+            jq --raw-output '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))'
+
   quick-checks:
     name: quick-checks
     runs-on: ubuntu-18.04
@@ -137,7 +185,6 @@ jobs:
           # PR was opened directly or from a forked repo. See: `9f890a92` for more info.
           git remote add upstream https://github.com/csarofeen/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
-
           # only run clang-format on allowlisted files
           echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
           echo "| clang-format failures found! Run: "
@@ -145,156 +192,13 @@ jobs:
           echo "| to fix this error. "
           echo "| For more info, see: https://github.com/csarofeen/pytorch/wiki/clang-format "
           echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-
           tools/linter/clang_format_ci.sh "${BASE_SHA}"
-
           GIT_DIFF=$(git diff)
           if [[ -z $GIT_DIFF ]]; then
             exit 0
           fi
           echo "$GIT_DIFF"
           exit 1
-
-  py2-setup-validate-errormsg:
-    name: py2-setup-validate-errormsg
-    runs-on: ubuntu-18.04
-    steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 2.x
-          architecture: x64
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
-      - name: Attempt to run setup.py
-        run: |
-          if ! python2 setup.py | grep -q "Python 2 has reached end-of-life and is no longer supported by PyTorch."; then
-            echo 'Running setup.py with Python 2 did not give the expected error message.'
-            false
-          fi
-      - name: Keep torch.utils.collect_env python2 compliant
-        run: python2 -m py_compile torch/utils/collect_env.py
-
-  shellcheck:
-    name: shellcheck
-    runs-on: ubuntu-18.04
-    steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.x
-          architecture: x64
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
-      - name: Install requirements
-        id: requirements
-        run: |
-          pip3 install -r requirements.txt --user
-      - name: Install Jinja2
-        run: |
-          pip3 install Jinja2==3.0.1 --user
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
-      - name: Regenerate workflows
-        id: generate_workflows
-        run: .github/scripts/generate_ci_workflows.py
-      - name: Assert that regenerating the workflows didn't change them
-        run: |
-          if ! .github/scripts/report_git_status.sh .github/workflows; then
-            echo
-            echo 'As shown by the above diff, the committed .github/workflows'
-            echo 'are not up to date according to .github/templates.'
-            echo 'Please run this command, commit, and push again to your PR:'
-            echo
-            echo '    .github/scripts/generate_ci_workflows.py'
-            echo
-            echo 'If running that command does nothing, you may need to rebase'
-            echo 'onto a more recent commit from the PyTorch master branch.'
-            false
-          fi
-      - name: Install ShellCheck
-        id: install_shellcheck
-        if: always()
-        # https://github.com/koalaman/shellcheck/tree/v0.7.2#installing-a-pre-compiled-binary
-        run: |
-          set -x
-          scversion="v0.7.2"
-          wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
-          mkdir -p ~/.local/bin
-          cp "shellcheck-${scversion}/shellcheck" ~/.local/bin/
-          rm -r "shellcheck-${scversion}"
-          ~/.local/bin/shellcheck --version
-      - name: Extract scripts from GitHub Actions workflows
-        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
-        run: |
-          # For local lints, remove the .extracted_scripts folder if it was already there
-          rm -rf .extracted_scripts
-          tools/extract_scripts.py --out=.extracted_scripts
-      - name: Run ShellCheck
-        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
-        run: |
-          if ! tools/linter/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
-            echo
-            echo 'ShellCheck gave a nonzero exit code. Please fix the warnings'
-            echo 'listed above. Note that if a path in one of the above warning'
-            echo 'messages starts with .extracted_scripts/ then that means it'
-            echo 'is referring to a shell script embedded within another file,'
-            echo 'whose path is given by the path components immediately'
-            echo 'following the .extracted_scripts/ prefix.'
-            false
-          fi
-      - name: Check that jobs will be cancelled
-        if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
-        run: |
-          .github/scripts/ensure_actions_will_cancel.py
-      - name: Run actionlint
-        shell: bash
-        run: |
-          set -eux
-          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          ./actionlint --color
-          rm actionlint
-
-  toc:
-    name: toc
-    runs-on: ubuntu-18.04
-    # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
-    env:
-      NPM_CONFIG_PREFIX: ~/.npm-global
-    steps:
-      - name: Setup Node
-        uses: actions/setup-node@v2
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
-      - name: Install markdown-toc
-        run: npm install -g markdown-toc
-      - name: Regenerate ToCs and check that they didn't change
-        run: |
-          set -eu
-          export PATH=~/.npm-global/bin:"$PATH"
-          for FILE in $(git grep -Il '<!-- toc -->' -- '**.md'); do
-            markdown-toc --bullets='-' -i "$FILE"
-          done
-
-          if ! .github/scripts/report_git_status.sh .; then
-            echo
-            echo 'As shown by the above diff, the table of contents in one or'
-            echo 'more Markdown files is not up to date with the file contents.'
-            echo 'You can either apply that Git diff directly to correct the'
-            echo 'table of contents, or if you have npm installed, you can'
-            echo 'install the npm package markdown-toc and run the following'
-            # shellcheck disable=SC2016
-            echo 'command (replacing $FILE with the filename for which you want'
-            echo 'to regenerate the table of contents):'
-            echo
-            # shellcheck disable=SC2016
-            echo "    markdown-toc --bullets='-' -i \"\$FILE\""
-            false
-          fi
 
   flake8-py3:
     name: flake8-py3
@@ -397,19 +301,16 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         run: |
           cd "${GITHUB_WORKSPACE}"
-
           # The Docker image has our custom build, so we don't need to install it
           python3 -m tools.linter.clang_tidy \
             --clang-tidy-exe "$(which clang-tidy)" \
             --diff-file pr.diff \
             --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
-
       # Run clang-tidy on a smaller subset of the codebase on master until we
       # make the repository clang-tidy clean
       - name: Run master clang-tidy
         run: |
           cd "${GITHUB_WORKSPACE}"
-
           python3 -m tools.linter.clang_tidy \
             --paths \
               torch/csrc/cuda \
@@ -421,7 +322,6 @@ jobs:
               torch/csrc/tensor \
             --clang-tidy-exe "$(which clang-tidy)" \
             --disable-progress-bar 2>&1 | tee -a "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
-
       - name: Annotate output
         if: ${{ github.event_name == 'pull_request' }}
         env:
@@ -478,76 +378,6 @@ jobs:
           git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
           grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/|cmake/Caffe2Config.cmake.in|aten/src/ATen/ATenConfig.cmake.in|cmake/Caffe2ConfigVersion.cmake.in|cmake/TorchConfig.cmake.in|cmake/TorchConfigVersion.cmake.in|cmake/cmake_uninstall.cmake.in)' | \
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
-
-  mypy:
-    name: mypy
-    runs-on: ubuntu-18.04
-    steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
-      - name: Install dependencies
-        run: |
-          set -eux
-          python3 -mpip install -r requirements.txt --user
-          python3 -mpip install numpy==1.20 --user # https://github.com/pytorch/pytorch/pull/60472
-          python3 -mpip install expecttest==0.1.3 mypy==0.812 --user
-          # Needed to check tools/render_junit.py
-          python3 -mpip install junitparser==2.1.1 rich==10.9.0 --user
-      - name: Run autogen
-        run: |
-          set -eux
-          time python3 -mtools.generate_torch_version --is_debug=false
-          time python3 -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
-          time python3 -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
-      - name: Run mypy
-        env:
-          MYPY_FORCE_COLOR: 1
-          TERM: xterm-color
-        run: |
-          set -eux
-          STATUS=
-          for CONFIG in mypy*.ini; do
-            if ! python3 -mmypy --config="$CONFIG"; then
-              STATUS=fail
-            fi
-          done
-          if [ -n "$STATUS" ]; then
-            echo 'Please fix the above mypy warnings.'
-            false
-          fi
-
-  test-tools:
-    name: Test tools
-    if: ${{ github.repository == 'csarofeen/pytorch' }}
-    runs-on: ubuntu-18.04
-    steps:
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-          architecture: x64
-      # [see note: pytorch repo ref]
-      # deep clone (fetch-depth 0) required, to allow us to use git log
-      - name: Checkout PyTorch
-        uses: csarofeen/pytorch/.github/actions/checkout-pytorch@master
-      - name: Install dependencies
-        # mypy and boto3 versions copied from
-        # .circleci/docker/common/install_conda.sh
-        run: |
-          set -eux
-          python3 -mpip install -r requirements.txt
-          python3 -mpip install boto3==1.16.34
-          make setup_lint
-      - name: Test tools
-        run: |
-          python3 -m unittest discover -vs tools/test -p 'test_*.py'
-          python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
 
   test_collect_env:
     if: ${{ github.repository == 'csarofeen/pytorch' }}
