@@ -4117,11 +4117,12 @@ TEST(Simplify, SimplifyReorderForCond) {
         0,
         4,
         Cond::make(
-            CompareSelect::make(i, 10, CompareSelectOperation::kLT),
+            CompareSelect::make(i, 3, CompareSelectOperation::kLT),
             Store::make(c, {i}, Load::make(a, {i})),
             nullptr));
 
     StmtPtr simplified = IRSimplifier::simplify(body);
+
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
@@ -4234,7 +4235,7 @@ TEST(Simplify, SimplifyReorderForCond) {
             CompareSelect::make(
                 Load::make(a, {0}), 10, CompareSelectOperation::kLT),
             Cond::make(
-                CompareSelect::make(i, 10, CompareSelectOperation::kEQ),
+                CompareSelect::make(i, 3, CompareSelectOperation::kEQ),
                 Store::make(c, {0}, Load::make(a, {i})),
                 nullptr),
             nullptr));

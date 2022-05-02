@@ -2916,17 +2916,17 @@ ExprPtr SimplifierUnderContext::mutate(IfThenElsePtr v) {
   ExprPtr true_val = v->true_value();
   ExprPtr false_val = v->false_value();
 
-  auto simp_condition = condition->accept_mutator(this);
-  auto simp_true_val = true_val->accept_mutator(this);
-  auto simp_false_val = false_val->accept_mutator(this);
-  if (simp_condition != condition) {
-    v->set_condition(simp_condition);
-  }
-  if (simp_true_val != true_val) {
-    v->set_true_value(simp_true_val);
-  }
-  if (simp_false_val != false_val) {
-    v->set_false_value(simp_false_val);
+  auto simp_condition = IRSimplifier::simplify(condition->accept_mutator(this));
+  auto simp_true_val = IRSimplifier::simplify(true_val->accept_mutator(this));
+  auto simp_false_val = IRSimplifier::simplify(false_val->accept_mutator(this));
+
+  ExprPtr simplified_ifelse_expr = nullptr;
+  if ((simp_condition == condition) && (simp_true_val == true_val) &&
+      (simp_false_val == false_val)) {
+    simplified_ifelse_expr = v;
+  } else {
+    simplified_ifelse_expr =
+        alloc<IfThenElse>(simp_condition, simp_true_val, simp_false_val);
   }
 
   if (simp_condition->isConstant()) {
@@ -2937,7 +2937,7 @@ ExprPtr SimplifierUnderContext::mutate(IfThenElsePtr v) {
       return simp_false_val;
     }
   } else {
-    return v;
+    return simplified_ifelse_expr;
   }
 }
 
@@ -2949,24 +2949,28 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
   ExprPtr ret1 = v->ret_val1();
   ExprPtr ret2 = v->ret_val2();
 
-  auto simp_lhs = lhs->accept_mutator(this);
-  auto simp_rhs = rhs->accept_mutator(this);
-  auto simp_ret1 = ret1->accept_mutator(this);
-  auto simp_ret2 = ret2->accept_mutator(this);
-  if (simp_lhs != lhs) {
-    v->set_lhs(simp_lhs);
-  }
-  if (simp_rhs != rhs) {
-    v->set_rhs(simp_rhs);
-  }
-  if (simp_ret1 != ret1) {
-    v->set_ret_val1(simp_ret1);
-  }
-  if (simp_ret2 != ret2) {
-    v->set_ret_val2(simp_ret2);
+  auto simp_lhs = IRSimplifier::simplify(lhs->accept_mutator(this));
+  auto simp_rhs = IRSimplifier::simplify(rhs->accept_mutator(this));
+  auto simp_ret1 = IRSimplifier::simplify(ret1->accept_mutator(this));
+  auto simp_ret2 = IRSimplifier::simplify(ret2->accept_mutator(this));
+
+  ExprPtr simplified_cmp_select_expr = nullptr;
+  if ((simp_lhs == lhs) && (simp_rhs == rhs) && (simp_ret1 == ret1) &&
+      (simp_ret2 == ret2)) {
+    simplified_cmp_select_expr = v;
+  } else {
+    simplified_cmp_select_expr = alloc<CompareSelect>(
+        simp_lhs,
+        simp_rhs,
+        simp_ret1,
+        simp_ret2,
+        v->compare_select_op(),
+        v->bias());
   }
 
-  GRAPH_DEBUG("(SimplifierUnderContext) after simplify: ", std::to_string(v));
+  GRAPH_DEBUG(
+      "(SimplifierUnderContext) after simplify: ",
+      std::to_string(simplified_cmp_select_expr));
 
   auto query_bound_info = [](const ExprPtr& expr_ptr,
                              VarBoundInfo& var_bound_info,
@@ -2992,22 +2996,20 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     }
   };
 
-  analysis::Bound lhs_bound;
-  auto lhs_has_bound = query_bound_info(simp_lhs, var_bound_info_, lhs_bound);
-  if (!lhs_has_bound)
-    return v;
-
   analysis::Bound rhs_bound;
+  analysis::Bound lhs_bound;
+
+  auto lhs_has_bound = query_bound_info(simp_lhs, var_bound_info_, lhs_bound);
   auto rhs_has_bound = query_bound_info(simp_rhs, var_bound_info_, rhs_bound);
-  if (!rhs_has_bound)
-    return v;
+  if (!lhs_has_bound || !rhs_has_bound)
+    return simplified_cmp_select_expr;
 
   CompareSelectOperation cmp_res = CompareSelectOperation::kEQ;
   auto has_overlap = analysis::boundOverlap(lhs_bound, rhs_bound);
   if (has_overlap == analysis::OverlapKind::PartialOverlap) {
     // There is overlap between lhs and rhs
     // lhs = (5, 10), rhs = (8, 11)
-    return v;
+    return simplified_cmp_select_expr;
   } else if (
       has_overlap == analysis::OverlapKind::Contains ||
       has_overlap == analysis::OverlapKind::ContainedOrEqual) {
@@ -3020,7 +3022,7 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
       } else if (exprEquals(simp_lhs, rhs_bound.end)) {
         cmp_res = CompareSelectOperation::kGE;
       } else {
-        return v;
+        return simplified_cmp_select_expr;
       }
     } else if (simp_rhs->isConstant()) {
       if (exprEquals(lhs_bound.end, simp_rhs)) {
@@ -3028,17 +3030,17 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
       } else if (exprEquals(lhs_bound.start, simp_rhs)) {
         cmp_res = CompareSelectOperation::kGE;
       } else {
-        return v;
+        return simplified_cmp_select_expr;
       }
     } else {
-      return v;
+      return simplified_cmp_select_expr;
     }
   } else {
     // NoOverlap
     auto sub_expr = alloc<Sub>(lhs_bound.end, rhs_bound.start);
     auto ret = IRSimplifier::simplify(sub_expr);
     if (!ret->isConstant()) {
-      return v;
+      return simplified_cmp_select_expr;
     }
     int diff = immediateAs<int>(ret);
     TORCH_INTERNAL_ASSERT(diff != 0);
@@ -3052,32 +3054,37 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
   ExprPtr ret_expr = nullptr;
   switch (v->compare_select_op()) {
     case CompareSelectOperation::kGT:
-      ret_expr = (cmp_res == CompareSelectOperation::kGT) ? v->ret_val1()
-                                                          : v->ret_val2();
+      ret_expr =
+          (cmp_res == CompareSelectOperation::kGT) ? simp_ret1 : simp_ret2;
       break;
     case CompareSelectOperation::kGE:
       ret_expr = (cmp_res == CompareSelectOperation::kGE ||
+                  cmp_res == CompareSelectOperation::kGT ||
                   cmp_res == CompareSelectOperation::kEQ)
-          ? v->ret_val1()
-          : v->ret_val2();
+          ? simp_ret1
+          : simp_ret2;
       break;
     case CompareSelectOperation::kLT:
-      ret_expr = (cmp_res == CompareSelectOperation::kLT) ? v->ret_val1()
-                                                          : v->ret_val2();
+      ret_expr =
+          (cmp_res == CompareSelectOperation::kLT) ? simp_ret1 : simp_ret2;
       break;
     case CompareSelectOperation::kLE:
-      ret_expr = (cmp_res == CompareSelectOperation::kLT ||
+      ret_expr = (cmp_res == CompareSelectOperation::kLE ||
+                  cmp_res == CompareSelectOperation::kLT ||
                   cmp_res == CompareSelectOperation::kEQ)
-          ? v->ret_val1()
-          : v->ret_val2();
+          ? simp_ret1
+          : simp_ret2;
       break;
     case CompareSelectOperation::kNE:
-      ret_expr = (cmp_res != CompareSelectOperation::kEQ) ? v->ret_val1()
-                                                          : v->ret_val2();
+      ret_expr =
+          (cmp_res != CompareSelectOperation::kEQ) ? simp_ret1 : simp_ret2;
       break;
     case CompareSelectOperation::kEQ:
-      ret_expr = (cmp_res == CompareSelectOperation::kEQ) ? v->ret_val1()
-                                                          : v->ret_val2();
+      ret_expr =
+          (cmp_res == CompareSelectOperation::kEQ) ? simp_ret1 : simp_ret2;
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false);
       break;
   }
 
