@@ -2,13 +2,14 @@ import torch
 from torch import Tensor
 
 import torch._prims.utils as utils
-from torch._prims.utils import TensorLike, TensorLikeType, TensorMeta, ShapeType
+from torch._prims.utils import (
+    TensorLike,
+    TensorLikeType,
+    TensorMeta,
+    ShapeType,
+    getnvFuserDtype,
+)
 from torch.overrides import has_torch_function, handle_torch_function
-
-import torch._C._nvfuser as nvfuser  # type: ignore[import]
-
-FusionDefinition = nvfuser.FusionDefinition  # type: ignore[attr-defined]
-DataType = nvfuser.DataType  # type: ignore[attr-defined]
 
 from typing import Sequence, Optional, Union, Callable, List, Tuple, Any
 from numbers import Number
@@ -1033,21 +1034,8 @@ def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
     return a.to(dtype)
 
 
-_torch_dtype_to_nvfuser_dtype_map = {
-    torch.cdouble: DataType.ComplexDouble,
-    torch.cfloat: DataType.ComplexFloat,
-    torch.double: DataType.Double,
-    torch.float: DataType.Float,
-    torch.half: DataType.Half,
-    torch.bfloat16: DataType.BFloat16,
-    torch.long: DataType.Int,
-    torch.int: DataType.Int32,
-    torch.bool: DataType.Bool,
-}
-
-
 def _convert_element_type_nvfuser(fd: Any, a: Tensor, dtype: torch.dtype) -> Tensor:
-    nvfuser_dtype = _torch_dtype_to_nvfuser_dtype_map[dtype]
+    nvfuser_dtype = getnvFuserDtype(dtype)
     return fd.Ops.cast(nvfuser_dtype, a)  # type: ignore[attr-defined]
 
 
