@@ -13629,7 +13629,7 @@ op_db: List[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(low=1),
                     sample_inputs_func=sample_inputs_pow,
                     skips=(
-                        #TODO convert skips to xfails
+                        # TODO convert skips to xfails
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
                                      dtypes=[torch.int8, torch.int16, torch.int32, torch.int64, torch.complex64, torch.complex128]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
