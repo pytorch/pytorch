@@ -2691,7 +2691,8 @@ class FullyShardedDataParallel(nn.Module):
             eod.index += 1
         else:
             # Use `compute_device` instead of the parameter's device in case it
-            # is offloaded on CPU and we are using NCCL backend
+            # is offloaded on CPU and we are using NCCL backend, which requires
+            # communicated tensors be on GPU
             device = self.compute_device
             indices = torch.zeros(self.world_size, dtype=torch.int32, device=device)
             index = torch.tensor([param_index], dtype=torch.int32, device=device)
