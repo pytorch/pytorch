@@ -2310,9 +2310,12 @@ the output has the same batch dimensions.
 The parameter :attr:`mode` chooses between the full and reduced QR decomposition.
 If :attr:`A` has shape `(*, m, n)`, denoting `k = min(m, n)`
 
-- :attr:`mode`\ `= 'reduced'` (default): Returns `(Q, R)` of shapes `(*, m, k)`, `(*, k, n)` respectively. It is always differentiable.
-- :attr:`mode`\ `= 'complete'`: Returns `(Q, R)` of shapes `(*, m, m)`, `(*, m, n)` respectively. It is differentiable for `m <= n`.
-- :attr:`mode`\ `= 'r'`: Computes only the reduced `R`. Returns `(Q, R)` with `Q` empty and `R` of shape `(*, k, n)`. It is never differentiable.
+- :attr:`mode`\ `= 'reduced'` (default): Returns `(Q, R)` of shapes `(*, m, k)`, `(*, k, n)` respectively.
+  It is always differentiable.
+- :attr:`mode`\ `= 'complete'`: Returns `(Q, R)` of shapes `(*, m, m)`, `(*, m, n)` respectively.
+  It is differentiable for `m <= n`.
+- :attr:`mode`\ `= 'r'`: Computes only the reduced `R`. Returns `(Q, R)` with `Q` empty and `R` of shape `(*, k, n)`.
+  It is never differentiable.
 
 Differences with `numpy.linalg.qr`:
 

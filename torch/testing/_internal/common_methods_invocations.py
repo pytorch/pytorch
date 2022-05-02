@@ -10678,7 +10678,8 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_qr_geqrf,
            skips=(
-               # The test is wrong https://github.com/pytorch/pytorch/pull/76115/files#r854455360
+               # The test is wrong
+               # https://github.com/pytorch/pytorch/pull/76115#discussion_r854328384
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
@@ -13074,7 +13075,8 @@ op_db: List[OpInfo] = [
            # In-place ops
            check_batched_gradgrad=False,
            skips=(
-               # The test is wrong https://github.com/pytorch/pytorch/pull/76115/files#r854455360
+               # The test is wrong
+               # https://github.com/pytorch/pytorch/pull/76115#discussion_r854328384
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
