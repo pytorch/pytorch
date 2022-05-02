@@ -8,7 +8,8 @@ __all__ = ["StreamReaderIterDataPipe", ]
 @functional_datapipe('read_from_stream')
 class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
     r"""
-    Given IO streams and their label names, yields bytes with label name in a tuple.
+    Given IO streams and their label names, yields bytes with label
+    name in a tuple (functional name: ``read_from_stream``).
 
     Args:
         datapipe: Iterable DataPipe provides label/URL and byte stream
