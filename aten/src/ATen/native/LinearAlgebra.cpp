@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/grad_mode.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
@@ -114,25 +115,7 @@ namespace native {
 
 DEFINE_DISPATCH(householder_orthogonalization_stub);
 
-Tensor& linalg_orthogonalize_out(const Tensor& self, const double epsilon, Tensor& out){
-    TORCH_CHECK(self.is_contiguous(), "Input must be contiguous")
-    TORCH_CHECK(self.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
-    TORCH_CHECK(out.is_contiguous(), "Output tensor must be contiguous")
-    TORCH_CHECK(self.sizes() == out.sizes(), "Output and input tensors must have same sizes.");
-        
-    Tensor R = self.clone();
-    R.diagonal().add_(epsilon);
-
-    householder_orthogonalization_stub(self.device().type(), R, out);
-
-    return out;
-}
-
-Tensor linalg_orthogonalize(const Tensor& self, const double epsilon){
-    Tensor out = at::empty(self.sizes(), self.options());
-    linalg_orthogonalize_out(self, epsilon, out);
-    return out;
-}
+namespace {
 
 Tensor& linalg_orthogonalize_(Tensor& self, const double epsilon){
     TORCH_CHECK(self.is_contiguous(), "Input must be contiguous")
@@ -143,6 +126,12 @@ Tensor& linalg_orthogonalize_(Tensor& self, const double epsilon){
     householder_orthogonalization_stub(self.device().type(), self, self);
     return self;
 }
+
+}
+
+static auto registry = at::RegisterOperators()
+   .op("distributed::orthogonalize(Tensor(a!) self, float epsilon=0) -> Tensor(a!)",  at::RegisterOperators::options()
+       .kernel<decltype(linalg_orthogonalize_), &linalg_orthogonalize_>(DispatchKey::CUDA));
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

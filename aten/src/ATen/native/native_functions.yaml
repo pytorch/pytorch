@@ -11207,24 +11207,6 @@
     CPU: _linalg_qr_helper_default
     CUDA: _linalg_qr_helper_cuda
 
-- func: linalg_orthogonalize(Tensor self, float epsilon=1e-8) -> Tensor
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_orthogonalize
-
-- func: linalg_orthogonalize.out(Tensor self, float epsilon=1e-8, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_orthogonalize_out
-
-- func: linalg_orthogonalize_(Tensor(a!) self, float epsilon=1e-8) -> Tensor(a!)
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_orthogonalize_
-
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg
 

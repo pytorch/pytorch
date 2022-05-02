@@ -154,8 +154,6 @@ void householder_orthogonalization_cuda_impl(Tensor& R, Tensor& out){
     
 }
 
-REGISTER_DISPATCH(householder_orthogonalization_stub, &householder_orthogonalization_cuda_impl);
-
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 void addr_kernel_cuda(TensorIterator &iter, const Scalar& beta, const Scalar& alpha) {
@@ -295,6 +293,7 @@ void unpack_pivots_cuda_kernel(
 
 } // anonymous namespace
 
+REGISTER_DISPATCH(householder_orthogonalization_stub, &householder_orthogonalization_cuda_impl);
 REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
 REGISTER_DISPATCH(unpack_pivots_stub, &unpack_pivots_cuda_kernel);
 
