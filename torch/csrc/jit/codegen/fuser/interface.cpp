@@ -19,13 +19,8 @@ bool cpu_fuser_enabled = true;
 bool cpu_fuser_enabled = false;
 #endif
 
-// TODO fix this to use something at runtime, since USE_ROCM flag might not be
-// available when building the cpu library
-#ifdef USE_ROCM
+// note: this doesn't necessarily enable NNC because NVFuser might override it
 bool gpu_fuser_enabled = true;
-#else
-bool gpu_fuser_enabled = false;
-#endif
 
 } // namespace detail
 

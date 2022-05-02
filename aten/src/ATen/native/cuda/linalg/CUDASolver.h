@@ -46,6 +46,47 @@ void getrs<c10::complex<double>>(CUDASOLVER_GETRS_ARGTYPES(c10::complex<double>)
 template<>
 void getrs<c10::complex<float>>(CUDASOLVER_GETRS_ARGTYPES(c10::complex<float>));
 
+#define CUDASOLVER_SYTRF_BUFFER_ARGTYPES(Dtype) \
+  cusolverDnHandle_t handle, int n, Dtype *A, int lda, int *lwork
+
+template <class Dtype>
+void sytrf_bufferSize(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(Dtype)) {
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::sytrf_bufferSize: not implemented for ",
+      typeid(Dtype).name());
+}
+template <>
+void sytrf_bufferSize<float>(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(float));
+template <>
+void sytrf_bufferSize<double>(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(double));
+template <>
+void sytrf_bufferSize<c10::complex<double>>(
+    CUDASOLVER_SYTRF_BUFFER_ARGTYPES(c10::complex<double>));
+template <>
+void sytrf_bufferSize<c10::complex<float>>(
+    CUDASOLVER_SYTRF_BUFFER_ARGTYPES(c10::complex<float>));
+
+#define CUDASOLVER_SYTRF_ARGTYPES(Dtype)                                      \
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, Dtype *A, int lda, \
+      int *ipiv, Dtype *work, int lwork, int *devInfo
+
+template <class Dtype>
+void sytrf(CUDASOLVER_SYTRF_ARGTYPES(Dtype)) {
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::sytrf: not implemented for ",
+      typeid(Dtype).name());
+}
+template <>
+void sytrf<float>(CUDASOLVER_SYTRF_ARGTYPES(float));
+template <>
+void sytrf<double>(CUDASOLVER_SYTRF_ARGTYPES(double));
+template <>
+void sytrf<c10::complex<double>>(
+    CUDASOLVER_SYTRF_ARGTYPES(c10::complex<double>));
+template <>
+void sytrf<c10::complex<float>>(CUDASOLVER_SYTRF_ARGTYPES(c10::complex<float>));
 
 #define CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()  \
     cusolverDnHandle_t handle, int m, int n, int *lwork

@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -19,7 +20,6 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
@@ -57,10 +57,10 @@ namespace jit {
 
 class FuserTest : public ::testing::Test {
   void SetUp() override {
-    old_nvfuser_value_ = RegisterCudaFuseGraph::registerPass(false);
+    old_nvfuser_value_ = fuser::cuda::setEnabled(false);
   }
   void TearDown() override {
-    RegisterCudaFuseGraph(old_nvfuser_value_);
+    fuser::cuda::setEnabled(old_fuser_value_);
   }
 
  private:

@@ -1,11 +1,8 @@
-#include <aten/src/ATen/cuda/detail/CUDAHooks.h>
-
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
 
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
 /*
@@ -34,19 +31,14 @@ class RegisterInterface {
 
 static RegisterInterface register_interface_;
 
-#ifndef USE_ROCM
-class RegisterPass {
+class RegisterNVFuserPass {
  public:
-  RegisterPass() {
-    at::cuda::detail::callCUDAHooksRegistration();
-    if (RegisterCudaFuseGraph::canRegisterPass()) {
-      RegisterCudaFuseGraph::registerPass(true);
-    }
+  RegisterNVFuserPass() {
+    NVFuserPassManager::registerPass(true);
   }
 };
 
-static RegisterPass register_pass_;
-#endif
+static RegisterNVFuserPass register_nvfuser_pass_;
 
 } // namespace
 
