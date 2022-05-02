@@ -3,19 +3,63 @@ from __future__ import annotations
 from numbers import Number
 from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
 from functools import reduce
+import threading
 
 import torch
+from torch.fx import Node
+
+# nvFuser imports are conditional on CUDA being available
+if torch.cuda.is_available():
+    from torch._C._nvfuser import DataType  # type: ignore[import]
+
+    _torch_dtype_to_nvfuser_dtype_map = {
+        torch.cdouble: DataType.ComplexDouble,
+        torch.cfloat: DataType.ComplexFloat,
+        torch.double: DataType.Double,
+        torch.float: DataType.Float,
+        torch.half: DataType.Half,
+        torch.bfloat16: DataType.BFloat16,
+        torch.long: DataType.Int,
+        torch.int: DataType.Int32,
+        torch.bool: DataType.Bool,
+    }
+else:
+    _torch_dtype_to_nvfuser_dtype_map = {}
+
+
+def getnvFuserDtype(dtype: torch.dtype):
+    """
+    Translates from torch.dtype to nvFuser's DataType enum
+    """
+    return _torch_dtype_to_nvfuser_dtype_map[dtype]
+
 
 ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 
 
-class TensorMeta(object):
+class TensorMeta_Meta(type):
+    def __init__(cls, *args, **kwargs):
+
+        _tls = threading.local()
+        cls._tls = _tls
+        cls._tls.ctx = None
+
+    @property
+    def ctx(cls):
+        return cls._tls.ctx
+
+    @ctx.setter
+    def ctx(cls, value):
+        cls._tls.ctx = value
+
+
+class TensorMeta(object, metaclass=TensorMeta_Meta):
     """
     Temporary helper class to model tensor metadata.
 
-    To be replaced with an actual meta tensor.
+    Likely to be replaced with an actual meta tensor subclass.
     """
 
     def __init__(
@@ -32,6 +76,8 @@ class TensorMeta(object):
         self.strides: Tuple[int, ...]
         self.dtype: torch.dtype
         self.device: torch.device
+        self.name: str = ""
+        self.node: Optional[Node] = None
 
         if isinstance(tensorlike, Number):
             assert not shape and (shape is None or isinstance(shape, Sequence))
@@ -75,13 +121,18 @@ class TensorMeta(object):
         if kwargs is None:
             kwargs = {}
 
+        if cls.ctx is not None:
+            return cls.ctx.handle_torch_function(func, types, args, kwargs)
+
         if not hasattr(func, "meta"):
             raise ValueError("Callable {0} has no meta function!".format(func.__name__))
 
         return func.meta(*args, **kwargs)  # type: ignore[attr-defined]
 
+    # TODO: fx uses dunder repr to print objects in code
     def __repr__(self):
-        return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.strides})"
+        return self.name
+        # return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.strides})"
 
     def stride(self):
         return self.strides
