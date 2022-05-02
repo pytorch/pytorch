@@ -689,7 +689,8 @@ inline static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, c
       gesvdj_params
     );
 
-    // The following code can be used to check or report the gesvdj residual.
+    // // The following code can be used to check or report the gesvdj residual.
+    // // Note: this will introduce a device-host sync and may negatively affect the performance
     // double residual = 0;
     // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjGetResidual(handle, gesvdj_params, &residual));
     // printf("gesvdj residual = %.6e\n", residual);
@@ -804,15 +805,15 @@ inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, cons
   // cuSOLVER remark: if the user is confident on the accuracy of singular values and singular vectors,
   //   for example, certain conditions hold (required singular value is far from zero),
   //   then the performance can be improved by passing a null pointer to h_RnrmF, i.e. no computation of residual norm.
-  // Comment: although this residual is not checked or presented to end user, but it's still too dangerous to not calculate that.
+  // Comment: calculation of Frobenius norm is expensive and doesn't affect accuracy of the result
   //   We may consider to return or check this array in some way in the future.
-  auto residual_frobenius_norm = host_allocator.allocate(sizeof(double) * batchsize);
+  // auto residual_frobenius_norm = host_allocator.allocate(sizeof(double) * batchsize);
 
   at::cuda::solver::gesvdaStridedBatched<scalar_t>(
     handle, jobz, rank, m, n, A_data, lda, A_stride, S_data, S_stride, U_data, ldu, U_stride, V_data, ldv, V_stride,
     reinterpret_cast<scalar_t*>(workspace.get()),
     lwork, infos.data_ptr<int>(),
-    reinterpret_cast<double*>(residual_frobenius_norm.get()),
+    nullptr,  // cuSOLVER h_RnrmF is not calculated: reinterpret_cast<double*>(residual_frobenius_norm.get()),
     batchsize);
 }
 
