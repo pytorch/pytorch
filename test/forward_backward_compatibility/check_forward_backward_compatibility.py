@@ -53,7 +53,6 @@ ALLOW_LIST = [
     ("aten::randperm", datetime.date(9999, 1, 1)),
     ("aten::linalg_solve", datetime.date(2022, 5, 31)),
     ("aten::linalg_solve.out", datetime.date(2022, 5, 31)),
-    ("aten::_solve_helper", datetime.date(2022, 5, 31)),
     ("aten::gelu", datetime.date(2022, 3, 1)),
     ("aten::gelu_backward", datetime.date(2022, 3, 1)),
     ("aten::cudnn_convolution_backward", datetime.date(2022, 1, 31)),

@@ -4801,6 +4801,38 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
   }
 }
 
+Tensor solve_jvp(
+  const Tensor& X,
+  const Tensor& A,
+  const Tensor& dA,
+  const Tensor& dB
+) {
+  return generic_solve_jvp(
+    [](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
+      return at::linalg_solve(A, dB - dA_contrib);
+    },
+    X, A, dA, dB
+  );
+}
+
+Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
+  return at::linalg_solve(A.mH(), grad);
+}
+
+Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
+  at::NoTF32Guard disable_tf32;
+  Tensor grad_self = solve_backward_self(grad, self, A);
+  if (self.ndimension() == 2 && A.ndimension() == 2) {
+    return -at::mm(grad_self, solution.mH());
+  }
+  // if self was unsqueezed from (..., M) to (..., M, 1)
+  bool vector_case = at::native::linalg_solve_is_vector_rhs(A, self);
+  if (vector_case) {
+    return -at::matmul(grad_self.unsqueeze(-1), solution.unsqueeze(-1).mH());
+  }
+  return -at::matmul(grad_self, solution.mH());
+}
+
 Tensor lu_unpack_backward(
   const Tensor& L_grad,
   const Tensor& U_grad,
