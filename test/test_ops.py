@@ -101,6 +101,7 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipMeta
     @onlyNativeDeviceTypes
     @ops(ops_and_refs, dtypes=OpDTypes.none)
@@ -318,6 +319,7 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # TODO: include stride propagation.
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_reference_meta_functions(self, device, dtype, op):
