@@ -145,6 +145,58 @@ class TestAutogradFuns_opset9(_BaseTestCase):
         self.assertEqual(python_op_node.hasAttribute("Subgraph"), True)   
 
 
+    def test_nested_autograd(self):
+        class Child(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, i):
+                result = i.log()
+                result_log = result.log()
+                ctx.save_for_backward(result_log)
+                return result_log
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                result, = ctx.saved_tensors
+                return grad_output * result
+
+        class Parent(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, i):
+                result_exp = i.exp()
+                result_log = Child.apply(result_exp)
+                ctx.save_for_backward(result_exp, result_log)
+                return result_exp, result_log
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                result, = ctx.saved_tensors
+                return grad_output * result
+
+        class Caller(torch.nn.Module):
+            def forward(self, input):
+                return Parent.apply(input)
+
+        model = Caller()
+        input = torch.ones(1, 5)
+
+        graph, _, __ = self._model_to_graph(model, (input, ),
+                                            input_names=["x"],
+                                            dynamic_axes={"x": [0, 1]},
+                                            inline_autograd=True)
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "onnx::Exp")
+        self.assertEqual(next(iter).kind(), "onnx::Log")
+        self.assertEqual(next(iter).kind(), "onnx::Log")
+
+        graph_non_autograd, _, __ = self._model_to_graph(model, (input, ),
+                                                         input_names=["x"],
+                                                         dynamic_axes={"x": [0]})
+        iter_na = graph_non_autograd.nodes()
+        python_op_node = next(iter_na)
+        self.assertEqual(python_op_node.kind(), "prim::PythonOp")
+        self.assertEqual(python_op_node.hasAttribute("Subgraph"), True)
+
+
     def test_grad_mutliply(self):
         class GradMultiply(torch.autograd.Function):
             @staticmethod

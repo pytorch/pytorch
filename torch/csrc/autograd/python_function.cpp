@@ -591,7 +591,7 @@ static void _append_subgraph(
     torch::jit::Graph* graph,
     std::vector<torch::jit::Node*> subgraph_trace_outputs,
     bool unpack_output) {
-  
+
   node->g_(torch::jit::attr::Subgraph, std::make_shared<torch::jit::Graph>(graph->current_scope()));
   auto subgraph = node->g(torch::jit::attr::Subgraph);
 
