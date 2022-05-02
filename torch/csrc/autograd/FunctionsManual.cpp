@@ -4666,7 +4666,7 @@ Tensor i1e_backward(
 // After inserting U_grad and L_grad into (!!!) we get the value for LU_grad.
 
 Tensor linalg_lu_solve_LU(
-  const Tensor& grad,
+  const Tensor& gX,
   const Tensor& LU,
   const Tensor& pivots,
   const Tensor& X,
@@ -4695,6 +4695,8 @@ Tensor linalg_lu_solve_LU(
   //   gL = gR.tril(-1)
   //   gU = (L^H gR U^{-H}).triu()
   // gLU = gL + gU
+
+  at::NoTF32Guard disable_tf32;
   Tensor P, L, U;
   std::tie(P, L, U) = at::lu_unpack(LU, pivots, /*unpack_data=*/true, /*unpack_pivots=*/left == adjoint);
   // TODO Optimise the order of the operations to avoid operating on large tensors unnecessarily
@@ -4702,13 +4704,13 @@ Tensor linalg_lu_solve_LU(
   //      Otherwise multiply them last
   if (left != adjoint) {
     // gR = U^{-H}op_2(-gX)op_2(X)^H
-    auto gR = at::linalg_solve_triangular(U.mH(), -(left ? grad : grad.mH()).matmul(left ? X.mH() : X), /*upper*/false);
+    auto gR = at::linalg_solve_triangular(U.mH(), -(left ? gX : gX.mH()).matmul(left ? X.mH() : X), /*upper*/false);
     // gL = (L^{-H} gR U^H).tril(-1)
     auto gL = at::linalg_solve_triangular(L.mH(), gR.matmul(U.mH()), /*upper*/true, /*left*/true, /*unitriangular*/true).tril(-1);;
     return gL + gR.triu();
   } else {
     // gR = -P^T op_3(X)op_1(op_2(gX))P
-    auto gR = -P.mT().matmul(left ? X : X.mH()).matmul(left ? grad.mH() : grad).matmul(P);
+    auto gR = -P.mT().matmul(left ? X : X.mH()).matmul(left ? gX.mH() : gX).matmul(P);
     // gR = gR L^{-H}
     gR = at::linalg_solve_triangular(L.mH(), gR, /*upper*/true, /*left*/false, /*unitriangular*/true);
     // gU = (L^H gR U^{-H}).triu()
@@ -4741,6 +4743,7 @@ Tensor linalg_lu_solve_jvp(
   // the JVP formula reads
   // dX = op_2(op_1(-U^{-1}(dUU^{-1} + L^{-1}dL)L^{-1} P^T)op_3(B)) + S
 
+  at::NoTF32Guard disable_tf32;
   auto S = at::linalg_lu_solve(LU, pivots, dB, left, adjoint);
   if (left != adjoint) {
     // We see that when left != adjoint, op_1(A) = A, and we can substitute A^{-1}op_3(B) by op_2(X)

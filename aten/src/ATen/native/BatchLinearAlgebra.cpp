@@ -2376,7 +2376,8 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
                                      bool left,
                                      bool adjoint,
                                      const Tensor& result) {
-  if (LU.numel() == 0 || B.numel() == 0) {
+  // Trivial case
+  if (result.numel() == 0) {
     return;
   }
 
