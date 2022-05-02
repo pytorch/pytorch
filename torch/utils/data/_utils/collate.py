@@ -100,9 +100,9 @@ def default_collate(batch):
             * `bytes` -> `bytes` (unchanged)
             * `Mapping[K, V_i]` -> `Mapping[K, default_collate([V_1, V_2, ...])]`
             * `NamedTuple[V1_i, V2_i, ...]` -> `NamedTuple[default_collate([V1_1, V1_2, ...]),
-            default_collate([V2_1, V2_2, ...]), ...]`
+              default_collate([V2_1, V2_2, ...]), ...]`
             * `Sequence[V1_i, V2_i, ...]` -> `Sequence[default_collate([V1_1, V1_2, ...]),
-            default_collate([V2_1, V2_2, ...]), ...]`
+              default_collate([V2_1, V2_2, ...]), ...]`
 
         Args:
             batch: a single batch to be collated
