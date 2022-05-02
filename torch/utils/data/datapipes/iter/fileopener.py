@@ -11,10 +11,11 @@ __all__ = [
 ]
 
 
-@functional_datapipe('open_files')
+@functional_datapipe("open_files")
 class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     r"""
-    Given pathnames, opens files and yield pathname and file stream in a tuple.
+    Given pathnames, opens files and yield pathname and file stream
+    in a tuple (functional name: ``open_files``).
 
     Args:
         datapipe: Iterable datapipe that provides pathnames

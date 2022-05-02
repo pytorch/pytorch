@@ -4,13 +4,13 @@
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
 # The fallback is expected to mimick this codegen, so we should keep the two in sync.
 
-from tools.codegen.api import cpp
-from tools.codegen.api.autograd import (
+from torchgen.api import cpp
+from torchgen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo,
     gen_differentiable_outputs,
     dispatch_strategy,
 )
-from tools.codegen.api.types import (
+from torchgen.api.types import (
     Binding,
     DispatcherSignature,
     CType,
@@ -21,9 +21,9 @@ from tools.codegen.api.types import (
     intArrayRefT,
     symIntArrayRefT,
 )
-from tools.codegen.code_template import CodeTemplate
-from tools.codegen.context import with_native_function
-from tools.codegen.model import (
+from torchgen.code_template import CodeTemplate
+from torchgen.context import with_native_function
+from torchgen.model import (
     Type,
     NativeFunction,
     SelfArgument,
@@ -32,7 +32,7 @@ from tools.codegen.model import (
     is_foreach_op,
 )
 from typing import List, Optional, Sequence, Tuple, Dict
-from tools.codegen.utils import FileManager
+from torchgen.utils import FileManager
 from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_AUTOGRAD,
