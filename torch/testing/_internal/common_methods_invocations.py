@@ -13547,9 +13547,9 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     supports_two_python_scalars=True,
                     # For the testing of reference implemenations the binary_ufunc does not use the provided
-                    # sampiling function. They use the default binary ufuncs generator and therefore need to pass
-                    # there is still a need ot pass in the rhs args and to skip hard coded tests that
-                    # cause int values to be raised to negative exponents
+                    # sampiling function. They use the default binary ufuncs generator and therefore
+                    # there is still a need to pass in the rhs_make_tensor args and to skip hard coded tests that
+                    # cause int values to be exponentiated to negative exponents
                     rhs_make_tensor_kwargs=dict(low=1),
                     sample_inputs_func=sample_inputs_pow,
                     skips=(
@@ -13557,6 +13557,8 @@ op_db: List[OpInfo] = [
                                      dtypes=[torch.int8, torch.int16, torch.int32, torch.int64, torch.complex64, torch.complex128]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
                                      dtypes=[torch.int16, torch.int32, torch.int64, torch.complex64, torch.complex128]),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
+                                     dtypes=[torch.complex64]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics',
                                      dtypes=[torch.int8, torch.int16, torch.int32, torch.int64, torch.complex64]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_scalar_support',
