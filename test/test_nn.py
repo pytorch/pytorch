@@ -16196,8 +16196,10 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double)
     def test_pooling_max_nhwc(self, dtype):
         def helper(n, c, h, w, kernel_size, stride, padding, dilation, contig, device):
-            output_height = math.floor( (h+2*padding[0] - dilation[0] * (kernel_size[0] - 1) - 1) / stride[0] + 1 )
-            output_width = math.floor( (w+2*padding[1] - dilation[1] * (kernel_size[1] - 1) - 1) / stride[1] + 1 )
+            output_height = math.floor((h + 2 * padding[0] - 
+                                        dilation[0] * (kernel_size[0] - 1) - 1) / stride[0] + 1)
+            output_width = math.floor((w + 2 * padding[1] - 
+                                       dilation[1] * (kernel_size[1] - 1) - 1) / stride[1] + 1)
 
             input = torch.randint(1, 10, (n, c, h, w), device=device, dtype=dtype)
             input = input.contiguous(memory_format=torch.channels_last)
@@ -16207,11 +16209,13 @@ class TestNNDeviceType(NNTestCase):
                 input = input[:, ::2, :, :]
                 grad = grad[:, ::2, :, :]
             input.requires_grad_(True)
-            pool = torch.nn.MaxPool2d(kernel_size, stride, padding, dilation, return_indices=True, ceil_mode=False) #(output_height, output_width), return_indices=True).to(device)
+            pool = torch.nn.MaxPool2d(kernel_size, stride, padding, dilation, 
+                                      return_indices=True, ceil_mode=False)
 
             ref_input = input.detach().clone().contiguous().requires_grad_(True)
             ref_grad = grad.detach().clone().contiguous()
-            ref_pool = torch.nn.MaxPool2d(kernel_size, stride, padding, dilation, return_indices=True, ceil_mode=False).to(device) # ((output_height, output_width), return_indices=True).to(device)
+            ref_pool = torch.nn.MaxPool2d(kernel_size, stride, padding, dilation, 
+                                          return_indices=True, ceil_mode=False).to(device)
 
             out, ind = pool(input)
             out.backward(grad)
@@ -16232,9 +16236,9 @@ class TestNNDeviceType(NNTestCase):
 
         for device in device_list:
             for contig in [True, False]:
-                helper(4, 8, 10, 10, kernel_size = (2, 2), stride = (1, 1), padding = (1, 1), dilation = (2, 2), contig = contig, device = device)
-                helper(4, 8, 9, 14, kernel_size = (2, 2), stride = (1, 1), padding = (1, 1), dilation = (2, 2), contig = contig, device = device)
-                helper(4, 8, 11, 11, kernel_size = (4, 4), stride = (2, 2), padding = (2, 2), dilation = (2, 2), contig = contig, device = device)
+                helper(4, 8, 10, 10, (2, 2), (1, 1), (1, 1), (2, 2), contig, device)
+                helper(4, 8, 9, 14, (2, 2), (1, 1), (1, 1), (2, 2), contig, device)
+                helper(4, 8, 11, 11, (4, 4), (2, 2), (2, 2), (2, 2), contig, device)
 
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)
