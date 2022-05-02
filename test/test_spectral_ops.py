@@ -10,7 +10,8 @@ import doctest
 import inspect
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM,
+     make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes, toleranceOverride, tol,
      skipCPUIfNoFFT, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
@@ -425,6 +426,22 @@ class TestFFT(TestCase):
             err_msg = "Unsupported dtype "
         with self.assertRaisesRegex(RuntimeError, err_msg):
             op(sample.input, *sample.args, **sample.kwargs)
+
+    @onlyNativeDeviceTypes
+    @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
+    def test_fft_half_and_chalf_not_power_of_two_error(self, device, dtype, op):
+        t = make_tensor(13, 13, device=device, dtype=dtype)
+        err_msg = "cuFFT only supports dimensions whose sizes are powers of two"
+        with self.assertRaisesRegex(RuntimeError, err_msg): 
+            op(t)
+
+        if op.ndimensional in (SpectralFuncType.ND, SpectralFuncType.TwoD):
+            kwargs = {'s': (12, 12)}
+        else:
+            kwargs = {'n': 12}
+
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            op(t, **kwargs)
 
     # nd-fft tests
     @skipCUDAIfRocm
