@@ -145,7 +145,7 @@ std::vector<Tensor> invoke_backward_fn(
 
   for (unsigned idx = 0; idx < grads.size(); idx++) {
     auto ivalue = torch::jit::toIValue(PyTuple_GetItem(out.ptr(), idx), TensorType::get());
-    result.push_back(ivalue.toTensor());
+    result.emplace_back(ivalue.toTensor());
   }
   return result;
 }
@@ -185,11 +185,11 @@ variable_list GenericPythonBackward::apply(variable_list&& grads) {
   variable_list grad_inputs(num_inputs_);
 
   std::vector<Tensor> args;
-  for (const auto& g : grads) {
-    args.push_back(g);
+  for (auto& g : grads) {
+    args.emplace_back(std::move(g));
   }
   for (const auto& saved : saved_tensors_) {
-    args.push_back(saved.unpack(shared_from_this()));
+    args.emplace_back(saved.unpack(shared_from_this()));
   }
 
   if (should_compute_output({ tensors_ix })) {

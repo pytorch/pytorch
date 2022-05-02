@@ -136,7 +136,7 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
       Tensor tensor_value;
       optional<int64_t> tensor_bdim;
       std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
-      tensor_inputs.push_back(std::make_pair(tensor_value, tensor_bdim));
+      tensor_inputs.emplace_back(tensor_value, tensor_bdim);
       tensor_pos.push_back(idx);
     }
   }
