@@ -87,6 +87,22 @@ subject to change and that users should not rely on.
 You can control how PyTorch does packing / unpacking with :ref:`saved-tensors-hooks-doc`.
 
 
+.. _non-differentiable-func-grad:
+
+Gradients for non-differentiable functions
+------------------------------------------
+
+The gradient computation using Automatic Differentiation is only valid when each elementary function being used is continuously differentiable.
+Unfortunately many of the function we use in practice do not have this property (relu or sqrt at 0 for example).
+And even though we cannot always guarantee that the returned gradient will be correct (for example :math:`f(x) = x = \text{relu}(x) - \text{relu}(-x)` will give a 0 gradient at 0 instead of 1 for any value we choose for the gradient of relu at 0).
+To try and reduce the impact of this limitation, we define the gradients of the elementary operations by applying the following rules in order:
+#. If the function is not defined (:math:`\sqrt(-1)`, :math:`\log(-1)` or most function when the input is :math:`nan` for example) then the returned value is arbitrary (we might also raise an error but that is not guaranteed). Most function will use :math:`nan`, but for performance reasons, some functions will use non-:math:`nan` values (:math:`\log(-1)` for example).
+#. If the function is continuously differentiable and thus a gradient exist at the current point, use it.
+#. If the function is convex (at least locally), use the sub-gradient with minimum norm (as it the steepest descent direction, see Exercise 2.7 from "Convex Optimization Algorithms" by Bertsekas, D. P and "Steepest Descent for Optimization Problems with Nondifferentiable Cost Functionals" by Bertsekas, D. P, and Mitter, S. K., 1971. for details and proofs).
+#. Same with concave and supergradient
+#. Define the gradient at the current point by continuity (note that :math:`inf` is possible here). If multiple values are possible, pick one arbitrarily.
+
+
 .. _locally-disable-grad-doc:
 
 Locally disabling gradient computation
