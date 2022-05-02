@@ -467,22 +467,18 @@ class TestFFT(TestCase):
 
                 torch_fns = (torch_fn, torch.jit.script(fn))
 
-                valid_input_default = input
-
                 # Once with dim defaulted
-                input_np = valid_input_default.cpu().numpy()
+                input_np = input.cpu().numpy()
                 expected = numpy_fn(input_np, s, norm=norm)
                 for fn in torch_fns:
-                    actual = fn(valid_input_default, s, norm=norm)
+                    actual = fn(input, s, norm=norm)
                     self.assertEqual(actual, expected)
 
                 # Once with explicit dims
                 dim = (1, 0)
-                valid_input_explicit = input
-
                 expected = numpy_fn(input_np, s, dim, norm)
                 for fn in torch_fns:
-                    actual = fn(valid_input_explicit, s, dim, norm)
+                    actual = fn(input, s, dim, norm)
                     self.assertEqual(actual, expected)
 
     @skipCPUIfNoFFT
