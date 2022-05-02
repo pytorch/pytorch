@@ -1705,6 +1705,31 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         return counts_per_thread;
       };
 
+      auto dim_indices_counts_per_thread = counts_per_thread(
+          dim_indices,
+          /*is_sorted=*/self.is_coalesced() && dim == 0
+          /*grain_size = at::internal::GRAIN_SIZE*/
+      );
+      auto dim_indices_offset_counts_per_thread = dim_indices_counts_per_thread.cumsum(0);
+
+      auto index_counts_per_thread = counts_per_thread(
+          nneg_index,
+          /*is_sorted=*/false
+          /*grain_size = at::internal::GRAIN_SIZE*/
+      );
+      auto index_offset_counts_per_thread = index_counts_per_thread.cumsum(0);
+
+      const auto index_counts = index_offset_counts_per_thread.select(0, -1);
+      const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1);
+      const auto intersection_counts = index_counts.mul(dim_indices_counts);
+      const auto intersection_offsets = intersection_counts.cumsum(0);
+      const auto res_len = intersection_counts.sum().item<int64_t>();
+      // Short-circuit if empty intersection
+      if (!res_len) {
+        auto empty_idx = at::empty({0}, index.options());
+        return std::make_tuple(empty_idx, empty_idx);
+      }
+
       const bool search_in_dim_indices = true;
 
       Tensor idx, idx_counts_per_thread, idx_offset_counts_per_thread;
@@ -1713,22 +1738,10 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           idx, idx_counts_per_thread, idx_offset_counts_per_thread,
           src, src_counts_per_thread, src_offset_counts_per_thread
       ) = [&]() {
-        auto dim_indices_counts_per_thread = counts_per_thread(
-            dim_indices,
-            /*is_sorted=*/self.is_coalesced() && dim == 0
-            /*grain_size = at::internal::GRAIN_SIZE*/
-        );
-
-        auto index_counts_per_thread = counts_per_thread(
-            nneg_index,
-            /*is_sorted=*/false
-            /*grain_size = at::internal::GRAIN_SIZE*/
-        );
-
         return search_in_dim_indices
           ? std::make_tuple(
-              nneg_index, index_counts_per_thread, index_counts_per_thread.cumsum(0),
-              dim_indices, dim_indices_counts_per_thread, dim_indices_counts_per_thread.cumsum(0)
+              nneg_index, index_counts_per_thread, index_offset_counts_per_thread,
+              dim_indices, dim_indices_counts_per_thread, dim_indices_offset_counts_per_thread
             )
           : std::make_tuple(
               dim_indices, dim_indices_counts_per_thread, dim_indices_counts_per_thread.cumsum(0),
@@ -1738,14 +1751,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
       const auto idx_counts = idx_offset_counts_per_thread.select(0, -1);
       const auto src_counts = src_offset_counts_per_thread.select(0, -1);
-      const auto intersection_counts = idx_counts.mul(src_counts);
-      const auto intersection_offsets = intersection_counts.cumsum(0);
-      const auto res_len = intersection_counts.sum().item<int64_t>();
-      // Short-circuit if empty intersection
-      if (!res_len) {
-        auto empty_idx = at::empty({0}, index.options());
-        return std::make_tuple(empty_idx, empty_idx);
-      }
 
       Tensor src_idx, src_idx_offsets;
       std::tie(src_idx, src_idx_offsets) = [&](
