@@ -443,8 +443,8 @@ def _get_test_report_path():
     test_source = override if override is not None else 'python-unittest'
     return os.path.join('test-reports', test_source)
 
-
-parser = argparse.ArgumentParser()
+is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
+parser = argparse.ArgumentParser(add_help=not is_running_via_run_test)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
@@ -871,6 +871,10 @@ if IS_WINDOWS:
 
 # Dict of torch dtype -> NumPy dtype
 torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
+torch_to_numpy_dtype_dict.update({
+    torch.bfloat16: np.float32,
+    torch.complex32: np.complex64
+})
 
 def skipIfRocm(fn):
     @wraps(fn)
@@ -2085,7 +2089,8 @@ class TestCase(expecttest.TestCase):
     # Compares a torch function with a reference function for a given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
     def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
-        n_inp, n_args, n_kwargs = sample_input.numpy()
+        numpy_sample = sample_input.numpy()
+        n_inp, n_args, n_kwargs = numpy_sample.input, numpy_sample.args, numpy_sample.kwargs
         t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
 
         actual = torch_fn(t_inp, *t_args, **t_kwargs)
