@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
@@ -2908,6 +2909,181 @@ ExprPtr SimplifierUnderContext::mutate(DivPtr v) {
     return v;
   }
   return alloc<Div>(lhs_new, rhs_new);
+}
+
+ExprPtr SimplifierUnderContext::mutate(IfThenElsePtr v) {
+  ExprPtr condition = v->condition();
+  ExprPtr true_val = v->true_value();
+  ExprPtr false_val = v->false_value();
+
+  auto simp_condition = condition->accept_mutator(this);
+  auto simp_true_val = true_val->accept_mutator(this);
+  auto simp_false_val = false_val->accept_mutator(this);
+  if (simp_condition != condition) {
+    v->set_condition(simp_condition);
+  }
+  if (simp_true_val != true_val) {
+    v->set_true_value(simp_true_val);
+  }
+  if (simp_false_val != false_val) {
+    v->set_false_value(simp_false_val);
+  }
+
+  if (simp_condition->isConstant()) {
+    auto ret = immediateAs<int>(simp_condition);
+    if (ret) {
+      return simp_true_val;
+    } else {
+      return simp_false_val;
+    }
+  } else {
+    return v;
+  }
+}
+
+ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
+  GRAPH_DEBUG("(SimplifierUnderContext) Original: ", std::to_string(v));
+
+  ExprPtr lhs = v->lhs();
+  ExprPtr rhs = v->rhs();
+  ExprPtr ret1 = v->ret_val1();
+  ExprPtr ret2 = v->ret_val2();
+
+  auto simp_lhs = lhs->accept_mutator(this);
+  auto simp_rhs = rhs->accept_mutator(this);
+  auto simp_ret1 = ret1->accept_mutator(this);
+  auto simp_ret2 = ret2->accept_mutator(this);
+  if (simp_lhs != lhs) {
+    v->set_lhs(simp_lhs);
+  }
+  if (simp_rhs != rhs) {
+    v->set_rhs(simp_rhs);
+  }
+  if (simp_ret1 != ret1) {
+    v->set_ret_val1(simp_ret1);
+  }
+  if (simp_ret2 != ret2) {
+    v->set_ret_val2(simp_ret2);
+  }
+
+  GRAPH_DEBUG("(SimplifierUnderContext) after simplify: ", std::to_string(v));
+
+  auto query_bound_info = [](const ExprPtr& expr_ptr,
+                             VarBoundInfo& var_bound_info,
+                             analysis::Bound& bound_info) -> bool {
+    VarPtr var_simp_lhs = nullptr;
+    if (expr_ptr->isConstant()) {
+      bound_info.start = expr_ptr;
+      bound_info.end = expr_ptr;
+      return true;
+    } else {
+      VarPtr simple_expr_ptr = to<Var>(expr_ptr);
+      if (simple_expr_ptr == nullptr) {
+        return false;
+      }
+      auto got = var_bound_info.find(simple_expr_ptr);
+      if (got == var_bound_info.end()) {
+        return false;
+      } else {
+        bound_info.start = got->second.first;
+        bound_info.end = got->second.second;
+        return true;
+      }
+    }
+  };
+
+  analysis::Bound lhs_bound;
+  auto lhs_has_bound = query_bound_info(simp_lhs, var_bound_info_, lhs_bound);
+  if (!lhs_has_bound)
+    return v;
+
+  analysis::Bound rhs_bound;
+  auto rhs_has_bound = query_bound_info(simp_rhs, var_bound_info_, rhs_bound);
+  if (!rhs_has_bound)
+    return v;
+
+  CompareSelectOperation cmp_res = CompareSelectOperation::kEQ;
+  auto has_overlap = analysis::boundOverlap(lhs_bound, rhs_bound);
+  if (has_overlap == analysis::OverlapKind::PartialOverlap) {
+    // There is overlap between lhs and rhs
+    // lhs = (5, 10), rhs = (8, 11)
+    return v;
+  } else if (
+      has_overlap == analysis::OverlapKind::Contains ||
+      has_overlap == analysis::OverlapKind::ContainedOrEqual) {
+    // lhs = (5, 5) or rhs = (5, 5)
+    if (lhs_bound == rhs_bound) {
+      cmp_res = CompareSelectOperation::kEQ;
+    } else if (simp_lhs->isConstant()) {
+      if (exprEquals(simp_lhs, rhs_bound.start)) {
+        cmp_res = CompareSelectOperation::kLE;
+      } else if (exprEquals(simp_lhs, rhs_bound.end)) {
+        cmp_res = CompareSelectOperation::kGE;
+      } else {
+        return v;
+      }
+    } else if (simp_rhs->isConstant()) {
+      if (exprEquals(lhs_bound.end, simp_rhs)) {
+        cmp_res = CompareSelectOperation::kLE;
+      } else if (exprEquals(lhs_bound.start, simp_rhs)) {
+        cmp_res = CompareSelectOperation::kGE;
+      } else {
+        return v;
+      }
+    } else {
+      return v;
+    }
+  } else {
+    // NoOverlap
+    auto sub_expr = alloc<Sub>(lhs_bound.end, rhs_bound.start);
+    auto ret = IRSimplifier::simplify(sub_expr);
+    if (!ret->isConstant()) {
+      return v;
+    }
+    int diff = immediateAs<int>(ret);
+    TORCH_INTERNAL_ASSERT(diff != 0);
+    if (diff > 0) {
+      cmp_res = CompareSelectOperation::kGT;
+    } else {
+      cmp_res = CompareSelectOperation::kLT;
+    }
+  }
+
+  ExprPtr ret_expr = nullptr;
+  switch (v->compare_select_op()) {
+    case CompareSelectOperation::kGT:
+      ret_expr = (cmp_res == CompareSelectOperation::kGT) ? v->ret_val1()
+                                                          : v->ret_val2();
+      break;
+    case CompareSelectOperation::kGE:
+      ret_expr = (cmp_res == CompareSelectOperation::kGE ||
+                  cmp_res == CompareSelectOperation::kEQ)
+          ? v->ret_val1()
+          : v->ret_val2();
+      break;
+    case CompareSelectOperation::kLT:
+      ret_expr = (cmp_res == CompareSelectOperation::kLT) ? v->ret_val1()
+                                                          : v->ret_val2();
+      break;
+    case CompareSelectOperation::kLE:
+      ret_expr = (cmp_res == CompareSelectOperation::kLT ||
+                  cmp_res == CompareSelectOperation::kEQ)
+          ? v->ret_val1()
+          : v->ret_val2();
+      break;
+    case CompareSelectOperation::kNE:
+      ret_expr = (cmp_res != CompareSelectOperation::kEQ) ? v->ret_val1()
+                                                          : v->ret_val2();
+      break;
+    case CompareSelectOperation::kEQ:
+      ret_expr = (cmp_res == CompareSelectOperation::kEQ) ? v->ret_val1()
+                                                          : v->ret_val2();
+      break;
+  }
+
+  GRAPH_DEBUG(
+      "(SimplifierUnderContext) after simplify: ", std::to_string(ret_expr));
+  return ret_expr;
 }
 
 ExprPtr SimplifierUnderContext::mutate(ModPtr v) {

@@ -381,6 +381,8 @@ class TORCH_API SimplifierUnderContext : public IRMutator {
 
   ExprPtr mutate(DivPtr v) override;
   ExprPtr mutate(ModPtr v) override;
+  ExprPtr mutate(CompareSelectPtr v) override;
+  ExprPtr mutate(IfThenElsePtr v) override;
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

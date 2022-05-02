@@ -4824,7 +4824,7 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
   }
 }
 
-TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
+TEST(Simplify, bound_CompareSelectCondAlwaysInLoopBounds) {
   // Before:
   //   for (const auto n : c10::irange(1, N)) {
   //     b[n] = n < 1 ? 0.f : 1.f;
@@ -4848,7 +4848,7 @@ TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
       oss.str());
 }
 
-TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
+TEST(Simplify, bound_IfThenCondAlwaysInLoopBounds) {
   // Before:
   //   for (const auto n : c10::irange(1, N)) {
   //     b[n] = IfThenElse(n < 1 ? 1 : 0, 0.f, 1.f);
@@ -4872,7 +4872,7 @@ TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
       oss.str());
 }
 
-TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
+TEST(Simplify, bound_MultiClauseCondAlwaysInLoopBounds) {
   // This test mimics the unpadded region of a conv2d.  We want to remove any
   // conditional that is provably satisfied (or unsatisfied) by the entire loop
   // range.
@@ -4901,12 +4901,12 @@ TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
   oss << *s;
   torch::jit::testing::FileCheck().run(
       R"IR(
-# CHECK: b[n] = 1.f;
+# CHECK: b[i, j] = 1.f;
 )IR",
       oss.str());
 }
 
-TEST(Simplify, DISABLED_SimplifyLoopBounds) {
+TEST(Simplify, bound_SimplifyLoopBounds) {
   // This test mimics the padded region of a conv2d.  We want to adjust the
   // loop bounds such that the condition will be always met.  Note that this
   // could be solved by peeling, and applying the range-based conditional
