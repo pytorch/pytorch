@@ -324,8 +324,15 @@ static void isin_sorting(
 }
 
 Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
-  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
-
+  Tensor self_, other_;
+  if (self.dtype() != other.dtype()) {
+    auto result_type = at::native::result_type(self, other);
+    self_ = self.to(result_type);
+    other_ = other.to(result_type);
+  } else {
+    self_ = self;
+    other_ = other;
+  }
   if (condition.scalar_type() == ScalarType::Byte) {
   TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
   } else {
@@ -336,8 +343,8 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
     .check_all_same_dtype(false)
     .add_output(out)
     .add_input(cond_bool)
-    .add_input(self)
-    .add_input(other)
+    .add_input(self_)
+    .add_input(other_)
     .build();
   where_kernel(iter.device_type(), iter);
   return out;
