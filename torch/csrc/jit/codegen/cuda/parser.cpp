@@ -1050,8 +1050,7 @@ class IrParser {
                 c10::nullopt, value_map[node->inputs()[0]->unique()]);
             auto operand = list_val.front();
             list_val.pop_front();
-            auto out =
-                unaryIsOp(op_mapping[node->kind()], operand);
+            auto out = unaryIsOp(op_mapping[node->kind()], operand);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
