@@ -2378,4 +2378,3 @@ Examples::
     >>> torch.dist(Q.mT @ Q, torch.eye(4))
     tensor(6.2158e-07)
 """)
-
