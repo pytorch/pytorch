@@ -83,8 +83,6 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   }
 
   auto arguments = torch::jit::pop(*stack, num_arguments);
-  std::vector<std::pair<Tensor, optional<int64_t>>> tensor_inputs;
-  std::vector<int64_t> tensor_pos;
 
   TORCH_INTERNAL_ASSERT(arguments[0].isTensor());
   Tensor self;

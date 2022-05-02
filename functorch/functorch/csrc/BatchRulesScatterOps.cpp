@@ -44,7 +44,7 @@ std::vector<optional<Tensor>> batchIndices(
   for (size_t i = 0; i < indices.size(); i++) {
     auto index = indices[i];
     if (index.has_value()) {
-      indices_.push_back(moveBatchDimToFront(index.value(), indices_bdims[i]));
+      indices_.emplace_back(moveBatchDimToFront(index.value(), indices_bdims[i]));
       minIndexDim = std::max(minIndexDim, index.value().dim());
       if (index.value().dtype() == kBool && indices_bdims[i].has_value()) {
         throw std::runtime_error("vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask.");
@@ -258,7 +258,7 @@ namespace {
 }  // namespace
 
 void index_put__batch_rule(
-    Tensor& self,
+    const Tensor& self,
     optional<int64_t> self_bdim,
     ArrayRef<optional<Tensor>> indices,
     ArrayRef<optional<int64_t>> indices_bdims,
@@ -296,7 +296,7 @@ Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indice
 }
 
 void _index_put_impl__batch_rule(
-    Tensor& self,
+    const Tensor& self,
     optional<int64_t> self_bdim,
     ArrayRef<optional<Tensor>> indices,
     ArrayRef<optional<int64_t>> indices_bdims,
@@ -335,7 +335,7 @@ Tensor &_index_put_impl__plumbing(Tensor &self, const List<optional<Tensor>> &in
 }
 
 std::tuple<Tensor,optional<int64_t>> index_put_batch_rule(
-    Tensor& self,
+    const Tensor& self,
     optional<int64_t> self_bdim,
     ArrayRef<optional<Tensor>> indices,
     ArrayRef<optional<int64_t>> indices_bdims,
