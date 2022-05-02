@@ -1426,6 +1426,10 @@
   result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left, A_p.is_contiguous() && !A_p.is_complex())"
   output_differentiability: [True, False, False]  # LU is an auxiliary tensor not exposed to the user
 
+- name: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
+  self: solve_backward_self(grad, self, A)
+  A: solve_backward_A(grad, self, A, solution)
+
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
