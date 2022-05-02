@@ -32,6 +32,8 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
                 return f"torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name})"
             elif arg.lazy_type.type is tensorListValueT:
                 return f"lazy_{arg.name}_tensorlist"
+            elif arg.is_symint_or_list:
+                return f"Value(std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>({arg.name}.toSymbolicIntNode())->node_, 0)"
             return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.lazy_type, OptionalCType):
             if arg.is_wrapped_scalar:
@@ -125,7 +127,27 @@ class GenLazyIR(ABC):
     def node_base_ctor_call(self, schema: LazyIrSchema) -> str:
         # backends can customize the way the node base class constructor is called,
         # as long as all of its arguments can be generated from information available from the schema
-        return f"{self.node_base}(torch::lazy::OpKind({aten_symbol(schema)})"
+        base_ctor_value_args_list = []
+        for arg in schema.filtered_args(values=True, scalars=False):
+            if isinstance(arg.lazy_type, BaseCType) or isinstance(
+                arg.lazy_type, VectorCType
+            ):
+                base_ctor_value_args_list.append(f"{arg.name}")
+            elif isinstance(arg.lazy_type, OptionalCType):
+                base_ctor_value_args_list.append(f"{arg.name}.value_or(kNullValue)")
+            else:
+                raise AssertionError(
+                    f"Unsupported type ({arg.lazy_type}) - add support if necessary"
+                )
+        base_ctor_value_args = ", ".join(base_ctor_value_args_list)
+
+        scalar_args = schema.filtered_args(values=False, scalars=True)
+        scalar_hashes = ", ".join([f"{a.name}" for a in scalar_args])
+
+        return f"""{self.node_base}(torch::lazy::OpKind({aten_symbol(schema)}),
+              {{{base_ctor_value_args}}}, std::move(shapes),
+              /* num_outputs */ {len(schema.returns)},
+              torch::lazy::MHash({scalar_hashes}))"""
 
     def gen(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         # for now, we just want one IR class decl and soon after also the method defs
@@ -151,22 +173,11 @@ class GenLazyIR(ABC):
                 for a in scalar_args
             ]
         )
-        scalar_hashes = ", ".join([f"{a.name}" for a in scalar_args])
-        base_ctor_value_args_list = []
-        optional_values = []
-        for arg in value_args:
-            if isinstance(arg.lazy_type, BaseCType) or isinstance(
-                arg.lazy_type, VectorCType
-            ):
-                base_ctor_value_args_list.append(f"{arg.name}")
-            elif isinstance(arg.lazy_type, OptionalCType):
-                base_ctor_value_args_list.append(f"{arg.name}.value_or(kNullValue)")
-                optional_values.append(arg.name)
-            else:
-                raise AssertionError(
-                    f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})"
-                )
-        base_ctor_value_args = ", ".join(base_ctor_value_args_list)
+        optional_values = [
+            arg.name
+            for arg in schema.filtered_args(values=True, scalars=False)
+            if isinstance(arg.lazy_type, OptionalCType)
+        ]
         has_optional_decls = "\n  ".join(
             [f"bool has_{value}: 1;" for value in optional_values]
         )
@@ -192,10 +203,7 @@ class GenLazyIR(ABC):
 class {schema.node_name} : public {self.node_base} {{
  public:
   {schema.node_name}({node_ctor_args}, std::vector<Shape>&& shapes)
-      : {self.node_base_ctor_call(schema)},
-              {{{base_ctor_value_args}}}, std::move(shapes),
-              /* num_outputs */ {len(func.returns)},
-              torch::lazy::MHash({scalar_hashes})){comma_if_scalar_initializers}
+      : {self.node_base_ctor_call(schema)}{comma_if_scalar_initializers}
         {scalar_initializers}
 
   {{
@@ -242,6 +250,10 @@ class GenLazyNativeFuncDefinition:
     metrics_counter: str
     create_tensor: str
     create_from_first_tensor: bool
+    create_aten_from_ltc_tensor: str
+    tuple_aten_from_ltc_tensors: str
+    lazy_value_class: str
+    lazy_tensor_ptr: str
 
     def lazy_tensor_decls(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
@@ -251,6 +263,8 @@ class GenLazyNativeFuncDefinition:
             if arg.is_wrapped_scalar:
                 # no lazy tensor wrapper for scalars that are promoted to IR values
                 continue
+            elif arg.is_symint_or_list:
+                continue  # values are extracted in isValueType
             elif isinstance(arg.lazy_type, BaseCType):
                 if arg.lazy_type.type is tensorListValueT:
                     lazy_tensor_decls.append(
@@ -259,14 +273,14 @@ class GenLazyNativeFuncDefinition:
                     )
                 else:
                     lazy_tensor_decls.append(
-                        f"{self.tensor_class}Ptr lazy_{arg.name} = "
+                        f"{self.lazy_tensor_ptr} lazy_{arg.name} = "
                         f"{self.backend_namespace}::{self.get_tensor_or_wrap_number}({arg.name}, *common_device);"
                     )
             elif isinstance(arg.lazy_type, OptionalCType):
                 # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
                 # until we encounter a real world example.
                 lazy_tensor_decls.append(
-                    f"    {self.tensor_class}Ptr lazy_{arg.name} = "
+                    f"{self.lazy_tensor_ptr} lazy_{arg.name} = "
                     f"{self.backend_namespace}::{self.try_get_tensor}({arg.name}.value_or(at::Tensor()));"
                 )
             else:
@@ -281,12 +295,14 @@ class GenLazyNativeFuncDefinition:
         return ""
 
     def metrics(self, func: NativeFunction, schema: LazyIrSchema) -> str:
-        return f'{self.metrics_counter};'
+        return f"{self.metrics_counter};"
 
     def get_device(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
+        assert (
+            len(value_types_names) > 0
+        ), "Code below assumes there is at least one tensor arg"
         return f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
         TORCH_INTERNAL_ASSERT(common_device);
         """
@@ -344,17 +360,19 @@ class GenLazyNativeFuncDefinition:
         returns_length = len(schema.returns)
         value_args = schema.filtered_args(values=True, scalars=False)
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
-        assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
+        assert (
+            len(value_types_names) > 0
+        ), "Code below assumes there is at least one tensor arg"
         first_tensor_name = value_types_names[0]
-        bridge_str = f"""auto result = torch::lazy::CreateAtenFromLtcTensor(
+        bridge_str = f"""auto result = {self.create_aten_from_ltc_tensor}(
                 {self.create_lazy_tensor(first_tensor_name)}(std::move(node), *common_device));"""
 
         if returns_length > 1:
-            bridge_str = f"""std::vector<{self.tensor_class}Ptr> lazy_tensors;
+            bridge_str = f"""std::vector<{self.lazy_tensor_ptr}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
-            lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}(torch::lazy::Value(node, i), *common_device));
+            lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({self.lazy_value_class}(node, i), *common_device));
         }}
-        auto result = torch::lazy::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
+        auto result = {self.tuple_aten_from_ltc_tensors}<{returns_length}>(lazy_tensors);"""
 
         if schema.name.name.inplace or func.func.is_out_fn():
             assert returns_length == 1, (
@@ -374,7 +392,8 @@ class GenLazyNativeFuncDefinition:
         metadata = self.backend_index.get_kernel(func)
         assert metadata is not None
         schema = LazyIrSchema(func.func)
-        return [f"""\
+        return [
+            f"""\
     {sig.decl(name=f"{self.class_method_name}::{metadata.kernel}")} {{
         {self.force_eager_fallback(func, schema)}
         {self.metrics(func, schema)}
@@ -384,7 +403,8 @@ class GenLazyNativeFuncDefinition:
         {self.build_ir_node(func, schema)}
         {self.return_aten_tensor(func, schema)}
     }};\n
-    """]
+    """
+        ]
 
 
 class ComputeShapeSignature:
