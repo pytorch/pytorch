@@ -1927,7 +1927,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mq = convert_fx(mp, is_reference=True)
         mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
 
-    def test_mul_add_cat_skips_shadowing(self):
+    def test_mul_add_cat_stack_skips_shadowing(self):
         class M(nn.Module):
             def forward(self, x):
                 x = x * x
@@ -1935,6 +1935,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 x = x + x
                 x = torch.add(x, x)
                 x = torch.cat([x])
+                x = torch.stack([x])
                 return x
 
         m = M().eval()
@@ -1946,6 +1947,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         class M(nn.Module):
             def forward(self, x):
                 x = torch.cat(tensors=[x])
+                x = torch.stack(tensors=[x])
                 return x
 
         m = M().eval()
