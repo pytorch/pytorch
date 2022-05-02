@@ -1447,6 +1447,105 @@ bool _requires_fw_or_bw_grad(const Tensor& input) {
           || input._fw_grad(/*level */ 0).defined());
 }
 
+// Below of the definitions of the functions operating on a batch that are going to be dispatched
+// in the main helper functions for the linear algebra operations
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/*
+Computes the solution to a system of linear equations
+  A X = B,
+where A is an n-by-n matrix and X and B are n-by-nrhs matrices.
+Note that B is required to be a matrix, the usual, vector case, is obtained with nrhs = 1.
+Above description is for non-batched input, the batched input is also supported.
+This is an in-place routine, content of both A and b are overwritten.
+'infos' is an int Tensor containing error codes for each matrix in the batched input.
+For more information see LAPACK's documentation for GESV routine.
+*/
+template<typename scalar_t>
+static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
+#if !AT_BUILD_WITH_LAPACK()
+  AT_ERROR("solve: LAPACK library not found in compilation");
+#else
+  auto A_data = A.data_ptr<scalar_t>();
+  auto b_data = b.data_ptr<scalar_t>();
+  auto A_mat_stride = matrixStride(A);
+  auto b_mat_stride = matrixStride(b);
+  auto batch_size = batchCount(A);
+  auto n = A.size(-2);
+  auto nrhs = b.size(-1);
+  auto lda = std::max<int64_t>(1, n);
+
+  auto ipiv = at::empty({lda}, b.options().dtype(kInt));
+  auto ipiv_data = ipiv.data_ptr<int>();
+  auto infos_data = infos.data_ptr<int>();
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+    scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+    int* info_working_ptr = &infos_data[i];
+    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, lda, ipiv_data, b_working_ptr, lda, info_working_ptr);
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A) {
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  auto A_working_copy = cloneBatchedColumnMajor(A);
+  // infos might not get filled for empty inputs therefore at::zeros is used instead of at::empty
+  auto infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cpu", [&]{
+    apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
+  });
+  at::_linalg_check_errors(infos, "solve_cpu", self.dim() == 2);
+  return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
+}
+
+// Supports arbitrary batch dimensions for self and A
+std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
+  TORCH_WARN_ONCE(
+    "torch.solve is deprecated in favor of torch.linalg.solve",
+    "and will be removed in a future PyTorch release.\n",
+    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
+    "To get the LU factorization see torch.linalg.lu_factor.\n",
+    "X = torch.solve(B, A).solution\n",
+    "should be replaced with\n",
+    "X = torch.linalg.solve(A, B)"
+  );
+  TORCH_CHECK(self.dim() >= 2,
+           "B should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  TORCH_CHECK(A.dim() >= 2,
+           "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
+  Tensor self_broadcasted, A_broadcasted;
+  std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "solve");
+  return at::_solve_helper(self_broadcasted, A_broadcasted);
+}
+
+std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tensor& solution, Tensor& lu) {
+  TORCH_WARN_ONCE(
+    "torch.solve is deprecated in favor of torch.linalg.solve",
+    "and will be removed in a future PyTorch release.\n",
+    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
+    "To get the LU factorization see torch.linalg.lu_factor.\n",
+    "X = torch.solve(B, A).solution\n",
+    "should be replaced with\n",
+    "X = torch.linalg.solve(A, B)"
+  );
+  checkSameDevice("solve", solution, self, "solution");
+  checkSameDevice("solve", lu, self, "lu");
+  checkLinalgCompatibleDtype("solve", solution, self, "solution");
+  checkLinalgCompatibleDtype("solve", lu, self, "lu");
+
+  Tensor solution_tmp, lu_tmp;
+  std::tie(solution_tmp, lu_tmp) = at::_solve_helper(self, A);
+
+  at::native::resize_output(solution, solution_tmp.sizes());
+  at::native::resize_output(lu, lu_tmp.sizes());
+  solution.copy_(solution_tmp);
+  lu.copy_(lu_tmp);
+  return std::tuple<Tensor&, Tensor&>(solution, lu);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /*
@@ -2045,40 +2144,6 @@ Tensor linalg_solve(const Tensor& A,
                     const Tensor& B,
                     bool left) {
   return std::get<0>(at::_linalg_solve(A, B, left));
-}
-
-std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tensor& solution, Tensor& lu) {
-  TORCH_WARN_ONCE(
-    "torch.solve is deprecated in favor of torch.linalg.solve",
-    "and will be removed in a future PyTorch release.\n",
-    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
-    "To get the LU factorization see torch.linalg.lu_factor.\n",
-    "X = torch.solve(B, A).solution\n",
-    "should be replaced with\n",
-    "X = torch.linalg.solve(A, B)"
-  );
-  // We cannot use _linalg_solve_out as it sometimes computes the LU from A^T
-  at::linalg_solve_out(solution, A, self);
-  auto pivots = at::empty({0}, A.options().dtype(kInt));
-  at::linalg_lu_factor_out(lu, pivots, A);
-  return std::tie(solution, lu);
-}
-
-std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
-  TORCH_WARN_ONCE(
-    "torch.solve is deprecated in favor of torch.linalg.solve",
-    "and will be removed in a future PyTorch release.\n",
-    "torch.linalg.solve has its arguments reversed and does not return the LU factorization.\n",
-    "To get the LU factorization see torch.linalg.lu_factor.\n",
-    "X = torch.solve(B, A).solution\n",
-    "should be replaced with\n",
-    "X = torch.linalg.solve(A, B)"
-  );
-  // We cannot use _linalg_solve_out as it sometimes computes the LU from A^T
-  Tensor X, LU;
-  X = at::linalg_solve(A, self);
-  LU = std::get<0>(at::linalg_lu_factor(A));
-  return std::make_tuple(X, LU);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_factor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
