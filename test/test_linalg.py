@@ -7854,7 +7854,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(*floating_and_complex_types())
     def test_ldl_factor(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-        from scipy.linalg import ldl as scipy_ldl
 
         def run_test(shape, batch, hermitian):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
@@ -7882,6 +7881,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
             # Now test against SciPy implementation
             if TEST_SCIPY:
+                from scipy.linalg import ldl as scipy_ldl
                 A_np = A.cpu().numpy()
                 np_dtype = A_np.dtype
                 scipy_ldl_batched = np.vectorize(
