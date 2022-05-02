@@ -369,7 +369,7 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 #   "name".
 #
 #   All the "sample_inputs" functions are invoked within a `torch.no_grad()`
-#   environment for efficiency and correctness. As such remember to set the the
+#   environment for efficiency and correctness. As such remember to set the
 #   "requires_grad" flag on the inputs **after** performing any transformations
 #   on them.
 #
@@ -402,7 +402,7 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 # Sample inputs are designed to be used with many tests, some
 #   that are very time consuming, so they should be a small
 #   set with small tensors. An elaborated set of sample inputs
-#   can be specified using the the "reference_inputs_func" attribute.
+#   can be specified using the "reference_inputs_func" attribute.
 #   The "reference inputs" for an operation are an extended
 #   set of sample inputs that can more exhausively test an
 #   operator. They are used by only a few tests that are careful
@@ -3519,6 +3519,37 @@ def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwa
 
     for shape in shapes:
         yield SampleInput(make_arg(shape))
+
+def sample_inputs_linalg_vander(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    shapes = ((),
+              (1,),
+              (S,),
+              (2, S),)
+
+    for shape in shapes:
+        yield SampleInput(make_arg(shape))
+        n = shape[-1] if len(shape) > 0 else 1
+        for i in range(3):
+            # n-1, n, n+1
+            N = n + i - 1
+            if N < 0:
+                continue
+            yield SampleInput(make_arg(shape), kwargs=dict(N=N))
+
+def np_vander_batched(x, N=None):
+    # Wrapper around np.vander that supports batches of 1 dimension (enough for the tests)
+    if x.ndim == 0:
+        x = x[np.newaxis]
+    if x.ndim == 1:
+        y = np.vander(x, N=N, increasing=True)
+        return y
+    else:
+        if N is None:
+            N = x.shape[-1]
+        y = np.vander(x.ravel(), N=N, increasing=True).reshape((*x.shape, N))
+        return y
 
 def np_sinc_with_fp16_as_fp32(x):
     # Wraps numpy's sinc function so that fp16 values are promoted to fp32
@@ -11192,6 +11223,15 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_slogdet,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
+    OpInfo('linalg.vander',
+           aten_name='linalg_vander',
+           ref=np_vander_batched,
+           op=torch.linalg.vander,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False,
+           sample_inputs_func=sample_inputs_linalg_vander),
     OpInfo('linalg.vector_norm',
            op=torch.linalg.vector_norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
