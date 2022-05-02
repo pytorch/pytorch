@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
-     skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
+     skipCPUIfNoFFT, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncInfo, SpectralFuncType)
 
@@ -204,8 +204,10 @@ class TestFFT(TestCase):
         else:
             return (input, s, dim, norm)
 
+    @skipCUDAIfRocm
     @onlyNativeDeviceTypes
-    @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.OneD])
+    @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.OneD],
+         allowed_dtypes=(torch.float, torch.cfloat))
     def test_reference_1d(self, device, dtype, op):
         if op.ref is None:
             raise unittest.SkipTest("No reference implementation")
@@ -288,7 +290,7 @@ class TestFFT(TestCase):
 
     # Note: NumPy will throw a ValueError for an empty input
     @onlyNativeDeviceTypes
-    @ops(spectral_funcs)
+    @ops(spectral_funcs, allowed_dtypes=(torch.float, torch.cfloat))
     def test_empty_fft(self, device, dtype, op):
         t = torch.empty(1, 0, device=device, dtype=dtype)
         match = r"Invalid number of data points \([-\d]*\) specified"
@@ -367,9 +369,11 @@ class TestFFT(TestCase):
             op(x)
 
     # nd-fft tests
+    @skipCUDAIfRocm
     @onlyNativeDeviceTypes
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
-    @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND])
+    @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
+         allowed_dtypes=(torch.cfloat, torch.cdouble))
     def test_reference_nd(self, device, dtype, op):
         if op.ref is None:
             raise unittest.SkipTest("No reference implementation")

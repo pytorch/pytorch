@@ -407,7 +407,7 @@ inline void checkSplitSizes(
         "Tensor's dim 0 does not divide equally across group size");
   } else {
     TORCH_CHECK(
-        split_sizes.size() == group_size,
+        split_sizes.size() == static_cast<size_t>(group_size),
         "Number of tensor splits not equal to group size");
     const auto sum = c10::sum_integers(split_sizes);
     TORCH_CHECK(

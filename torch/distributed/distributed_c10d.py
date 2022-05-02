@@ -1053,7 +1053,7 @@ def batch_isend_irecv(p2p_op_list):
     """
     Send or Receive a batch of tensors asynchronously and return a list of requests.
 
-    Process each of the operations in p2p_op_list and return the corresponding
+    Process each of the operations in ``p2p_op_list`` and return the corresponding
     requests. NCCL and Gloo backend are currently supported.
 
     Args:
@@ -1070,7 +1070,7 @@ def batch_isend_irecv(p2p_op_list):
         >>> send_tensor = torch.arange(2) + 2 * rank
         >>> recv_tensor = torch.randn(2)
         >>> send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
-        >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank + 1)%world_size)
+        >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank - 1 + world_size)%world_size)
         >>> reqs = batch_isend_irecv([send_op, recv_op])
         >>> for req in reqs:
         >>>     req.wait()
@@ -1081,6 +1081,12 @@ def batch_isend_irecv(p2p_op_list):
     .. note:: Note that when this API is used with the NCCL PG backend, users must set
         the current GPU device with `torch.cuda.set_device`, otherwise it will
         lead to unexpected hang issues.
+
+        In addition, if this API is the first collective call in the ``group``
+        passed to ``dist.P2POp``, all ranks of the ``group`` must participate in
+        this API call; otherwise, the behavior is undefined. If this API call is
+        not the first collective call in the ``group``, batched P2P operations
+        involving only a subset of ranks of the ``group`` are allowed.
     """
     _check_p2p_op_list(p2p_op_list)
     backend = get_backend(p2p_op_list[0].group)
