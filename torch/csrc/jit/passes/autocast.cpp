@@ -418,8 +418,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
         if (!node->schema().is_mutable() && !hasExplicitDtypeArgument(node)) {
           auto context = current_state();
           context.cpu_enabled = false;
-          castTensorInputs(
-              node, aten::_autocast_to_full_precision, context);
+          castTensorInputs(node, aten::_autocast_to_full_precision, context);
         }
         break;
 
