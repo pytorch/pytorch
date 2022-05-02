@@ -2,10 +2,16 @@ import torch
 from torch import Tensor
 
 import torch._prims.utils as utils
-from torch._prims.utils import TensorLike, TensorLikeType, TensorMeta, ShapeType
+from torch._prims.utils import (
+    TensorLike,
+    TensorLikeType,
+    TensorMeta,
+    ShapeType,
+    getnvFuserDtype,
+)
 from torch.overrides import has_torch_function, handle_torch_function
 
-from typing import Sequence, Optional, Union, Callable, List, Tuple
+from typing import Sequence, Optional, Union, Callable, List, Tuple, Any
 from numbers import Number
 from functools import reduce
 from enum import Enum
@@ -139,6 +145,7 @@ def _make_prim(
     name: str,
     meta: Callable,
     impl_aten: Callable,
+    impl_nvfuser: Optional[Callable] = None,
     return_type: RETURN_TYPE,
     doc: str
 ):
@@ -161,6 +168,7 @@ def _make_prim(
     _prim.__name__ = name
     _prim.__doc__ = doc
     _prim.meta = meta  # type: ignore[attr-defined]
+    _prim.impl_nvfuser = impl_nvfuser  # type: ignore[attr-defined]
     _prim.return_type = return_type  # type: ignore[attr-defined]
 
     return _prim
@@ -211,31 +219,23 @@ def _elementwise_meta(*args):
     return TensorMeta(number)
 
 
-def _make_elementwise_unary_prim(name: str, impl_aten: Callable, doc: str):
+def _make_elementwise_unary_prim(name: str, **kwargs):
     """
     Creates an elementwise unary prim.
     """
 
     return _make_prim(
-        name=name,
-        meta=_elementwise_meta,
-        impl_aten=impl_aten,
-        return_type=RETURN_TYPE.NEW,
-        doc=doc,
+        name=name, meta=_elementwise_meta, return_type=RETURN_TYPE.NEW, **kwargs
     )
 
 
-def _make_elementwise_binary_prim(name: str, impl_aten: Callable, doc: str):
+def _make_elementwise_binary_prim(name: str, **kwargs):
     """
     Creates an elementwise binary prim.
     """
 
     return _make_prim(
-        name=name,
-        meta=_elementwise_meta,
-        impl_aten=impl_aten,
-        return_type=RETURN_TYPE.NEW,
-        doc=doc,
+        name=name, meta=_elementwise_meta, return_type=RETURN_TYPE.NEW, **kwargs
     )
 
 
@@ -453,10 +453,15 @@ tan = _make_elementwise_unary_prim(
 #
 # Elementwise binary operations
 #
+# TODO: we should be able to stamp these out but it's a little tricky with FX's name resolution
+def _add_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.add(a, b)  # type: ignore[attr-defined]
+
 
 add = _make_elementwise_binary_prim(
     name="add",
     impl_aten=torch.add,
+    impl_nvfuser=_add_nvfuser,
     doc="",
 )
 
@@ -498,15 +503,20 @@ bitwise_xor = _make_elementwise_binary_prim(
 
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
-def _div(a, b):
+def _div_aten(a, b):
     if isinstance(a, (bool, int)):
         return torch.div(a, b, rounding_mode="trunc")
     return torch.true_divide(a, b)
 
 
+def _div_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.div(a, b)  # type: ignore[attr-defined]
+
+
 div = _make_elementwise_binary_prim(
     "div",
-    impl_aten=_div,
+    impl_aten=_div_aten,
+    impl_nvfuser=_div_nvfuser,
     doc="",
 )
 
@@ -516,27 +526,51 @@ eq = _make_elementwise_binary_prim(
     doc="",
 )
 
+
+def _ge_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.ge(a, b)  # type: ignore[attr-defined]
+
+
 ge = _make_elementwise_binary_prim(
     "ge",
     impl_aten=torch.ge,
+    impl_nvfuser=_ge_nvfuser,
     doc="",
 )
+
+
+def _gt_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.gt(a, b)  # type: ignore[attr-defined]
+
 
 gt = _make_elementwise_binary_prim(
     "gt",
     impl_aten=torch.gt,
+    impl_nvfuser=_gt_nvfuser,
     doc="",
 )
+
+
+def _le_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.le(a, b)  # type: ignore[attr-defined]
+
 
 le = _make_elementwise_binary_prim(
     "le",
     impl_aten=torch.le,
+    impl_nvfuser=_le_nvfuser,
     doc="",
 )
+
+
+def _lt_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.lt(a, b)  # type: ignore[attr-defined]
+
 
 lt = _make_elementwise_binary_prim(
     "lt",
     impl_aten=torch.lt,
+    impl_nvfuser=_lt_nvfuser,
     doc="",
 )
 
@@ -552,9 +586,15 @@ min = _make_elementwise_binary_prim(
     doc="",
 )
 
+
+def _mul_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.mul(a, b)  # type: ignore[attr-defined]
+
+
 mul = _make_elementwise_binary_prim(
     "mul",
     impl_aten=torch.mul,
+    impl_nvfuser=_mul_nvfuser,
     doc="",
 )
 
@@ -660,6 +700,15 @@ def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):
     return v.expand(shape)
 
 
+def _broadcast_in_dim_nvfuser(
+    fd: Any,
+    a: torch.Tensor,
+    shape: ShapeType,
+    broadcast_dimensions: ShapeType,
+):
+    return fd.Ops.broadcast_in_dim(a, shape, broadcast_dimensions)  # type: ignore[attr-defined]
+
+
 _broadcast_in_dim_doc = """
   Creates a view of t with the specified shape.
 
@@ -675,6 +724,7 @@ broadcast_in_dim = _make_prim(
     name="broadcast_in_dim",
     meta=_broadcast_in_dim_meta,
     impl_aten=_broadcast_in_dim_aten,
+    impl_nvfuser=_broadcast_in_dim_nvfuser,
     return_type=RETURN_TYPE.VIEW,
     doc=_broadcast_in_dim_doc,
 )
@@ -984,6 +1034,11 @@ def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
     return a.to(dtype)
 
 
+def _convert_element_type_nvfuser(fd: Any, a: Tensor, dtype: torch.dtype) -> Tensor:
+    nvfuser_dtype = getnvFuserDtype(dtype)
+    return fd.Ops.cast(nvfuser_dtype, a)  # type: ignore[attr-defined]
+
+
 _convert_element_type_doc = """
   Creates a copy of a tensor with the given dtype.
   """
@@ -992,6 +1047,7 @@ convert_element_type = _make_prim(
     name="convert_element_type",
     meta=_convert_element_type_meta,
     impl_aten=_convert_element_type_aten,
+    impl_nvfuser=_convert_element_type_nvfuser,
     return_type=RETURN_TYPE.NEW,
     doc=_convert_element_type_doc,
 )
