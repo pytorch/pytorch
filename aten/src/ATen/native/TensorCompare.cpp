@@ -350,11 +350,17 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
-  return at::where(condition, wrapped_scalar_tensor(self, other.device()), other);
+  auto result_type = at::native::result_type(other, self);
+  auto self_converted = at::scalar_tensor(self, other.options().dtype(result_type));
+  auto other_converted = other.to(result_type);
+  return at::where(condition, self_converted, other_converted);
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
-  return at::where(condition, self, wrapped_scalar_tensor(other, self.device()));
+  auto result_type = at::native::result_type(self, other);
+  auto other_converted = at::scalar_tensor(other, self.options().dtype(result_type));
+  auto self_converted = self.to(result_type);
+  return at::where(condition, self_converted, other_converted);
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
