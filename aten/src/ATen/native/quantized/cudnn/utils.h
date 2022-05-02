@@ -87,8 +87,9 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
       torch::List<int64_t> dilation,
       int64_t groups,
       bool transpose,
-      c10::QScheme q_scheme)
-      : orig_weight_(std::move(orig_weight)),
+      c10::QScheme q_scheme,
+      int64_t output_channels)
+      : maybe_padded_weight_(std::move(orig_weight)),
         bias_(std::move(bias)),
         stride_(std::move(stride)),
         padding_(std::move(padding)),
@@ -96,7 +97,8 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
         dilation_(std::move(dilation)),
         groups_(groups),
         transpose_(transpose),
-        q_scheme_(q_scheme) {}
+        q_scheme_(q_scheme),
+        num_unpadded_output_channels_(output_channels) {} // output channels needs to be stored when we have to pad this dimension
 
   at::Tensor apply(
       const at::Tensor& input,
@@ -159,7 +161,11 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
   }
 
  private:
-  at::Tensor orig_weight_;
+  // cudnn v8.4.0 expects conv2d's int8 weight tensor's input and output channels to be a multiple of 4. if it is not
+  // we need to explicitly pad it to a multiple of 4 ourselves as cudnn does not currently support padding, hence the naming
+  // convention "maybe"_padded_weight.
+  // TODO: when and if cudnn enables padding in their operators, we can remove padding on our end and rename this to orig_weight_
+  at::Tensor maybe_padded_weight_;
   c10::optional<at::Tensor> bias_;
   torch::List<int64_t> stride_;
   torch::List<int64_t> padding_;
@@ -168,6 +174,7 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
   int64_t groups_;
   bool transpose_;
   c10::QScheme q_scheme_;
+  int64_t num_unpadded_output_channels_;
 
   template <bool ReluFused>
   at::Tensor apply_impl(
