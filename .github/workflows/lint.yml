@@ -100,9 +100,22 @@ jobs:
       - name: Ensure submodules are up to date
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
-          GH_BASE: ${{ github.event.pull_request.base.sha }}
-        if: always()
-        run: if git diff --name-only "$GH_BASE" HEAD | grep -q third_party  && ! echo "$PR_BODY" | grep -q submodule-update; then echo "PR contains a submodule update, did you forget to run \`git submodule update\`? If this was on purpose, please specify \"submodule-update\" in the PR description."; false; fi
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          changed_files=$(git diff --name-only $GH_REF HEAD)
+          status=$(echo $?)
+          if [ $status -eq 0 ]; then 
+              echo $changed_files | grep -q "third_party"
+              if [ $(echo $?) -eq 0 ]; then
+                  echo "$PR_BODY" | grep -q "submodule-update"
+                  status=$(echo $?)
+                  if [ $status -ne 0 ]; then
+                      echo "PR contains a submodule update, did you forget to run \`git submodule update\`? If this was on purpose, please specify \"submodule-update\" in the PR description."
+                  fi
+              fi
+          fi
+          exit $status
       - name: C++ docs check
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
@@ -265,3 +278,4 @@ jobs:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
+
