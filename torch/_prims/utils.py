@@ -8,6 +8,32 @@ import threading
 import torch
 from torch.fx import Node
 
+# nvFuser imports are conditional on CUDA being available
+if torch.cuda.is_available():
+    from torch._C._nvfuser import DataType  # type: ignore[import]
+
+    _torch_dtype_to_nvfuser_dtype_map = {
+        torch.cdouble: DataType.ComplexDouble,
+        torch.cfloat: DataType.ComplexFloat,
+        torch.double: DataType.Double,
+        torch.float: DataType.Float,
+        torch.half: DataType.Half,
+        torch.bfloat16: DataType.BFloat16,
+        torch.long: DataType.Int,
+        torch.int: DataType.Int32,
+        torch.bool: DataType.Bool,
+    }
+else:
+    _torch_dtype_to_nvfuser_dtype_map = {}
+
+
+def getnvFuserDtype(dtype: torch.dtype):
+    """
+    Translates from torch.dtype to nvFuser's DataType enum
+    """
+    return _torch_dtype_to_nvfuser_dtype_map[dtype]
+
+
 ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
