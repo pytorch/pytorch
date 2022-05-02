@@ -7,6 +7,7 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
+#include <functorch/csrc/BatchRulesHelper.h>
 
 #include <torch/library.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
@@ -550,7 +551,7 @@ TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_BACK_MODE_KEY, m) {
   m.impl(#op "." #overload, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallbackWithOpId<ATenOpId::op ## _ ## overload>>());
 
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
-  FALLBACK_WITH_ID(nll_loss_backward);
+  RUN_JIT_DECOMPOSITION(nll_loss_backward);
   FALLBACK_WITH_ID(nll_loss2d_backward);
   FALLBACK_WITH_ID(mse_loss_backward);
   FALLBACK_WITH_ID(l1_loss_backward);
