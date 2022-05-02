@@ -16196,10 +16196,8 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double)
     def test_pooling_max_nhwc(self, dtype):
         def helper(n, c, h, w, kernel_size, stride, padding, dilation, contig, device):
-            output_height = math.floor((h + 2 * padding[0] - 
-                                        dilation[0] * (kernel_size[0] - 1) - 1) / stride[0] + 1)
-            output_width = math.floor((w + 2 * padding[1] - 
-                                       dilation[1] * (kernel_size[1] - 1) - 1) / stride[1] + 1)
+            output_height = math.floor((h + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1) / stride[0] + 1)
+            output_width = math.floor((w + 2 * padding[1] - dilation[1] * (kernel_size[1] - 1) - 1) / stride[1] + 1)
 
             input = torch.randint(1, 10, (n, c, h, w), device=device, dtype=dtype)
             input = input.contiguous(memory_format=torch.channels_last)
