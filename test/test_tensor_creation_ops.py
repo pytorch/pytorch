@@ -13,7 +13,7 @@ import random
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
-    torch_to_numpy_dtype_dict, slowTest,
+    torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, slowTest,
     TEST_SCIPY, IS_MACOS, IS_PPC, IS_WINDOWS, parametrize)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
@@ -628,16 +628,22 @@ class TestTensorCreation(TestCase):
         y = torch.randn((4, 6), device=device)
 
         with self.assertRaisesRegex(
-                RuntimeError, r"unsupported operation:.* input tensor 0"):
+                RuntimeError,
+                r"unsupported operation: some elements of the input tensor and "
+                r"the written-to tensor refer to a single memory location."):
             torch.cat([x, y], dim=0, out=x)
 
         with self.assertRaisesRegex(
-                RuntimeError, r"unsupported operation:.* input tensor 1"):
+                RuntimeError,
+                r"unsupported operation: some elements of the input tensor and "
+                r"the written-to tensor refer to a single memory location."):
             torch.cat([x, y], dim=0, out=y)
 
         z = torch.zeros((4, 6), device=device)
         with self.assertRaisesRegex(
-                RuntimeError, r"unsupported operation:.* input tensor 1"):
+                RuntimeError,
+                r"unsupported operation: some elements of the input tensor and "
+                r"the written-to tensor refer to a single memory location."):
             torch.cat([y, z], out=z[:2, :])
 
         w = y.view(-1).clone()
@@ -741,8 +747,7 @@ class TestTensorCreation(TestCase):
         self.assertTrue(res1_cpu.is_contiguous(memory_format=torch.contiguous_format))
 
         # Case 2: if out= is not the correct shape then the output it is resized internally
-        # - For the CPU variant the memory format is that of the first tensor
-        # - For the CUDA variant it only propagates memory format if all the tensors have
+        # - For both CPU and CUDA variants, it only propagates memory format if all the tensors have
         #   the same memory format, otherwise it just uses contiguous_format as a default
 
         out_cuda = torch.empty((0), device=device).contiguous(memory_format=torch.contiguous_format)
@@ -753,7 +758,7 @@ class TestTensorCreation(TestCase):
         res2_cpu = torch.cat((a_cpu, b_cpu), out=out_cpu)
 
         self.assertTrue(res2_cuda.is_contiguous(memory_format=torch.contiguous_format))
-        self.assertTrue(res2_cpu.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(res2_cpu.is_contiguous(memory_format=torch.contiguous_format))
 
         out_cuda = torch.empty((0), device=device).contiguous(memory_format=torch.contiguous_format)
         # a_cuda and c_cuda have same memory_format
@@ -2665,6 +2670,15 @@ class TestTensorCreation(TestCase):
             y = torch.empty(tuple(size_ones_instead_of_zeros), device=device)
             self.assertEqual(x.stride(), y.stride())
 
+    @onlyNativeDeviceTypes
+    def test_empty_overflow(self, device):
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            torch.empty([2, 4, 2**29, 2**29], dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            torch.empty([8, 8, 2**29, 2**29], dtype=torch.float64)
+        with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
+            torch.empty_strided([8, 8], [2**61, 1], dtype=torch.float64)
+
     def test_eye(self, device):
         for dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             if dtype == torch.bfloat16:
@@ -3092,7 +3106,7 @@ class TestTensorCreation(TestCase):
             self._test_logspace_base2(device, dtype, steps=steps)
 
     @dtypes(*all_types_and(torch.bfloat16))
-    @dtypesIfCUDA(*integral_types_and(torch.half, torch.bfloat16, torch.float32) if TEST_WITH_ROCM else
+    @dtypesIfCUDA(*integral_types_and(torch.half, torch.bfloat16, torch.float32, torch.float64) if TEST_WITH_ROCM else
                   all_types_and(torch.half, torch.bfloat16))
     def test_logspace(self, device, dtype):
         _from = random.random()
@@ -3669,13 +3683,13 @@ class TestBufferProtocol(TestCase):
         self.assertEqual(numpy_frombuffer.__array_interface__["data"][0], torch_frombuffer.data_ptr())
         return (numpy_original, torch_frombuffer)
 
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_same_type(self, device, dtype):
         self._run_test((), dtype)
         self._run_test((4,), dtype)
         self._run_test((10, 10), dtype)
 
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_requires_grad(self, device, dtype):
         def _run_test_and_check_grad(requires_grad, *args, **kwargs):
             kwargs["requires_grad"] = requires_grad
@@ -3690,14 +3704,14 @@ class TestBufferProtocol(TestCase):
         _run_test_and_check_grad(False, (4,), dtype)
         _run_test_and_check_grad(False, (10, 10), dtype)
 
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_with_offset(self, device, dtype):
         # Offset should be valid whenever there is, at least,
         # one remaining element
         for i in range(SIZE):
             self._run_test(SHAPE, dtype, first=i)
 
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_with_count(self, device, dtype):
         # Count should be valid for any valid in the interval
         # [-1, len(input)], except for 0
@@ -3705,7 +3719,7 @@ class TestBufferProtocol(TestCase):
             if i != 0:
                 self._run_test(SHAPE, dtype, count=i)
 
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_with_count_and_offset(self, device, dtype):
         # Explicit default count [-1, 1, 2, ..., len]
         for i in range(-1, SIZE + 1):
@@ -3721,7 +3735,7 @@ class TestBufferProtocol(TestCase):
             for j in range(SIZE - i + 1):
                 self._run_test(SHAPE, dtype, count=i, first=j)
 
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_invalid_positional_args(self, device, dtype):
         bytes = get_dtype_size(dtype)
         in_bytes = SIZE * bytes
@@ -3758,7 +3772,7 @@ class TestBufferProtocol(TestCase):
                                         rf"buffer length \({in_bytes} bytes\)"):
                 self._run_test(SHAPE, dtype, count=count, first=first)
 
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_shared_buffer(self, device, dtype):
         x = make_tensor((1,), dtype=dtype, device=device)
         # Modify the whole tensor
@@ -3785,13 +3799,13 @@ class TestBufferProtocol(TestCase):
                 arr[first] = x.item() - 1
                 self.assertEqual(arr[first:last], tensor)
 
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_not_a_buffer(self, device, dtype):
         with self.assertRaisesRegex(ValueError,
                                     r"object does not implement Python buffer protocol."):
             torch.frombuffer([1, 2, 3, 4], dtype=dtype)
 
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_non_writable_buffer(self, device, dtype):
         numpy_arr = make_tensor((1,), dtype=dtype, device=device).numpy()
         byte_arr = numpy_arr.tobytes()
@@ -3896,7 +3910,7 @@ class TestAsArray(TestCase):
         self._test_alias_with_cvt(identity, device, dtype)
 
     @onlyCPU
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_alias_from_numpy(self, device, dtype):
         self._test_alias_with_cvt(to_numpy, device, dtype)
 
@@ -3907,7 +3921,7 @@ class TestAsArray(TestCase):
         self._test_alias_with_cvt(to_dlpack, device, dtype)
 
     @onlyCPU
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_alias_from_buffer(self, device, dtype):
         self._test_alias_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
 
@@ -3945,7 +3959,7 @@ class TestAsArray(TestCase):
         self._test_copy_with_cvt(identity, device, dtype)
 
     @onlyCPU
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_copy_from_numpy(self, device, dtype):
         self._test_copy_with_cvt(to_numpy, device, dtype)
 
@@ -3955,7 +3969,7 @@ class TestAsArray(TestCase):
         self._test_copy_with_cvt(to_dlpack, device, dtype)
 
     @onlyCPU
-    @dtypes(*torch_to_numpy_dtype_dict.keys())
+    @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_copy_from_buffer(self, device, dtype):
         self._test_copy_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
 

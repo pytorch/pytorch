@@ -1,16 +1,15 @@
-#include <c10/util/irange.h>
+#include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
-#include <torch/csrc/lazy/core/config.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
-#include <torch/csrc/lazy/ts_backend/ops/cast.h>
-#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
-#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
+
 
 namespace torch {
 namespace lazy {
@@ -63,22 +62,24 @@ LazyTensorPtr LazyTensor::Create(std::shared_ptr<Data> data) {
 }
 
 LazyTensor::LazyTensor(const at::Tensor& tensor, const BackendDevice& device)
-    : data_(std::make_shared<Data>(tensor, device)) {}
+    : LazyTensor(std::make_shared<Data>(tensor, device)) {}
 
 LazyTensor::LazyTensor(BackendDataPtr handle)
-    : data_(std::make_shared<Data>(handle, handle->device())) {}
+    : LazyTensor(std::make_shared<Data>(handle, handle->device())) {}
 
 LazyTensor::LazyTensor(Value ir_value, const BackendDevice& device)
-    : data_(std::make_shared<Data>(std::move(ir_value), device)) {
+    : LazyTensor(std::make_shared<Data>(std::move(ir_value), device)) {
   TryLimitGraphSize();
 }
 
 LazyTensor::LazyTensor(
     std::shared_ptr<LazyView> view,
     const BackendDevice& device)
-    : data_(std::make_shared<Data>(std::move(view), device)) {}
+    : LazyTensor(std::make_shared<Data>(std::move(view), device)) {}
 
-LazyTensor::LazyTensor(std::shared_ptr<Data> data) : data_(std::move(data)) {}
+LazyTensor::LazyTensor(std::shared_ptr<Data> data)
+  : data_(std::move(data))
+  , storage_(c10::Storage({}, 0, c10::DataPtr(nullptr, backendDeviceToAtenDevice(data_->device)))) {}
 
 LazyTensor::Data* LazyTensor::data() const {
   TORCH_CHECK(data_ != nullptr, "Trying to access a null cursor");
@@ -201,7 +202,7 @@ void LazyTensor::SetInPlaceIrValue(Value ir_value) {
   auto tensor_shape = shape();
   if (tensor_shape.Get().scalar_type() !=
       ir_value.shape().scalar_type()) {
-    ir_value = MakeNode<Cast>(ir_value, tensor_shape.Get().scalar_type());
+    ir_value = MakeCast(ir_value, tensor_shape.Get().scalar_type(), c10::nullopt);
   }
   SetIrValue(std::move(ir_value));
 }
@@ -272,7 +273,7 @@ Value LazyTensor::GetIrValueForTensor(
   if (tensor.dim() == 0 && tensor.numel() == 1) {
     at::Scalar value = tensor.item();
     if (IsSpecialScalar(value)) {
-      return MakeNode<Scalar>(value, tensor.scalar_type());
+      return MakeScalar(value, tensor.scalar_type());
     }
     data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
     read_only = true;
@@ -345,7 +346,9 @@ std::shared_ptr<LazyView> LazyTensor::CreateView(ViewInfo view_info) const {
 }
 
 LazyTensorPtr LazyTensor::CreateViewTensor(ViewInfo view_info) const {
-  return Create(CreateView(std::move(view_info)), GetDevice());
+  auto new_tensor = Create(CreateView(std::move(view_info)), GetDevice());
+  new_tensor->storage_ = Storage();
+  return new_tensor;
 }
 
 at::Tensor LazyTensor::ToTensor(bool detached) {
@@ -423,7 +426,7 @@ void LazyTensor::UpdateFromTensorOut(const LazyTensorPtr& tensor) {
 Value LazyTensor::CreateTensorNode(BackendDataPtr data, bool read_only) const {
   data->SetInfo(std::make_shared<LazyGraphExecutor::DeviceDataInfo>(
       GetUniqueId(), read_only));
-  return MakeNode<DeviceData>(std::move(data));
+  return MakeDeviceData(std::move(data));
 }
 
 std::vector<LazyTensorPtr> LazyTensor::MakeOutputTensors(NodePtr node) const {
@@ -468,7 +471,7 @@ torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors) {
     values.push_back(impl->tensor()->GetIrValue());
   }
 
-  return torch::lazy::Value(torch::lazy::MakeNode<TensorList>(std::move(values)));
+  return torch::lazy::Value(torch::lazy::MakeTensorList(std::move(values)));
 }
 
 LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {

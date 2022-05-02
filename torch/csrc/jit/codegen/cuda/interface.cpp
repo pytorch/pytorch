@@ -146,7 +146,8 @@ bool complyWith(
       (guard_tensor_type->device().has_value() &&
        (guard_tensor_type->device().value() != tensor.device())) ||
       (guard_tensor_type->requiresGrad().has_value() &&
-       guard_tensor_type->requiresGrad().value() != tensor.requires_grad())) {
+       guard_tensor_type->requiresGrad().value() !=
+           (tensor.requires_grad() && at::GradMode::is_enabled()))) {
     return false;
   }
 
@@ -557,6 +558,24 @@ RegisterOperators view_guard({
                 tensor_constraint,
                 view_sizes_constraint);
             push(stack, IValue(guard_status));
+            return;
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
+RegisterOperators ivalue_guard({
+    Operator(
+        "prim::CudaFusionIvalGuard(...) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::ArrayRef<IValue> inputs = last(stack, 2);
+            drop(stack, 2);
+            if (!fuser::cuda::getCudaFusionGuardMode()) {
+              push(stack, IValue(true));
+              return;
+            }
+            push(stack, inputs[0].equals(inputs[1]));
             return;
           };
         },

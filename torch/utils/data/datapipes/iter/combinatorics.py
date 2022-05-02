@@ -5,6 +5,11 @@ from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from typing import Dict, Iterator, List, Optional, Sized, Tuple, Type, TypeVar
 
+__all__ = [
+    "SamplerIterDataPipe",
+    "ShufflerIterDataPipe",
+]
+
 T_co = TypeVar('T_co', covariant=True)
 
 

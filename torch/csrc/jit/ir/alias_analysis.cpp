@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 
+#include <ATen/core/interned_strings.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -659,6 +660,10 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::MMBatchSide:
     case prim::BroadcastSizes:
     case prim::ChunkSizes:
+    // this should never be seen outside of initial compilation
+    // but because of some dependencies with closure invoking alias
+    // db needs to be handled here
+    case prim::EmptyListLiteral:
     case prim::Closure:
     case prim::CreateObject:
     case prim::tolist:

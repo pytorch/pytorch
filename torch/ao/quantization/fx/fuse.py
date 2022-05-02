@@ -4,9 +4,6 @@ from torch.fx import (
     map_arg
 )
 from torch.fx.graph import Graph
-from ..utils import (
-    get_combined_dict
-)
 from .graph_module import (
     FusedGraphModule
 )
@@ -15,19 +12,20 @@ from .match_utils import (
     MatchAllNode,
 )
 from .pattern_utils import (
-    get_default_fusion_patterns,
+    sorted_patterns_dict,
 )
 
-from .backend_config.utils import get_fusion_pattern_to_fuse_handler_cls
-from .backend_config.utils import get_fuser_method_mapping
-from .backend_config.utils import get_fusion_pattern_to_root_node_getter
-from .backend_config.utils import get_fusion_pattern_to_extra_inputs_getter
+from ..backend_config.utils import get_fuser_method_mapping
+from ..backend_config.utils import get_fusion_pattern_to_root_node_getter
+from ..backend_config.utils import get_fusion_pattern_to_extra_inputs_getter
+from ..backend_config import get_native_backend_config_dict
+from .backend_config_utils import get_fusion_pattern_to_fuse_handler_cls
 
 from .fusion_patterns import *  # noqa: F401,F403
 
 from typing import Callable, Tuple, Dict, Any, Optional, List
 
-from .quantization_types import Pattern, NodePattern
+from torch.ao.quantization.quantization_types import Pattern, NodePattern
 
 def fuse(
     model: GraphModule,
@@ -42,21 +40,14 @@ def fuse(
     input_graph = model.graph
     named_modules = dict(input_root.named_modules())
 
-    # TODO: remove this branch after we define the configurations for the
-    # default/native backend
     if backend_config_dict is None:
-        additional_fusion_patterns = \
-            fuse_custom_config_dict.get("additional_fusion_pattern", {})
-        fusion_pattern_to_fuse_handler_cls = get_combined_dict(
-            get_default_fusion_patterns(), additional_fusion_patterns)
-        fuser_method_mapping = None
-        fusion_pattern_to_root_node_getter = {}
-        fusion_pattern_to_extra_inputs_getter = {}
-    else:
-        fusion_pattern_to_fuse_handler_cls = get_fusion_pattern_to_fuse_handler_cls(backend_config_dict)
-        fuser_method_mapping = get_fuser_method_mapping(backend_config_dict)
-        fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config_dict)
-        fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config_dict)
+        backend_config_dict = get_native_backend_config_dict()
+
+    fusion_pattern_to_fuse_handler_cls = sorted_patterns_dict(get_fusion_pattern_to_fuse_handler_cls(backend_config_dict))
+    fuser_method_mapping = get_fuser_method_mapping(backend_config_dict)
+    fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config_dict)
+    fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config_dict)
+
     # find fusion
     fusion_pairs = _find_matches(
         input_root, input_graph, fusion_pattern_to_fuse_handler_cls)
@@ -111,6 +102,7 @@ def _find_matches(
     # a map from node to the matched subpattern
     node_to_subpattern: Dict[Node, Any] = {}
 
+    # TODO: dedup with quantization matching function in match_utils.py
     def apply_match(pattern, node, match, matched_node_pattern, node_to_subpattern):
         if isinstance(pattern, tuple):
             s, *args = pattern
@@ -136,5 +128,6 @@ def _find_matches(
                 matched_node_pattern: List[Node] = []
                 if is_match(modules, node, pattern):
                     apply_match(pattern, node, (node, pattern, value(node)), matched_node_pattern, node_to_subpattern)
+                    break
 
     return match_map

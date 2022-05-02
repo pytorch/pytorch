@@ -13,7 +13,8 @@ namespace lazy {
 class CacheNode : public Node {
  public:
   explicit CacheNode(const std::string& str)
-      : Node(OpKind(), /* num_outputs */ 1, /* hash_func */ [&](bool /*bakeInSizes*/) -> hash_t { return Hash(str); }),
+      : Node(OpKind(), /* num_outputs */ 1),
+        hash_(Hash(str)),
         str_(str) {}
   ~CacheNode() override = default;
 
@@ -24,11 +25,12 @@ class CacheNode : public Node {
   const Output& operand(size_t i) const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of test node");
   }
-  const Shape& shape(size_t i) const override { return shape_; }
-  c10::ArrayRef<Shape> shapes() const override { return {shape_}; }
+
+  hash_t hash() const override { return hash_; }
+  hash_t shapeHash() const override { return hash_; }
  private:
+  hash_t hash_;
   std::string str_;
-  Shape shape_;
 };
 
 TEST(CacheTest, BasicTest) {
@@ -37,44 +39,36 @@ TEST(CacheTest, BasicTest) {
   std::shared_ptr<CacheNode> c = std::make_shared<CacheNode>("c");
   Cache<hash_t, CacheNode, HashReducer> cache(2);
 
-  cache.Add(a->node_hash(), a);
-  EXPECT_EQ(cache.Get(a->node_hash()), a);
-  EXPECT_EQ(cache.Get(b->node_hash()), nullptr);
-  EXPECT_EQ(cache.Get(c->node_hash()), nullptr);
+  cache.Add(a->hash(), a);
+  EXPECT_EQ(cache.Get(a->hash()), a);
+  EXPECT_EQ(cache.Get(b->hash()), nullptr);
+  EXPECT_EQ(cache.Get(c->hash()), nullptr);
 
-  cache.Add(b->node_hash(), b);
-  EXPECT_EQ(cache.Get(a->node_hash()), a);
-  EXPECT_EQ(cache.Get(b->node_hash()), b);
-  EXPECT_EQ(cache.Get(c->node_hash()), nullptr);
+  cache.Add(b->hash(), b);
+  EXPECT_EQ(cache.Get(a->hash()), a);
+  EXPECT_EQ(cache.Get(b->hash()), b);
+  EXPECT_EQ(cache.Get(c->hash()), nullptr);
 
-  cache.Add(c->node_hash(), c);
-  EXPECT_EQ(cache.Get(a->node_hash()), nullptr); // a has been evicted
-  EXPECT_EQ(cache.Get(b->node_hash()), b);
-  EXPECT_EQ(cache.Get(c->node_hash()), c);
+  cache.Add(c->hash(), c);
+  EXPECT_EQ(cache.Get(a->hash()), nullptr); // a has been evicted
+  EXPECT_EQ(cache.Get(b->hash()), b);
+  EXPECT_EQ(cache.Get(c->hash()), c);
 
-  cache.Erase(c->node_hash());
-  EXPECT_EQ(cache.Get(a->node_hash()), nullptr);
-  EXPECT_EQ(cache.Get(b->node_hash()), b);
-  EXPECT_EQ(cache.Get(c->node_hash()), nullptr); // c has been removed
+  cache.Erase(c->hash());
+  EXPECT_EQ(cache.Get(a->hash()), nullptr);
+  EXPECT_EQ(cache.Get(b->hash()), b);
+  EXPECT_EQ(cache.Get(c->hash()), nullptr); // c has been removed
 
   cache.Clear();
-  EXPECT_EQ(cache.Get(a->node_hash()), nullptr);
-  EXPECT_EQ(cache.Get(b->node_hash()), nullptr);
-  EXPECT_EQ(cache.Get(c->node_hash()), nullptr);
+  EXPECT_EQ(cache.Get(a->hash()), nullptr);
+  EXPECT_EQ(cache.Get(b->hash()), nullptr);
+  EXPECT_EQ(cache.Get(c->hash()), nullptr);
 }
 
 class CacheNodeWithShape : public TsNode {
  public:
   explicit CacheNodeWithShape(const Shape& shape)
-      : TsNode(OpKind(), shape, /* num_outputs */ 1, /* seed */ 0),
-        shape_(shape) {}
-
-  const Shape& getShape() const {
-    return shape_;
-  }
-
- private:
-  Shape shape_;
+      : TsNode(OpKind(), shape, /* num_outputs */ 1, /* seed */ 0){}
 };
 
 TEST(CacheTest, ShapeCacheTestForDynamicShape) {
@@ -89,8 +83,8 @@ TEST(CacheTest, ShapeCacheTestForDynamicShape) {
    * Make sure the cached shape for node (2, 4) is not used for node (4, 2)
    */
   for (auto& node : nodes) {
-    EXPECT_EQ(node.getShape(), node.GetOpShape([&]() {
-      return node.getShape();
+    EXPECT_EQ(node.shape(), node.computeShape([&]() {
+      return node.shape();
     }));
   }
 
