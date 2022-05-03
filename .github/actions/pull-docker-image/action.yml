@@ -16,4 +16,4 @@ runs:
         DOCKER_IMAGE: ${{ inputs.docker-image }}
       run: |
         retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
-        retry docker pull "${DOCKER_IMAGE}"
+        docker image inspect "${DOCKER_IMAGE}" > /dev/null || retry docker pull "${DOCKER_IMAGE}"
