@@ -70,8 +70,8 @@ class Gamma(ExponentialFamily):
         value = torch.as_tensor(value, dtype=self.rate.dtype, device=self.rate.device)
         if self._validate_args:
             self._validate_sample(value)
-        return (self.concentration * torch.log(self.rate) +
-                (self.concentration - 1) * torch.log(value) -
+        return (torch.xlogy(self.concentration, self.rate) +
+                torch.xlogy(self.concentration - 1, value) -
                 self.rate * value - torch.lgamma(self.concentration))
 
     def entropy(self):
