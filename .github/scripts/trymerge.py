@@ -654,7 +654,7 @@ class GitHubPR:
 
         repo.push(self.default_branch(), dry_run)
 
-class MandatoryChecksError(Exception):
+class MandatoryChecksMissingError(Exception):
     pass
 @dataclass
 class MergeRule:
@@ -756,12 +756,12 @@ def find_matching_merge_rule(pr: GitHubPR,
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
                 reject_reason = f"Refusing to merge as mandatory check(s) {','.join(pending_checks)}"
-                reject_reason += f"are pending for rule {rule_name}"
+                reject_reason += f" are not yet run for rule {rule_name}"
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
     if reject_reason_score == 20000:
-        raise MandatoryChecksError(reject_reason)
+        raise MandatoryChecksMissingError(reject_reason)
     raise RuntimeError(reject_reason)
 
 
@@ -808,17 +808,19 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
-def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False,) -> None:
+
+def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     start_time = time.time()
-
+    last_exception = ''
     while True:
         current_time = time.time()
         elapsed_time = current_time - start_time
 
         if(elapsed_time > 355 * 60):
-            msg = 'Took too long to merge. Please try again later'
+            msg = 'Merged timed out after 6 hours. Please contact the pytorch_dev_infra team.'
+            msg += f'The last exception was: {last_exception}'
             gh_post_comment(org, project, pr_num, msg, dry_run=dry_run)
             gh_add_labels(org, project, pr_num, ["land-failed"])
             raise RuntimeError(msg)
@@ -826,8 +828,9 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False,) -> None:
         pr = GitHubPR(org, project, pr_num)
         try:
             pr.merge_into(repo, dry_run=dry_run)
-        except MandatoryChecksError as e:
-            print('Merged failed due to {e}. Retrying in 60 seconds.')
+        except MandatoryChecksMissingError as ex:
+            last_exception = str(ex)
+            print(f'Merged failed due to: {ex}. Retrying in 60 seconds.')
             time.sleep(60)
 
 
@@ -870,11 +873,11 @@ def main() -> None:
             merge_on_green(args.pr_num, repo, args.dry_run,)
         except Exception as e:
             handle_exception(e)
-
-    try:
-        pr.merge_into(repo, dry_run=args.dry_run, force=args.force)
-    except Exception as e:
-        handle_exception(e)
+    else:
+        try:
+            pr.merge_into(repo, dry_run=args.dry_run, force=args.force)
+        except Exception as e:
+            handle_exception(e)
 
 
 if __name__ == "__main__":
