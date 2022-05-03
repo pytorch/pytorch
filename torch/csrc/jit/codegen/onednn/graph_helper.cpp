@@ -83,7 +83,8 @@ Operator createOperator(Node* node) {
           .setAttr("pads_end", Operator::Ints, 4)
           .setAttr("dilations", Operator::Ints, 5)
           .setAttr("groups", Operator::Int, 6)
-          .setAttr("filter_format", std::string("OIX"));
+          .setAttr("filter_format", std::string("OIX"))
+          .setAttr("data_format", std::string("NCX"));
     }
 
     case aten::_convolution: {
@@ -98,7 +99,8 @@ Operator createOperator(Node* node) {
           .setAttr("pads_end", Operator::Ints, 4)
           .setAttr("dilations", Operator::Ints, 5)
           .setAttr("groups", Operator::Int, 8)
-          .setAttr("filter_format", std::string("OIX"));
+          .setAttr("filter_format", std::string("OIX"))
+          .setAttr("data_format", std::string("NCX"));
     }
 
     case aten::batch_norm: {
@@ -109,7 +111,8 @@ Operator createOperator(Node* node) {
       return Operator(node, opkind::BatchNormInference)
           .setInput(0, 1, 2, 3, 4)
           .setOutput(0)
-          .setAttr("epsilon", Operator::Float, 7);
+          .setAttr("epsilon", Operator::Float, 7)
+          .setAttr("data_format", std::string("NCX"));
     }
 
     case aten::layer_norm: {
@@ -214,7 +217,8 @@ Operator createOperator(Node* node) {
           .setAttr("pads_begin", Operator::Ints, 3)
           .setAttr("pads_end", Operator::Ints, 3)
           .setAttr("dilations", Operator::Ints, 4)
-          .setAttr("rounding_type", std::string(rounding_type));
+          .setAttr("rounding_type", std::string(rounding_type))
+          .setAttr("data_format", std::string("NCX"));
     }
 
     case aten::avg_pool2d: {
@@ -233,7 +237,8 @@ Operator createOperator(Node* node) {
           .setAttr("pads_begin", Operator::Ints, 3)
           .setAttr("pads_end", Operator::Ints, 3)
           .setAttr("exclude_pad", !Operator::Bool(node, 5))
-          .setAttr("rounding_type", std::string(rounding_type));
+          .setAttr("rounding_type", std::string(rounding_type))
+          .setAttr("data_format", std::string("NCX"));
     }
 
     case aten::matmul: {

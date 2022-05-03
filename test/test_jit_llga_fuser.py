@@ -204,8 +204,7 @@ class TestOp(JitLlgaTestCase):
 
         for x, y in self._gen_binary_inputs():
             _, graph = self.checkTrace(forward_add, [x, y])
-            # single-op partitions shouldn't be created
-            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
+            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     def test_add_scalar(self):
         def add_scalar(x):
@@ -213,8 +212,7 @@ class TestOp(JitLlgaTestCase):
 
         x = torch.rand(32, 32)
         _, graph = self.checkTrace(add_scalar, [x])
-        # single-op partitions shouldn't be created.
-        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
+        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     def test_addmm(self):
         def addmm(x, y, z):
@@ -235,7 +233,7 @@ class TestOp(JitLlgaTestCase):
         for x, y in self._gen_binary_inputs():
             _, graph = self.checkTrace(forward_mul, [x, y])
             # single-op partitions shouldn't be created
-            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
+            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     def test_identity_binary(self):
         def forward(x):
@@ -449,6 +447,38 @@ class TestFusionPattern(JitLlgaTestCase):
         # conv can exist in a single-op oneDNN Graph partition but not relu
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
         self.assertFused(graph, ['aten::_convolution'])
+
+    def test_rewrap_tensor_input_to_pytorch(self):
+        class M(nn.Module):
+            def __init__(self, eltwise_fn, data_type):
+                super(M, self).__init__()
+                self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True, dtype=data_type)
+                self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True, dtype=data_type)
+                self.eltwise = eltwise_fn
+                self.adaptive_avg_pool_2d = nn.AdaptiveAvgPool2d((5, 7))
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                x = self.eltwise(x)
+                x = self.conv2(x)
+                x = self.eltwise(x)
+                x = torch.add(x, y)
+                x = self.adaptive_avg_pool_2d(x)
+                return x
+
+        eltwise_fn_name = 'relu'
+        eltwise_fn = get_eltwise_fn(eltwise_fn_name)
+        # Add bfloat16 later
+        for data_type in [torch.float]:
+            m = M(eltwise_fn, data_type)
+            m = m.to(memory_format=torch.channels_last)
+            x = torch.rand(1, 32, 28, 28, dtype=data_type).to(memory_format=torch.channels_last)
+            y = torch.rand(1, 32, 28, 28, dtype=data_type).to(memory_format=torch.channels_last)
+            # Simply test if the output is accurate
+            # The output of the second partition is input to adaptive_avg_pool2d, which is
+            # unsupported by LLGA, so it must be handled by PyTorch, which should receive
+            # correct strides info of the channels-last tensor.
+            graph, _ = self.checkTrace(m, [x, y])
 
 
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")

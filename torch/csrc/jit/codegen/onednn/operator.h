@@ -12,9 +12,7 @@ namespace onednn {
 class Operator {
  public:
   Operator(const Node* node, dnnl::graph::op::kind kind)
-      : n(node), o(getId(node), kind, node->kind().toQualString()), k(kind) {
-    setAttr("data_format", std::string("NCX"));
-  }
+      : n(node), o(getId(node), kind, node->kind().toQualString()), k(kind) {}
 
   Operator& setInputValue(Value* v) {
     if (v->mustNotBeNone())
