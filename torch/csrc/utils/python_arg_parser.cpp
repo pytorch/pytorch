@@ -252,13 +252,13 @@ auto handle_torch_function_no_python_arg_parser(
   const bool is_torch_function = torch_function_name == TorchFunctionName::TorchFunction;
   const auto& maybe_mode = is_torch_function ? at::impl::PythonTorchFunctionTLS::get_mode() : at::impl::TorchDispatchModeTLS::get_state();
   if (maybe_mode) {
-    mode_obj = maybe_mode->ptr(getPyInterpreter();
+    mode_obj = maybe_mode->ptr(getPyInterpreter());
     TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
     TORCH_INTERNAL_ASSERT(args != nullptr);
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
-    optional<torch::overrides::no_torch_function_mode> tf_g;
-    optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
+    at::optional<torch::overrides::no_torch_function_mode> tf_g;
+    at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
     if (is_torch_function) {
       tf_g.emplace();
     } else{
