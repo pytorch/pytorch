@@ -93,7 +93,7 @@ class PrimContext(torch.overrides.TorchFunctionMode):
         if isinstance(a, TensorMeta):
             if a.node is not None:
                 raise ValueError("Attempting to reuse a TensorMeta in a new trace!")
-            a.name = name
+            a.tname = name
             a.node = node
 
         return a
@@ -138,7 +138,7 @@ class PrimContext(torch.overrides.TorchFunctionMode):
             node = self.graph.create_node(
                 "call_function", func, name=output_name, args=args, kwargs=kwargs
             )
-            output.name = output_name
+            output.tname = output_name
             output.node = node
 
             # Marks uses
