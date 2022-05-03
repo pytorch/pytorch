@@ -8,8 +8,11 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 
 #include <c10/util/Exception.h>
-#include <jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <memory>
 #include <unordered_map>
 
@@ -143,6 +146,13 @@ void RegisterDecomposition(
     std::shared_ptr<Graph> g) {
   loadDecompositionFunctions();
   std::lock_guard<std::mutex> guard(lock);
+  Inline(*g);
+  for (const auto i : c10::irange(2)) {
+    (void)i; // Suppress unused variable warning
+    PeepholeOptimize(g);
+    ConstantPropagationImmutableTypes(g);
+  }
+
   std::unique_ptr<GraphFunction> new_func(new GraphFunction(
       schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE));
   user_registered_funcs.emplace(&schema, std::move(new_func));
@@ -150,11 +160,15 @@ void RegisterDecomposition(
   schema_to_decomposition[&schema] = g;
 }
 
-Function* GetDecompositionExecutor(const char* schema_literal) {
-  auto& schema = getOperatorForLiteral(schema_literal)->schema();
+Function* GetDecompositionExecutor(const FunctionSchema& schema) {
   auto maybe_func = GetDecompositionFunction(schema);
   TORCH_INTERNAL_ASSERT(maybe_func);
   return *maybe_func;
+}
+
+Function* GetDecompositionExecutor(const char* schema_literal) {
+  auto& schema = getOperatorForLiteral(schema_literal)->schema();
+  return GetDecompositionExecutor(schema);
 }
 
 } // namespace jit
