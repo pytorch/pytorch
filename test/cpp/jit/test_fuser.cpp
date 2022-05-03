@@ -60,7 +60,7 @@ class FuserTest : public ::testing::Test {
     old_nvfuser_value_ = fuser::cuda::setEnabled(false);
   }
   void TearDown() override {
-    fuser::cuda::setEnabled(old_fuser_value_);
+    fuser::cuda::setEnabled(old_nvfuser_value_);
   }
 
  private:
