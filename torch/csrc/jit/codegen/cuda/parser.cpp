@@ -29,6 +29,7 @@ namespace cuda {
 
 constexpr auto kNumUnaryOps = 10;
 constexpr auto kNumUnaryFloatOps = 23;
+constexpr auto kNumUnaryIsOps = 6;
 
 constexpr auto kNumBinaryFloatOps = 3;
 constexpr auto kNumBinaryComparisonOps = 12;
@@ -1205,6 +1206,40 @@ class IrParser {
                 op_mapping[node->kind()],
                 operand,
                 TypePromotion::float_op_config);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(out, format));
+          },
+          isInputNonSizeZeroTensor,
+          nullptr);
+    }
+
+    std::array<const char*, kNumUnaryIsOps> UnaryIsOp = {
+        "aten::isfinite(Tensor self) -> Tensor",
+        "aten::isinf(Tensor self) -> Tensor",
+        "aten::isnan(Tensor self) -> Tensor",
+        "aten::isneginf(Tensor self) -> Tensor",
+        "aten::isposinf(Tensor self) -> Tensor",
+        "aten::isreal(Tensor self) -> Tensor"};
+    for (auto signature : UnaryIsOp) {
+      auto ptr_op = getOperatorForLiteral(signature);
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            static std::unordered_map<Symbol, UnaryOpType> op_mapping({
+                {aten::isfinite, UnaryOpType::IsFinite},
+                {aten::isinf, UnaryOpType::IsInf},
+                {aten::isnan, UnaryOpType::IsNan},
+                {aten::isneginf, UnaryOpType::IsNegInf},
+                {aten::isposinf, UnaryOpType::IsPosInf},
+                {aten::isreal, UnaryOpType::IsReal},
+            });
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt, value_map[node->inputs()[0]->unique()]);
+            auto operand = list_val.front();
+            list_val.pop_front();
+            auto out = unaryIsOp(op_mapping[node->kind()], operand);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
