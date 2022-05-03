@@ -642,7 +642,7 @@ void initJITBindings(PyObject* module) {
           [](const std::string& op_name, bool flip = true) {
             return fuser::cuda::skipNode(op_name, flip);
           })
-      .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+      .def("_jit_set_nvfuser_enabled", &fuser::cuda::setEnabled)
       .def(
           "_jit_set_nvfuser_single_node_mode",
           [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
@@ -662,7 +662,7 @@ void initJITBindings(PyObject* module) {
             fuser::cuda::getCudaFusionGuardMode() = profiling_flag;
             return oldState;
           })
-      .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
+      .def("_jit_nvfuser_enabled", &fuser::cuda::isEnabled)
       .def(
           "_jit_nvfuser_set_comparison_callback",
           [](bool run_fallback, py::function fn) {
