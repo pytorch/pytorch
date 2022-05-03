@@ -40,7 +40,7 @@ jobs:
             --deprecated-functions-path "tools/autograd/deprecated.yaml"
 
       - name: Run lintrunner on all files
-        # if: github.event_name == 'push'
+        if: github.event_name == 'push'
         run: lintrunner -vv --paths-cmd='git grep -Il .' --force-color
 
       - name: Run lintrunner on PR files
