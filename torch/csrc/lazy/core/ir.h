@@ -11,7 +11,6 @@
 #include <utility>
 #include <vector>
 
-#include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/core/hash.h>

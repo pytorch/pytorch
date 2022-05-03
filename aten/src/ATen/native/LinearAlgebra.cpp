@@ -67,8 +67,14 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   // values larger than 10^53 (same for negative numbers), so that's fine.
   auto ord = scalar_ord.toDouble();
 
-  // If norm < 0 || norm == infty, we cannot reduce over an empty dimension (see issue 52783)
-  if (opt_dim.has_value() && self.numel() == 0 && (ord < 0. || ord == INFINITY)) {
+  // For more context, see issue 52783
+  // If the tensor is empty and norm < 0 || norm == infty
+  //   - We cannot reduce the whole tensor
+  //   - We cannot reduce over an empty dimension
+  if (self.numel() == 0 && (ord < 0. || ord == INFINITY)) {
+    TORCH_CHECK(opt_dim.has_value(),
+      "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
+      "tensor because the operation does not have an identity");
     for (auto dim_num : dim) {
       TORCH_CHECK(self.size(dim_num) != 0,
         "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
@@ -84,7 +90,7 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
         "linalg.vector_norm(): dtype should be ", self.is_complex() ? "complex" : "real",
         " for ", self.is_complex() ? "complex" : "real", " inputs, but got ", dtype);
     TORCH_CHECK(promoteTypes(self.scalar_type(), dtype) == dtype,
-        "linalg.vector_norm(): the dtype of x ", "(", self.scalar_type(), ") should be convertible ",
+        "linalg.vector_norm(): the dtype of the input ", "(", self.scalar_type(), ") should be convertible ",
         "without narrowing to the specified dtype (", dtype, ").");
   }
 
