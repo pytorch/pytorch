@@ -564,7 +564,7 @@ namespace {
 // tensor.
 class MaybeCopySchemaInfo {
  public:
-  MaybeCopySchemaInfo(c10::FunctionSchema schema)
+  explicit MaybeCopySchemaInfo(c10::FunctionSchema schema)
       : schema_(std::move(schema)) {}
 
   virtual ~MaybeCopySchemaInfo() = default;
@@ -601,7 +601,7 @@ class MaybeCopySchemaInfo {
 
 class ToMaybeCopySchemaInfo : public MaybeCopySchemaInfo {
  public:
-  ToMaybeCopySchemaInfo(c10::FunctionSchema schema)
+  explicit ToMaybeCopySchemaInfo(c10::FunctionSchema schema)
       : MaybeCopySchemaInfo(std::move(schema)) {}
 
  private:
@@ -636,7 +636,7 @@ class ToMaybeCopySchemaInfo : public MaybeCopySchemaInfo {
 
 class ReshapeMaybeCopySchemaInfo : public MaybeCopySchemaInfo {
  public:
-  ReshapeMaybeCopySchemaInfo(c10::FunctionSchema schema)
+  explicit ReshapeMaybeCopySchemaInfo(c10::FunctionSchema schema)
       : MaybeCopySchemaInfo(std::move(schema)) {}
 
  private:

@@ -1065,7 +1065,7 @@ TEST(StaticRuntime, Reshape) {
   auto d = std::vector<int64_t>({5, 1, 2, 2});
   std::vector<IValue> args1{c, d};
 
-  auto testScript = [](const auto src,
+  auto testScript = [](const char* src,
                        const std::vector<IValue>& args1,
                        const std::vector<IValue>& args2,
                        bool enable_copy_variants) {
@@ -2147,7 +2147,7 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
         %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
         %output = quantized::linear_dynamic_fp16(%input, %packed_params)
         %ret = aten::clone(%output, %bias)
-        return (%output)
+        return (%ret)
   )IR";
   at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
   at::Tensor input = torch::randn({3, 2}, torch::kFloat);
@@ -2168,7 +2168,7 @@ TEST(StaticRuntime, QuantizedLinearReluDynamicFp16) {
         %packed_params = quantized::linear_prepack_fp16(%weights, %bias)
         %output = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
         %ret = aten::clone(%output, %bias)
-        return (%output)
+        return (%ret)
   )IR";
   at::Tensor weight = torch::randn({3, 2}, torch::kFloat);
   at::Tensor input = torch::randn({3, 2}, torch::kFloat);

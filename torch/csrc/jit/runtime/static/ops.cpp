@@ -97,7 +97,7 @@ at::Tensor& reshape_copy_out(
   const auto& shape = infer_size
       ? at::infer_size_dv(proposed_shape, self.numel())
       : proposed_shape;
-  at::native::resize_(out, shape);
+  at::native::resize_(out, shape, c10::nullopt);
 
   auto self_contig = self.expect_contiguous();
 
@@ -2726,7 +2726,7 @@ REGISTER_OPERATOR_FUNCTOR(
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::reshape_maybe_copy_out,
     static_runtime_reshape_maybe_copy_out,
-    [](Node* n) -> SROperator {
+    [](Node*) -> SROperator {
       return [](ProcessedNode* pnode) {
         const auto& self = pnode->Input(0).toTensor();
         const auto proposed_shape = pnode->Input(1).toDimVector();
@@ -2752,7 +2752,7 @@ REGISTER_OPERATOR_FUNCTOR(
           out = at::_unsafe_view(
               at::native::copy_(out, self, /*non_blocking=*/false), shape);
         } else {
-          at::native::reshape_copy_out(out, self, shape, /*infer_shape=*/false);
+          at::native::reshape_copy_out(out, self, shape, /*infer_size=*/false);
         }
       };
     });

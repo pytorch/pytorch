@@ -734,12 +734,6 @@ void BlockInfo::prepare_for_memory_planner(
 
     for (const auto i : c10::irange(outputs.size())) {
       const Value* out_v = outputs[i];
-      if (is_optimizable_container) {
-        // We "leak" certain container types because their allocations
-        // take a long time
-        leaked_values_.insert(out_v);
-        continue;
-      }
 
       // This can happen in ops that manage only a subset of their outputs like
       // reshape_maybe_copy_out
@@ -758,8 +752,15 @@ void BlockInfo::prepare_for_memory_planner(
       if (value_group_.isAlwaysAlive(out_v)) {
         continue;
       }
+
       if (is_tensor_type) {
         managed_tensor_values_.insert(out_v);
+      } else if (is_optimizable_container) {
+        // We "leak" certain container types because their allocations
+        // take a long time.
+        // N.B. we have to do this after the isAlwaysAlive check
+        leaked_values_.insert(out_v);
+        continue;
       }
     }
   }
@@ -1853,7 +1854,7 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
-      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_OP);
   if (!step_callbacks.empty()) {
     at::RecordFunction guard(std::move(step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
