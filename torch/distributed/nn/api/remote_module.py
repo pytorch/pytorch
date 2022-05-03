@@ -9,6 +9,7 @@ from typing import (
     Dict,
     Iterator,
     List,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -366,7 +367,7 @@ class _RemoteModule(nn.Module):
 
     def load_state_dict(
         self,
-        state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
+        state_dict: Mapping[str, Any],
         strict: bool = True,
     ):
         _raise_not_supported(self.load_state_dict.__name__)

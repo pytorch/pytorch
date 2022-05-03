@@ -605,9 +605,9 @@ Tensor empty_like_sparse_csr(
         self.col_indices().clone(),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
-        dtype,
+        optTypeMetaToScalarType(options.dtype()),
         self.layout(),
-        device);
+        options.device());
     return result;
   } else if (options.layout() == kStrided) {
     return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
