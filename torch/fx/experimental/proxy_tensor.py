@@ -16,12 +16,12 @@ from contextlib import contextmanager
 __all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx"]
 aten = torch.ops.aten
 
-CURRENT_DECOMPOSITION_TABLE = {}
+CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
 
 @contextmanager
 def no_dispatch():
-    guard = torch._C._DisableTorchDispatch()
+    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
     try:
         yield
     finally:
@@ -40,9 +40,7 @@ def decompose(decomposition_table):
 
 
 class ProxyTensor(torch.Tensor):
-    elem: torch.Tensor
-
-    __slots__ = ['proxy']
+    proxy: fx.Proxy
 
     @staticmethod
     def __new__(cls, elem, proxy):
@@ -51,15 +49,15 @@ class ProxyTensor(torch.Tensor):
             proxy.node.meta['tensor_meta'] = {}
             r = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
         else:
-            r = super().__new__(cls, elem)
+            r = super().__new__(cls, elem)  # type: ignore[call-arg]
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
-        r.proxy = proxy
+        r.proxy = proxy  # type: ignore[attr-defined]
 
         return r
 
     def __repr__(self):
         with no_dispatch():
-            return f"ProxyTensor({self.as_subclass(torch.Tensor)}, proxy={self.proxy})"
+            return f"ProxyTensor({self.as_subclass(torch.Tensor)}, proxy={self.proxy})"  # type: ignore[arg-type]
 
     __torch_function__ = _disabled_torch_function_impl
 
@@ -140,7 +138,7 @@ class PythonKeyTracer(Tracer):
 
 
 def dispatch_trace(
-    root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None
+    root: Union[torch.nn.Module, Callable], concrete_args: Optional[Tuple[Any, ...]] = None
 ) -> GraphModule:
     tracer = PythonKeyTracer()
     graph = tracer.trace(root, concrete_args)
@@ -172,10 +170,12 @@ def wrap_key(f, inps):
     return wrapped
 
 
-def make_fx(f, decomposition_table={}):
+def make_fx(f, decomposition_table=None):
+    if decomposition_table is None:
+        decomposition_table = {}
     @functools.wraps(f)
     def wrapped(*args):
-        phs = pytree.tree_map(lambda x: fx.PH, args)
+        phs = pytree.tree_map(lambda x: fx.PH, args)  #type: ignore[attr-defined]
         with decompose(decomposition_table):
             t = dispatch_trace(wrap_key(f, args), concrete_args=tuple(phs))
         return t
