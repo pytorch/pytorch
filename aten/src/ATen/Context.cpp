@@ -188,6 +188,18 @@ bool Context::hasMKLDNN() {
 #endif
 }
 
+bool Context::hasMPS() {
+#if defined(__APPLE__) and defined(TARGET_ON_MAC)
+  if (@available(macOS 12.3, *)) {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MPS);
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
 bool Context::hasOpenMP() {
 #ifdef _OPENMP
   return true;
