@@ -10478,7 +10478,6 @@ op_db: List[OpInfo] = [
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
                      skips=(
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ),
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.rfft2',
@@ -10492,7 +10491,6 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False,
                      decorators=[
                          precisionOverride({torch.float: 1e-4}),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ],),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
@@ -10505,7 +10503,6 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False,
                      decorators=[
                          precisionOverride({torch.float: 1e-4}),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ],),
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
@@ -10546,7 +10543,6 @@ op_db: List[OpInfo] = [
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and(torch.bool),
                      skips=(
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ),
                      check_batched_grad=False),
     SpectralFuncInfo('fft.ihfft2',
@@ -10561,7 +10557,6 @@ op_db: List[OpInfo] = [
                      decorators=(
                          # The values for attribute 'shape' do not match: torch.Size([5, 6, 5]) != torch.Size([5, 6, 6]).
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                          DecorateInfo(precisionOverride({torch.float: 2e-4}), 'TestFFT', 'test_reference_nd'),
                          # Mismatched elements!
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -10580,7 +10575,6 @@ op_db: List[OpInfo] = [
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                          # Mismatched elements!
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                          DecorateInfo(
                              precisionOverride({torch.float: 2e-4}),
                              'TestFFT', 'test_reference_nd')],
@@ -10638,7 +10632,6 @@ op_db: List[OpInfo] = [
                skipCPUIfNoFFT,
                DecorateInfo(unittest.skip("Skipped! stft does not match the native function"),
                             'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ],
            dtypes=floating_and_complex_types(),
@@ -12244,7 +12237,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv1d',
            aliases=('conv1d',),
            aten_name='conv1d',
-           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv1d,
@@ -12269,7 +12262,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
            aten_name='conv2d',
-           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
@@ -13622,24 +13615,27 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
                     supports_one_python_scalar=True,
-                    # For the testing of reference implemenations the binary_ufunc does not use the provided
-                    # sampiling function. They use the default binary ufuncs generator and therefore
-                    # there is still a need to pass in the rhs_make_tensor args and to skip hard coded tests that
-                    # cause int values to be exponentiated to negative exponents
-                    rhs_make_tensor_kwargs=dict(low=1),
-                    sample_inputs_func=sample_inputs_pow,
+                    # Raising integer values to negative values is not causes an error
+                    rhs_make_tensor_kwargs=dict(low=0),
+                    # Logarithims of negative values are outside the domain of the function
+                    lhs_make_tensor_kwargs=dict(low=0),
+                    decorators=(
+                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05)}),
+                                        'TestBinaryUfuncs', 'test_reference_numerics'),
+                    ),
                     skips=(
-                        # TODO convert skips to xfails
+                        # Skipping integers because they are being raised to negative powers causing an error
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
+                                     dtypes=[torch.int8, torch.int16, torch.int32, torch.int64]),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
+                                     dtypes=[torch.int16, torch.int32, torch.int64]),
+                        # FIXME Complex values error with: Greatest absolute difference: nan at index
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
-                                     dtypes=[torch.int8, torch.int16, torch.int32, torch.int64, torch.complex64, torch.complex128]),
+                                     dtypes=[torch.complex64, torch.complex128]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
-                                     dtypes=[torch.int16, torch.int32, torch.int64, torch.complex64, torch.complex128]),
+                                     dtypes=[torch.complex64, torch.complex128]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
                                      dtypes=[torch.complex64, torch.complex128]),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics',
-                                     dtypes=[torch.int8, torch.int16, torch.int32, torch.int64, torch.complex64]),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_scalar_support',
-                                     dtypes=[torch.float32, torch.int64, torch.complex64]),
                     )),
     BinaryUfuncInfo('float_power',
                     ref=np.float_power,
@@ -13648,14 +13644,17 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
-                    sample_inputs_func=sample_inputs_pow,
+                    # Integer types do not support negative exponentes
+                    rhs_make_tensor_kwargs=dict(low=0),
+                    # Logarithims of negative values are outside the domain of the function
+                    lhs_make_tensor_kwargs=dict(low=0),
                     skips=(
                         # FIXME
                         # AssertionError: Object comparison failed: torch.float64 != torch.float32
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
                         # -3.43399e+38 is outside the range of representable values of type 'float'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-                        # #TODO convert skips to xfails
+                        # Complex values error with: Greatest absolute difference: nan at index
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_small_values',
                                      dtypes=[torch.complex64, torch.complex128]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_reference_numerics_large_values',
@@ -14405,12 +14404,7 @@ op_db: List[OpInfo] = [
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                    supports_out=False,
-                   supports_autograd=False,
-                   skips=(
-                       # Reference: https://github.com/pytorch/pytorch/issues/66402
-                       DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_large",
-                                    device_type='cpu', dtypes=(torch.complex64,), active_if=not (IS_MACOS or IS_WINDOWS)),
-                   )),
+                   supports_autograd=False),
     UnaryUfuncInfo('isinf',
                    ref=np.isinf,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -14950,7 +14944,6 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -16614,6 +16607,7 @@ op_db: List[OpInfo] = [
         'argmax',
         supports_multiple_dims=False,
         supports_autograd=False,
+        assert_jit_shape_analysis=True,
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
