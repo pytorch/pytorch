@@ -12,8 +12,8 @@
 namespace at {
 namespace cuda {
 
-TORCH_CUDA_CPP_API at::Tensor CompileKernel(
-  const std::string& op_string,
+TORCH_CUDA_CPP_API at::Tensor CompileAndLaunchKernel(
+  const std::string& code_string,
   const std::string& kernel_name,
   const std::vector<at::Tensor>& tensors,
   const std::vector<at::Scalar>& extra_args);
@@ -23,8 +23,8 @@ TORCH_CUDA_CPP_API at::Tensor CompileKernel(
 #else
 
 namespace at { namespace cuda {
-TORCH_CUDA_CPP_API at::Tensor CompileKernel(
-  const std::string& op_string,
+TORCH_CUDA_CPP_API at::Tensor CompileAndLaunchKernel(
+  const std::string& code_string,
   const std::string& kernel_name,
   const std::vector<at::Tensor>& tensors,
   const std::vector<at::Scalar>& extra_args) {

@@ -218,6 +218,7 @@ PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject
   END_HANDLE_TH_ERRORS
 }
 
+// Unpack a PyObject to at::Scalar, throw an exception if it fails
 at::Scalar as_scalar(PyObject* arg) {
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
@@ -239,7 +240,9 @@ at::Scalar as_scalar(PyObject* arg) {
   return at::Scalar(THPUtils_unpackDouble(arg));
 }
 
-PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
+// Entrypoint for the callable created by torch.cuda.jiterator
+// See jiterator.py for more details
+PyObject * THCPModule_cudaJiteratorCompileAndLaunchKernel(PyObject *_unused, PyObject *args){
   HANDLE_TH_ERRORS
 
   PyObject* code_string_o = nullptr;
@@ -274,7 +277,7 @@ PyObject * THCPModule_cudaCompileKernel(PyObject *_unused, PyObject *args){
     extra_args.emplace_back(as_scalar(value));
   }
 
-  at::Tensor output = at::cuda::CompileKernel(code_string, kernel_name, tensors, extra_args);
+  at::Tensor output = at::cuda::CompileAndLaunchKernel(code_string, kernel_name, tensors, extra_args);
 
   return THPVariable_Wrap(output);
   END_HANDLE_TH_ERRORS
@@ -660,7 +663,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
   {"_cuda_set_sync_debug_mode", THCPModule_cudaSetSyncDebugMode, METH_O, nullptr},
   {"_cuda_get_sync_debug_mode", THCPModule_cudaGetSyncDebugMode, METH_NOARGS, nullptr},
-  {"_cuda_compile_kernel", THCPModule_cudaCompileKernel, METH_VARARGS, nullptr},
+  {"_cuda_jiterator_compile_and_launch_kernel", THCPModule_cudaJiteratorCompileAndLaunchKernel, METH_VARARGS, nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},

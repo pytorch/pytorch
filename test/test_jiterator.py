@@ -1,12 +1,13 @@
 # Owner(s): ["module: cuda"]
 
 import torch
-from torch.cuda.jiterator import create_jit_fn
+from torch.cuda.jiterator import _create_jit_fn as create_jit_fn
 import sys
-import unittest
-from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, instantiate_parametrized_tests, TEST_WITH_ROCM
-
-TEST_CUDA = torch.cuda.is_available()
+from itertools import product
+from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, TEST_CUDA, TEST_WITH_ROCM
+from torch.testing._internal.common_dtype import all_types_and_complex_and
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, dtypes, toleranceOverride, tol)
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
@@ -17,54 +18,26 @@ if TEST_WITH_ROCM:
     TestCase = object  # noqa: F811
 
 
-code_string = "template <typename T> T my_fused_kernel(T x, T y, T alpha, T beta) { return  -x * y + x - y + alpha - beta; }"
-jitted_fn = create_jit_fn(code_string, alpha=0, beta=0)
+code_string = "template <typename T> T my_fused_kernel(T x, T y, T alpha, T beta) { return alpha * x + beta * y; }"
+jitted_fn = create_jit_fn(code_string, alpha=1, beta=1)
 
-def ref_fn(x, y, alpha=0, beta=0):
-    return -x * y + x - y + alpha - beta
+def ref_fn(x, y, alpha=1, beta=1):
+    return alpha * x + beta * y
 
 class TestPythonJiterator(TestCase):
-    @parametrize("dtype", [
-        torch.float, torch.double, torch.half,
-        # torch.bfloat16,  failing due to numerical difference
-        torch.uint8, torch.int8, torch.int16, torch.int, torch.long,
-        torch.complex64, torch.complex128,
-        # torch.bool,
-    ])
-    def test_all_dtypes(self, dtype):
-        a = torch.rand(3, device='cuda').mul(10).type(dtype)
-        b = torch.rand(3, device='cuda').mul(10).type(dtype)
-
-        expected = ref_fn(a, b)
-        result = jitted_fn(a, b)
-
-        rtol = 0.00001
-        if dtype is torch.half:
-            rtol = 1e-2
-        assert torch.allclose(expected, result, rtol=rtol)
 
     shape_stride_cases = [
-        # shape: [1]
-        ([1], [1]),        # contiguous
-        # shape: [3]
-        ([3], [1]),        # contiguous
-        ([3], [3]),        # non-contiguous
-        # shape: [3, 1]
-        ([3, 1], [1, 1]),  # contiguous
         ([3, 1], [1, 3]),  # non-contiguous
-        # shape: [1, 3]
-        ([1, 3], [3, 1]),  # contiguous
-        ([1, 3], [1, 2]),  # non-contiguous
-        # shape: [3, 3]
         ([3, 3], [3, 1]),  # contiguous
-        ([3, 3], [2, 1]),  # non-contiguous
     ]
 
     @parametrize("a_shape_stride", shape_stride_cases)
     @parametrize("b_shape_stride", shape_stride_cases)
-    def test_all_shape_stride(self, a_shape_stride, b_shape_stride, dtype=torch.float):
-        a_buffer = torch.rand(9, device='cuda').mul(10).type(dtype)
-        b_buffer = torch.rand(9, device='cuda').mul(10).type(dtype)
+    @dtypes(*product(all_types_and_complex_and(torch.half, torch.bfloat16),
+                     all_types_and_complex_and(torch.half, torch.bfloat16)))
+    def test_all_dtype_and_layout(self, device, dtypes, a_shape_stride, b_shape_stride):
+        a_buffer = torch.rand(9, device=device).mul(10).type(dtypes[0])
+        b_buffer = torch.rand(9, device=device).mul(10).type(dtypes[1])
 
         a = a_buffer.as_strided(*a_shape_stride)
         b = b_buffer.as_strided(*b_shape_stride)
@@ -72,53 +45,15 @@ class TestPythonJiterator(TestCase):
         expected = ref_fn(a, b)
         result = jitted_fn(a, b)
 
-        rtol = 0.00001
-        if dtype is torch.half:
-            rtol = 1e-2
-        assert torch.allclose(expected, result, rtol=rtol)
+        self.assertEqual(expected, result)
 
-    shape_stride_cases_sm = [
-        ([3, 1], [1, 3]),  # non-contiguous
-        ([3, 3], [3, 1]),  # contiguous
-    ]
-    dtypes = [
-        torch.float, torch.double, torch.half,
-        # torch.bfloat16,  failing due to numerical difference
-        # torch.uint8,   failing
-        torch.int8, torch.int16, torch.int, torch.long,
-        torch.complex64, torch.complex128,
-    ]
-
-    @parametrize("a_dtype", dtypes)
-    @parametrize("b_dtype", dtypes)
-    @parametrize("a_shape_stride", shape_stride_cases_sm)
-    @parametrize("b_shape_stride", shape_stride_cases_sm)
-    def test_all_dynamic_casts(self, a_dtype, b_dtype, a_shape_stride, b_shape_stride):
-        a_buffer = torch.rand(9, device='cuda').mul(10).type(a_dtype)
-        b_buffer = torch.rand(9, device='cuda').mul(10).type(b_dtype)
-
-        a = a_buffer.as_strided(*a_shape_stride)
-        b = b_buffer.as_strided(*b_shape_stride)
-
-        expected = ref_fn(a, b)
-        result = jitted_fn(a, b)
-
-        rtol = 0.00001
-        if a_dtype is torch.half or b_dtype is torch.half:
-            rtol = 1e-2
-        assert torch.allclose(expected, result, rtol=rtol)
-
-    @parametrize("dtype", [
-        torch.float, torch.double, torch.half,
-        # output type is mismatching for following cases
-        # torch.uint8, torch.int8, torch.int16, torch.int, torch.long,
-        # torch.bfloat16,  failing due to numerical difference
-    ])
+    @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
     @parametrize("alpha", [-1, 2.0, None])
     @parametrize("beta", [3, -4.2, None])
-    def test_extra_args(self, dtype, alpha, beta):
-        a = torch.rand(3, device='cuda').mul(10).type(dtype)
-        b = torch.rand(3, device='cuda').mul(10).type(dtype)
+    @toleranceOverride({torch.float16 : tol(atol=1e-2, rtol=1e-3)})
+    def test_extra_args(self, device, dtype, alpha, beta):
+        a = torch.rand(3, device=device).mul(10).type(dtype)
+        b = torch.rand(3, device=device).mul(10).type(dtype)
 
         extra_args = {}
         if alpha is not None:
@@ -129,12 +64,23 @@ class TestPythonJiterator(TestCase):
         expected = ref_fn(a, b, **extra_args)
         result = jitted_fn(a, b, **extra_args)
 
-        rtol = 0.00001
-        if dtype is torch.half:
-            rtol = 1e-2
-        assert torch.allclose(expected, result, rtol=rtol)
+        self.assertEqual(expected, result)
 
-    @parametrize("num_inputs", [1, 2, 3, 4, 5, 6, 7, 8])
+    def test_bool_extra_args(self, device):
+        code_string = "template <typename T> T conditional(T x, T mask, bool is_train) { return is_train ? x * mask : x; }"
+        jitted_fn = create_jit_fn(code_string, is_train=False)
+
+        def ref_fn(x, mask, is_train):
+            return x * mask if is_train else x
+
+        a = torch.rand(3, device=device)
+        b = torch.rand(3, device=device)
+
+        expected = ref_fn(a, b, is_train=True)
+        result = jitted_fn(a, b, is_train=True)
+        self.assertEqual(expected, result)
+
+    @parametrize("num_inputs", list(range(1, 9)))
     def test_various_num_inputs(self, num_inputs):
         inputs = []
         for i in range(num_inputs):
@@ -151,7 +97,7 @@ class TestPythonJiterator(TestCase):
         expected = ref_fn(*inputs)
         result = jitted_fn(*inputs)
 
-        assert torch.allclose(expected, result)
+        self.assertEqual(expected, result)
 
     @parametrize("code_string", [
         "template <typename T> T my _kernel(T x) { return x; }",
@@ -162,7 +108,7 @@ class TestPythonJiterator(TestCase):
             jitted_fn = create_jit_fn(code_string)
 
 
-instantiate_parametrized_tests(TestPythonJiterator)
+instantiate_device_type_tests(TestPythonJiterator, globals(), only_for="cuda")
 
 if __name__ == '__main__':
     run_tests()

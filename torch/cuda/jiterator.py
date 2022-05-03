@@ -1,10 +1,10 @@
 import torch
 from torch import Tensor
-from typing import Callable
+from typing import Callable, List
 
 import re
 
-__all__ = ["create_jit_fn"]
+__all__ : List[str] = []
 
 class _CodeParser:
     def __init__(self, code_string: str):
@@ -26,10 +26,10 @@ class _CodeParser:
             + optional_ws + function_body \
             + optional_ws
 
-        result = re.match(pattern, code_string)
+        result = re.match(pattern, code_string, re.DOTALL)  # DOTALL for matching multiline
 
         if result is None:
-            raise Exception("Couldn't parse code, please check correctness: ", code_string)
+            raise Exception(f"Couldn't parse code, please check correctness:\n {code_string}")
 
         self.template_params = result["template_params"]
         self.return_type = result["return_type"]
@@ -38,12 +38,19 @@ class _CodeParser:
         self.function_body = result["function_body"]
 
 
-def create_jit_fn(code_string: str, **kwargs) -> Callable:
+def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     """
-    Create a jiterator-generated cuda kernel.
+    Create a jiterator-generated cuda kernel for an elementwise op.
+
+    The code string has to be a valid CUDA function that describes the computation for a single element. The code
+    string has to follow the c++ template pattern, as shown in the example below. This function will be inlined
+    into elementwise kernel template, and compiled on the fly. Compiled kernel will be cached in memory, as well as
+    local temp dir.
+
+    Jiterator-generated kernels accepts noncontiguous tensors, and supports boardcasting and type promotion.
 
     Args:
-        code_string (string): CUDA code string to be compiled by jiterator
+        code_string (string): CUDA code string to be compiled by jiterator.
         kwargs (Dict, optional): Keyword arguments for generated function
 
     Examples:
@@ -58,10 +65,18 @@ def create_jit_fn(code_string: str, **kwargs) -> Callable:
         This API is in beta and may change in future releases.
 
     .. warning::
-        Jiterator only supports elementwise kernels with up to 8 tensor inputs
+        Jiterator only supports up to 8 tensor inputs
+
+    .. warning::
+        All input tensors must live in CUDA device
+
     """
     class JittedFunction:
         def __init__(self, code_string: str, **kwargs):
+
+            if not torch.cuda.is_available():
+                raise Exception("Jiterator is only supported on CUDA GPUs, no CUDA GPUs are available.")
+
             self.code_string = code_string
 
             parsed_code = _CodeParser(code_string)
@@ -79,7 +94,7 @@ def create_jit_fn(code_string: str, **kwargs) -> Callable:
                 else:
                     raise KeyError(f"{key} is not declared in function definition")
 
-            return torch._C._cuda_compile_kernel(
+            return torch._C._cuda_jiterator_compile_and_launch_kernel(
                 self.code_string,
                 self.kernel_name,
                 tensors,

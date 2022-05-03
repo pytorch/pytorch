@@ -130,4 +130,4 @@ Jiterator (beta)
     :toctree: generated
     :nosignatures:
 
-    jiterator.create_jit_fn
+    jiterator._create_jit_fn
