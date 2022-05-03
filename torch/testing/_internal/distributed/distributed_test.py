@@ -4439,7 +4439,9 @@ class DistributedTest:
             self._test_ddp_hook_parity(
                 state=state, hook=post_localSGD.post_localSGD_hook
             )
-            state.post_local_gradient_allreduce = False
+            state = post_localSGD.PostLocalSGDState(
+                process_group=None, subgroup=dist.group.WORLD, start_localSGD_iter=10, post_local_gradient_allreduce=False 
+            )
             self._test_ddp_hook_parity(
                 state=state, hook=post_localSGD.post_localSGD_hook
             )
@@ -4454,20 +4456,12 @@ class DistributedTest:
                 self._test_ddp_hook_parity(
                     state=state, hook=post_localSGD.post_localSGD_hook
                 )
-                state.post_local_gradient_allreduce = False
-                self._test_ddp_hook_parity(
-                    state=state, hook=post_localSGD.post_localSGD_hook
-                )
 
             # Since we start local SGD later than the total number of 100 iterations,
             # no local SGD actually is executed, and we don't even need to provide a subgroup for this case.
             state = post_localSGD.PostLocalSGDState(
                 process_group=None, subgroup=None, start_localSGD_iter=1000
             )
-            self._test_ddp_hook_parity(
-                state=state, hook=post_localSGD.post_localSGD_hook
-            )
-            state.post_local_gradient_allreduce = False
             self._test_ddp_hook_parity(
                 state=state, hook=post_localSGD.post_localSGD_hook
             )
