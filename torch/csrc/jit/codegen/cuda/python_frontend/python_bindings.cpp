@@ -2,6 +2,7 @@
 
 #ifdef USE_CUDA
 #include <c10/util/ArrayRef.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -117,10 +118,26 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def("print_kernel", [](PythonFusionOwner& self) { self.printKernel(); });
 
   // Bindings to Types required for Tensor/Scalar Creation
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<TensorView>(nvfuser, "TensorView");
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<torch::jit::fuser::cuda::Val>(nvfuser, "Val");
+  py::class_<TensorView>(nvfuser, "TensorView")
+      .def(
+          "__str__",
+          [](TensorView& self) -> std::string {
+            std::stringstream ss;
+            TORCH_CHECK(
+                self.getDataType().has_value(),
+                "TensorView does not have DataType?");
+            ss << self.getDataType().value();
+            return self.toString() + " DataType: " + ss.str() +
+                " Contiguity: " + self.domain()->getContiguityString();
+          },
+          py::return_value_policy::reference);
+  py::class_<torch::jit::fuser::cuda::Val>(nvfuser, "Val")
+      .def(
+          "__str__",
+          [](torch::jit::fuser::cuda::Val& self) -> std::string {
+            return self.toString();
+          },
+          py::return_value_policy::reference);
 
   // C++ Side of Context Manager used to mimic the FusionGuard as a way
   // to programatically distinguish code used to define the Fusion instead
@@ -168,6 +185,25 @@ void initNvFuserPythonBindings(PyObject* module) {
                 .build();
           },
           py::arg("ndims"),
+          py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
+          py::return_value_policy::reference)
+      .def_static(
+          "define_tensor",
+          [](size_t ndims,
+             std::vector<bool> contiguity,
+             torch::jit::fuser::cuda::DataType dtype =
+                 torch::jit::fuser::cuda::DataType::Float) -> TensorView* {
+            TORCH_CHECK(
+                ndims == contiguity.size(),
+                "The number of dimensions specified does not match contiguity.");
+            return TensorViewBuilder()
+                .ndims(ndims)
+                .dtype(dtype)
+                .contiguity(std::move(contiguity))
+                .build();
+          },
+          py::arg("ndims"),
+          py::arg("contiguity"),
           py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
           py::return_value_policy::reference)
       .def_static(
@@ -493,10 +529,44 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def_static(
       "sum", &torch::jit::fuser::cuda::sum, py::return_value_policy::reference);
 
-  // Broadcast operation
+  // Broadcast operations
   nvf_ops.def_static(
       "broadcast",
       &torch::jit::fuser::cuda::broadcast,
+      py::return_value_policy::reference);
+  // TODO: We don't have a way to realize a tensor if the operation creates
+  // the output of a fusion.
+  nvf_ops.def_static(
+      "broadcast_in_dim",
+      [](TensorView* input,
+         std::vector<int>& output_shape,
+         std::vector<int>& broadcast_dims) -> TensorView* {
+        TORCH_CHECK(
+            output_shape.size() >= input->nDims(),
+            "The new shape is expected to be greater-then-or-equal to the input",
+            output_shape.size(),
+            input->nDims());
+        TORCH_CHECK(
+            input->nDims() == broadcast_dims.size(),
+            "The broadcast dimensions should match the input dimensions.",
+            input->nDims(),
+            broadcast_dims.size());
+
+        std::vector<bool> is_broadcast_dim(output_shape.size(), true);
+        for (const auto idx : c10::irange(broadcast_dims.size())) {
+          if (idx > 0) {
+            TORCH_CHECK(
+                broadcast_dims[idx - 1] < broadcast_dims[idx],
+                "Broadcast dimension is not greater than the previous value.");
+          }
+          TORCH_CHECK(
+              broadcast_dims[idx] < static_cast<int>(output_shape.size()),
+              "Invalid broadcast_dims value.");
+          is_broadcast_dim.at(broadcast_dims[idx]) = false;
+        }
+
+        return torch::jit::fuser::cuda::broadcast(input, is_broadcast_dim);
+      },
       py::return_value_policy::reference);
 
   // Cast Operations
