@@ -79,7 +79,7 @@ class Dirichlet(ExponentialFamily):
     @property
     def mode(self):
         concentrationm1 = self.concentration - 1
-        mode = (concentrationm1 / concentrationm1.sum(-1, True)).clamp(0)
+        mode = (concentrationm1 / concentrationm1.sum(-1, True)).clamp(min=0)
         mode = mode * torch.where((self.concentration <= 1).any(-1, True), nan, 1.)
         return mode
 

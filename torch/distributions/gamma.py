@@ -37,7 +37,7 @@ class Gamma(ExponentialFamily):
 
     @property
     def mode(self):
-        return ((self.concentration - 1) / self.rate).clamp(0)
+        return ((self.concentration - 1) / self.rate).clamp(min=0)
 
     @property
     def variance(self):
