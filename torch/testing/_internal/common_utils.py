@@ -780,7 +780,7 @@ TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
-
+TEST_WITH_MPS = os.getenv('PYTORCH_TEST_WITH_MPS', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -881,6 +881,15 @@ def skipIfRocm(fn):
     def wrapper(*args, **kwargs):
         if TEST_WITH_ROCM:
             raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfMps(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_MPS:
+            raise unittest.SkipTest("test doesn't currently work with MPS")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -2184,6 +2193,12 @@ class TestCase(expecttest.TestCase):
     ):
         # Hide this function from `pytest`'s traceback
         __tracebackhide__ = True
+
+        if isinstance(x, torch.Tensor) and (x.is_mps):
+            x = x.to('cpu')
+
+        if isinstance(y, torch.Tensor) and (y.is_mps):
+            y = y.to('cpu')
 
         # numpy's dtypes are a superset of what PyTorch supports. In case we encounter an unsupported dtype, we fall
         # back to an elementwise comparison. Note that this has to happen here and not for example in
