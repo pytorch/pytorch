@@ -555,8 +555,8 @@ def _flatten_zero_dim_tensor_optim_state(
     """
     non_none_tensors = [t for t in zero_dim_tensors if t is not None]
     # Enforce that all have the same value and dtype
-    values_set = set(t.item() for t in zero_dim_tensors)
-    dtypes = set(t.dtype for t in zero_dim_tensors)
+    values_set = set(t.item() if t is not None else None for t in zero_dim_tensors)
+    dtypes = set(t.dtype if t is not None else None for t in zero_dim_tensors)
     if len(non_none_tensors) != len(zero_dim_tensors) or \
             len(values_set) != 1 or len(dtypes) != 1:
         raise ValueError(
