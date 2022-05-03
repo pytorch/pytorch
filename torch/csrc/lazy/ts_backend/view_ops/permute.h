@@ -15,10 +15,6 @@ class TORCH_API Permute : public TsNode {
     return dims_;
   }
 
-  static Shape MakePermuteShape(
-      const Shape& source_shape,
-      c10::ArrayRef<int64_t> permutation);
-
  private:
   // The permutation of dimensions.
   std::vector<int64_t> dims_;
