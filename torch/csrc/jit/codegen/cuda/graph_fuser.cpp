@@ -96,6 +96,9 @@ Value* createConditionalConstant(Node* profile_ivalue) {
     // str
     val = IValue(static_cast<std::string>(
         profile_ivalue->s(Symbol::attr("profiled_str"))));
+  } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_ival"))) {
+    // ival
+    val = IValue(profile_ivalue->ival(Symbol::attr("profiled_ival")));
   } else {
     GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
     TORCH_WARN(
@@ -1632,6 +1635,16 @@ void guardFusionGroup(
             versioning_if,
             view,
             profiled_ival);
+      } else if (fusion->input(offset)->node()->hasAttribute(
+                     Symbol::attr("profiled_ival"))) {
+        ivalue_check =
+            fusion->owningGraph()
+                ->create(
+                    c10::Symbol::fromQualString("prim::CudaFusionIvalGuard"),
+                    {profiled_ival, const_o},
+                    1)
+                ->insertBefore(versioning_if)
+                ->output();
       } else {
         ivalue_check = fusion->owningGraph()
                            ->create(aten::eq, {profiled_ival, const_o}, 1)

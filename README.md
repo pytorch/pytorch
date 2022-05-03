@@ -145,14 +145,9 @@ Commands to install binaries via Conda or pip wheels are on our website: [https:
 
 #### NVIDIA Jetson Platforms
 
-Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are available via the following URLs:
+Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are provided [here](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) and the L4T container is published [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
 
-- Stable binaries:
-  - Python 3.6: https://nvidia.box.com/v/torch-stable-cp36-jetson-jp42
-- Rolling weekly binaries:
-  - Python 3.6: https://nvidia.box.com/v/torch-weekly-cp36-jetson-jp42
-
-They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv) maintains them
+They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv) and [@ptrblck](https://github.com/ptrblck) are maintaining them.
 
 
 ### From Source
@@ -235,7 +230,7 @@ collect2: error: ld returned 1 exit status
 error: command 'g++' failed with exit status 1
 ```
 
-This is caused by `ld` from Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.6.10+, 3.7.6+ and 3.8.1+.
+This is caused by `ld` from Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.7.6+ and 3.8.1+.
 
 On macOS
 ```bash
