@@ -867,9 +867,8 @@ def _reduction(
         assert isinstance(out, TensorLike)
         if dtype is not None:
             # TODO - this is true for eager mode currently, but it's wrong behavior for complex norms
-            assert (
-                dtype == out.dtype
-            ), "dtype argument and out dtype must match in reduction"
+            if dtype != out.dtype:
+                raise RuntimeError("dtype argument and out dtype must match in reduction")
     if not accepts_dim_tuple:
         assert dims is None or isinstance(dims, int)
     if isinstance(dims, int):
@@ -895,18 +894,17 @@ def _reduction(
     if out is not None:
         if dtype is None:
             if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
-                assert (
-                    out.dtype == a.dtype
-                ), "out dtype and output type of reduction must match"
+                if out.dtype != a.dtype:
+                    raise RuntimeError("out dtype and output type of reduction must match")
             elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.ALWAYS_BOOL:
-                assert (
-                    out.dtype == torch.bool
-                ), "out dtype and output type of reduction must match"
+                if out.dtype != torch.bool:
+                    raise RuntimeError("out dtype and output type of reduction must match")
         out = _maybe_resize_out(out, result.shape)
         return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
     if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
-        result = prims.convert_element_type(result, a.dtype)
+        result_dtype = dtype if dtype else a.dtype
+        result = prims.convert_element_type(result, result_dtype)
     return result
 
 
@@ -923,6 +921,7 @@ def sum(
             dtype = torch.int64
         else:
             dtype = a.dtype
+    # sum reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
     return _reduction(
@@ -931,5 +930,6 @@ def sum(
         dims=dim,
         keepdims=keepdim,
         dtype=dtype,
+        out=out,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
     )

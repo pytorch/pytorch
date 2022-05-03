@@ -1322,6 +1322,7 @@ class ReductionOpInfo(OpInfo):
         # Options from the OpInfo base class
         **kwargs,
     ):
+        self._original_reduction_args = locals().copy()
         assert nan_policy in (None, 'propagate', 'omit')
 
         # These are mutually exclusive options
@@ -1340,7 +1341,7 @@ class ReductionOpInfo(OpInfo):
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault('inplace_variant', None)
         kwargs.setdefault('sample_inputs_func', sample_inputs_func)
-        super(ReductionOpInfo, self).__init__(name, **kwargs)
+        super().__init__(name, **kwargs)
 
         self.identity = identity
         self.nan_policy = nan_policy
@@ -17547,10 +17548,10 @@ class ReductionPythonRefInfo(ReductionOpInfo):
         self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
         assert isinstance(self.torch_opinfo, ReductionOpInfo)
 
-        inherited = self.torch_opinfo._original_opinfo_args
+        inherited = self.torch_opinfo._original_reduction_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
 
-        super(ReductionPythonRefInfo, self).__init__(**ukwargs)
+        super().__init__(**ukwargs)
 
 class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
     '''
@@ -17841,7 +17842,8 @@ python_ref_db = [
     ),
     ReductionPythonRefInfo(
         "_refs.sum",
-        torch_opinfo_name="sum"
+        torch_opinfo_name="sum",
+        supports_out=True
     )
 ]
 
