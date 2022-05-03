@@ -9053,7 +9053,8 @@ Example::
 
 add_docstr(torch.sparse_compressed_tensor,
            r"""
-sparse_compressed_tensor(compressed_indices, plain_indices, values, size=None, *, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+sparse_compressed_tensor(compressed_indices, plain_indices, values, size=None,
+                         *, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
 Constructs a :ref:`sparse tensor in Compressed Sparse format - CSR,
 CSC, BSR, or BSC - <sparse-csr-docs>` with specified values at the
