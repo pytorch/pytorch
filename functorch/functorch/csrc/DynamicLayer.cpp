@@ -7,6 +7,7 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
+#include <functorch/csrc/BatchRulesHelper.h>
 
 #include <torch/library.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
@@ -15,7 +16,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <c10/util/irange.h>
 #include <ATen/FuncTorchTLS.h>
-#include <functorch/csrc/ATenDecompositions.h>
 
 namespace at {
 namespace functorch {
@@ -378,110 +378,31 @@ WithoutTop::~WithoutTop() {
 // Easy, check the top of the DynamicLayerStack and read the transform.
 //
 // 1. Next, we must identify when an operation (e.g. nll_loss_backward)
-// gets dispatched to. The slow way to do this is to str check
-// OperatorHandle::schema::name. We do something a little faster, which is:
+// gets dispatched to.
 // - register a special kernel to the DynamicLayerFrontMode key
-//   (see FALLBACK_WITH_ID)
+//   (see JVP_DECOMP)
 // - that special kernel invokes dynamicLayerFrontFallbackOperator with
-//   a special enum value (ATenOpId) that identifies the operation.
+//   an arg indicating we're going to use a decomp
 //
 // 2. Next, we need to call the decomposition. See call_decomposition_for_jvp.
-// The decompositions are written in C++ right now, but we really want to just
-// reuse the decompositions that we have in Python (because those are actually
-// tested).
+// We currently use python decompositions that we torchscript.
 
 // Ideally c10::OperatorHandle would have a field like this
 // to identify the operator.
 // The stuff here should map 1:1 with the operator name.
 // aten::nll_loss_backward -> nll_loss_backward
 // aten::add.Tensor -> add_Tensor
-enum class ATenOpId {
-  nll_loss_backward,
-  nll_loss2d_backward,
-  mse_loss_backward,
-  l1_loss_backward,
-  _log_softmax_backward_data,
-  _softmax_backward_data,
-};
 
 static void call_decomposition_for_jvp(
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    ATenOpId op_id) {
-  switch (op_id) {
-    case ATenOpId::nll_loss2d_backward:
-    case ATenOpId::nll_loss_backward: {
-      ArrayRef<IValue> args = torch::jit::last(stack, 7);
-      auto result = nll_loss_backward_decomp(
-        args[0].toTensor(),
-        args[1].toTensor(),
-        args[2].toTensor(),
-        args[3].toTensor(),
-        args[4].toInt(),
-        args[5].toInt(),
-        args[6].toTensor()
-      );
-      torch::jit::pop(*stack, 7);
-      torch::jit::push(stack, result);
-      return;
-    }
-    case ATenOpId::mse_loss_backward: {
-      ArrayRef<IValue> args = torch::jit::last(stack, 4);
-      auto result = mse_loss_backward_decomp(
-        args[0].toTensor(),
-        args[1].toTensor(),
-        args[2].toTensor(),
-        args[3].toInt()
-      );
-      torch::jit::pop(*stack, 4);
-      torch::jit::push(stack, result);
-      return;
-    }
-    case ATenOpId::l1_loss_backward: {
-      ArrayRef<IValue> args = torch::jit::last(stack, 4);
-      auto result = l1_loss_backward_decomp(
-        args[0].toTensor(),
-        args[1].toTensor(),
-        args[2].toTensor(),
-        args[3].toInt()
-      );
-      torch::jit::pop(*stack, 4);
-      torch::jit::push(stack, result);
-      return;
-    }
-    case ATenOpId::_softmax_backward_data: {
-      ArrayRef<IValue> args = torch::jit::last(stack, 4);
-      auto result = _softmax_backward_data_decomp(
-        args[0].toTensor(),
-        args[1].toTensor(),
-        args[2].toInt(),
-        args[3].toScalarType()
-      );
-      torch::jit::pop(*stack, 4);
-      torch::jit::push(stack, result);
-      return;
-    }
-    case ATenOpId::_log_softmax_backward_data: {
-      ArrayRef<IValue> args = torch::jit::last(stack, 4);
-      auto result = _log_softmax_backward_data_decomp(
-        args[0].toTensor(),
-        args[1].toTensor(),
-        args[2].toInt(),
-        args[3].toScalarType()
-      );
-      torch::jit::pop(*stack, 4);
-      torch::jit::push(stack, result);
-      return;
-    }
-    default:
-      TORCH_INTERNAL_ASSERT(false);
-  }
+    torch::jit::Stack* stack) {
+  run_jit_decomposition(op, stack);
 }
 
 static void dynamicLayerFrontFallbackOperator(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    optional<ATenOpId> maybe_op_id) {
+    bool decomp_jvp) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
   TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
@@ -493,8 +414,8 @@ static void dynamicLayerFrontFallbackOperator(
 
   // Hack: if jvp and we have a decomposition registered, then do the decomposition
   if (dynamicLayerStack.back().interpreter().key() == TransformType::Jvp &&
-      maybe_op_id.has_value()) {
-    return call_decomposition_for_jvp(op, stack, *maybe_op_id);
+      decomp_jvp) {
+    return call_decomposition_for_jvp(op, stack);
   }
 
   // Save the current LocalDispatchKeySet (to the current DynamicLayer).
@@ -517,14 +438,13 @@ restoreLocalDispatchKeySetRAII(const c10::impl::LocalDispatchKeySet& key_set) {
 }
 
 void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  return dynamicLayerFrontFallbackOperator(op, stack, nullopt);
+  return dynamicLayerFrontFallbackOperator(op, stack, false);
 }
 
-template <ATenOpId op_id>
 void dynamicLayerFrontFallbackWithOpId(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
-  return dynamicLayerFrontFallbackOperator(op, stack, op_id);
+  return dynamicLayerFrontFallbackOperator(op, stack, true);
 }
 
 void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
@@ -543,19 +463,19 @@ TORCH_LIBRARY_IMPL(_, FT_DYNAMIC_LAYER_BACK_MODE_KEY, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dynamicLayerBackFallback>());
 }
 
-#define FALLBACK_WITH_ID(op) \
-  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallbackWithOpId<ATenOpId::op>>());
+#define JVP_DECOMP(op) \
+  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallbackWithOpId>());
 
-#define FALLBACK_WITH_ID2(op, overload) \
-  m.impl(#op "." #overload, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallbackWithOpId<ATenOpId::op ## _ ## overload>>());
+#define JVP_DECOMP2(op, overload) \
+  m.impl(#op "." #overload, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerFrontFallbackWithOpId>());
 
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
-  FALLBACK_WITH_ID(nll_loss_backward);
-  FALLBACK_WITH_ID(nll_loss2d_backward);
-  FALLBACK_WITH_ID(mse_loss_backward);
-  FALLBACK_WITH_ID(l1_loss_backward);
-  FALLBACK_WITH_ID(_log_softmax_backward_data);
-  FALLBACK_WITH_ID(_softmax_backward_data);
+  JVP_DECOMP(nll_loss_backward);
+  JVP_DECOMP(nll_loss2d_backward);
+  JVP_DECOMP(mse_loss_backward);
+  JVP_DECOMP(l1_loss_backward);
+  JVP_DECOMP(_log_softmax_backward_data);
+  JVP_DECOMP(_softmax_backward_data);
 }
 
 
