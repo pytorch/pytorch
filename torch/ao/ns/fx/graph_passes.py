@@ -358,7 +358,7 @@ def _copy_node_from_a_to_c(
 
     else:
         raise AssertionError(
-            f"handling of node with op {node_a.op} is not implemented")
+            f"handling of node {node_a.format_node()} with op {node_a.op} is not implemented")
 
 def _insert_copy_of_subgraph_a_after_input_node_c(
     input_node_c: Union[Node, List[Node]],
