@@ -5,8 +5,7 @@ from typing import (
     Dict,
     List,
     Optional,
-    Sequence,
-    Union
+    Sequence
 )
 import copy
 import weakref
@@ -21,6 +20,7 @@ from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata,
 )
+from .interface import ShardedTensorInterface
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
 from .reshard import reshuffle_local_shard, reshard_local_shard
@@ -31,7 +31,6 @@ from .utils import (
     build_metadata_from_local_shards,
     build_global_metadata
 )
-from torch.overrides import handle_torch_function
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -63,7 +62,8 @@ def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]]
         else:
             sharded_tensor._register_remote_shards(rrefs, rpc_rank)
 
-class ShardedTensor(object):
+
+class ShardedTensor(ShardedTensorInterface):
     """
     ShardedTensor is an abstraction to represent Tensors that are sharded
     across multiple devices and multiple processes.
@@ -111,11 +111,8 @@ class ShardedTensor(object):
         individual GPU, via ``torch.cuda.set_device()``
 
     """
-
-    def __new__(cls, *args, **kwargs):
-        # Use __new__ for logging purposes.
-        torch._C._log_api_usage_once("torch.distributed._shard.sharded_tensor")
-        return super(ShardedTensor, cls).__new__(cls)
+    _sharding_spec: shard_spec.ShardingSpec
+    _metadata: ShardedTensorMetadata
 
     def __init__(
         self,
@@ -133,42 +130,25 @@ class ShardedTensor(object):
         # _process_group, _local_shards, etc.
         self._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
-        tensor_properties = TensorProperties(dtype, layout, requires_grad, memory_format, pin_memory)
-
-        if tensor_properties is None:
-            raise ValueError('tensor_properties must not be None.')
-
-        if tensor_properties.dtype is None:
-            tensor_properties.dtype = torch.get_default_dtype()
-
-        if tensor_properties.layout != torch.strided:
+        if layout != torch.strided:
             raise ValueError('Only torch.strided layout is currently supported')
 
-        if tensor_properties.memory_format != torch.contiguous_format:
+        if memory_format != torch.contiguous_format:
             raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
-        dims = _flatten_tensor_size(size)
-
-        if not isinstance(sharding_spec, shard_spec.ShardingSpec):
-            raise ValueError(f'Expecting ShardingSpec but got: {type(sharding_spec)}')
-
-        self._sharding_spec = sharding_spec
-
-        sharded_tensor_metadata = sharding_spec.build_metadata(
-            dims, tensor_properties=tensor_properties)
+        self._metadata.tensor_properties.memory_format = memory_format
 
         current_rank = dist.get_rank(self._process_group)
 
-        for shard_metadata in sharded_tensor_metadata.shards_metadata:
+        for shard_metadata in self._metadata.shards_metadata:
             rank, device = _parse_and_validate_remote_device(self._process_group, shard_metadata.placement)
             if rank == current_rank:
                 local_tensor = _create_tensor_from_params(
                     shard_metadata.shard_sizes,
                     local_device=device,
-                    tensor_properties=sharded_tensor_metadata.tensor_properties
+                    tensor_properties=self._metadata.tensor_properties
                 )
                 self._local_shards.append(Shard(local_tensor, shard_metadata))
-        self._metadata = sharded_tensor_metadata
 
         # do post initialization (i.e. register sharded_tensor_id, initialize_rpc)
         self._post_init()
@@ -253,7 +233,7 @@ class ShardedTensor(object):
         # Barrier for all RPCs to finish on all ranks.
         rpc.api._all_gather(None)
 
-    def gather(
+    def gather(  # type: ignore[override]
         self,
         dst: int = 0,
         out: Optional[torch.Tensor] = None,
@@ -408,18 +388,24 @@ class ShardedTensor(object):
             gathered_metadatas = [local_sharded_tensor_metadata]
 
         global_sharded_tensor_metadata = build_global_metadata(gathered_metadatas)
+        tensor_properties = global_sharded_tensor_metadata.tensor_properties
 
         # STEP 3: Validation done, create the actual ShardedTensor and populate fields
         # prepare initialization
-        sharded_tensor = cls.__new__(cls)
-        sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
-
-        # add to metadata and local_shards
-        sharded_tensor._metadata = global_sharded_tensor_metadata
-        sharded_tensor._local_shards = local_shards
-        sharded_tensor._sharding_spec = shard_spec._infer_sharding_spec_from_shards_metadata(
+        spec = shard_spec._infer_sharding_spec_from_shards_metadata(
             global_sharded_tensor_metadata.shards_metadata
         )
+        sharded_tensor = cls.__new__(cls,
+                                     spec,
+                                     global_sharded_tensor_metadata.size,
+                                     dtype=tensor_properties.dtype,
+                                     layout=tensor_properties.layout,
+                                     pin_memory=tensor_properties.pin_memory,
+                                     requires_grad=tensor_properties.requires_grad)
+        sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
+
+        # attach local_shards to the ShardedTensor created
+        sharded_tensor._local_shards = local_shards
 
         # run post initialization, i.e. map registration, rpc initialization
         sharded_tensor._post_init()
@@ -558,10 +544,16 @@ class ShardedTensor(object):
         if tensor_properties.layout != torch.strided:
             raise ValueError('Only torch.strided layout is currently supported')
 
-        sharded_tensor = cls.__new__(cls)
-        sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
+        spec = shard_spec._infer_sharding_spec_from_shards_metadata(shards_metadata)
 
-        sharded_tensor._metadata = sharded_tensor_metadata
+        sharded_tensor = cls.__new__(cls,
+                                     spec,
+                                     sharded_tensor_metadata.size,
+                                     dtype=tensor_properties.dtype,
+                                     layout=tensor_properties.layout,
+                                     pin_memory=tensor_properties.pin_memory,
+                                     requires_grad=tensor_properties.requires_grad)
+        sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
         local_shard_metadatas = []
 
@@ -615,7 +607,6 @@ class ShardedTensor(object):
 
         # done validation, add local_shards
         sharded_tensor._local_shards = local_shards
-        sharded_tensor._sharding_spec = shard_spec._infer_sharding_spec_from_shards_metadata(shards_metadata)
 
         # run post initialization, i.e. map registration, rpc initialization
         sharded_tensor._post_init()
@@ -770,58 +761,11 @@ class ShardedTensor(object):
         """
         return self._local_shards
 
-    def size(self, dim: int = None) -> Union[torch.Size, int]:
-        """
-        Returns a :Union:`[torch.Size, int]` which represents the size of the tensor.
-            The dimension can be specified.
-
-        Args:
-            dim (int, optional): the dimension over which the size represents.
-                If specified, it returns the size of the given dimension.
-                If not, it returns a subclass of tuple.
-                Default: ``None``
-
-        Returns:
-            A :Union:`[torch.Size, int]` represents the size of the tensor.
-        """
-        size = self._metadata.size
-        if dim is None:
-            return size
-        if dim < 0 or dim >= len(size):
-            raise ValueError(
-                f"Argument ``dim`` must be within the range of tensor dimensions [0, {len(size)})"
-            )
-        return size[dim]
-
-
-    def is_pinned(self) -> bool:
+    def is_pinned(self) -> bool:  # type: ignore[override]
         """
         Returns True if the sharded tensor (each local shard) resides in pinned memory.
         """
         return self._metadata.tensor_properties.pin_memory
-
-    def is_contiguous(self) -> bool:
-        """
-        Returns True if the sharded tensor (each local shard) is contiguous in memory
-        in the order specified by memory format.
-        """
-        return self._metadata.tensor_properties.memory_format == torch.contiguous_format
-
-    @property
-    def shape(self):
-        return self._metadata.size
-
-    @property
-    def requires_grad(self):
-        return self._metadata.tensor_properties.requires_grad
-
-    @property
-    def dtype(self):
-        return self._metadata.tensor_properties.dtype
-
-    @property
-    def layout(self):
-        return self._metadata.tensor_properties.layout
 
     def _register_remote_shards(self, remote_shards: List[rpc.RRef[Shard]], rpc_rank: int):
         self._remote_shards[rpc_rank] = remote_shards
@@ -840,35 +784,8 @@ class ShardedTensor(object):
             )
         return self._remote_shards
 
-    def __hash__(self):
-        return id(self)
-
     def __repr__(self):
         return f'ShardedTensor({self._metadata})'
-
-    def __add__(self, other):
-        return handle_torch_function(torch.Tensor.__add__, (self, other), self, other)
-
-    def __radd__(self, other):
-        return handle_torch_function(torch.Tensor.__radd__, (self, other), self, other)
-
-    def __sub__(self, other):
-        return handle_torch_function(torch.Tensor.__sub__, (self, other), self, other)
-
-    def __rsub__(self, other):
-        return handle_torch_function(torch.Tensor.__rsub__, (self, other), self, other)
-
-    def __mul__(self, other):
-        return handle_torch_function(torch.Tensor.__mul__, (self, other), self, other)
-
-    def __rmul__(self, other):
-        return handle_torch_function(torch.Tensor.__rmul__, (self, other), self, other)
-
-    def __truediv__(self, other):
-        return handle_torch_function(torch.Tensor.__div__, (self, other), self, other)
-
-    def __rtruediv__(self, other):
-        return handle_torch_function(torch.Tensor.__rdiv__, (self, other), self, other)
 
     @dataclass
     class ProcessGroupState:
