@@ -1,7 +1,8 @@
 import torch
 import torch.nn.quantized as nnq
 import torch.nn.intrinsic as nni
-from torch.nn.quantized.modules.utils import _quantize_weight
+
+from ...utils import _quantize_weight
 
 class Linear(nnq.Linear):
     r"""

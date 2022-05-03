@@ -5,8 +5,9 @@ import warnings
 import torch
 from torch import Tensor
 from torch.nn.modules.utils import _pair, _triple
-from torch.nn.quantized.modules.utils import _pair_from_first
 from torch.jit.annotations import BroadcastingList2
+
+from .utils import _pair_from_first
 
 # Although some of the functions and docstrings are mirrored from the torch.nn,
 # we want to have them here for future changes.

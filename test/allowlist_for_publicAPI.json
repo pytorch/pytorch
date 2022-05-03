@@ -2563,7 +2563,7 @@
     "hide_packed_params_repr",
     "type_before_parametrizations"
   ],
-  "torch.nn.quantized.modules.utils": [
+  "torch.nn.quantized.utils": [
     "repeat"
   ],
   "torch.nn.utils.clip_grad": [

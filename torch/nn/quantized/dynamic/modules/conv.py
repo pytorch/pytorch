@@ -9,9 +9,10 @@ from torch import Tensor
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.quantized.modules.conv import _reverse_repeat_padding
-import torch.nn.quantized.modules as nnq
 import warnings
+
+from ..._modules.conv import _reverse_repeat_padding
+import torch.nn.quantized.modules as nnq
 
 
 class Conv1d(nnq.Conv1d):
