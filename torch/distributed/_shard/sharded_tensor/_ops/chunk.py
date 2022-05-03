@@ -43,7 +43,7 @@ def register_chunk_op(op):
         dim = dim if dim > 0 else st.dim() + dim
         results = []
         for chunk_tensor in local_tensor.chunk(chunk_num, dim=dim):
-            new_st_size = (*st_size[:dim], chunk_tensor.size(dim), *st_size[dim + 1 :])
+            new_st_size = (*st_size[:dim], chunk_tensor.size(dim), *st_size[dim + 1 :])  # type: ignore[index]
             results.append(
                 ShardedTensor._init_from_local_tensor(
                     chunk_tensor.contiguous(),
