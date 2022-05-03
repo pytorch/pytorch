@@ -99,13 +99,13 @@ includes = [
     "tools/autograd/templates/python_variable_methods.cpp",
 ]
 
-includes = [os.path.join(proj_dir, include) for include in includes]
-
 for new_dir in args.extra_include_dir:
     abs_new_dir = os.path.join(proj_dir, new_dir)
     if os.path.exists(abs_new_dir):
         new_dir = os.path.join(new_dir, "**/*")
         includes.append(new_dir)
+
+includes = [os.path.join(proj_dir, include) for include in includes]
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
