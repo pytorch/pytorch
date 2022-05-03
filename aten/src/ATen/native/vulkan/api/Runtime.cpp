@@ -241,6 +241,10 @@ bool load_vulkan_drivers() {
   }
   return true;
 #endif /* USE_VULKAN_VOLK, USE_VULKAN_WRAPPER */
+
+  // If not using Volk or the Vulkan wrapper, assume that the vulkan drivers are
+  // linked with pytorch.
+  return true;
 }
 
 std::unique_ptr<Runtime> init_global_vulkan_runtime() {
