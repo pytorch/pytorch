@@ -13621,7 +13621,7 @@ op_db: List[OpInfo] = [
                     lhs_make_tensor_kwargs=dict(low=0),
                     decorators=(
                         DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05)}),
-                                        'TestBinaryUfuncs', 'test_reference_numerics'),
+                                     'TestBinaryUfuncs', 'test_reference_numerics'),
                     ),
                     skips=(
                         # Skipping integers because they are being raised to negative powers causing an error
