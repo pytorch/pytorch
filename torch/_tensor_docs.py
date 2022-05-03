@@ -3232,12 +3232,13 @@ In-place version of :meth:`~Tensor.rsqrt`
 
 add_docstr_all('scatter_',
                r"""
-scatter_(dim, index, src, reduce=None) -> Tensor
+scatter_(dim, index, src, value, reduce=None) -> Tensor
 
-Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
-specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
-index is specified by its index in :attr:`src` for ``dimension != dim`` and by
-the corresponding value in :attr:`index` for ``dimension = dim``.
+Writes all values from the tensor :attr:`src` or the value from :attr:`value`
+into :attr:`self` at the indices specified in the :attr:`index` tensor. For
+each value in :attr:`src`, its output index is specified by its index in 
+:attr:`src` for ``dimension != dim`` and by the corresponding value in 
+:attr:`index` for ``dimension = dim``.
 
 For a 3-D tensor, :attr:`self` is updated as::
 
@@ -3247,7 +3248,7 @@ For a 3-D tensor, :attr:`self` is updated as::
 
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-:attr:`self`, :attr:`index` and :attr:`src` (if it is a Tensor) should all have
+:attr:`self`, :attr:`index` and :attr:`src` should all have
 the same number of dimensions. It is also required that
 ``index.size(d) <= src.size(d)`` for all dimensions ``d``, and that
 ``index.size(d) <= self.size(d)`` for all dimensions ``d != dim``.
@@ -3290,7 +3291,10 @@ Args:
     index (LongTensor): the indices of elements to scatter, can be either empty
         or of the same dimensionality as ``src``. When empty, the operation
         returns ``self`` unchanged.
-    src (Tensor or float): the source element(s) to scatter.
+    src (Tensor): the source element(s) to scatter,
+        incase `value` is not specified
+    value (float): the source element(s) to scatter,
+        incase `src` is not specified
     reduce (str, optional): reduction operation to apply, can be either
         ``'add'`` or ``'multiply'``.
 
