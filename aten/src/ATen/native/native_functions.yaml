@@ -452,6 +452,7 @@
     SparseCsrCPU, SparseCsrCUDA: add_sparse_csr
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_add_Tensor
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -461,6 +462,7 @@
     SparseCPU, SparseCUDA: add_sparse_
     SparseCsrCPU, SparseCsrCUDA: add_sparse_csr_
     MkldnnCPU: mkldnn_add_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_add__Tensor
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3219,6 +3221,7 @@
     SparseCsrCPU, SparseCsrCUDA: mul_sparse_csr
     MkldnnCPU: mkldnn_mul
     ZeroTensor: mul_zerotensor
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Tensor
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3228,6 +3231,7 @@
     SparseCPU, SparseCUDA: mul_sparse_
     SparseCsrCPU, SparseCsrCUDA: mul_sparse_csr_
     MkldnnCPU: mkldnn_mul_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul__Tensor
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -11665,7 +11669,7 @@
     CompositeExplicitAutograd: alias_copy
   tags: view_copy
 
-- func: to_padded_tensor(Tensor self, float padding) -> Tensor
+- func: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
   variants: method
   dispatch:
     NestedTensorCPU: NestedTensor_to_padded_tensor_generic
