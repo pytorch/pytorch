@@ -1,12 +1,15 @@
 #include <torch/csrc/lazy/ts_backend/view_ops/as_strided.h>
 
 #include <algorithm>
+#include "ATen/core/interned_strings.h"
 
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/util.h>
 
 namespace torch {
 namespace lazy {
+
+const OpKind AsStrided::class_op_kind(at::aten::as_strided);
 
 AsStrided::AsStrided(
     const Value& input,

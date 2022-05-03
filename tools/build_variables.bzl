@@ -458,6 +458,7 @@ lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/ops/expand.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
+    "torch/csrc/lazy/ts_backend/ops/to_copy.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/as_strided.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/as_strided_view_update.cpp",
     "torch/csrc/lazy/ts_backend/view_ops/diagonal.cpp",
