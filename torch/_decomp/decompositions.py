@@ -549,7 +549,7 @@ def _softmax_backward_data(
 ):
     new_grad = grad_output * output
     grad_input = new_grad - output * torch.sum(new_grad, dim=dim, keepdim=True)
-    return grad_input.to(input_dtype)
+    return aten.to(grad_input, dtype=input_dtype)
 
 
 @register_decomposition(aten._log_softmax_backward_data)
@@ -560,7 +560,7 @@ def _log_softmax_backward_data(
     grad_input = grad_output - torch.exp(output) * torch.sum(
         grad_output, dim=dim, keepdim=True
     )
-    return grad_input.to(input_dtype)
+    return aten.to(grad_input, dtype=input_dtype)
 
 
 # TODO: the type annotations on arguments are not quite right
