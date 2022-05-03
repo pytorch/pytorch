@@ -223,6 +223,10 @@ static void norm_kernel_tensor_iterator_impl(
   } else {
     AT_ERROR("norm_kernel_tensor_iterator_impl expects norm to be integer or float");
   }
+  if (iter.numel() == 0) {
+    iter.output().fill_((val < 0) ? INFINITY : 0);
+    return;
+  }
 
   bool use_fast_path = is_reduce_lastdim(iter) && iter.dtype(0) == iter.input_dtype()
       && (iter.input_dtype() == kFloat || iter.input_dtype() == kBFloat16);
@@ -302,7 +306,7 @@ static void norm_kernel_tensor_iterator_impl(
       binary_kernel_reduce(
         iter,
         AbsMinOps<scalar_t, acc_t>(),
-        std::numeric_limits<acc_t>::max()
+        std::numeric_limits<acc_t>::infinity()
       );
     });
   } else {
