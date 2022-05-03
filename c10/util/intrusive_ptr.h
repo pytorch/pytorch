@@ -293,7 +293,6 @@ class intrusive_ptr final {
         delete target_;
       }
     }
-    target_ = NullType::singleton();
   }
 
   // raw pointer constructors are not public because we shouldn't make
@@ -417,6 +416,7 @@ class intrusive_ptr final {
 
   void reset() noexcept {
     reset_();
+    target_ = NullType::singleton();
   }
 
   void swap(intrusive_ptr& rhs) noexcept {
