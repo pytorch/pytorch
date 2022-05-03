@@ -173,9 +173,10 @@ def wrap_key(f, inps):
 def make_fx(f, decomposition_table=None):
     if decomposition_table is None:
         decomposition_table = {}
+
     @functools.wraps(f)
     def wrapped(*args):
-        phs = pytree.tree_map(lambda x: fx.PH, args)  #type: ignore[attr-defined]
+        phs = pytree.tree_map(lambda x: fx.PH, args)  # type: ignore[attr-defined]
         with decompose(decomposition_table):
             t = dispatch_trace(wrap_key(f, args), concrete_args=tuple(phs))
         return t
