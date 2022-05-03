@@ -303,7 +303,10 @@ Tensor nested_from_padded_generic(
       std::move(new_buffer), sizes);
 }
 
-Tensor NestedTensor_to_padded_tensor_generic(const Tensor& t, double padding) {
+Tensor NestedTensor_to_padded_tensor_generic(
+    const Tensor& t,
+    double padding,
+    OptionalIntArrayRef output_size) {
   // TODO: skipped optimization for case of all 1x1 tensors
   auto& nt = *get_nested_tensor_impl(t);
   auto max_size = NestedTensor_get_max_size(nt);
@@ -356,7 +359,22 @@ Tensor NestedTensor_to_padded_tensor_generic(const Tensor& t, double padding) {
     buffers.push_back(pad_tensor_to_shape(to_pad, max_size, padding));
     sizes_ptr += sizes_num_columns;
   }
-  return at::stack(buffers);
+  auto ret_val = at::stack(buffers);
+
+  // Pad output tensor to output_size if provided
+  if (output_size.has_value()) {
+    auto output_size_ = output_size.value();
+    TORCH_CHECK(
+        (int64_t)output_size_.size() == ret_val.dim(),
+        "Length of output_size does not match NestedTensor dims. Broadcasting is not supported.");
+    for (int64_t i = 0; i < (int64_t)ret_val.dim(); i++) {
+      TORCH_CHECK(
+          output_size_[i] >= ret_val.size(i),
+          "Value in output_size is less than NestedTensor padded size. Truncation is not supported.");
+    }
+    return pad_tensor_to_shape(ret_val, output_size_, padding);
+  }
+  return ret_val;
 }
 
 Tensor NestedTensor_embedding(

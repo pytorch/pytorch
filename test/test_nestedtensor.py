@@ -275,6 +275,26 @@ class TestNestedTensorDeviceType(TestCase):
             self.assertEqual(padded.device, torch.device(device))
             self.assertEqual(padded.dtype, dtype)
 
+    @dtypes(torch.float, torch.float16)
+    def test_to_padded_tensor_output_size(self, device, dtype):
+        t = torch.randn(4, 4, 4, device=device, dtype=dtype)
+        output_size = (4, 6, 5)
+        ts = list(torch.unbind(t))
+        ts[0] = ts[0][:-1]
+        nt = torch.nested_tensor(ts, device=device, dtype=dtype)
+        for padding_value in (0, 1):
+            padded = nt.to_padded_tensor(padding_value, output_size=output_size)
+            correct_output = torch.ones(output_size, device=device, dtype=dtype) * padding_value
+            correct_output[:4:, :4, :4] = t.clone()
+            if padding_value == 0:
+                correct_output[0][3] = torch.zeros_like(correct_output[0][3])
+            else:
+                correct_output[0][3] = torch.ones_like(correct_output[0][3])
+
+            self.assertEqual(padded, correct_output)
+            self.assertEqual(padded.device, torch.device(device))
+            self.assertEqual(padded.dtype, dtype)
+
     @dtypes(torch.float, torch.float16, torch.double)
     def test_to_padded_tensor_dim2(self, device, dtype):
         ts = [
