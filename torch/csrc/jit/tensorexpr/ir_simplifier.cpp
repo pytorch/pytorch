@@ -3062,42 +3062,49 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
   }
 
   ExprPtr ret_expr = nullptr;
+  // a > b
+  auto gt_true = (cmp_res == CompareSelectOperation::kGT);
+  // a >= b
+  auto ge_true =
+      (cmp_res == CompareSelectOperation::kGE ||
+       cmp_res == CompareSelectOperation::kGT ||
+       cmp_res == CompareSelectOperation::kEQ);
+  // a < b
+  auto lt_true = (cmp_res == CompareSelectOperation::kLT);
+  // a <= b
+  auto le_true =
+      (cmp_res == CompareSelectOperation::kLE ||
+       cmp_res == CompareSelectOperation::kLT ||
+       cmp_res == CompareSelectOperation::kEQ);
+  // a == b
+  auto eq_true = (cmp_res == CompareSelectOperation::kEQ);
+  // a != b
+  auto ne_true =
+      (cmp_res == CompareSelectOperation::kLT ||
+       cmp_res == CompareSelectOperation::kGT);
+
+#define DEDUCE_RET_EXPR(true_cond, false_cond) \
+  ret_expr = true_cond ? simp_ret1             \
+                       : (false_cond ? simp_ret2 : simplified_cmp_select_expr)
+
   switch (v->compare_select_op()) {
     case CompareSelectOperation::kGT:
-      ret_expr =
-          (cmp_res == CompareSelectOperation::kGT) ? simp_ret1 : simp_ret2;
+      DEDUCE_RET_EXPR(gt_true, le_true);
       break;
     case CompareSelectOperation::kGE:
-      ret_expr = (cmp_res == CompareSelectOperation::kGE ||
-                  cmp_res == CompareSelectOperation::kGT ||
-                  cmp_res == CompareSelectOperation::kEQ)
-          ? simp_ret1
-          : simp_ret2;
+      DEDUCE_RET_EXPR(ge_true, lt_true);
       break;
     case CompareSelectOperation::kLT:
-      ret_expr =
-          (cmp_res == CompareSelectOperation::kLT) ? simp_ret1 : simp_ret2;
+      DEDUCE_RET_EXPR(lt_true, ge_true);
       break;
     case CompareSelectOperation::kLE:
-      ret_expr = (cmp_res == CompareSelectOperation::kLE ||
-                  cmp_res == CompareSelectOperation::kLT ||
-                  cmp_res == CompareSelectOperation::kEQ)
-          ? simp_ret1
-          : simp_ret2;
+      DEDUCE_RET_EXPR(le_true, gt_true);
       break;
     case CompareSelectOperation::kNE:
-      ret_expr = (cmp_res == CompareSelectOperation::kGT ||
-                  cmp_res == CompareSelectOperation::kLT)
-          ? simp_ret1
-          : simplified_cmp_select_expr;
+      DEDUCE_RET_EXPR(ne_true, eq_true);
       break;
     case CompareSelectOperation::kEQ:
-      ret_expr = (cmp_res == CompareSelectOperation::kEQ)
-          ? simp_ret1
-          : ((cmp_res == CompareSelectOperation::kGT ||
-              cmp_res == CompareSelectOperation::kLT)
-                 ? simp_ret2
-                 : simplified_cmp_select_expr);
+      DEDUCE_RET_EXPR(eq_true, ne_true);
       break;
     default:
       TORCH_INTERNAL_ASSERT(false);

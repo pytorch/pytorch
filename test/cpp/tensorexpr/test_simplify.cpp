@@ -4824,6 +4824,148 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
   }
 }
 
+TEST(Simplify, CompareSelectLoopBounds) {
+  // Before:
+  //   for (const auto n : c10::irange(1, N)) {
+  //     b[n] = n < 1 ? 0.f : 1.f;
+  //   }
+  // After:
+  //   for (const auto n : c10::irange(1, N)) {
+  //     b[n] = 1.f;
+  //   }
+  constexpr int N = 8;
+  BufHandle b("b", {N}, kFloat);
+  VarHandle n("n", kInt);
+
+  auto test_case_fn = [](const VarHandle& n,
+                         const BufHandle& b,
+                         const int& start,
+                         const int& stop,
+                         const int& cmp_val,
+                         const CompareSelectOperation& cmp_op,
+                         const std::string& check_string) {
+    StmtPtr s = For::make(
+        n,
+        start,
+        stop,
+        b.store({n}, CompareSelect::make(n, cmp_val, 0.f, 1.0f, cmp_op)));
+    s = IRSimplifier::simplify(s);
+    std::ostringstream oss;
+    oss << *s;
+    std::string target_string = "# CHECK: ";
+    target_string += check_string;
+    torch::jit::testing::FileCheck().run(target_string, oss.str());
+  };
+
+  // for n in [1...7]
+  //   n < 1 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 1, kLT, "b[n] = 1.f;");
+
+  // for n in [1...7]
+  //   n <= 1 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 1, kLE, "b[n] = n<=1 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n <= 0 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 0, kLE, "b[n] = 1.f;");
+
+  // for n in [1...7]
+  //   n < 1 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 1, kLT, "b[n] = 1.f;");
+
+  // for n in [1...7]
+  //   n < 8 ? 0.f : 1.f => n <= 7 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N, kLT, "b[n] = 0.f;");
+
+  // for n in [1...7]
+  //   n <= 7 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N - 1, kLE, "b[n] = 0.f;");
+
+  // for n in [1...7]
+  //   n <= 8 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N, kLE, "b[n] = 0.f;");
+
+  // for n in [1...7]
+  //   n < 7 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N - 1, kLT, "b[n] = n<7 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n > 0 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 0, kGT, "b[n] = 0.f;");
+
+  // for n in [1...7]
+  //   n > 1 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 1, kGT, "b[n] = n>1 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n >= 1 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 1, kGE, "b[n] = 0.f;");
+
+  // for n in [1...7]
+  //   n > 7 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N - 1, kGT, "b[n] = 1.f;");
+
+  // for n in [1...7]
+  //   n >= 7 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N - 1, kGE, "b[n] = n>=7 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n > 5 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 5, kGT, "b[n] = n>5 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n >= 5 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 5, kGE, "b[n] = n>=5 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n > 8 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N, kGT, "b[n] = 1.f;");
+
+  // for n in [1...7]
+  //   n >= 8 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N, kGE, "b[n] = 1.f;");
+
+  // for n in [1...1]
+  //   n == 1 ? 0.f : 1.f
+  test_case_fn(n, b, 1, 2, 1, kEQ, "b[1] = 0.f;");
+
+  // for n in [1...7]
+  //   n == 1 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 1, kEQ, "b[n] = n==1 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n == 0 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 0, kEQ, "b[n] = 1.f;");
+
+  // for n in [1...7]
+  //   n == 7 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N - 1, kEQ, "b[n] = n==7 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n == 8 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N, kEQ, "b[n] = 1.f;");
+
+  // for n in [1...7]
+  //   n != 1 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 1, kNE, "b[n] = n!=1 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n != 7 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N - 1, kNE, "b[n] = n!=7 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n != 5 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 5, kNE, "b[n] = n!=5 ? 0.f : 1.f;");
+
+  // for n in [1...7]
+  //   n != 0 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, 0, kNE, "b[n] = 0.f;");
+
+  // for n in [1...7]
+  //   n != 8 ? 0.f : 1.f
+  test_case_fn(n, b, 1, N, N, kNE, "b[n] = 0.f;");
+}
+
 TEST(Simplify, CompareSelectCondAlwaysInLoopBounds) {
   // Before:
   //   for (const auto n : c10::irange(1, N)) {
