@@ -125,11 +125,9 @@ DEFINE_DISPATCH(householder_orthogonalization_stub);
 
 namespace {
 
-Tensor& linalg_orthogonalize_(Tensor& self, const double epsilon){
+Tensor& linalg_orthogonalize_(Tensor& self){
     TORCH_CHECK(self.is_contiguous(), "Input must be contiguous")
     TORCH_CHECK(self.size(1) <= std::numeric_limits<int32_t>::max(), "Input too big. Use torch.linalg.qr instead.");
-
-    self.diagonal().add_(epsilon);
 
     householder_orthogonalization_stub(self.device().type(), self, self);
     return self;
@@ -138,7 +136,7 @@ Tensor& linalg_orthogonalize_(Tensor& self, const double epsilon){
 }
 
 static auto registry = at::RegisterOperators()
-   .op("distributed::orthogonalize(Tensor(a!) self, float epsilon=0) -> Tensor(a!)",  at::RegisterOperators::options()
+   .op("distributed::orthogonalize(Tensor(a!) self) -> Tensor(a!)",  at::RegisterOperators::options()
        .kernel<decltype(linalg_orthogonalize_), &linalg_orthogonalize_>(DispatchKey::CUDA));
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

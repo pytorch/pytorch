@@ -78,7 +78,7 @@ __global__ void reflections(scalar_t *R, scalar_t *vs, const uint m, const uint 
     
     scalar_t norm_v = sqrt(dot<BLOCK_THREADS, scalar_t>(v, v, v_len));
     for (uint idx = tx; idx < v_len; idx += BLOCK_THREADS)
-        v[idx] /= norm_v;
+        v[idx] /= max(norm_v, 1e-8);
 
     for (uint row = bx + 1; row < m; ++row){
         wait_barrier(&barriers[row], bx);
