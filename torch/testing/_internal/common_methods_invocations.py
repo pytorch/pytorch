@@ -9,6 +9,7 @@ import random
 import unittest
 import math
 
+
 import torch
 import numpy as np
 from torch._six import inf
@@ -8400,6 +8401,15 @@ def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwa
 
     for input, target, var, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target, var, ), kwargs=kwargs)
+
+
+def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    q_shape = (2, 3)
+    k_shape = (2, 3)
+    v_shape = (2, 4)
+    q, k, v = make_arg(q_shape), make_arg(k_shape), make_arg(v_shape)
+    yield SampleInput(q, args=(k, v,))
 
 def _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -17172,6 +17182,16 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False),
+    OpInfo(
+        "attn",
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16, torch.complex64, torch.complex128),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16, torch.complex64, torch.complex128),
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_attn,
+    ),
     OpInfo(
         "nn.functional.ctc_loss",
         ref=_NOTHING,

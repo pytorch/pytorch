@@ -827,6 +827,9 @@
 - func: atleast_3d.Sequence(Tensor[] tensors) -> Tensor[]
   variants: function
 
+- func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
+  variants: function
+
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
   structured_delegate: baddbmm.out
