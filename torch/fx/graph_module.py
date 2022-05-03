@@ -240,10 +240,7 @@ class _WrappedCall:
     def _generate_error_message(frame_summary: traceback.FrameSummary) -> str:
         # auxiliary variables (for readability)
         err_lineno = frame_summary.lineno
-        assert err_lineno is not None
-        line = frame_summary.line
-        assert line is not None
-        err_line_len = len(line)
+        err_line_len = len(frame_summary.line)
         all_src_lines = linecache.getlines(frame_summary.filename)
 
         # constituent substrings of the error message
@@ -263,7 +260,7 @@ class _WrappedCall:
             if self.cls_call is not None:
                 return self.cls_call(obj, *args, **kwargs)
             else:
-                return super(self.cls, obj).__call__(*args, **kwargs)  # type: ignore[misc]
+                return super(self.cls, obj).__call__(*args, **kwargs)
         except Exception as e:
             assert e.__traceback__
             topmost_framesummary: traceback.FrameSummary = \
@@ -641,7 +638,7 @@ class {module_name}(torch.nn.Module):
         cls_call = cls.__call__ if "__call__" in vars(cls) else None
 
         if '_wrapped_call' not in vars(cls):
-            cls._wrapped_call = _WrappedCall(cls, cls_call)  # type: ignore[attr-defined]
+            cls._wrapped_call = _WrappedCall(cls, cls_call)
 
         def call_wrapped(self, *args, **kwargs):
             return self._wrapped_call(self, *args, **kwargs)
