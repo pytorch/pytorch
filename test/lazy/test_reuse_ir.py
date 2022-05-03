@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import torch
 import torch._lazy
 import torch._lazy.config

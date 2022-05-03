@@ -116,10 +116,14 @@ class GenLazyIR(ABC):
         return self.gen(f)
 
     @method_with_native_function
-    def gen_opkind_definition(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
+    def gen_opkind_definition(
+        self, f: Union[NativeFunctionsGroup, NativeFunction]
+    ) -> List[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
         schema = LazyIrSchema(func)
-        return [f"const OpKind {schema.node_name}::class_op_kind{{{aten_symbol(schema)}}};"]
+        return [
+            f"const OpKind {schema.node_name}::class_op_kind{{{aten_symbol(schema)}}};"
+        ]
 
     # there is no lowering functionality generated unless this IR base class is subclassed and
     # implemented as a backend-specific node
@@ -136,7 +140,9 @@ class GenLazyIR(ABC):
         for arg in schema.positional_args:
             if arg.is_lazy_value:
                 if isinstance(arg.lazy_type, OptionalCType):
-                    value_comparsion.append(f"operand(i++) == {arg.name}.value_or(kNullValue)")
+                    value_comparsion.append(
+                        f"operand(i++) == {arg.name}.value_or(kNullValue)"
+                    )
                 else:
                     value_comparsion.append(f"operand(i++) == {arg.name}")
         for arg in schema.keyword_values:
@@ -290,13 +296,16 @@ class GenLazyNativeFuncDefinition:
         for arg in value_args:
             if arg.is_wrapped_scalar:
                 if isinstance(arg.lazy_type, OptionalCType):
-                    lazy_tensor_decls.append(f"""auto node_{arg.name} = {arg.name} ?
+                    lazy_tensor_decls.append(
+                        f"""auto node_{arg.name} = {arg.name} ?
                 c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name})):
-                c10::nullopt;""")
+                c10::nullopt;"""
+                    )
                 else:
                     lazy_tensor_decls.append(
                         f"""auto node_{arg.name} =
-                torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name});""")
+                torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name});"""
+                    )
             elif arg.is_symint_or_list:
                 continue  # values are extracted in isValueType
             elif isinstance(arg.lazy_type, BaseCType):

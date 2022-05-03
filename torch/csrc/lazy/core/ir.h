@@ -146,6 +146,8 @@ class TORCH_API Node {
   virtual std::string ToString() const;
 
  private:
+  // The ID of the operation captured by this node.
+  OpKind op_;
   size_t num_outputs_ = 1;
 
   // The IR specific metadata attached to the IR node.
@@ -155,8 +157,6 @@ class TORCH_API Node {
   std::shared_ptr<UserMetaData> user_metadata_;
 
 protected:
-  // The ID of the operation captured by this node.
-  OpKind op_;
   // Adds node's index output number as operand.
   void AddOperand(NodePtr node, size_t index = 0);
 
