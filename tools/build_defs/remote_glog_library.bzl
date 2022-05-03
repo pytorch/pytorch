@@ -49,7 +49,7 @@ def remote_glog_library(name, srcs, http_archive, exported_preprocessor_flags, *
         name = temp_name,
         outs = new_srcs,
         cmd = " && ".join(cmd),
-        default_outs = ["."],
+        # default_outs = ["."],
     )
     native.cxx_library(
         name = name,
