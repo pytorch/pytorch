@@ -4,7 +4,7 @@ import sys
 
 import torch
 import torch.distributed as dist
-from torch.distributed._shard.sharded_tensor import (
+from torch.distributed._shard.partial_tensor import (
     _PartialTensor,
 )
 from torch.distributed._shard.sharding_spec import (
@@ -39,30 +39,33 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
     def _run_partial_tensor_n_reshard(
         self, reshard_spec, input_size, world_size, reduce_op, dtype=torch.float
     ):
-        results = []
         results_compare = []
-        for _ in range(0, world_size):
-            tensor = torch.rand(*input_size, dtype=dtype).cuda(self.rank)
-            results.append(tensor)
-            results_compare.append(tensor.clone().detach())
+        local_result = []
         pg = dist.distributed_c10d._get_default_group()
-        parital_tensor = _PartialTensor(torch.cat(results), pg, reduce_op=reduce_op)
+        for rank in range(pg.size()):
+            torch.manual_seed(rank)
+            results = []
+            for _ in range(world_size):
+                tensor = torch.rand(*input_size, dtype=dtype).cuda(self.rank)
+                results.append(tensor)
+                if self.rank == rank:
+                    local_result.append(tensor.clone().detach())
+            results_compare.append(torch.cat(results))
+        parital_tensor = _PartialTensor(
+            torch.cat(local_result), pg, reduce_op=reduce_op
+        )
         local_sharded_result = parital_tensor.reshard(reshard_spec)
         local_shards = local_sharded_result.local_shards()
-        if pg.size() > world_size:
-            chunk_mode_res = (input_size[0] * world_size) % pg.size()
-            padding = [0] * (len(input_size) * 2)
-            padding[-1] = pg.size() - chunk_mode_res
-            results_compare = list(
-                torch.nn.functional.pad(
-                    torch.cat(results_compare),
-                    tuple(padding),
-                    "constant",
-                    0,
-                ).chunk(pg.size())
-            )
-        local_result_compare = torch.empty_like(results_compare[0])
-        dist.reduce_scatter(local_result_compare, results_compare, op=reduce_op)
+        results_compare = torch.stack(results_compare)
+        if reduce_op == dist.ReduceOp.SUM:
+            results_compare = torch.sum(results_compare, dim=0)
+        else:
+            results_compare = torch.max(results_compare, dim=0).values
+        rank_idx = None
+        for idx, placement in enumerate(reshard_spec.placements):
+            if placement.rank() == self.rank:
+                rank_idx = idx
+        local_result_compare = results_compare.chunk(pg.size())[rank_idx]
         self.assertEqual(1, len(local_shards))
         self.assertEqual(local_shards[0].tensor, local_result_compare)
 
