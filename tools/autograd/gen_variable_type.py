@@ -329,6 +329,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "im2col",
     "im2col_backward",
     "cholesky_inverse",
+    "to_sparse",
+    "sparse_sampled_addmm",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -672,6 +674,7 @@ for (const auto& _t: ${arg}) {
 def gen_variable_type(
     out: str,
     native_yaml_path: str,
+    tags_yaml_path: str,
     fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
