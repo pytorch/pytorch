@@ -2919,26 +2919,16 @@ ExprPtr SimplifierUnderContext::mutate(IfThenElsePtr v) {
   auto simp_condition = IRSimplifier::simplify(condition->accept_mutator(this));
   auto simp_true_val = IRSimplifier::simplify(true_val->accept_mutator(this));
   auto simp_false_val = IRSimplifier::simplify(false_val->accept_mutator(this));
+  if (simp_condition->isConstant()) {
+    return immediateAs<int>(simp_condition) ? simp_true_val : simp_false_val;
+  }
 
   ExprPtr simplified_ifelse_expr = nullptr;
-  if ((simp_condition == condition) && (simp_true_val == true_val) &&
-      (simp_false_val == false_val)) {
-    simplified_ifelse_expr = v;
-  } else {
-    simplified_ifelse_expr =
-        alloc<IfThenElse>(simp_condition, simp_true_val, simp_false_val);
-  }
-
-  if (simp_condition->isConstant()) {
-    auto ret = immediateAs<int>(simp_condition);
-    if (ret) {
-      return simp_true_val;
-    } else {
-      return simp_false_val;
-    }
-  } else {
-    return simplified_ifelse_expr;
-  }
+  bool nothing_changed = (simp_condition == condition) &&
+      (simp_true_val == true_val) && (simp_false_val == false_val);
+  return nothing_changed
+      ? v
+      : alloc<IfThenElse>(simp_condition, simp_true_val, simp_false_val);
 }
 
 ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
@@ -2980,28 +2970,34 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
       bound_info.start = expr_ptr;
       bound_info.end = expr_ptr;
       return true;
-    } else {
-      VarPtr simple_expr_ptr = to<Var>(expr_ptr);
-      if (simple_expr_ptr == nullptr) {
-        return false;
-      }
-      auto got = var_bound_info.find(simple_expr_ptr);
-      if (got == var_bound_info.end()) {
-        return false;
-      } else {
-        bound_info.start = got->second.first;
-        // TODO: Need to add the range bounary information to Bound
-        bound_info.end = IRSimplifier::simplify(
-            alloc<Sub>(got->second.second, immLike(got->second.second, 1)));
-        return true;
-      }
     }
+
+    VarPtr var_key = to<Var>(expr_ptr);
+    if (var_key == nullptr) {
+      return false;
+    }
+
+    auto got = var_bound_info.find(var_key);
+    if (got == var_bound_info.end()) {
+      return false;
+    }
+
+    bound_info.start = got->second.first;
+    // TODO: Need to add the boundary information(close/open) of a range to
+    // Bound. Currently, the VarBoundInfo comes from for-loop statement while
+    // the end of the boundary is open. But we assume the start and end of a
+    // range are always close. Hence, we explicitly convert the open boundary to
+    // close.
+    //   [for-start, for-stop) => [for-start, for-stop -1]
+    bound_info.end = IRSimplifier::simplify(
+        alloc<Sub>(got->second.second, immLike(got->second.second, 1)));
+    return true;
   };
 
   using CompareResult = CompareSelectOperation;
-  auto deduce_bound_relationship = [](const analysis::Bound& lhs_bound,
-                                      const analysis::Bound& rhs_bound,
-                                      CompareResult& cmp_res) {
+  auto solve_bound_relationship = [](const analysis::Bound& lhs_bound,
+                                     const analysis::Bound& rhs_bound,
+                                     CompareResult& cmp_res) {
     if (lhs_bound == rhs_bound) {
       cmp_res = CompareResult::kEQ;
       return true;
@@ -3065,7 +3061,7 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
   }
 
   CompareResult cmp_res = CompareResult::kEQ;
-  auto bound_solved = deduce_bound_relationship(lhs_bound, rhs_bound, cmp_res);
+  auto bound_solved = solve_bound_relationship(lhs_bound, rhs_bound, cmp_res);
   if (!bound_solved) {
     GRAPH_DEBUG(
         "(SimplifierUnderContext) Final: ",

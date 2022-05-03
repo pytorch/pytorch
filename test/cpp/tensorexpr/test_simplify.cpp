@@ -4988,17 +4988,6 @@ TEST(Simplify, CompareSelectCondAlwaysInLoopBounds) {
 # CHECK: b[n] = 1.f;
 )IR",
       oss.str());
-
-  s = For::make(
-      n, 1, N, b.store({n}, CompareSelect::make(n, N, 0.f, 1.0f, kLT)));
-  s = IRSimplifier::simplify(s);
-  oss.clear();
-  oss << *s;
-  torch::jit::testing::FileCheck().run(
-      R"IR(
-# CHECK: b[n] = 0.f;
-)IR",
-      oss.str());
 }
 
 TEST(Simplify, IfThenCondAlwaysInLoopBounds) {
