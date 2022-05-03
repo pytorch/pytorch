@@ -73,18 +73,19 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
     """
     class JittedFunction:
         def __init__(self, code_string: str, **kwargs):
-
-            if not torch.cuda.is_available():
-                raise Exception("Jiterator is only supported on CUDA GPUs, no CUDA GPUs are available.")
-
             self.code_string = code_string
 
             parsed_code = _CodeParser(code_string)
             self.kernel_name = parsed_code.function_name
 
             self.kwargs_dict = kwargs
+            self.is_cuda_available = torch.cuda.is_available()
 
         def __call__(self, *tensors: Tensor, **kwargs):
+            # Jiterator follow torch.cuda's lazy initialization behavior
+            # Defer checking cuda's availability at the function invocation time
+            assert self.is_cuda_available, "Jiterator is only supported on CUDA GPUs, no CUDA GPUs are available."
+
             assert len(tensors) <= 8, "jiterator only supports up to 8 tensor inputs."
 
             expanded_kwargs = self.kwargs_dict.copy()
