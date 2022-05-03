@@ -207,7 +207,7 @@ def leaky_relu_backward(
 
 @register_decomposition(aten.gelu)
 @cast_for_opmath
-def gelu(self: Tensor, approximate: str='none') -> Tensor:
+def gelu(self: Tensor, approximate: str = 'none') -> Tensor:
     M_SQRT2 = 1.41421356237309504880
     M_SQRT1_2 = 0.70710678118654752440
     M_2_SQRTPI = 1.12837916709551257390
