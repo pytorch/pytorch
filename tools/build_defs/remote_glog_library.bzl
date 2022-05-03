@@ -47,9 +47,9 @@ def remote_glog_library(name, srcs, http_archive, exported_preprocessor_flags, *
     temp_name = name + "_temp"
     native.genrule(
         name = temp_name,
-        outs = new_srcs,
+        out = new_srcs,
         cmd = " && ".join(cmd),
-        # default_outs = ["."],
+        #default_outs = ["."],
     )
     native.cxx_library(
         name = name,
