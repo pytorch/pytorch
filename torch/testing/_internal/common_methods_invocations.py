@@ -369,7 +369,7 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 #   "name".
 #
 #   All the "sample_inputs" functions are invoked within a `torch.no_grad()`
-#   environment for efficiency and correctness. As such remember to set the
+#   environment for efficiency and correctness. As such remember to set the the
 #   "requires_grad" flag on the inputs **after** performing any transformations
 #   on them.
 #
@@ -402,7 +402,7 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 # Sample inputs are designed to be used with many tests, some
 #   that are very time consuming, so they should be a small
 #   set with small tensors. An elaborated set of sample inputs
-#   can be specified using the "reference_inputs_func" attribute.
+#   can be specified using the the "reference_inputs_func" attribute.
 #   The "reference inputs" for an operation are an extended
 #   set of sample inputs that can more exhausively test an
 #   operator. They are used by only a few tests that are careful
@@ -3571,37 +3571,6 @@ def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwa
 
     for shape in shapes:
         yield SampleInput(make_arg(shape))
-
-def sample_inputs_linalg_vander(op_info, device, dtype, requires_grad=False, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-
-    shapes = ((),
-              (1,),
-              (S,),
-              (2, S),)
-
-    for shape in shapes:
-        yield SampleInput(make_arg(shape))
-        n = shape[-1] if len(shape) > 0 else 1
-        for i in range(3):
-            # n-1, n, n+1
-            N = n + i - 1
-            if N < 0:
-                continue
-            yield SampleInput(make_arg(shape), kwargs=dict(N=N))
-
-def np_vander_batched(x, N=None):
-    # Wrapper around np.vander that supports batches of 1 dimension (enough for the tests)
-    if x.ndim == 0:
-        x = x[np.newaxis]
-    if x.ndim == 1:
-        y = np.vander(x, N=N, increasing=True)
-        return y
-    else:
-        if N is None:
-            N = x.shape[-1]
-        y = np.vander(x.ravel(), N=N, increasing=True).reshape((*x.shape, N))
-        return y
 
 def np_sinc_with_fp16_as_fp32(x):
     # Wraps numpy's sinc function so that fp16 values are promoted to fp32
@@ -10525,7 +10494,6 @@ op_db: List[OpInfo] = [
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
                      skips=(
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ),
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.rfft2',
@@ -10539,7 +10507,6 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False,
                      decorators=[
                          precisionOverride({torch.float: 1e-4}),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ],),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
@@ -10552,7 +10519,6 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False,
                      decorators=[
                          precisionOverride({torch.float: 1e-4}),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ],),
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
@@ -10593,7 +10559,6 @@ op_db: List[OpInfo] = [
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and(torch.bool),
                      skips=(
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ),
                      check_batched_grad=False),
     SpectralFuncInfo('fft.ihfft2',
@@ -10608,7 +10573,6 @@ op_db: List[OpInfo] = [
                      decorators=(
                          # The values for attribute 'shape' do not match: torch.Size([5, 6, 5]) != torch.Size([5, 6, 6]).
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                          DecorateInfo(precisionOverride({torch.float: 2e-4}), 'TestFFT', 'test_reference_nd'),
                          # Mismatched elements!
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -10627,7 +10591,6 @@ op_db: List[OpInfo] = [
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                          # Mismatched elements!
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                          DecorateInfo(
                              precisionOverride({torch.float: 2e-4}),
                              'TestFFT', 'test_reference_nd')],
@@ -10685,7 +10648,6 @@ op_db: List[OpInfo] = [
                skipCPUIfNoFFT,
                DecorateInfo(unittest.skip("Skipped! stft does not match the native function"),
                             'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ],
            dtypes=floating_and_complex_types(),
@@ -11320,15 +11282,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_slogdet,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
-    OpInfo('linalg.vander',
-           aten_name='linalg_vander',
-           ref=np_vander_batched,
-           op=torch.linalg.vander,
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_out=False,
-           sample_inputs_func=sample_inputs_linalg_vander),
     OpInfo('linalg.vector_norm',
            op=torch.linalg.vector_norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -12300,7 +12253,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv1d',
            aliases=('conv1d',),
            aten_name='conv1d',
-           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv1d,
@@ -12325,7 +12278,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
            aten_name='conv2d',
-           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
@@ -14988,7 +14941,6 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
