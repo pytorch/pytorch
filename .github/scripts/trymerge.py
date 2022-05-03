@@ -808,28 +808,6 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
-def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False,) -> None:
-    repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-    org, project = repo.gh_owner_and_name()
-    start_time = time.time()
-
-    while True:
-        current_time = time.time()
-        elapsed_time = current_time - start_time
-
-        if(elapsed_time > 355 * 60):
-            msg = 'Took too long to merge. Please try again later'
-            gh_post_comment(org, project, pr_num, msg, dry_run=dry_run)
-            gh_add_labels(org, project, pr_num, ["land-failed"])
-            raise RuntimeError(msg)
-
-        pr = GitHubPR(org, project, pr_num)
-        try:
-            pr.merge_into(repo, dry_run=dry_run)
-        except MandatoryChecksError as e:
-            print('Merged failed due to {e}. Retrying in 60 seconds.')
-            time.sleep(60)
-
 
 def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
