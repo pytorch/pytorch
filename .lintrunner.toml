@@ -74,6 +74,7 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+is_formatter = true
 
 [[linter]]
 code = 'MYPY'
@@ -269,6 +270,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'ruamel.yaml==0.17.4',
 ]
+is_formatter = true
 
 [[linter]]
 code = 'NEWLINE'
@@ -289,6 +291,7 @@ command = [
     '--',
     '@{{PATHSFILE}}',
 ]
+is_formatter = true
 
 [[linter]]
 code = 'SPACES'
@@ -566,3 +569,4 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'black==22.3.0',
 ]
+is_formatter = true
