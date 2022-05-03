@@ -2,8 +2,8 @@
 import argparse
 import os
 from typing import Set
-from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.code_template import CodeTemplate
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.code_template import CodeTemplate
 
 import yaml
 

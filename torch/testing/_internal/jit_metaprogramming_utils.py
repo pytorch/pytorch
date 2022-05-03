@@ -411,24 +411,39 @@ def create_script_fn(self, method_name, func_type):
 # applied, and all tensor arguments remain.
 # used to trace functions when some arguments are not tensors
 def partial_apply_nontensors(fn, args, **kwargs):
-    source = ['t' if (isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)) else 's' for arg in args]
+    def _is_tensor_input(arg):
+        return isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)
+
+    source = ['t' if _is_tensor_input(arg) else 's' for arg in args]
 
     def new_fn(*tensors_):
         tensors = iter(tensors_)
         return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
 
-    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)]
+    tensor_args = [arg for arg in args if _is_tensor_input(arg)]
+    nontensor_args = [arg for arg in args if not _is_tensor_input(arg)]
+
+    return new_fn, tensor_args, nontensor_args
 
 # create a trace function from input fn
-def create_traced_fn(self, fn):
+def create_traced_fn(self, fn, cache_traced_fn=False):
     def traced_fn(*inputs, **kwargs):
-        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         # `check_trace` is set to False because check_trace is run with @no_grad
         # Also, `check_against_reference` already does all the checks
         # against python function
-        traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
-        self.assertExportImport(traced.graph, inputs_tensors)
-        output = traced(*inputs_tensors)
+        fn_tensors, inputs_tensors, inputs_nontensors = partial_apply_nontensors(fn, inputs, **kwargs)
+        if not cache_traced_fn or not hasattr(traced_fn, 'traced'):
+            traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
+            self.assertExportImport(traced.graph, inputs_tensors)
+            output = traced(*inputs_tensors)
+            if cache_traced_fn:
+                traced_fn.traced = traced
+                traced_fn.inputs_nontensors = inputs_nontensors
+        else:
+            # Guard to check that nontensor inputs are the same as during tracing
+            self.assertEqual(inputs_nontensors, traced_fn.inputs_nontensors)
+            output = traced_fn.traced(*inputs_tensors)
+            traced = traced_fn.traced
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)  # type: ignore[attr-defined]
         traced_fn.graph = traced.graph  # type: ignore[attr-defined]

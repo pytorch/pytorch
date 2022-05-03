@@ -254,7 +254,8 @@ class _DataPipeMeta(GenericMeta):
 
     def __new__(cls, name, bases, namespace, **kwargs):
         if '__iter__' in namespace:
-            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
+            if not any(['MapDataPipe' in str(b) for b in bases]):
+                hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
 
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
@@ -341,17 +342,10 @@ def _simplify_obj_name(obj) -> str:
     """
     Simplify the display strings of objects for the purpose of rendering within DataPipe error messages.
     """
-    default_str = str(obj)
-    # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
-    if isinstance(type(obj), _DataPipeMeta):  # Only applies to DataPipes
-        try:
-            return str(obj.__class__.__qualname__)
-        except Exception as _:
-            return default_str
-    elif inspect.isfunction(obj):
+    if inspect.isfunction(obj):
         return obj.__name__
     else:
-        return default_str
+        return repr(obj)
 
 
 def _generate_input_args_string(obj):
@@ -383,8 +377,12 @@ def _check_iterator_valid(datapipe, iterator_id) -> None:
         if datapipe._valid_iterator_id == iterator_id:
             pass
         else:
-            raise RuntimeError("This iterator has been invalidated, because another iterator has been created"
-                               f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}")
+            raise RuntimeError("This iterator has been invalidated because another iterator has been created"
+                               f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}\n"
+                               "This may be caused multiple references to the same IterDataPipe. We recommend "
+                               "using `.fork()` if that is necessary.\n"
+                               "For feedback regarding this single iterator per IterDataPipe constraint, feel free "
+                               "to comment on this issue: https://github.com/pytorch/data/issues/45.")
 
 
 def _set_datapipe_valid_iterator_id(datapipe):
@@ -457,31 +455,60 @@ def hook_iterator(namespace, profile_name):
                 raise
 
         namespace['__iter__'] = wrap_generator
-    else:
+    else:  # ``__iter__`` of IterDataPipe is not a generator function
         # IterDataPipe is an iterator with both ``__iter__`` and ``__next__``
-        # And ``__iter__`` returns `self`
+        # And ``__iter__`` may or may not return `self`
+
+        # TODO: The two todos below are probably not needed
+        # TODO: We need to check if they return `self` or not, not `__next__`
+        # TODO: Wrap it around and return a wrapper object with an ID and a pointer to the original one
+        #       This will allow invalidation
+        #       Very similar to the third case below (need to return a wrapper around it)
         if '__next__' in namespace:
             next_func = namespace['__next__']
 
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
                 with context():
-                    # If `__iter__` returns `self`, then the object can always have only one iterator at a time
-                    # by default, such that no additional logic is needed.
+                    datapipe = args[0]
+                    # The `_valid_iterator_id` should either be never set (`None`), or set by at most one
+                    # iterator (`0`). Otherwise, it means there are multiple iterators.
+                    if datapipe._valid_iterator_id is not None and datapipe._valid_iterator_id != 0:
+                        raise RuntimeError(
+                            "A separate iterator has been created for this IterDataPipe, but `next()` has been called"
+                            f"on the original IterDataPipe as well: {_generate_iterdatapipe_msg(datapipe)}\n"
+                            "Multiple iterator references to the same IterDataPipe is not allowed. We recommend "
+                            "using `.fork()` if that is necessary.\n"
+                            "For feedback regarding this single iterator per IterDataPipe constraint, feel free "
+                            "to comment on this issue: https://github.com/pytorch/data/issues/45.")
                     return next_func(*args, **kwargs)
 
             namespace['__next__'] = wrap_next
-        # ``__iter__`` of IterDataPipe returns an iterator other than `self` (or simply doesn't have ``__next__``)
-        else:
-            @functools.wraps(func)
-            def wrap_iter(*args, **kwargs):
-                iter_ret = func(*args, **kwargs)
-                datapipe = args[0]
-                nonlocal iterator_id
-                iterator_id = _set_datapipe_valid_iterator_id(datapipe)
-                return IteratorDecorator(iter_ret, datapipe, iterator_id)
 
-            namespace['__iter__'] = wrap_iter
+            # TODO: What if the __next__ and __iter__ do something completely unrelated? That may be an issue
+            #       but the user is probably violating the iterator protocol
+
+        # Regardless if `__next__` exists or not, `__iter__` needs a wrapper to track the number of valid iterators
+        @functools.wraps(func)
+        def wrap_iter(*args, **kwargs):
+            iter_ret = func(*args, **kwargs)
+            datapipe = args[0]
+            nonlocal iterator_id
+            iterator_id = _set_datapipe_valid_iterator_id(datapipe)
+            return IteratorDecorator(iter_ret, datapipe, iterator_id)
+
+        namespace['__iter__'] = wrap_iter
+
+        # else:  # Object has ``__iter__`` but it doesn't have ``__next__``
+        #     @functools.wraps(func)
+        #     def wrap_iter(*args, **kwargs):
+        #         iter_ret = func(*args, **kwargs)
+        #         datapipe = args[0]
+        #         nonlocal iterator_id
+        #         iterator_id = _set_datapipe_valid_iterator_id(datapipe)
+        #         return IteratorDecorator(iter_ret, datapipe, iterator_id)
+        #
+        #     namespace['__iter__'] = wrap_iter
 
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
