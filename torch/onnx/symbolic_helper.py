@@ -1034,7 +1034,7 @@ def args_have_same_dtype(args):
     return has_same_dtype
 
 _default_onnx_opset_version = 13
-_onnx_main_opset = 15
+_onnx_main_opset = 16
 _onnx_stable_opsets = list(range(7, _onnx_main_opset))
 _export_onnx_opset_version = _default_onnx_opset_version
 _constant_folding_opset_versions = list(range(9, _onnx_main_opset + 1))
