@@ -8,7 +8,7 @@ __all__ = ['extend_library', 'create_library']
 # User created libraries to extend existing libraries
 # Each user created library is added here to ensure that it's not automatically removed outside the
 # scope of the function it was created in.
-impls_for_existing_libraries = {}
+_impls_for_existing_libraries = {}
 
 # User created custom libraries
 libraries = {}
@@ -17,20 +17,20 @@ libraries = {}
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
 # This set is maintained to ensure that two libraries don't try to override the exact same functionality to avoid
 # libraries calling into kernels not intended to be called.
-impls: Set[str] = set()
+_impls: Set[str] = set()
 
 class Library:
     # kind can be DEF, IMPL
     def __init__(self, kind, ns, dispatch_key="", message=""):
-        frame = traceback.extract_stack()[0]
+        frame = traceback.extract_stack(limit=1)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m = C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
         self.ns = ns
-        self.op_impls = set()
+        self._op_impls = set()
         self.kind = kind
         self.dispatch_key = dispatch_key
         if kind == "IMPL":
-            impls_for_existing_libraries[id(self)] = self
+            _impls_for_existing_libraries[id(self)] = self
         elif kind == "DEF":
             libraries[id(self)] = self
         else:
@@ -41,7 +41,8 @@ class Library:
 
     def impl(self, op_name, fn, dispatch_key=''):
         if dispatch_key == '':
-            assert self.dispatch_key != '', "Please specify the dispatch key that you want to register the kernel for."
+            if self.dispatch_key == '':
+                raise RuntimeError("Please specify the dispatch key that you want to register the kernel for.")
             dispatch_key = self.dispatch_key
 
         if isinstance(op_name, str):
@@ -55,26 +56,25 @@ class Library:
             raise RuntimeError("impl should be passed either a name or an OpOverload object as the first argument")
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
-        if key in impls:
-            raise RuntimeError("This is not allowed since there's already a kernel overriding {}"
+        if key in _impls:
+            # TODO: in future, add more info about where the existing function is registered (this info is
+            # today already returned by the C++ warning when impl is called but we error out before that)
+            raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
                                "'s behavior for {} dispatch key and {} namespace.".
                                format(name.split("::")[-1], dispatch_key, self.ns))
 
-        # ignore the warning when overriding an existing kernel for an op
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            self.m.impl(name, dispatch_key, fn)
-        impls.add(key)
-        self.op_impls.add(key)
+        self.m.impl(name, dispatch_key, fn)
+        _impls.add(key)
+        self._op_impls.add(key)
 
     # Libraries can be removed at any point by explicitly calling .remove()
     def remove(self):
-        for key in self.op_impls:
-            impls.remove(key)
+        for key in self._op_impls:
+            _impls.remove(key)
         if self.kind == "DEF":
             del libraries[self.ns]
         else:
-            del impls_for_existing_libraries[id(self)]
+            del _impls_for_existing_libraries[id(self)]
         del self.m
 
 # Every user can create their own IMPL to extend existing C++ libraries
