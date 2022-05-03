@@ -59,7 +59,7 @@ namespace onnx = ::ONNX_NAMESPACE;
 const static int kInvalidOpsetVersion = -1;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
-constexpr static std::array<int64_t, 16> kOpsetVersionToIRVersion = {
+constexpr static std::array<int64_t, 17> kOpsetVersionToIRVersion = {
     kInvalidOpsetVersion,
     3,
     kInvalidOpsetVersion,
@@ -75,6 +75,7 @@ constexpr static std::array<int64_t, 16> kOpsetVersionToIRVersion = {
     7,
     7,
     7,
+    8,
     8};
 
 std::string getNodeStackTraceString(const Node* n) {
