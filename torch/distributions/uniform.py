@@ -33,7 +33,7 @@ class Uniform(Distribution):
 
     @property
     def mode(self):
-        return nan * torch.empty_like(self.high)
+        return nan * self.high
 
     @property
     def stddev(self):
