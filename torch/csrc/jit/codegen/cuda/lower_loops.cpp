@@ -178,8 +178,7 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
       }
 
       // Loops after tv_id are dependent on tv_id
-      dependencies.emplace(
-          ca_map->getConcreteMappedID(tv_id, IdMappingMode::LOOP));
+      dependencies.emplace(concrete_id);
     }
   }
 
