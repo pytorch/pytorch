@@ -61,19 +61,19 @@ class TensorMeta(torch.Tensor):
         if isinstance(tensorlike, Number):
             assert not shape and (shape is None or isinstance(shape, Sequence))
             assert not strides and (strides is None or isinstance(strides, Sequence))
-            shape = ()
-            strides = ()
-            dtype = type_to_dtype(type(tensorlike))
-            device = torch.device("cpu")
+            inferred_shape: Tuple[int, ...] = ()
+            inferred_strides: Tuple[int, ...] = ()
+            inferred_dtype = type_to_dtype(type(tensorlike))
+            inferred_device = torch.device("cpu")
             # TODO: This looks wrong, a number that is wrapped into a tensor
             # needs to behave differently than a scalar tensor for type
             # promotion purposes
         elif tensorlike is not None:
             assert isinstance(tensorlike, (TensorMeta, torch.Tensor))
-            shape = tuple(tensorlike.shape)
-            strides = tuple(tensorlike.stride())
-            dtype = tensorlike.dtype
-            device = tensorlike.device
+            inferred_shape = tuple(tensorlike.shape)
+            inferred_strides = tuple(tensorlike.stride())
+            inferred_dtype = tensorlike.dtype
+            inferred_device = tensorlike.device
         else:
             # If no tensorlike "example" is given then all metadata
             # must be provided explicitly
@@ -81,6 +81,11 @@ class TensorMeta(torch.Tensor):
             assert strides is not None
             assert dtype is not None
             assert device is not None
+
+        shape = inferred_shape if shape is None else tuple(shape)
+        strides = inferred_strides if strides is None else tuple(strides)
+        dtype = inferred_dtype if dtype is None else dtype
+        device = inferred_device if device is None else device
 
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
@@ -135,7 +140,7 @@ class TensorMeta(torch.Tensor):
     # TODO: fx uses dunder repr to print objects in code
     def __repr__(self):
         return self.tname
-        # return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.strides})"
+        # return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.stride()})"
 
     def __format__(self, format_spec):
         return self.tname
