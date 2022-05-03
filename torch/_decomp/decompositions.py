@@ -265,6 +265,11 @@ def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tens
     )
 
 
+@register_decomposition(aten.trace)
+def trace(x):
+    return torch.sum(torch.diagonal(x))
+
+
 @register_decomposition(aten.prelu_backward)
 @cast_for_opmath
 def prelu_backward(
@@ -543,7 +548,8 @@ def _softmax_backward_data(
     grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
 ):
     new_grad = grad_output * output
-    return new_grad - output * torch.sum(new_grad, dim=dim, keepdim=True)
+    grad_input = new_grad - output * torch.sum(new_grad, dim=dim, keepdim=True)
+    return grad_input.to(input_dtype)
 
 
 @register_decomposition(aten._log_softmax_backward_data)
@@ -554,7 +560,7 @@ def _log_softmax_backward_data(
     grad_input = grad_output - torch.exp(output) * torch.sum(
         grad_output, dim=dim, keepdim=True
     )
-    return grad_input
+    return grad_input.to(input_dtype)
 
 
 # TODO: the type annotations on arguments are not quite right
