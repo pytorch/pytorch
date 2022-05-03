@@ -164,7 +164,7 @@ class NestedModel(torch.nn.Module):
         model,
         add_to_fsdp_module: bool,
         group=None,
-    ) -> Tuple[torch.nn.Module, torch.nn.Parameter, str]:
+    ) -> Tuple[torch.nn.Module, torch.nn.Parameter]:
         """Registers unmanaged parameters before wrapping with :meth:`wrap`."""
         device = next(model.parameters()).device
         unmanaged_param = torch.nn.Parameter(torch.randn(5, 5, device=device))
@@ -174,7 +174,7 @@ class NestedModel(torch.nn.Module):
         register_module.register_parameter(
             "unmanaged_param", unmanaged_param,
         )
-        return NestedModel.wrap(model, group)
+        return NestedModel.wrap(model, group), unmanaged_param
 
     # NOTE: We exclude `self.bias` from either parameter group to test the
     # case where the optimizer input does not include all model parameters
@@ -600,6 +600,7 @@ class TestFSDPOptimState(FSDPTest):
         into the same subroutine :meth:`_flatten_full_optim_state_dict`.
         """
         NUM_ITERS = 1
+        LR = 1e-3
         # Create a normal wrapped model
         model, optim, optim_input = self._init_nested_model(wrap=True)
         self._step_model(model, optim, num_iters=NUM_ITERS)
@@ -610,8 +611,10 @@ class TestFSDPOptimState(FSDPTest):
         # parameters, representing the model for which we want to load
         device = torch.device("cuda")
         model = NestedModel().to(device)
-        model = NestedModel.wrap_with_unmanaged_params(model, add_to_fsdp_module)
-        optim_input = model.parameters()
+        model, unmanaged_param = NestedModel.wrap_with_unmanaged_params(
+            model, add_to_fsdp_module,
+        )
+        optim_input = list(model.parameters())
         if add_to_fsdp_module:
             # If we add the unmanaged parameters to a module wrapped with FSDP,
             # then the flattened parameter will be comprised of some
@@ -630,9 +633,33 @@ class TestFSDPOptimState(FSDPTest):
             # FSDP, then we simply ignore them without erroring to enable
             # model parallelism use cases, where some parameters are managed
             # externally to FSDP
-            FSDP.shard_full_optim_state_dict(
+            sharded_osd = FSDP.shard_full_optim_state_dict(
                 full_osd, model, optim_input,
             )
+            # Add an entry for the unmanaged parameter to be able to load
+            unmanaged_param_id = -1
+            param_ids = sharded_osd["param_groups"][0]["params"]
+            for i in range(1, len(param_ids)):
+                diff = param_ids[i] - param_ids[i - 1]
+                if diff != 1:
+                    assert diff == 2 and unmanaged_param_id == -1, \
+                        "Only one parameter ID should be skipped"
+                    unmanaged_param_id = param_ids[i - 1] + 1
+            if unmanaged_param_id == -1:
+                unmanaged_param_id = len(param_ids)  # last ID skipped
+            assert unmanaged_param_id >= 0, "One parameter ID should be skipped"
+            state_device = next(iter(next(iter(sharded_osd["state"].values())).values())).device
+            sharded_osd["state"][unmanaged_param_id] = {
+                "step": torch.tensor(float(NUM_ITERS), device=state_device),
+                "exp_avg": torch.randn(unmanaged_param.shape, device=state_device),
+                "exp_avg_sq": torch.randn(unmanaged_param.shape, device=state_device),
+            }
+            sharded_osd["param_groups"][0]["params"] = list(range(
+                max(max(param_ids), unmanaged_param_id) + 1
+            ))  # parameter IDs are now {0, ..., N-1}
+            # Check that we can load the optimizer state dict
+            optim = torch.optim.Adam(optim_input, lr=LR)
+            optim.load_state_dict(sharded_osd)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
