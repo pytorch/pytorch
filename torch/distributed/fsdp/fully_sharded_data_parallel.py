@@ -103,7 +103,7 @@ class ShardingStrategy(Enum):
                    GPU memory until backward computation is done. It inserts reduce_scater
                    after backward computation for synchronizing and sharding gradients.
                    Sharded optimizer states are updated locally.
-    NO_SHARD: This is similar to PyTorch `DistributedDataParallel` API. Parameters, gradients
+    NO_SHARD: This is similar to PyTorch ``DistributedDataParallel`` API. Parameters, gradients
               and optimizer states are replicated among ranks, all_reduce is inserted after
               backward computation is done for synchronizing gradients. Full optimizer states
               are updated in each rank.
@@ -1218,8 +1218,9 @@ class FullyShardedDataParallel(nn.Module):
         are set by :func:`_shard_parameters`:
             ``_is_sharded``: ``True`` if the Parameter is sharded or ``False``
                 if the Parameter is intentionally not sharded (in which case we
-                will all-reduce grads for this param). Currently the only way
-                `_is_sharded = False` is if world_size = 1.
+                will all-reduce grads for this param). Currently the way
+                `_is_sharded = False` is if world_size = 1 or 
+                sharding_strategy is set to be NO_SHARD.
             ``_orig_size``: the size of the original Parameter (before sharding)
         A few attributes are set here:
             ``_local_shard``: a single shard of the parameter. This is needed to
@@ -2413,7 +2414,7 @@ class FullyShardedDataParallel(nn.Module):
                     param._saved_grad_shard = output  # type: ignore[attr-defined]
                 grad = param._saved_grad_shard  # type: ignore[attr-defined]
             else:
-                # Currently the only way for _is_sharded to be False is if
+                # Currently the way for _is_sharded to be False is if
                 # world_size == 1 or sharding_strategy is NO_SHARD.
                 assert (
                     self.world_size == 1 or self.sharding_strategy == ShardingStrategy.NO_SHARD
