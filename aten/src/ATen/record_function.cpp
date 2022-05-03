@@ -692,4 +692,16 @@ bool RecordFunction::isAsync() const {
   return false;
 }
 
+void RecordFunction::_setStaticRuntimeOutVariant() {
+  if (isActive()) {
+    state_->is_static_runtime_out_variant_ = true;
+  }
+}
+
+bool RecordFunction::isStaticRuntimeOutVariant() const {
+  if (isActive()) {
+    return state_->is_static_runtime_out_variant_;
+  }
+  return false;
+}
 } // namespace at
