@@ -12,7 +12,53 @@ from torch.utils._python_dispatch import enable_python_mode
 import logging
 
 class TestPythonRegistration(TestCase):
-    # TODO: split this test into multiple tests
+    def test_override_aten_ops_with_multiple_libraries(self) -> None:
+        x = torch.tensor([1, 2])
+        my_lib1 = torch.library.extend_library("aten")
+        my_lib2 = torch.library.extend_library("aten")
+
+        # Example 1
+        def my_neg(*args, **kwargs):
+            return args[0]._neg_view()
+
+        # Now we are secretly making the operator a view op so autograd needs to know how
+        # to handle it
+        my_lib1.impl('neg', my_neg, "AutogradCPU")
+
+        self.assertTrue(torch.neg(x).is_neg())
+
+        # RuntimeError: impl("aten::neg", ...):
+        # Explicitly provided namespace (aten) in operator name does not match ...
+        with self.assertRaises(RuntimeError):
+            my_lib3 = torch.library.extend_library("foo")
+            my_lib3.impl(torch.ops.aten.neg.default, my_neg, "AutogradCPU")
+
+        # Example 2
+        def my_mul(*args, **kwargs):
+            return torch.zeros_like(args[0])
+
+        # torch.ops.aten.mul.Tensor
+        my_lib2.impl("aten::mul.Tensor", my_mul, "ZeroTensor")
+
+        y = torch._efficientzerotensor(2)
+        self.assertFalse(torch.mul(x, y)._is_zerotensor())
+
+        # Assert that a user can't override the behavior of a (ns, op, dispatch_key)
+        # combination if someone overrided the behavior for the same before them
+        with self.assertRaisesRegex(RuntimeError, 'already a kernel overriding'):
+            my_lib2.impl(torch.ops.aten.mul.Tensor, my_mul, "ZeroTensor")
+
+        my_lib1.remove()
+
+        # Validate that lib2 is not affected by removing lib1
+        self.assertFalse(torch.mul(x, y)._is_zerotensor())
+
+        my_lib2.remove()
+
+        # Validate that the old behavior is restored for neg and mul
+        self.assertFalse(torch.neg(x).is_neg())
+        self.assertTrue(torch.mul(x, y)._is_zerotensor())
+
     def test_override_cpu_sum(self) -> None:
         # Example 1
         run = [False]
@@ -22,65 +68,26 @@ class TestPythonRegistration(TestCase):
             return args[0]
 
         my_lib1 = torch.library.extend_library("aten")
-        my_lib2 = torch.library.extend_library("aten")
-
-        # RuntimeError: impl("aten::sum", ...):
-        # Explicitly provided namespace (aten) in operator name does not match ...
-        # my_lib3 = torch.library.extend_library("foo")
-        # my_lib3.impl(torch.ops.aten.sum.default, "CPU", my_sum)
-
-        # RuntimeError: Explicitly provided dispatch key (Conjugate) is
-        # inconsistent with the dispatch key of the enclosing TORCH_LIBRARY_IMPL block
-        # my_lib1 = torch.library.extend_library("aten", "CPU")
-        # my_lib1.impl('sum', "Conjugate", my_sum)
-
-        my_lib1.impl('sum', "CPU", my_sum)
+        my_lib1.impl('aten::sum', my_sum, "CPU")
         x = torch.tensor([1, 2])
         self.assertEqual(torch.sum(x), x)
         self.assertTrue(run[0])
+        my_lib1.remove()
+        # Validate that the old behavior is restored for sum
+        self.assertEqual(torch.sum(x), torch.tensor(3))
 
-        # Example 2
-        def my_neg(*args, **kwargs):
-            return args[0]._neg_view()
-
-        # Now we are secretly making the operator a view op so autograd needs to know how
-        # to handle it
-        my_lib2.impl(torch.ops.aten.neg.out, "AutogradCPU", my_neg)
-
-        self.assertTrue(torch.neg(x).is_neg())
-
-        # # Example 3
-        # def my_mul(*args, **kwargs):
-        #     return torch.zeros_like(args[0])
-
-        # my_lib2.impl(torch.ops.aten.mul.Tensor, "ZeroTensor", my_mul)
-
-        # y = torch._efficientzerotensor(2)
-        # self.assertFalse(torch.mul(x, y)._is_zerotensor())
-
-        # # Assert that a user can't override the behavior of a (ns, op, dispatch_key)
-        # # combination if someone overrided the behavior for the same before them
-        # with self.assertRaisesRegex(RuntimeError, 'already a kernel overriding'):
-        #     my_lib2.impl(torch.ops.aten.sum.default, "CPU", my_sum)
-
-        # my_lib1.remove()
-
-        # # Validate that the old behavior is restored for sum
-        # self.assertEqual(torch.sum(x), torch.tensor(3))
-
-        # # Validate that lib2 is not affected by removing lib1
-        # self.assertTrue(torch.neg(x).is_neg())
-        # self.assertFalse(torch.mul(x, y)._is_zerotensor())
-
-        # # Overriding sum for CPU is now okay
-        # my_lib2.impl(torch.ops.aten.sum.default, "CPU", my_sum)
-        # self.assertEqual(torch.sum(x), x)
-
-        # my_lib2.remove()
-
-        # # Validate that the old behavior is restored for neg and mul
-        # self.assertTrue(not torch.neg(x).is_neg())
-        # self.assertTrue(torch.mul(x, y)._is_zerotensor())
+    def test_extend_library_with_dispatch_key_arg(self):
+        def my_sum(*args, **kwargs):
+            return args[0]
+        my_lib1 = torch.library.extend_library("aten", "CPU")
+        # RuntimeError: Explicitly provided dispatch key (Conjugate) is
+        # inconsistent with the dispatch key of the enclosing TORCH_LIBRARY_IMPL block
+        with self.assertRaises(RuntimeError):
+            my_lib1.impl('sum', my_sum, "Conjugate")
+        my_lib1.impl('aten::sum', my_sum)
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.sum(x), x)
+        my_lib1.remove()
 
     def test_create_new_library(self) -> None:
         my_lib1 = torch.create_library("foo")

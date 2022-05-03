@@ -10,6 +10,7 @@ def define_targets(rules):
         tags = [
             "supermodule:android/default/pytorch",
             "supermodule:ios/default/public.pytorch",
+            "-fbcode",
             "xplat",
         ],
         visibility = ["//visibility:public"],
