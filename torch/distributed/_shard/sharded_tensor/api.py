@@ -1009,7 +1009,7 @@ class ShardedTensor(object):
         elif sharding_spec.dim == dim1:  # type: ignore[attr-defined]
             sharding_spec.dim = dim0  # type: ignore[attr-defined]
 
-        st_size = list(self.size())
+        st_size = list(self.size())  # type: ignore[arg-type]
         _swap_meta_data(st_size, dim0, dim1)
         return ShardedTensor._init_from_local_tensor(
             self.local_tensor().transpose(dim0, dim1).contiguous(),

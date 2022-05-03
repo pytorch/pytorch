@@ -148,13 +148,13 @@ def sharded_bmm_check(*args, **kwargs):
     if st.dim() != 3 or st2.dim() != 3:
         raise TypeError("both st and st2 need to be a 3D ShardedTensor")
     if (
-        st.sharding_spec().dim != st2.sharding_spec().dim
+        st.sharding_spec().dim != st2.sharding_spec().dim  # type: ignore[attr-defined]
         or st.sharding_spec().dim != 0
     ):
         raise NotImplementedError(
             "Only support performing bmm on tensors sharded on dim 0 now."
         )
-    if st.sharding_spec().placements != st2.sharding_spec().placements:
+    if st.sharding_spec().placements != st2.sharding_spec().placements:  # type: ignore[attr-defined]
         raise NotImplementedError(
             "Both st and st2 need to have same placements for bmm."
         )
