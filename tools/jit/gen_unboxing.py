@@ -216,7 +216,6 @@ def main() -> None:
         "e.g.: aten::empty aten::conv2d ...",
     )
 
-
     options = parser.parse_args()
 
     selector = get_custom_build_selector(
