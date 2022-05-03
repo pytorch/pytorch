@@ -438,6 +438,39 @@ bool isinf(std::complex<T> x) {
   return ::isinf(std::real(x)) || ::isinf(std::imag(x));
 }
 
+////////////////////////////////////////////////////////////
+// TODO: the following overloads are only needed for CUDA //
+// 10.2 Please remove when CUDA 10.2 support is dropped   //
+////////////////////////////////////////////////////////////
+
+bool isinf(int64_t x) {
+  return false;
+}
+
+bool isinf(int x) {
+  return false;
+}
+
+bool isinf(short x) {
+  return false;
+}
+
+bool isinf(char x) {
+  return false;
+}
+
+bool isinf(unsigned char x) {
+  return false;
+}
+
+bool isinf(bool x) {
+  return false;
+}
+
+////////////////////////////////////////////////////////////
+//                        End TODO                        //
+////////////////////////////////////////////////////////////
+
 template <typename T>
 bool isnan(T x) {
   return x != x;
