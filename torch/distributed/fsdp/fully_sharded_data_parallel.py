@@ -17,6 +17,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     Set,
@@ -55,15 +56,38 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _unflatten_optim_state,
 )
-from .utils import _apply_to_tensors, _replace_by_prefix
+from ._utils import _apply_to_tensors, _replace_by_prefix
 from .wrap import _recursive_wrap
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
 
+_TORCHDISTX_AVAIL = True
+try:
+    from torchdistx import fake, deferred_init
+except ImportError:
+    _TORCHDISTX_AVAIL = False
+
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
+
+
+def _default_meta_device_init_fn(module):
+    """
+    Default initializer for modules initialized on the meta device.
+    """
+    # TODO: move module to device_id here once device_id is available.
+    module.to_empty(device=torch.cuda.current_device())
+    try:
+        with torch.no_grad():
+            module.reset_parameters()
+    except BaseException as e:
+        warnings.warn(
+            f"Unable to call reset_parameters() for module on meta device with error {str(e)}. "
+            "Please ensure your module implements a ``reset_parameters`` function."
+        )
+        raise e
 
 
 class ShardingStrategy(Enum):
@@ -79,25 +103,18 @@ class ShardingStrategy(Enum):
                    GPU memory until backward computation is done. It inserts reduce_scater
                    after backward computation for synchronizing and sharding gradients.
                    Sharded optimizer states are updated locally.
-    SHARD_OP(future support): Shard optimizer states only, this algorithm inserts all_gather
-                              or broadcast before forward computation and keeps the full
-                              parameters in GPU memory until backward computation is done. It
-                              inserts all_reduce after backward computation for synchronizing
-                              gradients. Sharded optimizer states are updated locally.
-    NO_SHARD(future support): This is similar to PyTorch `DistributedDataParallel` API.
-                              Parameters, gradients and optimizer states are replicated
-                              among ranks, all_reduce is inserted after backward computation
-                              is done for synchronizing gradients. Full optimizer states
-                              are updated in each rank.
+    NO_SHARD: This is similar to PyTorch ``DistributedDataParallel`` API. Parameters, gradients
+              and optimizer states are replicated among ranks, all_reduce is inserted after
+              backward computation is done for synchronizing gradients. Full optimizer states
+              are updated in each rank.
     HYBRID_SHARD(future support): apply FULL_SHARD algorithm in the intra node and
                                   apply NO_SHARD algorithm in the inter nodes.
 
     """
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
+    NO_SHARD = auto()
     # TODO
-    # SHARD_OP = auto()
-    # NO_SHARD = auto()
     # HYBRID_SHARD = auto()
 
 
@@ -122,22 +139,32 @@ class MixedPrecision:
         to their reduced precision) as expected. Note that this checkpoint
         support is currently limited to ``StateDictType.FULL_STATE_DICT``.
 
-    .. note:: In ``_summon_full_params``, parameters are summoned in full
+    .. note:: In ``summon_full_params``, parameters are summoned in full
         precision but buffers are not.
 
     .. note:: Parameters and buffers are checkpointed in full precision. For
         buffers, this is only guaranteed to work for ``StateDictType.FULL_STATE_DICT``.
 
     .. note:: This API is experimental and subject to change.
+
+    .. note:: Specification of reduced precision types must be explicit, in that
+        if, for example, ``param_dtype`` is not specified, it will not be cast by
+        FSDP. Thus, a config such as ``MixedPrecision(reduce_dtype=torch.float16)``
+        will not cast buffers or parameters. Note that if a ``MixedPrecision``
+        config is specified without a ``reduce_dtype``, gradient communication
+        would occur in the `param_dtype` precision, if given, otherwise, in the
+        original parameter precision.
     """
     # maintain a tensor of this dtype that the fp32 param shard will be cast to.
     # Will control the precision of model params, inputs, and thus compute as
     # well.
-    param_dtype: torch.dtype = torch.float16
+    param_dtype: Optional[torch.dtype] = None
     # Gradient communication precision.
-    reduce_dtype: torch.dtype = torch.float16
+    reduce_dtype: Optional[torch.dtype] = None
     # Buffer precision.
-    buffer_dtype: torch.dtype = torch.float16
+    # TODO: buffer + param are usually of the same type, if user specifies
+    # param but not buffer, should we automatically make buffer be the same?
+    buffer_dtype: Optional[torch.dtype] = None
 
 
 @dataclass
@@ -455,6 +482,13 @@ class FullyShardedDataParallel(nn.Module):
             the near future. It allows users to enable two different backward_prefetch
             algorithms to help backward communication and computation overlapping.
             Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
+        mixed_precision: (Optional[MixedPrecision]): A ``MixedPrecision`` instance
+            describing the mixed precision training config to be used. ``MixedPrecision``
+            supports configuring parameter, buffer, and gradient communication dtype. Note
+            that only floating point data is cast to the reduced precision. This allows
+            users potential memory saving and training speedup while trading off
+            accuracy during model training. If ``None``, no mixed precision is applied.
+            (Default: ``None``)
         ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
             own parameters and child modules' parameters are ignored by this
             instance. None of the modules directly in ``ignored_modules``
@@ -465,6 +499,37 @@ class FullyShardedDataParallel(nn.Module):
             avoid sharding specific parameters when using an
             ``auto_wrap_policy`` or if parameters' sharding is not managed by
             FSDP. (Default: ``None``)
+        param_init_fn: (Optional[Callable[[nn.Module], None]]):
+            A ``Callable[torch.nn.Module] -> None`` that
+            specifies how modules that are currently on the meta device should be initialized
+            onto an actual device. Note that as of v1.12, we detect modules on the meta
+            device via ``is_meta`` check and apply a default initialization that calls
+            ``reset_parameters`` method on the passed in ``nn.Module`` if ``param_init_fn``
+            is not specified, otherwise we run ``param_init_fn`` to initialize the passed
+            in ``nn.Module``. In particular, this means that if ``is_meta=True`` for any
+            module parameters for modules that will be wrapped with FSDP and ``param_init_fn``
+            is not specified, we assume your module properly implements a ``reset_paramters()``
+            and will throw errors if not. Note that additionally, we offer support for modules
+            initialized with torchdistX's (https://github.com/pytorch/torchdistX)
+            ``deferred_init`` API. In this case, deferred modules would be initialized
+            by a default initialization function that calls torchdistX's
+            ``materialize_module``, or the passed in ``param_init_fn``, if it is not
+            ``None``. The same ``Callable`` is applied to initialize all meta modules.
+            Note that this initialization function is applied before doing any FSDP sharding
+            logic.
+
+            Example::
+
+                >>> module = MyModule(device="meta")
+                >>> def my_init_fn(module):
+                >>>     # responsible for initializing a module, such as with reset_parameters
+                >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=default_auto_wrap_policy)
+                >>> print(next(fsdp_model.parameters()).device) # current CUDA device
+                >>> # With torchdistX
+                >>> module = deferred_init.deferred_init(MyModule, device="cuda")
+                >>> # Will initialize via deferred_init.materialize_module().
+                >>> fsdp_model = FSDP(module, auto_wrap_policy=default_auto_wrap_policy)
+
     """
 
     def __init__(
@@ -477,6 +542,7 @@ class FullyShardedDataParallel(nn.Module):
         backward_prefetch: Optional[BackwardPrefetch] = None,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
+        param_init_fn: Optional[Callable[[nn.Module], None]] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -518,11 +584,44 @@ class FullyShardedDataParallel(nn.Module):
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
                 mixed_precision=mixed_precision,
+                param_init_fn=param_init_fn,
             )
 
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
+
+        is_meta_module = any(p.is_meta for p in module.parameters())
+        is_torchdistX_deferred_init = (
+            not is_meta_module and _TORCHDISTX_AVAIL
+            and any(fake.is_fake(p) for p in module.parameters())
+        )
+
+        def _run_param_init_fn():
+            # Call user-specified initialization function.
+            if not callable(param_init_fn):
+                raise ValueError(
+                    f"Expected {param_init_fn} to be callable, but got {type(param_init_fn)}"
+                )
+            param_init_fn(module)
+
+        if is_meta_module:
+            if param_init_fn is not None:
+                _run_param_init_fn()
+            else:
+                # Call default initialization function that is dependent on
+                # reset_parameters.
+                _default_meta_device_init_fn(module)
+        elif is_torchdistX_deferred_init:
+            assert _TORCHDISTX_AVAIL, "Got torchdistX initialized module but torchdistX lib is not available."
+            if param_init_fn is not None:
+                _run_param_init_fn()
+            else:
+                # Call default torchdistX initialization function. Omit re-initialization of FSDP submodules
+                # which is unnecessary.
+                check_fn = lambda k: not isinstance(k, FullyShardedDataParallel)  # noqa: E731
+                deferred_init.materialize_module(module, check_fn=check_fn)
+
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
@@ -574,7 +673,7 @@ class FullyShardedDataParallel(nn.Module):
         for n, p in self.named_parameters():
             if p not in ignored_params and not isinstance(p, FlatParameter):
                 raise RuntimeError(
-                    f"found unsharded parameter: {n} ; {p.size()} {p.__class__}"
+                    f"found unflattened parameter: {n} ; {p.size()} {p.__class__}"
                 )
         self._reset_lazy_init()
 
@@ -627,9 +726,13 @@ class FullyShardedDataParallel(nn.Module):
             # Keep full params in the GPU memory until backward
             # computation is done
             self.reshard_after_forward = False
+        elif self.sharding_strategy == ShardingStrategy.NO_SHARD:
+            # self.reshard_after_forward is not used when NO_SHARD
+            # is set, just setting it as False here
+            self.reshard_after_forward = False
         else:
             raise RuntimeError(
-                "sharding_strategy only supports FULL_SHARD and SHARD_GRAD_OP right now."
+                "sharding_strategy only supports FULL_SHARD, SHARD_GRAD_OP and NO_SHARD right now."
             )
 
     def _get_ignored_modules(
@@ -775,7 +878,39 @@ class FullyShardedDataParallel(nn.Module):
         with torch.no_grad():
             p.data = p.to(cpu_device)
 
-    def _cast_fp_inputs_to_precision(self, dtype: torch.dtype, *args: Any, **kwargs: Any) -> Tuple[Any, Any]:
+    def _mixed_precision_enabled_for_params(self) -> bool:
+        """
+        Whether user explicitly enabled mixed precision for
+        parameters or not.
+        """
+        return (
+            self.mixed_precision is not None
+            and self.mixed_precision.param_dtype is not None
+        )
+
+    def _mixed_precision_enabled_for_buffers(self) -> bool:
+        """
+        Whether user explicitly enabled mixed precision for
+        buffers or not.
+        """
+        return (
+            self.mixed_precision is not None
+            and self.mixed_precision.buffer_dtype is not None
+        )
+
+    def _mixed_precision_enabled_for_reduce(self) -> bool:
+        """
+        Whether user explicitly enabled mixed precision for
+        gradient reduction or not.
+        """
+        return (
+            self.mixed_precision is not None
+            and self.mixed_precision.reduce_dtype is not None
+        )
+
+    def _cast_fp_inputs_to_precision(
+        self, dtype: torch.dtype, *args: Any, **kwargs: Any
+    ) -> Tuple[Any, Any]:
         """
         Casts floating point tensors in args and kwargs to precision given by dtype.
         requires_grad field is respected.
@@ -804,7 +939,9 @@ class FullyShardedDataParallel(nn.Module):
         if we are CPU offloading, this also implicitly loads the parameter shard
         back to GPU.
         """
-        assert self.mixed_precision is not None, "Expected to only be called when mixed precision is enabled."
+        assert (
+            self._mixed_precision_enabled_for_params()
+        ), "Expected to only be called when mixed precision for parameters is enabled."
         with torch.cuda.stream(self._streams["mixed_precision_params"]):
             for p in self.params:
                 assert p._mp_shard is not None
@@ -825,7 +962,9 @@ class FullyShardedDataParallel(nn.Module):
         """
         Deallocate storage for parameter's mixed precision shard.
         """
-        assert self.mixed_precision is not None
+        assert (
+            self._mixed_precision_enabled_for_params()
+        ), "Expected to only be called when mixed precision for parameters is enabled."
         current_stream = torch.cuda.current_stream()
         for p in params:
             # mp_shard should always be allocated.
@@ -892,7 +1031,7 @@ class FullyShardedDataParallel(nn.Module):
                         # Note that we don't pass in self.mixed_precision.buffer_dtype
                         # recursively into _cast_buffers, as we want to respect
                         # mp config for child FSDP instances.
-                        elif self.mixed_precision is not None:
+                        elif self._mixed_precision_enabled_for_buffers():
                             buf = buf.to(self.mixed_precision.buffer_dtype)
 
                     setattr(module, name, buf)
@@ -918,8 +1057,12 @@ class FullyShardedDataParallel(nn.Module):
                 p.is_floating_point()
             ), "Autograd does not support operations for integer type."
 
-            # Sharding is done only when world_size is larger than 1.
-            p._is_sharded = self.world_size > 1  # type: ignore[attr-defined]
+            # Sharding is done only when world_size is larger than 1 and
+            # sharding_strategy!=NO_SHARD.
+            p._is_sharded = (  # type: ignore[attr-defined]
+                self.world_size > 1
+                and self.sharding_strategy != ShardingStrategy.NO_SHARD
+            )
             p._orig_size = p.size()  # type: ignore[attr-defined]
 
             if not p._is_sharded:  # type: ignore[attr-defined]
@@ -1075,8 +1218,9 @@ class FullyShardedDataParallel(nn.Module):
         are set by :func:`_shard_parameters`:
             ``_is_sharded``: ``True`` if the Parameter is sharded or ``False``
                 if the Parameter is intentionally not sharded (in which case we
-                will all-reduce grads for this param). Currently the only way
-                `_is_sharded = False` is if world_size = 1.
+                will all-reduce grads for this param). Currently the way
+                `_is_sharded = False` is if world_size = 1 or sharding strategy
+                is NO_SHARD.
             ``_orig_size``: the size of the original Parameter (before sharding)
         A few attributes are set here:
             ``_local_shard``: a single shard of the parameter. This is needed to
@@ -1138,7 +1282,9 @@ class FullyShardedDataParallel(nn.Module):
         # fwd/bwd, it is freed and we only hold on to the full precision shard.
         # As a result, this reduced precision shard is not allocated if we are
         # not in the forward/backward pass.
-        if self.mixed_precision:
+        if (
+            self._mixed_precision_enabled_for_params()
+        ):
             p._mp_shard = torch.zeros_like(
                 p._local_shard,
                 device=self.compute_device,
@@ -1157,7 +1303,7 @@ class FullyShardedDataParallel(nn.Module):
             # into full_param_padded it can occur without issues and result in
             # full_param_padded having the expected param_dtype.
             full_param_dtype = (
-                p.dtype if self.mixed_precision is None
+                p.dtype if not self._mixed_precision_enabled_for_params()
                 else self.mixed_precision.param_dtype
             )
             p._full_param_padded = torch.zeros(  # type: ignore[attr-defined]
@@ -1206,7 +1352,7 @@ class FullyShardedDataParallel(nn.Module):
             self._streams["post_backward"] = torch.cuda.Stream()
             # Stream to move main params to self.mixed_precision.param_dtype
             # for forward pass.
-            if self.mixed_precision:
+            if self._mixed_precision_enabled_for_params():
                 self._streams["mixed_precision_params"] = torch.cuda.Stream()
 
         # We share streams with all children instances, which allows them to
@@ -1229,7 +1375,7 @@ class FullyShardedDataParallel(nn.Module):
         if not torch.cuda.is_available():
             return
 
-        if self.mixed_precision:
+        if self._mixed_precision_enabled_for_params():
             self._streams["mixed_precision_params"].wait_stream(
                 torch.cuda.current_stream()
             )
@@ -1336,9 +1482,9 @@ class FullyShardedDataParallel(nn.Module):
 
     def _full_post_state_dict_hook(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         """
         Hook that runs after model.state_dict() is called before returning result to
         user. For FSDP, we may have to clone the tensors in state_dict as params go
@@ -1379,9 +1525,9 @@ class FullyShardedDataParallel(nn.Module):
 
     def _local_post_state_dict_hook(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         """
         This hook create a ShardedTensor from the local flat_param and replace
         the state_dict[f"{prefix}{FLAT_PARAM}] with the ShardedTensor. No copy
@@ -1414,18 +1560,18 @@ class FullyShardedDataParallel(nn.Module):
 
     def _sharded_post_state_dict_hook(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518")
 
     @staticmethod
     def _post_state_dict_hook(
         module: nn.Module,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
         *args: Any,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         """
         _post_state_dict_hook() is called after the state_dict() of this
         FSDP module is executed. ``self._state_dict_type`` is used to decide
@@ -1437,7 +1583,10 @@ class FullyShardedDataParallel(nn.Module):
         # back to their mixed precision type. This is because buffers are cast
         # during lazy_init() and stay at their mixed precision type before/after
         # forward/backward. As a result state_dict() should maintain this.
-        if self._is_root and self.mixed_precision is not None:
+        if (
+            self._is_root
+            and self._mixed_precision_enabled_for_buffers()
+        ):
             self._cast_buffers(recurse=True)
         return processed_state_dict
 
@@ -1505,7 +1654,10 @@ class FullyShardedDataParallel(nn.Module):
                 # buffers stay casted after forward/backward. We must have the
                 # call here instead of above because _summon_full_params itself
                 # calls _lazy_init() which would cast the buffers.
-                if self.mixed_precision is not None and self._is_root:
+                if (
+                    self._is_root
+                    and self._mixed_precision_enabled_for_buffers()
+                ):
                     self._cast_buffers(
                         dtype=self._orig_buffer_dtypes, recurse=False
                     )
@@ -1537,14 +1689,14 @@ class FullyShardedDataParallel(nn.Module):
 
     def _full_pre_load_state_dict_hook(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
     ) -> None:
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_WRAPPED_MODULE}.")
 
     def _local_pre_load_state_dict_hook(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
     ) -> None:
         """
@@ -1578,7 +1730,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _sharded_pre_load_state_dict_hook(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
     ) -> None:
         raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
@@ -1586,7 +1738,7 @@ class FullyShardedDataParallel(nn.Module):
     @staticmethod
     def _pre_load_state_dict_hook(
         module: nn.Module,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
         *args: Any,
     ) -> None:
@@ -1604,7 +1756,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def load_state_dict(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Mapping[str, Any],
         *args,
     ) -> NamedTuple:
         """
@@ -1662,7 +1814,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _load_local_state_dict(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Mapping[str, Any],
         *args,
     ) -> NamedTuple:
         """
@@ -1678,7 +1830,10 @@ class FullyShardedDataParallel(nn.Module):
         self.training_state = TrainingState_.FORWARD
 
         # Cast inputs to their mixed precision type.
-        if self._is_root and self.mixed_precision is not None:
+        if (
+            self._is_root
+            and self._mixed_precision_enabled_for_params()
+        ):
             input_dtype = self.mixed_precision.param_dtype
             args, kwargs = self._cast_fp_inputs_to_precision(
                 input_dtype, *args, **kwargs
@@ -1702,7 +1857,9 @@ class FullyShardedDataParallel(nn.Module):
 
         if self.reshard_after_forward:
             self._free_full_params()
-            if self.mixed_precision is not None:
+            if (
+                self._mixed_precision_enabled_for_params()
+            ):
                 self._free_mp_shard(self.params)
         # Switch to original local shards of params. We maintain this invariant throughout
         # the code, i.e., ``p.data == p._local_shard`` after each function. This
@@ -2144,7 +2301,7 @@ class FullyShardedDataParallel(nn.Module):
             # full parameters in memory and save network overhead.
             self._free_full_params(cast(List[FlatParameter], [param]))
 
-        if self.mixed_precision:
+        if self._mixed_precision_enabled_for_params():
             # Noop if reshard_after_forward=True because we'd free the param
             # shard when rebuilding the full params in the pre_beckward_hook.
             self._free_mp_shard(cast(List[FlatParameter], [param]))
@@ -2179,12 +2336,12 @@ class FullyShardedDataParallel(nn.Module):
         with torch.cuda.stream(self._streams["post_backward"]):
             orig_grad_data = param.grad.data
             if (
-                self.mixed_precision is not None and
-                self.mixed_precision.param_dtype != self.mixed_precision.reduce_dtype
+                self._mixed_precision_enabled_for_reduce()
             ):
                 # Cast gradient to precision in which it should be communicated.
                 # TODO: Make this a communication hook when communication hooks
-                # are implemented for FSDP.
+                # are implemented for FSDP. Note that this is a noop if the
+                # reduce_dtype matches the param dtype.
                 param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
 
             if self.gradient_predivide_factor > 1:
@@ -2218,7 +2375,14 @@ class FullyShardedDataParallel(nn.Module):
                     # Average grad by world_size for consistency with PyTorch DDP.
                     output.div_(self.gradient_postdivide_factor)
 
-                if self.mixed_precision is not None:
+                # Note that we need to cast grads back to the full precision if
+                # 1) parameters were in reduced precision during fwd, as grads
+                # would thus be in this reduced precision, or
+                # 2) parameters did not have precision reduced, but grads
+                # had reduced precision for communication.
+                if (
+                    self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                ):
                     # Cast gradients back to the full parameter precision so that
                     # optimizer.step() happens in full precision.
                     orig_param_grad_data = output
@@ -2250,15 +2414,25 @@ class FullyShardedDataParallel(nn.Module):
                     param._saved_grad_shard = output  # type: ignore[attr-defined]
                 grad = param._saved_grad_shard  # type: ignore[attr-defined]
             else:
-                # Currently the only way for _is_sharded to be False is if
-                # world_size == 1. This could be relaxed in the future, e.g,
-                # no sharding like PyTorch DDP, in which case grads should be
-                # all-reduced here.
+                # Currently the way for _is_sharded to be False is if
+                # world_size == 1 or sharding_strategy is NO_SHARD.
                 assert (
-                    self.world_size == 1
-                ), "Currently the only way for _is_sharded to be False is \
-                    world_size == 1"
-                if self.mixed_precision is not None:
+                    self.world_size == 1 or self.sharding_strategy == ShardingStrategy.NO_SHARD
+                ), "Currently the way for _is_sharded to be False is \
+                    world_size == 1 or sharding_stratagy is set to be NO_SHARD"
+                if self.sharding_strategy == ShardingStrategy.NO_SHARD:
+                    dist.all_reduce(param.grad, group=self.process_group)
+                    if self.gradient_postdivide_factor > 1:
+                        # Average grad by world_size for consistency with PyTorch DDP.
+                        param.grad.div_(self.gradient_postdivide_factor)
+                # Note that we need to cast grads back to the full precision if
+                # 1) parameters were in reduced precision during fwd, as grads
+                # would thus be in this reduced precision, or
+                # 2) parameters did not have precision reduced, but grads
+                # had reduced precision for communication.
+                if (
+                    self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                ):
                     # Cast gradients back to the full parameter precision so that
                     # optimizer.step() happens in full precision.
                     orig_param_grad_data = param.grad.data
@@ -2430,7 +2604,8 @@ class FullyShardedDataParallel(nn.Module):
         with torch.cuda.stream(self._streams["all_gather"]):
             for p in self.params:
                 mixed_precision_cast_ran = (
-                    self.mixed_precision is not None and not force_full_precision
+                    self._mixed_precision_enabled_for_params()
+                    and not force_full_precision
                 )
                 if mixed_precision_cast_ran:
                     self._cast_param_shards_to_dtype()
@@ -2491,7 +2666,10 @@ class FullyShardedDataParallel(nn.Module):
                     assert (
                         p._full_param_padded.storage().size() == 0  # type: ignore[attr-defined]
                     ), "Full param's storage should have been freed before if all gather is needed."  # type: ignore[attr-defined]
-                    if self.mixed_precision and force_full_precision:
+                    if (
+                        self._mixed_precision_enabled_for_params()
+                        and force_full_precision
+                    ):
                         # p._full_param_padded has the reduced precision type,
                         # but we need full precision rebuild as we're in
                         # _summon_full_params. Note that this is why
@@ -2519,7 +2697,9 @@ class FullyShardedDataParallel(nn.Module):
                     self._update_p_data(p, output_tensor=output_tensor)
                     # We can free the reduced precision shard as we have the
                     # full precision parameter.
-                    if self.mixed_precision is not None:
+                    if (
+                        self._mixed_precision_enabled_for_params()
+                    ):
                         self._free_mp_shard(cast(List[FlatParameter], [p]))
         return output_tensors
 
@@ -2534,6 +2714,12 @@ class FullyShardedDataParallel(nn.Module):
         warnings on the first deviating iteration and stops checking
         thereafter.
 
+        For now, only the all-gathers to rebuild full parameters in the forward
+        pass are checked since (1) a correct forward order should imply a
+        correct pre-backward order for typical cases and (2) there may be some
+        issues with pre-fetching that need to be looked into:
+        https://github.com/pytorch/pytorch/issues/76553
+
         Executing in ``no_sync()`` does not affect this check for
         ``FULL_SHARD`` and ``SHARD_GRAD_OP``: (1) Being in ``no_sync()`` in the
         first iteration does not yield a different all-gather sequence, and (2)
@@ -2543,10 +2729,8 @@ class FullyShardedDataParallel(nn.Module):
         sequence's prefix (for ``SHARD_GRAD_OP``).
         """
         # Only check all-gathers when rebuilding the full parameters in the
-        # forward pass or in the beginning of the backward pass
-        if self.training_state not in (
-            TrainingState_.FORWARD, TrainingState_.BACKWARD_PRE,
-        ):
+        # forward pass
+        if self.training_state != TrainingState_.FORWARD:
             return
         eod = self._exec_order_data
         param_index = eod.get_param_index(param)
@@ -2595,7 +2779,10 @@ class FullyShardedDataParallel(nn.Module):
                 eod.warn_status = _ExecOrderWarnStatus.WARNING
             eod.index += 1
         else:
-            device = param.device
+            # Use `compute_device` instead of the parameter's device in case it
+            # is offloaded on CPU and we are using NCCL backend, which requires
+            # communicated tensors be on GPU
+            device = self.compute_device
             indices = torch.zeros(self.world_size, dtype=torch.int32, device=device)
             index = torch.tensor([param_index], dtype=torch.int32, device=device)
             dist._all_gather_base(indices, index, group=self.process_group)
@@ -2653,9 +2840,11 @@ class FullyShardedDataParallel(nn.Module):
             params = self.params
         current_stream = torch.cuda.current_stream()
         for p in params:
-            # e.g., world_size == 1
+            # e.g., world_size == 1 or self.sharding_strategy = NO_SHARD
             if not p._is_sharded:  # type: ignore[attr-defined]
-                if self.mixed_precision is not None:
+                if (
+                    self._mixed_precision_enabled_for_params()
+                ):
                     self._free_mp_shard(cast(List[FlatParameter], [p]))
                 continue
             # Don't let PyTorch reuse this memory until all work in the current
@@ -3359,7 +3548,5 @@ def _get_param_name_to_param(
     model: torch.nn.Module,
 ) -> Dict[str, torch.nn.Parameter]:
     """Constructs the inverse mapping of :meth:`_get_param_to_param_name`."""
-    return {
-        param_name: param
-        for param, param_name in _get_param_to_param_name(model).items()
-    }
+    param_to_param_name = _get_param_to_param_name(model)
+    return dict(zip(param_to_param_name.values(), param_to_param_name.keys()))

@@ -38,6 +38,11 @@ from torch.distributed.distributed_c10d import (
     AllreduceOptions,
     GroupMember,
 )
+from torch.distributed.utils import (
+    _verify_param_shape_across_processes,
+    _sync_params_and_buffers,
+)
+
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 from torch.testing._internal.common_distributed import (
@@ -5408,16 +5413,6 @@ class DistributedTest:
             # type if it didn't exist.
             self.assertEqual(ddp_logging_data.get("unused_parameter_size", 0), 0)
             self.assertEqual(ddp_logging_data.get("has_rebuilt_buckets"), 1)
-            init_bucket_lims = ddp_logging_data.get("initial_bucket_size_limits")
-            rebuilt_bucket_lims = ddp_logging_data.get("rebuilt_bucket_size_limits")
-            self.assertEqual(
-                int(init_bucket_lims),
-                -1,
-            )
-            self.assertEqual(
-                int(rebuilt_bucket_lims),
-                dist._DEFAULT_FIRST_BUCKET_BYTES,
-            )
             self.assertEqual(
                 ddp_logging_data.get("rebuilt_bucket_sizes"), str(param_size)
             )
@@ -5900,7 +5895,13 @@ class DistributedTest:
                         # tensor from another rank should be different.
                         self.assertNotEqual(t, tensor)
 
-            net._sync_params_and_buffers(authoritative_rank=rank_to_broadcast)
+            _sync_params_and_buffers(
+                module=net.module,
+                process_group=net.process_group,
+                broadcast_bucket_size=net.broadcast_bucket_size,
+                src=rank_to_broadcast,
+                params_and_buffers_to_ignore=net.parameters_to_ignore
+            )
             # Now all model params should be the same.
             self.validate_net_equivalence(net)
             # Since the network params were broadcast from rank_to_broadcast, validate that
@@ -7338,7 +7339,7 @@ class DistributedTest:
             )
 
             # Modify the model so that the number of parameters are different for each rank.
-            # This will cause a RuntimeError to be thrown below in dist._verify_params_across_processes,
+            # This will cause a RuntimeError to be thrown below in _verify_param_shape_across_processes,
             # so we can check if the correct error is thrown and is logged.
             # We can't do this in the constructor above otherwise the logger will
             # not be properly initialized.
@@ -7347,9 +7348,16 @@ class DistributedTest:
             # if we pass a logger we can verify that it was logged
             with ctx:
                 if use_logger:
-                    dist._verify_params_across_processes(net.process_group, list(net.parameters()), net.logger)
+                    _verify_param_shape_across_processes(
+                        net.process_group,
+                        list(net.parameters()),
+                        net.logger
+                    )
                 else:
-                    dist._verify_params_across_processes(net.process_group, list(net.parameters()))
+                    _verify_param_shape_across_processes(
+                        net.process_group,
+                        list(net.parameters())
+                    )
                 # Should only be run by rank 0, and blocking_wait catches and
                 # reports exception.
                 dist.barrier(group_to_use)
@@ -8392,55 +8400,6 @@ class DistributedTest:
                         else:
                             self.assertEqual(opt[i]["tensor"].grad_fn, None)
                     out.mean().backward()
-
-        @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(
-            BACKEND not in DistTestCases.backend_feature["ddp"],
-            f"The {BACKEND} backend does not support DistributedDataParallel"
-        )
-        def test_ddp_get_bucket_sizes(self):
-            torch.cuda.set_device(self.rank)
-            default_bucket_cap_mb = 25 * (1024 ** 2)
-            first_bucket_bytes_mb = dist._DEFAULT_FIRST_BUCKET_BYTES
-            os.environ["DDP_SET_LAST_BUCKET_CAP"] = "1"
-
-            class MyModel(nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.model = nn.Sequential(
-                        nn.Linear(2, 4000, bias=False),
-                        *[nn.Linear(4000, 4000, bias=False) for _ in range(10)]
-                    )
-
-                def forward(self, x):
-                    return self.model(x)
-
-            ddp = torch.nn.parallel.DistributedDataParallel(
-                MyModel().cuda(),
-                device_ids=[self.rank]
-            )
-            inp = torch.randn(10, 2)
-            rebuilt_bucket_index = 2
-            for i in range(6):
-                out = ddp(inp).sum()
-                out.backward()
-                logging_data = ddp._get_ddp_logging_data()
-                bucket_size_limits = [
-                    int(b) for b in logging_data[
-                        "{}_bucket_size_limits".format(
-                            "initial" if i < rebuilt_bucket_index else "rebuilt"
-                        )
-                    ].split(", ")
-                ]
-                # first_bucket_bytes is actually the last because we reverse
-                # parameter bucket order under DDP_SET_LAST_BUCKET_CAP flag.
-                if i <= 1:
-                    self.assertEqual(bucket_size_limits[-1], -1)
-                else:
-                    self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
-                for j, bucket_size in enumerate(bucket_size_limits):
-                    if j != len(bucket_size_limits) - 1:
-                        self.assertEqual(bucket_size, default_bucket_cap_mb)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
