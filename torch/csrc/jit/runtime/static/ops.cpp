@@ -97,7 +97,7 @@ at::Tensor& reshape_copy_out(
   const auto& shape = infer_size
       ? at::infer_size_dv(proposed_shape, self.numel())
       : proposed_shape;
-  at::native::resize_(out, shape);
+  at::native::resize_(out, shape, c10::nullopt);
 
   auto self_contig = self.expect_contiguous();
 
