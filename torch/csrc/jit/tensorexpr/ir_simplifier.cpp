@@ -3086,14 +3086,18 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
           : simp_ret2;
       break;
     case CompareSelectOperation::kNE:
-      ret_expr = (cmp_res != CompareSelectOperation::kEQ)
+      ret_expr = (cmp_res == CompareSelectOperation::kGT ||
+                  cmp_res == CompareSelectOperation::kLT)
           ? simp_ret1
           : simplified_cmp_select_expr;
       break;
     case CompareSelectOperation::kEQ:
       ret_expr = (cmp_res == CompareSelectOperation::kEQ)
           ? simp_ret1
-          : simplified_cmp_select_expr;
+          : ((cmp_res == CompareSelectOperation::kGT ||
+              cmp_res == CompareSelectOperation::kLT)
+                 ? simp_ret2
+                 : simplified_cmp_select_expr);
       break;
     default:
       TORCH_INTERNAL_ASSERT(false);
