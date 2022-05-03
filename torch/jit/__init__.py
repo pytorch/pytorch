@@ -188,7 +188,6 @@ def isinstance(obj, target_type):
     """
     return _isinstance(obj, target_type)
 
-
 class strict_fusion(object):
     """
     This class errors if not all nodes have been fused in
