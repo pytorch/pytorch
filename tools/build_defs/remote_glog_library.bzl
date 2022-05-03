@@ -43,18 +43,21 @@ def remote_glog_library(name, srcs, http_archive, exported_preprocessor_flags, *
             ]:
         cmd.append("{} $(location :{})/src/glog/{}.h.in > $OUT/glog/{}.h".format(sed, http_archive, f, f))
         new_srcs["{}.h".format(f)] = ["glog/{}.h".format(f)]
+    new_srcs["."] = ["glog"]
 
     temp_name = name + "_temp"
     native.genrule(
         name = temp_name,
-        out = 'glog',
+        outs = new_srcs,
         cmd = " && ".join(cmd),
-        # default_out = ["."],
+        # default_outs = ["."],
     )
+
     native.cxx_library(
         name = name,
         srcs = [":{}[{}]".format(temp_name, src) for src in srcs],
         headers = [":{}[{}]".format(temp_name, "config.h")],
-        exported_preprocessor_flags = exported_preprocessor_flags + ["-I$(location :{})/".format(temp_name)],
+        # this is a hack for OSS genrule, since it cannot get the location of a multi-outpus genrule
+        exported_preprocessor_flags = exported_preprocessor_flags + ["-I$(location :glog_temp[.])/../"],
         **kwargs
     )
