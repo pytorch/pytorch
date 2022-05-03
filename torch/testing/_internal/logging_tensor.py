@@ -57,7 +57,7 @@ class LoggingTensor(torch.Tensor):
         return r
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.elem})"
+        return super().__repr__(tensor_contents=f"{self.elem}")
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):

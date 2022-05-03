@@ -1910,7 +1910,8 @@ if(USE_KINETO)
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
-        ${CUDA_SOURCE_DIR}/lib64)
+        ${CUDA_SOURCE_DIR}/lib64
+        NO_DEFAULT_PATH)
 
     find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
         ${CUDA_SOURCE_DIR}/extras/CUPTI/include
