@@ -136,14 +136,14 @@ class GenLazyIR(ABC):
         for arg in schema.positional_args:
             if arg.is_lazy_value:
                 if isinstance(arg.lazy_type, OptionalCType):
-                    value_comparsion.append(f"(!has_{arg.name} || operand(i++) == {arg.name}.value())")
-                    continue
-                value_comparsion.append(f"operand(i++) == {arg.name}")
-
+                    value_comparsion.append(f"operand(i++) == {arg.name}.value_or(kNullValue)")
+                else:
+                    value_comparsion.append(f"operand(i++) == {arg.name}")
         for arg in schema.keyword_values:
             value_comparsion.append(f"operand(i++) == {arg.name}")
         for arg in schema.keyword_scalars:
             value_comparsion.append(f"this->{arg.name} == {arg.name}")
+
         return " &&\n        ".join(value_comparsion)
 
     def node_base_ctor_call(self, schema: LazyIrSchema) -> str:
@@ -291,10 +291,12 @@ class GenLazyNativeFuncDefinition:
             if arg.is_wrapped_scalar:
                 if isinstance(arg.lazy_type, OptionalCType):
                     lazy_tensor_decls.append(f"""auto node_{arg.name} = {arg.name} ?
-                    c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name})) : c10::nullopt;""")
+                c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name})):
+                c10::nullopt;""")
                 else:
                     lazy_tensor_decls.append(
-                        f"auto node_{arg.name} = torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name});")
+                        f"""auto node_{arg.name} =
+                torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name});""")
             elif arg.is_symint_or_list:
                 continue  # values are extracted in isValueType
             elif isinstance(arg.lazy_type, BaseCType):
