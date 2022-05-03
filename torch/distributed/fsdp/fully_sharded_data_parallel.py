@@ -2774,7 +2774,10 @@ class FullyShardedDataParallel(nn.Module):
                 eod.warn_status = _ExecOrderWarnStatus.WARNING
             eod.index += 1
         else:
-            device = param.device
+            # Use `compute_device` instead of the parameter's device in case it
+            # is offloaded on CPU and we are using NCCL backend, which requires
+            # communicated tensors be on GPU
+            device = self.compute_device
             indices = torch.zeros(self.world_size, dtype=torch.int32, device=device)
             index = torch.tensor([param_index], dtype=torch.int32, device=device)
             dist._all_gather_base(indices, index, group=self.process_group)
@@ -3540,7 +3543,5 @@ def _get_param_name_to_param(
     model: torch.nn.Module,
 ) -> Dict[str, torch.nn.Parameter]:
     """Constructs the inverse mapping of :meth:`_get_param_to_param_name`."""
-    return {
-        param_name: param
-        for param, param_name in _get_param_to_param_name(model).items()
-    }
+    param_to_param_name = _get_param_to_param_name(model)
+    return dict(zip(param_to_param_name.values(), param_to_param_name.keys()))
