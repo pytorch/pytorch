@@ -1992,7 +1992,7 @@ void ONNXShapeTypeInference(
       try {
         // TODO: add data propagation supports for more operators
         if (n->kind() == ::c10::onnx::Shape || n->kind() == ::c10::onnx::Gather) {
-          onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, inferred_shape_data);
+          inferred_shape_data = onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, inferred_shape_data);
         } else {
           onnx::shape_inference::InferShapes(*model_proto);
         }
