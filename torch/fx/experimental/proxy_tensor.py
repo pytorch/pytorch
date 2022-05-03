@@ -13,6 +13,7 @@ import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager
 
+__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE = {}
@@ -67,7 +68,6 @@ class ProxyTensor(torch.Tensor):
         func = func_overload.overloadpacket
         if func_overload in CURRENT_DECOMPOSITION_TABLE:
             return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
-        # Commenting this out for now since it causes some spurious failures (such as error checking)
         if func_overload == aten._local_scalar_dense.default:
             raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
                                "It's likely that this is caused by data-dependent control flow or similar.")
@@ -111,9 +111,9 @@ class PythonKeyTracer(Tracer):
     def __init__(self):
         super().__init__()
 
-    # In general, we don't want to make modules leaves. In priniple, users of
+    # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
-    # modules into leaves in the tracd graph.
+    # modules into leaves in the traced graph.
     def call_module(
         self, m: torch.nn.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
