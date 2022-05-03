@@ -4870,7 +4870,7 @@ TEST(Simplify, CompareSelectLoopBounds) {
   test_case_fn(n, b, 1, N, 0, kLE, "b[n] = 1.f;");
 
   // for n in [1...7]
-  //   n < 1 ? 0.f : 1.f
+  //   n < 0 ? 0.f : 1.f
   test_case_fn(n, b, 1, N, 1, kLT, "b[n] = 1.f;");
 
   // for n in [1...7]
