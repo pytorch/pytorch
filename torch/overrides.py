@@ -1701,7 +1701,7 @@ def _wrap_torch_function(f):
 # more difficult to interact with TorchFunctionModeMeta.
 
 
-class TorchFunctionMetaInitErrorInfo(MetaInitErrorInfo):
+class _TorchFunctionMetaInitErrorInfo(MetaInitErrorInfo):
     def __init__(self):
         super().__init__(mode_class_name="TorchDispatchMode", mode_name="torch_dispatch")
 
@@ -1723,7 +1723,7 @@ class TorchFunctionModeMeta(type):
     """
     def __new__(metacls, name, bases, dct):
         if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'], TorchFunctionMetaInitErrorInfo())
+            dct['__init__'] = _wrap_init(dct['__init__'], _TorchFunctionMetaInitErrorInfo())
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
