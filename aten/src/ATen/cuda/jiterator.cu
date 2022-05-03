@@ -86,7 +86,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
     }
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.get(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   } else {
-    TrivialOffsetCalculatorVariant input_offset_calculator(iter.ninputs());
+    TrivialOffsetCalculatorVariant input_offset_calculator(iter);
     void* ic_ptr = input_offset_calculator.data_ptr();
     auto oc = TrivialOffsetCalculator<1>();
     auto l = memory::LoadWithoutCast();
@@ -240,7 +240,7 @@ void jitted_gpu_kernel_dynamic_impl(
 
   if (contiguous) {
     // Case 3: dynamic casting and contiguous
-    TrivialOffsetCalculatorVariant input_offset_calculator(iter.ninputs());
+    TrivialOffsetCalculatorVariant input_offset_calculator(iter);
     void* ic_ptr = input_offset_calculator.data_ptr();
 
     auto output_offset_calculator = TrivialOffsetCalculator<1>();

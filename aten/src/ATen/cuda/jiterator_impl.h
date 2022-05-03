@@ -16,16 +16,17 @@
 namespace at {
 namespace native {
 
+constexpr int NUM_INPUTS = 8;
+
 #define AT_FOR_8_INPUTS(_)  \
-  _(0)                      \
   _(1)                      \
   _(2)                      \
   _(3)                      \
   _(4)                      \
   _(5)                      \
   _(6)                      \
-  _(7)
-
+  _(7)                      \
+  _(8)
 
 c10::SmallVector<std::string> get_extra_args_typenames(const std::vector<at::Scalar>& extra_args) {
   c10::SmallVector<std::string> args_typenames(extra_args.size());
@@ -78,26 +79,23 @@ static std::unique_ptr<OffsetCalculator<N>> make_unique_input_offset_calculator(
   return std::make_unique<OffsetCalculator<N>>(iter.ndim(), iter.shape().data(), strides.data(), element_sizes);
 }
 
-template<int ...Is>
-auto OffsetCalculatorType_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<std::unique_ptr<OffsetCalculator<Is>>...>;
-
-template<int N>
-using OffsetCalculatorType_List = decltype(OffsetCalculatorType_List_Impl(std::make_integer_sequence<int, N>{}));
-
-
 struct OffsetCalculatorVariant {
-  using OffsetCalculatorTypes = OffsetCalculatorType_List<8>;
+#define DEFINE_CASE(index) std::unique_ptr<OffsetCalculator<index>>,
+  using OffsetCalculatorTypes = c10::variant<
+    AT_FOR_8_INPUTS(DEFINE_CASE)
+  >;
+#undef DEFINE_CASE
 
   OffsetCalculatorVariant(const TensorIteratorBase& iter) {
-    int N = iter.ninputs();
-    switch(N) {
+    int arity = iter.ninputs();
+    switch(arity) {
 #define DEFINE_CASE(index)        \
       case index : v = make_unique_input_offset_calculator<index>(iter); break;
 
       AT_FOR_8_INPUTS(DEFINE_CASE)
 #undef DEFINE_CASE
       default:
-        TORCH_CHECK(false, "OffsetCalculatorVariant not implemented for ninputs = ", N);
+        TORCH_CHECK(false, "OffsetCalculatorVariant is not implemented for ninputs = ", arity);
     }
   }
 
@@ -109,32 +107,30 @@ struct OffsetCalculatorVariant {
   OffsetCalculatorTypes v;
 };
 
-template<int ...Is>
-auto ArrayType_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<at::detail::Array<char*, Is + 2>...>;
-
-template<int N>
-using ArrayType_List = decltype(ArrayType_List_Impl(std::make_integer_sequence<int, N>{}));
-
 struct ArrayVariant {
-  // notice: This would produce c10::variant<at::detail::Array<char*, 2...10>>
-  using ArrayTypes = ArrayType_List<8>;
+  // notice: This would produce c10::variant<at::detail::Array<char*, 2...9>>
+#define DEFINE_CASE(index) at::detail::Array<char*, index + 1>,
+  using ArrayTypes = c10::variant<
+    AT_FOR_8_INPUTS(DEFINE_CASE)
+  >;
+#undef DEFINE_CASE
 
   ArrayVariant(const TensorIteratorBase& iter) {
-    int N = iter.ntensors();
-    // jitted kernels must have at least 1 input and 1 output
-    switch(N) {
-#define DEFINE_CASE(index)      \
-      case index + 2: array = at::detail::Array<char*, index + 2>{}; break;
+    int arity = iter.ninputs();
+    // This assumes that jiterator kernels only have 1 output
+    switch(arity) {
+#define DEFINE_CASE(index)                              \
+      case index: array = at::detail::Array<char*, index + 1>{}; break;
 
       AT_FOR_8_INPUTS(DEFINE_CASE)
 #undef DEFINE_CASE
 
       default:
-        TORCH_CHECK(false, "ArrayVariant not implemented for ninputs = ", N);
+        TORCH_CHECK(false, "ArrayVariant is not implemented for ninputs = ", arity);
     }
 
     c10::visit([&](auto& a) {
-      for (auto i = 0; i < N; ++i) {
+      for (auto i = 0; i < arity + 1; ++i) {
         a[i] = (char*)iter.data_ptr(i);
       }
     }, array);
@@ -148,16 +144,15 @@ private:
   ArrayTypes array;
 };
 
-template<int ...Is>
-auto TrivialOffsetCalculator_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<TrivialOffsetCalculator<Is>...>;
-
-template<int N>
-using TrivialOffsetCalculator_List = decltype(TrivialOffsetCalculator_List_Impl(std::make_integer_sequence<int, N>{}));
-
 struct TrivialOffsetCalculatorVariant {
-  using TrivialOffsetCalculatorTypes = TrivialOffsetCalculator_List<8>;
+#define DEFINE_CASE(index) TrivialOffsetCalculator<index>,
+  using TrivialOffsetCalculatorTypes = c10::variant<
+    AT_FOR_8_INPUTS(DEFINE_CASE)
+  >;
+#undef DEFINE_CASE
 
-  TrivialOffsetCalculatorVariant(int arity) {
+  TrivialOffsetCalculatorVariant(const TensorIteratorBase& iter) {
+    int arity = iter.ninputs();
     switch(arity) {
 #define DEFINE_CASE(index)      \
       case index: v = TrivialOffsetCalculator<index>(); break;
@@ -166,7 +161,7 @@ struct TrivialOffsetCalculatorVariant {
 #undef DEFINE_CASE
 
       default:
-        TORCH_CHECK(false, "TrivialOffsetCalculatorVariant not implemented for ninputs = ", arity);
+        TORCH_CHECK(false, "TrivialOffsetCalculatorVariant is not implemented for ninputs = ", arity);
     }
   }
 
@@ -178,14 +173,12 @@ private:
   TrivialOffsetCalculatorTypes v;
 };
 
-template<int ...Is>
-auto LoadWithCastPtr_List_Impl(std::integer_sequence<int, Is...>) -> c10::variant<std::unique_ptr<memory::LoadWithCast<Is>>...>;
-
-template<int N>
-using LoadWithCastPtr_List = decltype(LoadWithCastPtr_List_Impl(std::make_integer_sequence<int, N>{}));
-
 struct LoadWithCastVariant {
-  using LoadWithCastPtr = LoadWithCastPtr_List<8>;
+#define DEFINE_CASE(index) std::unique_ptr<memory::LoadWithCast<index>>,
+  using LoadWithCastPtr = c10::variant<
+    AT_FOR_8_INPUTS(DEFINE_CASE)
+  >;
+#undef DEFINE_CASE
 
   LoadWithCastVariant(const TensorIteratorBase& iter) {
     int arity = iter.ninputs();
@@ -197,7 +190,7 @@ struct LoadWithCastVariant {
 #undef DEFINE_CASE
 
       default:
-        TORCH_CHECK(false, "make_input_offset_calculator not implemented for ninputs = ", arity);
+        TORCH_CHECK(false, "LoadWithCastVariant is not implemented for ninputs = ", arity);
     }
   }
 
