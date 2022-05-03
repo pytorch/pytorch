@@ -195,7 +195,7 @@ TEST_F(FuserTest, FusedConcat_CUDA) {
   };
 }
 
-TEST(FuserTest, FusionAliasing) {
+TEST_F(FuserTest, FusionAliasing) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif
@@ -223,7 +223,7 @@ TEST(FuserTest, FusionAliasing) {
       ->run(*g);
 }
 
-TEST(FuserTest, KernelCaching) {
+TEST_F(FuserTest, KernelCaching) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif
