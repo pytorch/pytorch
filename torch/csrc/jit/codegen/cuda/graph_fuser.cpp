@@ -96,6 +96,9 @@ Value* createConditionalConstant(Node* profile_ivalue) {
     // str
     val = IValue(static_cast<std::string>(
         profile_ivalue->s(Symbol::attr("profiled_str"))));
+  } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_ival"))) {
+    // ival
+    val = IValue(profile_ivalue->ival(Symbol::attr("profiled_ival")));
   } else {
     GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
     TORCH_WARN(
@@ -576,7 +579,7 @@ struct CudaGraphFuser {
     Value* producer_for_chunk = *it;
     size_t producer_index = it - chunk->inputs().begin();
 
-    // all uses of the chunk must be in in this consumer
+    // all uses of the chunk must be in this consumer
     for (auto s : chunk->outputs()) {
       for (auto u : s->uses()) {
         if (u.user != consumer)
@@ -1632,6 +1635,16 @@ void guardFusionGroup(
             versioning_if,
             view,
             profiled_ival);
+      } else if (fusion->input(offset)->node()->hasAttribute(
+                     Symbol::attr("profiled_ival"))) {
+        ivalue_check =
+            fusion->owningGraph()
+                ->create(
+                    c10::Symbol::fromQualString("prim::CudaFusionIvalGuard"),
+                    {profiled_ival, const_o},
+                    1)
+                ->insertBefore(versioning_if)
+                ->output();
       } else {
         ivalue_check = fusion->owningGraph()
                            ->create(aten::eq, {profiled_ival, const_o}, 1)
@@ -2303,7 +2316,7 @@ void separateNestedViews(Node* cuda_fusion_group) {
       auto parent = parent_value->node();
 
       auto grandparent_value = parent->input(0);
-      auto grandparent = grandparent_value->node();
+      C10_UNUSED auto grandparent = grandparent_value->node();
 
       // Before: gp -> x -> n
       // After: gp -> x / gp -> n

@@ -286,7 +286,7 @@ void OptOutMutator::mutate(MmaOp* mma) {
   auto container = mma->container();
   auto options = mma->options();
   container->removeExpr(mma);
-  auto new_mma =
+  C10_UNUSED auto new_mma =
       IrBuilder::create<MmaOp>(container, out, in_a, in_b, init, options);
 }
 
@@ -393,7 +393,7 @@ void OptOutMutator::mutate(Split* s) {
   auto container = s->container();
   auto inner_split = s->innerSplit();
   container->removeExpr(s);
-  auto new_node = IrBuilder::create<Split>(
+  C10_UNUSED auto new_node = IrBuilder::create<Split>(
       container, ot, inr, in, fact, inner_split, start_offset, stop_offset);
 }
 
@@ -409,7 +409,7 @@ void OptOutMutator::mutate(Merge* m) {
 
   auto container = m->container();
   container->removeExpr(m);
-  auto new_node = IrBuilder::create<Merge>(container, ot, otr, in);
+  C10_UNUSED auto new_node = IrBuilder::create<Merge>(container, ot, otr, in);
 }
 
 void OptOutMutator::mutate(kir::Allocate*) {

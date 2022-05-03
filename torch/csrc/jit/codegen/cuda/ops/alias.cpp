@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>
+#include <torch/csrc/jit/codegen/cuda/type_promotion.h>
 
 namespace torch {
 namespace jit {
@@ -79,7 +80,10 @@ TensorView* view(
   auto analyze_view = analyzeView(x, original_sizes, new_sizes);
 
   auto reduction = (!analyze_view.trivial_reduction_axes.empty())
-      ? sum(x, analyze_view.trivial_reduction_axes)
+      ? sum(x,
+            analyze_view.trivial_reduction_axes,
+            false /* keep_dim */,
+            x->getDataType().value())
       : x;
 
   auto view = (!analyze_view.transforms.empty())
@@ -128,7 +132,11 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes) {
       trivial_reduction_axes.push_back(idx);
     }
   }
-  return (trivial_reduction_axes.empty()) ? x : sum(x, trivial_reduction_axes);
+  return (trivial_reduction_axes.empty()) ? x
+                                          : sum(x,
+                                                trivial_reduction_axes,
+                                                false /* keep_dim */,
+                                                x->getDataType().value());
 }
 
 TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
@@ -137,7 +145,7 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
     dim = (int)(x->nDims()) + dim;
   }
   if (dim >= 0 && dim < x->nDims() && sizes[dim] == 1) {
-    return sum(x, {dim});
+    return sum(x, {dim}, false /* keep_dim */, x->getDataType().value());
   } else {
     return set(x);
   }

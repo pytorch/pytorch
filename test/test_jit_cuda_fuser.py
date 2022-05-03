@@ -19,7 +19,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
 from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, IS_WINDOWS, slowTest
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, slowTest
 from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_variant_pairs, JitTestCase, RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
@@ -34,7 +34,7 @@ from torch.autograd.gradcheck import gradcheck
 
 from typing import List
 
-RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM and not IS_WINDOWS
+RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM
 CUDA_MAJOR, CUDA_MINOR = 0, 0
 
 if RUN_NVFUSER and torch.version.cuda is not None:
@@ -102,6 +102,10 @@ class CudaFuserTestOptions():
         torch._C._jit_set_autocast_mode(self.old_value)
 
 class TestCudaFuser(JitTestCase):
+    def assertEqual(self, *args, **kwargs):
+        kwargs["exact_layout"] = True
+        super(JitTestCase, self).assertEqual(*args, **kwargs)
+
     def _getSubgraphInFusion(self, graph):
         num_node = 0
         subgraph = None
@@ -222,6 +226,7 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(oo.dtype, jit_oo.dtype)
             self.assertEqual(oo, jit_oo)
         self.assertGraphContains(t_jit.graph_for(x, y, z, alpha), FUSION_GUARD)
+
 
     @unittest.skipIf(not TEST_BF16, "device does not support BFloat16")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -3738,6 +3743,30 @@ class TestCudaFuser(JitTestCase):
         self._alias_bias_flatten_relu_helper([2, 3, 4, 5], 1, 2, torch.float, 'cuda', 1e-6)
         self._alias_bias_flatten_relu_helper([2, 3, 4, 5], 2, 2, torch.float, 'cuda', 1e-6)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_strict_fusion(self):
+        def success(x):
+            with torch.jit.strict_fusion():
+                return x + x + x
+
+        scripted = self.checkScript(success, (torch.rand([4], device='cuda'),))
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_not("aten::add").check("prim::CudaFusionGroup").run(g)
+
+        def failure(x):
+            with torch.jit.strict_fusion():
+                return x + torch.mm(x, x) + x
+
+        with self.assertRaises(Exception) as error_out:
+            foo_s = torch.jit.script(failure)
+            foo_s(torch.rand([4, 4]))
+            foo_s(torch.rand([4, 4]))
+
+        fc = FileCheck().check("Found unfused operators")
+        fc.check("aten::mm").run(str(error_out.exception))
+
     def _ltc_helper(self, shape, dtype, device, error, approximate=True):
         # modeled after LTC linear layer
         class LTC(torch.nn.Module):
@@ -4216,6 +4245,8 @@ class TestCudaFuser(JitTestCase):
             t_jit = torch.jit.script(t)
             self._run_helper(t_jit, t, x)
 
+    # TODO: revert disabled aten::view
+    @unittest.skipIf(True, "skipping this test since reshape is disabled now")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
@@ -4637,7 +4668,6 @@ class TestCudaFuser(JitTestCase):
             self.assertGraphContainsExactly(t_cpu_jit.graph_for(x), FUSION_GUARD, 0)
 
 
-
 class TestPassManagerCudaFuser(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -4694,6 +4724,18 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
 
+    @unittest.skipIf(RUN_CUDA, "Testing on CPU only")
+    def test_register_fuser_cpu(self):
+        with self.assertRaises(RuntimeError):
+            torch._C._jit_set_nvfuser_enabled(True)
+            torch._C._jit_set_nvfuser_enabled(False)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCM test only")
+    def test_register_fuser_rocm(self):
+        with self.assertRaises(RuntimeError):
+            torch._C._jit_set_nvfuser_enabled(True)
+            torch._C._jit_set_nvfuser_enabled(False)
 
 class TestCudaFuserOpInfo(JitCommonTestCase):
     def setUp(self):
@@ -4713,14 +4755,14 @@ class TestCudaFuserOpInfo(JitCommonTestCase):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
         for variant, sample in variant_sample_pairs:
-            trace = create_traced_fn(self, variant)
+            trace = create_traced_fn(self, variant, cache_traced_fn=True)
             ref = variant(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
             trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
             val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-            self.assertEqual(ref, val)
+            self.assertEqual(ref, val, exact_layout=True)
 
         # https://github.com/pytorch/pytorch/issues/35600
         # each torch.jit.trace adds state to the _python_cu compilation unit
