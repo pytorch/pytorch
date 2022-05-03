@@ -1965,7 +1965,7 @@ void ONNXShapeTypeInference(
       if (onnx_output_name != torch_to_onnx_output_name.end()) {
         inferred_shape_data[onnx_output_name->second] = gs_data.second;
         if (gs_data.first != onnx_output_name->second) {
-          original_keys.push_back(gs_data.first);
+          original_keys.emplace_back(gs_data.first);
         }
       }
     }
@@ -1991,10 +1991,15 @@ void ONNXShapeTypeInference(
       // infer shape
       try {
         // TODO: add data propagation supports for more operators
-        if (n->kind() == ::c10::onnx::Shape || n->kind() == ::c10::onnx::Gather) {
-          inferred_shape_data = onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, inferred_shape_data);
-        } else {
-          onnx::shape_inference::InferShapes(*model_proto);
+        switch (n->kind()) {
+          case ::c10::onnx::Shape:
+          case ::c10::onnx::Gather: {
+            inferred_shape_data = onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, inferred_shape_data);
+            break;
+          }
+          default: {
+            onnx::shape_inference::InferShapes(*model_proto);
+          }
         }
         UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_dim_map);
       } catch (std::runtime_error& ex) {
