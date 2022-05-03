@@ -30,9 +30,9 @@ def sharded_type_as_check(*args, **kwargs):
         raise ValueError("Needs to give a Tensor or ShardedTensor to cast type as!")
 
 
-def same_type(*args, **kwargs):
+def same_dtype(*args, **kwargs):
     """
-    When the type is the same, return the original ShardedTensor.
+    When the dtype is the same, return the original ShardedTensor.
 
     Args: same as ``torch.Tensor.type_as``.
 
@@ -43,7 +43,7 @@ def same_type(*args, **kwargs):
 
 def sharded_type_as(args, kwargs, pg):
     """
-    Handles ``__torch_function__`` dispatch for the sharded_type_as op.
+    Handles ``__torch_function__`` dispatch for the ``torch.Tensor.type_as`` op.
 
     Args: same as ``torch.Tensor.type_as``.
 
@@ -65,7 +65,7 @@ def sharded_type_as(args, kwargs, pg):
 
 _register_sharded_op_on_local_shards(
     torch.Tensor.type_as,
-    early_stop_func=same_type,
+    early_stop_func=same_dtype,
     extra_check=sharded_type_as_check,
     customized_func=sharded_type_as,
 )
@@ -98,7 +98,7 @@ def sharded_transpose_check(*args, **kwargs):
 
 def sharded_transpose(args, kwargs, pg):
     """
-    Handles ``__torch_function__`` dispatch for the sharded_transpose op.
+    Handles ``__torch_function__`` dispatch for the ``torch.Tensor.transpose`` op.
 
     Returns a new sharded tensor with the given dimensions transposed.
     During the transpose, we keep the original shading dim, if the sharding
@@ -124,32 +124,25 @@ def sharded_transpose(args, kwargs, pg):
     dim0 = args[1]
     dim1 = args[2]
 
-    new_local_shards = []
-    for shard in st.local_shards():
-        shard_meta_data = copy.deepcopy(shard.metadata)
-        _swap_meta_data(shard_meta_data.shard_offsets, dim0, dim1)
-        _swap_meta_data(shard_meta_data.shard_sizes, dim0, dim1)
-        new_local_shards.append(
-            Shard(shard.tensor.transpose(dim0, dim1).contiguous(), shard_meta_data)
-        )
-    st_meta = copy.deepcopy(st.metadata())
-    for shard_metadata in st_meta.shards_metadata:
-        _swap_meta_data(shard_metadata.shard_offsets, dim0, dim1)
-        _swap_meta_data(shard_metadata.shard_sizes, dim0, dim1)
-    st_size = list(st_meta.size)
+    sharding_spec = copy.deepcopy(st.sharding_spec())
+    if sharding_spec.dim == dim0:
+        sharding_spec.dim = dim1
+    elif sharding_spec.dim == dim1:
+        sharding_spec.dim = dim0
+
+    st_size = list(st.size())
     _swap_meta_data(st_size, dim0, dim1)
-    st_meta.size = tuple(st_size)  # type: ignore[assignment]
+    local_tensor = st.local_tensor().transpose(dim0, dim1).contiguous()
+    return local_tensor, sharding_spec, tuple(st_size)
 
-    return new_local_shards, st_meta
 
-
-_register_sharded_op_on_local_shards(
+_register_sharded_op_on_local_tensor(
     torch.transpose,
     early_stop_func=transpose_same_dim,
     extra_check=sharded_transpose_check,
     customized_func=sharded_transpose,
 )
-_register_sharded_op_on_local_shards(
+_register_sharded_op_on_local_tensor(
     torch.Tensor.transpose,
     early_stop_func=transpose_same_dim,
     extra_check=sharded_transpose_check,
@@ -159,7 +152,7 @@ _register_sharded_op_on_local_shards(
 
 def sharded_softmax_check(*args, **kwargs):
     """
-    Perform extra checks for the sharded_softmax op for now we don't support
+    Perform extra checks for ``torch.Tensor.softmax`` op for now we don't support
     doing softmax on the sharding dim.
 
     Args: same as ``torch.Tensor.softmax``.
@@ -183,7 +176,7 @@ _register_sharded_op_on_local_tensor(
 
 def sharded_masked_fill_check(*args, **kwargs):
     """
-    Perform extra checks for the sharded_masked_fill op.
+    Perform extra checks for the ``torch.Tensor.masked_fill`` op.
     Ensure the mask size is broadcastable with the size of
     the sharded tensor.
 
@@ -207,7 +200,7 @@ def sharded_masked_fill_check(*args, **kwargs):
 
 def sharded_masked_fill(args, kwargs, pg):
     """
-    Handles ``__torch_function__`` dispatch for the sharded_masked_fill op.
+    Handles ``__torch_function__`` dispatch for the ``torch.Tensor.masked_fill`` op.
     We first narrow down the mask to the size of local tensor if the mask
     contains the sharding dim and then apply the mask to the local tensor.
 
@@ -252,33 +245,35 @@ _register_sharded_op_on_local_tensor(
 
 def sharded_view_check(*args, **kwargs):
     """
-    Perform extra checks for the sharded_view op.
+    Perform extra checks for the ``torch.Tensor.view`` op.
 
     Args: same as ``torch.Tensor.view``.
 
     Return: None
     """
     st = args[0]
-    shapes = args[1:]
-    if len(shapes) == 0:
+    shape = args[1:]
+    if len(shape) == 0:
         raise ValueError("Missing *shape for sharded view op.")
-    if len(shapes) <= st.sharding_spec().dim:
+    if len(shape) <= st.sharding_spec().dim:
         raise NotImplementedError(
-            f"Shape having dim {len(shapes)} is not supported "
+            f"Shape having dim {len(shape)} is not supported "
             f"for sharded tensor sharded on dim {st.sharding_spec().dim}."
         )
     st_size = math.prod(st.size())  # type: ignore[attr-defined]
-    shape_size = math.prod(shapes)  # type: ignore[attr-defined]
-    neg_sum = sum(i for i in shapes if i < 0)
+    shape_size = math.prod(shape)  # type: ignore[attr-defined]
+    neg_sum = sum(i for i in shape if i < 0)
     if shape_size > st_size or st_size % shape_size:
-        raise ValueError("Shape is invalid for sharded tensor size.")
+        raise ValueError(
+            f"Shape '{list(shape)}' is invalid for sharded tensor size {st_size}."
+        )
     if neg_sum < -1:
         raise ValueError("Only one dimension can be inferred for sharded view op.")
 
 
 def sharded_view(args, kwargs, pg):
     """
-    Handles ``__torch_function__`` dispatch for the sharded_view op.
+    Handles ``__torch_function__`` dispatch for the ``torch.Tensor.view`` op.
     For now we always keep the sharding dim after view. For example, if
     a sharded tensor with size [16, 5] and sharded by 0. If we now view
     it as [4, 2, 2, 5], it will still be sharded by dim 0.
@@ -292,35 +287,34 @@ def sharded_view(args, kwargs, pg):
         new_st_size (torch.Size): Size of the new sharded tensor.
     """
     st = args[0]
-    shapes = args[1:]
+    shape = args[1:]
     try:
-        infer_idx = shapes.index(-1)
+        infer_idx = shape.index(-1)
     except ValueError:
         infer_idx = None
 
     # Infer the dim which is specified with -1.
     if infer_idx is not None:
         st_size = math.prod(st.size())  # type: ignore[attr-defined]
-        shape_size = -1 * math.prod(shapes)  # type: ignore[attr-defined]
-        shapes = (*shapes[:infer_idx], st_size // shape_size, *shapes[infer_idx + 1 :])
-    if st.size() == shapes:
-        return st.local_tensor(), st.sharding_spec(), shapes
+        shape_size = -1 * math.prod(shape)  # type: ignore[attr-defined]
+        shape = (*shape[:infer_idx], st_size // shape_size, *shape[infer_idx + 1 :])
+    if st.size() == shape:
+        return st.local_tensor(), st.sharding_spec(), shape
 
-    st = args[0]
     sharding_dim = st.sharding_spec().dim
     world_size = dist.get_world_size(pg)
-    if shapes[sharding_dim] % world_size:
+    if shape[sharding_dim] % world_size:
         raise NotImplementedError(
-            f"Case when dim '({shapes[sharding_dim]})' is not divisible "
+            f"Case when dim '({shape[sharding_dim]})' is not divisible "
             "by world_size is not supported."
         )
     new_local_tensor_size = (
-        *shapes[:sharding_dim],
-        shapes[sharding_dim] // world_size,
-        *shapes[sharding_dim + 1 :],
+        *shape[:sharding_dim],
+        shape[sharding_dim] // world_size,
+        *shape[sharding_dim + 1 :],
     )
     new_local_tensor = st.local_tensor().view(*new_local_tensor_size)
-    return new_local_tensor, st.sharding_spec(), shapes
+    return new_local_tensor, st.sharding_spec(), shape
 
 
 _register_sharded_op_on_local_tensor(

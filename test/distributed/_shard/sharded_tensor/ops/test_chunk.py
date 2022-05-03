@@ -49,8 +49,7 @@ class TestShardedTensorChunkOps(ShardedTensorTestBase):
         local_tensor_chunked = torch.chunk(local_tensor, chunk_num, dim=-1)
         chunked_st = torch.chunk(st_tensor, chunk_num, dim=-1)
         self._compare_chunk_result(local_tensor_chunked, chunked_st)
-        chunked_st = st_tensor.chunk(chunk_num, dim=-1)
-        self._compare_chunk_result(local_tensor_chunked, chunked_st)
+        # TODO: Add sharded tensor chunk test cases back after making st a subclass of Tensor.
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
@@ -77,13 +76,13 @@ class TestShardedTensorChunkOps(ShardedTensorTestBase):
             NotImplementedError, "Chunk by sharding dim is not supported."
         ):
             st = sharded_tensor.rand(chunk_spec[0], [17, 24])
-            st.chunk(5, dim=-1)
+            torch.chunk(st, 5, dim=-1)
         enumerable_spec = generate_enumerable_sharding_specs_for_test()
         with self.assertRaisesRegex(
             NotImplementedError, "Only ChunkShardingSpec is supported for chunk."
         ):
             st = sharded_tensor.rand(enumerable_spec[0], [10, 10])
-            st.chunk(5, dim=-1)
+            torch.chunk(st, 5, dim=-1)
 
 
 if __name__ == "__main__":

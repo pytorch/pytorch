@@ -153,11 +153,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
         specs = _chunk_sharding_specs_list_for_test([0, 1, 2], seed=7)
         for spec in specs:
             tensor = torch.rand(35, 17, 26).cuda(self.rank)
-            mask = (
-                torch.randint(0, 2, mask_size)
-                .type(torch.BoolTensor)
-                .cuda(self.rank)
-            )
+            mask = torch.randint(0, 2, mask_size).type(torch.BoolTensor).cuda(self.rank)
             if broadcast_style:
                 mask = mask.unsqueeze(1)
             tensor_m = tensor.masked_fill(mask, 25.0)
@@ -253,7 +249,7 @@ class TestShardedTensorMatrixOps(ShardedTensorTestBase):
                 st.view(35 * 17, 26)
             with self.assertRaisesRegex(
                 ValueError,
-                "Shape is invalid for sharded tensor size.",
+                r"Shape '\[5, 7, 35, 17, 26\]' is invalid for sharded tensor size 15470.",
             ):
                 st.view(5, 7, 35, 17, 26)
             with self.assertRaisesRegex(
