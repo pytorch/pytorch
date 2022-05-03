@@ -54,7 +54,7 @@ void TrieCache::ResetCurrent() {
 void TrieCache::Insert(NodePtr ir_node) {
   TORCH_CHECK(current_);
   if (!current_->successors.empty()) {
-    TORCH_LAZY_COUNTER("TrieForkedTimes", 1);
+    TORCH_LAZY_COUNTER("TrieForked", 1);
   }
   current_->successors.push_front(
       std::make_unique<TrieNode>(std::move(ir_node)));
