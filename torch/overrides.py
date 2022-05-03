@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, MetaInitErrorInfo
 
 __all__ = [
     "get_ignored_functions",
@@ -169,6 +169,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.result_type,
         torch.scalar_tensor,
         torch.sparse_coo_tensor,
+        torch.sparse_compressed_tensor,
         torch.sparse_csr_tensor,
         torch.tril_indices,
         torch.triu_indices,
@@ -607,6 +608,9 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean', log_target=False: -1,
         torch.kron: lambda input, other: -1,
         torch.kthvalue: lambda input, k, dim=None, keepdim=False, out=None: -1,
+        torch.linalg.ldl_factor_ex: lambda input, hermitian=False, check_errors=False, out=None: -1,
+        torch.linalg.ldl_factor: lambda input, hermitian=False, out=None: -1,
+        torch.linalg.ldl_solve: lambda LD, pivots, B, hermitian=False, out=None: -1,
         torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1,
         torch.lcm: lambda input, other, out=None: -1,
         torch.ldexp: lambda input, other, out=None: -1,
@@ -1697,6 +1701,11 @@ def _wrap_torch_function(f):
 # more difficult to interact with TorchFunctionModeMeta.
 
 
+class TorchFunctionMetaInitErrorInfo(MetaInitErrorInfo):
+    def __init__(self):
+        super().__init__(mode_class_name="TorchDispatchMode", mode_name="torch_dispatch")
+
+
 class TorchFunctionModeMeta(type):
     """
     Metaclass for :class:`TorchFunctionMode`; it does two things:
@@ -1714,7 +1723,7 @@ class TorchFunctionModeMeta(type):
     """
     def __new__(metacls, name, bases, dct):
         if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'], "TorchFunctionMode", "torch_function")
+            dct['__init__'] = _wrap_init(dct['__init__'], TorchFunctionMetaInitErrorInfo())
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
@@ -1781,25 +1790,14 @@ def _no_torch_function_mode() -> Iterator[None]:
 class _TorchFunctionModeInfo(_ModeInfo):
     def __init__(self):
         super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode,
-                         base_mode_class=BaseTorchFunctionMode,
-                         required_fn="__torch_function__")
+                         base_mode_class=BaseTorchFunctionMode)
 
     def get_mode(self):
         return _get_torch_function_mode()
 
-    def help_text(self, mode) -> str:
-        if isinstance(mode, self.mode_class):
-            return f'Use push_{self.mode_type}_mode instead.'
-        else:
-            return (
-                'If you intended to completely override the preexisting mode, '
-                'pass ignore_preexisting=True.  This can result in unexpected '
-                'behavior; please consider rewriting your mode to be a subclass '
-                f'of {self.mode_class.__name__} to make it compositional!'
-            )
-
     def set_mode(self, mode):
         return _set_torch_function_mode(mode)
+
 
 @contextlib.contextmanager
 def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) -> Iterator[None]:

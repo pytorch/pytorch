@@ -2,29 +2,36 @@ import functools
 from typing import Iterator
 from dataclasses import dataclass
 
+# This file has all the logic to dedupe logic between torch dispatch and
+# torch function modes
+#
+# Specifically, it has the helper functions for enable_ and push_X_mode and the
+# ModeInfo class, which is extended by each where they are different
 
-def _wrap_init(f, class_name, mode_type):
+
+# a helper class for the error message in the _wrap_init function. This can't be shared with ModeInfo because
+# that causes a circular dependency. It also must has only strings attributes to avoid circular dependencies
+@dataclass
+class MetaInitErrorInfo:
+    mode_name: str
+    mode_class_name: str  # name of the mode class that extends the meta class here
+
+
+# used by both TorchFunctionMode and TorchDispatchMode, this will wrap the init
+# function to require an "inner" kwarg
+def _wrap_init(f, meta_init_error_info):
     undef = object()
 
     @functools.wraps(f)
     def wrapped(self, *args, inner=undef, **kwargs):
         if inner is undef:
             raise TypeError(
-                f"missing inner keyword argument; instead of constructing a {class_name} directly, "
-                f"pass the constructor to push_{mode_type}_mode"
+                f"missing inner keyword argument; instead of constructing a {meta_init_error_info.mode_class_name} "
+                f"directly, pass the constructor to push_{meta_init_error_info.mode_name}_mode"
             )
         self.inner = inner
         return f(self, *args, **kwargs)
     return wrapped
-
-
-class ModeMeta(type):
-    def __new__(metacls, name, bases, dct, mode_type=None):
-        if mode_type not in ['torch_function', 'python']:
-            raise RuntimeError(f"only support torch_function or python modes, got mode_type of {mode_type}")
-        if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'], metacls, mode_type)
-        return super().__new__(metacls, name, bases, dct)
 
 
 # in order to dedupe the logic between python mode and torch_function mode, this
@@ -36,8 +43,6 @@ class _ModeInfo:
     mode_name: str
     mode_class: type  # the class related to the mode that's allowed to be passed in
     base_mode_class: type  # the base class of mode_class that dispatches to the original function
-    required_fn: str  # string version of the function required, either torch_function or torch_dispatch
-
 
     def mode_class_name(self):
         return self.mode_class.__name__
@@ -54,7 +59,7 @@ class _ModeInfo:
         raise NotImplementedError()
 
 
-# shared version of enable_torch_function/enable_python_mode in order to deduplicate the code.
+# shared version of enable_torch_function/enable_torch_dispatch_mode in order to deduplicate the code.
 # The differences between the modes are captured by `mode_info` and then queried when they're
 # needed during the function's invocation
 def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
@@ -85,9 +90,10 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
         )
     # NB: we don't require TorchFunctionMode/PythonMode since this is intended to also
     # let you directly pass a Tensor subclass type to "mode-ify" it.
-    if not hasattr(mode, mode_info.required_fn):
+    required_fn = "__" + mode_info.mode_name + "__"
+    if not hasattr(mode, required_fn):
         raise ValueError(
-            f'The argument passed to enable_{mode_info.mode_name}_mode must implement {mode_info.required_fn}'
+            f'The argument passed to enable_{mode_info.mode_name}_mode must implement {required_fn}'
         )
     mode_info.set_mode(mode)
     try:
@@ -96,6 +102,9 @@ def _enable_mode(mode, mode_info: _ModeInfo, *, replace=None, ignore_preexisting
         mode_info.set_mode(old)
 
 
+# shared version of push_torch_function/push_torch_dispatch_mode in order to deduplicate the code.
+# The differences between the modes are captured by `mode_info` and then queried when they're
+# needed during the function's invocation
 def _push_mode(ctor, mode_info: _ModeInfo) -> Iterator[object]:
     # Helper function for pushing a mode onto the stack
     if isinstance(ctor, mode_info.mode_class):
