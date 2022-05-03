@@ -44,6 +44,7 @@ GENERATED_CPP = [
 
 # This is duplicated in caffe2/CMakeLists.txt for now and not yet used in buck
 GENERATED_LAZY_TS_CPP = [
+    "lazy/generated/LazyIr.cpp",
     "lazy/generated/LazyNativeFunctions.cpp",
     "lazy/generated/RegisterAutogradLazy.cpp",
     "lazy/generated/RegisterLazy.cpp",
