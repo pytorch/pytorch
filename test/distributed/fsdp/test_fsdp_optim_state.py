@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import bisect
 import sys
 from enum import Enum, auto
 from typing import Any, Dict, List, Tuple, Type
@@ -164,7 +165,7 @@ class NestedModel(torch.nn.Module):
         model,
         add_to_fsdp_module: bool,
         group=None,
-    ) -> Tuple[torch.nn.Module, torch.nn.Parameter]:
+    ) -> Tuple[torch.nn.Module, List[torch.nn.Parameter]]:
         """Registers unmanaged parameters before wrapping with :meth:`wrap`."""
         device = next(model.parameters()).device
         unmanaged_param = torch.nn.Parameter(torch.randn(5, 5, device=device))
@@ -174,7 +175,38 @@ class NestedModel(torch.nn.Module):
         register_module.register_parameter(
             "unmanaged_param", unmanaged_param,
         )
-        return NestedModel.wrap(model, group), unmanaged_param
+        # For simplicity, we only add a single unmanaged parameter, but should
+        # be easy to generalize if needed
+        return NestedModel.wrap(model, group), [unmanaged_param]
+
+    @staticmethod
+    def add_unmanaged_param_entry(osd, unmanaged_param, step) -> None:
+        """Adds an entry for the unmanaged parameter ``unmanaged_param``
+        assuming Adam optimizer and a single parameter group."""
+        # The unmanaged parameters should be passed to this method in
+        # `model.parameters()` order since their parameter IDs will be assigned
+        # in order of the skipped IDs
+        # Assign a parameter ID to the unmanaged parameter
+        unmanaged_param_id = -1
+        param_ids = osd["param_groups"][0]["params"]
+        for i in range(1, len(param_ids)):
+            diff = param_ids[i] - param_ids[i - 1]
+            if diff != 1:
+                assert diff > 1, f"Invalid IDs: {param_ids[i - 1]} {param_ids[i]}"
+                unmanaged_param_id = param_ids[i - 1] + 1
+                break
+        if unmanaged_param_id == -1:
+            unmanaged_param_id = len(param_ids)  # last ID skipped
+        assert unmanaged_param_id >= 0, "One parameter ID should be skipped"
+        # Add a state entry for the unmanaged parameter
+        state_device = next(iter(next(iter(osd["state"].values())).values())).device
+        osd["state"][unmanaged_param_id] = {
+            "step": torch.tensor(float(step), device=state_device),
+            "exp_avg": torch.randn(unmanaged_param.shape, device=state_device),
+            "exp_avg_sq": torch.randn(unmanaged_param.shape, device=state_device),
+        }
+        # Insert the ID into the parameter group in order
+        bisect.insort(osd["param_groups"][0]["params"], unmanaged_param_id)
 
     # NOTE: We exclude `self.bias` from either parameter group to test the
     # case where the optimizer input does not include all model parameters
@@ -600,7 +632,6 @@ class TestFSDPOptimState(FSDPTest):
         into the same subroutine :meth:`_flatten_full_optim_state_dict`.
         """
         NUM_ITERS = 1
-        LR = 1e-3
         # Create a normal wrapped model
         model, optim, optim_input = self._init_nested_model(wrap=True)
         self._step_model(model, optim, num_iters=NUM_ITERS)
@@ -611,7 +642,7 @@ class TestFSDPOptimState(FSDPTest):
         # parameters, representing the model for which we want to load
         device = torch.device("cuda")
         model = NestedModel().to(device)
-        model, unmanaged_param = NestedModel.wrap_with_unmanaged_params(
+        model, unmanaged_params = NestedModel.wrap_with_unmanaged_params(
             model, add_to_fsdp_module,
         )
         optim_input = list(model.parameters())
@@ -636,29 +667,13 @@ class TestFSDPOptimState(FSDPTest):
             sharded_osd = FSDP.shard_full_optim_state_dict(
                 full_osd, model, optim_input,
             )
-            # Add an entry for the unmanaged parameter to be able to load
-            unmanaged_param_id = -1
-            param_ids = sharded_osd["param_groups"][0]["params"]
-            for i in range(1, len(param_ids)):
-                diff = param_ids[i] - param_ids[i - 1]
-                if diff != 1:
-                    assert diff == 2 and unmanaged_param_id == -1, \
-                        "Only one parameter ID should be skipped"
-                    unmanaged_param_id = param_ids[i - 1] + 1
-            if unmanaged_param_id == -1:
-                unmanaged_param_id = len(param_ids)  # last ID skipped
-            assert unmanaged_param_id >= 0, "One parameter ID should be skipped"
-            state_device = next(iter(next(iter(sharded_osd["state"].values())).values())).device
-            sharded_osd["state"][unmanaged_param_id] = {
-                "step": torch.tensor(float(NUM_ITERS), device=state_device),
-                "exp_avg": torch.randn(unmanaged_param.shape, device=state_device),
-                "exp_avg_sq": torch.randn(unmanaged_param.shape, device=state_device),
-            }
-            sharded_osd["param_groups"][0]["params"] = list(range(
-                max(max(param_ids), unmanaged_param_id) + 1
-            ))  # parameter IDs are now {0, ..., N-1}
+            # Add entries for the unmanaged parameters to be able to load
+            for unmanaged_param in unmanaged_params:
+                NestedModel.add_unmanaged_param_entry(
+                    sharded_osd, unmanaged_param, NUM_ITERS,
+                )
             # Check that we can load the optimizer state dict
-            optim = torch.optim.Adam(optim_input, lr=LR)
+            optim = torch.optim.Adam(optim_input, lr=1e-3)
             optim.load_state_dict(sharded_osd)
 
     @skip_if_lt_x_gpu(2)
