@@ -462,5 +462,44 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         self.assertEqual([1], state_dict_to_load['bytes0'])
         self.assertEqual('string', state_dict_to_load['bytes1'])
 
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_switch_between_sharded_tensor_to_tensor(self) -> None:
+        path = self.get_file_path()
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+            ],
+        )
+
+        save_dict = {
+            'sharded': sharded_tensor.rand(spec, 4),
+            'replicated': torch.rand(6, device=self.rank)
+        }
+
+        fs_writer = FileSystemWriter(path=path)
+        save_state_dict(state_dict=save_dict, storage_writer=fs_writer)
+
+        # Freaky Friday the tensors
+        load_dict = {
+            'sharded': torch.zeros(4, device=self.rank),
+            'replicated': sharded_tensor.zeros(spec, 6)
+        }
+
+        fs_reader = FileSystemReader(path=path)
+        load_state_dict(state_dict=load_dict, storage_reader=fs_reader)
+
+        save_dict_sharded = self.load_tensor(save_dict['sharded'])
+        load_dict_replicated = self.load_tensor(load_dict['replicated'])
+
+        if dist.get_rank() == 0:
+            self.assertTrue(torch.allclose(save_dict_sharded, load_dict['sharded']))
+            self.assertTrue(torch.allclose(save_dict['replicated'], load_dict_replicated))
+
 if __name__ == "__main__":
     run_tests()
