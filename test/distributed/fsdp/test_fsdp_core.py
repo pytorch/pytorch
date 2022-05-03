@@ -106,7 +106,11 @@ class TestParityWithDDP(FSDPTest):
         mixed_precision
     ):
         init_modes = self._get_init_modes_for_test(cpu_offload)
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+        ) if mixed_precision else None
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
                 self._test_identical_outputs(
@@ -322,7 +326,11 @@ class TestNoGrad(FSDPTest):
     @parametrize("mixed_precision", [True, False])
     def test_transformer_no_grad(self, mixed_precision):
         group = dist.distributed_c10d._get_default_group()
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+        ) if mixed_precision else None
         config = {"mixed_precision": mixed_precision}
         model = self._get_wrapped_model(group, config=config, cuda_first=False)
         # Train model for a step

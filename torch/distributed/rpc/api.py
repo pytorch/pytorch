@@ -1,3 +1,6 @@
+__all__ = ["shutdown", "get_worker_info", "remote", "rpc_sync",
+           "rpc_async", "RRef", "AllGatherStates", "method_factory", "new_method"]
+
 import collections
 import contextlib
 import functools
@@ -13,6 +16,7 @@ from torch._C._distributed_rpc import (
     PyRRef,
     RemoteProfilerManager,
     WorkerInfo,
+    TensorPipeAgent,
     get_rpc_timeout,
     _cleanup_python_rpc_handler,
     _delete_all_user_and_unforked_owner_rrefs,
@@ -37,6 +41,8 @@ from .internal import (
 )
 
 from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
+
+from ._utils import _group_membership_management, _update_group_membership
 
 logger = logging.getLogger(__name__)
 
@@ -333,9 +339,21 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     """
     if graceful:
         try:
-            _wait_all_workers(timeout)
-            _delete_all_user_and_unforked_owner_rrefs()
-            _get_current_rpc_agent().join(shutdown=True)
+            agent = _get_current_rpc_agent()
+            if not isinstance(agent, TensorPipeAgent) or agent.is_static_group:
+                _wait_all_workers(timeout)
+                _delete_all_user_and_unforked_owner_rrefs()
+                agent.join(shutdown=True)
+            else:
+                # This is a dynamic group so we need to grab the token for the operation
+                my_worker_info = agent.get_worker_info()
+                my_name = my_worker_info.name
+                with _group_membership_management(agent.store, my_name, False):
+                    all_worker_infos = agent.get_worker_infos()
+                    for worker in all_worker_infos:
+                        if worker.name != my_name:
+                            rpc_sync(worker.name, _update_group_membership, args=(my_worker_info, [], {}, False))
+                    agent.join(shutdown=True)
         finally:
             # In case of errors, continue to complete the local shutdown.
             _finalize_shutdown()
@@ -452,7 +470,8 @@ def method_factory(method_name, docstring):
     def method(self, *args, **kwargs):
         return getattr(super(RRef, self), method_name)(*args, **kwargs)
 
-    method.__doc__ = docstring
+    if method.__doc__:
+        method.__doc__ = docstring
     return method
 
 
@@ -586,7 +605,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     torch._C._log_api_usage_once("torch.distributed.rpc_remote")
     qualified_name = torch.jit._builtins._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
-    should_profile = torch.autograd._profiler_enabled()
+    should_profile = _get_should_profile()
 
     ctx_manager = _enable_rpc_profiler(should_profile, qualified_name, func, RPCExecMode.REMOTE, dst_worker_info)
 
@@ -639,7 +658,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RP
     qualified_name = torch.jit._builtins._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
 
-    should_profile = torch.autograd._profiler_enabled()
+    should_profile = _get_should_profile()
 
     ctx_manager = _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info)
 
@@ -861,6 +880,14 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         _thread_local_var.future_list.append(fut)
     return fut
 
+def _get_should_profile():
+    # Legacy profiler should be enabled. RPC profiling is not supported with
+    # Kineto profiler.
+    ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+    return (
+        torch.autograd._profiler_enabled() and
+        torch._C._autograd._profiler_type() == ActiveProfilerType.LEGACY  # type: ignore[attr-defined]
+    )
 
 def _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info):
     ctx_manager = contextlib.suppress()
