@@ -84,7 +84,7 @@ from torch.ao.quantization.fx.utils import NodeInfo
 
 from torch.ao.quantization.fake_quantize import (
     default_fixed_qparams_range_0to1_fake_quant,
-    default_qparams_range_neg1to1_fake_quant,
+    default_fixed_qparams_range_neg1to1_fake_quant,
 )
 
 from torch.ao.quantization.observer import (
@@ -4102,12 +4102,12 @@ class TestQuantizeFx(QuantizationTestCase):
         self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant2"],
                                                   default_fixed_qparams_range_0to1_fake_quant)
         self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant3"],
-                                                  default_qparams_range_neg1to1_fake_quant)
+                                                  default_fixed_qparams_range_neg1to1_fake_quant)
         output_fake_quantize_map = get_default_output_activation_post_process_map(is_training=True)
         output_observer_map = get_default_output_activation_post_process_map(is_training=False)
         self.assertEqual(output_observer_map.get("dummy_quant3"), default_fixed_qparams_range_neg1to1_observer)
         self._assertFixedQParamsFakeQuantizeEqual(output_fake_quantize_map.get("dummy_quant3"),
-                                                  default_qparams_range_neg1to1_fake_quant)
+                                                  default_fixed_qparams_range_neg1to1_fake_quant)
 
 
 

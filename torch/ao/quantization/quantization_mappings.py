@@ -20,7 +20,7 @@ import torch.ao.nn as ao_nn
 from torch.ao.quantization.stubs import QuantStub, DeQuantStub
 from torch.ao.quantization.fake_quantize import (
     default_fixed_qparams_range_0to1_fake_quant,
-    default_qparams_range_neg1to1_fake_quant,
+    default_fixed_qparams_range_neg1to1_fake_quant,
 )
 from torch.ao.quantization.utils import get_combined_dict
 from torch.nn.utils.parametrize import type_before_parametrizations
@@ -159,7 +159,7 @@ DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
     nn.Hardsigmoid: default_fixed_qparams_range_0to1_fake_quant,
     nn.Sigmoid: default_fixed_qparams_range_0to1_fake_quant,
     nn.Softmax: default_fixed_qparams_range_0to1_fake_quant,
-    nn.Tanh: default_qparams_range_neg1to1_fake_quant,
+    nn.Tanh: default_fixed_qparams_range_neg1to1_fake_quant,
 }
 
 # Default map for swapping float module to static sparse quantized ones
