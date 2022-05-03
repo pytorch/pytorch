@@ -4440,7 +4440,7 @@ class DistributedTest:
                 state=state, hook=post_localSGD.post_localSGD_hook
             )
             state = post_localSGD.PostLocalSGDState(
-                process_group=None, subgroup=dist.group.WORLD, start_localSGD_iter=10, post_local_gradient_allreduce=False 
+                process_group=None, subgroup=dist.group.WORLD, start_localSGD_iter=10, post_local_gradient_allreduce=False
             )
             self._test_ddp_hook_parity(
                 state=state, hook=post_localSGD.post_localSGD_hook
