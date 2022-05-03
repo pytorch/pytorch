@@ -2850,6 +2850,36 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
                         kwargs={'alpha': alpha_val, 'beta': beta_val},))
     return sample_inputs
 
+def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **kwargs):
+    alpha = 2 + 3j if dtype.is_complex else 0.6
+    beta = 1 + 2j if dtype.is_complex else 0.2
+
+    def generator():
+        # sparse.sampled_addmm performs: alpha * (A @ B) * sparse_ones_like(C) + beta * C
+        for m, n, k in itertools.product([0, 5], repeat=3):
+            yield SampleInput(
+                torch.eye(m, n, device=device, dtype=dtype)
+                .to_sparse_csr()
+                .requires_grad_(requires_grad),
+                args=(
+                    make_tensor(
+                        (m, k),
+                        device=device,
+                        dtype=dtype,
+                        requires_grad=requires_grad,
+                    ),
+                    make_tensor(
+                        (k, n),
+                        device=device,
+                        dtype=dtype,
+                        requires_grad=requires_grad,
+                    ),
+                ),
+                kwargs={"alpha": alpha, "beta": beta},
+            )
+
+    return list(generator())
+
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     return (
         SampleInput(
@@ -10658,6 +10688,45 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
+    OpInfo('sparse.sampled_addmm',
+           dtypes=floating_and_complex_types(),
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_sparse_sampled_addmm,
+           decorators=[
+               onlyCUDA,
+               skipCUDAIf(_get_torch_cuda_version() < (11, 3), "cusparseSDDMM was added in 11.2.1"), ],
+           skips=(
+               # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
+               # RuntimeError: Sparse CSR tensors do not have strides.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+               # RuntimeError: sampled_addmm: Expected result to have sparse csr layout, but got Strided
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # RuntimeError: unsupported memory format option Preserve
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+           )),
     UnaryUfuncInfo('i0',
                    ref=np_unary_ufunc_integer_promotion_wrapper(
                        scipy.special.i0) if TEST_SCIPY else _NOTHING,

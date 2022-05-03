@@ -2135,6 +2135,7 @@
     CPU, CUDA: fill_
     QuantizedCPU, QuantizedCUDA: fill_quantized_
     Meta: fill_meta_
+    SparseCsrCPU, SparseCsrCUDA: fill_sparse_csr_
 
 - func: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3249,6 +3250,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: mul
+    SparseCsrCPU, SparseCsrCUDA: mul_scalar_sparse_csr
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5447,6 +5449,7 @@
   dispatch:
     SparseCPU: sparse_mask_cpu
     SparseCUDA: sparse_mask_cuda
+    SparseCsrCPU, SparseCsrCUDA: sparse_mask_sparse_csr
 
 - func: _to_cpu(Tensor[] tensors) -> Tensor[]
   variants: function
