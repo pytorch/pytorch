@@ -2752,6 +2752,18 @@ class TestDistributions(TestCase):
                                     'Dirichlet(alpha={})'.format(list(alpha)),
                                     multivariate=True)
 
+    def test_dirichlet_mode(self):
+        # Test a few edge cases for the Dirichlet distribution mode. This also covers beta distributions.
+        concentrations_and_modes = [
+            ([2, 2, 1], [.5, .5, 0.]),
+            ([3, 2, 1], [2 / 3, 1 / 3, 0]),
+            ([.5, .2, .2], [1., 0., 0.]),
+            ([1, 1, 1], [nan, nan, nan]),
+        ]
+        for concentration, mode in concentrations_and_modes:
+            dist = Dirichlet(torch.tensor(concentration))
+            self.assertEqual(dist.mode, torch.tensor(mode))
+
     def test_beta_shape(self):
         con1 = torch.randn(2, 3).exp().requires_grad_()
         con0 = torch.randn(2, 3).exp().requires_grad_()

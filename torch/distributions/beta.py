@@ -50,10 +50,7 @@ class Beta(ExponentialFamily):
 
     @property
     def mode(self):
-        mode = (self.concentration1 - 1) / (self.concentration0 + self.concentration1 - 2)
-        f = (self.concentration0 < 1) | (self.concentration1 < 1)
-        mode[f] = (self.concentration0[f] < self.concentration1[f]).to(self.concentration0)
-        return mode.clamp(min=0, max=1)
+        return self._dirichlet.mode[..., 0]
 
     @property
     def variance(self):

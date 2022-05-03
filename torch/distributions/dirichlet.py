@@ -1,5 +1,4 @@
 import torch
-from torch._six import nan
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
@@ -78,9 +77,10 @@ class Dirichlet(ExponentialFamily):
 
     @property
     def mode(self):
-        concentrationm1 = self.concentration - 1
-        mode = (concentrationm1 / concentrationm1.sum(-1, True)).clamp(min=0)
-        mode = mode * torch.where((self.concentration <= 1).any(-1, True), nan, 1.)
+        concentrationm1 = (self.concentration - 1).clamp(min=0.)
+        mode = concentrationm1 / concentrationm1.sum(-1, True)
+        mask = (self.concentration < 1).all(axis=-1)
+        mode[mask] = torch.nn.functional.one_hot(mode[mask].argmax(axis=-1), concentrationm1.shape[-1]).to(mode)
         return mode
 
     @property
