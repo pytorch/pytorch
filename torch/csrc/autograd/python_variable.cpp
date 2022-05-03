@@ -33,7 +33,8 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <torch/library.h>
-#include <torch/csrc/autograd/python_mode.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/autograd/torch_dispatch_mode.h>
 
 
 #include <ATen/ATen.h>
@@ -51,8 +52,8 @@ using namespace at;
 using namespace torch;
 using namespace torch::autograd;
 
-std::pair<py::object, py::dict> get_args_kwargs(const c10::OperatorHandle& op, const std::vector<c10::IValue>& arguments) {
-  py::gil_scoped_acquire g;
+std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(const c10::OperatorHandle& op, const std::vector<c10::IValue>& arguments) {
+  TORCH_CHECK(PyGILState_Check(), "GIL must be held before you call parseIValuesToPyArgsKwargs");
   const auto& schema = op.schema();
   py::dict kwargs;
   // About all the pointers:
@@ -111,15 +112,15 @@ std::pair<py::object, py::dict> get_args_kwargs(const c10::OperatorHandle& op, c
     const auto& arg = schema.arguments()[idx];
     kwargs[py::cast(arg.name())] = torch::jit::toPyObject(arguments[idx]);
   }
-  return std::make_pair(py::cast<py::object>(args.release()), py::cast<py::dict>(kwargs.release()));
+  return std::make_pair(py::cast<py::object>(std::move(args.release())), py::cast<py::dict>(std::move(kwargs.release())));
 }
 
-void push_out_to_stack(
+void pushPyOutToStack(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     py::object out,
     const char* msg) {
-  py::gil_scoped_acquire g;
+  TORCH_CHECK(PyGILState_Check(), "GIL must be held before you call pushPyOutToStack");
   auto schema_returns = op.schema().returns();
   const auto num_returns = schema_returns.size();
   if (num_returns == 0) {
@@ -1821,9 +1822,9 @@ bool isPythonTensor(const Tensor& tensor) {
 }
 
 // NOTE [dispatch_fn's type argument]
-// `type` is nullable and represents the PythonMode going on.
-// Right now we only support a single PythonMode, but in the future we could
-// change this to a stack of PythonModes.
+// `type` is nullable and represents the TorchDispatchMode going on.
+// Right now we only support a single TorchDispatchMode, but in the future we could
+// change this to a stack of TorchDispatchModes.
 //
 // If `type` isn't null, then we consider the type for dispatch by prepending
 // it to the overloaded_args list. `handle_torch_funciton_no_python_arg_parser`
@@ -1892,9 +1893,9 @@ void concrete_dispatch_fn(
     }
   }
 
-  auto args_kwargs = get_args_kwargs(op, arguments);
-  auto args = args_kwargs.first;
-  auto kwargs = args_kwargs.second;
+  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+  auto args = std::move(args_kwargs.first);
+  auto kwargs = std::move(args_kwargs.second);
 
   PyObject* obj = handle_torch_function_no_python_arg_parser(
                     overloaded_args,
@@ -1904,7 +1905,7 @@ void concrete_dispatch_fn(
                     torch_api_function_overload.ptr(),
                     module_name_str.c_str(),
                     TorchFunctionName::TorchDispatch);
-  push_out_to_stack(op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
+  pushPyOutToStack(op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
 }
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {

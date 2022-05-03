@@ -67,6 +67,6 @@ inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
 
 TORCH_PYTHON_API c10::impl::PyInterpreter* getPyInterpreter();
 
-std::pair<py::object, py::dict> get_args_kwargs(const c10::OperatorHandle& op, const std::vector<c10::IValue>& arguments);
+std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(const c10::OperatorHandle& op, const std::vector<c10::IValue>& arguments);
 
-void push_out_to_stack(const c10::OperatorHandle& op, torch::jit::Stack* stack, py::object out, const char* msg);
+void pushPyOutToStack(const c10::OperatorHandle& op, torch::jit::Stack* stack, py::object out, const char* msg);

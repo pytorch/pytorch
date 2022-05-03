@@ -62,9 +62,9 @@ public:
   void operator()(const c10::OperatorHandle& op, c10::DispatchKeySet keyset, torch::jit::Stack* stack) {
     auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
     py::gil_scoped_acquire g;
-    auto args_kwargs = get_args_kwargs(op, arguments);
+    auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto obj = py::reinterpret_steal<py::object>(PyObject_Call(func_.ptr(getPyInterpreter()), args_kwargs.first.ptr(), args_kwargs.second.ptr()));
-    push_out_to_stack(op, stack, py::reinterpret_steal<py::object>(obj), "PythonKernelHolder");
+    pushPyOutToStack(op, stack, py::reinterpret_steal<py::object>(obj), "PythonKernelHolder");
   }
 };
 

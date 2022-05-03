@@ -14,16 +14,16 @@ impls_for_existing_libraries = {}
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
 # This set is maintained to ensure that two libraries don't try to override the exact same functionality to avoid
 # libraries calling into kernels not intended to be called.
-impls: Set[str] = set()
+_impls: Set[str] = set()
 
 class Library:
     # kind can be DEF, IMPL
     def __init__(self, kind, ns, dispatch_key="", message=""):
         frame = traceback.extract_stack()[0]
         filename, lineno = frame.filename, frame.lineno
-        self.m = C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
+        self.m = C._dispatch_library(kind, ns, dispatch_key, filename, lineno) # type: ignore[attr-defined]
         self.ns = ns
-        self.op_impls = set()
+        self._op_impls = set()
         self.kind = kind
         self.dispatch_key = dispatch_key
         if kind == "IMPL":
@@ -50,7 +50,7 @@ class Library:
             raise RuntimeError("impl should be passed either a name or an OpOverload object as the first argument")
 
         key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
-        if key in impls:
+        if key in _impls:
             raise RuntimeError("This is not allowed since there's already a kernel overriding {}"
                                "'s behavior for {} dispatch key and {} namespace.".
                                format(name.split("::")[-1], dispatch_key, self.ns))
@@ -59,13 +59,13 @@ class Library:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             self.m.impl(name, dispatch_key, fn)
-        impls.add(key)
-        self.op_impls.add(key)
+        _impls.add(key)
+        self._op_impls.add(key)
 
     # Libraries can be removed at any point by explicitly calling .remove()
     def remove(self):
-        for key in self.op_impls:
-            impls.remove(key)
+        for key in self._op_impls:
+            _impls.remove(key)
         del impls_for_existing_libraries[id(self)]
         del self.m
 
