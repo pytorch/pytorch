@@ -392,13 +392,14 @@ def diagonal_backward(grad_output: Tensor, input_sizes: List[int], offset: int, 
 @register_decomposition(aten._softmax_backward_data)
 def _softmax_backward_data(grad_output: Tensor, output: Tensor, dim: int, input_dtype: int):
     new_grad = grad_output * output
-    return (new_grad - output * torch.sum(new_grad, dim=dim, keepdim=True)).to(input_dtype)
+    grad_output = new_grad - output * torch.sum(new_grad, dim=dim, keepdim=True)
+    return aten.to(grad_output, dtype=input_dtype)
 
 
 @register_decomposition(aten._log_softmax_backward_data)
 def _log_softmax_backward_data(grad_output: Tensor, output: Tensor, dim: int, input_dtype: int):
     grad_input = grad_output - torch.exp(output) * torch.sum(grad_output, dim=dim, keepdim=True)
-    return grad_input.to(input_dtype)
+    return aten.to(grad_input, dtype=input_dtype)
 
 
 @register_decomposition(aten.im2col_backward)
