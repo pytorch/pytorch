@@ -4296,7 +4296,7 @@ class TestQuantizeFx(QuantizationTestCase):
                         else:
                             lower_bnd = 0
                             upper_bnd = 255
-                        if hasattr(mod, "activation_post_process"):
+                        if issubclass(type(mod), FakeQuantize):
                             self.assertEqual(mod.activation_post_process.quant_min, lower_bnd)
                             self.assertEqual(mod.activation_post_process.quant_max, upper_bnd)
                         else:
