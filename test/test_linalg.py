@@ -28,7 +28,8 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
+from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9, _get_magma_version, \
+    _get_torch_cuda_version
 from torch.distributions.binomial import Binomial
 
 # Protects against includes accidentally setting the default dtype
@@ -1219,42 +1220,36 @@ class TestLinalg(TestCase):
             return result
 
         def run_test_case(input, ord, dim, keepdim, norm_dtype):
-            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}, norm_dtype={norm_dtype}'
-            error_msg = None
-            if input.numel() == 0:
-                if ord < 0:
-                    error_msg = r'linalg.vector_norm of negative order cannot be performed on an empty tensor'
-                elif ord == inf and (dim is None or input.size(dim) == 0):
-                    error_msg = (
-                        r'linalg.vector_norm cannot compute the infinity norm on an empty '
-                        r'dimension because the operation does not have an identity')
-            if error_msg is None:
+            if (input.numel() == 0 and
+                (ord < 0. or ord == inf) and
+                (dim is None or input.shape[dim] == 0)):
+                # The operation does not have an identity.
+                error_msg = "linalg.vector_norm cannot compute"
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim)
+            else:
+                msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}, norm_dtype={norm_dtype}'
                 result_dtype_reference = vector_norm_reference(input, ord, dim=dim, keepdim=keepdim, dtype=norm_dtype)
                 result_dtype = torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim, dtype=norm_dtype)
+                if dtype.is_complex:
+                    result_dtype_reference = result_dtype_reference.real
                 self.assertEqual(result_dtype, result_dtype_reference, msg=msg)
 
                 if norm_dtype is not None:
-                    result_convert_before = torch.linalg.vector_norm(input.to(norm_dtype), ord, dim=dim, keepdim=keepdim)
-                    if norm_dtype.is_complex:
-                        result_convert_before = result_convert_before.to(norm_dtype)
+                    ref = torch.linalg.vector_norm(input.to(norm_dtype), ord, dim=dim, keepdim=keepdim)
+                    actual = torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim, dtype=norm_dtype)
+                    self.assertEqual(ref, actual, msg=msg)
 
-                    result_out = torch.empty((0), dtype=norm_dtype, device=device)
-                    torch.linalg.vector_norm(input, ord, dtype=norm_dtype, dim=dim, keepdim=keepdim, out=result_out)
-                    self.assertEqual(result_convert_before, result_out, msg=msg)
-                else:
-                    result_out = torch.empty((0), dtype=result_dtype.dtype, device=device)
-                    torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim, out=result_out)
-                    self.assertEqual(result_dtype, result_out, msg=msg)
-            else:
-                with self.assertRaises(RuntimeError):
-                    vector_norm_reference(input, ord, dim=dim, keepdim=keepdim)
-                with self.assertRaisesRegex(RuntimeError, error_msg):
-                    torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim)
-
-        if dtype.is_complex:
-            norm_dtypes = [None, torch.cfloat, torch.cdouble]
+        if dtype == torch.cfloat:
+            norm_dtypes = (None, torch.cfloat, torch.cdouble)
+        elif dtype == torch.cdouble:
+            norm_dtypes = (None, torch.cdouble)
+        elif dtype in (torch.float16, torch.bfloat16, torch.float):
+            norm_dtypes = (None, torch.float, torch.double)
+        elif dtype == torch.double:
+            norm_dtypes = (None, torch.double)
         else:
-            norm_dtypes = [None, torch.float, torch.double, torch.cfloat, torch.cdouble, torch.float16, torch.bfloat16]
+            raise RuntimeError("Unsupported dtype")
 
         for input_size, ord, keepdim, norm_dtype in product(input_sizes, ord_vector, [True, False], norm_dtypes):
             input = make_tensor(input_size, dtype=dtype, device=device, low=-9, high=9)
@@ -1287,40 +1282,6 @@ class TestLinalg(TestCase):
                 else:
                     with self.assertRaises(error):
                         torch.linalg.vector_norm(input, dim=dim)
-
-    # Test that linalg.vector_norm throws an error if the out tensor's dtype
-    # does not match the expected output dtype
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16)
-    def test_vector_norm_out_dtype_error(self, device, dtype):
-        input = torch.randn(10, device=device, dtype=dtype)
-        dtypes = [None, torch.float, torch.double, torch.cfloat, torch.cdouble, torch.float16, torch.bfloat16]
-
-        for norm_dtype, out_dtype in product(dtypes, dtypes):
-            if out_dtype is None:
-                continue
-
-            if norm_dtype is None:
-                if dtype == torch.cfloat:
-                    expected_dtype = torch.float
-                elif dtype == torch.cdouble:
-                    expected_dtype = torch.double
-                else:
-                    expected_dtype = dtype
-            else:
-                expected_dtype = norm_dtype
-
-            result = torch.empty((0), device=device, dtype=out_dtype)
-            msg = f'norm_dtype: {norm_dtype}, out_dtype: {out_dtype}, expected_dtype: {expected_dtype}'
-
-            if dtype.is_complex and norm_dtype is not None and not norm_dtype.is_complex:
-                with self.assertRaisesRegex(RuntimeError, r"linalg.vector_norm expected complex 'dtype'", msg=msg):
-                    torch.linalg.vector_norm(input, dtype=norm_dtype, out=result)
-
-            elif out_dtype != expected_dtype:
-                with self.assertRaisesRegex(RuntimeError, r'linalg.vector_norm expected out tensor dtype', msg=msg):
-                    torch.linalg.vector_norm(input, dtype=norm_dtype, out=result)
-            else:
-                torch.linalg.vector_norm(input, dtype=norm_dtype, out=result)
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
     # their vector norm results match
@@ -1739,14 +1700,9 @@ class TestLinalg(TestCase):
     def test_norm_vector_degenerate_shapes(self, device, dtype):
         def run_test_case(input, ord, dim, keepdim):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
-            should_error = False
-            if ord is not None and ord < 0:
-                should_error = True
-            elif ord == inf:
-                if dim is None or input.size(dim) == 0:
-                    should_error = True
-
-            if should_error:
+            if (input.numel() == 0 and
+                (ord < 0. or ord == inf) and
+                (dim is None or input.shape[dim] == 0)):
                 with self.assertRaises(RuntimeError):
                     torch.linalg.norm(input, ord, dim, keepdim)
             else:
@@ -1755,7 +1711,7 @@ class TestLinalg(TestCase):
                 result = torch.linalg.norm(input, ord, dim, keepdim)
                 self.assertEqual(result, result_numpy, msg=msg)
 
-        ord_vector = [0, 0.5, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf, None]
+        ord_vector = [0, 0.5, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf]
         S = 10
         test_cases = [
             # input size, dim
@@ -7836,6 +7792,104 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
         self.assertEqual(a, an)
+
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @skipCUDAIfRocm
+    @dtypes(*floating_and_complex_types())
+    def test_ldl_factor(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        from scipy.linalg import ldl as scipy_ldl
+
+        def run_test(shape, batch, hermitian):
+            A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
+            actual_factors, actual_pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+            actual_L = torch.tril(actual_factors, diagonal=-1)
+            actual_L.diagonal(0, -2, -1).fill_(1.0)
+
+            # This test is designed only for inputs with 1x1 block diagonal matrix D.
+            # That is for positive definite input matrices, the pivots tensor is always > 0.
+            # If negative pivots are encountered, it means that the input matrix is not positive definite.
+            # And matrix D is a 2x2 block diagonal matrix.
+            self.assertTrue((actual_pivots > 0).all())
+
+            # Construct a 1x1 block diagonal matrix D from factors.
+            actual_D = torch.diag_embed(actual_factors.diagonal(0, -2, -1))
+
+            def T(x):
+                return x.mH if hermitian else x.mT
+            A_reconstructed = actual_L @ actual_D @ T(actual_L)
+
+            def symmetric(A):
+                return A.tril() + A.tril(-1).mT
+
+            self.assertEqual(symmetric(A) if not hermitian else A, A_reconstructed)
+
+            # Now test against SciPy implementation
+            if TEST_SCIPY:
+                A_np = A.cpu().numpy()
+                np_dtype = A_np.dtype
+                scipy_ldl_batched = np.vectorize(
+                    lambda x: scipy_ldl(x, hermitian=hermitian, lower=True),
+                    otypes=[np_dtype, np_dtype, np.dtype('int64')],
+                    signature='(m,m)->(m,m),(m,m),(m)')
+
+                expected = scipy_ldl_batched(A_np)
+                expected_L, expected_D, expected_pivots = expected
+
+                if expected_pivots.ndim > 1:
+                    permuted_expected_L = np.stack(
+                        [expected_L[i][expected_pivots[i], :] for i in range(expected_pivots.shape[0])]
+                    )
+                else:
+                    permuted_expected_L = expected_L[expected_pivots, :]
+                self.assertEqual(actual_L, permuted_expected_L)
+                self.assertEqual(actual_D, expected_D)
+            else:
+                self.assertEqual(actual_factors.shape, A.shape)
+                self.assertEqual(actual_pivots.shape, A.shape[:-1])
+                self.assertEqual(info.shape, A.shape[:-2])
+
+        # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
+        magma_254_available = self.device_type == 'cuda' and _get_magma_version() >= (2, 5, 4)
+        hermitians = (True, False) if dtype.is_complex and (self.device_type == 'cpu' or magma_254_available) else (False,)
+
+        shapes = (5,)
+        batches = ((), (4,),)
+        for shape, batch, hermitian in itertools.product(shapes, batches, hermitians):
+            run_test(shape, batch, hermitian)
+
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @skipCUDAIfRocm
+    @skipCUDAIf(_get_torch_cuda_version() < (11, 4), "not available before CUDA 11.3.1")
+    @dtypes(*floating_and_complex_types())
+    def test_ldl_solve(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_test(shape, batch, nrhs, hermitian):
+            A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
+            B = make_tensor((*A.shape[:-1], nrhs), dtype=dtype, device=device)
+            factors, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+            X = torch.linalg.ldl_solve(factors, pivots, B, hermitian=hermitian)
+
+            def symmetric(A):
+                return A.tril() + A.tril(-1).mT
+
+            # verify A @ X == B
+            expected_B = symmetric(A) @ X if not hermitian else A @ X
+            self.assertEqual(B, expected_B)
+
+        # hermitian=True is not supported on CUDA yet
+        hermitians = (True, False) if dtype.is_complex and self.device_type == 'cpu' else (False,)
+
+        shapes = (5,)
+        batches = ((), (4,), (2, 2))
+        nrhss = (1, 7)
+        for shape, batch, nrhs, hermitian in itertools.product(shapes, batches, nrhss, hermitians):
+            run_test(shape, batch, nrhs, hermitian)
 
     @onlyCUDA
     @skipCUDAIfNoMagma
