@@ -2947,6 +2947,13 @@ class TestDistributions(TestCase):
                     'icdf(cdf(x)) = {}'.format(actual),
                 ]))
 
+    def test_gamma_log_prob_at_boundary(self):
+        for concentration, log_prob in [(.5, inf), (1, 0), (2, -inf)]:
+            dist = Gamma(concentration, 1)
+            scipy_dist = scipy.stats.gamma(concentration)
+            np.testing.assert_allclose(dist.log_prob(0), log_prob)
+            np.testing.assert_allclose(dist.log_prob(0), scipy_dist.logpdf(0))
+
     def test_cdf_log_prob(self):
         # Tests if the differentiation of the CDF gives the PDF at a given value
         for Dist, params in EXAMPLES:
