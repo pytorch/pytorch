@@ -17,6 +17,10 @@ import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import distributed_c10d
 import torch.distributed._shard.sharding_spec as shard_spec
+from torch.distributed._shard.sharding_spec.api import (
+    _dispatch_custom_op,
+    _has_custom_op,
+)
 from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata,
@@ -747,8 +751,9 @@ class ShardedTensor(object):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         def dispatch(st: ShardedTensor, func: Callable):
-            if st._sharding_spec._has_custom_op(func):
-                return st._sharding_spec._dispatch_custom_op(func, types, args, kwargs)
+            # Dispatch to custom sharding spec op if it has one.
+            if _has_custom_op(st._sharding_spec, func):
+                return _dispatch_custom_op(st._sharding_spec, func, types, args, kwargs)
 
             if func in _SHARDED_OPS:
                 return _SHARDED_OPS[func](types, args, kwargs, st._process_group)
