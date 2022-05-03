@@ -880,7 +880,7 @@ class ShardedTensor(object):
         return ShardedTensor._init_from_local_tensor(
             local_tensor,
             self.sharding_spec(),
-            self.size(),
+            self.size(),  # type: ignore[arg-type]
             process_group=self._process_group,
         )
 
@@ -930,9 +930,9 @@ class ShardedTensor(object):
         """
         if len(shape) == 0:
             raise ValueError("Missing *shape for sharded view op.")
-        if len(shape) <= self.sharding_spec().dim:
+        if len(shape) <= self.sharding_spec().dim:  # type: ignore[attr-defined]
             raise NotImplementedError(
-                f"Shape having dim {len(shape)} is not supported "
+                f"Shape having dim {len(shape)} is not supported "  # type: ignore[attr-defined]
                 f"for sharded tensor sharded on dim {self.sharding_spec().dim}."
             )
         st_size = math.prod(self.size())  # type: ignore[attr-defined]
@@ -947,7 +947,7 @@ class ShardedTensor(object):
         try:
             infer_idx = shape.index(-1)
         except ValueError:
-            infer_idx = None
+            infer_idx = None  # type: ignore[assignment]
 
         # Infer the dim which is specified with -1.
         if infer_idx is not None:
@@ -957,7 +957,7 @@ class ShardedTensor(object):
         if self.size() == shape:
             return self
 
-        sharding_dim = self.sharding_spec().dim
+        sharding_dim = self.sharding_spec().dim  # type: ignore[attr-defined]
         world_size = dist.get_world_size(self._process_group)
         if shape[sharding_dim] % world_size:
             raise NotImplementedError(
@@ -1004,10 +1004,10 @@ class ShardedTensor(object):
         if dim0 == dim1:
             return self
         sharding_spec = copy.deepcopy(self.sharding_spec())
-        if sharding_spec.dim == dim0:
-            sharding_spec.dim = dim1
-        elif sharding_spec.dim == dim1:
-            sharding_spec.dim = dim0
+        if sharding_spec.dim == dim0:  # type: ignore[attr-defined]
+            sharding_spec.dim = dim1  # type: ignore[attr-defined]
+        elif sharding_spec.dim == dim1:  # type: ignore[attr-defined]
+            sharding_spec.dim = dim0  # type: ignore[attr-defined]
 
         st_size = list(self.size())
         _swap_meta_data(st_size, dim0, dim1)
