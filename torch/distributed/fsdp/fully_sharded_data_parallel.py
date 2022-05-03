@@ -17,6 +17,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     Set,
@@ -1479,9 +1480,9 @@ class FullyShardedDataParallel(nn.Module):
 
     def _full_post_state_dict_hook(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         """
         Hook that runs after model.state_dict() is called before returning result to
         user. For FSDP, we may have to clone the tensors in state_dict as params go
@@ -1522,9 +1523,9 @@ class FullyShardedDataParallel(nn.Module):
 
     def _local_post_state_dict_hook(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         """
         This hook create a ShardedTensor from the local flat_param and replace
         the state_dict[f"{prefix}{FLAT_PARAM}] with the ShardedTensor. No copy
@@ -1557,18 +1558,18 @@ class FullyShardedDataParallel(nn.Module):
 
     def _sharded_post_state_dict_hook(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518")
 
     @staticmethod
     def _post_state_dict_hook(
         module: nn.Module,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
         *args: Any,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         """
         _post_state_dict_hook() is called after the state_dict() of this
         FSDP module is executed. ``self._state_dict_type`` is used to decide
@@ -1686,14 +1687,14 @@ class FullyShardedDataParallel(nn.Module):
 
     def _full_pre_load_state_dict_hook(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
     ) -> None:
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_WRAPPED_MODULE}.")
 
     def _local_pre_load_state_dict_hook(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
     ) -> None:
         """
@@ -1727,7 +1728,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _sharded_pre_load_state_dict_hook(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
     ) -> None:
         raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
@@ -1735,7 +1736,7 @@ class FullyShardedDataParallel(nn.Module):
     @staticmethod
     def _pre_load_state_dict_hook(
         module: nn.Module,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
         *args: Any,
     ) -> None:
@@ -1753,7 +1754,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def load_state_dict(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Mapping[str, Any],
         *args,
     ) -> NamedTuple:
         """
@@ -1811,7 +1812,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _load_local_state_dict(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Mapping[str, Any],
         *args,
     ) -> NamedTuple:
         """
