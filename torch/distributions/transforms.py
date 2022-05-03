@@ -24,6 +24,7 @@ __all__ = [
     'ExpTransform',
     'IndependentTransform',
     'LowerCholeskyTransform',
+    'PositiveDefiniteTransform',
     'PowerTransform',
     'ReshapeTransform',
     'SigmoidTransform',
@@ -971,6 +972,23 @@ class LowerCholeskyTransform(Transform):
     def _inverse(self, y):
         return y.tril(-1) + y.diagonal(dim1=-2, dim2=-1).log().diag_embed()
 
+
+class PositiveDefiniteTransform(LowerCholeskyTransform):
+    """
+    Transform from unconstrained matrices to positive-definite matrices.
+    """
+    codomain = constraints.positive_definite
+
+    def __eq__(self, other):
+        return isinstance(other, PositiveDefiniteTransform)
+
+    def _call(self, x):
+        x = super()._call(x)
+        return x @ x.transpose(-1, -2)
+
+    def _inverse(self, y):
+        y = torch.linalg.cholesky(y)
+        return super()._inverse(y)
 
 class CatTransform(Transform):
     """
