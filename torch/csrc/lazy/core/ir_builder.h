@@ -12,6 +12,12 @@
 namespace torch {
 namespace lazy {
 
+// TODO(alanwaketan): Support r-value reference argument type.
+template <typename T, typename... Args>
+NodePtr MakeNode(Args&&... args) {
+  return std::make_shared<T>(std::forward<Args>(args)...);
+}
+
 struct IrBuilder {
   virtual NodePtr MakeDeviceData(const std::shared_ptr<BackendData>& data) const = 0;
   virtual NodePtr MakeScalar(const at::Scalar& value, const at::ScalarType& type) const = 0;
