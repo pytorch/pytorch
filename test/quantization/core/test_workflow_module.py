@@ -1282,7 +1282,7 @@ class TestFusedObsFakeQuantModule(TestCase):
             self.assertEqual(ref_model.quant.activation_post_process.activation_post_process.quant_min, lower_bnd)
             self.assertEqual(ref_model.quant.activation_post_process.activation_post_process.quant_max, upper_bnd)
             self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
-                                obs2match)
+                             obs2match)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
