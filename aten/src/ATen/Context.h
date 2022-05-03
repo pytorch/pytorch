@@ -252,7 +252,6 @@ class TORCH_API Context {
   bool benchmark_cudnn = false;
   Float32MatmulPrecision float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
   bool allow_tf32_cudnn = true;
-  bool allow_tf32_cublas = false;
   bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
   at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;

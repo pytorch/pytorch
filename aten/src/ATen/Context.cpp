@@ -139,14 +139,11 @@ void Context::setBenchmarkCuDNN(bool b) {
 }
 
 bool Context::allowTF32CuBLAS() const {
-  return allow_tf32_cublas;
+  return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
 
 void Context::setAllowTF32CuBLAS(bool b) {
-  TORCH_WARN("Setting allow_tf32_cublas directly is not recommend as it may conflict with"
-              "torch.set_float32_matmul_precision. Using torch.set_float32_matmul_precision"
-              "is recommended instead.");
-  allow_tf32_cublas = b;
+  float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
 }
 
 Float32MatmulPrecision Context::float32MatmulPrecision() const {
@@ -162,15 +159,12 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
     // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
     if (s_ == "highest") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
-      allow_tf32_cublas = false;
       return true;
     } else if (s_ == "high") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
-      allow_tf32_cublas = true;
       return true;
     } else if (s_ == "medium") {
       float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
-      allow_tf32_cublas = true;
       return true;
     }
     return false;
@@ -180,8 +174,8 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
   std::transform(s.begin(), s.end(), sl.begin(),
                  [](unsigned char c) -> unsigned char { return std::tolower(c); });
   if (match(sl)) { return; }
-  TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the previous"
-    "setFloat32MatmulPrecision call had no effect.");
+  TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
+    "setFloat32MatmulPrecision call has no effect.");
 }
 
 at::LinalgBackend Context::linalgPreferredBackend() const {
