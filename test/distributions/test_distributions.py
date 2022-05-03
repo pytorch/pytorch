@@ -4685,9 +4685,11 @@ class TestAgainstScipy(TestCase):
                 other = dist.mode + step
             mask = isfinite & dist.support.check(other)
             self.assertTrue(mask.any() or dist.mode.unique().numel() == 1)
-            other = torch.where(mask, other, dist.sample())
+            # Add a dimension to the right if the event shape is not a scalar, e.g. OneHotCategorical.
+            other = torch.where(mask[..., None] if mask.ndim < other.ndim else mask, other, dist.sample())
             log_prob_other = dist.log_prob(other)
-            np.testing.assert_array_less(log_prob_other[mask], log_prob_mode[mask])
+            delta = log_prob_mode - log_prob_other
+            np.testing.assert_array_less(-1e-12, delta[mask].detach())  # Allow up to 1e-12 rounding error.
 
     def _test_continuous_distribution_mode(self, dist, sanitized_mode):
         sanitized_mode = sanitized_mode.requires_grad_()
@@ -4715,9 +4717,11 @@ class TestAgainstScipy(TestCase):
                 continue
 
             # Check if the gradients are zero.
-            sanitized_mode.grad = None
+            # sanitized_mode.grad = None
+            grad = []
+            sanitized_mode.register_hook(lambda x: grad.append(x))
             log_prob.backward(retain_graph=True)
-            grad = sanitized_mode.grad.reshape(flat_shape)[i]
+            grad = grad[0].reshape(flat_shape)[i]
             try:
                 np.testing.assert_allclose(grad, 0, atol=1e-3)
             except AssertionError:
@@ -4729,29 +4733,34 @@ class TestAgainstScipy(TestCase):
 
     def test_mode(self):
         discrete_distributions = (
-            Bernoulli, Binomial, Geometric, OneHotCategorical, Poisson,
+            Bernoulli, Binomial, Categorical, Geometric, NegativeBinomial, OneHotCategorical, Poisson,
         )
-        no_mode_available = (ContinuousBernoulli, Multinomial)
+        no_mode_available = (
+            ContinuousBernoulli, LKJCholesky, LogisticNormal, MixtureSameFamily, Multinomial,
+            RelaxedBernoulli, RelaxedOneHotCategorical,
+        )
 
-        for dist, _ in self.distribution_pairs:
-            if isinstance(dist, no_mode_available):
-                with self.assertRaises(NotImplementedError):
-                    dist.mode
-                continue
+        for dist_cls, params in EXAMPLES:
+            for param in params:
+                dist = dist_cls(**param)
+                if isinstance(dist, no_mode_available) or type(dist) is TransformedDistribution:
+                    with self.assertRaises(NotImplementedError):
+                        dist.mode
+                    continue
 
-            # Check that either all or no elements in the event shape are nan: the mode cannot be
-            # defined for part of an event.
-            isfinite = dist.mode.isfinite().reshape(dist.batch_shape + (dist.event_shape.numel(),))
-            np.testing.assert_array_equal(isfinite.all(-1) | ~isfinite.any(-1), True)
+                # Check that either all or no elements in the event shape are nan: the mode cannot be
+                # defined for part of an event.
+                isfinite = dist.mode.isfinite().reshape(dist.batch_shape + (dist.event_shape.numel(),))
+                np.testing.assert_array_equal(isfinite.all(-1) | ~isfinite.any(-1), True)
 
-            # Evaluate the Jacobian of the log probability at the mode. We sanitize undefined modes by
-            # sampling from the distribution.
-            sanitized_mode = torch.where(dist.mode.isfinite(), dist.mode, dist.sample())
+                # Evaluate the Jacobian of the log probability at the mode. We sanitize undefined modes by
+                # sampling from the distribution.
+                sanitized_mode = torch.where(dist.mode.isfinite(), dist.mode, dist.sample())
 
-            if isinstance(dist, discrete_distributions):
-                self._test_discrete_distribution_mode(dist, sanitized_mode)
-            else:
-                self._test_continuous_distribution_mode(dist, sanitized_mode)
+                if isinstance(dist, discrete_distributions):
+                    self._test_discrete_distribution_mode(dist, sanitized_mode)
+                else:
+                    self._test_continuous_distribution_mode(dist, sanitized_mode)
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
