@@ -7,7 +7,7 @@
 namespace at {
 namespace impl {
 
-struct TORCH_API PythonModeTLS {
+struct TORCH_API TorchDispatchModeTLS {
   static void set_state(std::shared_ptr<SafePyObject> state);
   static const std::shared_ptr<SafePyObject>& get_state();
   static void reset_state();
