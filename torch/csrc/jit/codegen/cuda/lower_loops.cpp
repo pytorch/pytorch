@@ -155,9 +155,8 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   // for an example why see FusionAdvancedLowering6
 
   // Grab iteration domain dependencies, similar to the logic in
-  // lower_expr_sort, EXCEPT it is based on parallel map not loop map, and
-  // dependencies are in opposite order, inner loops are dependant on outer
-  // loops.
+  // lower_expr_sort, EXCEPT dependencies are in opposite order,
+  // inner loops are dependant on outer loops.
 
   const auto& ca_map = GpuLower::current()->caMap();
 
