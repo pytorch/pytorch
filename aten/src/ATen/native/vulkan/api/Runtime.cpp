@@ -1,13 +1,14 @@
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Adapter.h>
 
+#include <thread>
+
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 
 namespace {
-
 
 void find_requested_layers_and_extensions(
     std::vector<const char*>& enabled_layers,
@@ -221,23 +222,31 @@ uint32_t select_first(const std::vector<Adapter>& adapters) {
 // Global runtime initialization
 //
 
-std::unique_ptr<Runtime> init_global_vulkan_runtime() {
+bool load_vulkan_drivers() {
   // Load Vulkan drivers
 #if defined(USE_VULKAN_VOLK)
   if (VK_SUCCESS != volkInitialize()) {
     TORCH_WARN(
         "Pytorch Vulkan Runtime: Failed to load Vulkan driver using volkInitialize()! "
         "The global vulkan runtime is invalid.");
-    return std::unique_ptr<Runtime>(nullptr);
+    return false;
   }
+  return true;
 #elif defined(USE_VULKAN_WRAPPER)
   if (!InitVulkan()) {
     TORCH_WARN(
         "Pytorch Vulkan Runtime: Failed to load Vulkan driver using initVulkan()! "
         "The global vulkan runtime is invalid.");
+    return false;
+  }
+  return true;
+#endif /* USE_VULKAN_VOLK, USE_VULKAN_WRAPPER */
+}
+
+std::unique_ptr<Runtime> init_global_vulkan_runtime() {
+  if(!load_vulkan_drivers()) {
     return std::unique_ptr<Runtime>(nullptr);
   }
-#endif /* USE_VULKAN_VOLK, USE_VULKAN_WRAPPER */
 
   const bool enableValidationMessages =
 #if defined(DEBUG)
@@ -273,6 +282,29 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 
   return std::unique_ptr<Runtime>(nullptr);
 }
+
+// This is a utility function that can be used to trigger pre-emptive loading
+// of the global vulkan runtime in an asynchronous fashion. This is useful to
+// reduce the latency of the first loading of a vulkan model, as without calling
+// this function the first model load will trigger init_global_vulkan_runtime()
+// which will greatly increase model loading time.
+int async_runtime_loader() {
+  // This is safe since the global vulkan runtime instance is stored as a static
+  // local variable inside runtime(). Local static variable initialization is
+  // thread-safe since C++11.
+  std::thread async_loader(runtime);
+  async_loader.detach();
+
+  return 1;
+}
+
+// On Android, we can trigger the global vulkan runtime to load asynchronously
+// on library load. On other platforms, this has shown to raise some issues,
+// possibly due to implementation details of the Vulkan drivers on those
+// platforms.
+#ifdef __ANDROID__
+static int async_load_trigger = async_runtime_loader();
+#endif
 
 } // namespace
 
