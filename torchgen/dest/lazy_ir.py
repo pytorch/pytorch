@@ -120,10 +120,14 @@ class GenLazyIR(ABC):
         return self.gen(f)
 
     @method_with_native_function
-    def gen_opkind_definition(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
+    def gen_opkind_definition(
+        self, f: Union[NativeFunctionsGroup, NativeFunction]
+    ) -> List[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
         schema = LazyIrSchema(func)
-        return [f"const OpKind {schema.node_name}::class_op_kind{{{aten_symbol(schema)}}};"]
+        return [
+            f"const OpKind {schema.node_name}::class_op_kind{{{aten_symbol(schema)}}};"
+        ]
 
     # there is no lowering functionality generated unless this IR base class is subclassed and
     # implemented as a backend-specific node

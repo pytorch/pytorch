@@ -537,7 +537,9 @@ def run_gen_lazy_tensor(
             ],
             "opkind_definitions": list(
                 concat_map_codegen(
-                    lazy_ir_generator(backend_indices[backend_key], node_base).gen_opkind_definition,
+                    lazy_ir_generator(
+                        backend_indices[backend_key], node_base
+                    ).gen_opkind_definition,
                     grouped_native_functions,
                 )
             ),
@@ -545,6 +547,7 @@ def run_gen_lazy_tensor(
             "namespace_epilogue": ns_helper.epilogue,
         },
     )
+
 
 if __name__ == "__main__":
     main()
