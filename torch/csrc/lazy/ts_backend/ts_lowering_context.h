@@ -87,7 +87,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
     TORCH_INTERNAL_ASSERT(false, "not implemented");
   }
 
-  void Lower(Node* node) override;
+  void Lower(const Node* node) override;
 
   ComputationPtr Build() override {
     for (torch::jit::Value* output : root_tuple_) {

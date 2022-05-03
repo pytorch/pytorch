@@ -27,7 +27,7 @@ TSLoweringContext::TSLoweringContext(
 }
 
 
-void TSLoweringContext::Lower(Node* node) {
+void TSLoweringContext::Lower(const Node* node) {
   if (auto* tsnode = dynamic_cast<const torch::lazy::TsNode*>(node)) {
     // First, we call the node lowering function, which exists for newly
     // codegenned or refactored nodes
