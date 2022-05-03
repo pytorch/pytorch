@@ -132,6 +132,37 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_set_sym_sizes(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    // TODO: switch this to SymIntArrayRef when we add the parsing logic
+    "set_sym_izes(IntArrayRef size)",
+  });
+  auto& self_ = const_cast<at::Tensor&>(THPVariable_Unpack(self));
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  // We don't want to suppor this
+  // if(r.has_torch_function()){
+  //   return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  // }
+
+  if (r.idx == 0) {
+    auto sym_sizes = r.intlist(0);
+    self_.set_sym_sizes(sym_sizes);
+
+    // TODO: support tracing?
+    // if (jit::tracer::isTracing()) {
+    //   return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
+    // } else {
+    //   return wrap(self_.size(r.toInt64(0)));
+    // }
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS

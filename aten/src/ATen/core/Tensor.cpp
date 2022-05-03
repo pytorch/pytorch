@@ -100,6 +100,10 @@ bool TensorBase::is_leaf() const {
   return impl::GetVariableHooks()->is_leaf(*this);
 }
 
+void TensorBase::set_sym_sizes(IntArrayRef sizes) {
+    sym_sizes_ = c10::fmap(sizes, [](int64_t s) { return c10::SymInt(s); });
+}
+
 int64_t TensorBase::output_nr() const {
   return impl::GetVariableHooks()->output_nr(*this);
 }

@@ -220,6 +220,9 @@ class TORCH_API TensorBase {
   IntArrayRef sizes() const {
     return impl_->sizes();
   }
+
+  void set_sym_sizes(IntArrayRef sizes);
+
   c10::SymIntArrayRef sym_sizes() const {
     return c10::SymIntArrayRef(reinterpret_cast<const SymInt*>(sizes().data()), sizes().size());
   }
@@ -804,6 +807,7 @@ protected:
 
 private:
   TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
+  c10::optional<std::vector<c10::SymInt>> sym_sizes_;
 };
 
 inline int64_t get_device(const TensorBase& self) {

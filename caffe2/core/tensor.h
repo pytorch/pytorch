@@ -430,7 +430,9 @@ class TORCH_API Tensor final {
   }
 
   inline c10::SymIntArrayRef sym_sizes() const {
-    auto sizes = impl_.get()->sizes();
+    if (!sym_sizes_) {
+      TORCH_CHECK(false, "Sym Sizes aren't set for this tensor");
+    }
     return c10::SymIntArrayRef(reinterpret_cast<const c10::SymInt*>(sizes.data()), sizes.size());
   }
 
