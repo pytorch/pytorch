@@ -158,6 +158,17 @@ class NaiveTypePropagator {
         unary_float_type(node);
         break;
       }
+      // unary is
+      case aten::isfinite:
+      case aten::isinf:
+      case aten::isnan:
+      case aten::isneginf:
+      case aten::isposinf:
+      case aten::isreal: {
+        copyScalarTypeAndDeviceToOutput(
+            c10::ScalarType::Bool, c10::nullopt, node);
+        break;
+      }
       // binary float
       case aten::atan2: {
         binary_type(node, TypePromotion::float_op_config);

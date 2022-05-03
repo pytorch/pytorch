@@ -1,7 +1,6 @@
 #include <torch/csrc/lazy/ts_backend/view_ops/as_strided.h>
 
 #include <algorithm>
-#include "ATen/core/interned_strings.h"
 
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/util.h>
