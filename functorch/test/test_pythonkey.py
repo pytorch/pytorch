@@ -206,9 +206,9 @@ make_fx_failures = {
     xfail('nn.functional.feature_alpha_dropout', 'with_train', device_type='cpu'),
     xfail('bernoulli', device_type='cpu'),
     xfail('nn.functional.dropout2d', device_type='cpu'),
-    xfail('nn.functional.max_unpool1d', '', device_type='cpu'),
-    xfail('nn.functional.max_unpool2d', '', device_type='cpu'),
-    xfail('nn.functional.max_unpool3d', '', device_type='cpu'),
+    skip('nn.functional.max_unpool1d', '', device_type='cpu'), # flaky
+    skip('nn.functional.max_unpool2d', '', device_type='cpu'), # flaky
+    skip('nn.functional.max_unpool3d', '', device_type='cpu'), # flaky
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
 }
 
