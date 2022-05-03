@@ -44,9 +44,6 @@ import torch.testing._internal.opinfo_helper as opinfo_helper
 
 import torch._refs as refs  # noqa: F401
 
-# TODO: FIXME: this import does not work in PyTorch CI
-# import torch._refs.nn.functional  # noqa: F401
-
 from distutils.version import LooseVersion
 
 has_scipy_fft = False
@@ -17747,14 +17744,6 @@ python_ref_db = [
         "_refs.tan",
         torch_opinfo_name="tan",
     ),
-    # TODO: FIXME: _refs.nn.functional import not working in CI
-    # ElementwiseUnaryPythonRefInfo(
-    #     "_refs.nn.functional.elu",
-    #     torch_opinfo_name="nn.functional.elu",
-    # ),
-    #
-    # Elementwise Binary OpInfos
-    #
     ElementwiseBinaryPythonRefInfo(
         "_refs.add",
         torch_opinfo_name="add",
