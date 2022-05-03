@@ -1,7 +1,6 @@
 from numbers import Real, Number
 
 import torch
-from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
@@ -52,7 +51,8 @@ class Beta(ExponentialFamily):
     @property
     def mode(self):
         mode = (self.concentration1 - 1) / (self.concentration0 + self.concentration1 - 2)
-        mode[(self.concentration0 <= 1) & (self.concentration1 <= 1)] = nan
+        f = (self.concentration0 < 1) | (self.concentration1 < 1)
+        mode[f] = (self.concentration0[f] < self.concentration1[f]).to(self.concentration0)
         return mode.clamp(min=0, max=1)
 
     @property
