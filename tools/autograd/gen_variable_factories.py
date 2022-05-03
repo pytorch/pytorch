@@ -5,13 +5,13 @@
 import re
 from typing import Optional, List
 
-from tools.codegen.api.types import CppSignatureGroup
-from tools.codegen.api import cpp
-import tools.codegen.api.python as python
-from tools.codegen.gen import parse_native_yaml
-from tools.codegen.context import with_native_function
-from tools.codegen.utils import mapMaybe, FileManager
-from tools.codegen.model import NativeFunction, TensorOptionsArguments, Variant
+from torchgen.api.types import CppSignatureGroup
+from torchgen.api import cpp
+import torchgen.api.python as python
+from torchgen.gen import parse_native_yaml
+from torchgen.context import with_native_function
+from torchgen.utils import mapMaybe, FileManager
+from torchgen.model import NativeFunction, TensorOptionsArguments, Variant
 
 OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
 TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
@@ -34,8 +34,12 @@ def fully_qualified_type(argument_type: str) -> str:
     return maybe_optional_type(qualified_type, is_opt)
 
 
-def gen_variable_factories(out: str, native_yaml_path: str, template_path: str) -> None:
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+def gen_variable_factories(
+    out: str, native_yaml_path: str, tags_yaml_path: str, template_path: str
+) -> None:
+    native_functions = parse_native_yaml(
+        native_yaml_path, tags_yaml_path
+    ).native_functions
     factory_functions = [fn for fn in native_functions if is_factory_function(fn)]
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_with_template(
