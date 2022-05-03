@@ -31,9 +31,12 @@
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
-// fuser and IR parser
+#include <test/cpp/jit/test_utils.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
+#include <torch/torch.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
@@ -41,6 +44,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <thread>
 
 // Tests go in torch::jit
 namespace torch {
@@ -21320,6 +21324,110 @@ TEST_F(NVFuserTest, FusionVectorizeInputToOutput_CUDA) {
 
   // Pass misaligned output. This must fail too.
   ASSERT_ANY_THROW(fe.runFusion({t0}, {t1_misaligned}));
+}
+
+class NVFuserMultithreadedTest : public ::testing::Test {
+ protected:
+  bool was_enabled = false;
+
+  void SetUp() override {
+    was_enabled = RegisterCudaFuseGraph::registerPass(true);
+  }
+
+  void TearDown() override {
+    RegisterCudaFuseGraph::registerPass(was_enabled);
+  }
+};
+
+TEST_F(NVFuserMultithreadedTest, SingleFunction_CUDA) {
+  std::string ir = R"IR(
+graph(%x.1 : Tensor,
+      %y.1 : Tensor):
+  %12 : NoneType = prim::Constant()
+  %11 : bool = prim::Constant[value=0]()
+  %9 : int = prim::Constant[value=1]()
+  %3 : Tensor = aten::exp(%x.1)
+  %5 : Tensor = aten::relu(%y.1)
+  %6 : Tensor = aten::sin(%5)
+  %8 : Tensor = aten::add(%3, %6, %9)
+  %10 : int[] = prim::ListConstruct(%9)
+  %13 : Tensor = aten::sum(%8, %10, %11, %12)
+  return (%13)
+)IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(ir, g.get());
+  GraphFunction fn("nvfuser_test", g, nullptr);
+
+  auto run_kernel = [&fn]() {
+    auto x = torch::rand({32, 32}, at::TensorOptions(at::kCUDA));
+    auto y = torch::rand({32, 32}, at::TensorOptions(at::kCUDA));
+    std::vector<IValue> results;
+    for (const auto& _ : c10::irange(10)) {
+      auto stack = createStack({x.clone(), y.clone()});
+      fn.run(stack);
+      results.push_back(stack.back());
+    }
+    for (const auto& i : c10::irange(1, 10)) {
+      auto t0 = results[0].toTensor();
+      auto ti = results[i].toTensor();
+      ASSERT_TRUE(at::allclose(t0, ti));
+    }
+  };
+
+  constexpr size_t kNumThreads = 4;
+  std::vector<std::thread> threads;
+  for (size_t id = 0; id < kNumThreads; ++id) {
+    threads.emplace_back(run_kernel);
+  }
+  for (auto& t : threads) {
+    t.join();
+  }
+}
+
+TEST_F(NVFuserMultithreadedTest, MultipleFunctions_CUDA) {
+  auto run_kernel = []() {
+    const std::string ir = R"IR(
+  graph(%x.1 : Tensor,
+        %y.1 : Tensor):
+    %12 : NoneType = prim::Constant()
+    %11 : bool = prim::Constant[value=0]()
+    %9 : int = prim::Constant[value=1]()
+    %3 : Tensor = aten::exp(%x.1)
+    %5 : Tensor = aten::relu(%y.1)
+    %6 : Tensor = aten::sin(%5)
+    %8 : Tensor = aten::add(%3, %6, %9)
+    %10 : int[] = prim::ListConstruct(%9)
+    %13 : Tensor = aten::sum(%8, %10, %11, %12)
+    return (%13)
+  )IR";
+    auto g = std::make_shared<Graph>();
+    torch::jit::parseIR(ir, g.get());
+    GraphFunction fn("nvfuser_test", g, nullptr);
+
+    auto x = torch::rand({32, 32}, at::TensorOptions(at::kCUDA));
+    auto y = torch::rand({32, 32}, at::TensorOptions(at::kCUDA));
+    std::vector<IValue> results;
+    constexpr size_t numRuns = 10;
+    for (const auto& _ : c10::irange(numRuns)) {
+      auto stack = createStack({x.clone(), y.clone()});
+      fn.run(stack);
+      results.push_back(stack.back());
+    }
+    for (const auto& i : c10::irange(1, numRuns)) {
+      auto t0 = results[0].toTensor();
+      auto ti = results[i].toTensor();
+      ASSERT_TRUE(at::allclose(t0, ti));
+    }
+  };
+
+  constexpr size_t kNumThreads = 4;
+  std::vector<std::thread> threads;
+  for (size_t id = 0; id < kNumThreads; ++id) {
+    threads.emplace_back(run_kernel);
+  }
+  for (auto& t : threads) {
+    t.join();
+  }
 }
 
 } // namespace jit

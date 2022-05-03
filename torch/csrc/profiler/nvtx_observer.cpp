@@ -72,7 +72,6 @@ std::list<std::pair<at::RecordFunctionHandle, int>> flattenOpIdList(c10::List<c1
 }
 
 std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(const at::RecordFunction& fn) {
-  int num_inputs = fn.inputs().size();
   std::pair<at::RecordFunctionHandle, int> undefined_op_pair(0,-1);
   std::list<std::pair<at::RecordFunctionHandle, int>> input_producer_ops_;
   auto state_ptr = NVTXThreadLocalState::getTLS();

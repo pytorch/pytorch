@@ -59,7 +59,7 @@ namespace onnx = ::ONNX_NAMESPACE;
 const static int kInvalidOpsetVersion = -1;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
-constexpr static std::array<int64_t, 16> kOpsetVersionToIRVersion = {
+constexpr static std::array<int64_t, 17> kOpsetVersionToIRVersion = {
     kInvalidOpsetVersion,
     3,
     kInvalidOpsetVersion,
@@ -75,6 +75,7 @@ constexpr static std::array<int64_t, 16> kOpsetVersionToIRVersion = {
     7,
     7,
     7,
+    8,
     8};
 
 std::string getNodeStackTraceString(const Node* n) {
@@ -113,7 +114,7 @@ void validateBlock(
           WithInsertPoint guard(node);
           auto* new_node =
               b->owningGraph()->insertNode(b->owningGraph()->create(
-                  Symbol(::c10::onnx::ATen),
+                  Symbol(::c10::aten::ATen),
                   node->inputs(),
                   node->outputs().size()));
           for (size_t i = 0; i < node->outputs().size(); ++i) {
@@ -1163,8 +1164,8 @@ void GraphEncoder::EncodeIntermediateValueInfo(
     const Value* v) {
   // Motivation is to encode ValueInfo for onnx local function nodes.
   auto n = v->node();
-  if (n->kind().is_onnx()) {
-    // Encode value info only for non-onnx nodes.
+  if (n->kind().is_onnx() || n->kind().is_aten()) {
+    // Encode value info only for non-onnx or non-ATen nodes.
     return;
   }
   if (n->owningGraph() != graph_.get()) {

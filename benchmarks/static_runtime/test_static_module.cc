@@ -1603,8 +1603,33 @@ TEST(UseSplitAndSqueeze, Fusion) {
   auto graph = getGraphFromIR(src);
   UseSplitAndSqueeze(graph);
   EXPECT_TRUE(
-      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze"));
+      hasNodeWithKind(graph, "static_runtime::fused_split_and_squeeze_copy"));
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::split"));
   EXPECT_FALSE(hasNodeWithKind(graph, "aten::squeeze"));
   EXPECT_FALSE(hasNodeWithKind(graph, "prim::ListUnpack"));
+}
+
+TEST(EliminateNoOpSlice, IntegerStart) {
+  const auto src = R"JIT(
+    def forward(self, x: List[int]) -> List[int]:
+        return x[0:]
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::slice"));
+  EliminateNoOpSlice(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::slice"));
+}
+
+TEST(EliminateNoOpSlice, NoneStart) {
+  const auto src = R"JIT(
+    def forward(self, x: List[int]) -> List[int]:
+        return x[:]
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+  auto graph = mod.get_method("forward").graph();
+  EliminateNoOpSlice(graph);
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::slice"));
 }

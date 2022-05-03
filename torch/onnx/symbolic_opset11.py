@@ -8,7 +8,7 @@ import torch.onnx.symbolic_helper as sym_help
 import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType, quantized_args
-from torch.onnx.symbolic_opset9 import expand, unused, mul, op_with_optional_float_cast
+from torch.onnx.symbolic_opset9 import expand, unused, mul, op_with_optional_float_cast, _pad_circular
 from torch.onnx.symbolic_opset9 import linalg_vector_norm as lvn
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
@@ -100,7 +100,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         indices_list = sym_help._unpack_list(indices_list_value)
     else:
         indices_list = [indices_list_value]
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         args = [self] + indices_list + [values, accumulate]
         return g.at("index_put", *args)
 
@@ -225,7 +225,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
 def gather(g, self, dim, index, sparse_grad=False):
     if sym_help._maybe_get_const(sparse_grad, "i"):
         return _unimplemented("gather", "sparse_grad == True")
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("gather", self, dim, index, sparse_grad)
     return g.op("GatherElements", self, index, axis_i=dim)
 
@@ -233,7 +233,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 @parse_args("v", "i", "v", "v")
 def scatter(g, self, dim, index, src):
     from torch.onnx.symbolic_opset9 import expand_as
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
     src_type = src.type().scalarType()
     src = sym_help._maybe_get_scalar(src)
@@ -502,6 +502,20 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
+def pad(g, input, pad, mode, value):
+    mode = sym_help._parse_arg(mode, "s")
+    if mode == "replicate":
+        return replication_pad(g, input, pad)
+    elif mode == "reflect":
+        return reflection_pad(g, input, pad)
+    elif mode == "constant":
+        return constant_pad_nd(g, input, pad, value)
+    elif mode == "circular":
+        return _pad_circular(g, input, pad)
+    else:
+        raise RuntimeError(f"Unrecognized padding mode {mode}")
+
+
 def linalg_det(g, self):
     return g.op("Det", self)
 
@@ -551,10 +565,7 @@ def arange(g, *args):
 def _dim_arange(g, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
-    # Caffe2-specific op
-    is_caffe2_aten_fallback = (sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and
-                               torch.onnx._CAFFE2_ATEN_FALLBACK)
-    if is_caffe2_aten_fallback:
+    if sym_help.is_caffe2_aten_fallback():
         return g.op("_caffe2::Range", stop)
     return arange(g, stop, 4, None, None, None)
 
@@ -621,7 +632,7 @@ def mm(g, self, other):
 
 
 def index(g, self, index):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("index", self, index, overload_name="Tensor")
 
     if sym_help._is_packed_list(index):
@@ -642,8 +653,9 @@ def index(g, self, index):
 
 def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, "i")
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.at("index_fill", self, index, value, dim_i=dim_value, overload_name="int_Scalar")
+    if sym_help.is_caffe2_aten_fallback():
+        return g.at("index_fill", self, index, value, overload_name="int_Scalar", dim_i=dim_value)
+
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, self)
@@ -653,7 +665,7 @@ def index_fill(g, self, dim, index, value):
 
 def index_copy(g, self, dim, index, source):
     dim_value = sym_help._parse_arg(dim, "i")
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("index_copy", self, index, source, dim_i=dim_value)
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
