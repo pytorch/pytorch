@@ -14368,12 +14368,7 @@ op_db: List[OpInfo] = [
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                    supports_out=False,
-                   supports_autograd=False,
-                   skips=(
-                       # Reference: https://github.com/pytorch/pytorch/issues/66402
-                       DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_large",
-                                    device_type='cpu', dtypes=(torch.complex64,), active_if=not (IS_MACOS or IS_WINDOWS)),
-                   )),
+                   supports_autograd=False),
     UnaryUfuncInfo('isinf',
                    ref=np.isinf,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -16576,6 +16571,7 @@ op_db: List[OpInfo] = [
         'argmax',
         supports_multiple_dims=False,
         supports_autograd=False,
+        assert_jit_shape_analysis=True,
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
