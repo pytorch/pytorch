@@ -118,10 +118,11 @@ def generate_data(transform):
         domain = domain.base_constraint
     codomain = transform.codomain
     x = torch.empty(4, 5)
-    if domain is constraints.lower_cholesky or codomain is constraints.lower_cholesky:
-        x = torch.empty(6, 6)
-        x = x.normal_()
-        return x
+    if domain is constraints.lower_cholesky:
+        x = torch.randn(6, 6)
+        return x.tril(-1) + x.diag().exp().diag_embed()
+    elif codomain is constraints.lower_cholesky:
+        return torch.randn(6, 6)
     elif domain is constraints.real:
         return x.normal_()
     elif domain is constraints.real_vector:
@@ -189,6 +190,7 @@ def test_with_cache(transform):
 @pytest.mark.parametrize('test_cached', [True, False])
 def test_forward_inverse(transform, test_cached):
     x = generate_data(transform).requires_grad_()
+    assert transform.domain.check(x).all()  # verify that the input data are valid
     try:
         y = transform(x)
     except NotImplementedError:
