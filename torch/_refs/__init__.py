@@ -889,7 +889,7 @@ def _reduction(
     result = prim(a_converted, dims)
 
     if keepdims:
-        output_shape = [a.shape[i] if i in dims else 1 for i in range(a.ndim)]
+        output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
         broadcast_dims = [i for i in range(a.ndim) if i not in dims]
         result = prims.broadcast_in_dim(result, output_shape, broadcast_dims)
     if out is not None:
@@ -923,7 +923,8 @@ def sum(
             dtype = torch.int64
         else:
             dtype = a.dtype
-
+    if dim == () or dim == []:
+        dim = None
     return _reduction(
         a,
         prims.sum,

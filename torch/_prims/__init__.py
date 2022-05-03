@@ -1228,7 +1228,8 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     if output_dtype is None:
         output_dtype = inp.dtype
     output_shape = utils.compute_reduction_output_shape(inp.shape, dims)
-    return TensorMeta(shape=output_shape, dtype=output_dtype, device=inp.device)
+    return TensorMeta(shape=output_shape, strides=utils.make_contiguous_strides_for(output_shape),
+                      dtype=output_dtype, device=inp.device)
 
 
 def _bool_return_reduction_meta(inp, dims):

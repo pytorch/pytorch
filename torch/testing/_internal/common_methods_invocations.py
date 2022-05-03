@@ -17531,6 +17531,27 @@ class OpInfoPythonRefInfo(OpInfo):
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
         super(OpInfoPythonRefInfo, self).__init__(**ukwargs)
 
+class ReductionPythonRefInfo(ReductionOpInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise unary operation.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        assert isinstance(self.torch_opinfo, ReductionOpInfo)
+
+        inherited = self.torch_opinfo._original_opinfo_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
+
+        super(ReductionPythonRefInfo, self).__init__(**ukwargs)
+
 class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
     '''
     An OpInfo for a Python reference of an elementwise unary operation.
@@ -17818,6 +17839,10 @@ python_ref_db = [
         "_refs.true_divide",
         torch_opinfo_name="true_divide",
     ),
+    ReductionPythonRefInfo(
+        "_refs.sum",
+        torch_opinfo_name="sum"
+    )
 ]
 
 # Common operator groupings
