@@ -33,7 +33,7 @@ class PostLocalSGDState(object):
         process_group,
         subgroup,
         start_localSGD_iter,
-        post_local_gradient_allreduce = True,
+        post_local_gradient_allreduce=True,
     ):
         logger.info(
             "Local SGD will be started after {} iterations".format(start_localSGD_iter)
