@@ -1266,7 +1266,7 @@ class PlaceholderObserver(ObserverBase):
         )
 
 
-class RecordingObserver(_ObserverBase):
+class RecordingObserver(ObserverBase):
     r"""
     The module is mainly for debug and records the tensor values during runtime.
 
@@ -1277,8 +1277,8 @@ class RecordingObserver(_ObserverBase):
     """
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
-    def __init__(self, **kwargs):
-        super(RecordingObserver, self).__init__(**kwargs)
+    def __init__(self, dtype=torch.quint8, **kwargs):
+        super(RecordingObserver, self).__init__(dtype=dtype, **kwargs)  # type: ignore[call-arg]
         self.tensor_val = []
 
     def forward(self, x):
