@@ -292,21 +292,6 @@ class DeviceCheckType(Enum):
     ExactSame = 1
 
 
-class Tag(Enum):
-    inplace_view = 0
-    view_copy = 1
-
-    def __str__(self) -> str:
-        return self.name
-
-    @staticmethod
-    def parse(value: str) -> "Tag":
-        for k, v in Tag.__members__.items():
-            if k == value:
-                return v
-        raise AssertionError(f"unknown tag {value}")
-
-
 ViewSchemaKind = Enum("ViewSchemaKind", ("aliasing", "inplace", "out", "non_aliasing"))
 
 # The basic input to the code generation is native_functions.yaml.
@@ -416,8 +401,7 @@ class NativeFunction:
 
     # Tags are used to describe semantic information about (groups of) operators,
     # That aren't easily inferrable directly from the operator's schema.
-    # For now operators have at most one tag.
-    tag: Optional["Tag"]
+    tags: Set[str]
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -426,7 +410,7 @@ class NativeFunction:
     # We parse both the NativeFunction + backend-specific information about it, which it stored in a corresponding BackendIndex.
     @staticmethod
     def from_yaml(
-        ei: Dict[str, object], loc: "Location"
+        ei: Dict[str, object], loc: "Location", valid_tags: Set[str]
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
@@ -514,9 +498,18 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tag_str = e.pop("tags", None)
-        assert tag_str is None or isinstance(tag_str, str), f"not a str: {tag_str}"
-        tag = Tag.parse(tag_str) if tag_str else None
+        tags_s = e.pop("tags", "")
+        assert isinstance(tags_s, str)
+        tags: Set[str] = set()
+        if len(tags_s) > 0:
+            assert len(valid_tags) > 0
+            for t in tags_s.split(", "):
+                # TODO: verify that the tag is valid and has an entry in tags.yaml
+                if t in valid_tags:
+                    tags.add(t)
+                else:
+                    raise AssertionError(f"illegal tag {t}")
+        assert isinstance(tags, set)
 
         from torchgen.api import cpp
 
@@ -662,7 +655,7 @@ class NativeFunction:
                 is_abstract=is_abstract,
                 has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
                 has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
-                tag=tag,
+                tags=tags,
             ),
             backend_metadata,
         )
@@ -743,7 +736,7 @@ class NativeFunction:
         is_non_mutating_view = len(rets) > 0 and any(
             r.annotation is not None and not r.annotation.is_write for r in rets
         )
-        is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
+        is_inplace_view = "inplace_view" in self.tags
         is_wildcard_view = any(
             inp.annotation is not None and inp.annotation.alias_set_after != ""
             for inp in self.func.schema_order_arguments()
@@ -847,59 +840,6 @@ class NativeFunctionsGroup:
             inplace=inplace,
             out=out,
         )
-
-
-def is_foreach_op(name: str) -> bool:
-    return str(name) in set(
-        [
-            "_amp_foreach_non_finite_check_and_unscale_",
-            "_foreach_add_.ScalarList",
-            "_foreach_sub_.ScalarList",
-            "_foreach_mul_.ScalarList",
-            "_foreach_div_.ScalarList",
-            "_foreach_add_.Scalar",
-            "_foreach_sub_.Scalar",
-            "_foreach_mul_.Scalar",
-            "_foreach_div_.Scalar",
-            "_foreach_add_.List",
-            "_foreach_sub_.List",
-            "_foreach_mul_.List",
-            "_foreach_div_.List",
-            "_foreach_exp_",
-            "_foreach_sqrt_",
-            "_foreach_abs_",
-            "_foreach_acos_",
-            "_foreach_asin_",
-            "_foreach_atan_",
-            "_foreach_ceil_",
-            "_foreach_cos_",
-            "_foreach_cosh_",
-            "_foreach_erf_",
-            "_foreach_erfc_",
-            "_foreach_expm1_",
-            "_foreach_floor_",
-            "_foreach_log_",
-            "_foreach_log10_",
-            "_foreach_log1p_",
-            "_foreach_log2_",
-            "_foreach_neg_",
-            "_foreach_tan_",
-            "_foreach_tanh_",
-            "_foreach_sin_",
-            "_foreach_sinh_",
-            "_foreach_round_",
-            "_foreach_lgamma_",
-            "_foreach_frac_",
-            "_foreach_reciprocal_",
-            "_foreach_sigmoid_",
-            "_foreach_trunc_",
-            "_foreach_addcmul_.Scalar",
-            "_foreach_addcdiv_.Scalar",
-            "_foreach_addcmul_.ScalarList",
-            "_foreach_addcdiv_.ScalarList",
-            "_foreach_zero_",
-        ]
-    )
 
 
 @dataclass(frozen=True)
@@ -1120,12 +1060,39 @@ class FunctionSchema:
                 "Did you forget to mark an out argument as keyword-only?"
             )
         if self.arguments.out:
-            assert len(self.arguments.out) == len(self.returns) or len(self.returns) == 0, \
-                "Must return as many arguments as there are out arguments, or no return at all"
+            # out= ops that return their mutable inputs are only really useful for method chaining.
+            # And method chaining is only really useful if the thing you're returning is a plain Tensor.
+            # So ideally, we'd enforce that out= ops with a single plain mutable tensor should return the tensor,
+            # and all other types of out= op schemas should return void.
+            # There are a bunch of existing out= ops that return tuples of tensors though, so we're stuck with allowing that.
+            if any(a.type != BaseType(BaseTy.Tensor) for a in self.arguments.out):
+                assert (
+                    len(self.returns) == 0
+                ), "out= ops that accept tensor lists as out arguments "
+                "are expected to have no return type (since you can't do method chaining on them)"
+            else:
+                assert len(self.arguments.out) == len(
+                    self.returns
+                ), "Must return as many arguments as there are out arguments, or no return at all"
+
         if self.name.name.inplace:
-            # TODO: fixme
-            if not is_foreach_op(str(self.name)):
-                assert len(self.returns) == 1
+            self_a = self.arguments.self_arg
+            assert (
+                self_a
+                and self_a.argument.annotation
+                and self_a.argument.annotation.is_write
+            )
+            if self_a.argument.type == BaseType(BaseTy.Tensor):
+                # All inplace ops with an ordinary `Tensor self` argument should return self,
+                # to allow for method chaining.
+                assert (
+                    len(self.returns) == 1
+                    and self.returns[0].annotation == self_a.argument.annotation
+                )
+            else:
+                # You can't method chain on non-tensor self arguments though (like a List[Tensor])
+                # so in all other cases we expect the return type to be none.
+                assert len(self.returns) == 0
 
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
@@ -1993,8 +1960,8 @@ class NativeFunctionsViewGroup:
             assert self.view.func.signature() == self.view_copy.func.signature(
                 strip_view_copy_name=True
             )
-            assert self.view_copy.tag == Tag.view_copy, (
-                f"{str(self.view_copy.func.name)} appears to be a view_copy operator. The codegen expects"
+            assert "view_copy" in self.view_copy.tags, (
+                f"{str(self.view_copy.func.name), str(self.view.tags)} appears to be a view_copy operator. The codegen expects"
                 " view_copy operators to be annotated with the 'view_copy' tag in native_functions.yaml."
                 " See Note [view_copy NativeFunction] for details."
             )
@@ -2035,7 +2002,7 @@ def gets_generated_view_copy(f: NativeFunction) -> bool:
     if f.has_composite_implicit_autograd_kernel:
         return False
     # We also don't need to generate copy variants for inplace views.
-    if f.tag == Tag.inplace_view:
+    if "inplace_view" in f.tags:
         return False
     return True
 

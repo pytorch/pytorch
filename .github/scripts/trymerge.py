@@ -743,7 +743,7 @@ def find_matching_merge_rule(pr: GitHubPR,
                     if reject_reason_score < 20000:
                         reject_reason_score = 20000
                         reject_reason = f"Refusing to merge as mandatory check {checkname} "
-                        reject_reason += "has not been run" if checkname not in checks else "failed"
+                        reject_reason += "has not been run" if checkname not in checks or checks[checkname] is None else "failed"
                         reject_reason += f" for rule {rule_name}"
                     pass_checks = False
             if not pass_checks:
