@@ -361,20 +361,6 @@ def gen_pyi(
                                            ' requires_grad: bool = False) -> Tensor: ...'],
         })
 
-    unsorted_function_hints.update({
-        'sparse_compressed_tensor' : ['def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],'
-                                      'plain_indices: Union[Tensor, List],'
-                                      ' values: Union[Tensor, List], size: Optional[_size]=None,'
-                                      ' *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,'
-                                      ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
-        '_sparse_compressed_tensor_unsafe': ['def _sparse_compressed_tensor_unsafe(comp_indices: Union[Tensor, List],'
-                                             'plain_indices: Union[Tensor, List],'
-                                             ' values: Union[Tensor, List], size: List[int],'
-                                             ' dtype: Optional[_dtype] = None, layout: Optional[_layout] = None,'
-                                             ' device: Optional[_device] = None,'
-                                             ' requires_grad: bool = False) -> Tensor: ...'],
-    })
-
     unsorted_function_hints.update(
         {
             "set_flush_denormal": ["def set_flush_denormal(mode: _bool) -> _bool: ..."],
@@ -412,6 +398,22 @@ def gen_pyi(
                 " size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,"
                 " device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ..."
             ],
+            "_sparse_coo_tensor_unsafe": [
+                "def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],"
+                " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
+                " requires_grad: bool = False) -> Tensor: ..."
+            ],
+            'sparse_compressed_tensor' : ['def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],'
+                                          'plain_indices: Union[Tensor, List],'
+                                          ' values: Union[Tensor, List], size: Optional[_size]=None,'
+                                          ' *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,'
+                                          ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
+            '_sparse_compressed_tensor_unsafe': ['def _sparse_compressed_tensor_unsafe(comp_indices: Union[Tensor, List],'
+                                                 'plain_indices: Union[Tensor, List],'
+                                                 ' values: Union[Tensor, List], size: List[int],'
+                                                 ' dtype: Optional[_dtype] = None, layout: Optional[_layout] = None,'
+                                                 ' device: Optional[_device] = None,'
+                                                 ' requires_grad: bool = False) -> Tensor: ...'],
             "range": [
                 "def range(start: Number, end: Number,"
                 " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
