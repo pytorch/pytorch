@@ -773,7 +773,7 @@
   index: non_differentiable
 
 - name: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
-  self: grad.clone().index_fill_(dim, index, 0)
+  self: grad.index_fill(dim, index, 0)
   # The case source.dim() == 0 is necessary to support scalar tensors of the form
   # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
   # This is because source is not broadcastable to index, as source.dim() < index.dim()
@@ -2326,6 +2326,11 @@
   grad_output: replication_pad3d(grad, padding)
   self: zeros_like(self)
   result: replication_pad3d_backward(grad_output_t, self_p, padding)
+
+- name: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  self: maybe_multiply(grad, beta.conj())
+  mat1: maybe_multiply(grad.sparse_mask(self).mm(mat2.mH()), alpha.conj())
+  mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, beta)
