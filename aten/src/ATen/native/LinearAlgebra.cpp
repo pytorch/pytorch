@@ -119,6 +119,7 @@ TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor&
 namespace native {
 
 DEFINE_DISPATCH(addr_stub);
+DEFINE_DISPATCH(linalg_vector_norm_stub);
 
 // As P is a permutation matrix
 // det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
@@ -2615,7 +2616,7 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
       make_reduction("vector_norm", result, self_, dim, keepdim, in_dtype, out_dtype) :
       make_reduction("vector_norm", result, self_, dim, keepdim, out_dtype);
 
-  norm_stub(iter.device_type(), iter, ord);
+  linalg_vector_norm_stub(iter.device_type(), iter, ord);
   return result;
 }
 
