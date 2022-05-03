@@ -2990,7 +2990,9 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
         return false;
       } else {
         bound_info.start = got->second.first;
-        bound_info.end = got->second.second;
+        // TODO: Need to add the range bounary information to Bound
+        bound_info.end = IRSimplifier::simplify(
+            alloc<Sub>(got->second.second, immLike(got->second.second, 1)));
         return true;
       }
     }
@@ -3013,23 +3015,29 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
   } else if (
       has_overlap == analysis::OverlapKind::Contains ||
       has_overlap == analysis::OverlapKind::ContainedOrEqual) {
-    // lhs = (5, 5) or rhs = (5, 5)
+    // lhs = [5, 5] or rhs = [5, 5]
     if (lhs_bound == rhs_bound) {
       cmp_res = CompareSelectOperation::kEQ;
     } else if (simp_lhs->isConstant()) {
       if (exprEquals(simp_lhs, rhs_bound.start)) {
+        // lhs = [5, 5] and rhs = [5, 10]
         cmp_res = CompareSelectOperation::kLE;
       } else if (exprEquals(simp_lhs, rhs_bound.end)) {
+        // lhs = [10, 10] and rhs = [5, 10]
         cmp_res = CompareSelectOperation::kGE;
       } else {
+        // lhs = [8, 8] and rhs = [5, 10]
         return simplified_cmp_select_expr;
       }
     } else if (simp_rhs->isConstant()) {
       if (exprEquals(lhs_bound.end, simp_rhs)) {
+        // lhs = [5, 10] and rhs = [10, 10]
         cmp_res = CompareSelectOperation::kLE;
       } else if (exprEquals(lhs_bound.start, simp_rhs)) {
+        // lhs = [5, 10] and rhs = [5, 5]
         cmp_res = CompareSelectOperation::kGE;
       } else {
+        // lhs = [5, 10] and rhs = [8, 8]
         return simplified_cmp_select_expr;
       }
     } else {
@@ -3045,8 +3053,10 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     int diff = immediateAs<int>(ret);
     TORCH_INTERNAL_ASSERT(diff != 0);
     if (diff > 0) {
+      // lhs = [5, 10] and rhs = [0, 4]
       cmp_res = CompareSelectOperation::kGT;
     } else {
+      // lhs = [5, 10] and rhs = [11, 15]
       cmp_res = CompareSelectOperation::kLT;
     }
   }
@@ -3076,12 +3086,14 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
           : simp_ret2;
       break;
     case CompareSelectOperation::kNE:
-      ret_expr =
-          (cmp_res != CompareSelectOperation::kEQ) ? simp_ret1 : simp_ret2;
+      ret_expr = (cmp_res != CompareSelectOperation::kEQ)
+          ? simp_ret1
+          : simplified_cmp_select_expr;
       break;
     case CompareSelectOperation::kEQ:
-      ret_expr =
-          (cmp_res == CompareSelectOperation::kEQ) ? simp_ret1 : simp_ret2;
+      ret_expr = (cmp_res == CompareSelectOperation::kEQ)
+          ? simp_ret1
+          : simplified_cmp_select_expr;
       break;
     default:
       TORCH_INTERNAL_ASSERT(false);

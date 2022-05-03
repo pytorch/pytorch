@@ -4117,12 +4117,11 @@ TEST(Simplify, SimplifyReorderForCond) {
         0,
         4,
         Cond::make(
-            CompareSelect::make(i, 3, CompareSelectOperation::kLT),
+            CompareSelect::make(i, 2, CompareSelectOperation::kEQ),
             Store::make(c, {i}, Load::make(a, {i})),
             nullptr));
 
     StmtPtr simplified = IRSimplifier::simplify(body);
-
     IS_NODE_WITH_NAME(For, simplified, loop);
     IS_NODE_WITH_NAME(Cond, loop->body()->front(), cond);
   }
@@ -4845,6 +4844,17 @@ TEST(Simplify, CompareSelectCondAlwaysInLoopBounds) {
   torch::jit::testing::FileCheck().run(
       R"IR(
 # CHECK: b[n] = 1.f;
+)IR",
+      oss.str());
+
+  s = For::make(
+      n, 1, N, b.store({n}, CompareSelect::make(n, N, 0.f, 1.0f, kLT)));
+  s = IRSimplifier::simplify(s);
+  oss.clear();
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: b[n] = 0.f;
 )IR",
       oss.str());
 }
