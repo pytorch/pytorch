@@ -133,7 +133,9 @@ class TestGenAutogradFunctions(unittest.TestCase):
 # Represents the most basic NativeFunction. Use dataclasses.replace()
 # to edit for use.
 DEFAULT_NATIVE_FUNCTION, _ = torchgen.model.NativeFunction.from_yaml(
-    {"func": "func() -> bool"}, loc=torchgen.model.Location(__file__, 1)
+    {"func": "func() -> bool"},
+    loc=torchgen.model.Location(__file__, 1),
+    valid_tags=set(),
 )
 
 

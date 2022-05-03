@@ -131,9 +131,31 @@ void lazy_lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singula
   lstsq_stub(DeviceType::CUDA, a, b, rank, singular_values, infos, rcond, driver_name);
 }
 
+void lazy_ldl_factor(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian) {
+  loadLazyTorchLinalgLibrary();
+  ldl_factor_stub(DeviceType::CUDA, LD, pivots, info, upper, hermitian);
+}
+
+void lazy_ldl_solve(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper,
+    bool hermitian) {
+  loadLazyTorchLinalgLibrary();
+  ldl_solve_stub(DeviceType::CUDA, LD, pivots, B, upper, hermitian);
+}
+
 REGISTER_CUDA_DISPATCH(cholesky_stub, &lazy_cholesky_kernel)
 REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &lazy_cholesky_inverse_kernel);
 REGISTER_CUDA_DISPATCH(lu_factor_stub, &lazy_lu_factor);
+REGISTER_CUDA_DISPATCH(ldl_factor_stub, &lazy_ldl_factor);
+REGISTER_CUDA_DISPATCH(ldl_solve_stub, &lazy_ldl_solve);
 REGISTER_CUDA_DISPATCH(triangular_solve_stub, &lazy_triangular_solve_kernel);
 REGISTER_CUDA_DISPATCH(orgqr_stub, &lazy_orgqr_kernel);
 REGISTER_CUDA_DISPATCH(ormqr_stub, &lazy_ormqr_kernel);
