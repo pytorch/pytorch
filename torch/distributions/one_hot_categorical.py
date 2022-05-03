@@ -72,8 +72,9 @@ class OneHotCategorical(Distribution):
 
     @property
     def mode(self):
-        max_prob, _ = self._categorical.probs.max(-1, True)
-        return (self._categorical.probs == max_prob).to(self._categorical.probs)
+        probs = self._categorical.probs
+        mode = probs.argmax(axis=-1)
+        return torch.nn.functional.one_hot(mode, num_classes=probs.shape[-1]).to(probs)
 
     @property
     def variance(self):

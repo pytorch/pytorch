@@ -77,7 +77,7 @@ class Binomial(Distribution):
 
     @property
     def mode(self):
-        return ((self.total_count + 1) * self.probs).floor()
+        return ((self.total_count + 1) * self.probs).floor().clamp(max=self.total_count)
 
     @property
     def variance(self):

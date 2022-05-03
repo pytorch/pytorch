@@ -60,8 +60,8 @@ class Kumaraswamy(TransformedDistribution):
     @property
     def mode(self):
         # Evaluate in log-space for numerical stability.
-        log_mode = self.concentration0.recpriocal() * \
-            (-self.concentration0).log1p - (-self.concentration0 * self.concentration1).log1p()
+        log_mode = self.concentration0.reciprocal() * \
+            (-self.concentration0).log1p() - (-self.concentration0 * self.concentration1).log1p()
         log_mode[(self.concentration0 < 1) | (self.concentration1 < 1)] = nan
         return log_mode.exp()
 
