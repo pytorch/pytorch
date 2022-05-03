@@ -2998,90 +2998,99 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     }
   };
 
-  analysis::Bound rhs_bound;
-  analysis::Bound lhs_bound;
+  using CompareResult = CompareSelectOperation;
+  auto deduce_bound_relationship = [](const analysis::Bound& lhs_bound,
+                                      const analysis::Bound& rhs_bound,
+                                      CompareResult& cmp_res) {
+    if (lhs_bound == rhs_bound) {
+      cmp_res = CompareResult::kEQ;
+      return true;
+    }
 
+    auto overlap_kind = analysis::boundOverlap(lhs_bound, rhs_bound);
+    if (overlap_kind == analysis::OverlapKind::PartialOverlap) {
+      return false;
+    }
+
+    if (overlap_kind == analysis::OverlapKind::NoOverlap) {
+      // NoOverlap
+      auto sub_expr = alloc<Sub>(lhs_bound.end, rhs_bound.start);
+      auto ret = IRSimplifier::simplify(sub_expr);
+      if (!ret->isConstant()) {
+        return false;
+      }
+
+      int diff = immediateAs<int>(ret);
+      TORCH_INTERNAL_ASSERT(diff != 0);
+      // CompareResult::kGT:
+      //   lhs = [5, 10] and rhs = [0, 4]
+      // CompareResult::kLT:
+      //   lhs = [5, 10] and rhs = [11, 15]
+      cmp_res = diff > 0 ? CompareResult::kGT : CompareResult::kLT;
+      return true;
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        (overlap_kind == analysis::OverlapKind::Contains) ||
+        (overlap_kind == analysis::OverlapKind::ContainedOrEqual));
+    TORCH_INTERNAL_ASSERT(
+        exprEquals(lhs_bound.start, lhs_bound.end) ||
+        exprEquals(rhs_bound.start, rhs_bound.end));
+    if (exprEquals(lhs_bound.end, rhs_bound.start)) {
+      // lhs = [5, 5] and rhs = [5, 10]
+      // lhs = [5, 10] and rhs = [10, 10]
+      cmp_res = CompareResult::kLE;
+    } else if (exprEquals(lhs_bound.start, rhs_bound.end)) {
+      // lhs = [10, 10] and rhs = [5, 10]
+      // lhs = [5, 10] and rhs = [5, 5]
+      cmp_res = CompareResult::kGE;
+    } else {
+      // lhs = [8, 8] and rhs = [5, 10]
+      // lhs = [5, 10] and rhs = [8, 8]
+      return false;
+    }
+
+    return (cmp_res == CompareResult::kLE) || (cmp_res == CompareResult::kGE);
+  };
+
+  analysis::Bound lhs_bound;
+  analysis::Bound rhs_bound;
   auto lhs_has_bound = query_bound_info(simp_lhs, var_bound_info_, lhs_bound);
   auto rhs_has_bound = query_bound_info(simp_rhs, var_bound_info_, rhs_bound);
-  if (!lhs_has_bound || !rhs_has_bound)
+  if (!lhs_has_bound || !rhs_has_bound) {
+    GRAPH_DEBUG(
+        "(SimplifierUnderContext) Final: ",
+        std::to_string(simplified_cmp_select_expr));
     return simplified_cmp_select_expr;
+  }
 
-  CompareSelectOperation cmp_res = CompareSelectOperation::kEQ;
-  auto has_overlap = analysis::boundOverlap(lhs_bound, rhs_bound);
-  if (has_overlap == analysis::OverlapKind::PartialOverlap) {
-    // There is overlap between lhs and rhs
-    // lhs = (5, 10), rhs = (8, 11)
+  CompareResult cmp_res = CompareResult::kEQ;
+  auto bound_solved = deduce_bound_relationship(lhs_bound, rhs_bound, cmp_res);
+  if (!bound_solved) {
+    GRAPH_DEBUG(
+        "(SimplifierUnderContext) Final: ",
+        std::to_string(simplified_cmp_select_expr));
     return simplified_cmp_select_expr;
-  } else if (
-      has_overlap == analysis::OverlapKind::Contains ||
-      has_overlap == analysis::OverlapKind::ContainedOrEqual) {
-    // lhs = [5, 5] or rhs = [5, 5]
-    if (lhs_bound == rhs_bound) {
-      cmp_res = CompareSelectOperation::kEQ;
-    } else if (simp_lhs->isConstant()) {
-      if (exprEquals(simp_lhs, rhs_bound.start)) {
-        // lhs = [5, 5] and rhs = [5, 10]
-        cmp_res = CompareSelectOperation::kLE;
-      } else if (exprEquals(simp_lhs, rhs_bound.end)) {
-        // lhs = [10, 10] and rhs = [5, 10]
-        cmp_res = CompareSelectOperation::kGE;
-      } else {
-        // lhs = [8, 8] and rhs = [5, 10]
-        return simplified_cmp_select_expr;
-      }
-    } else if (simp_rhs->isConstant()) {
-      if (exprEquals(lhs_bound.end, simp_rhs)) {
-        // lhs = [5, 10] and rhs = [10, 10]
-        cmp_res = CompareSelectOperation::kLE;
-      } else if (exprEquals(lhs_bound.start, simp_rhs)) {
-        // lhs = [5, 10] and rhs = [5, 5]
-        cmp_res = CompareSelectOperation::kGE;
-      } else {
-        // lhs = [5, 10] and rhs = [8, 8]
-        return simplified_cmp_select_expr;
-      }
-    } else {
-      return simplified_cmp_select_expr;
-    }
-  } else {
-    // NoOverlap
-    auto sub_expr = alloc<Sub>(lhs_bound.end, rhs_bound.start);
-    auto ret = IRSimplifier::simplify(sub_expr);
-    if (!ret->isConstant()) {
-      return simplified_cmp_select_expr;
-    }
-    int diff = immediateAs<int>(ret);
-    TORCH_INTERNAL_ASSERT(diff != 0);
-    if (diff > 0) {
-      // lhs = [5, 10] and rhs = [0, 4]
-      cmp_res = CompareSelectOperation::kGT;
-    } else {
-      // lhs = [5, 10] and rhs = [11, 15]
-      cmp_res = CompareSelectOperation::kLT;
-    }
   }
 
   ExprPtr ret_expr = nullptr;
   // a > b
-  auto gt_true = (cmp_res == CompareSelectOperation::kGT);
+  auto gt_true = (cmp_res == CompareResult::kGT);
   // a >= b
   auto ge_true =
-      (cmp_res == CompareSelectOperation::kGE ||
-       cmp_res == CompareSelectOperation::kGT ||
-       cmp_res == CompareSelectOperation::kEQ);
+      (cmp_res == CompareResult::kGE || cmp_res == CompareResult::kGT ||
+       cmp_res == CompareResult::kEQ);
   // a < b
-  auto lt_true = (cmp_res == CompareSelectOperation::kLT);
+  auto lt_true = (cmp_res == CompareResult::kLT);
   // a <= b
   auto le_true =
-      (cmp_res == CompareSelectOperation::kLE ||
-       cmp_res == CompareSelectOperation::kLT ||
-       cmp_res == CompareSelectOperation::kEQ);
+      (cmp_res == CompareResult::kLE || cmp_res == CompareResult::kLT ||
+       cmp_res == CompareResult::kEQ);
   // a == b
-  auto eq_true = (cmp_res == CompareSelectOperation::kEQ);
+  auto eq_true = (cmp_res == CompareResult::kEQ);
   // a != b
   auto ne_true =
-      (cmp_res == CompareSelectOperation::kLT ||
-       cmp_res == CompareSelectOperation::kGT);
+      (cmp_res == CompareResult::kLT || cmp_res == CompareResult::kGT);
 
 #define DEDUCE_RET_EXPR(true_cond, false_cond) \
   ret_expr = true_cond ? simp_ret1             \
