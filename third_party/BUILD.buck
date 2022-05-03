@@ -1,4 +1,5 @@
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
+load("//tools/build_defs:remote_glog_library.bzl", "remote_glog_library")
 load(
     "//third_party:buck_defs.bzl",
     "HOT_SRCS",
@@ -312,4 +313,60 @@ cxx_library(
         ":FP16",
         ":FXdiv",
     ],
+)
+
+remote_glog_library(
+    name = "glog",
+    srcs = [
+        'src/demangle.cc',
+        'src/vlog_is_on.cc',
+        'src/symbolize.cc',
+        'src/raw_logging.cc',
+        'src/logging.cc',
+        'src/signalhandler.cc',
+        'src/utilities.cc'
+    ],
+    compiler_flags = [
+        '-Wno-sign-compare',
+        '-Wno-unused-function',
+        '-Wno-unused-local-typedefs',
+        '-Wno-unused-variable',
+        '-Wno-deprecated-declarations',
+    ],
+    preferred_linkage = "static",
+    exported_linker_flags = [],
+    exported_preprocessor_flags = [
+        '-DGLOG_NO_ABBREVIATED_SEVERITIES',
+        '-DGLOG_STL_LOGGING_FOR_UNORDERED',
+        '-DGOOGLE_GLOG_DLL_DECL=',
+        '-DGOOGLE_NAMESPACE=google',
+        # this is required for buck build
+        '-DGLOG_BAZEL_BUILD',
+        '-DHAVE_PTHREAD',
+        # Allows src/logging.cc to determine the host name.
+        '-DHAVE_SYS_UTSNAME_H',
+        # For src/utilities.cc.
+        '-DHAVE_SYS_SYSCALL_H',
+        '-DHAVE_SYS_TIME_H',
+        '-DHAVE_STDINT_H',
+        '-DHAVE_STRING_H',
+        # Enable dumping stacktrace upon sigaction.
+        '-DHAVE_SIGACTION',
+        # For logging.cc.
+        '-DHAVE_PREAD',
+        '-DHAVE___ATTRIBUTE__',
+    ],
+    soname = "libglog.$(ext)",
+    visibility = ["PUBLIC"],
+    http_archive = "glog_http_archive",
+)
+
+http_archive(
+    name = "glog_http_archive",
+    strip_prefix = "glog-0.4.0",
+    sha256 = "f28359aeba12f30d73d9e4711ef356dc842886968112162bc73002645139c39c",
+    urls = [
+        "https://github.com/google/glog/archive/v0.4.0.tar.gz",
+    ],
+    out = "",
 )
