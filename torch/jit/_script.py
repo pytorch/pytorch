@@ -13,7 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict, List, Tuple, Union, Callable
+from typing import Any, Dict, List, Set, Tuple, Union, Callable
 
 
 import torch
@@ -249,7 +249,7 @@ class ScriptMeta(type):
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
                 cls._methods[k] = v
-            base_constants = getattr(base, "_constants_set", set())
+            base_constants: Set = getattr(base, "_constants_set", set())
             cls._constants_set = cls._constants_set.union(base_constants)
 
         # find all the script methods of the current class
@@ -417,7 +417,7 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__getattr__(attr)  # type: ignore[misc]
 
             if attr in self._props:
-                return self._props[attr].fget()
+                return self._props[attr].fget()  # type: ignore[call-arg, misc]
 
             return getattr(self._c, attr)
 
@@ -426,7 +426,7 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__setattr__(attr, value)
 
             if attr in self._props:
-                return self._props[attr].fset(value)
+                return self._props[attr].fset(value)  # type: ignore[call-arg, misc]
 
             setattr(self._c, attr, value)
 
@@ -1306,7 +1306,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
-            obj = obj.__original_fn
+            obj = obj.__original_fn  # type: ignore[union-attr]
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
 
         # some functions are explicitly marked as not supported in script mode
