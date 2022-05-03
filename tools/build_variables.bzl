@@ -9,39 +9,6 @@
 # bzl files are not exported via ShipIt by default, so you may also need to
 # update PyTorch's ShipIt config)
 
-# In both open-source and fbcode builds, these are generated into
-# torch/csrc/{autograd,jit}/generated.i
-GENERATED_CPP = [
-    "autograd/generated/Functions.cpp",
-    "autograd/generated/VariableType_0.cpp",
-    "autograd/generated/VariableType_1.cpp",
-    "autograd/generated/VariableType_2.cpp",
-    "autograd/generated/VariableType_3.cpp",
-    "autograd/generated/VariableType_4.cpp",
-    "autograd/generated/TraceType_0.cpp",
-    "autograd/generated/TraceType_1.cpp",
-    "autograd/generated/TraceType_2.cpp",
-    "autograd/generated/TraceType_3.cpp",
-    "autograd/generated/TraceType_4.cpp",
-    "autograd/generated/ADInplaceOrViewType_0.cpp",
-    "autograd/generated/ADInplaceOrViewType_1.cpp",
-    "autograd/generated/python_functions_0.cpp",
-    "autograd/generated/python_functions_1.cpp",
-    "autograd/generated/python_functions_2.cpp",
-    "autograd/generated/python_functions_3.cpp",
-    "autograd/generated/python_functions_4.cpp",
-    "autograd/generated/python_nn_functions.cpp",
-    "autograd/generated/python_fft_functions.cpp",
-    "autograd/generated/python_linalg_functions.cpp",
-    "autograd/generated/python_return_types.cpp",
-    "autograd/generated/python_sparse_functions.cpp",
-    "autograd/generated/python_special_functions.cpp",
-    "autograd/generated/python_torch_functions_0.cpp",
-    "autograd/generated/python_torch_functions_1.cpp",
-    "autograd/generated/python_torch_functions_2.cpp",
-    "autograd/generated/python_variable_methods.cpp",
-]
-
 # This is duplicated in caffe2/CMakeLists.txt for now and not yet used in buck
 GENERATED_LAZY_TS_CPP = [
     "lazy/generated/LazyNativeFunctions.cpp",
