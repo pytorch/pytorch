@@ -577,46 +577,58 @@ def _worker_init_fn(worker_id):
     random.seed(123)
 
 
+def _mul_10(x):
+    return x * 10
+
+
+def _mod_3_test(x):
+    return x % 3 == 1
+
+
 class TestFunctionalIterDataPipe(TestCase):
 
-    def _serialization_test_helper(self, datapipe):
-        serialized_dp = pickle.dumps(datapipe)
-        deserialized_dp = pickle.loads(serialized_dp)
+    def _serialization_test_helper(self, datapipe, use_dill):
+        if use_dill:
+            serialized_dp = dill.dumps(datapipe)
+            deserialized_dp = dill.loads(serialized_dp)
+        else:
+            serialized_dp = pickle.dumps(datapipe)
+            deserialized_dp = pickle.loads(serialized_dp)
         try:
             self.assertEqual(list(datapipe), list(deserialized_dp))
         except AssertionError as e:
             print(f"{datapipe} is failing.")
             raise e
 
-    def _serialization_test_for_single_dp(self, dp):
+    def _serialization_test_for_single_dp(self, dp, use_dill=False):
         # 1. Testing for serialization before any iteration starts
-        self._serialization_test_helper(dp)
+        self._serialization_test_helper(dp, use_dill)
         # 2. Testing for serialization after DataPipe is partially read
         it = iter(dp)
         _ = next(it)
-        self._serialization_test_helper(dp)
+        self._serialization_test_helper(dp, use_dill)
         # 3. Testing for serialization after DataPipe is fully read
         _ = list(it)
-        self._serialization_test_helper(dp)
+        self._serialization_test_helper(dp, use_dill)
 
-    def _serialization_test_for_dp_with_children(self, dp1, dp2):
+    def _serialization_test_for_dp_with_children(self, dp1, dp2, use_dill=False):
         # 1. Testing for serialization before any iteration starts
-        self._serialization_test_helper(dp1)
-        self._serialization_test_helper(dp2)
+        self._serialization_test_helper(dp1, use_dill)
+        self._serialization_test_helper(dp2, use_dill)
         # 2. Testing for serialization after DataPipe is partially read
         it1, it2 = iter(dp1), iter(dp2)
         _, _ = next(it1), next(it2)
-        self._serialization_test_helper(dp1)
-        self._serialization_test_helper(dp2)
+        self._serialization_test_helper(dp1, use_dill)
+        self._serialization_test_helper(dp2, use_dill)
         # 2.5. Testing for serialization after one child DataPipe is fully read
         #      (Only for DataPipes with children DataPipes)
         _ = list(it1)  # fully read one child
-        self._serialization_test_helper(dp1)
-        self._serialization_test_helper(dp2)
+        self._serialization_test_helper(dp1, use_dill)
+        self._serialization_test_helper(dp2, use_dill)
         # 3. Testing for serialization after DataPipe is fully read
         _ = list(it2)  # fully read the other child
-        self._serialization_test_helper(dp1)
-        self._serialization_test_helper(dp2)
+        self._serialization_test_helper(dp1, use_dill)
+        self._serialization_test_helper(dp2, use_dill)
 
     def test_serializable(self):
         picklable_datapipes: List = [
@@ -674,10 +686,10 @@ class TestFunctionalIterDataPipe(TestCase):
             for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
                 if dpipe in dp_compare_children:
                     dp1, dp2 = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                    self._serialization_test_for_dp_with_children(dp1, dp2)
+                    self._serialization_test_for_dp_with_children(dp1, dp2, use_dill=True)
                 else:
                     datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                    self._serialization_test_for_single_dp(datapipe)
+                    self._serialization_test_for_single_dp(datapipe, use_dill=True)
         else:
             for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
                 with warnings.catch_warnings(record=True) as wa:
@@ -1483,25 +1495,29 @@ class TestFunctionalIterDataPipe(TestCase):
 
 class TestFunctionalMapDataPipe(TestCase):
 
-    def _serialization_test_helper(self, datapipe):
-        serialized_dp = pickle.dumps(datapipe)
-        deserialized_dp = pickle.loads(serialized_dp)
+    def _serialization_test_helper(self, datapipe, use_dill):
+        if use_dill:
+            serialized_dp = dill.dumps(datapipe)
+            deserialized_dp = dill.loads(serialized_dp)
+        else:
+            serialized_dp = pickle.dumps(datapipe)
+            deserialized_dp = pickle.loads(serialized_dp)
         try:
             self.assertEqual(list(datapipe), list(deserialized_dp))
         except AssertionError as e:
             print(f"{datapipe} is failing.")
             raise e
 
-    def _serialization_test_for_single_dp(self, dp):
+    def _serialization_test_for_single_dp(self, dp, use_dill=False):
         # 1. Testing for serialization before any iteration starts
-        self._serialization_test_helper(dp)
+        self._serialization_test_helper(dp, use_dill)
         # 2. Testing for serialization after DataPipe is partially read
         it = iter(dp)
         _ = next(it)
-        self._serialization_test_helper(dp)
+        self._serialization_test_helper(dp, use_dill)
         # 3. Testing for serialization after DataPipe is fully read
         _ = list(it)
-        self._serialization_test_helper(dp)
+        self._serialization_test_helper(dp, use_dill)
 
     def test_serializable(self):
         picklable_datapipes: List = [
@@ -1530,7 +1546,7 @@ class TestFunctionalMapDataPipe(TestCase):
         ]
         if HAS_DILL:
             for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
-                _ = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
+                _ = dill.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
         else:
             for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
                 with warnings.catch_warnings(record=True) as wa:
@@ -2067,10 +2083,13 @@ class TestGraph(TestCase):
 class TestCircularSerialization(TestCase):
 
     class CustomIterDataPipe(IterDataPipe):
-        def add_one(self, x):
+
+        @staticmethod
+        def add_one(x):
             return x + 1
 
-        def classify(self, x):
+        @classmethod
+        def classify(cls, x):
             return 0
 
         def __init__(self, fn, source_dp=None):
@@ -2082,23 +2101,44 @@ class TestCircularSerialization(TestCase):
             yield from self._dp
 
     def test_circular_serialization_with_pickle(self):
+        from torch.utils.data.datapipes.iter.combining import _ChildDataPipe, _DemultiplexerIterDataPipe
+
+        def _get_name(datapipe):
+            return datapipe.__name__
+
         # Test for circular reference issue with pickle
-        self.assertTrue(list(TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn)) ==
+        source_dp = TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn)
+        self.assertTrue(list(source_dp) ==
                         list(pickle.loads(pickle.dumps(TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn)))))
-        _ = traverse(TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn), only_datapipe=True)
-        _ = traverse(TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn), only_datapipe=False)
+        res1 = traverse(source_dp, only_datapipe=True)
+        res2 = traverse(source_dp, only_datapipe=False)
+        expected_str = str({source_dp:
+                            {_get_name(dp.iter.IterableWrapper): {},
+                                _get_name(_ChildDataPipe):
+                                    {_get_name(_DemultiplexerIterDataPipe):
+                                        {_get_name(dp.iter.Mapper):
+                                            {_get_name(dp.iter.IterableWrapper): {}}}}}}
+                           ).replace("'", "")
+        # For simplicity, compare the resulting string instead of trying to recreate the object
+        self.assertEqual(expected_str, str(res1))
+        self.assertEqual(expected_str, str(res2))
 
         dp1 = TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn)
         dp2 = TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn, source_dp=dp1)
         self.assertTrue(list(dp2) == list(pickle.loads(pickle.dumps(dp2))))
-        _ = traverse(dp2, only_datapipe=True)
-        _ = traverse(dp2, only_datapipe=False)
+        res3 = traverse(dp2, only_datapipe=True)
+        res4 = traverse(dp2, only_datapipe=False)
+        self.assertTrue(str(dp2) in str(res3))  # Quick check to ensure the result isn't blank
+        self.assertTrue(str(dp2) in str(res4))
 
     class LambdaIterDataPipe(IterDataPipe):
-        def add_one(self, x):
+
+        @staticmethod
+        def add_one(x):
             return x + 1
 
-        def classify(self, x):
+        @classmethod
+        def classify(cls, x):
             return 0
 
         def __init__(self, fn, source_dp=None):
@@ -2113,17 +2153,36 @@ class TestCircularSerialization(TestCase):
 
     @skipIfNoDill
     def test_circular_serialization_with_dill(self):
+        from torch.utils.data.datapipes.iter.combining import _ChildDataPipe, _DemultiplexerIterDataPipe
+
+        def _get_name(datapipe):
+            return datapipe.__name__
+
         # Test for circular reference issue with dill
         self.assertTrue(list(TestCircularSerialization.LambdaIterDataPipe(lambda x: x + 1)) ==
                         list(dill.loads(dill.dumps(TestCircularSerialization.LambdaIterDataPipe(lambda x: x + 1)))))
-        _ = traverse(TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn), only_datapipe=True)
-        _ = traverse(TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn), only_datapipe=False)
+        source_dp = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn)
+        res1 = traverse(source_dp, only_datapipe=True)
+        res2 = traverse(source_dp, only_datapipe=False)
+        expected_str = str({source_dp:
+                           {_get_name(dp.iter.IterableWrapper): {},
+                            _get_name(_ChildDataPipe):
+                                {_get_name(_DemultiplexerIterDataPipe):
+                                    {_get_name(dp.iter.Mapper):
+                                        {_get_name(dp.iter.Mapper):
+                                            {_get_name(dp.iter.IterableWrapper): {}}}}}}}
+                           ).replace("'", "")
+        # For simplicity, compare the resulting string instead of trying to recreate the object
+        self.assertEqual(expected_str, str(res1))
+        self.assertEqual(expected_str, str(res2))
 
         dp1 = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn)
         dp2 = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn, source_dp=dp1)
         self.assertTrue(list(dp2) == list(dill.loads(dill.dumps(dp2))))
-        _ = traverse(dp2, only_datapipe=True)
-        _ = traverse(dp2, only_datapipe=False)
+        res3 = traverse(dp2, only_datapipe=True)
+        res4 = traverse(dp2, only_datapipe=False)
+        self.assertTrue(str(dp2) in str(res3))  # Quick check to ensure the result isn't blank
+        self.assertTrue(str(dp2) in str(res4))
 
 
 class TestSharding(TestCase):
@@ -2131,12 +2190,20 @@ class TestSharding(TestCase):
     def _get_pipeline(self):
         numbers_dp = NumbersDataset(size=10)
         dp0, dp1 = numbers_dp.fork(num_instances=2)
+        dp0_upd = dp0.map(_mul_10)
+        dp1_upd = dp1.filter(_mod_3_test)
+        combined_dp = dp0_upd.mux(dp1_upd)
+        return combined_dp
+
+    def _get_dill_pipeline(self):
+        numbers_dp = NumbersDataset(size=10)
+        dp0, dp1 = numbers_dp.fork(num_instances=2)
         dp0_upd = dp0.map(lambda x: x * 10)
         dp1_upd = dp1.filter(lambda x: x % 3 == 1)
         combined_dp = dp0_upd.mux(dp1_upd)
         return combined_dp
 
-    @skipIfNoDill
+
     def test_simple_sharding(self):
         sharded_dp = self._get_pipeline().sharding_filter()
         torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 1)
@@ -2173,7 +2240,7 @@ class TestSharding(TestCase):
         self.assertEqual(1, len(sharded_dp0))
         self.assertEqual(0, len(sharded_dp1))
 
-    @skipIfNoDill
+
     def test_old_dataloader(self):
         dp0 = self._get_pipeline()
         expected = list(dp0)
