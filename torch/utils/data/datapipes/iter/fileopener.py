@@ -1,13 +1,21 @@
 from io import IOBase
 from typing import Iterable, Tuple, Optional
 
+from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames, deprecation_warning
+from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames, _deprecation_warning
+
+__all__ = [
+    "FileOpenerIterDataPipe",
+    "FileLoaderIterDataPipe",
+]
 
 
+@functional_datapipe("open_files")
 class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     r"""
-    Given pathnames, opens files and yield pathname and file stream in a tuple.
+    Given pathnames, opens files and yield pathname and file stream
+    in a tuple (functional name: ``open_files``).
 
     Args:
         datapipe: Iterable datapipe that provides pathnames
@@ -72,10 +80,10 @@ class FileLoaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
             datapipe: Iterable[str],
             mode: str = 'b',
             length: int = -1):
-        deprecation_warning(
+        _deprecation_warning(
             cls.__name__,
             deprecation_version="1.12",
-            removal_version="1.14",
+            removal_version="1.13",
             new_class_name="FileOpener",
         )
         return FileOpenerIterDataPipe(datapipe=datapipe, mode=mode, length=length)

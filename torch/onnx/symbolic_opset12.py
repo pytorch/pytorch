@@ -173,7 +173,7 @@ def unfold(g, input, dimension, size, step):
     if not sym_help._is_value(const_size) and not sym_help._is_value(const_step):
         from torch.onnx.symbolic_opset9 import unfold as _unfold
         return _unfold(g, input, dimension, const_size, const_step)
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help.is_caffe2_aten_fallback():
         return g.at("unfold", input, dimension_i=dimension, size_i=size, step_i=step)
 
     sizedim = sym_help._get_tensor_dim_size(input, dimension)

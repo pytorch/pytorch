@@ -45,6 +45,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"c10::string_view", ParameterType::STRING},
   {"SymInt", ParameterType::SYM_INT},
   {"Dimname", ParameterType::DIMNAME},
+  {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
   {"DimnameList", ParameterType::DIMNAME_LIST},
   {"ScalarList", ParameterType::SCALAR_LIST},
 };
@@ -540,7 +541,7 @@ bool is_float_or_complex_list(PyObject* obj) {
   return true;
 }
 
-static bool is_int_list(PyObject* obj, int broadcast_size) {
+static bool is_int_list_(PyObject* obj, int broadcast_size) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
     if (PySequence_Size(obj) == 0) {
       return true;
@@ -561,13 +562,22 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
   return broadcast_size > 0 && THPUtils_checkLong(obj);
 }
 
-static bool is_int_or_symbolic_or_concrete_int(PyObject* obj) {
+static bool is_int_list(PyObject* obj, int broadcast_size) {
+  return is_int_list_(obj, broadcast_size);
+}
+
+static bool is_int_or_symint(PyObject* obj) {
   if (THPUtils_checkLong(obj)) {
       return true;
   }
 
   // TODO: test if it's the Python binding for SymbolicIntNode
   return false;
+}
+
+static bool is_int_or_symint_list(PyObject* obj, int broadcast_size) {
+  // TODO: add a check for SymbolicIntNode
+  return is_int_list_(obj, broadcast_size);
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.
@@ -637,7 +647,10 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return is_scalar_list(obj);
     }
     case ParameterType::SYM_INT: {
-      return is_int_or_symbolic_or_concrete_int(obj);
+      return is_int_or_symint(obj);
+    }
+    case ParameterType::SYM_INT_LIST: {
+      return is_int_or_symint_list(obj, size);
     }
   }
 }
@@ -666,6 +679,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";
     case ParameterType::SCALAR_LIST: return "tuple of Scalars";
+    case ParameterType::SYM_INT_LIST: return "tuple of SymInts";
     default: throw std::runtime_error("unknown parameter type");
   }
 }

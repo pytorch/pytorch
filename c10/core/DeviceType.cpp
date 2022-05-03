@@ -31,8 +31,8 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "xla" : "XLA";
     case DeviceType::Lazy:
       return lower_case ? "lazy" : "LAZY";
-    case DeviceType::MLC:
-      return lower_case ? "mlc" : "MLC";
+    case DeviceType::MPS:
+      return lower_case ? "mps" : "MPS";
     case DeviceType::Vulkan:
       return lower_case ? "vulkan" : "VULKAN";
     case DeviceType::Metal:
@@ -80,7 +80,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::ORT:
     case DeviceType::XLA:
     case DeviceType::Lazy:
-    case DeviceType::MLC:
+    case DeviceType::MPS:
     case DeviceType::Vulkan:
     case DeviceType::Metal:
     case DeviceType::XPU:

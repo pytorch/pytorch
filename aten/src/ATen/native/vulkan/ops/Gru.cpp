@@ -196,9 +196,9 @@ std::tuple<Tensor, Tensor> GruOpContext::run(
     const auto&  cxt_in = packed_.linear_op_contexts[i * linear_op_contexts_per_layer + 4];
     const auto&  cxt_hn = packed_.linear_op_contexts[i * linear_op_contexts_per_layer + 5];
 
-    const auto&  r = at::sigmoid(cxt_ir.run(x, 1.0f, 1.0f) + cxt_hr.run(h, 1.0f, 1.0f));
-    const auto&  z = at::sigmoid(cxt_iz.run(x, 1.0f, 1.0f) + cxt_hz.run(h, 1.0f, 1.0f));
-    const auto&  n = at::tanh(cxt_in.run(x, 1.0f, 1.0f) + r * (cxt_hn.run(h, 1.0f, 1.0f)));
+    const auto&  r = at::sigmoid(cxt_ir.run(x, 1.0f, 1.0f, "aten::addmm") + cxt_hr.run(h, 1.0f, 1.0f, "aten::addmm"));
+    const auto&  z = at::sigmoid(cxt_iz.run(x, 1.0f, 1.0f, "aten::addmm") + cxt_hz.run(h, 1.0f, 1.0f, "aten::addmm"));
+    const auto&  n = at::tanh(cxt_in.run(x, 1.0f, 1.0f, "aten::addmm") + r * (cxt_hn.run(h, 1.0f, 1.0f, "aten::addmm")));
     h = (z * (-1) + 1) * n + z * h;
     x = h;  // next input
     h_n_list.emplace_back(h.reshape({1, 1, h.size(0), h.size(1)}));  // 2D to 4D for cat op

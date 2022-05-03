@@ -165,7 +165,8 @@ __global__ void segment_reduce_backward_kernel(
     const index_t* lengths_data,
     const index_t* lengths_cumsum_data,
     const int64_t segment_count,
-    const int64_t stride_count) {
+    const int64_t stride_count,
+    scalar_t initial_prod_value) {
   int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   int64_t row_id = idx / stride_count;
   int64_t lane_id = idx % stride_count;
@@ -221,8 +222,18 @@ __global__ void segment_reduce_backward_kernel(
     const auto& grad_val = grad_data[output_index] * output_data[output_index];
     for (int64_t j = offset_start; j < offset_end; ++j) {
       int64_t starting_index = (j * stride_count) + lane_id;
-      if (values_data[starting_index] == 0) {
-        grad_input_data[starting_index] = values_data[starting_index];
+      if (at::_isnan(values_data[starting_index]) ||
+          values_data[starting_index] == 0) {
+        // explicitly compute exclusive prod
+        scalar_t exclusive_prod = initial_prod_value;
+        int64_t idx;
+        for (int64_t k = offset_start; k < offset_end; ++k) {
+          if (k != j) {
+            idx = (k * stride_count) + lane_id;
+            exclusive_prod *= values_data[idx];
+          }
+        }
+        grad_input_data[starting_index] = grad_data[output_index] * exclusive_prod;
       } else {
         grad_input_data[starting_index] = grad_val / values_data[starting_index];
       }
@@ -238,7 +249,8 @@ Tensor _segment_reduce_cuda_backward_kernel(
     const Tensor& data_contig,
     SegmentReductionType reduction,
     const Tensor& lengths_contig,
-    int64_t axis) {
+    int64_t axis,
+    const c10::optional<Scalar>& initial) {
   int64_t segment_count = lengths_contig.numel();
   auto output_shape = data_contig.sizes().vec();
   output_shape[axis] = segment_count;
@@ -273,6 +285,13 @@ Tensor _segment_reduce_cuda_backward_kernel(
               auto* grad_input_data = grad_input.data_ptr<scalar_t>();
               const auto* values_data = data_contig.data_ptr<scalar_t>();
 
+              scalar_t initial_prod_value;
+              if (initial.has_value()) {
+                initial_prod_value = initial.value().to<scalar_t>();
+              } else {
+                initial_prod_value = 1;
+              }
+
               segment_reduce_backward_kernel<scalar_t>
                   <<<num_blocks,
                      threads_per_block,
@@ -286,7 +305,8 @@ Tensor _segment_reduce_cuda_backward_kernel(
                       lengths_data,
                       offsets_data,
                       segment_count,
-                      stride_count);
+                      stride_count,
+                      initial_prod_value);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
             }));
       }));

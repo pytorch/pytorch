@@ -50,7 +50,7 @@ static void forked_autograd_child() { in_bad_autograd_fork = true; }
 
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
-#if !defined(WIN32) && !defined(__XROS__)
+#if !defined(WIN32)
   static std::once_flag flag;
   std::call_once(
       flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
@@ -715,7 +715,8 @@ void validate_outputs(
        // In future, there will be an oppportunity to support more combinations of layouts if they are composable
        // (example., operations like addition etc., are well defined between tensors of different layouts.),
        // as well as all parts of autograd like AccumulateGrad correctly handle this.
-       if (!grad.is_sparse()) {
+       // We allow grad to be Strided when metadata is SparseCsr
+       if (!grad.is_sparse() && !(grad.layout() == at::kStrided && metadata.layout() == at::kSparseCsr)) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected layout ";
         ss << metadata.layout() << " but got " << grad.layout();
