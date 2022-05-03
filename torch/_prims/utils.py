@@ -318,7 +318,7 @@ def check_same_shape(*args):
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 _float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-_complex_dtypes = (torch.complex64, torch.complex128)
+_complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
 
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
@@ -335,6 +335,17 @@ def is_float_dtype(dtype: torch.dtype) -> bool:
 
 def is_complex_dtype(dtype: torch.dtype) -> bool:
     return dtype in _complex_dtypes
+
+
+_complex_to_real_dtype_map = {
+    torch.complex128: torch.float64,
+    torch.complex64: torch.float32,
+    torch.complex32: torch.float16,
+}
+
+
+def corresponding_real_dtype(dtype: torch.dtype) -> torch.dtype:
+    return _complex_to_real_dtype_map[dtype]
 
 
 def dtype_to_type(dtype: torch.dtype) -> type:
@@ -400,8 +411,8 @@ def get_higher_type(a: type, b: type) -> type:
 #   are not ordered relative to each other, the next
 #   higher datatype
 def get_higher_dtype(
-    a: Union[torch.dtype, torch.Tensor, Number],
-    b: Union[torch.dtype, torch.Tensor, Number],
+    a: Union[torch.dtype, TensorLikeType, Number],
+    b: Union[torch.dtype, TensorLikeType, Number],
 ) -> torch.dtype:
     """
     Computes the "lowest" datatype that is weakly
@@ -409,13 +420,13 @@ def get_higher_dtype(
     """
 
     # Type checking
-    assert isinstance(a, (torch.dtype, torch.Tensor, Number))
-    assert isinstance(b, (torch.dtype, torch.Tensor, Number))
+    assert isinstance(a, (torch.dtype, TensorLike, Number))
+    assert isinstance(b, (torch.dtype, TensorLike, Number))
 
-    def _extract_dtype(x: Union[torch.dtype, torch.Tensor, Number]) -> torch.dtype:
+    def _extract_dtype(x: Union[torch.dtype, TensorLikeType, Number]) -> torch.dtype:
         if isinstance(x, torch.dtype):
             return x
-        if isinstance(x, torch.Tensor):
+        if isinstance(x, TensorLike):
             return x.dtype
         if isinstance(x, Number):
             return type_to_dtype(type(x))
