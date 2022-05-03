@@ -782,7 +782,6 @@ inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, cons
 
   // Need to pass allocated memory to the function, otherwise it fails
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto& host_allocator = *at::getCPUAllocator();
   auto dataPtr_U = !compute_uv ? allocator.allocate(sizeof(scalar_t) * batchsize * m * k) : c10::DataPtr{};
   auto dataPtr_V = !compute_uv ? allocator.allocate(sizeof(scalar_t) * batchsize * n * k) : c10::DataPtr{};
 
@@ -807,6 +806,7 @@ inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, cons
   //   then the performance can be improved by passing a null pointer to h_RnrmF, i.e. no computation of residual norm.
   // Comment: calculation of Frobenius norm is expensive and doesn't affect accuracy of the result
   //   We may consider to return or check this array in some way in the future.
+  // auto& host_allocator = *at::getCPUAllocator();
   // auto residual_frobenius_norm = host_allocator.allocate(sizeof(double) * batchsize);
 
   at::cuda::solver::gesvdaStridedBatched<scalar_t>(
