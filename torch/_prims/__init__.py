@@ -13,7 +13,7 @@ from torch.overrides import has_torch_function, handle_torch_function
 
 from typing import Sequence, Optional, Union, Callable, List, Tuple, Any
 from numbers import Number
-from functools import reduce
+from functools import reduce, partial
 from enum import Enum
 
 # Experimental module containing prototype "primitive" operations.
@@ -44,8 +44,6 @@ __all__ = [
     "exp",
     "expm1",
     "floor",
-    "igamma",
-    "igammac",
     "is_finite",
     "lgamma",
     "log",
@@ -73,6 +71,8 @@ __all__ = [
     "eq",
     "ge",
     "gt",
+    "igamma",
+    "igammac",
     "le",
     "lt",
     "max",
@@ -174,7 +174,14 @@ def _make_prim(
     return _prim
 
 
-def _elementwise_meta(*args):
+class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
+    DEFAULT = (0,)
+    ALWAYS_BOOL = (2,)
+    COMPLEX_TO_FLOAT = (3,)
+
+
+# TODO: implement and test type promotion and stride behavior
+def _elementwise_meta(*args, type_promotion):
     """
     Meta function for elementwise operations that produce outputs in the same dtype
     as their inputs.
@@ -219,23 +226,33 @@ def _elementwise_meta(*args):
     return TensorMeta(number)
 
 
-def _make_elementwise_unary_prim(name: str, **kwargs):
+def _make_elementwise_unary_prim(
+    name: str, *, type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND, **kwargs
+):
     """
     Creates an elementwise unary prim.
     """
 
     return _make_prim(
-        name=name, meta=_elementwise_meta, return_type=RETURN_TYPE.NEW, **kwargs
+        name=name,
+        meta=partial(_elementwise_meta, type_promotion=type_promotion),
+        return_type=RETURN_TYPE.NEW,
+        **kwargs
     )
 
 
-def _make_elementwise_binary_prim(name: str, **kwargs):
+def _make_elementwise_binary_prim(
+    name: str, *, type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND, **kwargs
+):
     """
     Creates an elementwise binary prim.
     """
 
     return _make_prim(
-        name=name, meta=_elementwise_meta, return_type=RETURN_TYPE.NEW, **kwargs
+        name=name,
+        meta=partial(_elementwise_meta, type_promotion=type_promotion),
+        return_type=RETURN_TYPE.NEW,
+        **kwargs
     )
 
 
@@ -251,54 +268,63 @@ abs = _make_elementwise_unary_prim(
     "abs",
     impl_aten=torch.abs,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
 )
 
 acos = _make_elementwise_unary_prim(
     "acos",
     impl_aten=torch.acos,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 acosh = _make_elementwise_unary_prim(
     "acosh",
     impl_aten=torch.acosh,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 asin = _make_elementwise_unary_prim(
     "asin",
     impl_aten=torch.asin,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 atan = _make_elementwise_unary_prim(
     "atan",
     impl_aten=torch.atan,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 cos = _make_elementwise_unary_prim(
     "cos",
     impl_aten=torch.cos,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 cosh = _make_elementwise_unary_prim(
     "cosh",
     impl_aten=torch.cosh,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 bessel_i0e = _make_elementwise_unary_prim(
     "bessel_i0e",
     impl_aten=torch.special.i0e,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 bessel_i1e = _make_elementwise_unary_prim(
     "bessel_i1e",
     impl_aten=torch.special.i1e,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 
@@ -310,144 +336,154 @@ cbrt = _make_elementwise_unary_prim(
     "cbrt",
     impl_aten=_cbrt_aten,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 ceil = _make_elementwise_unary_prim(
     "ceil",
     impl_aten=torch.ceil,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 digamma = _make_elementwise_unary_prim(
     "digamma",
     impl_aten=torch.digamma,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 erf = _make_elementwise_unary_prim(
     "erf",
     impl_aten=torch.erf,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 erf_inv = _make_elementwise_unary_prim(
     "erf_inv",
     impl_aten=torch.special.erfinv,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 erfc = _make_elementwise_unary_prim(
     "erfc",
     impl_aten=torch.special.erfc,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 exp = _make_elementwise_unary_prim(
     "exp",
     impl_aten=torch.exp,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 expm1 = _make_elementwise_unary_prim(
     "expm1",
     impl_aten=torch.special.expm1,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 floor = _make_elementwise_unary_prim(
     "floor",
     impl_aten=torch.floor,
     doc="",
-)
-
-igamma = _make_elementwise_unary_prim(
-    "igamma",
-    impl_aten=torch.special.gammainc,
-    doc="",
-)
-
-igammac = _make_elementwise_unary_prim(
-    "igammac",
-    impl_aten=torch.special.gammaincc,
-    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 is_finite = _make_elementwise_unary_prim(
     "is_finite",
     impl_aten=torch.isfinite,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 lgamma = _make_elementwise_unary_prim(
     "lgamma",
     impl_aten=torch.lgamma,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 log = _make_elementwise_unary_prim(
     "log",
     impl_aten=torch.log,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 log1p = _make_elementwise_unary_prim(
     "log1p",
     impl_aten=torch.log1p,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 reciprocal = _make_elementwise_unary_prim(
     "reciprocal",
     impl_aten=torch.reciprocal,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 neg = _make_elementwise_unary_prim(
     "neg",
     impl_aten=torch.neg,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 round = _make_elementwise_unary_prim(
     "round",
     impl_aten=torch.round,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 sign = _make_elementwise_unary_prim(
     "sign",
     impl_aten=torch.sign,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 sin = _make_elementwise_unary_prim(
     "sin",
     impl_aten=torch.sin,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 sinh = _make_elementwise_unary_prim(
     "sinh",
     impl_aten=torch.sinh,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 sqrt = _make_elementwise_unary_prim(
     "sqrt",
     impl_aten=torch.sqrt,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 square = _make_elementwise_unary_prim(
     "square",
     impl_aten=torch.square,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 tan = _make_elementwise_unary_prim(
     "tan",
     impl_aten=torch.tan,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 #
@@ -463,36 +499,42 @@ add = _make_elementwise_binary_prim(
     impl_aten=torch.add,
     impl_nvfuser=_add_nvfuser,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 atan2 = _make_elementwise_binary_prim(
     name="atan2",
     impl_aten=torch.atan2,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 bitwise_and = _make_elementwise_binary_prim(
     "bitwise_and",
     impl_aten=torch.bitwise_and,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 bitwise_not = _make_elementwise_binary_prim(
     "bitwise_not",
     impl_aten=torch.bitwise_not,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 bitwise_or = _make_elementwise_binary_prim(
     "bitwise_or",
     impl_aten=torch.bitwise_or,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 bitwise_xor = _make_elementwise_binary_prim(
     "bitwise_xor",
     impl_aten=torch.bitwise_xor,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: complex needs a special meta to account for its float -> complex behavior
@@ -518,12 +560,14 @@ div = _make_elementwise_binary_prim(
     impl_aten=_div_aten,
     impl_nvfuser=_div_nvfuser,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 eq = _make_elementwise_binary_prim(
     "eq",
     impl_aten=torch.eq,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 
@@ -536,6 +580,7 @@ ge = _make_elementwise_binary_prim(
     impl_aten=torch.ge,
     impl_nvfuser=_ge_nvfuser,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 
@@ -548,6 +593,21 @@ gt = _make_elementwise_binary_prim(
     impl_aten=torch.gt,
     impl_nvfuser=_gt_nvfuser,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+)
+
+igamma = _make_elementwise_binary_prim(
+    "igamma",
+    impl_aten=torch.special.gammainc,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+igammac = _make_elementwise_binary_prim(
+    "igammac",
+    impl_aten=torch.special.gammaincc,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 
@@ -560,6 +620,7 @@ le = _make_elementwise_binary_prim(
     impl_aten=torch.le,
     impl_nvfuser=_le_nvfuser,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 
@@ -572,18 +633,21 @@ lt = _make_elementwise_binary_prim(
     impl_aten=torch.lt,
     impl_nvfuser=_lt_nvfuser,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 max = _make_elementwise_binary_prim(
     "max",
     impl_aten=torch.maximum,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 min = _make_elementwise_binary_prim(
     "min",
     impl_aten=torch.minimum,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 
@@ -596,42 +660,49 @@ mul = _make_elementwise_binary_prim(
     impl_aten=torch.mul,
     impl_nvfuser=_mul_nvfuser,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 ne = _make_elementwise_binary_prim(
     "ne",
     impl_aten=torch.ne,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 
 nextafter = _make_elementwise_binary_prim(
     "nextafter",
     impl_aten=torch.nextafter,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 pow = _make_elementwise_binary_prim(
     "pow",
     impl_aten=torch.pow,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 rsqrt = _make_elementwise_binary_prim(
     "rsqrt",
     impl_aten=torch.rsqrt,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 shift_left = _make_elementwise_binary_prim(
     "shift_left",
     impl_aten=torch.bitwise_left_shift,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 shift_right_arithmetic = _make_elementwise_binary_prim(
     "shift_right_arithmetic",
     impl_aten=torch.bitwise_right_shift,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 shift_right_logical = _not_impl
@@ -640,6 +711,7 @@ sub = _make_elementwise_binary_prim(
     "sub",
     impl_aten=torch.sub,
     doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 #
@@ -995,7 +1067,7 @@ def _select_meta(
     utils.check_same_shape(pred, a, b)
     assert pred.dtype is torch.bool
 
-    return _elementwise_meta(a, b)
+    return _elementwise_meta(a, b, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT)
 
 
 def _select_aten(pred: Tensor, a: Tensor, b: Tensor) -> Tensor:
@@ -1124,7 +1196,6 @@ copy_to = _make_prim(
 def _resize_meta(
     a: TensorLikeType, shape: Union[torch.Size, List[int], Tuple[int, ...]]
 ):
-    assert a.numel() == 0
     return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
 
 
