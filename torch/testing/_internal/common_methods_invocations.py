@@ -16223,6 +16223,8 @@ op_db: List[OpInfo] = [
                          'TestUnaryUfuncs', 'test_reference_numerics_hard'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestUnaryUfuncs', 'test_reference_numerics_normal'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestUnaryUfuncs', 'test_reference_numerics_small'),
         ],
         skips=(
             # Jiterator ops doesn't support neg or conj view
