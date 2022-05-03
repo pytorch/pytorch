@@ -253,10 +253,6 @@ class _DataPipeMeta(GenericMeta):
     type: _DataPipeType
 
     def __new__(cls, name, bases, namespace, **kwargs):
-        if '__iter__' in namespace:
-            if not any(['MapDataPipe' in str(b) for b in bases]):
-                hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
-
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         cls.__origin__ = None
@@ -336,6 +332,14 @@ class _DataPipeMeta(GenericMeta):
     # TODO: Fix isinstance bug
     def _hash_(self):
         return hash((self.__name__, self.type))
+
+
+class _IterDataPipeMeta(_DataPipeMeta):
+
+    def __new__(cls, name, bases, namespace, **kwargs):
+        if '__iter__' in namespace:
+            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
+        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
 
 def _simplify_obj_name(obj) -> str:

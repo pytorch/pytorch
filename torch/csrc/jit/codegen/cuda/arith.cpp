@@ -294,16 +294,16 @@ TensorView* unaryOp(UnaryOpType type, TensorView* v1) {
 }
 
 Val* unaryOp(UnaryOpType type, Val* v1, const TypePromotionConfig& config) {
-  auto casted_v1 = promoteValues(config, {v1}).front();
-  return unaryOp(type, casted_v1);
+  auto cast_v1 = promoteValues(config, {v1}).front();
+  return unaryOp(type, cast_v1);
 }
 
 TensorView* unaryOp(
     UnaryOpType type,
     TensorView* v1,
     const TypePromotionConfig& config) {
-  auto casted_v1 = promoteValues(config, {v1}).front();
-  return unaryOp(type, casted_v1)->as<TensorView>();
+  auto cast_v1 = promoteValues(config, {v1}).front();
+  return unaryOp(type, cast_v1)->as<TensorView>();
 }
 
 // UNARY OPERATIONS
@@ -497,9 +497,8 @@ Val* binaryOp(
     const TypePromotionConfig& config) {
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(config, operands);
-  auto casted_values = promoteValues(operands, common_dtype);
-  return binaryOp(
-      type, casted_values.front(), casted_values.back(), common_dtype);
+  auto cast_values = promoteValues(operands, common_dtype);
+  return binaryOp(type, cast_values.front(), cast_values.back(), common_dtype);
 }
 
 TensorView* binaryOp(
@@ -509,11 +508,11 @@ TensorView* binaryOp(
     const TypePromotionConfig& config) {
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(config, operands);
-  auto casted_values = promoteValues(operands, common_dtype);
+  auto cast_values = promoteValues(operands, common_dtype);
   return binaryOp(
       type,
-      casted_values.front()->as<TensorView>(),
-      casted_values.back(),
+      cast_values.front()->as<TensorView>(),
+      cast_values.back(),
       common_dtype);
 }
 
@@ -524,11 +523,11 @@ TensorView* binaryOp(
     const TypePromotionConfig& config) {
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(config, operands);
-  auto casted_values = promoteValues(operands, common_dtype);
+  auto cast_values = promoteValues(operands, common_dtype);
   return binaryOp(
       type,
-      casted_values.front(),
-      casted_values.back()->as<TensorView>(),
+      cast_values.front(),
+      cast_values.back()->as<TensorView>(),
       common_dtype);
 }
 
@@ -539,11 +538,11 @@ TensorView* binaryOp(
     const TypePromotionConfig& config) {
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(config, operands);
-  auto casted_values = promoteValues(operands, common_dtype);
+  auto cast_values = promoteValues(operands, common_dtype);
   return binaryOp(
       type,
-      casted_values.front()->as<TensorView>(),
-      casted_values.back()->as<TensorView>(),
+      cast_values.front()->as<TensorView>(),
+      cast_values.back()->as<TensorView>(),
       common_dtype);
 }
 
@@ -1024,10 +1023,28 @@ TensorView* sub_alpha(TensorView* v1, TensorView* v2, Val* v3) {
 }
 // lerp
 Val* lerp(Val* start, Val* end, Val* weight) {
+  auto cast_values =
+      promoteValues(TypePromotion::default_op_config, {start, end, weight});
+  start = cast_values[0];
+  end = cast_values[1];
+  weight = cast_values[2];
+
+  auto out_dtype =
+      promote_type(start->getDataType().value(), end->getDataType().value());
+  auto out_vtype =
+      promote_type(start->getValType().value(), end->getValType().value());
+
   auto vals = maybeBroadcast({start, end, weight});
-  Val* intrm1 = sub(vals[1], vals[0]);
-  Val* intrm2 = mul(vals[2], intrm1);
-  return add(vals[0], intrm2);
+  Val* out = nullptr;
+  if (out_vtype == ValType::TensorView) {
+    out = newOutputTV(vals, out_dtype);
+  } else {
+    out = newScalar(out_vtype, out_dtype);
+  }
+
+  IrBuilder::create<TernaryOp>(
+      TernaryOpType::Lerp, out, vals[0], vals[1], vals[2]);
+  return out;
 }
 TensorView* lerp(TensorView* v1, Val* v2, Val* v3) {
   return arithOpOverloads(lerp, v1, v2, v3);
@@ -1095,10 +1112,9 @@ Val* where(Val* c, Val* v1, Val* v2) {
       "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
-  auto casted_values =
-      promoteValues(TypePromotion::default_op_config, {v1, v2});
-  v1 = casted_values[0];
-  v2 = casted_values[1];
+  auto cast_values = promoteValues(TypePromotion::default_op_config, {v1, v2});
+  v1 = cast_values[0];
+  v2 = cast_values[1];
 
   TORCH_CHECK(c->getDataType().value() == DataType::Bool);
   auto out_dtype =
