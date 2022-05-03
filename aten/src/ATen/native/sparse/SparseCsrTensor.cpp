@@ -632,26 +632,18 @@ Tensor empty_like_sparse_csr(
           .merge_in(options_)
           .merge_memory_format(optional_memory_format);
 
-  switch(options.layout()) {
-  case kSparseCsr:
-    //case kSparseCsc:
-    //case kSparseBsr:
-    //case kSparseBsc:
-    return at::native::_sparse_csr_tensor_unsafe(
-                                                 self.crow_indices().clone(),
-                                                 self.col_indices().clone(),
-                                                 at::empty(self.values().sizes(), options.layout(kStrided)),
-                                                 self.sizes(),
-                                                 dtype,
-                                                 self.layout(),
-                                                 device);
-    break;
-  // TODO: kSparse
-  case kStrided:
+  if (options.layout() == kSparseCsr) {
+    auto result = at::native::_sparse_csr_tensor_unsafe(
+        self.crow_indices().clone(),
+        self.col_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        optTypeMetaToScalarType(options.dtype()),
+        self.layout(),
+        options.device());
+    return result;
+  } else if (options.layout() == kStrided) {
     return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
-    break;
-  default:
-    TORCH_CHECK(false, "empty_like_sparse_csr: layout ", options.layout(), " is not supported");
   }
 }
 

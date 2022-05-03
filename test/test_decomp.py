@@ -3,7 +3,7 @@
 from collections import defaultdict
 from torch import Tensor
 import torch.autograd
-from torch.utils._python_dispatch import enable_python_mode
+from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch._decomp import decomposition_table
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
@@ -450,7 +450,7 @@ class TestDecomp(TestCase):
                 # explicit clearing is necessary as I will create a fresh mode
                 # for each region
                 decomposed.clear()
-                with enable_python_mode(DecompCrossRefMode):
+                with enable_torch_dispatch_mode(DecompCrossRefMode):
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     check_decomposed(aten_name)
@@ -459,7 +459,7 @@ class TestDecomp(TestCase):
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
                     decomposed.clear()
-                    with enable_python_mode(DecompCrossRefMode):
+                    with enable_torch_dispatch_mode(DecompCrossRefMode):
                         decomp_vjp_fn(cotangents)
                     if not run_all:
                         check_decomposed(op.aten_backward_name)
@@ -468,7 +468,7 @@ class TestDecomp(TestCase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 decomposed.clear()
-                with enable_python_mode(DecompCrossRefMode):
+                with enable_torch_dispatch_mode(DecompCrossRefMode):
                     func(*args, **kwargs)
                 if not run_all:
                     check_decomposed(aten_name)
