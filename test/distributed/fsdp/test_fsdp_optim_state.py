@@ -583,16 +583,22 @@ class TestFSDPOptimState(FSDPTest):
         self,
         add_to_fsdp_module: bool,
     ):
-        """Tests :meth:`shard_full_optim_state_dict` when there are unmanaged
-        parameters. If ``add_to_fsdp_module=True``, then the unmanaged
-        parameters are added to a module to be wrapped with FSDP, in which case
-        there should be an error since we require that all unflattened
-        parameter comprising a flattened parameter have the same scalar state
-        (e.g. Adam "step") but the added parameter is missing its entry, and if
-        ``add_to_fsdp_module=False``, then the unmanaged parameters are added
-        to a module not to be wrapped with FSDP, in which case there should be
-        no error (emulating model parallel use cases where some parameters may
-        be managed externally to FSDP)."""
+        """
+        Tests :meth:`shard_full_optim_state_dict` when there are unmanaged
+        parameters.
+          - If ``add_to_fsdp_module=True``, then the unmanaged parameters are
+          added to a module to be wrapped with FSDP, in which case there should
+          be an error since we require that all unflattened parameter
+          comprising a flattened parameter have the same scalar state (e.g.
+          Adam "step") but the added parameter is missing its entry.
+          - If ``add_to_fsdp_module=False``, then the unmanaged parameters are
+          added to a module not to be wrapped with FSDP, in which case there
+          should be no error (emulating model parallel use cases where some
+          parameters may be managed externally to FSDP).
+        We do not separately test unmanaged parameters for
+        :meth:`scatter_full_optim_state_dict` to save CI cost since it calls
+        into the same subroutine :meth:`_flatten_full_optim_state_dict`.
+        """
         NUM_ITERS = 1
         # Create a normal wrapped model
         model, optim, optim_input = self._init_nested_model(wrap=True)
