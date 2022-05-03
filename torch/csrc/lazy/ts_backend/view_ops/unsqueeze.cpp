@@ -1,17 +1,9 @@
-#include <torch/csrc/lazy/core/view_ops/unsqueeze.h>
+#include <torch/csrc/lazy/core/ops/utils.h>
+#include <torch/csrc/lazy/ts_backend/view_ops/unsqueeze.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 namespace torch {
 namespace lazy {
-
-std::vector<int64_t> BuildUnsqueezedDimensions(
-    c10::ArrayRef<int64_t> dimensions,
-    int64_t squeeze_dim) {
-  std::vector<int64_t> output_dimensions(
-      dimensions.cbegin(), dimensions.cend());
-  output_dimensions.insert(output_dimensions.begin() + squeeze_dim, 1);
-  return output_dimensions;
-}
 
 Unsqueeze::Unsqueeze(const torch::lazy::Value& input, int dim)
     : torch::lazy::TsNode(
