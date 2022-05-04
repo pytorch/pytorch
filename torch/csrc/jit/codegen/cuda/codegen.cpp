@@ -1967,24 +1967,31 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     bool bidx = sync->syncDims().get(ParallelType::BIDx);
     bool bidy = sync->syncDims().get(ParallelType::BIDy);
     bool bidz = sync->syncDims().get(ParallelType::BIDz);
-    auto bool2str = [](bool b) { return (b ? "true" : "false"); };
-    std::stringstream sync_str;
-    sync_str << bool2str(bidx) << ", " << bool2str(bidy) << ", "
-             << bool2str(bidz);
 
-    std::stringstream sync_segment_size;
-    sync_segment_size << "index_utils::maskedSize<" << sync_str.str()
-                      << ">(gridDim)";
+    ArgumentBuilder sync_call_template_parms;
+    sync_call_template_parms.arg(bidx).arg(bidy).arg(bidz).arg(true);
 
-    std::stringstream sync_idx;
-    sync_idx << "index_utils::maskedOffset<" << bool2str(!bidx) << ", "
-             << bool2str(!bidy) << ", " << bool2str(!bidz)
-             << ">(gridDim, blockDim)";
+    auto sync_idx = genCall(
+        "index_utils::maskedOffset",
+        ArgumentBuilder().arg(!bidx).arg(!bidy).arg(!bidz),
+        ArgumentBuilder().arg("blockIdx").arg("gridDim"));
 
-    indent() << "grid_sync::sync<" << sync_str.str() << ", true>(\n";
-    indent() << "  " << varName(sync->syncBuffer()) << "[" << sync_idx.str()
-             << "],\n";
-    indent() << "  " << sync_segment_size.str() << ");\n";
+    auto sync_segment_size = genCall(
+        "index_utils::maskedSize",
+        ArgumentBuilder().arg(bidx).arg(bidy).arg(bidz),
+        ArgumentBuilder().arg("gridDim"));
+
+    ArgumentBuilder sync_call_args;
+    sync_call_args.arg(varName(sync->syncBuffer()))
+        .append("[")
+        .append(sync_idx)
+        .append("]");
+    sync_call_args.arg(sync_segment_size);
+
+    auto sync_call =
+        genCall("grid_sync::sync", sync_call_template_parms, sync_call_args);
+
+    indent() << sync_call << ";\n";
   }
 
   void handle(const kir::InitMagicZero*) final {

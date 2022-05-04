@@ -400,7 +400,10 @@ Val* getGridSyncBufferSize(const ParallelTypeBitmap& ptb) {
       "Detected  needing a grid sync but no grid bits set in bitmap.");
   Val* buffer_size = GpuLower::current()->kernel()->oneVal();
   for (auto pt : kParallelTypeBIDs) {
-    if (!ptb.get(pt)) {
+    // Synchronized within pt, so all blocks of this PT use the same
+    // sync buffer location, and thus no need to expand the sync
+    // buffer size.
+    if (ptb.get(pt)) {
       continue;
     }
     auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
