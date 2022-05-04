@@ -832,7 +832,7 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the cudnn add and add_relu op
     (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    @unittest.skip("Local only - currently the test_qadd_relu_cudnn op is bulid "
                    "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
                    "after it is built by default")
     def test_qadd_relu_cudnn(self):
@@ -842,6 +842,41 @@ class TestQuantizedOps(TestCase):
 
         A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
         B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+        scale_A = 2.5
+        scale_B = 6.3
+        scale_C = 12.9
+        zero_point = 0
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
+                                       dtype=dtype)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
+                                       dtype=dtype)
+        # Add ground truth
+        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
+        qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
+        qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized addition failed.")
+
+        # Add + ReLU ground truth
+        Crelu = C.copy()
+        Crelu[C < 0] = 0
+        qCrelu = _quantize(Crelu, scale_C, zero_point, dtype=np_dtype[dtype])
+        qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
+        np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
+                                "Quantized addition with ReLU failed.")
+
+    """Tests the correctness of the cudnn add and add_relu op for nhwc format"""
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skip("Local only - currently the test_qadd_relu_cudnn_nhwc op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
+    def test_qadd_relu_cudnn_nhwc(self):
+        dtype = torch.qint8
+        add_relu = torch.ops.quantized.add_relu
+        add = torch.ops.quantized.add
+
+        A = torch.rand(16, 8, 4, 12).to(device="cuda")
+        B = torch.rand(16, 8, 4, 12).to(device="cuda")
         scale_A = 2.5
         scale_B = 6.3
         scale_C = 12.9
@@ -1778,19 +1813,23 @@ class TestQuantizedOps(TestCase):
                 error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
 
                 for name, op in ops_under_test.items():
-                    qX_hat = op(qX, output_size=output_size)
-                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(
-                        X_ref, qX_hat.int_repr(), atol=1.0,
-                        rtol=0, msg=error_message.format(name, X_ref, qX_hat))
-                    self.assertEqual(
-                        scale, qX_hat.q_scale(),
-                        msg=error_message.format(name + '.scale', scale,
-                                                 qX_hat.q_scale()))
-                    self.assertEqual(
-                        zero_point, qX_hat.q_zero_point(),
-                        msg=error_message.format(name + '.zero_point', scale,
-                                                 qX_hat.q_zero_point()))
+                    # TODO: torch.cuda.is_available() should be swapped for a flag that checks if cudnn
+                    # is enabled in the build when cudnn supports adaptive average pooling
+                    devices = ["cpu", "cuda"] if (dim == 2 and torch.cuda.is_available()) else ["cpu"]
+                    for device in devices:
+                        qX_hat = op(qX.to(device=device), output_size=output_size)
+                        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                        self.assertEqualIgnoreType(
+                            X_ref, qX_hat.int_repr(), atol=1.0,
+                            rtol=0, msg=error_message.format(name, X_ref, qX_hat))
+                        self.assertEqual(
+                            scale, qX_hat.q_scale(),
+                            msg=error_message.format(name + '.scale', scale,
+                                                     qX_hat.q_scale()))
+                        self.assertEqual(
+                            zero_point, qX_hat.q_zero_point(),
+                            msg=error_message.format(name + '.zero_point', scale,
+                                                     qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool3d_ndhwc(self):
@@ -4427,16 +4466,12 @@ class TestQuantizedConv(TestCase):
                 Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False, input_dtype=X_qdtype, output_dtype=X_qdtype)
 
     @given(batch_size=st.integers(1, 3),
-           # only multiples of 16 are supported right now, might be fixed in
-           # next release of cudnn
-           # input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           input_channels_per_group=st.sampled_from([16, 32]),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           input_channels_per_group=st.integers(1, 32),
            height=st.integers(10, 16),
            width=st.integers(7, 14),
-           # only multiples of 16 are supported right now, might be fixed in
-           # next release of cudnn
-           # output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           output_channels_per_group=st.sampled_from([16, 32]),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           output_channels_per_group=st.integers(1, 32),
            # groups=st.integers(1, 3),
            groups=st.integers(1, 1),
            kernel_h=st.integers(1, 7),
