@@ -54,4 +54,8 @@ runs:
     - name: ROCm set GPU_FLAG
       shell: bash
       run: |
-        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        if [[ ${{ runner.name }} == *-2 ]]; then
+            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri/renderD130 --device=/dev/dri/renderD131 --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        else
+            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri/renderD128 --device=/dev/dri/renderD129 --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        fi
