@@ -1338,6 +1338,11 @@ void initJITBindings(PyObject* module) {
             docstring << "  " << op->schema() << "\n";
           }
 
+          py::list overload_names;
+          for (const auto& op : operations) {
+            overload_names.append(py::str(op->schema().overload_name()));
+          }
+
           auto func = py::cpp_function(
               [operations, symbol](py::args args, py::kwargs kwargs) {
                 return _get_operation_for_overload_or_packet(
@@ -1345,7 +1350,7 @@ void initJITBindings(PyObject* module) {
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
-          return func;
+          return py::make_tuple(func, overload_names);
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
               ? e.what()
