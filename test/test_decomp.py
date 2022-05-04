@@ -480,13 +480,6 @@ class TestDecomp(TestCase):
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
 
-    def test_torchscriptable(self, device):
-        skip_list = [aten.rsub.Scalar]
-        for op, decomposition in decomposition_table.items():
-            if op in skip_list:
-                continue
-            f = torch.jit.script(decomposition)
-
 
 instantiate_device_type_tests(TestDecomp, globals())
 
