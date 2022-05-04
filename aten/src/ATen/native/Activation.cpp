@@ -6,6 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
+#include <ATen/ops/matmul.h>
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 #include <ATen/native/xnnpack/Engine.h>
 #endif
@@ -422,6 +423,14 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
   auto iter = TensorIterator::borrowing_binary_op(grad_input, grad_output, self);
   hardswish_backward_stub(iter.device_type(), iter);
   return iter.output();
+}
+
+std::tuple<Tensor, Tensor> attn(const Tensor & q, const Tensor & k, const Tensor & v){
+  auto k_t = at::transpose(k, 0, 1);
+  auto x = at::matmul(q, k_t);
+  auto a = at::tanh(x);
+  auto o = at::matmul(a, v);
+  return std::tuple<Tensor, Tensor>{o, a};
 }
 
 Tensor relu(const Tensor & self) {
