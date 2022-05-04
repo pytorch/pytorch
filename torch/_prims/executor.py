@@ -95,7 +95,8 @@ def make_traced(fn: Callable):
     """
 
     def _traced(*args, executor="aten"):
-        with torch.overrides.push_torch_function_mode(PrimContext) as ctx:
+        ctx: PrimContext
+        with torch.overrides.push_torch_function_mode(PrimContext) as ctx:  # type: ignore
             placeholders = []
             for arg in args:
                 if isinstance(arg, torch.Tensor):
