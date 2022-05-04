@@ -1943,6 +1943,6 @@ class Module:
         replica._parameters = OrderedDict()
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
-        replica._is_replica = True
+        replica._is_replica = True  # type: ignore[assignment]
 
         return replica
