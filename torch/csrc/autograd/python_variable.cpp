@@ -111,7 +111,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(const c10::OperatorHa
     const auto& arg = schema.arguments()[idx];
     kwargs[py::cast(arg.name())] = torch::jit::toPyObject(arguments[idx]);
   }
-  return std::make_pair(py::cast<py::object>(std::move(args.release())), py::cast<py::dict>(std::move(kwargs.release())));
+  return std::make_pair(std::move(args), std::move(kwargs));
 }
 
 void pushPyOutToStack(
