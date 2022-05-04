@@ -144,6 +144,7 @@ def _getDefaultRtolAndAtol(dtype0, dtype1):
 
 
 def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
+    assert orig.dtype == decomp.dtype, f"Operation:  {op}"
     if orig.numel() == 0 or decomp.numel() == 0:
         assert orig.numel() == decomp.numel()
         return
