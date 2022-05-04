@@ -91,7 +91,8 @@ TORCH_CUDA_CU_API TensorView* reductionOp(
     const std::vector<int>& axes,
     Val* init,
     TensorView* v1,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 //! Auxiliary Struct holding result of
 //! a single welford op in ternsorview
@@ -362,7 +363,8 @@ TORCH_CUDA_CU_API TensorView* xorOp(TensorView* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* sum(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 TORCH_CUDA_CU_API TensorView* max(
     TensorView* v1,

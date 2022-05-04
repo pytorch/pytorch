@@ -135,7 +135,7 @@ VarWithType IRParser::parseVarWithType(bool allow_optional) {
 std::string IRParser::parseVar() {
   L.expect('%');
   std::string name;
-  bool continue_parsing = true;
+  bool continue_parsing;
   do {
     if (L.cur().kind == TK_IDENT) {
       name += L.expect(TK_IDENT).text();
@@ -543,6 +543,7 @@ void IRParser::parse() {
     TORCH_INTERNAL_ASSERT(dtype);
     auto options = at::TensorOptions(*device).dtype(*dtype);
     auto t = n->t_(attr::value, at::empty_strided(*sizes, *strides, options));
+    (void)t;
   }
 }
 

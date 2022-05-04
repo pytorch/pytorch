@@ -30,7 +30,7 @@ __device__ constexpr int64_t ceilDiv(int a, int64_t b) {
 // Monotonic and precise lerp is described here:
 // https://math.stackexchange.com/a/1798323
 __device__ double lerp(double start, double end, double weight) {
-  if (abs(weight) < 0.5) {
+  if (weight < 0.5) {
     return start + weight * (end - start);
   } else {
     return end - (end - start) * (1.0 - weight);
@@ -38,7 +38,7 @@ __device__ double lerp(double start, double end, double weight) {
 }
 
 __device__ float lerp(float start, float end, float weight) {
-  if (abs(weight) < 0.5f) {
+  if (weight < 0.5f) {
     return start + weight * (end - start);
   } else {
     return end - (end - start) * (1.0f - weight);

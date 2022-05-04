@@ -198,7 +198,7 @@ def _forward_unimplemented(self, *input: Any) -> None:
         instead of this since the former takes care of running the
         registered hooks while the latter silently ignores them.
     """
-    raise NotImplementedError
+    raise NotImplementedError(f"Module [{type(self).__name__}] is missing the required \"forward\" function")
 
 
 class Module:
@@ -1324,17 +1324,14 @@ class Module:
 
     # TODO: Deprecated, destination is becoming private. Remove this signature when BC allows
     # See https://github.com/pytorch/pytorch/issues/72778#issuecomment-1039263869
-    T_destination = TypeVar('T_destination', bound=Mapping[str, Tensor])
+    T_destination = TypeVar('T_destination', bound=Dict[str, Any])
 
     @overload
     def state_dict(self, destination: T_destination, prefix: str = ..., keep_vars: bool = ...) -> T_destination:
         ...
 
-    # TODO: Remove string escape once Python-3.7.0 is no longer supported
-    # typing.OrderedDict with generics can be used in Python-3.7.2+ or later
-    # See https://github.com/pytorch/pytorch/issues/74087
     @overload
-    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> "OrderedDict[str, Tensor]":
+    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Any]:
         ...
 
     def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
@@ -1520,7 +1517,7 @@ class Module:
                     if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
 
-    def load_state_dict(self, state_dict: 'OrderedDict[str, Tensor]',
+    def load_state_dict(self, state_dict: Mapping[str, Any],
                         strict: bool = True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
@@ -1550,7 +1547,7 @@ class Module:
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, '_metadata', None)
-        state_dict = state_dict.copy()
+        state_dict = OrderedDict(state_dict)
         if metadata is not None:
             # mypy isn't aware that "_metadata" exists in state_dict
             state_dict._metadata = metadata  # type: ignore[attr-defined]
@@ -1946,6 +1943,6 @@ class Module:
         replica._parameters = OrderedDict()
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
-        replica._is_replica = True
+        replica._is_replica = True  # type: ignore[assignment]
 
         return replica

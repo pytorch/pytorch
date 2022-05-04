@@ -788,10 +788,14 @@ static const char* supported_casts2string(
       return "(std::complex<float>)";
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
+    case supported_switch_pair(DataType::Double, DataType::Half):
+      return "__double2half";
     case supported_switch_pair(DataType::Float, DataType::BFloat16):
       return "__float2bfloat";
     case supported_switch_pair(DataType::Half, DataType::Float):
       return "__half2float";
+    case supported_switch_pair(DataType::Half, DataType::Double):
+      return "__half2double";
     case supported_switch_pair(DataType::BFloat16, DataType::Float):
       return "__bfloat2float";
     default:

@@ -63,7 +63,7 @@ if(INTERN_BUILD_ATEN_OPS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
-  file(GLOB_RECURSE all_python "${PROJECT_SOURCE_DIR}/tools/codegen/*.py")
+  file(GLOB_RECURSE all_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
   COMMAND
   "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
@@ -417,6 +417,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     COMMAND
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
+      --tags-path "aten/src/ATen/native/tags.yaml"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
@@ -424,6 +425,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${GEN_PER_OPERATOR_FLAG}
     DEPENDS
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
     "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
     "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
     "${TORCH_ROOT}/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
@@ -458,10 +460,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
     "${TOOLS_PATH}/autograd/gen_inplace_or_view_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
-    "${TOOLS_PATH}/codegen/gen_backend_stubs.py"
-    "${TOOLS_PATH}/codegen/gen_lazy_tensor.py"
-    "${TOOLS_PATH}/codegen/api/lazy.py"
-    "${TOOLS_PATH}/codegen/dest/lazy_ir.py"
+    "${TORCH_ROOT}/torchgen/gen_backend_stubs.py"
+    "${TORCH_ROOT}/torchgen/gen_lazy_tensor.py"
+    "${TORCH_ROOT}/torchgen/api/lazy.py"
+    "${TORCH_ROOT}/torchgen/dest/lazy_ir.py"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -533,6 +535,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/context.cpp
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.mm
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/observer/PTMCoreMLObserver.mm
       )
       list(APPEND TORCH_SRCS ${COREML_DELEGATE_SRCS})
     endif()
@@ -596,6 +599,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_bytecode.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer_jit.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
@@ -651,10 +655,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       PROPERTIES COMPILE_DEFINITIONS "NVRTC_SHORTHASH=${CUDA_NVRTC_SHORTHASH}"
     )
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
-  endif()
-
-  if(USE_MLCOMPUTE)
-    include(../mlc/mlc_build.cmake)
   endif()
 
   if(USE_ROCM)
@@ -737,7 +737,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
-      ${TORCH_SRC_DIR}/csrc/utils/crash_handler.cpp
     )
   endif()
 
@@ -792,6 +791,10 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
+if(HAS_WERROR_SIGN_COMPARE AND WERROR)
+  # target_compile_options(torch_cpu PRIVATE "-Werror=sign-compare")
+  set_property(SOURCE ${ATen_CORE_SRCS} ${ATen_CPU_SRCS} APPEND PROPERTY COMPILE_OPTIONS "-Werror=sign-compare")
+endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
@@ -1072,10 +1075,9 @@ if(USE_TBB)
   target_link_libraries(torch_cpu PUBLIC TBB::tbb)
 endif()
 
-if(USE_BREAKPAD)
-  target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
-  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src)
-  target_link_libraries(torch_cpu PRIVATE breakpad)
+if(BUILD_CAFFE2 AND BUILD_CAFFE2_OPS AND USE_FBGEMM)
+  # FIXME: quantization/server/conv_dnnlowp_op.cc depends on fbgemm/src/RefImplementations.h
+  target_include_directories(torch_cpu PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../third_party)
 endif()
 
   target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
@@ -1538,9 +1540,6 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
 endif()
-if(USE_MLCOMPUTE)
-  target_link_libraries(torch PUBLIC torch_mlc_library)
-endif()
 
 if(PRINT_CMAKE_DEBUG_INFO)
   print_target_properties(torch)
@@ -1938,6 +1937,8 @@ if(BUILD_PYTHON)
   # ---[ Python.
   if(BUILD_CAFFE2)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
+  target_compile_definitions(torch PRIVATE BUILD_CAFFE2)
+  target_compile_definitions(torch_python PRIVATE BUILD_CAFFE2)
   if(USE_NUMPY)
     target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
     target_link_libraries(caffe2_pybind11_state  PRIVATE numpy::numpy)

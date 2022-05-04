@@ -946,14 +946,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     indent() << genMmaOp(mma, true) << "(reinterpret_cast<Array<"
              << mma->out()->getDataType().value() << ","
-             << getOutputRegisterSize(mma->options().macro) << ","
-             << getOutputRegisterSize(mma->options().macro) << ">*>"
+             << getOutputRegisterSize(options.macro) << ","
+             << getOutputRegisterSize(options.macro) << ">*>"
              << "(&" << gen(uop->out()) << "));\n";
   }
 
   void handle(const MmaOp* mma) final {
     auto options = mma->options();
-    auto in_a = mma->inA()->as<kir::TensorIndex>();
     auto out = mma->out()->as<kir::TensorIndex>();
     indent() << genMmaOp(mma) << "(\n";
     indent() << kTab << "reinterpret_cast<Array<"
@@ -974,7 +973,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const BroadcastOp* stmt) final {
     TORCH_INTERNAL_ASSERT(stmt->out()->isA<kir::TensorIndex>());
-    const auto tensor_index = stmt->out()->as<kir::TensorIndex>();
 
     const ParallelTypeBitmap parallel_types =
         kernel_->summary().broadcast_parallel_types.at(stmt);
@@ -1359,7 +1357,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     TORCH_INTERNAL_ASSERT(grop->isAllreduce());
 
     const auto out = grop->out()->as<kir::TensorIndex>();
-    const auto domain = out->view()->domain();
 
     const auto data_type = grop->out()->dtype();
     const auto op_type = grop->getReductionOpType();
@@ -1562,11 +1559,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         parallel_types.hasBID(),
         "GridBroadcast needs to be used with a broadcast op that is parallelized with the BID parallel types");
 
-    const auto out = bop->out()->as<kir::TensorIndex>();
-    const auto domain = out->view()->domain();
-
-    const auto data_type = bop->out()->dtype();
-
     TORCH_INTERNAL_ASSERT(
         grop->broadcast_buffer()->buffer()->isA<TensorView>());
     TORCH_INTERNAL_ASSERT(grop->sync_buffer()->buffer()->isA<TensorView>());
@@ -1676,7 +1668,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     TORCH_INTERNAL_ASSERT(wop->isAllreduce());
 
     const auto out = wop->out()->as<kir::TensorIndex>();
-    const auto domain = out->view()->domain();
 
     const auto data_type = wop->outAvg()->dtype();
     const auto index_type = wop->outN()->dtype();
