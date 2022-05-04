@@ -817,6 +817,7 @@ class ShardedTensor(object):
         """
         return len(self._metadata.size)
 
+    # TODO: This op needs further definition of what exactly its behavior will be.
     def contiguous(self) -> ShardedTensor:
         """
         Returns a new sharded tensor with the local tensor is made to contiguous.
