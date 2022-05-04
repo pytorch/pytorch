@@ -7,7 +7,7 @@ from torch.ao.quantization import (
     FakeQuantize,
     MovingAverageMinMaxObserver,
     default_observer,
-    default_affine_fixed_qparams_fake_quant,
+    default_fixed_qparams_range_0to1_fake_quant,
 )
 
 from torch.ao.quantization._learnable_fake_quantize import _LearnableFakeQuantize
@@ -544,7 +544,7 @@ class TestFakeQuantizeOps(TestCase):
     def test_fixed_qparams_fq_module(self, device, X):
         X, (scale, zero_point, torch_type) = X
         X = to_tensor(X, device)
-        fq_module = default_affine_fixed_qparams_fake_quant()
+        fq_module = default_fixed_qparams_range_0to1_fake_quant()
         fq_module.to(device)
         fixed_scale = fq_module.scale.clone()
         fixed_zero_point = fq_module.zero_point.clone()
