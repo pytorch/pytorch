@@ -48,10 +48,13 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}"
-          echo ""
-          echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
-          echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+          set +e
+          if ! lintrunner -vv --force-color --merge-base-with "${PR_BASE_SHA}" ; then
+              echo ""
+              echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
+              echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+              exit 1
+          fi
 
       - name: Store annotations
         if: always() && github.event_name == 'pull_request'
