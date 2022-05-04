@@ -1846,6 +1846,9 @@ void ProcessedNode::run() {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     guard.needsInputs() ? guard.before(get_op_name(), inputs_ivalue_vec())
                         : guard.before(get_op_name());
+    if (has_out_variant()) {
+      guard._setStaticRuntimeOutVariant();
+    }
 
     fn_->run(this);
   } else {
