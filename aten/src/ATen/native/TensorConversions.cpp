@@ -69,7 +69,7 @@ Tensor _to_copy(
         device,
         pin_memory,
         non_blocking,
-        false, // copy
+        true, // force copy since we're in _to_copy
         memory_format);
 
     auto new_crow_indices = at::native::to(
@@ -79,7 +79,7 @@ Tensor _to_copy(
         device,
         pin_memory,
         non_blocking,
-        false, // copy
+        true, // force copy since we're in _to_copy
         memory_format);
 
     auto new_col_indices = at::native::to(
@@ -89,7 +89,7 @@ Tensor _to_copy(
         device,
         pin_memory,
         non_blocking,
-        false, // copy
+        true, // force copy since we're in _to_copy
         memory_format);
 
     return at::native::_sparse_csr_tensor_unsafe(

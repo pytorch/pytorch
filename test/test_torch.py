@@ -7579,16 +7579,25 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertIs(torch.float32, a.to('cpu', dtype=torch.float32).dtype)
         self.assertEqual(a.device, a.to(torch.float32).device)
         self.assertIs(torch.float32, a.to(dtype=torch.float32).dtype)
+
+        def test_data_ptr(getter):
+            self.assertEqual(getter(a), getter(a.to('cpu')))
+            self.assertEqual(getter(a), getter(a.to(dtype=a.dtype, device=a.device, copy=False)))
+            self.assertEqual(getter(a), getter(a.to('cpu', copy=False)))
+            self.assertNotEqual(getter(a), getter(a.to('cpu', copy=True)))
         if layout == torch.sparse_csr:
             # TODO: compressed sparse tensors currently don't support data_ptr.
             # Exercising failure will allow us to widen coverage of this test once it does.
             with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer of Tensor that doesn't have storage"):
                 a.data_ptr()
+            # While compressed sparse tensors don't have a concept of data_ptr
+            # the underlying tensors do. The implementation of to appropriately forwards
+            # the call to the components, which is what we're test here.
+            test_data_ptr(lambda a: a.values().data_ptr())
+            test_data_ptr(lambda a: a.crow_indices().data_ptr())
+            test_data_ptr(lambda a: a.col_indices().data_ptr())
         else:
-            self.assertEqual(a.data_ptr(), a.to('cpu').data_ptr())
-            self.assertEqual(a.data_ptr(), a.to(dtype=a.dtype, device=a.device, copy=False).data_ptr())
-            self.assertEqual(a.data_ptr(), a.to('cpu', copy=False).data_ptr())
-            self.assertNotEqual(a.data_ptr(), a.to('cpu', copy=True).data_ptr())
+            test_data_ptr(lambda a: a.data_ptr())
 
         if torch.cuda.is_available():
             for non_blocking in [True, False]:
