@@ -919,7 +919,7 @@ def _slice_meta(
         )
         raise ValueError(msg)
 
-    if a.ndim != len(start_indices):
+    if a.ndim != len(limit_indices):
         msg = "Attempting to slice tensor of rank {0} with limit_indices of length {1}!".format(
             a.ndim, len(limit_indices)
         )
@@ -980,8 +980,8 @@ def _slice_meta(
             raise ValueError(msg)
 
     new_shape = []
-    for x, y in zip(start_indices, limit_indices):
-        new_shape.append(y - x)
+    for x, y, z in zip(start_indices, limit_indices, _strides):
+        new_shape.append(math.floor((y - x) / z))
 
     new_strides = []
     for x, y in zip(a.stride(), _strides):
@@ -1069,7 +1069,7 @@ def _slice_in_dim_meta(
         raise ValueError(msg)
 
     start_indices = [0] * a.ndim
-    limit_indices = [0] * a.ndim
+    limit_indices = list(a.shape)
     strides = [1] * a.ndim
 
     start_indices[axis] = start_index
