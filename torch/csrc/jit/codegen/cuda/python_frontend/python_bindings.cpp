@@ -66,7 +66,7 @@ class FusionDefinitionContextManager {
   void addOutput(torch::jit::fuser::cuda::Val* output) {
     fusionPtr()->addOutput(output);
   }
-  
+
   Fusion* fusionPtr() {
     return fusion_owner_->fusionPtr();
   }
@@ -247,7 +247,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                 contig_info[i] = (strides[i] == strides[i - 1] * sizes[i - 1]);
               }
             }
-  
+
             return IrBuilder::create<TensorView>(
                 IrBuilder::create<TensorDomain>(domain_sizes, contig_info),
                 dtype);
