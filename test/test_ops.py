@@ -663,7 +663,6 @@ class TestCommon(TestCase):
                 op_out(out=out)
                 final_strides = _extract_strides(out)
                 final_ptrs = _extract_data_ptrs(out)
-
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
@@ -684,6 +683,7 @@ class TestCommon(TestCase):
                 except TypeError as te:
                     # for non-integer types fills with NaN
                     return torch.full_like(t, float("nan"))
+
 
             _compare_out(_case_zero_transform)
 
