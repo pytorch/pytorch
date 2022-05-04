@@ -317,6 +317,9 @@
   self, other: atan2_backward(grad, self, other, grad_input_mask)
   result: (-self_p * other_t + other_p * self_t) / (self_p.pow(2) + other_p.pow(2))
 
+- name: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
+  q, k, v : attn_backward(grads[0], grads[1], q, k, v, result1)
+
 - name: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
   batch1: maybe_multiply(grad.bmm(batch2.transpose(1, 2).conj()), alpha.conj())
