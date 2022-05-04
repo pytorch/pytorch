@@ -17,7 +17,7 @@
 template <int kSpatialDim>
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightCudnn<
     kSpatialDim>::unpack() {
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>{orig_weight_, bias_};
+  return std::tuple<at::Tensor, c10::optional<at::Tensor>>{maybe_padded_weight_, bias_};
 }
 
 template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightCudnn<

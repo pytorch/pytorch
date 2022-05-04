@@ -1,15 +1,16 @@
 import torch
-from torch._C import _add_docstr  # type: ignore[attr-defined]
 
 import torch._prims as prims
 import torch._prims.utils as utils
 from torch._prims import TensorLike as TensorLike
-from torch._prims.utils import DimsType
+from torch._prims.utils import DimsType, TensorLikeType
 
 from functools import reduce
 from enum import Enum
 from numbers import Number, Complex
 from typing import Sequence, Optional, Union, Callable, List
+import operator
+import warnings
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -18,7 +19,38 @@ all = [
     #
     # Elementwise Unary References
     #
+    "abs",
+    "acos",
+    "acosh",
+    "asin",
+    "atan",
+    # "bessel_i0e",  # special.i0e
+    # "bessel_i1e",  # special.i1e
+    # "cbrt",  # No corresponding torch operation
+    "ceil",
+    "cos",
+    "cosh",
+    "digamma",
+    "erf",
+    "erfinv",
+    "erfc",
+    "exp",
+    "expm1",
     "floor",
+    "isfinite",
+    "isnan",
+    "lgamma",
+    "log",
+    "log1p",
+    "neg",
+    "reciprocal",
+    "round",  # TODO: model kwargs
+    "sign",
+    "sin",
+    "sinh",
+    "sqrt",
+    "square",
+    "tan",
     #
     # Elementwise Binary References
     #
@@ -42,8 +74,8 @@ all = [
     "gt",
     # 'heaviside',
     # 'hypot',
-    # 'igamma',
-    # 'igammac',
+    "igamma",
+    "igammac",
     # 'isclose', # abs, sub, le, add, mul
     # 'lcm',
     # 'ldexp',
@@ -71,15 +103,15 @@ all = [
     #
     # Conditional references
     #
-    "where",
+    "where",  # TODO: add opinfo
     #
     # Data conversion and movement references
     #
-    "copy_to",
+    "copy_to",  # TODO: add opinfo
     #
     # Reduction ops
     #
-    "sum",
+    "sum",  # TODO: add opinfo
 ]
 
 Tensor = torch.Tensor
@@ -89,7 +121,9 @@ class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     DEFAULT = (0,)
     INT_TO_FLOAT = (1,)
     ALWAYS_BOOL = (2,)
-    OP_MATH = 3
+    OP_MATH = (3,)
+    COMPLEX_TO_FLOAT = (4,)
+    BOOL_TO_LONG = (5,)
 
 
 class REDUCTION_OUTPUT_TYPE_KIND(Enum):
@@ -103,6 +137,7 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
 _computation_dtype_map = {
     torch.bfloat16: torch.float32,
     torch.float16: torch.float32,
+    torch.complex32: torch.complex64,
 }
 
 
@@ -192,19 +227,42 @@ def _elementwise_dtypes(*_args, type_promotion: ELEMENTWISE_TYPE_PROMOTION_KIND)
                 else torch.complex64
             )
 
-    if type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT and (
-        utils.is_boolean_dtype(dtype) or utils.is_integer_dtype(dtype)
+    if type_promotion in (
+        ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+        ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     ):
-        return torch.get_default_dtype(), torch.get_default_dtype()
+        if type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
+            return dtype, torch.bool
 
-    if type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
-        return dtype, torch.bool
+        return dtype, dtype
 
-    if type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH:
+    if type_promotion in (
+        ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+        ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+        ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH,
+    ):
+
+        if type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT and (
+            utils.is_boolean_dtype(dtype) or utils.is_integer_dtype(dtype)
+        ):
+            return torch.get_default_dtype(), torch.get_default_dtype()
+
+        if (
+            type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+            and utils.is_complex_dtype(dtype)
+        ):
+            return _get_computation_dtype(dtype), utils.corresponding_real_dtype(dtype)
+
+        if (
+            type_promotion is ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
+            and utils.is_boolean_dtype(dtype)
+        ):
+            return torch.long, torch.long
+
         return _get_computation_dtype(dtype), dtype
 
-    # DEFAULT type promotion
-    return dtype, dtype
+    raise ValueError("Unknown type promotion kind {0}".format(str(type_promotion)))
 
 
 def _broadcast_shapes(*_shapes):
@@ -282,8 +340,21 @@ def _convert_dtype(*args, dtype: torch.dtype):
 
 
 # TODO: handle tuples of tensors
-def _maybe_resize_out(out: Tensor, shape):
+def _maybe_resize_out(out: TensorLikeType, shape):
     if out.numel() == 0:
+        return prims.resize(out, shape)
+
+    if out.numel() != reduce(operator.mul, shape, 1):
+        msg = (
+            "An output with one or more elements was resized since it had shape {0} "
+            "which does not match the required output shape {1}. "
+            "This behavior is deprecated, and in a future PyTorch release outputs will not "
+            "be resized unless they have zero elements. "
+            "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0).".format(
+                str(out.shape), str(shape)
+            )
+        )
+        warnings.warn(msg)
         return prims.resize(out, shape)
 
     return out
@@ -294,13 +365,21 @@ def _maybe_resize_out(out: Tensor, shape):
 #
 
 # TODO: add type promotion support
-def _make_elementwise_unary_reference(prim: Callable) -> Callable:
+def _make_elementwise_unary_reference(prim: Callable, *, type_promotion) -> Callable:
     def _ref(a: Tensor, *, out: Optional[Tensor] = None) -> Tensor:
 
         assert isinstance(a, TensorLike)
         assert out is None or isinstance(out, TensorLike)
 
+        computation_dtype, result_dtype = _elementwise_dtypes(
+            a, type_promotion=type_promotion
+        )
+        (a,) = _convert_dtype(a, dtype=computation_dtype)
+
         result = prim(a)
+
+        if type_promotion is not ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
+            (result,) = _convert_dtype(result, dtype=result_dtype)
 
         # TODO: refactor out handling to a generic wrapper
         if out is not None:
@@ -312,7 +391,127 @@ def _make_elementwise_unary_reference(prim: Callable) -> Callable:
     return _ref
 
 
-floor = _make_elementwise_unary_reference(prims.floor)
+abs = _make_elementwise_unary_reference(
+    prims.abs, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
+)
+
+acos = _make_elementwise_unary_reference(
+    prims.acos, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+acosh = _make_elementwise_unary_reference(
+    prims.acosh, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+asin = _make_elementwise_unary_reference(
+    prims.asin, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+atan = _make_elementwise_unary_reference(
+    prims.atan, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+ceil = _make_elementwise_unary_reference(
+    prims.ceil, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+cos = _make_elementwise_unary_reference(
+    prims.cos, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+cosh = _make_elementwise_unary_reference(
+    prims.cosh, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+digamma = _make_elementwise_unary_reference(
+    prims.digamma, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+erf = _make_elementwise_unary_reference(
+    prims.erf, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+erfinv = _make_elementwise_unary_reference(
+    prims.erf_inv, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+erfc = _make_elementwise_unary_reference(
+    prims.erfc, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+exp = _make_elementwise_unary_reference(
+    prims.exp, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+expm1 = _make_elementwise_unary_reference(
+    prims.expm1, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+floor = _make_elementwise_unary_reference(
+    prims.floor, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+isfinite = _make_elementwise_unary_reference(
+    prims.is_finite, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+)
+
+
+def _isnan(a: Tensor) -> Tensor:
+    return prims.ne(a, a)
+
+
+isnan = _make_elementwise_unary_reference(
+    _isnan, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+)
+
+lgamma = _make_elementwise_unary_reference(
+    prims.lgamma, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+log = _make_elementwise_unary_reference(
+    prims.log, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+log1p = _make_elementwise_unary_reference(
+    prims.log1p, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+neg = _make_elementwise_unary_reference(
+    prims.neg, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+reciprocal = _make_elementwise_unary_reference(
+    prims.reciprocal, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+# TODO: round takes additional kwargs
+round = _make_elementwise_unary_reference(
+    prims.round, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+sign = _make_elementwise_unary_reference(
+    prims.sign, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+)
+
+sin = _make_elementwise_unary_reference(
+    prims.sin, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+sinh = _make_elementwise_unary_reference(
+    prims.sinh, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+sqrt = _make_elementwise_unary_reference(
+    prims.sqrt, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+square = _make_elementwise_unary_reference(
+    prims.square, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
+)
+
+tan = _make_elementwise_unary_reference(
+    prims.tan, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
 
 
 def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Callable:
@@ -442,11 +641,13 @@ eq = _make_elementwise_binary_reference(
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
 def float_power(
-    a: Union[Tensor, Number], b: Union[Tensor, Number], out: Optional[Tensor] = None
+    a: Union[TensorLikeType, Number],
+    b: Union[TensorLikeType, Number],
+    out: Optional[TensorLikeType] = None,
 ) -> Tensor:
 
-    assert isinstance(a, (Tensor, Number))
-    assert isinstance(b, (Tensor, Number))
+    assert isinstance(a, (TensorLike, Number))
+    assert isinstance(b, (TensorLike, Number))
     assert out is None or isinstance(out, TensorLike)
 
     # Special-cases Number x Number case
@@ -484,9 +685,17 @@ gt = _make_elementwise_binary_reference(
     prims.gt, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
 )
 
+igamma = _make_elementwise_binary_reference(
+    prims.igamma, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
+igammac = _make_elementwise_binary_reference(
+    prims.igammac, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+)
+
 # TODO: add docstring
 le = _make_elementwise_binary_reference(
-    prims.lt, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.le, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
 )
 
 # TODO: add docstring
@@ -521,7 +730,7 @@ nextafter = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 pow = _make_elementwise_binary_reference(
-    prims.pow, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.OP_MATH
+    prims.pow, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
 )
 
 # TODO: add docstring
@@ -658,9 +867,8 @@ def _reduction(
         assert isinstance(out, TensorLike)
         if dtype is not None:
             # TODO - this is true for eager mode currently, but it's wrong behavior for complex norms
-            assert (
-                dtype == out.dtype
-            ), "dtype argument and out dtype must match in reduction"
+            if dtype != out.dtype:
+                raise RuntimeError("dtype argument and out dtype must match in reduction")
     if not accepts_dim_tuple:
         assert dims is None or isinstance(dims, int)
     if isinstance(dims, int):
@@ -680,24 +888,23 @@ def _reduction(
     result = prim(a_converted, dims)
 
     if keepdims:
-        output_shape = [a.shape[i] if i in dims else 1 for i in range(a.ndim)]
+        output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
         broadcast_dims = [i for i in range(a.ndim) if i not in dims]
         result = prims.broadcast_in_dim(result, output_shape, broadcast_dims)
     if out is not None:
         if dtype is None:
             if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
-                assert (
-                    out.dtype == a.dtype
-                ), "out dtype and output type of reduction must match"
+                if out.dtype != a.dtype:
+                    raise RuntimeError("out dtype and output type of reduction must match")
             elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.ALWAYS_BOOL:
-                assert (
-                    out.dtype == torch.bool
-                ), "out dtype and output type of reduction must match"
+                if out.dtype != torch.bool:
+                    raise RuntimeError("out dtype and output type of reduction must match")
         out = _maybe_resize_out(out, result.shape)
         return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
     if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
-        result = prims.convert_element_type(result, a.dtype)
+        result_dtype = dtype if dtype else a.dtype
+        result = prims.convert_element_type(result, result_dtype)
     return result
 
 
@@ -714,12 +921,15 @@ def sum(
             dtype = torch.int64
         else:
             dtype = a.dtype
-
+    # sum reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
     return _reduction(
         a,
         prims.sum,
         dims=dim,
         keepdims=keepdim,
         dtype=dtype,
+        out=out,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
     )

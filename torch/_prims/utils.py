@@ -8,6 +8,32 @@ import threading
 import torch
 from torch.fx import Node
 
+# nvFuser imports are conditional on CUDA being available
+if torch.cuda.is_available():
+    from torch._C._nvfuser import DataType  # type: ignore[import]
+
+    _torch_dtype_to_nvfuser_dtype_map = {
+        torch.cdouble: DataType.ComplexDouble,
+        torch.cfloat: DataType.ComplexFloat,
+        torch.double: DataType.Double,
+        torch.float: DataType.Float,
+        torch.half: DataType.Half,
+        torch.bfloat16: DataType.BFloat16,
+        torch.long: DataType.Int,
+        torch.int: DataType.Int32,
+        torch.bool: DataType.Bool,
+    }
+else:
+    _torch_dtype_to_nvfuser_dtype_map = {}
+
+
+def getnvFuserDtype(dtype: torch.dtype):
+    """
+    Translates from torch.dtype to nvFuser's DataType enum
+    """
+    return _torch_dtype_to_nvfuser_dtype_map[dtype]
+
+
 ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
@@ -177,10 +203,12 @@ def validate_shape(shape: Sequence):
 def validate_idx(shape: Sequence, idx: int):
     """
     Validates that idx is a valid idx for the given shape.
+    0 and -1 is a valid index for an empty shape
     """
 
     assert isinstance(idx, int)
-    assert idx >= 0 and idx < len(shape)
+    ndim = len(shape) if len(shape) else 1
+    assert idx >= 0 and idx < ndim
 
 
 def validate_exclusive_idx(shape: Sequence, ex_idx: int):
@@ -194,9 +222,10 @@ def validate_exclusive_idx(shape: Sequence, ex_idx: int):
 
 
 def canonicalize_idx(shape: Sequence, idx: int):
-    validate_idx(shape, idx)
+    ndim = len(shape) if len(shape) else 1
     if idx < 0:
-        idx = idx + len(shape)
+        idx = idx + ndim
+    assert idx >= 0 and idx < ndim
     return idx
 
 
@@ -292,7 +321,7 @@ def check_same_shape(*args):
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 _float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-_complex_dtypes = (torch.complex64, torch.complex128)
+_complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
 
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
@@ -309,6 +338,17 @@ def is_float_dtype(dtype: torch.dtype) -> bool:
 
 def is_complex_dtype(dtype: torch.dtype) -> bool:
     return dtype in _complex_dtypes
+
+
+_complex_to_real_dtype_map = {
+    torch.complex128: torch.float64,
+    torch.complex64: torch.float32,
+    torch.complex32: torch.float16,
+}
+
+
+def corresponding_real_dtype(dtype: torch.dtype) -> torch.dtype:
+    return _complex_to_real_dtype_map[dtype]
 
 
 def dtype_to_type(dtype: torch.dtype) -> type:
@@ -374,8 +414,8 @@ def get_higher_type(a: type, b: type) -> type:
 #   are not ordered relative to each other, the next
 #   higher datatype
 def get_higher_dtype(
-    a: Union[torch.dtype, torch.Tensor, Number],
-    b: Union[torch.dtype, torch.Tensor, Number],
+    a: Union[torch.dtype, TensorLikeType, Number],
+    b: Union[torch.dtype, TensorLikeType, Number],
 ) -> torch.dtype:
     """
     Computes the "lowest" datatype that is weakly
@@ -383,13 +423,13 @@ def get_higher_dtype(
     """
 
     # Type checking
-    assert isinstance(a, (torch.dtype, torch.Tensor, Number))
-    assert isinstance(b, (torch.dtype, torch.Tensor, Number))
+    assert isinstance(a, (torch.dtype, TensorLike, Number))
+    assert isinstance(b, (torch.dtype, TensorLike, Number))
 
-    def _extract_dtype(x: Union[torch.dtype, torch.Tensor, Number]) -> torch.dtype:
+    def _extract_dtype(x: Union[torch.dtype, TensorLikeType, Number]) -> torch.dtype:
         if isinstance(x, torch.dtype):
             return x
-        if isinstance(x, torch.Tensor):
+        if isinstance(x, TensorLike):
             return x.dtype
         if isinstance(x, Number):
             return type_to_dtype(type(x))
