@@ -4,7 +4,7 @@ import warnings
 import functools
 import builtins
 
-from typing import Callable, Dict
+from typing import Any, Callable, Dict, Optional, Union
 
 def embedding_override(self, input):
     return torch.empty(*input.shape, self.weight.shape[-1], device='meta')
@@ -250,7 +250,19 @@ class MetaTracer(torch.fx.Tracer):
             self.orig_fns.add(orig)
 
         try:
-            return super().trace(root, concrete_args)
+            graph = super().trace(root, concrete_args)
+            graph._tracer_extras = {'meta_args': meta_args}
+            return graph
         finally:
             for name, (_, orig) in self.patched_torch_methods.items():
                 setattr(torch, name, orig)
+
+
+def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]],
+                   meta_args : Dict[str, torch.Tensor] = None,
+                   concrete_args: Optional[Dict[str, Any]] = None) -> torch.fx.GraphModule:
+    tracer = MetaTracer()
+    graph = tracer.trace(root, meta_args, concrete_args)
+    name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
+    gm = torch.fx.GraphModule(tracer.root, graph, name)
+    return gm

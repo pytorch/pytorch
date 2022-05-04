@@ -59,6 +59,14 @@ std::vector<c10::Device> getDevicesForTensors(
         devices.emplace_back(deviceIter->second);
         hasMappedDevice = true;
       }
+    } else if (t.device().is_meta()) {
+      const auto deviceIter = deviceMap.find(c10::kMeta);
+      if (deviceIter == deviceMap.end()) {
+        devices.emplace_back(c10::kMeta);
+      } else {
+        devices.emplace_back(deviceIter->second);
+        hasMappedDevice = true;
+      }
     } else {
       const auto deviceIter = deviceMap.find(t.device());
       TORCH_CHECK(
@@ -1372,7 +1380,7 @@ std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
   if (iter == deviceMaps.end()) {
     for (const auto& t : message.tensors()) {
       TORCH_CHECK(
-          t.device().is_cpu(),
+          t.device().is_cpu() || t.device().is_meta(),
           errStr,
           ", but found tensor on device: ",
           t.device());
