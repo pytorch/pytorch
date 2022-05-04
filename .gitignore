@@ -319,3 +319,9 @@ pr.diff
 
 # coverage files
 */**/.coverage.*
+
+# buck generated files
+.buckd/
+.lsp-buck-out/
+.lsp.buckd/
+buck-out/

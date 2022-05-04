@@ -21,11 +21,6 @@ on:
         type: boolean
         default: false
         description: If set, build in debug mode.
-      needs-viable-strict:
-        required: false
-        type: boolean
-        default: false
-        description: checks out viable/strict
 
     outputs:
       docker-image:
@@ -51,8 +46,6 @@ jobs:
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          needs-viable-strict: ${{ inputs.needs-viable-strict }}
 
       - name: Check for new workflows
         run: |
