@@ -833,7 +833,7 @@ def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False) -> None:
             print(f'Merged failed due to: {ex}. Retrying in 60 seconds.')
             time.sleep(60)
         else:
-            return
+            break
 
 def main() -> None:
     args = parse_args()
