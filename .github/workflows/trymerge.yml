@@ -26,10 +26,10 @@ jobs:
       - name: Merge PR
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
-          PR_NUM: ${{ github.event.client_payload.pr_num }}
+          PR_NUM: 3
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FORCE: ${{ github.event.client_payload.force}}
-          ON_GREEN: ${{ github.event.client_payload.on_green}}
+          ON_GREEN: true
         run: |
           if [ -n "${FORCE}" ]; then
             python3 .github/scripts/trymerge.py --force "${PR_NUM}"
