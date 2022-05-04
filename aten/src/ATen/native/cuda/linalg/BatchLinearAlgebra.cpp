@@ -3210,6 +3210,11 @@ c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& B, const Tensor& pivot
 }
 
 static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  // Trivial case. Remove it once `torch.solve` is removed, as linalg.solve already shortcuts this case
+  if (B.numel() == 0) {
+    return;
+  }
+
   auto batch_size = batchCount(B);
   auto m = LU.size(-2);
   auto b2 = B.size(-1);
