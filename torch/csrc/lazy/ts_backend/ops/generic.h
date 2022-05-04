@@ -14,8 +14,6 @@ namespace lazy {
 // Doing the former would limit IR introspection.
 class TORCH_API Generic : public TsNode {
  public:
-  static const OpKind class_op_kind;
-
   Generic(
       OpKind op,
       OpList operands,
