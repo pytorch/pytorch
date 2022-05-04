@@ -44,8 +44,4 @@ def test_attention_grad_grad():
     k = torch.rand((2, 3), dtype=torch.double, requires_grad=True)
     v = torch.rand((2, 4), dtype=torch.double, requires_grad=True)
     input = (q, k, v)
-<<<<<<< HEAD
     assert gradgradcheck(attention_lab, input)
-=======
-    assert gradgradcheck(attention_lab, input, eps=1e-6, atol=1e-4)
->>>>>>> ab3dc431bb (Adding composite implicit version)
