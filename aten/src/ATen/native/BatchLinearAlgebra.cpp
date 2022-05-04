@@ -220,11 +220,11 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
     std::tie(self_broadcast_size, A_broadcast_size) = at::native::_linalg_broadcast_batch_dims(self, A);
 
     // make column major strides for BLAS
-    const auto solution_strides = at::native::contiguous_strides(self_broadcast_size, /*f-contig=*/true);
+    const auto solution_strides = at::native::batched_matrix_contiguous_strides(self_broadcast_size, /*f-contig=*/true);
     set_output_raw_strided(0, self_broadcast_size, solution_strides, self.options(), {});
 
     // make column major strides for BLAS
-    auto clone_A_strides = at::native::contiguous_strides(A_broadcast_size, /*f_contig=*/true);
+    auto clone_A_strides = at::native::batched_matrix_contiguous_strides(A_broadcast_size, /*f_contig=*/true);
     set_output_raw_strided(1, A_broadcast_size, clone_A_strides, A.options(), {});
   } else if (A.layout() == Layout::SparseCsr) {
     // no broadcasting for non-strided layout
@@ -243,7 +243,7 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
   const auto n = sizes.cend()[-1];
 
   // make column major strides for BLAS
-  auto LU_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
+  auto LU_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
   set_output_raw_strided(0, sizes, LU_strides, A.options(), {});
 
   // Set sizes to the size of pivots
@@ -269,7 +269,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   // Prepare sizes for U
   if (compute_uv) {
     sizes.back() = full_matrices ? m : k;
-    auto U_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
+    auto U_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/true);
     set_output_raw_strided(0, sizes, U_strides, A.options(), {});
 
     // Prepare sizes for Vh
@@ -279,7 +279,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
     // We need to distinguish the cuSOLVER case, as the cuSOLVER algorithms we use
     // expect F-contig matrices, but they compute V rather than Vh
     const bool use_cusolver = at::native::svd_uses_cusolver(A);
-    auto Vh_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
+    auto Vh_strides = at::native::batched_matrix_contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
     set_output_raw_strided(2, sizes, Vh_strides, A.options(), {});
   } else {
     set_output_raw_strided(0, {0}, {}, A.options(), {});
