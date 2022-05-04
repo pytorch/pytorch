@@ -1,7 +1,7 @@
 from ._ops import OpOverload
 from typing import Set
 import traceback
-import torch._C as C
+import torch
 
 __all__ = ['Library']
 
@@ -26,12 +26,12 @@ class Library:
     def __init__(self, ns, kind, dispatch_key=""):
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
-        self.m = C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
+        self.m = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
         self.ns = ns
         self._op_impls = set()
         self.kind = kind
         self.dispatch_key = dispatch_key
-        if kind != "IMPL":
+        if kind != "IMPL" and kind != "DEF":
             raise ValueError("Unsupported kind: ", kind)
 
     def __repr__(self):
@@ -64,6 +64,9 @@ class Library:
         self.m.impl(name, dispatch_key, fn)
         _impls.add(key)
         self._op_impls.add(key)
+
+    def define(self, schema):
+        self.m.define(schema)
 
     def __del__(self):
         for key in self._op_impls:
