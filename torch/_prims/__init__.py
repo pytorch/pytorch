@@ -952,7 +952,7 @@ def _slice_meta(
     for x, y, z in zip(limit_indices, a.shape, start_indices):
         if x < 0:
             msg = (
-                "Attempting to slice a tensor with a negative end index of {0}!".format(
+                "Attempting to slice a tensor with a negative stop index of {0}!".format(
                     x
                 )
             )
