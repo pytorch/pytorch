@@ -5319,11 +5319,11 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_multi_rpc_sparse(self):
         self._multi_rpc(True)
 
-    @unittest.skip("TODO")
+    # @unittest.skip("https://github.com/pytorch/pytorch/issues/76850")
     def test_wait_all_workers_sparse(self):
         self._wait_all_workers(heavy_rpc_sparse, build_sparse_tensor())
 
-    @unittest.skip("TODO")
+    # @unittest.skip("https://github.com/pytorch/pytorch/issues/76850")
     def test_wait_all_workers_twice_sparse(self):
         self._wait_all_workers_twice(heavy_rpc_sparse, build_sparse_tensor())
 
@@ -5433,7 +5433,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
             build_sparse_tensor() * 2
         )
 
-    @unittest.skip("TODO")
+    # @unittest.skip("https://github.com/pytorch/pytorch/issues/76850")
     @dist_init
     def test_my_parameter_server_sparse(self):
         self._my_parameter_server(True)
