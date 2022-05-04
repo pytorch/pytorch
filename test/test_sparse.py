@@ -157,7 +157,7 @@ class TestSparse(TestCase):
             self.assertEqual(i, x._indices())
             self.assertEqual(v, x._values())
             self.assertEqual(x.ndimension(), len(with_size))
-            self.assertEqual(x.coalesce()._nnz(), nnz)
+            self.assertEqual(x.coalesce()._nnz(), nnz if x.is_coalesced() else nnz // 2)
             self.assertEqual(list(x.size()), with_size)
 
             # Test .indices() and .values()
@@ -998,6 +998,36 @@ class TestSparse(TestCase):
                 test_shape(1, 10, sizes, d, index)
                 test_shape(len(sizes) // 2, 10, sizes, d, index)
                 test_shape(len(sizes), 10, sizes, d, index)
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_index_select_parallelization(self, device, dtype, coalesced):
+        """
+        Test with sizes that will trigger parallelization (i.e. with sizes
+        that are >= at::internal::GRAIN_SIZE)
+        """
+        def run_test(nnz, size):
+            t_sparse, _, _ = self._gen_sparse(1, nnz, (size,), dtype, device, coalesced)
+            t_dense = t_sparse.to_dense()
+
+            # idx_small to (sort) and (binary) search into t_sparse
+            idx_small = torch.randint(size, (nnz // 2,), device=device)
+            # idx_large to (sort) and (binary) search into idx_large
+            # NOTE: when coalesced=True, the (binary) search will be
+            # done over t_sparse anyway, as it is already sorted.
+            idx_large = torch.randint(size, (nnz * 2,), device=device)
+            for idx in (idx_small, idx_large):
+                res_dense = t_dense.index_select(0, idx)
+                res_sparse = t_sparse.index_select(0, idx)
+                self.assertEqual(res_dense, res_sparse)
+
+        # NOTE: GRAIN_SIZE = 32768
+        # case nnz <= size[d]
+        tlen = 70000  # > 2 * GRAIN_SIZE
+        run_test(tlen, tlen)
+
+        # case nnz > size[d]
+        run_test(tlen, tlen // 2)
 
     @onlyCPU
     @coalescedonoff
