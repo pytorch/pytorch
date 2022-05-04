@@ -1764,6 +1764,8 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
     ``enable_torch_function_mode(self, replace=self.inner)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
+    inner: "TorchFunctionMode"
+
     # Force metaclass to generate constructor at the base of the hierarchy
     def __init__(self):
         pass
