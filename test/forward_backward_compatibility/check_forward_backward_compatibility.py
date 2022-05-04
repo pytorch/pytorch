@@ -121,6 +121,7 @@ ALLOW_LIST = [
     ("aten::_cat", datetime.date(2022, 5, 15)),
     ("aten::nansum", datetime.date(2022, 5, 15)),
     ("aten::zero", datetime.date(2022, 5, 15)),
+    ("aten::_validate_sparse_compressed_tensor_args", datetime.date(2022, 5, 15)),
 ]
 
 ALLOW_LIST_COMPILED = [
