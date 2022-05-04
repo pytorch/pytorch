@@ -13656,9 +13656,9 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
                     supports_one_python_scalar=True,
-                    # Raising integer values to negative values is not causes an error
+                    # Integer types do not support negative exponentes
                     rhs_make_tensor_kwargs=dict(low=0),
-                    # Logarithims of negative values are outside the domain of the function
+                    # Raising negative real numbers to fractional powers is not supported
                     lhs_make_tensor_kwargs=dict(low=0),
                     decorators=(
                         DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05)}),
@@ -13690,7 +13690,7 @@ op_db: List[OpInfo] = [
                     supports_one_python_scalar=True,
                     # Integer types do not support negative exponentes
                     rhs_make_tensor_kwargs=dict(low=0),
-                    # Logarithims of negative values are outside the domain of the function
+                    # Raising negative real numbers to fractional powers is not supported
                     lhs_make_tensor_kwargs=dict(low=0),
                     decorators=(
                         DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05),
