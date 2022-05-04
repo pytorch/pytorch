@@ -468,8 +468,20 @@ void LazyGraphExecutor::SyncTensorsGraph(
   }
 }
 
-void LazyGraphExecutor::MarkStep(const BackendDevice& device) {
+struct MarkStepContext {
+  static bool in_context;
+  MarkStepContext() { in_context = true; }
+  ~MarkStepContext() { in_context = false; }
+};
+
+bool MarkStepContext::in_context = false;
+
+bool LazyGraphExecutor::InMarkStep(){ return MarkStepContext::in_context; }
+
+void LazyGraphExecutor::MarkStep(const BackendDevice& device, const std::vector<std::string>& devices, bool wait) {
   TORCH_LAZY_COUNTER("MarkStep", 1);
+  auto context = MarkStepContext();
+  SyncLiveTensorsGraph(&device, devices, wait);
   DeviceContextArena::Get()->MarkStep(device);
   ScopePusher::ResetScopes();
   g_tls_data.Reset();

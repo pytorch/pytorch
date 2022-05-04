@@ -96,8 +96,7 @@ void initLazyBindings(PyObject* module){
          bool wait) {
         pybind11::gil_scoped_release no_gil;
         auto backend_device = GetDeviceOrCurrent(device_str);
-        torch::lazy::LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&backend_device, devices, wait);
-        torch::lazy::LazyGraphExecutor::Get()->MarkStep(backend_device);
+        torch::lazy::LazyGraphExecutor::Get()->MarkStep(backend_device, devices, wait);
       },
       py::arg("device") = "", py::arg("devices"), py::arg("wait") = true);
   lazy.def(
