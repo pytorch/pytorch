@@ -27,7 +27,6 @@ from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_ignore_context_manager import TestIgnoreContextManager  # noqa: F401
 from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: F401
 from jit.test_op_decompositions import TestOpDecompositions  # noqa: F401
-from jit.test_if_hoisting import TestIfHoisting  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
@@ -101,7 +100,8 @@ from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
     freeze_rng_state, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
+    enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
+    skipIfCrossRef
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -4407,6 +4407,7 @@ def foo(xyz):
         fc.run(scripted.foo.graph)
         fc.run(str(scripted.foo.graph))
 
+    @skipIfCrossRef
     def test_file_line_trace(self):
         def foobar(xyz):
             return torch.neg(xyz)
@@ -4547,6 +4548,7 @@ def foo(xyz):
             debug_files = filter(lambda f: f.endswith('.debug_pkl'), files)
             debug_files = (archive.open(f) for f in debug_files)
             debug_files = (pickle.load(f) for f in debug_files)
+            debug_files = (f[2] for f in debug_files)
             return list(debug_files)
 
         debug_files = debug_records_from_mod(ft3)
@@ -15083,6 +15085,22 @@ dedent """
         # print(jit_out / py_out - 1)
         self.assertEqual(jit_out, py_out, atol=5e-4, rtol=1e-4)
 
+    def test_torchscript_multi_head_attn_fast_path(self):
+        src_l = 3
+        bsz = 5
+        embed_size = 8
+        nhead = 2
+        multi_head_attn = torch.nn.MultiheadAttention(embed_size, nhead, batch_first=True)
+        multi_head_attn = multi_head_attn.eval()
+
+        query = key = value = torch.rand((bsz, src_l, embed_size))
+
+        with torch.no_grad():
+            py_out = multi_head_attn(query, key, value)
+            mha = torch.jit.script(multi_head_attn)
+            jit_out = mha(query, key, value)
+        torch.testing.assert_close(jit_out, py_out)
+
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_scriptmodule_multi_head_attn_cuda(self):
 
@@ -15512,7 +15530,7 @@ dedent """
         self.assertEqual(m.int64_min, imported.int64_min)
 
     def test_script_scope(self):
-        scripted = torch.jit.script(torch.nn.functional.pad)
+        scripted = torch.jit.script(torch.nn.functional.triplet_margin_loss)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
