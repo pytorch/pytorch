@@ -489,7 +489,7 @@ def _check_trace(
                         orig = orig.to_dense()
                     if ref.is_mkldnn:
                         ref = ref.to_dense()
-                    if ref.is_complex():
+                    if ref.is_complex() or orig.is_complex():
                         torch.testing.assert_close(
                             orig.to(torch.cdouble),
                             ref.to(torch.cdouble),
