@@ -2,7 +2,6 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
-#include <ATen/SparseCsrTensorUtils.h>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -52,7 +51,6 @@ Tensor _to_copy(
   // memory_format is handled separately due to MemoryFormat::Preserve logic
   options = self.options().merge_in(options).memory_format(c10::nullopt);
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
-
   // TODO: Use the dispatcher for this.
   // Currently there are unenumerated extensibility issues preventing this.
   if (self.is_sparse_csr()) {
@@ -101,6 +99,7 @@ Tensor _to_copy(
         self.layout(),
         new_values.device());
   }
+
   bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
                   (options.layout() == c10::kStrided));
 
@@ -112,13 +111,13 @@ Tensor _to_copy(
         at::QuantizerPtr quantizer = r.quantizer();
         r.copy_(self, non_blocking);
         set_quantizer_(r, quantizer);
-        return r;
+      } else {
+        r = at::empty_strided(
+            self.sizes(),
+            self.strides(),
+            options.pinned_memory(pin_out));
+        r.copy_(self, non_blocking);
       }
-      r = at::empty_strided(
-          self.sizes(),
-          self.strides(),
-          options.pinned_memory(pin_out));
-      r.copy_(self, non_blocking);
       return r;
     } else {
       memory_format = self.suggest_memory_format();
@@ -221,10 +220,10 @@ Tensor _autocast_to_full_precision(const Tensor& self, bool cuda_enabled, bool c
 
 Tensor to(
   const Tensor& self,
-  c10::optional<ScalarType> dtype,
-  c10::optional<Layout> layout,
-  c10::optional<Device> device,
-  c10::optional<bool> pin_memory,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
   bool non_blocking,
   bool copy,
   c10::optional<c10::MemoryFormat> optional_memory_format
@@ -252,12 +251,7 @@ Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking
       optional_memory_format);
 }
 
-Tensor to(
-    const Tensor& self,
-    ScalarType dtype,
-    bool non_blocking,
-    bool copy,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   return to_impl(
       self,
       dtype,
