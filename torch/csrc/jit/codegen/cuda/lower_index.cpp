@@ -38,6 +38,17 @@ void IndexLowering::pushBack(Expr* expr) {
   }
 }
 
+Expr* IndexLowering::back() const {
+  if (active_scope_ == nullptr) {
+    TORCH_INTERNAL_ASSERT(
+        !lowered_exprs_.empty(), "IndexLowering::back: empty scope.");
+    return lowered_exprs_.back();
+  }
+  TORCH_INTERNAL_ASSERT(
+      !active_scope_->empty(), "IndexLowering::back: empty scope.");
+  return active_scope_->exprs().back();
+}
+
 void IndexLowering::insertAtTopLevel(Expr* expr) {
   TORCH_INTERNAL_ASSERT(!lowered_exprs_.empty());
   lowered_exprs_.insert(lowered_exprs_.end() - 1, expr);
@@ -85,6 +96,7 @@ void IndexLowering::handle(const UnaryOp* uop) {
   const auto in = lowerSrcIndex(uop->in(), uop->out());
   const auto out = lowerDstIndex(uop->out());
   pushBack(IrBuilder::create<UnaryOp>(uop->getUnaryOpType(), out, in));
+  GpuLower::current()->propagateExprInfo(uop, back());
 }
 
 void IndexLowering::handle(const BinaryOp* bop) {
@@ -92,6 +104,7 @@ void IndexLowering::handle(const BinaryOp* bop) {
   const auto rhs = lowerSrcIndex(bop->rhs(), bop->out());
   const auto out = lowerDstIndex(bop->out());
   pushBack(IrBuilder::create<BinaryOp>(bop->getBinaryOpType(), out, lhs, rhs));
+  GpuLower::current()->propagateExprInfo(bop, back());
 }
 
 void IndexLowering::handle(const TernaryOp* top) {
@@ -101,6 +114,7 @@ void IndexLowering::handle(const TernaryOp* top) {
   const auto out = lowerDstIndex(top->out());
   pushBack(IrBuilder::create<TernaryOp>(
       top->getTernaryOpType(), out, in1, in2, in3));
+  GpuLower::current()->propagateExprInfo(top, back());
 }
 
 void IndexLowering::handle(const ViewAsScalar* uop) {
@@ -114,6 +128,7 @@ void IndexLowering::handle(const ViewAsScalar* uop) {
       Val* index = loop->index();
       pushBack(
           IrBuilder::create<ViewAsScalar>(out, in, uop->vector_id(), index));
+      GpuLower::current()->propagateExprInfo(uop, back());
       return;
     }
   }
@@ -200,6 +215,7 @@ void IndexLowering::handle(const ReductionOp* rop) {
   } else {
     pushBack(
         IrBuilder::create<BinaryOp>(rop->getReductionOpType(), out, out, in));
+    GpuLower::current()->propagateExprInfo(rop, back());
   }
 }
 
@@ -219,6 +235,7 @@ void IndexLowering::handleBlockReduction(
   }
 
   pushBack(indexed_rop);
+  GpuLower::current()->propagateExprInfo(rop, back());
 }
 
 void IndexLowering::handleGridReduction(
@@ -288,6 +305,7 @@ void IndexLowering::handleGridReduction(
   pushBack(reduce_buffer);
   pushBack(sync_buffer);
   pushBack(grid_reduction);
+  GpuLower::current()->propagateExprInfo(rop, back());
 
   if (rop->isAllreduce()) {
     // When using the fused reduction, allocate the reduction object at
@@ -351,6 +369,7 @@ void IndexLowering::handleBlockReduction(
   }
 
   pushBack(indexed_rop);
+  GpuLower::current()->propagateExprInfo(grouped_rop, back());
 }
 
 void IndexLowering::handleGridReduction(
@@ -430,6 +449,7 @@ void IndexLowering::handleGridReduction(
   }
   pushBack(sync_buffer);
   pushBack(grid_reduction);
+  GpuLower::current()->propagateExprInfo(grouped_rop, back());
 
   if (grouped_rop->isAllreduce()) {
     auto fused_reduction_alloc_reduction =
@@ -500,12 +520,14 @@ void IndexLowering::handle(const WelfordOp* wop) {
   // Serial welford
   if (!has_block_reduce && !has_grid_reduce) {
     pushBack(indexed_wop);
+    GpuLower::current()->propagateExprInfo(wop, back());
     return;
   }
 
   // Block-only welford
   if (!has_grid_reduce) {
     pushBack(indexed_wop);
+    GpuLower::current()->propagateExprInfo(wop, back());
     return;
   }
 
@@ -566,6 +588,7 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
 
   if (block_reduce_separated) {
     pushBack(indexed_wop);
+    GpuLower::current()->propagateExprInfo(indexed_wop, back());
   }
 
   pushBack(out_var_buffer);
@@ -573,6 +596,7 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
   pushBack(out_N_buffer);
   pushBack(sync_buffer);
   pushBack(grid_welford);
+  GpuLower::current()->propagateExprInfo(indexed_wop, back());
 
   if (indexed_wop->isAllreduce()) {
     // When using the fused reduction, allocate the reduction object at
@@ -590,6 +614,7 @@ void IndexLowering::handle(const MmaOp* mma) {
   auto mma_indexed =
       IrBuilder::create<MmaOp>(out, a, b, mma->init(), mma->options());
   pushBack(mma_indexed);
+  GpuLower::current()->propagateExprInfo(mma, back());
 }
 
 void IndexLowering::handle(const BroadcastOp* bop) {
@@ -616,6 +641,7 @@ void IndexLowering::handle(const BroadcastOp* bop) {
   const bool grid_broadcast_needed = block_x || block_y || block_z;
   if (!grid_broadcast_needed) {
     pushBack(indexed_expr);
+    GpuLower::current()->propagateExprInfo(bop, back());
     return;
   }
 
@@ -637,6 +663,7 @@ void IndexLowering::handle(const BroadcastOp* bop) {
   pushBack(broadcast_buffer);
   pushBack(sync_buffer);
   pushBack(grid_broadcast);
+  GpuLower::current()->propagateExprInfo(bop, back());
 }
 
 void IndexLowering::handle(const kir::Allocate* allocate) {

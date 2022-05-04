@@ -365,6 +365,10 @@ bool GpuLower::hasCurrent() {
   return active_gpu_lower != nullptr;
 }
 
+void GpuLower::propagateExprInfo(const Expr* old_expr, const Expr* new_expr) {
+  pred_elimination_.propagateRemovalInfo(old_expr, new_expr);
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

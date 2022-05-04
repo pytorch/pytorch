@@ -164,6 +164,19 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return sync_map_;
   }
 
+  // This is an interface to propagate information after expression
+  //  replacement on the kernel IR. E.g.:
+  //    for ...
+  //       c = a + b   (expr 0)
+  //  after any pass that does replacement:
+  //    for ...
+  //       c1 = a1 + b1 (expr1)
+  //  The previous analysis that was performed on expr0 might still
+  //    be valid on expr1 but that info would be lost after replacement.
+  //  This function provides an interface to manually update the info
+  //    in any pass that performs replacement.
+  void propagateExprInfo(const Expr* old_expr, const Expr* new_expr);
+
  private:
   void lower(Fusion* fusion, DataType index_type);
 

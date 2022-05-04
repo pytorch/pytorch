@@ -660,6 +660,14 @@ bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
   return false;
 }
 
+void PredicateElimination::propagateRemovalInfo(
+    const Expr* from,
+    const Expr* to) {
+  if (non_predicated_exprs_.count(from)) {
+    non_predicated_exprs_.insert(to);
+  }
+}
+
 Val* PredicateElimination::getInitValue(TensorView* tv) const {
   auto it = init_value_map_.find(tv);
   if (it == init_value_map_.end()) {

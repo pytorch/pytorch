@@ -22413,6 +22413,66 @@ TEST_F(NVFuserTest, FusionSerialSmemWriteParallelRead2_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1, t2}, {ref}, __LINE__, __FILE__);
 }
 
+// Test predicate removal on reg-to-reg expressions
+TEST_F(NVFuserTest, FusionPredRemovalCheck_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = set(tv0);
+  TensorView* tv2 = set(tv1);
+  TensorView* tv3 = set(tv2);
+  TensorView* tv4 = set(tv3);
+
+  fusion.addOutput(tv4);
+  tv4->split(1, 4);
+  tv0->computeAt(tv4, -2);
+  tv3->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  class PredicateRemovalChecker : public kir::IrVisitor {
+   public:
+    using kir::IrVisitor::handle;
+
+   private:
+    void handle(UnaryOp* uop) final {
+      assertOnLocalToLocal(uop);
+    }
+
+    // Utility to assert any local-to-local expr is only trivially predicated.
+    void assertOnLocalToLocal(Expr* expr) {
+      bool is_local = true;
+      for (auto in : ir_utils::filterByType<kir::TensorIndex>(expr->inputs())) {
+        if (in->view()->getMemoryType() != MemoryType::Local) {
+          is_local = false;
+        }
+      }
+      for (auto in :
+           ir_utils::filterByType<kir::TensorIndex>(expr->outputs())) {
+        if (in->view()->getMemoryType() != MemoryType::Local) {
+          is_local = false;
+        }
+      }
+
+      if (is_local) {
+        if (auto ite = dynamic_cast<kir::IfThenElse*>(scope_exprs_.back())) {
+          TORCH_INTERNAL_ASSERT(
+              ite->predicate()->value()->isConst(),
+              "redundant predicate on: ",
+              expr);
+        }
+      }
+    }
+
+   private:
+    bool within_ite_ = false;
+  } pred_checker;
+
+  GpuLower gpulw(&fusion);
+  pred_checker.handle(gpulw.kernel()->topLevelExprs());
+}
+
 TEST_F(NVFuserTest, FusionPropagateParallelTypesToSiblings_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

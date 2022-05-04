@@ -26,6 +26,18 @@ class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
   //! Dump to string for debugging
   std::string toString() const;
 
+  // A utility to set removal info of `to` the same as `from`.
+  //  See issue #1641
+  // We build predicate info before lowering but more expressions
+  //  are created during lowering that this class also need to
+  //  keep track of to make sure correct predicate removal is
+  //  applied.
+  // This utility is a quick patch for the missing information
+  //  since it might be better just to recompute predicate info
+  //  if all expressions were mutated, but that'd take much more
+  //  global info to reliably track.
+  void propagateRemovalInfo(const Expr* from, const Expr* to);
+
  private:
   using IterVisitor::handle;
 

@@ -30,6 +30,11 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
 
   void pushBack(Expr*);
 
+  // Return the most recently inserted
+  //  expression in the current active
+  //  scope or global scope.
+  Expr* back() const;
+
   // Insert an expression before the current top-level expression.
   void insertAtTopLevel(Expr* expr);
 
