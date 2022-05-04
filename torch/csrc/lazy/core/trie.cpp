@@ -30,13 +30,13 @@ TrieCache* TrieCache::Get() {
   return trie;
 }
 
-TrieCache::TrieCache() : root_(std::make_unique<TrieNode>()), current_(root_.get()) {}
+TrieCache::TrieCache() : root_(std::make_shared<TrieNode>()), current_(root_.get()) {}
 
 TrieNode* TrieCache::Current() const {
   return current_;
 }
 
-void TrieCache::SetCurrent(std::deque<std::unique_ptr<TrieNode>>::iterator iter) {
+void TrieCache::SetCurrent(std::deque<std::shared_ptr<TrieNode>>::iterator iter) {
   auto& successors = current_->successors;
   // Update current_ before iter gets destroyed
   current_ = (*iter).get();
@@ -56,7 +56,7 @@ void TrieCache::Insert(NodePtr ir_node) {
   if (!current_->successors.empty()) {
     TORCH_LAZY_COUNTER("TrieForked", 1);
   }
-  auto new_node = std::make_unique<TrieNode>(std::move(ir_node));
+  auto new_node = std::make_shared<TrieNode>(std::move(ir_node));
   current_->successors.push_front(std::move(new_node));
   // Update current_ to the newly inserted node
   current_ = current_->successors.front().get();
@@ -64,7 +64,7 @@ void TrieCache::Insert(NodePtr ir_node) {
 
 void TrieCache::Clear() {
   // Clear at the root level should be sufficient because all the nodes
-  // are created as unique_ptr.
+  // are created as shared_ptr.
   root_->successors.clear();
 }
 
