@@ -2267,11 +2267,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::is_mlc(Tensor a) -> bool"),
+        TORCH_SELECTIVE_SCHEMA("prim::is_mps(Tensor a) -> bool"),
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
-          push(stack, a.is_mlc());
+          push(stack, a.is_mps());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
