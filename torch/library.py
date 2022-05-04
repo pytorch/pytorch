@@ -1,7 +1,7 @@
 from ._ops import OpOverload
 from typing import Set
 import traceback
-import torch._C as C
+import torch
 
 __all__ = ['extend_library', 'create_library']
 
@@ -21,10 +21,10 @@ _impls: Set[str] = set()
 
 class _Library:
     # kind can be DEF, IMPL
-    def __init__(self, kind, ns, dispatch_key="", message=""):
+    def __init__(self, kind, ns, dispatch_key=""):
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
-        self.m = C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
+        self.m = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
         self.ns = ns
         self._op_impls = set()
         self.kind = kind
@@ -32,6 +32,7 @@ class _Library:
         if kind == "IMPL":
             _impls_for_existing_libraries[id(self)] = self
         elif kind == "DEF":
+            getattr(torch.ops, ns)
             _libraries[id(self)] = self
         else:
             raise ValueError("Unsupported kind: ", kind)
@@ -67,12 +68,16 @@ class _Library:
         _impls.add(key)
         self._op_impls.add(key)
 
+    def define(self, schema):
+        self.m.define(schema)
+
     # Libraries can be removed at any point by explicitly calling .remove()
     def remove(self):
         for key in self._op_impls:
             _impls.remove(key)
         if self.kind == "DEF":
-            del _libraries[self.ns]
+            del _libraries[id(self)]
+            torch.ops.__dict__.pop(self.ns)
         else:
             del _impls_for_existing_libraries[id(self)]
         del self.m
@@ -96,4 +101,4 @@ def extend_library(ns, dispatch_key=""):
     return _Library("IMPL", ns, dispatch_key)
 
 def create_library(ns):
-    return _Library("DEF", ns, '', message='')
+    return _Library("DEF", ns, "")

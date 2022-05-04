@@ -114,15 +114,14 @@ class TestPythonRegistration(TestCase):
             else:
                 return args[0]
 
-        torch.ops.foo.sum.default.impl(my_lib2, "ZeroTensor", my_sum_zt)
+        my_lib2.impl(torch.ops.foo.sum.default, my_sum_zt, "ZeroTensor")
+
         y = torch._efficientzerotensor(3)
         self.assertTrue(torch.ops.foo.sum(y)._is_zerotensor())
         self.assertEqual(torch.ops.foo.sum(x), x)
 
-        my_lib1.remove()
         my_lib2.remove()
-        self.assertFalse(torch.ops.foo.sum(y)._is_zerotensor())
-        self.assertEqual(torch.ops.foo.sum(x), torch.tensor(3))
+        my_lib1.remove()
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
