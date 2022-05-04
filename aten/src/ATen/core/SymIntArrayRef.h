@@ -174,6 +174,7 @@ class SymIntArrayRef final {
 };
 
 TORCH_API at::IntArrayRef expectIntArrayRef(c10::SymIntArrayRef ar);
+TORCH_API c10::SymIntArrayRef toSymIntArrayRef(at::IntArrayRef ar);
 
 std::ostream& operator<<(std::ostream& out, const c10::SymIntArrayRef& list);
 

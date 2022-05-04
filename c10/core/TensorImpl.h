@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include "ATen/core/SymIntArrayRef.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -1243,7 +1244,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "set_sizes_contiguous ",
         err_msg_tensor_metadata_change_not_allowed);
 
-    sizes_and_strides_.set_sizes(new_size);
+    sizes_and_strides_.set_sizes(toSymIntArrayRef(new_size));
 
     refresh_numel();
     empty_tensor_restride(MemoryFormat::Contiguous);
@@ -1270,7 +1271,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         ")");
     const auto new_dim = new_size.size();
 
-    sizes_and_strides_.set_sizes(new_size);
+    sizes_and_strides_.set_sizes(toSymIntArrayRef(new_size));
 
     if (new_dim > 0) {
       for (size_t dim = new_dim - 1;; dim--) {
@@ -1286,7 +1287,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             // Keep stride monotonically increasing to match NumPy.
             sizes_and_strides_.stride_at_unchecked(dim) =
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
+                    sizes_and_strides_.size_at_unchecked(dim + 1).expect_int(), 1) *
                 sizes_and_strides_.stride_at_unchecked(dim + 1);
           }
         }
@@ -1667,8 +1668,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         is_contiguous_,
         "Right now Extend is only supported for contiguous Tensor.");
     using SizesVector = SmallVector<int64_t, 5>;
+    auto tmp_int_arr_ref = expectIntArrayRef(sizes_and_strides_.sizes_arrayref());
     SizesVector newDims(
-        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+        tmp_int_arr_ref.begin(), tmp_int_arr_ref.end());
     newDims[0] += num;
     if (!storage_.data()) {
       Resize(newDims);
@@ -1677,16 +1679,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     const auto newNumel =
         c10::multiply_integers(newDims.begin(), newDims.end());
     if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
-      sizes_and_strides_.set_sizes(newDims);
+      sizes_and_strides_.set_sizes(toSymIntArrayRef(newDims));
       numel_ = newNumel;
       return;
     }
+    tmp_int_arr_ref = expectIntArrayRef(sizes_and_strides_.sizes_arrayref());
     SizesVector newCapacity(
-        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+        tmp_int_arr_ref.begin(), tmp_int_arr_ref.end());
     newCapacity[0] = std::max(
         newDims[0],
         static_cast<int64_t>(std::ceil(
-            sizes_and_strides_.size_at_unchecked(0) * (1 + growthPct / 100))));
+            sizes_and_strides_.size_at_unchecked(0).expect_int() * (1 + growthPct / 100))));
     auto oldData = std::move(storage_.data_ptr());
     auto oldSize = numel_;
     Resize(newCapacity);
@@ -1714,7 +1717,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           true); // non-blocking
     }
     reserved_ = true;
-    sizes_and_strides_.set_sizes(newDims);
+    sizes_and_strides_.set_sizes(toSymIntArrayRef(newDims));
     numel_ = newNumel;
   }
 
@@ -1732,8 +1735,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(
         storage_.unique(), "Can't call ReserveSpace on shared storage.");
     // TODO: eliminate newCapacity.
+    auto tmp_int_arry_ref = expectIntArrayRef(sizes_and_strides_.sizes_arrayref());
     SmallVector<int64_t, 5> newCapacity(
-        sizes_and_strides_.sizes_begin(), sizes_and_strides_.sizes_end());
+        tmp_int_arry_ref.begin(), tmp_int_arry_ref.end());
     newCapacity[0] = outer_dim;
     auto newNumel = c10::multiply_integers(newCapacity);
     if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
@@ -1747,7 +1751,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     Resize(newCapacity);
     // Allocate new memory but don't copy over the data
     raw_mutable_data(data_type_);
-    sizes_and_strides_.set_sizes(oldDims);
+    sizes_and_strides_.set_sizes(toSymIntArrayRef(oldDims));
     numel_ = oldSize;
     reserved_ = true;
   }
@@ -1803,7 +1807,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         " The old caffe2 mixes Reshape and Resize but this behavior has "
         "been changed. If you find this error, most likely you will need "
         "to change corresponding code from Reshape to Resize.");
-    sizes_and_strides_.set_sizes(dims);
+    sizes_and_strides_.set_sizes(toSymIntArrayRef(dims));
     empty_tensor_restride(MemoryFormat::Contiguous);
   }
 
@@ -2037,7 +2041,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             sizes_and_strides_.stride_at_unchecked(i) =
                 sizes_and_strides_.stride_at_unchecked(i + 1) *
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1), 1);
+                    sizes_and_strides_.size_at_unchecked(i + 1).expect_int(), 1);
           }
         }
         break;

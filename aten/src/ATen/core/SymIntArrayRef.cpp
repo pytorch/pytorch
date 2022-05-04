@@ -11,6 +11,10 @@ at::IntArrayRef expectIntArrayRef(c10::SymIntArrayRef ar) {
   return IntArrayRef(reinterpret_cast<const int64_t*>(ar.data()), ar.size());
 }
 
+c10::SymIntArrayRef toSymIntArrayRef(at::IntArrayRef ar) {
+  return c10::SymIntArrayRef(reinterpret_cast<const c10::SymInt*>(ar.data()), ar.size());
+}
+
 std::ostream& operator<<(std::ostream& os, SymInt s) {
   os << "SymInt(" << s.data() << ")";
   return os;

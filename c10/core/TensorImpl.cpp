@@ -6,6 +6,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include "ATen/core/SymIntArrayRef.h"
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -183,7 +184,8 @@ TensorImpl::TensorImpl(
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 IntArrayRef TensorImpl::sizes() const {
-  return sizes_and_strides_.sizes_arrayref();
+  // TODO: fold this check into a policy somehow
+  return expectIntArrayRef(sizes_and_strides_.sizes_arrayref());
 }
 #endif
 
@@ -219,7 +221,7 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+    const auto size_d = sizes_and_strides_.size_at_unchecked(d).expect_int();
     if (size_d != 1) {
       if (sizes_and_strides_.stride_at_unchecked(d) == z) {
         z *= size_d;
@@ -239,7 +241,7 @@ bool TensorImpl::compute_channels_last_contiguous_2d() const {
     case 4: {
       int64_t expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d = sizes_and_strides_.size_at_unchecked(d).expect_int();
         if (size_d != 1) {
           if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
             return false;
@@ -265,7 +267,7 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
     case 5: {
       int64_t expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d = sizes_and_strides_.size_at_unchecked(d).expect_int();
         if (size_d != 1) {
           if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
             return false;
@@ -296,7 +298,7 @@ bool TensorImpl::compute_strides_like_channels_last_3d() const {
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (dim() == 1) {
-    return sizes_and_strides_.size_at_unchecked(0) < 2 ||
+    return sizes_and_strides_.size_at_unchecked(0).expect_int() < 2 ||
         sizes_and_strides_.stride_at_unchecked(0) == 1;
   }
   SmallVector<int64_t, 5> perm;
@@ -306,9 +308,9 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   }
   // Sort by strides, leaving 0 and 1 sized dims at the end of the array
   std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
-    if (sizes_and_strides_.size_at_unchecked(a) < 2) {
+    if (sizes_and_strides_.size_at_unchecked(a).expect_int() < 2) {
       return false;
-    } else if (sizes_and_strides_.size_at_unchecked(b) < 2) {
+    } else if (sizes_and_strides_.size_at_unchecked(b).expect_int() < 2) {
       return true;
     }
     return sizes_and_strides_.stride_at_unchecked(a) <
@@ -316,7 +318,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   });
   auto require_stride = 1;
   for (const auto i : c10::irange(dim())) {
-    const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
+    const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]).expect_int();
     if (size_perm_i < 2) {
       return true;
     }
@@ -356,7 +358,7 @@ int64_t TensorImpl::dim() const {
 
 int64_t TensorImpl::size(int64_t d) const {
   d = at::maybe_wrap_dim(d, dim(), false);
-  return sizes_and_strides_.size_at_unchecked(d);
+  return sizes_and_strides_.size_at_unchecked(d).expect_int();
 }
 
 int64_t TensorImpl::stride(int64_t d) const {

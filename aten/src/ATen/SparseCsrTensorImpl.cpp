@@ -92,7 +92,7 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
   col_indices_values_size.push_back(std::min<int64_t>(nnz, rows*cols));
   col_indices_.resize_(col_indices_values_size);
   values_.resize_(col_indices_values_size);
-  sizes_and_strides_.set_sizes(size);
+  sizes_and_strides_.set_sizes(toSymIntArrayRef(size));
 }
 
 void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
@@ -109,7 +109,7 @@ void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
       src.values(),
       src.values().options(),
       src.values().suggest_memory_format());
-  sizes_and_strides_.set_sizes(src.sizes());
+  sizes_and_strides_.set_sizes(toSymIntArrayRef(src.sizes()));
   refresh_numel();
 }
 
@@ -132,7 +132,7 @@ void SparseCsrTensorImpl::set_member_tensors(
   col_indices_ = col_indices;
   values_ = values;
 
-  sizes_and_strides_.set_sizes(size);
+  sizes_and_strides_.set_sizes(toSymIntArrayRef(size));
   refresh_numel();
 }
 

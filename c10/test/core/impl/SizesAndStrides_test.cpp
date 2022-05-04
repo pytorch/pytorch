@@ -20,13 +20,13 @@ static void checkData(
 
   int idx = 0;
   for (auto x : sizes) {
-    EXPECT_EQ(sz.size_at_unchecked(idx), x) << "index: " << idx;
+    EXPECT_EQ(sz.size_at_unchecked(idx).expect_int(), x) << "index: " << idx;
     EXPECT_EQ(sz.size_at(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.sizes_data()[idx], x) << "index: " << idx;
-    EXPECT_EQ(*(sz.sizes_begin() + idx), x) << "index: " << idx;
+    EXPECT_EQ(*(reinterpret_cast<const int64_t*>(sz.sizes_begin()) + idx), x) << "index: " << idx;
     idx++;
   }
-  EXPECT_EQ(sz.sizes_arrayref(), sizes);
+  EXPECT_EQ(c10::expectIntArrayRef(sz.sizes_arrayref()), sizes);
 
   idx = 0;
   for (auto x : strides) {
@@ -48,7 +48,7 @@ TEST(SizesAndStridesTest, DefaultConstructor) {
 
 TEST(SizesAndStridesTest, SetSizes) {
   SizesAndStrides sz;
-  sz.set_sizes({5, 6, 7, 8});
+  sz.set_sizes(toSymIntArrayRef({5, 6, 7, 8}));
   checkData(sz, {5, 6, 7, 8}, {1, 0, 0, 0});
 }
 

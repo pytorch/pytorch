@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cstdint>
+#include "ATen/core/SymIntArrayRef.h"
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
+#include <ATen/core/SymInt.h>
 
 #define C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE 5
 
@@ -25,8 +27,8 @@ class C10_API SizesAndStrides {
  public:
   // TODO: different iterator types for sizes & strides to prevent
   // mixing the two accidentally.
-  using sizes_iterator = int64_t*;
-  using sizes_const_iterator = const int64_t*;
+  using sizes_iterator = c10::SymInt*;
+  using sizes_const_iterator = const c10::SymInt*;
   using strides_iterator = int64_t*;
   using strides_const_iterator = const int64_t*;
 
@@ -111,19 +113,19 @@ class C10_API SizesAndStrides {
     return size_;
   }
 
-  const int64_t* sizes_data() const noexcept {
+  const c10::SymInt* sizes_data() const noexcept {
     if (C10_LIKELY(isInline())) {
-      return &inlineStorage_[0];
+      return reinterpret_cast<const c10::SymInt*>(&inlineStorage_[0]);
     } else {
-      return &outOfLineStorage_[0];
+      return reinterpret_cast<const c10::SymInt*>(&outOfLineStorage_[0]);
     }
   }
 
-  int64_t* sizes_data() noexcept {
+  c10::SymInt* sizes_data() noexcept {
     if (C10_LIKELY(isInline())) {
-      return &inlineStorage_[0];
+      return reinterpret_cast<c10::SymInt*>(&inlineStorage_[0]);
     } else {
-      return &outOfLineStorage_[0];
+      return reinterpret_cast<c10::SymInt*>(&outOfLineStorage_[0]);
     }
   }
 
@@ -143,11 +145,11 @@ class C10_API SizesAndStrides {
     return sizes_begin() + size();
   }
 
-  IntArrayRef sizes_arrayref() const noexcept {
-    return IntArrayRef{sizes_data(), size()};
+  c10::SymIntArrayRef sizes_arrayref() const noexcept {
+    return SymIntArrayRef{sizes_data(), size()};
   }
 
-  void set_sizes(IntArrayRef newSizes) {
+  void set_sizes(c10::SymIntArrayRef newSizes) {
     resize(newSizes.size());
     std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
@@ -197,21 +199,21 @@ class C10_API SizesAndStrides {
   }
 
   // Size accessors.
-  int64_t size_at(size_t idx) const noexcept {
+  c10::SymInt size_at(size_t idx) const noexcept {
     assert(idx < size());
     return sizes_data()[idx];
   }
 
-  int64_t& size_at(size_t idx) noexcept {
+  c10::SymInt& size_at(size_t idx) noexcept {
     assert(idx < size());
     return sizes_data()[idx];
   }
 
-  int64_t size_at_unchecked(size_t idx) const noexcept {
+  c10::SymInt size_at_unchecked(size_t idx) const noexcept {
     return sizes_data()[idx];
   }
 
-  int64_t& size_at_unchecked(size_t idx) noexcept {
+  c10::SymInt& size_at_unchecked(size_t idx) noexcept {
     return sizes_data()[idx];
   }
 
@@ -295,7 +297,8 @@ class C10_API SizesAndStrides {
   size_t size_;
   union {
     int64_t* outOfLineStorage_;
-    int64_t inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * 2]{};
+    // TODO: we need to initialize this
+    int64_t inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * 2];
   };
 };
 

@@ -146,7 +146,7 @@ void LTCTensorImpl::setup_size_properties() {
     auto shape = tensor_->shape();
     // We can't call refresh_numel() given we override sizes() too.
     numel_ = shape.Get().numel();
-    sizes_and_strides_.set_sizes(shape.Get().sizes());
+    sizes_and_strides_.set_sizes(toSymIntArrayRef(shape.Get().sizes()));
     // We can't call empty_tensor_restride(c10::MemoryFormat::Contiguous) given we override sizes() too.
     std::vector<int64_t> updated_strides;
     updated_strides = ComputeArrayStrides(shape.Get().sizes());

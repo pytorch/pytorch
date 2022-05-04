@@ -3,6 +3,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
+#include "ATen/core/SymIntArrayRef.h"
 
 namespace at {
 
@@ -30,7 +31,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
         opaque_handle_(std::move(opaque_handle)) {
     set_storage_access_should_throw();
     set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
-    sizes_and_strides_.set_sizes(sizes);
+    sizes_and_strides_.set_sizes(toSymIntArrayRef(sizes));
     refresh_numel();
     is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
   }
@@ -77,7 +78,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-        key_set(), dtype(), device(), opaque_handle_, sizes_and_strides_.sizes_arrayref());
+        key_set(), dtype(), device(), opaque_handle_, expectIntArrayRef(sizes_and_strides_.sizes_arrayref()));
     copy_tensor_metadata(
         /*src_opaque_impl=*/this,
         /*dest_opaque_impl=*/impl.get(),
@@ -97,7 +98,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-        key_set(), dtype(), device(), opaque_handle_, sizes_and_strides_.sizes_arrayref());
+        key_set(), dtype(), device(), opaque_handle_, expectIntArrayRef(sizes_and_strides_.sizes_arrayref()));
     copy_tensor_metadata(
         /*src_opaque_impl=*/this,
         /*dest_opaque_impl=*/impl.get(),
