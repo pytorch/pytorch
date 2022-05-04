@@ -13622,6 +13622,9 @@ op_db: List[OpInfo] = [
                     decorators=(
                         DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05)}),
                                      'TestBinaryUfuncs', 'test_reference_numerics'),
+                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1.3e-05),
+                                                        torch.complex128: tol(atol=1e-4, rtol=1.3e-05)}),
+                                     'TestBinaryUfuncs', 'test_scalar_support'),
                     ),
                     skips=(
                         # Skipping integers because they are being raised to negative powers causing an error
