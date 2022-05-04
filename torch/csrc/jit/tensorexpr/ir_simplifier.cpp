@@ -2966,10 +2966,10 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
       "(SimplifierUnderContext) after simplify: ",
       std::to_string(simplified_cmp_select_expr));
 
-  analysis::Bound lhs_bound;
-  analysis::Bound rhs_bound;
-  auto lhs_has_bound = getBoundInfo(simplified_lhs, &lhs_bound);
-  auto rhs_has_bound = getBoundInfo(simplified_rhs, &rhs_bound);
+  BoundInfo lhs_bound;
+  BoundInfo rhs_bound;
+  auto lhs_has_bound = getBoundInfo(simplified_lhs, lhs_bound);
+  auto rhs_has_bound = getBoundInfo(simplified_rhs, rhs_bound);
   if (!lhs_has_bound || !rhs_has_bound) {
     GRAPH_DEBUG(
         "(SimplifierUnderContext) Final: ",
@@ -2978,7 +2978,10 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
   }
 
   analysis::BoundCompareResult cmp_res = analysis::BoundCompareResult::kEQ;
-  auto bound_solved = analysis::compareBound(lhs_bound, rhs_bound, cmp_res);
+  auto bound_solved = analysis::compareBound(
+      {lhs_bound.first, lhs_bound.second},
+      {rhs_bound.first, rhs_bound.second},
+      cmp_res);
   if (!bound_solved) {
     GRAPH_DEBUG(
         "(SimplifierUnderContext) Final: ",
@@ -3096,13 +3099,13 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
 
 bool SimplifierUnderContext::getBoundInfo(
     const ExprPtr& expr,
-    analysis::Bound* bound_info) {
-  if (expr == nullptr || bound_info == nullptr)
+    BoundInfo& bound_info) {
+  if (expr == nullptr)
     return false;
 
   if (expr->isConstant()) {
-    bound_info->start = expr;
-    bound_info->end = expr;
+    bound_info.first = expr;
+    bound_info.second = expr;
     return true;
   }
 
@@ -3116,14 +3119,14 @@ bool SimplifierUnderContext::getBoundInfo(
     return false;
   }
 
-  bound_info->start = got->second.first;
+  bound_info.first = got->second.first;
   // TODO: Need to add the boundary information(close/open) of a range to
   // Bound. Currently, the VarBoundInfo comes from for-loop statement while
   // the end of the boundary is open. But we assume the start and end of a
   // range are always close. Hence, we explicitly convert the open boundary to
   // close.
   //   [for-start, for-stop) => [for-start, for-stop -1]
-  bound_info->end = IRSimplifier::simplify(
+  bound_info.second = IRSimplifier::simplify(
       alloc<Sub>(got->second.second, immLike(got->second.second, 1)));
   return true;
 }
