@@ -1,8 +1,8 @@
 name: Validate and merge PR
 
 on:
-  repository_dispatch:
-    types: [try-merge]
+  issue_comment:
+    types: [created]
 
 jobs:
   do_merge:
