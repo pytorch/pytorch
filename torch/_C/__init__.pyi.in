@@ -54,7 +54,7 @@ class Stream:
 class Size(Tuple[_int, ...]):
     # TODO: __reduce__
 
-    @overload
+    @overload  # type: ignore[override]
     def __getitem__(self: Size, key: _int) -> _int: ...
 
     @overload
@@ -836,9 +836,6 @@ class ThroughputBenchmark(object):
 # Defined in torch/csrc/generic/Storage.cpp
 ${legacy_storage_base_hints}
 
-# TODO: where
-${legacy_class_hints}
-
 # Defined in torch/csrc/autograd/python_engine.cpp
 class _ImperativeEngine:
     ...
@@ -872,6 +869,11 @@ class _TensorBase(metaclass=_TensorMeta):
     _grad: Optional[Tensor]
     _backward_hooks: Optional[Dict[_int, Callable[[Tensor], Optional[Tensor]]]]
     ${tensor_method_hints}
+
+class Tensor(_TensorBase): ...
+
+# TODO: where
+${legacy_class_hints}
 
 # Defined in torch/csrc/multiprocessing/init.cpp
 def _multiprocessing_init() -> None: ...

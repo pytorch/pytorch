@@ -206,10 +206,12 @@ def validate_shape(shape: Sequence):
 def validate_idx(shape: Sequence, idx: int):
     """
     Validates that idx is a valid idx for the given shape.
+    0 and -1 is a valid index for an empty shape
     """
 
     assert isinstance(idx, int)
-    assert idx >= 0 and idx < len(shape)
+    ndim = len(shape) if len(shape) else 1
+    assert idx >= 0 and idx < ndim
 
 
 def validate_exclusive_idx(shape: Sequence, ex_idx: int):
@@ -222,6 +224,8 @@ def validate_exclusive_idx(shape: Sequence, ex_idx: int):
     assert ex_idx > 0 and ex_idx <= len(shape)
 
 
+# "Wraps" a dim (up to one time) for the given rank, allowing
+# dims to be specified using negative indices
 def canonicalize_idx(rank: int, idx: int) -> int:
     # TODO: add a comment for why this is
     _rank = rank if rank != 0 else 1
@@ -232,7 +236,7 @@ def canonicalize_idx(rank: int, idx: int) -> int:
     if idx < 0:
         _idx = idx + _rank
 
-    if _idx < 0 or _idx >= rank:
+    if _idx < 0 or _idx > _rank:
         msg = "Received out of bounds index {0} for tensor of rank {1}!".format(
             idx, rank
         )

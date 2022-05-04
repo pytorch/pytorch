@@ -1150,6 +1150,7 @@ def sample_inputs_sparse_coo_masked_reduction(op_info, device, dtype, requires_g
     inputs: List[SampleInput] = []
 
     if op_info.supports_sparse:
+        op_name = op_info.name.replace('_masked.', '')
         for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
             mask = sample_input.kwargs.get('mask')
             if mask is not None:
@@ -1158,6 +1159,12 @@ def sample_inputs_sparse_coo_masked_reduction(op_info, device, dtype, requires_g
                 inputs.append(SampleInput(sample_input.input.to_sparse(),
                                           args=sample_input.args, kwargs=sample_input_kwargs))
             else:
+                if op_name in {'prod', 'amax', 'amin'}:
+                    # FIXME: for now reductions with non-zero reduction identity and
+                    # unspecified mask are not supported for sparse COO
+                    # tensors, see torch._masked.prod implementation
+                    # for details.
+                    continue
                 inputs.append(SampleInput(sample_input.input.to_sparse(),
                                           args=sample_input.args, kwargs=sample_input.kwargs))
     return inputs
@@ -1322,6 +1329,7 @@ class ReductionOpInfo(OpInfo):
         # Options from the OpInfo base class
         **kwargs,
     ):
+        self._original_reduction_args = locals().copy()
         assert nan_policy in (None, 'propagate', 'omit')
 
         # These are mutually exclusive options
@@ -1340,7 +1348,7 @@ class ReductionOpInfo(OpInfo):
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault('inplace_variant', None)
         kwargs.setdefault('sample_inputs_func', sample_inputs_func)
-        super(ReductionOpInfo, self).__init__(name, **kwargs)
+        super().__init__(name, **kwargs)
 
         self.identity = identity
         self.nan_policy = nan_policy
@@ -10509,7 +10517,6 @@ op_db: List[OpInfo] = [
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
                      skips=(
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ),
                      check_batched_gradgrad=False),
     SpectralFuncInfo('fft.rfft2',
@@ -10523,7 +10530,6 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False,
                      decorators=[
                          precisionOverride({torch.float: 1e-4}),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ],),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
@@ -10536,7 +10542,6 @@ op_db: List[OpInfo] = [
                      check_batched_gradgrad=False,
                      decorators=[
                          precisionOverride({torch.float: 1e-4}),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ],),
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
@@ -10577,7 +10582,6 @@ op_db: List[OpInfo] = [
                      supports_fwgrad_bwgrad=True,
                      dtypes=all_types_and(torch.bool),
                      skips=(
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                      ),
                      check_batched_grad=False),
     SpectralFuncInfo('fft.ihfft2',
@@ -10592,7 +10596,6 @@ op_db: List[OpInfo] = [
                      decorators=(
                          # The values for attribute 'shape' do not match: torch.Size([5, 6, 5]) != torch.Size([5, 6, 6]).
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                          DecorateInfo(precisionOverride({torch.float: 2e-4}), 'TestFFT', 'test_reference_nd'),
                          # Mismatched elements!
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -10611,7 +10614,6 @@ op_db: List[OpInfo] = [
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                          # Mismatched elements!
                          DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-                         DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                          DecorateInfo(
                              precisionOverride({torch.float: 2e-4}),
                              'TestFFT', 'test_reference_nd')],
@@ -10669,7 +10671,6 @@ op_db: List[OpInfo] = [
                skipCPUIfNoFFT,
                DecorateInfo(unittest.skip("Skipped! stft does not match the native function"),
                             'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ],
            dtypes=floating_and_complex_types(),
@@ -14420,12 +14421,7 @@ op_db: List[OpInfo] = [
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                    supports_out=False,
-                   supports_autograd=False,
-                   skips=(
-                       # Reference: https://github.com/pytorch/pytorch/issues/66402
-                       DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_large",
-                                    device_type='cpu', dtypes=(torch.complex64,), active_if=not (IS_MACOS or IS_WINDOWS)),
-                   )),
+                   supports_autograd=False),
     UnaryUfuncInfo('isinf',
                    ref=np.isinf,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -14965,7 +14961,6 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -16631,6 +16626,7 @@ op_db: List[OpInfo] = [
         'argmax',
         supports_multiple_dims=False,
         supports_autograd=False,
+        assert_jit_shape_analysis=True,
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
@@ -16874,13 +16870,9 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_sparse=True,
         supports_sparse_csr=True,
-        promotes_int_to_int64=False,
+        promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_duplicate_values',
-                         dtypes=(torch.bool,)),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_small_input',
-                         dtypes=(torch.bool,)),
             DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
                          dtypes=(torch.bool, torch.int8, torch.int16, torch.int32)),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -16914,6 +16906,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        supports_sparse=True,
         supports_sparse_csr=True,
         promotes_int_to_int64=True,
         # FIXME: "prod_cpu" not implemented for 'BFloat16'
@@ -16928,6 +16921,10 @@ op_db: List[OpInfo] = [
             # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
+            # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout', device_type='cuda',
+                         dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
+                                 torch.int64, torch.complex64, torch.complex128)),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-02)}),
@@ -16936,13 +16933,15 @@ op_db: List[OpInfo] = [
                          'TestReductions', 'test_ref_duplicate_values'),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,
-        sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction
+        sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
+        sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
     ),
     ReductionOpInfo(
         '_masked.amax',
         nan_policy='propagate',
         supports_out=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
+        supports_sparse=True,
         ref=reference_reduction_numpy(np.amax),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -16950,9 +16949,14 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: Unknown builtin op: aten::iinfo
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout', device_type='cuda',
+                         dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
+                                 torch.int64, torch.complex64, torch.complex128)),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
+        sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
@@ -16960,6 +16964,7 @@ op_db: List[OpInfo] = [
         nan_policy='propagate',
         supports_out=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
+        supports_sparse=True,
         ref=reference_reduction_numpy(np.amin),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -16968,8 +16973,13 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: Unknown builtin op: aten::iinfo
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout', device_type='cuda',
+                         dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
+                                 torch.int64, torch.complex64, torch.complex128)),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
+        sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
@@ -17578,6 +17588,27 @@ class PythonRefInfo(OpInfo):
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
         super(PythonRefInfo, self).__init__(**ukwargs)
 
+class ReductionPythonRefInfo(ReductionOpInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise unary operation.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        assert isinstance(self.torch_opinfo, ReductionOpInfo)
+
+        inherited = self.torch_opinfo._original_reduction_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
+
+        super().__init__(**ukwargs)
+
 class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
     '''
     An OpInfo for a Python reference of an elementwise unary operation.
@@ -17893,6 +17924,14 @@ python_ref_db = [
         "_refs.transpose",
         torch_opinfo_name="transpose",
     ),
+    #
+    # Reduction OpInfos
+    #
+    ReductionPythonRefInfo(
+        "_refs.sum",
+        torch_opinfo_name="sum",
+        supports_out=True
+    )
 ]
 
 # Common operator groupings
