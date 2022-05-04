@@ -1050,17 +1050,23 @@ class TestSparse(TestCase):
         # non-contigous index
         idx = torch.randint(low=0, high=5, size=(10, 2), device=device)[:, 0]
 
-        # case nnz > size[d]
-        t = make_tensor((5, 5), dtype=dtype, device=device)
-        res_dense = t.index_select(0, idx)
-        res_sparse = t.to_sparse().index_select(0, idx)
-        self.assertEqual(res_dense, res_sparse)
+        def run_test(sizes):
+            # case nnz > size[d]
+            t = make_tensor(sizes, dtype=dtype, device=device)
+            res_dense = t.index_select(0, idx)
+            res_sparse = t.to_sparse().index_select(0, idx)
+            self.assertEqual(res_dense, res_sparse)
 
-        # case nnz <= size[d]
-        t_small_sparse, _, _ = self._gen_sparse(2, 2, (10, 10), dtype, device, coalesced)
-        res_sparse = t_small_sparse.index_select(0, idx)
-        res_dense = t_small_sparse.to_dense().index_select(0, idx)
-        self.assertEqual(res_dense, res_sparse)
+            # case nnz <= size[d]
+            t_small_sparse, _, _ = self._gen_sparse(len(sizes), 2, sizes, dtype, device, coalesced)
+            res_sparse = t_small_sparse.index_select(0, idx)
+            res_dense = t_small_sparse.to_dense().index_select(0, idx)
+            self.assertEqual(res_dense, res_sparse)
+
+        # brute-force
+        run_test((10, 10))
+        # more sophisticated algos
+        run_test((10, 100, 100))
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
