@@ -2545,6 +2545,7 @@ Returns the Vandermonde matrix :math:`V`
             1 & x_n & x_n^2 & \dots & x_n^{N-1}
         \end{pmatrix}.
 
+for `N > 1`.
 If :attr:`N`\ `= None`, then `N = x.size(-1)` so that the output is a square matrix.
 
 Supports inputs of float, double, cfloat, cdouble, and integral dtypes.

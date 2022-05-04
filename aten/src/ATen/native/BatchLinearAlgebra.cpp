@@ -4631,26 +4631,14 @@ Tensor linalg_vander(
 
   auto shape = x_.sizes().vec();
   const auto n = N.value_or(shape.back());
-  TORCH_CHECK(n >= 0, "N must be non-negative.");
+  TORCH_CHECK(n >= 2, "N must be greater or equal to 2.");
 
-  // Get the dtype of cumsum
-  auto dtype = x_.scalar_type();
-  auto options = x_.options()
-                   .dtype(at::isIntegralType(dtype, /*includeBool=*/true) ? kLong : dtype);
-
-  // n = 0 or n = 1 case (Empty or one row case)
-  shape.push_back(std::min<int64_t>(n, 1LL));
-  auto ones =  x_.new_ones(shape, options);
-
-  if (n <= 1) {
-    // new_ones does not propagate requires_grad. UGH
-    ones.requires_grad_(x_.requires_grad());
-    return ones;
-  } else {
-    // Append cumprod of the oher 0...n-1 powers
-    shape.back() = n - 1;
-    auto result = at::cumprod(x_.unsqueeze(-1).expand(shape), -1);
-    return at::cat({ones, result}, /*dim=*/ -1);
-  }
+  // Append cumprod of the oher 0...n-1 powers
+  shape.push_back(n - 1);
+  auto result = at::cumprod(x_.unsqueeze(-1).expand(shape), -1);
+  // The row of ones
+  shape.back() = 1LL;
+  auto ones =  result.new_ones(shape);
+  return at::cat({ones, result}, /*dim=*/ -1);
 }
 }}  // namespace at::native
