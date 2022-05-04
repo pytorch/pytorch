@@ -5,9 +5,6 @@ import torch
 
 __all__ = ['Library']
 
-# User created custom libraries
-_libraries = {}
-
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
 # This set is maintained to ensure that two libraries don't try to override the exact same functionality to avoid
