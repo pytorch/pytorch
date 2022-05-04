@@ -17,6 +17,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     Set,
@@ -102,25 +103,18 @@ class ShardingStrategy(Enum):
                    GPU memory until backward computation is done. It inserts reduce_scater
                    after backward computation for synchronizing and sharding gradients.
                    Sharded optimizer states are updated locally.
-    SHARD_OP(future support): Shard optimizer states only, this algorithm inserts all_gather
-                              or broadcast before forward computation and keeps the full
-                              parameters in GPU memory until backward computation is done. It
-                              inserts all_reduce after backward computation for synchronizing
-                              gradients. Sharded optimizer states are updated locally.
-    NO_SHARD(future support): This is similar to PyTorch `DistributedDataParallel` API.
-                              Parameters, gradients and optimizer states are replicated
-                              among ranks, all_reduce is inserted after backward computation
-                              is done for synchronizing gradients. Full optimizer states
-                              are updated in each rank.
+    NO_SHARD: This is similar to PyTorch ``DistributedDataParallel`` API. Parameters, gradients
+              and optimizer states are replicated among ranks, all_reduce is inserted after
+              backward computation is done for synchronizing gradients. Full optimizer states
+              are updated in each rank.
     HYBRID_SHARD(future support): apply FULL_SHARD algorithm in the intra node and
                                   apply NO_SHARD algorithm in the inter nodes.
 
     """
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
+    NO_SHARD = auto()
     # TODO
-    # SHARD_OP = auto()
-    # NO_SHARD = auto()
     # HYBRID_SHARD = auto()
 
 
@@ -679,7 +673,7 @@ class FullyShardedDataParallel(nn.Module):
         for n, p in self.named_parameters():
             if p not in ignored_params and not isinstance(p, FlatParameter):
                 raise RuntimeError(
-                    f"found unsharded parameter: {n} ; {p.size()} {p.__class__}"
+                    f"found unflattened parameter: {n} ; {p.size()} {p.__class__}"
                 )
         self._reset_lazy_init()
 
@@ -732,9 +726,13 @@ class FullyShardedDataParallel(nn.Module):
             # Keep full params in the GPU memory until backward
             # computation is done
             self.reshard_after_forward = False
+        elif self.sharding_strategy == ShardingStrategy.NO_SHARD:
+            # self.reshard_after_forward is not used when NO_SHARD
+            # is set, just setting it as False here
+            self.reshard_after_forward = False
         else:
             raise RuntimeError(
-                "sharding_strategy only supports FULL_SHARD and SHARD_GRAD_OP right now."
+                "sharding_strategy only supports FULL_SHARD, SHARD_GRAD_OP and NO_SHARD right now."
             )
 
     def _get_ignored_modules(
@@ -1059,8 +1057,12 @@ class FullyShardedDataParallel(nn.Module):
                 p.is_floating_point()
             ), "Autograd does not support operations for integer type."
 
-            # Sharding is done only when world_size is larger than 1.
-            p._is_sharded = self.world_size > 1  # type: ignore[attr-defined]
+            # Sharding is done only when world_size is larger than 1 and
+            # sharding_strategy!=NO_SHARD.
+            p._is_sharded = (  # type: ignore[attr-defined]
+                self.world_size > 1
+                and self.sharding_strategy != ShardingStrategy.NO_SHARD
+            )
             p._orig_size = p.size()  # type: ignore[attr-defined]
 
             if not p._is_sharded:  # type: ignore[attr-defined]
@@ -1216,8 +1218,9 @@ class FullyShardedDataParallel(nn.Module):
         are set by :func:`_shard_parameters`:
             ``_is_sharded``: ``True`` if the Parameter is sharded or ``False``
                 if the Parameter is intentionally not sharded (in which case we
-                will all-reduce grads for this param). Currently the only way
-                `_is_sharded = False` is if world_size = 1.
+                will all-reduce grads for this param). Currently the way
+                `_is_sharded = False` is if world_size = 1 or sharding strategy
+                is NO_SHARD.
             ``_orig_size``: the size of the original Parameter (before sharding)
         A few attributes are set here:
             ``_local_shard``: a single shard of the parameter. This is needed to
@@ -1479,9 +1482,9 @@ class FullyShardedDataParallel(nn.Module):
 
     def _full_post_state_dict_hook(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         """
         Hook that runs after model.state_dict() is called before returning result to
         user. For FSDP, we may have to clone the tensors in state_dict as params go
@@ -1522,9 +1525,9 @@ class FullyShardedDataParallel(nn.Module):
 
     def _local_post_state_dict_hook(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         """
         This hook create a ShardedTensor from the local flat_param and replace
         the state_dict[f"{prefix}{FLAT_PARAM}] with the ShardedTensor. No copy
@@ -1557,18 +1560,18 @@ class FullyShardedDataParallel(nn.Module):
 
     def _sharded_post_state_dict_hook(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518")
 
     @staticmethod
     def _post_state_dict_hook(
         module: nn.Module,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Dict[str, Any],
         prefix: str,
         *args: Any,
-    ) -> "OrderedDict[str, torch.Tensor]":
+    ) -> Dict[str, Any]:
         """
         _post_state_dict_hook() is called after the state_dict() of this
         FSDP module is executed. ``self._state_dict_type`` is used to decide
@@ -1686,14 +1689,14 @@ class FullyShardedDataParallel(nn.Module):
 
     def _full_pre_load_state_dict_hook(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
     ) -> None:
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_WRAPPED_MODULE}.")
 
     def _local_pre_load_state_dict_hook(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
     ) -> None:
         """
@@ -1727,7 +1730,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _sharded_pre_load_state_dict_hook(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
     ) -> None:
         raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
@@ -1735,7 +1738,7 @@ class FullyShardedDataParallel(nn.Module):
     @staticmethod
     def _pre_load_state_dict_hook(
         module: nn.Module,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: Dict[str, Any],
         prefix: str,
         *args: Any,
     ) -> None:
@@ -1753,7 +1756,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def load_state_dict(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Mapping[str, Any],
         *args,
     ) -> NamedTuple:
         """
@@ -1811,7 +1814,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _load_local_state_dict(
         self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
+        state_dict: Mapping[str, Any],
         *args,
     ) -> NamedTuple:
         """
@@ -2411,14 +2414,17 @@ class FullyShardedDataParallel(nn.Module):
                     param._saved_grad_shard = output  # type: ignore[attr-defined]
                 grad = param._saved_grad_shard  # type: ignore[attr-defined]
             else:
-                # Currently the only way for _is_sharded to be False is if
-                # world_size == 1. This could be relaxed in the future, e.g,
-                # no sharding like PyTorch DDP, in which case grads should be
-                # all-reduced here.
+                # Currently the way for _is_sharded to be False is if
+                # world_size == 1 or sharding_strategy is NO_SHARD.
                 assert (
-                    self.world_size == 1
-                ), "Currently the only way for _is_sharded to be False is \
-                    world_size == 1"
+                    self.world_size == 1 or self.sharding_strategy == ShardingStrategy.NO_SHARD
+                ), "Currently the way for _is_sharded to be False is \
+                    world_size == 1 or sharding_stratagy is set to be NO_SHARD"
+                if self.sharding_strategy == ShardingStrategy.NO_SHARD:
+                    dist.all_reduce(param.grad, group=self.process_group)
+                    if self.gradient_postdivide_factor > 1:
+                        # Average grad by world_size for consistency with PyTorch DDP.
+                        param.grad.div_(self.gradient_postdivide_factor)
                 # Note that we need to cast grads back to the full precision if
                 # 1) parameters were in reduced precision during fwd, as grads
                 # would thus be in this reduced precision, or
@@ -2708,6 +2714,12 @@ class FullyShardedDataParallel(nn.Module):
         warnings on the first deviating iteration and stops checking
         thereafter.
 
+        For now, only the all-gathers to rebuild full parameters in the forward
+        pass are checked since (1) a correct forward order should imply a
+        correct pre-backward order for typical cases and (2) there may be some
+        issues with pre-fetching that need to be looked into:
+        https://github.com/pytorch/pytorch/issues/76553
+
         Executing in ``no_sync()`` does not affect this check for
         ``FULL_SHARD`` and ``SHARD_GRAD_OP``: (1) Being in ``no_sync()`` in the
         first iteration does not yield a different all-gather sequence, and (2)
@@ -2717,10 +2729,8 @@ class FullyShardedDataParallel(nn.Module):
         sequence's prefix (for ``SHARD_GRAD_OP``).
         """
         # Only check all-gathers when rebuilding the full parameters in the
-        # forward pass or in the beginning of the backward pass
-        if self.training_state not in (
-            TrainingState_.FORWARD, TrainingState_.BACKWARD_PRE,
-        ):
+        # forward pass
+        if self.training_state != TrainingState_.FORWARD:
             return
         eod = self._exec_order_data
         param_index = eod.get_param_index(param)
@@ -2769,7 +2779,10 @@ class FullyShardedDataParallel(nn.Module):
                 eod.warn_status = _ExecOrderWarnStatus.WARNING
             eod.index += 1
         else:
-            device = param.device
+            # Use `compute_device` instead of the parameter's device in case it
+            # is offloaded on CPU and we are using NCCL backend, which requires
+            # communicated tensors be on GPU
+            device = self.compute_device
             indices = torch.zeros(self.world_size, dtype=torch.int32, device=device)
             index = torch.tensor([param_index], dtype=torch.int32, device=device)
             dist._all_gather_base(indices, index, group=self.process_group)
@@ -2827,7 +2840,7 @@ class FullyShardedDataParallel(nn.Module):
             params = self.params
         current_stream = torch.cuda.current_stream()
         for p in params:
-            # e.g., world_size == 1
+            # e.g., world_size == 1 or self.sharding_strategy = NO_SHARD
             if not p._is_sharded:  # type: ignore[attr-defined]
                 if (
                     self._mixed_precision_enabled_for_params()
@@ -3535,7 +3548,5 @@ def _get_param_name_to_param(
     model: torch.nn.Module,
 ) -> Dict[str, torch.nn.Parameter]:
     """Constructs the inverse mapping of :meth:`_get_param_to_param_name`."""
-    return {
-        param_name: param
-        for param, param_name in _get_param_to_param_name(model).items()
-    }
+    param_to_param_name = _get_param_to_param_name(model)
+    return dict(zip(param_to_param_name.values(), param_to_param_name.keys()))
