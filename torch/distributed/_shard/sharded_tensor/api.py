@@ -9,7 +9,6 @@ from typing import (
     Union
 )
 import copy
-import math
 import weakref
 
 import threading
