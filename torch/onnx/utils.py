@@ -475,7 +475,7 @@ def _decide_input_format(model, args):
                 param = sig.parameters[optional_arg]
                 if param.default != param.empty:
                     args_list.append(param.default)
-        args = tuple(args_list)
+        args = args_list if isinstance(args, list) else tuple(args_list)
     # Cases of models with no input args
     except IndexError:
         warnings.warn("No input args, skipping _decide_input_format")
