@@ -14,6 +14,7 @@
 // See https://github.com/pytorch/pytorch/issues/37577 for an instance
 // of this bug in the past.
 
+#include <cassert>
 #include <cstring>
 #include <functional>
 #include <cmath>
