@@ -34,7 +34,7 @@ def _apply_to_tensors(
 
 
 def _replace_by_prefix(
-    state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+    state_dict: Dict[str, Any],
     old_prefix: str,
     new_prefix: str,
 ) -> None:
