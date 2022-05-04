@@ -283,7 +283,7 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float16, "nn.functional.batch_norm"),
     ("cuda", torch.bfloat16, "nn.functional.instance_norm"),
     ("cuda", torch.float16, "nn.functional.instance_norm"),
-    # Not sure if opmath is the right thing to do, so disabled.
+    # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
 
 }

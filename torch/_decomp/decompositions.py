@@ -711,7 +711,6 @@ def embedding(
 
 # TODO: Correct the type promotion semantics
 @register_decomposition(aten.embedding_dense_backward)
-@pw_cast_for_opmath
 def embedding_dense_backward(
     grad_output: Tensor,
     indices: Tensor,
