@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# Owner(s): ["module: unknown"]
+
 import torch
 from torch.autograd import gradcheck, gradgradcheck
 
@@ -31,7 +34,7 @@ def test_attention_grad():
     k = torch.rand((2, 3), dtype=torch.double, requires_grad=True)
     v = torch.rand((2, 4), dtype=torch.double, requires_grad=True)
     input = (q, k, v)
-    assert gradcheck(attention_lab, input, eps=1e-6, atol=1e-4)
+    assert gradcheck(attention_lab, input)
 
 def test_attention_grad_grad():
     attention_lab = AttentionLab.apply
@@ -39,4 +42,4 @@ def test_attention_grad_grad():
     k = torch.rand((2, 3), dtype=torch.double, requires_grad=True)
     v = torch.rand((2, 4), dtype=torch.double, requires_grad=True)
     input = (q, k, v)
-    assert gradgradcheck(attention_lab, input, eps=1e-6, atol=1e-4)
+    assert gradgradcheck(attention_lab, input)
