@@ -15,10 +15,10 @@ _impls_for_existing_libraries = {}
 # libraries calling into kernels not intended to be called.
 _impls: Set[str] = set()
 
-class Library:
+class _Library:
     # kind can be DEF, IMPL
     def __init__(self, kind, ns, dispatch_key="", message=""):
-        frame = traceback.extract_stack(limit=1)[0]
+        frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m = C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
         self.ns = ns
@@ -84,4 +84,4 @@ def extend_library(ns, dispatch_key=""):
         None
     """
     # TODO: check if there's an existing library with name ns
-    return Library("IMPL", ns, dispatch_key)
+    return _Library("IMPL", ns, dispatch_key)
