@@ -492,7 +492,7 @@ if (C10_UNLIKELY(current_device.has_value())) {
         if maybe_create_proxy:
             create_proxy = """
 auto maybe_proxy = maybe_create_proxy(out, sizes, strides, options);
-if (maybe_proxy.has_value()) {
+if (C10_UNLIKELY(maybe_proxy.has_value())) {
     proxy_outputs_[output_idx] = c10::ExclusivelyOwned<Tensor>(std::move(maybe_proxy).value());
 }
 """
@@ -529,8 +529,7 @@ resize_out(out, sizes, strides, options);
         elif k is SchemaKind.out:
             out_args = ', '.join(f"Tensor& out{i}" for i in range(returns))
             out_refs = ', '.join(f"std::ref(out{i})" for i in range(returns))
-            nullopts = ", ".join("c10::nullopt" for _ in range(returns))
-            return f"{class_name}({out_args}) : outputs_{{ {out_refs} }}, proxy_outputs_{{ {nullopts} }} {{}}"
+            return f"{class_name}({out_args}) : outputs_{{ {out_refs} }} {{}}"
         else:
             assert_never(k)
 
