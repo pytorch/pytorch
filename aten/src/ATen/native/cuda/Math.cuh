@@ -1268,6 +1268,8 @@ const auto erfcx_string = jiterator_stringify(
 const auto airy_ai_string = jiterator_stringify(
     template <typename T>
     T airy_ai(T x) {
+        constexpr T M_PI = 3.14159265358979323846264338327950288;
+
         static T AN[8] = {
                 +3.46538101525629032477e-01,
                 +1.20075952739645805542e+01,
@@ -1431,6 +1433,8 @@ const auto airy_ai_string = jiterator_stringify(
 const auto airy_bi_string = jiterator_stringify(
     template <typename T>
     T airy_bi(T x) {
+        constexpr T M_PI = 3.14159265358979323846264338327950288;
+
         static T AN[8] = {
                 +3.46538101525629032477e-01,
                 +1.20075952739645805542e+01,
