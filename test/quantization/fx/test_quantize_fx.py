@@ -2094,7 +2094,7 @@ class TestQuantizeFx(QuantizationTestCase):
         qengine = torch.backends.quantized.engine
         qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig(qengine)}
         x = torch.randn(5, 5)
-        example_inputs= (x,)
+        example_inputs = (x,)
         model = prepare_qat_fx(model, qconfig_dict, example_inputs=example_inputs)
 
         # ensure scripting works
@@ -3495,7 +3495,11 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        m = prepare_fx(m, {"": default_qconfig}, example_inputs=(torch.randn(1),), prepare_custom_config_dict={"preserved_attributes": ["attr"]})
+        m = prepare_fx(
+            m,
+            {"": default_qconfig},
+            example_inputs=(torch.randn(1),),
+            prepare_custom_config_dict={"preserved_attributes": ["attr"]})
         self.assertTrue(hasattr(m, "attr"))
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
@@ -3666,11 +3670,13 @@ class TestQuantizeFx(QuantizationTestCase):
 
         m = M().eval()
         example_inputs = (torch.rand(2, 1, 5, 5),)
-        m = prepare_fx(m, {"": torch.ao.quantization.QConfig(
-            activation=torch.ao.quantization.HistogramObserver.with_args(
-                qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
-            ), weight=torch.ao.quantization.default_per_channel_weight_observer)},
-                       example_inputs=example_inputs)
+        m = prepare_fx(
+            m,
+            {"": torch.ao.quantization.QConfig(
+                activation=torch.ao.quantization.HistogramObserver.with_args(
+                    qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
+                ), weight=torch.ao.quantization.default_per_channel_weight_observer)},
+            example_inputs=example_inputs)
         m = convert_fx(m, is_reference=True)
         m(*example_inputs)
 
@@ -5184,7 +5190,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 return torch.cat([x, y], 1)
 
         example_inputs = (torch.randn(1, 2, 5, 5, dtype=torch.float),
-                       torch.randn(1, 2, 5, 5, dtype=torch.float))
+                          torch.randn(1, 2, 5, 5, dtype=torch.float))
         quantized_node = ns.call_function(torch.cat)
         options = itertools.product(self.static_quant_types, [True, False])
         for quant_type, is_reference in options:

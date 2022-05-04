@@ -277,7 +277,11 @@ class TestEqualizeFx(QuantizationTestCase):
             # TODO: if shape is important we need to define a sample_arg for each test
             # for now we do not need shape so this can be fixed later
             example_inputs = (torch.randn(1, 1, 1, 1),)
-            prepared = prepare_fx(m, specific_qconfig_dict, example_inputs=example_inputs, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(
+                m,
+                specific_qconfig_dict,
+                example_inputs=example_inputs,
+                equalization_qconfig_dict=default_equalization_qconfig_dict)
             self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
     def test_input_weight_equalization_branching(self):
