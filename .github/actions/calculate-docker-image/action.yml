@@ -76,6 +76,7 @@ runs:
         # If no image exists but the hash is the same as the previous hash then we should error out here
         if [[ "${PREVIOUS_DOCKER_TAG}" = "${DOCKER_TAG}" ]]; then
           echo "ERROR: Something has gone wrong and the previous image isn't available for the merge-base of your branch"
+          echo "PREVIOUS_DOCKER_TAG ${PREVIOUS_DOCKER_TAG}"
           echo "       contact the PyTorch team to restore the original images"
           exit 1
         fi
