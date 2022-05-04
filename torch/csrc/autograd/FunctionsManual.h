@@ -505,6 +505,13 @@ std::tuple<Tensor, Tensor> _index_reduce_backward(
   const Tensor& result
 );
 
+std::tuple<Tensor, Tensor, Tensor> attn_backward(
+    const Tensor& grad_o,
+    const Tensor& grad_a,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& a);
 } // namespace details
 } // namespace generated
 } // namespace autograd

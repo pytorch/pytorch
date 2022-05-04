@@ -829,6 +829,11 @@
 
 - func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: attn
+
+# - func:  attn_backward(Tensor grad_o, Tensor grad_a, Tensor q, Tensor k, Tensor v, Tensor a) -> (Tensor, Tensor, Tensor)
+#   variants: function
 
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
