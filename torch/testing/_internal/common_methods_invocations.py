@@ -1451,18 +1451,6 @@ def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad, **k
         for n in [-4, -2, -1]:
             yield SampleInput(make_arg_fullrank(*size), args=(n,))
 
-def sample_inputs_pow(op, device, dtype, requires_grad, **kwargs):
-    # If base is complex allow for negative real/imag components
-    lhs_low = -9 if dtype.is_complex else 0
-
-    # Only Interal types do not support negative exponents
-    rhs_low = 1 if dtype in integral_types() else -9
-
-    op.lhs_make_tensor_kwargs['low'] = lhs_low
-    op.rhs_make_tensor_kwargs['low'] = rhs_low
-
-    return sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
-
 def sample_inputs_hsplit(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((6,), dtype=dtype, device=device,
                                     low=None, high=None,
