@@ -2916,19 +2916,23 @@ ExprPtr SimplifierUnderContext::mutate(IfThenElsePtr v) {
   ExprPtr true_val = v->true_value();
   ExprPtr false_val = v->false_value();
 
-  auto simp_condition = IRSimplifier::simplify(condition->accept_mutator(this));
-  auto simp_true_val = IRSimplifier::simplify(true_val->accept_mutator(this));
-  auto simp_false_val = IRSimplifier::simplify(false_val->accept_mutator(this));
-  if (simp_condition->isConstant()) {
-    return immediateAs<int>(simp_condition) ? simp_true_val : simp_false_val;
+  auto simplified_condition =
+      IRSimplifier::simplify(condition->accept_mutator(this));
+  auto simplified_true_val =
+      IRSimplifier::simplify(true_val->accept_mutator(this));
+  auto simplified_false_val =
+      IRSimplifier::simplify(false_val->accept_mutator(this));
+  if (simplified_condition->isConstant()) {
+    return immediateAs<int>(simplified_condition) ? simplified_true_val
+                                                  : simplified_false_val;
   }
 
-  ExprPtr simplified_ifelse_expr = nullptr;
-  bool nothing_changed = (simp_condition == condition) &&
-      (simp_true_val == true_val) && (simp_false_val == false_val);
+  bool nothing_changed = (simplified_condition == condition) &&
+      (simplified_true_val == true_val) && (simplified_false_val == false_val);
   return nothing_changed
       ? v
-      : alloc<IfThenElse>(simp_condition, simp_true_val, simp_false_val);
+      : alloc<IfThenElse>(
+            simplified_condition, simplified_true_val, simplified_false_val);
 }
 
 ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
