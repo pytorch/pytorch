@@ -1,7 +1,14 @@
-from typing import List, Any, Optional, TypeVar, Union, Dict, Callable
+from typing import List, Any, Optional, Union, Dict, Callable
 import math
 number = Union[int, float]
 # flake8: noqa
+
+###
+# There are generated files that depend on this file
+# To re-generate, please run:
+# cd ~/pytorch && python
+# torchgen/shape_functions/gen_jit_shape_functions.py
+####
 
 import torch
 
