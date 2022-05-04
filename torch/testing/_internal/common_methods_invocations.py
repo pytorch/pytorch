@@ -15,7 +15,7 @@ from torch._six import inf
 import collections.abc
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, Iterable
-from dataclasses import dataclass, asdict, fields
+from dataclasses import dataclass, asdict, fields, is_dataclass
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -902,24 +902,7 @@ class OpInfo(object):
         return self.op(*args, **kwargs)
 
     def __str__(self):
-        class_name = self.__class__.__name__
-        indent = (len(class_name) + 1) * " "
-
-        field_list = [(f.name, getattr(self, f.name)) for f in fields(self) if f.repr]
-
-        fields_str = []
-        for f in field_list:
-            field_str = f"{f[0]} = {repr(f[1])}"
-
-            # 80 is the max_width, if the len is over it we split the args over multiple lines
-            if len(field_str) >= 80:
-                max_indent = (len(f[0]) + 3) * " "
-                field_str = f",\n{indent + max_indent}".join(field_str.split(","))
-
-            fields_str.append(field_str)
-
-        fields_str = f",\n{indent}".join(fields_str)
-        return f"{class_name}({fields_str})"
+        return _pprint(self)
 
     def get_op(self):
         """Returns the function variant of the operator, torch.<op_name>."""
@@ -18973,3 +18956,27 @@ def run_additional_tri_tests(self, device):
         RuntimeError,
         lambda: torch.tril_indices(
             1, 1, device=device, layout=torch.sparse_coo))
+
+def _pprint(obj, width=80, indent=2) -> str:
+    assert is_dataclass(obj), f"obj should be a dataclass, received: {type(obj)}"
+
+    class_name = obj.__class__.__name__
+    indent_str = indent * " "
+
+    field_list = [(f.name, getattr(obj, f.name)) for f in fields(obj) if f.repr]
+
+    fields_str = []
+    for f in field_list:
+        if is_dataclass(f[1]):
+            field_str = _pprint(f[1], width=width, indent=indent+2)
+        else:
+            field_str = f"{f[0]} = {repr(f[1])}"
+            # if the len is over it we split the args over multiple lines
+            if len(field_str) >= width:
+                add_indent = (len(f[0]) + 3) * " "
+                field_str = f",\n{indent_str + add_indent}".join(field_str.split(","))
+
+        fields_str.append(field_str)
+
+    fields_str = f",\n{indent_str}".join(fields_str)
+    return f"{class_name}({fields_str})"
