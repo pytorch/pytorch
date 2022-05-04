@@ -17928,12 +17928,7 @@ def _inherit_constructor_args(name, op, inherited, overrides):
 
     return kwargs
 
-<<<<<<< HEAD
 class PythonRefInfo(OpInfo):
-=======
-
-class OpInfoPythonRefInfo(OpInfo):
->>>>>>> 283d6f1c7a (Remove pow and float_power TestGradient Skips)
     '''
     An OpInfo for a Python reference of an OpInfo base class operation.
     '''
