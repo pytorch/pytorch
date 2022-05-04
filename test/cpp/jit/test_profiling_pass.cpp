@@ -21,6 +21,52 @@ namespace jit {
 
 namespace {
 
+/*
+In this test file, we will be writing a pass that fuses
+multiple adds into one single fusion group that invokes
+`_foreach_add_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()`
+Because this kernel is only defined for cuda tensors,
+the pass only operators on cuda tensors, and sets up appropriate
+guards to ensure that the runtime tesnors follow the same necessary
+properties as the profiled tensors.
+
+Example before Graph
+graph(%x.1 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cuda:0),
+      %y.1 : Float(1, strides=[1], requires_grad=0, device=cuda:0),
+      %z.1 : Float(1, 1, strides=[1, 1], requires_grad=0, device=cuda:0),
+      %scalar.1 : int):
+  %4 : int = prim::Constant[value=1]()
+  %6 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cuda:0) =
+aten::add(%x.1, %scalar.1, %4) %8 : Float(1, strides=[1], requires_grad=0,
+device=cuda:0) = aten::add(%y.1, %scalar.1, %4) %11 : Float(4, 4, strides=[4,
+1], requires_grad=0, device=cuda:0) = aten::add(%x.1, %y.1, %4) %13 : Float(1,
+1, strides=[1, 1], requires_grad=0, device=cuda:0) = aten::add(%z.1, %scalar.1,
+%4) %18 : (Tensor, Tensor, Tensor, Tensor) = prim::TupleConstruct(%6, %8, %13,
+%11) return (%18) Example After Graph graph(%x.1 : Float(4, 4, strides=[4, 1],
+requires_grad=0, device=cuda:0), %y.1 : Float(1, strides=[1], requires_grad=0,
+device=cuda:0), %z.1 : Float(1, 1, strides=[1, 1], requires_grad=0,
+device=cuda:0), %scalar.1 : int): %4 : int = prim::Constant[value=1]() %25 :
+Float(4, 4, strides=[4, 1], requires_grad=0, device=cuda:0), %26 : Float(1,
+strides=[1], requires_grad=0, device=cuda:0), %27 : Float(1, 1, strides=[1, 1],
+requires_grad=0, device=cuda:0), %28 : bool =
+prim::TypeCheck[types=[Tensor(device=cuda:0), Tensor(device=cuda:0),
+Tensor(device=cuda:0)]](%x.1, %y.1, %z.1) %29 : Float(4, 4, strides=[4, 1],
+requires_grad=0, device=cuda:0), %30 : Float(1, strides=[1], requires_grad=0,
+device=cuda:0), %31 : Float(1, 1, strides=[1, 1], requires_grad=0,
+device=cuda:0) = prim::If(%28) block0(): %20 : Float(4, 4, strides=[4, 1],
+requires_grad=0, device=cuda:0), %22 : Float(1, strides=[1], requires_grad=0,
+device=cuda:0), %24 : Float(1, 1, strides=[1, 1], requires_grad=0,
+device=cuda:0) = prim::FusedAddGraph_0(%25, %scalar.1, %26, %27)
+      -> (%20, %22, %24)
+    block1():
+      %38 : Tensor, %39 : Tensor, %40 : Tensor = prim::FallbackGraph_1(%x.1,
+%scalar.1, %y.1, %z.1)
+      -> (%38, %39, %40)
+  %11 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cuda:0) =
+aten::add(%x.1, %y.1, %4) %18 : (Tensor, Tensor, Tensor, Tensor) =
+prim::TupleConstruct(%29, %30, %31, %11) return (%18)
+*/
+
 size_t counter = 0;
 
 Operation createFusedAddGroup(const Node* node) {
