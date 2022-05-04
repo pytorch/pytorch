@@ -63,6 +63,7 @@
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
@@ -1734,6 +1735,9 @@ Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
 }
 
 Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Tensor& mask) {
+  if (areAnyTensorSubclassLike({grad, input, mask})) {
+    return at::zeros_like(input, input.options()).masked_scatter(mask, grad);
+  }
   // The following could just be written as `zeros_like(input).masked_scatter(mask, grad)`.
   // However, as an optimization, we call the in-place variant of masked_scatter.
   // Unfortunately, that doesn't allow for the broadcasting of the LHS, so we need
