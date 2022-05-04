@@ -1869,28 +1869,84 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         : std::make_tuple(idx_selected, src_selected);
     };
 
+    const auto make_output = [&](
+        const Tensor& selected_dim_indices,
+        const Tensor& res_dim_indices) -> Tensor {
+      auto res_indices = index_select(indices, 1, selected_dim_indices);
+      res_indices[dim] = res_dim_indices;
+      const auto res_values = index_select(values, 0, selected_dim_indices);
 
-    Tensor selected_dim_indices;
-    Tensor res_dim_indices;
+      return _sparse_coo_tensor_with_dims_and_tensors(
+          sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
+    };
 
-    // A more precise decision could be of the form:
-    // `nnz < C(nnz, size) * size`, but it requires heavy benchmarking.
-    // We choose `nnz < size`, which measures theoretical complexity
-    // and does not rely on runtime performance.
-    // TODO: perform this analysis and find better C(nnz, size).
-    if (nnz <= size) {
-      std::tie(selected_dim_indices, res_dim_indices) = get_selected_indices_small_nnz_large_size();
+    // Brute-force solution for small values of nnz and index_len
+    const auto get_result_small_nnz_small_index = [&]()
+      -> Tensor {
+      const auto dim_indices_in_inner_loop = nnz >= index_len;
+      Tensor outer, inner;
+      std::tie(outer, inner) = [&]() -> std::tuple<Tensor, Tensor> {
+        if (dim_indices_in_inner_loop) {
+          return std::make_tuple(nneg_index, dim_indices);
+        }
+        else {
+          return std::make_tuple(dim_indices, nneg_index);
+        }
+      }();
+
+      const auto* ptr_outer = outer.data_ptr<int64_t>();
+      const auto* ptr_inner = inner.data_ptr<int64_t>();
+      // NOTE: if very critical, replace std::vector with
+      // a data structure that operates on stack up to some limit.
+      auto outer_selected_idx = std::vector<int64_t>();
+      auto inner_selected_idx = std::vector<int64_t>();
+      int64_t res_len = 0;
+      for (const auto i : c10::irange(outer.numel())) {
+        for (const auto j : c10::irange(inner.numel())) {
+          if (ptr_outer[i] == ptr_inner[j]) {
+            ++res_len;
+            outer_selected_idx.push_back(i);
+            inner_selected_idx.push_back(j);
+          }
+        }
+      }
+
+      const auto outer_selected_idx_tensor = at::from_blob(
+          outer_selected_idx.data(), {res_len}, at::kLong
+      );
+      const auto inner_selected_idx_tensor = at::from_blob(
+          inner_selected_idx.data(), {res_len}, at::kLong
+      );
+
+      return dim_indices_in_inner_loop
+        ? make_output(inner_selected_idx_tensor, outer_selected_idx_tensor)
+        : make_output(outer_selected_idx_tensor, inner_selected_idx_tensor);
+    };
+
+    constexpr int64_t BRUTE_FORCE_SIZE_LIMIT = 2 << 14; // 16384
+    // NOTE: such a condition to avoid overflows in (nnz * index_len)
+    if (nnz <= BRUTE_FORCE_SIZE_LIMIT && index_len <= BRUTE_FORCE_SIZE_LIMIT
+        && (nnz * index_len) <= BRUTE_FORCE_SIZE_LIMIT) {
+      return get_result_small_nnz_small_index();
     }
     else {
-      std::tie(selected_dim_indices, res_dim_indices) = get_selected_indices_large_nnz_small_size();
+      Tensor selected_dim_indices;
+      Tensor res_dim_indices;
+
+      // A more precise decision could be of the form:
+      // `nnz < C(nnz, size) * size`, but it requires heavy benchmarking.
+      // We choose `nnz < size`, which measures theoretical complexity
+      // and does not rely on runtime performance.
+      // TODO: perform this analysis and find better C(nnz, size).
+      if (nnz <= size) {
+        std::tie(selected_dim_indices, res_dim_indices) = get_selected_indices_small_nnz_large_size();
+      }
+      else {
+        std::tie(selected_dim_indices, res_dim_indices) = get_selected_indices_large_nnz_small_size();
+      }
+
+      return make_output(selected_dim_indices, res_dim_indices);
     }
-
-    auto res_indices = index_select(indices, 1, selected_dim_indices);
-    res_indices[dim] = res_dim_indices;
-    const auto res_values = index_select(values, 0, selected_dim_indices);
-
-    return _sparse_coo_tensor_with_dims_and_tensors(
-        sparse_dim, dense_dim, res_sizes, res_indices, res_values, self.options());
   }
   // If indexing into dense dimensions
   else {

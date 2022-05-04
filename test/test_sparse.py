@@ -999,15 +999,12 @@ class TestSparse(TestCase):
                 test_shape(len(sizes) // 2, 10, sizes, d, index)
                 test_shape(len(sizes), 10, sizes, d, index)
 
-    @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
-    def test_index_select_exhaustive_index(self, device, dtype, coalesced):
-        sizes = [3, 3, 4]
+    def _test_index_select_exhaustive_index(self, sizes, dims, device, dtype, coalesced):
         t = make_tensor(sizes, dtype=dtype, device=device)
         t_sparse = t.to_sparse().coalesce() if coalesced else t.to_sparse()
         t_small_sparse, _, _ = self._gen_sparse(len(sizes), 2, sizes, dtype, device, coalesced)
         t_small = t_small_sparse.to_dense()
-        for d in range(len(sizes)):
+        for d in dims:
             # NOTE: indices are negative
             idx_dim_d_range = list(range(-sizes[d], 0))
             for idx_len in range(sizes[d], sizes[d] + 1):
@@ -1027,6 +1024,18 @@ class TestSparse(TestCase):
                     small_dense_result = t_small.index_select(d, t_idx + sizes[d])
                     small_sparse_result = t_small_sparse.index_select(d, t_idx)
                     self.assertEqual(small_dense_result, small_sparse_result)
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_index_select_exhaustive_index_small(self, device, dtype, coalesced):
+        # will trigger brute-force algo
+        self._test_index_select_exhaustive_index((3, 3, 4), range(3), device, dtype, coalesced)
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_index_select_exhaustive_index_large(self, device, dtype, coalesced):
+        # will trigger more sophisticated algos
+        self._test_index_select_exhaustive_index((100, 50, 3, 3), (2, 3), device, dtype, coalesced)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
