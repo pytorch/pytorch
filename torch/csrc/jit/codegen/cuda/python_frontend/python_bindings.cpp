@@ -195,26 +195,6 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_tensor",
           [](FusionDefinitionContextManager& self,
-             size_t ndims,
-             std::vector<bool> contiguity,
-             torch::jit::fuser::cuda::DataType dtype =
-                 torch::jit::fuser::cuda::DataType::Float) -> TensorView* {
-            TORCH_CHECK(
-                ndims == contiguity.size(),
-                "The number of dimensions specified does not match contiguity.");
-            return TensorViewBuilder()
-                .ndims(ndims)
-                .dtype(dtype)
-                .contiguity(std::move(contiguity))
-                .build();
-          },
-          py::arg("ndims"),
-          py::arg("contiguity"),
-          py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
-          py::return_value_policy::reference)
-      .def(
-          "define_tensor",
-          [](FusionDefinitionContextManager& self,
              std::vector<int> sizes,
              std::vector<int> strides,
              torch::jit::fuser::cuda::DataType dtype =
