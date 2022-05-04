@@ -21609,6 +21609,19 @@ class TestStateDictHooks(TestCase):
         # hook_called should not have been incremented
         self.assertEqual(hook_called, 2)
 
+        def load_hook_clear_incompatible(module, incompatible_keys):
+            incompatible_keys.missing_keys.clear()
+            incompatible_keys.unexpected_keys.clear()
+
+        nested.register_load_state_dict_post_hook(load_hook_clear_incompatible)
+        state_dict = wrapped.state_dict()
+        state_dict["extra"] = torch.ones(1)
+        # load state_dict with strict=True should not throw.
+        ret = wrapped.load_state_dict(state_dict, strict=True)
+        # explicitly ensure that the post hook clearned out incompatible_keys
+        self.assertEqual([], ret.missing_keys)
+        self.assertEqual([], ret.unexpected_keys)
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)

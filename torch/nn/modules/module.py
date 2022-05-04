@@ -1422,22 +1422,24 @@ class Module:
 
     def register_load_state_dict_post_hook(self, hook):
         r"""Registers a post hook to be run after module's ``load_state_dict``
-        is called. The hook will be called everytime after :func:`load_state_dict`
-        has loaded a ``state_dict`` into the ``self`` module.
+        is called.
+
         It should have the following signature::
             hook(module, incompatible_keys) -> None
+
         The ``module`` argument is the current module that this hook is registered
         on, and the ``incompatible_keys`` argument is a ``NamedTuple`` consisting
         of attributes ``missing_keys`` and ``unexpected_keys``. ``missing_keys``
         is a ``list`` of ``str`` containing the missing keys and
         ``unexpected_keys`` is a ``list`` of ``str`` containing the unexpected keys.
-        If the hook wishes to modify the ``NamedTuple`` ``missing_keys``
-        or ``unexpected_keys`` returned by ``load_state_dict``, the hook
-        can simply modify the ``NamedTuple`` argument it is invoked with.
-        Note that if the hook modifies (adds) entries to ``missing_keys`` or
-        ``unexpected_keys`` and :func:`load_state_dict` is called with ``strict=True``,
-        the error raised by :func:`load_state_dict` will contain these keys added
-        by the hook, as expected.
+
+        The given incompatible_keys can be modified inplace if needed.
+
+        Note that the checks performed when calling :func:`load_state_dict` with
+        ``strict=True`` are affected by modifications the hook makes to
+        ``missing_keys`` or ``unexpected_keys``, as expected. Additions to either
+        set of keys will result in an error being thrown when ``strict=True``, and
+        clearning out both missing and unexpected keys will avoid an error.
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
@@ -1592,12 +1594,10 @@ class Module:
             incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
             for hook in module._load_state_dict_post_hooks.values():
                 out = hook(module, incompatible_keys)
-                # load_state_dict post hooks are not expected to return new
-                # values, if incompatible_keys can be modified, it should be done
-                # inplace.
                 assert out is None, (
-                    "Expected hook registered with ``register_load_state_dict_post_hook``"
-                    " to return ``None``."
+                    "Hooks registered with ``register_load_state_dict_post_hook`` are not"
+                    "expected to return new values, if incompatible_keys need to be modified,"
+                    "it should be done inplace."
                 )
 
         load(self)
@@ -1616,7 +1616,6 @@ class Module:
         if len(error_msgs) > 0:
             raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
                                self.__class__.__name__, "\n\t".join(error_msgs)))
-
         return _IncompatibleKeys(missing_keys, unexpected_keys)
 
     def _named_members(self, get_members_fn, prefix='', recurse=True):
