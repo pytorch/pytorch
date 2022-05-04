@@ -130,6 +130,11 @@ struct ForEachAddFuser {
     // same scalar
     Node* curr_fusion_graph = nullptr;
     Value* curr_scalar_arg = nullptr;
+    // NB: in this fusion pass, we are just merging nodes horizontally,
+    // typically, one might pull in inputs to fusion group to fuse vertically
+    // See tensorexpr_fuser.cpp or create_autodiff_subgraphs.cpp
+    // for example on vertical fusion
+
     for (auto it = b->nodes().begin(); it != b->nodes().end();) {
       Node* node = *it;
       for (Block* block : node->blocks()) {
