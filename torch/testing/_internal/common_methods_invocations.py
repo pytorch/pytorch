@@ -6,6 +6,7 @@ import copy
 from enum import Enum
 import operator
 import random
+from reprlib import Repr
 import unittest
 import math
 
@@ -15,7 +16,7 @@ from torch._six import inf
 import collections.abc
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, Iterable
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -900,6 +901,26 @@ class OpInfo(object):
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
         return self.op(*args, **kwargs)
+
+    def __str__(self):
+        class_name = self.__class__.__name__
+        indent = (len(class_name) + 1) * ' '
+
+        field_list = [(f.name, getattr(self, f.name)) for f in fields(self) if f.repr]
+
+        fields_str = []
+        for f in field_list:
+            field_str = f"{f[0]} = {repr(f[1])}"
+
+            # 80 is the max_width, if the len is over it we split the args over multiple lines
+            if len(field_str) >= 80:
+                max_indent = (len(f[0]) + 3) * ' '
+                field_str = f",\n{indent + max_indent}".join(field_str.split(','))
+
+            fields_str.append(field_str)
+
+        fields_str = f',\n{indent}'.join(fields_str)
+        return f"{class_name}({fields_str})"
 
     def get_op(self):
         """Returns the function variant of the operator, torch.<op_name>."""
