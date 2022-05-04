@@ -5713,7 +5713,7 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
     else:
         # cuFFT supports powers of 2 for half and complex half precision
         # NOTE: For hfft, hfft2, hfftn, irfft, irfft2, irfftn with default args
-        # where output_size n=2*(input_dim - 1), we make sure that logical fft size is a power of two
+        # where output_size n=2*(input_size - 1), we make sure that logical fft size is a power of two
         if self.name in ['fft.hfft', 'fft.irfft']:
             shapes = ((2, 9, 9), (33,))
         elif self.name in ['fft.hfft2', 'fft.irfft2']:

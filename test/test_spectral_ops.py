@@ -395,7 +395,7 @@ class TestFFT(TestCase):
         }
         if dtype in (torch.half, torch.complex32):
             # cuFFT supports powers of 2 for half and complex half precision
-            # NOTE: With hfft and default args where output_size n=2*(input_dim - 1),
+            # NOTE: With hfft and default args where output_size n=2*(input_size - 1),
             # we make sure that logical fft size is a power of two.
             x = torch.randn(65, device=device, dtype=dtype)
             R = torch.fft.hfft(x)
