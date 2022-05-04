@@ -18968,7 +18968,7 @@ def _pprint(obj, width=80, indent=2) -> str:
     fields_str = []
     for f in field_list:
         if is_dataclass(f[1]):
-            field_str = _pprint(f[1], width=width, indent=indent+2)
+            field_str = _pprint(f[1], width=width, indent=indent + 2)
         else:
             field_str = f"{f[0]} = {repr(f[1])}"
             # if the len is over it we split the args over multiple lines
