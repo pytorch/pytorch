@@ -1150,6 +1150,7 @@ def sample_inputs_sparse_coo_masked_reduction(op_info, device, dtype, requires_g
     inputs: List[SampleInput] = []
 
     if op_info.supports_sparse:
+        op_name = op_info.name.replace('_masked.', '')
         for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
             mask = sample_input.kwargs.get('mask')
             if mask is not None:
@@ -1158,6 +1159,12 @@ def sample_inputs_sparse_coo_masked_reduction(op_info, device, dtype, requires_g
                 inputs.append(SampleInput(sample_input.input.to_sparse(),
                                           args=sample_input.args, kwargs=sample_input_kwargs))
             else:
+                if op_name in {'prod', 'amax', 'amin'}:
+                    # FIXME: for now reductions with non-zero reduction identity and
+                    # unspecified mask are not supported for sparse COO
+                    # tensors, see torch._masked.prod implementation
+                    # for details.
+                    continue
                 inputs.append(SampleInput(sample_input.input.to_sparse(),
                                           args=sample_input.args, kwargs=sample_input.kwargs))
     return inputs
@@ -1322,6 +1329,7 @@ class ReductionOpInfo(OpInfo):
         # Options from the OpInfo base class
         **kwargs,
     ):
+        self._original_reduction_args = locals().copy()
         assert nan_policy in (None, 'propagate', 'omit')
 
         # These are mutually exclusive options
@@ -1340,7 +1348,7 @@ class ReductionOpInfo(OpInfo):
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault('inplace_variant', None)
         kwargs.setdefault('sample_inputs_func', sample_inputs_func)
-        super(ReductionOpInfo, self).__init__(name, **kwargs)
+        super().__init__(name, **kwargs)
 
         self.identity = identity
         self.nan_policy = nan_policy
@@ -3398,6 +3406,12 @@ def sample_inputs_transpose_swapdims(self, device, dtype, requires_grad, **kwarg
     for shape, args in cases:
         yield SampleInput(make_arg(shape), args=args)
 
+def _numpy_ref_transpose(a, dim0, dim1):
+    if a.ndim <= 1:
+        return a
+
+    return np.swapaxes(a, dim0, dim1)
+
 def sample_inputs_adjoint(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -3676,6 +3690,18 @@ def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
 
     for input_shape1, input_shape2, kwargs in cases:
         yield SampleInput([make_arg(input_shape1), make_arg(input_shape2)], kwargs=kwargs)
+
+def reference_inputs_cat(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_cat_concat(op, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Noncontiguous type promoting tensors
+    a = make_arg((3, 4, 2))
+    b = make_arg((3, 2, 2), noncontiguous=True, dtype=torch.double)
+    c = make_arg((3, 3, 2), dtype=torch.float16).permute(1, 0, 2)
+
+    yield SampleInput((a, b, c), kwargs={'dim': 1})
 
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **kwargs):
     tensors = [
@@ -6555,6 +6581,31 @@ def sample_inputs_permute(op_info, device, dtype, requires_grad, **kwargs):
 
     for shape, args in cases:
         yield SampleInput(make_arg(shape), args=(args,))
+
+def reference_inputs_permute(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_permute(op, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = (
+        ((), ()),
+        ((1,), (0,)),
+        ((2, 2), (1, 0)),
+        ((2, 2), (0, 1)),
+        ((2, 0, 1), (0, 2, 1)),
+        ((3, 4, 2), (2, 1, 0)),
+        ((3, 4, 2), (1, 0, 2)),
+        ((3, 4, 2), (0, 1, 2)),
+    )
+
+    # Adds tricky permutations and permutations with noncontiguity
+    for shape, permutation in cases:
+        for p in itertools.permutations(permutation):
+            a = make_arg(shape).permute(p)
+            yield SampleInput(a, args=(permutation,))
+
+            a = make_arg(shape, noncontiguous=True).permute(p)
+            yield SampleInput(a, args=(permutation,))
 
 def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -13580,6 +13631,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
            )),
     OpInfo('permute',
+           ref=np.transpose,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -13589,7 +13641,8 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_permute),
+           sample_inputs_func=sample_inputs_permute,
+           reference_inputs_func=reference_inputs_permute),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
@@ -14368,12 +14421,7 @@ op_db: List[OpInfo] = [
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                    supports_out=False,
-                   supports_autograd=False,
-                   skips=(
-                       # Reference: https://github.com/pytorch/pytorch/issues/66402
-                       DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_large",
-                                    device_type='cpu', dtypes=(torch.complex64,), active_if=not (IS_MACOS or IS_WINDOWS)),
-                   )),
+                   supports_autograd=False),
     UnaryUfuncInfo('isinf',
                    ref=np.isinf,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -15521,6 +15569,7 @@ op_db: List[OpInfo] = [
            aliases=('concat',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
            sample_inputs_func=sample_inputs_cat_concat,
+           reference_inputs_func=reference_inputs_cat,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
@@ -15796,6 +15845,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_trace),
     OpInfo('transpose',
+           ref=_numpy_ref_transpose,
            aliases=('swapdims', 'swapaxes'),
            assert_jit_shape_analysis=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
@@ -16576,6 +16626,7 @@ op_db: List[OpInfo] = [
         'argmax',
         supports_multiple_dims=False,
         supports_autograd=False,
+        assert_jit_shape_analysis=True,
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
@@ -16819,13 +16870,9 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_sparse=True,
         supports_sparse_csr=True,
-        promotes_int_to_int64=False,
+        promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_duplicate_values',
-                         dtypes=(torch.bool,)),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_ref_small_input',
-                         dtypes=(torch.bool,)),
             DecorateInfo(unittest.skip("Failing on some jobs"), 'TestReductions', 'test_reference_masked',
                          dtypes=(torch.bool, torch.int8, torch.int16, torch.int32)),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -16859,6 +16906,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        supports_sparse=True,
         supports_sparse_csr=True,
         promotes_int_to_int64=True,
         # FIXME: "prod_cpu" not implemented for 'BFloat16'
@@ -16873,6 +16921,10 @@ op_db: List[OpInfo] = [
             # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
+            # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout', device_type='cuda',
+                         dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
+                                 torch.int64, torch.complex64, torch.complex128)),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-02)}),
@@ -16881,13 +16933,15 @@ op_db: List[OpInfo] = [
                          'TestReductions', 'test_ref_duplicate_values'),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,
-        sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction
+        sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
+        sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
     ),
     ReductionOpInfo(
         '_masked.amax',
         nan_policy='propagate',
         supports_out=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
+        supports_sparse=True,
         ref=reference_reduction_numpy(np.amax),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -16895,9 +16949,14 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: Unknown builtin op: aten::iinfo
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout', device_type='cuda',
+                         dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
+                                 torch.int64, torch.complex64, torch.complex128)),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
+        sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
@@ -16905,6 +16964,7 @@ op_db: List[OpInfo] = [
         nan_policy='propagate',
         supports_out=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
+        supports_sparse=True,
         ref=reference_reduction_numpy(np.amin),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -16913,8 +16973,13 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # RuntimeError: Unknown builtin op: aten::iinfo
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout', device_type='cuda',
+                         dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
+                                 torch.int64, torch.complex64, torch.complex128)),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
+        sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
@@ -17503,7 +17568,7 @@ def _inherit_constructor_args(name, op, inherited, overrides):
 
     return kwargs
 
-class OpInfoPythonRefInfo(OpInfo):
+class PythonRefInfo(OpInfo):
     '''
     An OpInfo for a Python reference of an OpInfo base class operation.
     '''
@@ -17521,7 +17586,28 @@ class OpInfoPythonRefInfo(OpInfo):
 
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
-        super(OpInfoPythonRefInfo, self).__init__(**ukwargs)
+        super(PythonRefInfo, self).__init__(**ukwargs)
+
+class ReductionPythonRefInfo(ReductionOpInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise unary operation.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        assert isinstance(self.torch_opinfo, ReductionOpInfo)
+
+        inherited = self.torch_opinfo._original_reduction_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
+
+        super().__init__(**ukwargs)
 
 class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
     '''
@@ -17569,7 +17655,7 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
 # Separate registry for experimental Python Reference OpInfos.
 python_ref_db = [
     #
-    # Elementwise unary OpInfos
+    # Elementwise Unary OpInfos
     #
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
@@ -17689,9 +17775,6 @@ python_ref_db = [
         "_refs.tan",
         torch_opinfo_name="tan",
     ),
-    #
-    # Elementwise binary OpInfos
-    #
     ElementwiseBinaryPythonRefInfo(
         "_refs.add",
         torch_opinfo_name="add",
@@ -17810,6 +17893,45 @@ python_ref_db = [
         "_refs.true_divide",
         torch_opinfo_name="true_divide",
     ),
+    #
+    # View & Shape OpInfos
+    #
+    PythonRefInfo(
+        "_refs.cat",
+        torch_opinfo_name="cat",
+        skips=(
+            # torch function issue:
+            # ValueError: Callable cat has no meta function!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
+            # torch.cat can't handle chalf or cdouble type promotion properly
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
+                         dtypes=(torch.chalf, torch.cfloat))
+        )
+    ),
+    PythonRefInfo(
+        "_refs.permute",
+        torch_opinfo_name="permute",
+    ),
+    PythonRefInfo(
+        "_refs.tensor_split",
+        torch_opinfo_name="tensor_split",
+        skips=(
+            # TensorMeta doesn't support tolist
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
+        )
+    ),
+    PythonRefInfo(
+        "_refs.transpose",
+        torch_opinfo_name="transpose",
+    ),
+    #
+    # Reduction OpInfos
+    #
+    ReductionPythonRefInfo(
+        "_refs.sum",
+        torch_opinfo_name="sum",
+        supports_out=True
+    )
 ]
 
 # Common operator groupings
