@@ -14,72 +14,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-xenial-py3_7-gcc5_4-build:
-    name: linux-xenial-py3.7-gcc5.4
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-xenial-py3.7-gcc5.4
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
-
-  linux-xenial-py3_7-gcc5_4-test:
-    name: linux-xenial-py3.7-gcc5.4
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-py3_7-gcc5_4-build
-    with:
-      build-environment: linux-xenial-py3.7-gcc5.4
-      docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
-          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-        ]}
-
   linux-docs:
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
-    needs: linux-xenial-py3_7-gcc5_4-build
+    needs: linux-focal-py3.7-gcc7
     with:
-      build-environment: linux-xenial-py3.7-gcc5.4
-      docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4-build.outputs.docker-image }}
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image: ${{ needs.linux-focal-py3.7-gcc7-build.outputs.docker-image }}
 
-  linux-xenial-py3_7-gcc7-build:
-    name: linux-xenial-py3.7-gcc7
+  linux-focal-py3_7-gcc7-build:
+    name: linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc7
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
-  linux-xenial-py3_7-gcc7-test:
-    name: linux-xenial-py3.7-gcc7
+  linux-focal-py3_7-gcc7-test:
+    name: linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-py3_7-gcc7-build
+    needs: linux-focal-py3_7-gcc7-build
     with:
-      build-environment: linux-xenial-py3.7-gcc7
-      docker-image: ${{ needs.linux-xenial-py3_7-gcc7-build.outputs.docker-image }}
+      build-environment: linux-focal-py3.7-gcc7
+      docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
-  linux-xenial-py3_7-clang7-asan-build:
-    name: linux-xenial-py3.7-clang7-asan
+  linux-focal-py3_7-clang7-asan-build:
+    name: linux-focal-py3.7-clang7-asan
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3.7-clang7-asan
-      docker-image-name: pytorch-linux-xenial-py3-clang7-asan
+      build-environment: linux-focal-py3.7-clang7-asan
+      docker-image-name: pytorch-linux-focal-py3-clang7-asan
 
-  linux-xenial-py3_7-clang7-asan-test:
-    name: linux-xenial-py3.7-clang7-asan
+  linux-focal-py3_7-clang7-asan-test:
+    name: linux-focal-py3.7-clang7-asan
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-py3_7-clang7-asan-build
+    needs: linux-focal-py3_7-clang7-asan-build
     with:
-      build-environment: linux-xenial-py3.7-clang7-asan
-      docker-image: ${{ needs.linux-xenial-py3_7-clang7-asan-build.outputs.docker-image }}
+      build-environment: linux-focal-py3.7-clang7-asan
+      docker-image: ${{ needs.linux-focal-py3_7-clang7-asan-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "linux.2xlarge" },
@@ -89,27 +65,27 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
         ]}
 
-  linux-xenial-py3_7-gcc7-no-ops:
-    name: linux-xenial-py3.7-gcc7-no-ops
+  linux-focal-py3_7-gcc7-no-ops:
+    name: linux-focal-py3.7-gcc7-no-ops
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3.7-gcc7-no-ops
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc7
+      build-environment: linux-focal-py3.7-gcc7-no-ops
+      docker-image-name: pytorch-linux-focal-py3.7-gcc7
 
-  linux-xenial-py3_7-clang7-onnx-build:
-    name: linux-xenial-py3.7-clang7-onnx
+  linux-focal-py3_7-clang7-onnx-build:
+    name: linux-focal-py3.7-clang7-onnx
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3.7-clang7-onnx
-      docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
+      build-environment: linux-focal-py3.7-clang7-onnx
+      docker-image-name: pytorch-linux-focal-py3-clang7-onnx
 
-  linux-xenial-py3_7-clang7-onnx-test:
-    name: linux-xenial-py3.7-clang7-onnx
+  linux-focal-py3_7-clang7-onnx-test:
+    name: linux-focal-py3.7-clang7-onnx
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-py3_7-clang7-onnx-build
+    needs: linux-focal-py3_7-clang7-onnx-build
     with:
-      build-environment: linux-xenial-py3.7-clang7-onnx
-      docker-image: ${{ needs.linux-xenial-py3_7-clang7-onnx-build.outputs.docker-image }}
+      build-environment: linux-focal-py3.7-clang7-onnx
+      docker-image: ${{ needs.linux-focal-py3_7-clang7-onnx-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -164,20 +140,20 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-xenial-cuda11_3-py3_7-gcc7-build:
-    name: linux-xenial-cuda11.3-py3.7-gcc7
+  linux-focal-cuda11_3-py3_7-gcc7-build:
+    name: linux-focal-cuda11.3-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-environment: linux-focal-cuda11.3-py3.7-gcc7
+      docker-image-name: pytorch-linux-focal-cuda11.3-cudnn8-py3-gcc7
 
-  linux-xenial-cuda11_3-py3_7-gcc7-test:
-    name: linux-xenial-cuda11.3-py3.7-gcc7
+  linux-focal-cuda11_3-py3_7-gcc7-test:
+    name: linux-focal-cuda11.3-py3.7-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-cuda11_3-py3_7-gcc7-build
+    needs: linux-focal-cuda11_3-py3_7-gcc7-build
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
+      build-environment: linux-focal-cuda11.3-py3.7-gcc7
+      docker-image: ${{ needs.linux-focal-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
@@ -211,20 +187,20 @@ jobs:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
-  linux-xenial-py3-clang5-mobile-build:
-    name: linux-xenial-py3-clang5-mobile-build
+  linux-focal-py3-clang9-mobile-build:
+    name: linux-focal-py3-clang9-mobile-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3-clang5-mobile-build
-      docker-image-name: pytorch-linux-xenial-py3-clang5-asan
+      build-environment: linux-focal-py3-clang9-mobile-build
+      docker-image-name: pytorch-linux-focal-py3-clang9-asan
       build-generates-artifacts: false
 
-  linux-xenial-py3-clang5-mobile-custom-build-static:
-    name: linux-xenial-py3-clang5-mobile-custom-build-static
+  linux-focal-py3-clang5-mobile-custom-build-static:
+    name: linux-focal-py3-clang9-mobile-custom-build-static
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3-clang5-mobile-custom-build-static
-      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      build-environment: linux-focal-py3-clang9-mobile-custom-build-static
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
       build-generates-artifacts: false
 
   pytorch-xla-linux-bionic-py3_7-clang8-build:
@@ -276,49 +252,49 @@ jobs:
       build-environment: win-vs2019-cuda11.3-py3
       cuda-version: "11.3"
 
-  linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
-    name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
+  linux-focal-cuda11_3-py3_7-gcc7-bazel-test:
+    name: linux-focal-cuda11.3-py3.7-gcc7-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
-      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-environment: linux-focal-cuda11.3-py3.7-gcc7-bazel-test
+      docker-image-name: pytorch-linux-focal-cuda11.3-cudnn8-py3-gcc7
 
-  pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single:
-    name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+  pytorch-linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single:
+    name: pytorch-linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
-      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      build-environment: pytorch-linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
 
-  pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit:
-    name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
+  pytorch-linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit:
+    name: pytorch-linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
-      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      build-environment: pytorch-linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
 
-  linux-xenial-py3_7-gcc5_4-mobile-lightweight-dispatch-build:
-    name: linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build
+  linux-focal-py3_7-gcc7-mobile-lightweight-dispatch-build:
+    name: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build
-      docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
+      build-environment: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
+      docker-image-name: pytorch-linux-focal-py3.7-gcc7
       build-generates-artifacts: false
 
-  deploy-linux-xenial-cuda11_3-py3_7-gcc7-build:
-    name: deploy-linux-xenial-cuda11.3-py3.7-gcc7
+  deploy-linux-focal-cuda11_3-py3_7-gcc7-build:
+    name: deploy-linux-focal-cuda11.3-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-environment: deploy-linux-focal-cuda11.3-py3.7-gcc7
+      docker-image-name: pytorch-linux-focal-cuda11.3-cudnn8-py3-gcc7
 
-  deploy-linux-xenial-cuda11_3-py3_7-gcc7-test:
-    name: linux-xenial-cuda11.3-py3.7-gcc7
+  deploy-linux-focal-cuda11_3-py3_7-gcc7-test:
+    name: linux-focal-cuda11.3-py3.7-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: deploy-linux-xenial-cuda11_3-py3_7-gcc7-build
+    needs: deploy-linux-focal-cuda11_3-py3_7-gcc7-build
     with:
-      build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image: ${{ needs.deploy-linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
+      build-environment: deploy-linux-focal-cuda11.3-py3.7-gcc7
+      docker-image: ${{ needs.deploy-linux-focal-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
