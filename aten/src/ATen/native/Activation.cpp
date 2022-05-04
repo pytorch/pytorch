@@ -6,7 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
-#include <ATen/ops/matmul.h>
+
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 #include <ATen/native/xnnpack/Engine.h>
 #endif
