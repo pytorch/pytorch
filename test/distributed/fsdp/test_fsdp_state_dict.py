@@ -204,7 +204,11 @@ class TestFSDPStateDict(FSDPTest):
         expected.
         """
         torch.cuda.set_device(self.rank)
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+        ) if mixed_precision else None
         model = self._get_simple_nested_model(mixed_precision=mixed_precision)
         optim = torch.optim.SGD(model.parameters(), lr=0.1)
         initial_params = _get_full_detached_param(model)
