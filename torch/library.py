@@ -11,7 +11,7 @@ __all__ = ['extend_library', 'create_library']
 _impls_for_existing_libraries = {}
 
 # User created custom libraries
-libraries = {}
+_libraries = {}
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -32,7 +32,7 @@ class _Library:
         if kind == "IMPL":
             _impls_for_existing_libraries[id(self)] = self
         elif kind == "DEF":
-            libraries[id(self)] = self
+            _libraries[id(self)] = self
         else:
             raise ValueError("Unsupported kind: ", kind)
 
@@ -72,7 +72,7 @@ class _Library:
         for key in self._op_impls:
             _impls.remove(key)
         if self.kind == "DEF":
-            del libraries[self.ns]
+            del _libraries[self.ns]
         else:
             del _impls_for_existing_libraries[id(self)]
         del self.m
