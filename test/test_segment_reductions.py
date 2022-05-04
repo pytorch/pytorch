@@ -270,8 +270,8 @@ class TestSegmentReductions(TestCase):
                         ]
                         expected_grad = [
                             [1.0, 1.0],
-                            [float("nan"), float("nan")],
-                            [float("nan"), float("nan")],
+                            [3.0, float("nan")],
+                            [float("nan"), 1.0],
                             [6.0, 6.0],
                             [8.0, 3.0],
                             [12.0, 2.0],
