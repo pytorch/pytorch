@@ -1,21 +1,21 @@
 # Owner(s): ["module: type promotion"]
 
-from functools import wraps
+from functools import (partial, wraps)
 import itertools
 import unittest
 
 import torch
 
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
-                                                  TEST_NUMPY, torch_to_numpy_dtype_dict)
+                                                  TEST_NUMPY, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, dtypesIfCUDA, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, get_all_math_dtypes, integral_types_and, floating_types_and
 )
 
-if TEST_NUMPY:
-    import numpy as np
+import numpy as np
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -809,11 +809,50 @@ class TestTypePromotion(TestCase):
         with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported+'):
             t.addcdiv_(t, t)
 
+    def _ternary_promotion_common(self, device, op1, op2):
+        make_arg = partial(make_tensor, device=device)
+
+        types = (
+            (torch.float64, torch.float64, torch.complex128),
+            (torch.long, torch.bfloat16, torch.float32),
+        )
+
+        for type1, type2, type3 in types:
+            arg1 = make_arg([5, 5], dtype=type1)
+            arg2 = make_arg([5, 5], dtype=type2)
+            arg3 = make_arg([1, 5], dtype=type3)
+
+            res1 = op1(arg1, arg2, arg3)
+            res2 = op2(arg1, arg2, arg3)
+
+            # res1 and res2 are not guaranteed to be the same.  They are the
+            # same when all the inputs are tensors with one or more dimensions.
+            self.assertEqual(res1, res2)
+            self.assertEqual(res1.dtype, res2.dtype)
+
+    def test_addcdiv_promotion(self, device):
+        def op1(arg1, arg2, arg3):
+            return torch.addcdiv(arg1, arg2, arg3)
+
+        def op2(arg1, arg2, arg3):
+            return arg1 + arg2 / arg3
+
+        self._ternary_promotion_common(device, op1, op2)
+
+    def test_addcmul_promotion(self, device):
+        def op1(arg1, arg2, arg3):
+            return torch.addcmul(arg1, arg2, arg3)
+
+        def op2(arg1, arg2, arg3):
+            return arg1 + arg2 * arg3
+
+        self._ternary_promotion_common(device, op1, op2)
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype
     @onlyCPU
-    @dtypes(*list(itertools.product(torch_to_numpy_dtype_dict.keys(),
-                                    torch_to_numpy_dtype_dict.keys())))
+    @dtypes(*list(itertools.product(set(numpy_to_torch_dtype_dict.values()),
+                                    set(numpy_to_torch_dtype_dict.values()))))
     def test_numpy_array_binary_ufunc_promotion(self, device, dtypes):
         import operator
         np_type = torch_to_numpy_dtype_dict[dtypes[0]]
