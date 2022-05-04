@@ -829,6 +829,10 @@ class Generator(object):
     def seed(self) -> _int: ...
     def initial_seed(self) -> _int: ...
 
+
+# Defined in torch/csrc/utils/python_dispatch.cpp
+def _dispatch_library(kind: str, name: str, dispatch: str, file: str, linenum: Any) -> Any: ...
+
 # Defined in torch/csrc/utils/init.cpp
 class BenchmarkConfig(object):
     num_calling_threads: _int

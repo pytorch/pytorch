@@ -918,3 +918,4 @@ def _register_device_module(device_type, module):
 
 # expose return_types
 from . import return_types
+from . import library
