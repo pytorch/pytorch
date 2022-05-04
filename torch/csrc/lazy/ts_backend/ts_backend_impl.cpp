@@ -2,6 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
@@ -182,6 +183,10 @@ torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
 
 std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
     std::vector<torch::lazy::ComputationPtr> instances) const {
+  if (!LazyGraphExecutor::InMarkStep()) {
+    LOG(WARNING) << "Compile outside of mark step";
+  }
+
   for (const auto& instance : instances) {
     C10_UNUSED auto ts_computation =
         static_cast<torch::lazy::TSComputation*>(instance.get());
