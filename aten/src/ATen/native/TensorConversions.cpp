@@ -53,9 +53,6 @@ Tensor _to_copy(
   options = self.options().merge_in(options).memory_format(c10::nullopt);
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
 
-  bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
-                  (options.layout() == c10::kStrided));
-
   // TODO: Use the dispatcher for this.
   // Currently there are unenumerated extensibility issues preventing this.
   if (self.is_sparse_csr()) {
@@ -74,6 +71,9 @@ Tensor _to_copy(
         non_blocking,
         memory_format);
   }
+  bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
+                  (options.layout() == c10::kStrided));
+
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
       Tensor r;
