@@ -6,6 +6,7 @@ import torch
 import torch.onnx
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9
+
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils

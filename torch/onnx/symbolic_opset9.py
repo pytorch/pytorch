@@ -9,6 +9,7 @@ from typing import Optional
 import torch
 import torch.onnx
 import torch.onnx.symbolic_helper as sym_help
+
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils

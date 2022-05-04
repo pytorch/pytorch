@@ -7,6 +7,7 @@ from typing import Set
 
 import torch
 import torch.onnx
+
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
