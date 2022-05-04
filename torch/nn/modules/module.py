@@ -1421,19 +1421,27 @@ class Module:
         return handle
 
     def register_load_state_dict_post_hook(self, hook):
-        r"""
-        These hooks will be called with the following arguments:
-            1. The current module this hook is registered on
-            2. A ``NamedTuple`` consisting of attributes ``missing_keys``
-                and ``unexpected_keys``. ``missing_keys`` is a ``list`` of
-                ``str`` containing the missing keys and ``unexpected_keys``
-                is a ``list`` of ``str`` containing the unexpected keys.
+        r"""Registers a post hook to be run after module's ``load_state_dict``
+        is called. The hook will be called everytime after :func:`load_state_dict`
+        has loaded a ``state_dict`` into the ``self`` module.
+        It should have the following signature::
+            hook(module, incompatible_keys) -> None
+        The ``module`` argument is the current module that this hook is registered
+        on, and the ``incompatible_keys`` argument is a ``NamedTuple`` consisting
+        of attributes ``missing_keys`` and ``unexpected_keys``. ``missing_keys``
+        is a ``list`` of ``str`` containing the missing keys and
+        ``unexpected_keys`` is a ``list`` of ``str`` containing the unexpected keys.
         If the hook wishes to modify the ``NamedTuple`` ``missing_keys``
         or ``unexpected_keys`` returned by ``load_state_dict``, the hook
         can simply modify the ``NamedTuple`` argument it is invoked with.
-        Arguments:
-            hook (Callable): Callable hook that will be invoked after
-                loading the state dict.
+        Note that if the hook modifies (adds) entries to ``missing_keys`` or
+        ``unexpected_keys`` and :func:`load_state_dict` is called with ``strict=True``,
+        the error raised by :func:`load_state_dict` will contain these keys added
+        by the hook, as expected.
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._load_state_dict_post_hooks)
         self._load_state_dict_post_hooks[handle.id] = hook
@@ -1583,7 +1591,14 @@ class Module:
             # Note that the hook can modify missing_keys and unexpected_keys.
             incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
             for hook in module._load_state_dict_post_hooks.values():
-                hook(module, incompatible_keys)
+                out = hook(module, incompatible_keys)
+                # load_state_dict post hooks are not expected to return new
+                # values, if incompatible_keys can be modified, it should be done
+                # inplace.
+                assert out is None, (
+                    "Expected hook registered with ``register_load_state_dict_post_hook``"
+                    " to return ``None``."
+                )
 
         load(self)
         del load

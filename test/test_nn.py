@@ -21581,14 +21581,9 @@ class TestStateDictHooks(TestCase):
                 incompatible_keys.unexpected_keys.append("bar")
                 hook_called += 1
 
-        class MyModuleContainer(nn.Module):
-            def __init__(self, mod):
-                super().__init__()
-                self.mod = mod
-
         nested = MyModule()
-        wrapped = MyModuleContainer(nested)
-        nested.register_load_state_dict_post_hook(
+        wrapped = nn.ModuleList([nested])
+        handle = nested.register_load_state_dict_post_hook(
             nested.my_post_load_hook,
         )
         # Hook must be called even if it is wrapped
@@ -21599,6 +21594,20 @@ class TestStateDictHooks(TestCase):
         unexpected = ret.unexpected_keys
         self.assertEqual(missing, ["foo"])
         self.assertEqual(unexpected, ["bar"])
+        # When called with strict=True, the error raised should mention the
+        # missing and unexpected keys the hook added.
+        with self.assertRaisesRegex(RuntimeError, "foo.*\n.*bar"):
+            wrapped.load_state_dict(wrapped.state_dict(), strict=True)
+        self.assertEqual(hook_called, 2)
+        # Removing the hook via handle.remove() should cause it not to
+        # fire anymore.
+        handle.remove()
+        # Hook did not run so it should not have added any keys
+        ret = wrapped.load_state_dict(wrapped.state_dict(), strict=False)
+        self.assertEqual(ret.missing_keys, [])
+        self.assertEqual(ret.unexpected_keys, [])
+        # hook_called should not have been incremented
+        self.assertEqual(hook_called, 2)
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
