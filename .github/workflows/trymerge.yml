@@ -29,7 +29,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: 4
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          FORCE: ${{ github.event.client_payload.force}}
+          FORCE: false
           ON_GREEN: true
         run: |
           if [ -n "${FORCE}" ]; then
