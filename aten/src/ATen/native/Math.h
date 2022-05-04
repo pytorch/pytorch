@@ -2339,6 +2339,10 @@ airy_ai(T x) {
     return ai;
 }
 
+template <typename T, typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+static inline C10_HOST_DEVICE
+double airy_ai(T x) { return airy_ai(static_cast<double>(x)); }
+
 template<typename T>
 static inline C10_HOST_DEVICE typename std::enable_if<std::is_floating_point<T>::value, T>::type
 airy_bi(T x) {
@@ -2546,5 +2550,9 @@ airy_bi(T x) {
 
     return bi;
 }
+
+template<typename T, typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+static inline C10_HOST_DEVICE
+double airy_bi(T x) { return airy_bi(static_cast<double>(x)); }
 
 C10_CLANG_DIAGNOSTIC_POP()
