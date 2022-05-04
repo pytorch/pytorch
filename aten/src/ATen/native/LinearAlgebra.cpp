@@ -1845,7 +1845,7 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   if (2 <= num_matrices - 1) {
     // out for a^2
     auto view_out = buffer.select(0, 2);
-    at::matmul_out(
+    _matmul_impl(
       view_out,
       buffer.select(0, 1),
       buffer.select(0, 1)
@@ -1856,7 +1856,7 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   if (3 <= num_matrices - 1) {
     // out for a^3
     auto view_out = buffer.select(0, 3);
-    at::matmul_out(
+    _matmul_impl(
       view_out,
       buffer.select(0, 1),
       buffer.select(0, 2)
@@ -1867,7 +1867,7 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   if (4 <= num_matrices - 1) {
     // out for a^6
     auto view_out = buffer.select(0, 4);
-    at::matmul_out(
+    _matmul_impl(
       view_out,
       buffer.select(0, 3),
       buffer.select(0, 3)
@@ -1928,7 +1928,7 @@ Tensor compute_T4(const Tensor& A) {
 
   // output for A^2 * (I / 2 + A / 6 + A^2 / 24)
   auto view_out = As.select(0, 3);
-  at::matmul_out(
+  _matmul_impl(
     view_out,
     // contains A^2
     As.select(0, 2),
@@ -1964,7 +1964,7 @@ Tensor compute_T8(const Tensor& A) {
   // output for A4
   auto view_out = As.select(0, 3);
   // A4 =  A2 * (x1 * A + x2 * A2)
-  at::matmul_out(
+  _matmul_impl(
     view_out,
     // As.select(0, 2) = A^2
     As.select(0, 2),
@@ -1978,7 +1978,7 @@ Tensor compute_T8(const Tensor& A) {
   // output for A8
   view_out = As.select(0, 4);
   // A8 = (x3 * A2 + A4) * (x4 * I + x5 * A + x6 * A2 + x7 * A4)
-  at::matmul_out(
+  _matmul_impl(
     view_out,
     // x3 * A2 + A4
     at::native::_compute_linear_combination(
@@ -2046,13 +2046,13 @@ Tensor compute_T12(const Tensor& A) {
   // output for A6
   auto view_out = As.select(0, 0);
   // compute A6
-  Bs.select(0, 2).add_(at::matmul_out(
+  Bs.select(0, 2).add_(_matmul_impl(
     view_out,
     Bs.select(0, 3),
     Bs.select(0, 3)
   ));
 
-  return Bs.select(0, 0).add_(at::matmul_out(
+  return Bs.select(0, 0).add_(_matmul_impl(
     view_out,
     Bs.select(0, 1).add_(Bs.select(0, 2)),
     Bs.select(0, 2)
@@ -2118,13 +2118,13 @@ Tensor compute_T18(const Tensor& A) {
   // tmp buffer for this matrix product
   auto view_out = As.select(0, 0);
   // compute A9
-  Bs.select(0, 3).add_(at::matmul_out(
+  Bs.select(0, 3).add_(_matmul_impl(
     view_out,
     Bs.select(0, 0),
     Bs.select(0, 4))
   );
 
-  return Bs.select(0, 1).add_(at::matmul_out(
+  return Bs.select(0, 1).add_(_matmul_impl(
     view_out,
     Bs.select(0, 2).add_(Bs.select(0, 3)),
     Bs.select(0, 3)
