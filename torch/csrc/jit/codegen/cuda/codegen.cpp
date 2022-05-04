@@ -1232,7 +1232,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       const REDUCTION_OP* rop,
       const ParallelTypeBitmap& thread_pred) {
     TORCH_INTERNAL_ASSERT(
-        !rop->isFused(), "This is not for the fused reduction kernel\n");
+        !rop->isAllreduce(),
+        "This is not for the allreduce reduction kernel\n");
 
     const auto par_domains = ir_utils::getParallelDomains(rop->outputs()[0]);
     ArgumentBuilder flags;
@@ -1266,7 +1267,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       const REDUCTION_OP* rop,
       const ParallelTypeBitmap& thread_pred) {
     TORCH_INTERNAL_ASSERT(
-        !rop->isFused(), "This is not for the fused reduction kernel\n");
+        !rop->isAllreduce(),
+        "This is not for the allreduce reduction kernel\n");
 
     const auto par_domains =
         ir_utils::getParallelDomains(ir_utils::getTvOutput(rop));
@@ -1307,8 +1309,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         grop->reduction_buffer()->buffer()->as<TensorView>();
     const auto sync_buffer = grop->sync_buffer()->buffer()->as<TensorView>();
 
-    if (grop->isFused()) {
-      generateFusedGridReduction(grop);
+    if (grop->isAllreduce()) {
+      generateGridAllreduce(grop);
       return;
     }
 
@@ -1349,12 +1351,12 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     indent() << kTab << func_args << ");\n";
   }
 
-  std::string genFusedReductionName(const kir::TensorIndex* reduction_out) {
-    return varName(reduction_out->view()) + "_reduction";
+  std::string genFusedReductionName(const TensorView* reduction_out) {
+    return varName(reduction_out) + "_reduction";
   }
 
-  void generateFusedGridReduction(const kir::GridReduction* grop) {
-    TORCH_INTERNAL_ASSERT(grop->isFused());
+  void generateGridAllreduce(const kir::GridReduction* grop) {
+    TORCH_INTERNAL_ASSERT(grop->isAllreduce());
 
     const auto out = grop->out()->as<kir::TensorIndex>();
     const auto domain = out->view()->domain();
@@ -1366,7 +1368,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         grop->reduction_buffer()->buffer()->as<TensorView>();
     const auto sync_buffer = grop->sync_buffer()->buffer()->as<TensorView>();
 
-    const auto reduction_name = genFusedReductionName(out);
+    const auto reduction_name = genFusedReductionName(out->view());
 
     // template <typename Func, typename... Types>
     // __device__ __inline__ void reduce(
@@ -1431,8 +1433,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         "Only grouping of 2 reductions is supported. ",
         grouped_grop->toString());
 
-    // TODO: enable this
-    TORCH_INTERNAL_ASSERT(!grouped_grop->isFused());
+    if (grouped_grop->isAllreduce()) {
+      generateGridAllreduce(grouped_grop);
+      return;
+    }
 
     const std::string flags_str = generateGridReduceTemplateFlags2(
         grouped_grop, grouped_grop->threadPredicate());
@@ -1483,6 +1487,67 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
 
     indent() << "reduction::gridReduceGroup<" << template_args << ">(\n";
+    indent() << kTab << func_args << ");\n";
+  }
+
+  void generateGridAllreduce(const kir::GroupedGridReduction* grouped_grop) {
+    TORCH_INTERNAL_ASSERT(grouped_grop->isAllreduce());
+
+    // First, build a list of function arguments
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+
+    for (const auto i : c10::irange(grouped_grop->numReductions())) {
+      const auto data_type = grouped_grop->outputs().at(i)->dtype();
+      TORCH_INTERNAL_ASSERT(
+          grouped_grop->reduction_buffers().at(i)->buffer()->isA<TensorView>());
+
+      // out
+      func_args.arg(
+          genCall("RefTuple", data_type, gen(grouped_grop->outputs().at(i))));
+
+      // inp
+      func_args.arg(genCall(
+          "ConstRefTuple", data_type, gen(grouped_grop->inputs().at(i))));
+
+      // global_work_buffer
+      const auto work_buffer =
+          grouped_grop->reduction_buffers().at(i)->buffer()->as<TensorView>();
+      func_args.arg(genCall(
+          "VolatilePtrTuple", data_type, "&" + varName(work_buffer) + "[0]"));
+
+      // init
+      func_args.arg(genCall(
+          "LocalTuple", data_type, genInline(grouped_grop->initVal(i))));
+
+      // reduction op
+      func_args.arg(genReductionOp(
+          grouped_grop->getReductionOpType(i),
+          grouped_grop->output(i)->dtype()));
+    }
+
+    // global_sync_buffer
+    const auto sync_buffer =
+        grouped_grop->sync_buffer()->buffer()->as<TensorView>();
+    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+
+    // shared_buf
+    func_args.arg("shared_mem");
+
+    // read and write predicates
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->predicate() != nullptr &&
+        grouped_grop->predicate()->hasValue());
+    const auto read_pred = genInline(grouped_grop->predicate());
+    func_args.arg(read_pred);
+    if (grouped_grop->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(grouped_grop->writePredicate()->hasValue());
+      func_args.arg(genInline(grouped_grop->writePredicate()));
+    } else {
+      func_args.arg(read_pred);
+    }
+
+    indent() << genFusedReductionName(ir_utils::getTvOutput(grouped_grop))
+             << ".reduceGroup(\n";
     indent() << kTab << func_args << ");\n";
   }
 
@@ -1549,8 +1614,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto n_buffer = gwop->N_buffer()->buffer()->as<TensorView>();
     const auto sync_buffer = gwop->sync_buffer()->buffer()->as<TensorView>();
 
-    if (wop->isFused()) {
-      generateFusedGridWelford(gwop);
+    if (wop->isAllreduce()) {
+      generateGridAllreduce(gwop);
       return;
     }
 
@@ -1606,9 +1671,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     indent() << kTab << data_type << "(0));\n";
   }
 
-  void generateFusedGridWelford(const kir::GridWelford* gwop) {
+  void generateGridAllreduce(const kir::GridWelford* gwop) {
     const auto wop = gwop->welford_op();
-    TORCH_INTERNAL_ASSERT(wop->isFused());
+    TORCH_INTERNAL_ASSERT(wop->isAllreduce());
 
     const auto out = wop->out()->as<kir::TensorIndex>();
     const auto domain = out->view()->domain();
@@ -1622,7 +1687,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     const auto sync_buffer = gwop->sync_buffer()->buffer()->as<TensorView>();
 
-    const auto reduction_name = genFusedReductionName(out);
+    const auto reduction_name = genFusedReductionName(out->view());
 
     // template <typename Func, typename... Types>
     // __device__ __inline__ void reduce(
@@ -1763,7 +1828,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     flags.arg(true);
 
     const auto reduction_name =
-        genFusedReductionName(alloc_fused_reduction->out());
+        genFusedReductionName(alloc_fused_reduction->out()->view());
 
     indent() << genTemplate("fused_reduction::ParallelReduce", flags) << " "
              << reduction_name << ";\n";

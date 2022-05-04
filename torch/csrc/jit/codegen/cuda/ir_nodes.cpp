@@ -382,14 +382,14 @@ ReductionOp::ReductionOp(
     Val* init,
     Val* out,
     Val* in,
-    bool is_fused,
+    bool is_allreduce,
     ExprType expr_type)
     : Expr(passkey, expr_type),
       reduction_op_type_(reduction_op_type),
       init_(init),
       out_(out),
       in_(in),
-      is_fused_(is_fused) {
+      is_allreduce_(is_allreduce) {
   TORCH_CHECK(
       out->getValType().value() == ValType::TensorView ||
       out->getValType().value() == ValType::TensorIndex);
@@ -427,7 +427,7 @@ GroupedReductionOp::GroupedReductionOp(
     : Expr(passkey, expr_type),
       reduction_op_types_(std::move(reduction_op_types)),
       init_vals_(std::move(init_vals)),
-      is_fused_(is_fused) {
+      is_allreduce_(is_fused) {
   for (auto out : outputs) {
     addOutput(out);
   }
@@ -443,7 +443,7 @@ GroupedReductionOp::GroupedReductionOp(
     : Expr(src, ir_cloner),
       reduction_op_types_(src->reduction_op_types_),
       init_vals_(ir_cloner->clone(src->init_vals_)),
-      is_fused_(src->is_fused_) {}
+      is_allreduce_(src->is_allreduce_) {}
 
 bool GroupedReductionOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -491,7 +491,7 @@ WelfordOp::WelfordOp(
       in_avg_(in_avg),
       in_var_(in_var == nullptr ? in_avg->container()->zeroVal() : in_var),
       in_N_(in_N),
-      is_fused_(is_fused) {
+      is_allreduce_(is_fused) {
   // Check output type
   TORCH_INTERNAL_ASSERT(
       out_avg->getValType().value() == ValType::TensorView ||
@@ -565,7 +565,7 @@ WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
       in_avg_(ir_cloner->clone(src->in_avg_)),
       in_var_(src->in_var_ ? ir_cloner->clone(src->in_var_) : nullptr),
       in_N_(ir_cloner->clone(src->in_N_)),
-      is_fused_(src->is_fused_) {}
+      is_allreduce_(src->is_allreduce_) {}
 
 namespace {
 inline bool sameOptionalVal(Val* a, Val* b) {
@@ -661,7 +661,7 @@ ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
       init_(ir_cloner->clone(src->init_)),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
-      is_fused_(src->is_fused_) {}
+      is_allreduce_(src->is_allreduce_) {}
 
 bool ReductionOp::sameAs(const Statement* other) const {
   if (this == other) {

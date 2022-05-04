@@ -210,7 +210,7 @@ void IndexLowering::handleBlockReduction(
   TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(rop));
 
   ReductionOp* indexed_rop = IrBuilder::create<ReductionOp>(
-      rop->getReductionOpType(), rop->init(), out, in, rop->isFused());
+      rop->getReductionOpType(), rop->init(), out, in, rop->isAllreduce());
   if (rop->predicate()) {
     indexed_rop->setPredicate(rop->predicate());
   }
@@ -254,7 +254,7 @@ void IndexLowering::handleGridReduction(
 
   const auto reduce_buffer = ir_utils::allocGlobalBufferForGridComm(
       getGridCommWorkBufferSize(
-          out_domain, rop->isFused() && is_within_a_loop ? 2 : 1),
+          out_domain, rop->isAllreduce() && is_within_a_loop ? 2 : 1),
       out->dtype(),
       false);
 
@@ -274,7 +274,7 @@ void IndexLowering::handleGridReduction(
       in,
       reduce_buffer,
       sync_buffer,
-      rop->isFused());
+      rop->isAllreduce());
 
   grid_reduction->setThreadPredicate(thread_pred);
 
@@ -289,7 +289,7 @@ void IndexLowering::handleGridReduction(
   pushBack(sync_buffer);
   pushBack(grid_reduction);
 
-  if (rop->isFused()) {
+  if (rop->isAllreduce()) {
     // When using the fused reduction, allocate the reduction object at
     // the outer-most scope
     auto fused_reduction_alloc_reduction =
@@ -342,7 +342,7 @@ void IndexLowering::handleBlockReduction(
       grouped_rop->initVals(),
       outputs,
       inputs,
-      grouped_rop->isFused());
+      grouped_rop->isAllreduce());
   if (grouped_rop->predicate()) {
     indexed_rop->setPredicate(grouped_rop->predicate());
   }
@@ -393,7 +393,7 @@ void IndexLowering::handleGridReduction(
         return ir_utils::allocGlobalBufferForGridComm(
             getGridCommWorkBufferSize(
                 out_domain,
-                (grouped_rop->isFused() && is_within_a_loop ? 2 : 1)),
+                (grouped_rop->isAllreduce() && is_within_a_loop ? 2 : 1)),
             output->dtype(),
             false);
       });
@@ -414,7 +414,7 @@ void IndexLowering::handleGridReduction(
       inputs,
       reduce_buffers,
       sync_buffer,
-      grouped_rop->isFused());
+      grouped_rop->isAllreduce());
 
   grid_reduction->setThreadPredicate(thread_pred);
 
@@ -431,8 +431,11 @@ void IndexLowering::handleGridReduction(
   pushBack(sync_buffer);
   pushBack(grid_reduction);
 
-  // TODO: enable
-  TORCH_INTERNAL_ASSERT(!grouped_rop->isFused(), "Not supported yet");
+  if (grouped_rop->isAllreduce()) {
+    auto fused_reduction_alloc_reduction =
+        IrBuilder::create<kir::AllocateFusedReduction>(grid_reduction);
+    insertAtTopLevel(fused_reduction_alloc_reduction);
+  }
 }
 
 void IndexLowering::handle(const WelfordOp* wop) {
@@ -485,7 +488,7 @@ void IndexLowering::handle(const WelfordOp* wop) {
       in_avg,
       in_var,
       in_N,
-      wop->isFused());
+      wop->isAllreduce());
 
   if (wop->predicate()) {
     indexed_wop->setPredicate(wop->predicate());
@@ -522,7 +525,7 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
       [](IterDomain* id) { return !isTrivialIterDomain(id); });
 
   const auto work_buffer_size = getGridCommWorkBufferSize(
-      out_domain, indexed_wop->isFused() && is_within_a_loop ? 2 : 1);
+      out_domain, indexed_wop->isAllreduce() && is_within_a_loop ? 2 : 1);
 
   const auto out_var_buffer = ir_utils::allocGlobalBufferForGridComm(
       work_buffer_size, indexed_wop->outVar()->dtype(), false);
@@ -546,7 +549,7 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
   grid_welford->setThreadPredicate(thread_pred);
 
   const bool block_reduce_separated =
-      out_domain->hasBlockReduction() && !indexed_wop->isFused();
+      out_domain->hasBlockReduction() && !indexed_wop->isAllreduce();
 
   if (indexed_wop->predicate()) {
     if (block_reduce_separated) {
@@ -571,7 +574,7 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
   pushBack(sync_buffer);
   pushBack(grid_welford);
 
-  if (indexed_wop->isFused()) {
+  if (indexed_wop->isAllreduce()) {
     // When using the fused reduction, allocate the reduction object at
     // the outer-most scope
     auto fused_reduction_alloc_reduction =

@@ -908,7 +908,8 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getPersistentHeuristics(
   size_t vectorize_factor = std::numeric_limits<size_t>::max();
 
   for (auto tv : vectorizable_inputs_outputs) {
-    const auto tv_vectorize_factor = runtime_info.getInnerDimVectorizableWidth(tv);
+    const auto tv_vectorize_factor =
+        runtime_info.getInnerDimVectorizableWidth(tv);
     vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
   }
 

@@ -460,7 +460,8 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
 
   for (auto tv : vectorizable_inputs_outputs) {
-    const auto tv_vectorize_factor = runtime_info.getInnerDimVectorizableWidth(tv);
+    const auto tv_vectorize_factor =
+        runtime_info.getInnerDimVectorizableWidth(tv);
     vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
   }
 

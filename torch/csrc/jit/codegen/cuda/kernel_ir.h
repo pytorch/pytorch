@@ -550,7 +550,7 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
       std::vector<Val*> in,
       std::vector<Allocate*> reduction_buffers,
       Allocate* sync_buffer,
-      bool is_fused = false);
+      bool is_allreduce = false);
 
   const std::vector<Allocate*>& reduction_buffers() const {
     return reduction_buffers_;
@@ -682,6 +682,10 @@ class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
       IrBuilderPasskey passkey,
       GridWelford* grid_welford);
 
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GroupedGridReduction* grouped_grid_reduction);
+
   Expr* gridExpr() const {
     return grid_expr_;
   }
@@ -691,7 +695,7 @@ class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
   const ParallelTypeBitmap& threadPredicate() const;
 
  private:
-  //! GridReduction or GridWelford
+  //! GridReduction, GridWelford or GroupedGridReduction
   Expr* grid_expr_ = nullptr;
 };
 

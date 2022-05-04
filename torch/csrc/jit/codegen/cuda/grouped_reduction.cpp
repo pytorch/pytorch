@@ -187,7 +187,7 @@ void groupReductions(const std::vector<TensorView*>& reduction_outputs) {
     // Fused reduction is only enabled during the lowering, so at this
     // point it should be false.
     TORCH_INTERNAL_ASSERT(
-        !rop->isFused(), "Invalid ReductionOp: ", rop->toString());
+        !rop->isAllreduce(), "Invalid ReductionOp: ", rop->toString());
     op_types.at(i) = rop->getReductionOpType();
     init_vals.at(i) = rop->init();
     outputs.at(i) = rop->out();

@@ -353,7 +353,7 @@ struct SubstituteInExpr : public OptInDispatch {
         in_avg,
         in_var,
         in_N,
-        welford_expr->isFused());
+        welford_expr->isAllreduce());
   }
 
   void handle(MmaOp* mma_expr) final {

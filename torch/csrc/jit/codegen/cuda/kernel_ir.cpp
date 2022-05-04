@@ -435,14 +435,14 @@ GridReduction::GridReduction(
     Val* in,
     Allocate* reduction_buffer,
     Allocate* sync_buffer,
-    bool is_fused)
+    bool is_allreduce)
     : ReductionOp(
           passkey,
           reduction_op_type,
           init,
           out,
           in,
-          is_fused,
+          is_allreduce,
           ExprType::GridReduction),
       reduction_buffer_(reduction_buffer),
       sync_buffer_(sync_buffer) {
@@ -527,10 +527,21 @@ AllocateFusedReduction::AllocateFusedReduction(
       "IR type only valid for Kernel container.");
 }
 
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GroupedGridReduction* grouped_grid_reduction)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grouped_grid_reduction) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
 TensorIndex* AllocateFusedReduction::out() const {
   TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
-  if (auto grid_reduction = dynamic_cast<GridReduction*>(grid_expr_)) {
-    return grid_reduction->out()->as<kir::TensorIndex>();
+  if (grid_expr_->isA<GridReduction>() ||
+      grid_expr_->isA<GroupedGridReduction>()) {
+    return grid_expr_->outputs().at(0)->as<kir::TensorIndex>();
   } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
     return grid_welford->welford_op()->out()->as<kir::TensorIndex>();
   } else {
@@ -545,6 +556,10 @@ const ParallelTypeBitmap& AllocateFusedReduction::threadPredicate() const {
     return grid_reduction->threadPredicate();
   } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
     return grid_welford->threadPredicate();
+  } else if (
+      auto grouped_grid_reduction =
+          dynamic_cast<GroupedGridReduction*>(grid_expr_)) {
+    return grouped_grid_reduction->threadPredicate();
   } else {
     TORCH_INTERNAL_ASSERT(
         false, "Invalid grid expression: ", grid_expr_->toString());

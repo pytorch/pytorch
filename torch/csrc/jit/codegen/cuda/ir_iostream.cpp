@@ -393,7 +393,7 @@ void IrPrinter::handle(const ReductionOp* rop) {
   indent() << rop->out() << " = reduction( " << rop->in()
            << ", op = " << rop->getReductionOpType()
            << ", initial value = " << rop->init()
-           << ", fused = " << rop->isFused() << " )\n";
+           << ", allreduce = " << rop->isAllreduce() << " )\n";
 }
 
 void IrPrinter::handle(const GroupedReductionOp* grouped_rop) {
@@ -405,7 +405,7 @@ void IrPrinter::handle(const GroupedReductionOp* grouped_rop) {
              << ", op = " << grouped_rop->getReductionOpType(i)
              << ", initial value = " << grouped_rop->initVal(i) << " )\n";
   }
-  indent() << "fused = " << (grouped_rop->isFused() ? "true" : "false")
+  indent() << "allreduce = " << (grouped_rop->isAllreduce() ? "true" : "false")
            << " )\n";
   --indent_size_;
 }
@@ -425,7 +425,7 @@ void IrPrinter::handle(const WelfordOp* wop) {
     os_ << "\n  initial value = " << wop->initAvg() << "(Avg)\n  "
         << wop->initVar() << "(Var)\n  " << wop->initN() << "(N)";
   }
-  os_ << "\n  fused = " << wop->isFused();
+  os_ << "\n  allreduce = " << wop->isAllreduce();
   os_ << " )\n";
 }
 

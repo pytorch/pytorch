@@ -973,6 +973,300 @@ TEST_F(NVFuserTest, FusionGroupedReductionAfterComputeAt_CUDA) {
   testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionGroupAllreduce1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = broadcast(tv1, {true});
+  auto tv3 = sum(tv0, {0});
+  auto tv4 = broadcast(tv3, {true});
+  auto tv5 = add(tv0, tv2);
+  auto tv6 = add(tv5, tv4);
+  fusion.addOutput(tv6);
+
+  groupReductions({tv1, tv3});
+
+  tv2->split(0, 128);
+  TransformPropagator::from(tv2);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv2, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto t3 = t0.sum({0}).unsqueeze(-1);
+  auto ref = t0 + t3 + t3;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Grid reductionso of different types
+TEST_F(NVFuserTest, FusionGroupAllreduce2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+
+  auto tv3 = castOp(DataType::Double, tv0);
+  auto tv4 = sum(tv3, {1});
+  auto tv5 = broadcast(tv4, {false, true});
+  auto tv6 = castOp(DataType::Float, tv5);
+
+  auto tv7 = add(tv0, tv2);
+  auto tv8 = add(tv7, tv6);
+  fusion.addOutput(tv8);
+
+  groupReductions({tv1, tv4});
+  tv1->split(1, 128);
+  TransformPropagator::from(tv1);
+
+  tv0->computeAt(tv8, -1, ComputeAtMode::MostInlined);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDy);
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+  tv1->axis(2)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv1, ir_utils::allTvs(&fusion));
+
+  std::vector<int64_t> shape({99, 999});
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto outputs = fe.runFusion({t0});
+
+  auto t2 = t0.sum({1}).unsqueeze(-1);
+  auto t6 = t0.to(c10::kDouble).sum({1}).unsqueeze(-1).to(c10::kFloat);
+  auto ref = t0 + t2 + t6;
+
+  testValidate(fe.kernel(), outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Persistent batchnorm backward with grouped allreduce
+TEST_F(NVFuserTest, FusionPersistentBNBackwardAllreduce_CUDA) {
+  const std::vector<int64_t> shape({64, 1024, 14, 14});
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto input = makeContigTensor(4);
+  fusion.addInput(input);
+  auto grad_output = makeContigTensor(4);
+  fusion.addInput(grad_output);
+  auto weight = makeContigTensor(1);
+  fusion.addInput(weight);
+  auto save_mean = makeContigTensor(1);
+  fusion.addInput(save_mean);
+  auto save_invstd = makeContigTensor(1);
+  fusion.addInput(save_invstd);
+
+  const bool kTraining = true;
+  const bool channels_last = false;
+
+  const size_t kNumberOfDims =
+      TensorDomain::noReductions(input->getMaybeRFactorDomain()).size();
+  size_t c_axis = channels_last ? kNumberOfDims - 1 : 1;
+
+  std::vector<int> reduction_axes;
+  std::vector<bool> broadcast_mask(kNumberOfDims, false);
+  Val* num_features = nullptr;
+  for (const auto axis : c10::irange(kNumberOfDims)) {
+    if (axis != c_axis) {
+      reduction_axes.push_back(axis);
+      broadcast_mask[axis] = true;
+      if (num_features == nullptr) {
+        num_features =
+            castOp(DataType::Double, input->domain()->domain()[axis]->extent());
+      } else {
+        num_features =
+            mul(num_features, input->domain()->domain()[axis]->extent());
+      }
+    }
+  }
+
+  auto mean = save_mean;
+  auto invstd = save_invstd;
+
+  mean = broadcast(mean, broadcast_mask);
+
+  auto norm = reciprocal(num_features);
+
+  auto grad_output_sum = sum(grad_output, reduction_axes);
+  auto dot_p = sum(mul(grad_output, sub(input, mean)), reduction_axes);
+
+  auto grad_mean = broadcast(mul(grad_output_sum, norm), broadcast_mask);
+
+  auto proj_scale =
+      broadcast(mul(mul(dot_p, norm), mul(invstd, invstd)), broadcast_mask);
+
+  TensorView* grad_scale = nullptr;
+
+  if (weight == nullptr) {
+    grad_scale =
+        mul(broadcast(invstd, broadcast_mask),
+            IrBuilder::create<Double>(input->container(), 1));
+  } else {
+    grad_scale = mul(
+        broadcast(invstd, broadcast_mask), broadcast(weight, broadcast_mask));
+  }
+
+  TensorView* grad_input = nullptr;
+  if (kTraining) {
+    auto proj = mul(sub(input, mean), proj_scale);
+    grad_input = mul(sub(sub(grad_output, proj), grad_mean), grad_scale);
+  } else {
+    grad_input = mul(grad_output, grad_scale);
+  }
+
+  fusion.addOutput(grad_input);
+
+  // Scheduling strategy
+  // 1. Cache inputs
+  // 2. Group the reductions (automatically fused with broadcasts)
+  // 3. Merge HW and vectorize with the outer parallelized by TIDx
+  // 4. Split N by TIDy with the outer parallelized by BIDx and
+  // inner by TIDy
+  // 5. Split C by BIDy and let the outer be the serial outermost loop
+
+  auto input_cache = input->cacheAfter();
+  auto grad_output_cache = grad_output->cacheAfter();
+  auto weight_cache = weight->cacheAfter();
+  auto save_mean_cache = save_mean->cacheAfter();
+  auto save_invstd_cache = save_invstd->cacheAfter();
+
+  // Group the two reductions
+  groupReductions({grad_output_sum, dot_p});
+
+  // Transform grad_input to: [C/bidy, N/tidy, tidy, bidy, HW/vec_width,
+  // vec_width]
+  const int tidy = 8;
+  const int bidy = 4;
+  const int bidx = ceilDiv(shape[0], (int64_t)tidy);
+  const int vec_width = 4;
+  TORCH_CHECK(
+      (shape[2] * shape[3]) % vec_width == 0,
+      "Invalid vector width: ",
+      vec_width);
+
+  grad_input->merge(-2, -1);
+  grad_input->split(-1, vec_width);
+
+  grad_input->split(0, tidy);
+  grad_input->split(2, bidy);
+  TORCH_CHECK(
+      grad_input->nDims() == 6,
+      "Unexpected number of dimensions: ",
+      grad_input->toString());
+
+  grad_input->reorder({{2, 0}, {0, 1}, {1, 2}});
+
+  grad_input->axis(1)->parallelize(ParallelType::BIDx);
+  grad_input->axis(2)->parallelize(ParallelType::TIDy);
+  grad_input->axis(3)->parallelize(ParallelType::BIDy);
+  grad_input->axis(4)->parallelize(ParallelType::TIDx);
+
+  TransformPropagator::from(grad_input);
+
+  auto rf_tensors = grad_output_sum->rFactor(
+      {-1}, std::vector<TensorView*>({grad_output_sum, dot_p}));
+
+  for (auto fusion_input :
+       ir_utils::filterByType<TensorView>(fusion.inputs())) {
+    fusion_input->computeAt(grad_input, 1);
+  }
+
+  // Parallelization
+  scheduler_utils::parallelizeAllLike(grad_input, ir_utils::allTvs(&fusion));
+  input_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+  grad_output_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto at_input = at::randn(shape, options);
+  auto at_grad_output = at::randn(shape, options);
+  auto at_weight = at::randn({shape[c_axis]}, options);
+  auto at_save_mean = at::randn({shape[c_axis]}, options);
+  auto at_save_invstd = at::randn({shape[c_axis]}, options);
+  std::vector<IValue> aten_inputs(
+      {at_input, at_grad_output, at_weight, at_save_mean, at_save_invstd});
+
+  GpuLower gpulw(&fusion);
+  validateNoParallelBroadcastExist(gpulw.kernel());
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+
+  if (bidx * bidy > deviceSMCount()) {
+    GTEST_SKIP() << "Not enough SMs to run this test";
+  }
+
+  auto outputs = fe.runFusion(aten_inputs);
+
+  std::vector<int64_t> at_reduction_axes;
+  std::copy(
+      reduction_axes.begin(),
+      reduction_axes.end(),
+      std::back_inserter(at_reduction_axes));
+
+  auto at_bcast = [](const auto& tensor) {
+    if (channels_last) {
+      tensor.unsqueeze(0).unsqueeze(0).unsqueeze(0);
+    } else {
+      return tensor.unsqueeze(0).unsqueeze(-1).unsqueeze(-1);
+    }
+  };
+
+  auto at_mean = at_save_mean;
+  const auto& at_invstd = at_save_invstd;
+  at_mean = at_bcast(at_mean);
+  auto at_norm = 1.0f / static_cast<float>(shape[0] * shape[2] * shape[3]);
+
+  auto at_grad_output_sum = sum(at_grad_output, at_reduction_axes);
+  auto at_dot_p =
+      sum(mul(at_grad_output, sub(at_input, at_mean)), at_reduction_axes);
+
+  auto at_grad_mean = at_bcast(at_grad_output_sum * at_norm);
+
+  auto at_proj_scale = at_bcast((at_dot_p * at_norm) * (at_invstd * at_invstd));
+
+  at::Tensor at_grad_scale;
+
+  if (weight == nullptr) {
+    at_grad_scale = at_bcast(at_invstd);
+  } else {
+    at_grad_scale = at_bcast(at_invstd) * at_bcast(at_weight);
+  }
+
+  at::Tensor at_grad_input;
+  if (kTraining) {
+    auto at_proj = (at_input - at_mean) * at_proj_scale;
+    at_grad_input = (at_grad_output - at_proj - at_grad_mean) * at_grad_scale;
+  } else {
+    at_grad_input = at_grad_output * at_grad_scale;
+  }
+
+  testValidate(
+      fe.kernel(), outputs, aten_inputs, {at_grad_input}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

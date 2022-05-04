@@ -184,7 +184,7 @@ void OptOutMutator::mutate(ReductionOp* rop) {
   auto rop_type = rop->getReductionOpType();
   container->removeExpr(rop);
   IrBuilder::create<ReductionOp>(
-      container, rop_type, init, out, in, rop->isFused());
+      container, rop_type, init, out, in, rop->isAllreduce());
 }
 
 void OptOutMutator::mutate(GroupedReductionOp* rop) {
@@ -219,7 +219,7 @@ void OptOutMutator::mutate(GroupedReductionOp* rop) {
   const auto& rop_types = rop->getReductionOpTypes();
   container->removeExpr(rop);
   IrBuilder::create<GroupedReductionOp>(
-      container, rop_types, init_vals, outputs, inputs, rop->isFused());
+      container, rop_types, init_vals, outputs, inputs, rop->isAllreduce());
 }
 
 namespace {
@@ -269,7 +269,7 @@ void OptOutMutator::mutate(WelfordOp* wop) {
       in_avg,
       in_var,
       in_N,
-      wop->isFused());
+      wop->isAllreduce());
 }
 
 void OptOutMutator::mutate(MmaOp* mma) {

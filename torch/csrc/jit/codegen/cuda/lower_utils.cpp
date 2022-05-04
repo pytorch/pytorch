@@ -457,7 +457,7 @@ class ReplaceExprInput : private kir::ExprMutator {
           node->init(),
           node->out(),
           replaced_inputs.value().at(node->in()),
-          node->isFused());
+          node->isAllreduce());
       registerReplaceWithPredicate(node, replacement);
     }
   }
@@ -478,7 +478,7 @@ class ReplaceExprInput : private kir::ExprMutator {
           node->initVals(),
           node->outputs(),
           inputs,
-          node->isFused());
+          node->isAllreduce());
       registerReplaceWithPredicate(node, replacement);
     }
   }

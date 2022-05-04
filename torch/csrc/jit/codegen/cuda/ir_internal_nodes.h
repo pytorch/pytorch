@@ -152,7 +152,7 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
       Val* init,
       Val* out,
       Val* in,
-      bool is_fused = false,
+      bool is_allreduce = false,
       ExprType expr_type = ExprType::ReductionOp);
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
@@ -171,8 +171,8 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
     return reduction_op_type_;
   }
 
-  bool isFused() const {
-    return is_fused_;
+  bool isAllreduce() const {
+    return is_allreduce_;
   }
 
   bool sameAs(const Statement* other) const override;
@@ -182,8 +182,8 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
   Val* const init_ = nullptr;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
-  //! True if using the fused reduction kernel
-  bool is_fused_ = false;
+  //! True if broadcast is fused
+  bool is_allreduce_ = false;
 };
 
 //! Grouped reduction operation for horizontal fusions. It works like
@@ -200,7 +200,7 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
       std::vector<Val*> init,
       std::vector<Val*> out,
       std::vector<Val*> in,
-      bool is_fused = false,
+      bool is_allreduce = false,
       ExprType expr_type = ExprType::GroupedReductionOp);
 
   GroupedReductionOp(const GroupedReductionOp* src, IrCloner* ir_cloner);
@@ -225,8 +225,8 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
     return reduction_op_types_.at(index);
   }
 
-  bool isFused() const {
-    return is_fused_;
+  bool isAllreduce() const {
+    return is_allreduce_;
   }
 
   bool sameAs(const Statement* other) const override;
@@ -235,7 +235,7 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
   const std::vector<BinaryOpType> reduction_op_types_;
   const std::vector<Val*> init_vals_;
   //! True if using the fused reduction kernel
-  bool is_fused_ = false;
+  bool is_allreduce_ = false;
 };
 
 //! Welford Scan operation.
@@ -312,8 +312,8 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
     return !init_N_->isZeroInt();
   }
 
-  bool isFused() const {
-    return is_fused_;
+  bool isAllreduce() const {
+    return is_allreduce_;
   }
 
   std::vector<Val*> getInitVals() const;
@@ -329,7 +329,7 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
   Val* const in_var_;
   Val* const in_N_;
   //! True if using the fused reduction kernel (not implemented yet)
-  bool is_fused_ = false;
+  bool is_allreduce_ = false;
 };
 
 //! Fused Matmul operation
