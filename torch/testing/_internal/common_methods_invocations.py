@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import \
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 import torch._refs as refs  # noqa: F401
+import torch._refs.nn.functional
 
 from distutils.version import LooseVersion
 
@@ -17775,6 +17776,13 @@ python_ref_db = [
         "_refs.tan",
         torch_opinfo_name="tan",
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.elu",
+        torch_opinfo_name="nn.functional.elu",
+    ),
+    #
+    # Elementwise Binary OpInfos
+    #
     ElementwiseBinaryPythonRefInfo(
         "_refs.add",
         torch_opinfo_name="add",
