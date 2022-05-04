@@ -13,6 +13,8 @@ from torch._prims.utils import (
 )
 
 
+from torch._decomp import register_decomposition
+
 from functools import reduce
 from enum import Enum
 from typing import Sequence, Optional, Union, Callable, List, Tuple
@@ -467,7 +469,9 @@ def _maybe_resize_out(out: TensorLikeType, shape):
 #
 
 # TODO: add type promotion support
-def _make_elementwise_unary_reference(prim: Callable, *, type_promotion) -> Callable:
+infer_aten_op = object()
+
+def _make_elementwise_unary_reference(prim: Callable, *, type_promotion, aten_op=infer_aten_op) -> Callable:
     def _ref(a: Tensor, *, out: Optional[Tensor] = None) -> Tensor:
 
         assert isinstance(a, TensorLike)
@@ -489,6 +493,11 @@ def _make_elementwise_unary_reference(prim: Callable, *, type_promotion) -> Call
             return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
         return result
+
+    if aten_op is infer_aten_op:
+        aten_op = getattr(torch.ops.aten, prim.__name__)
+    if aten_op is not None:
+        register_decomposition(aten_op)(_ref)
 
     return _ref
 
@@ -534,7 +543,8 @@ erf = _make_elementwise_unary_reference(
 )
 
 erfinv = _make_elementwise_unary_reference(
-    prims.erf_inv, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.erf_inv, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.erfinv  # prim/aten name mismatch
 )
 
 erfc = _make_elementwise_unary_reference(
@@ -554,7 +564,8 @@ floor = _make_elementwise_unary_reference(
 )
 
 isfinite = _make_elementwise_unary_reference(
-    prims.is_finite, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    prims.is_finite, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=None  # CompositeImplicitAutograd
 )
 
 
@@ -563,7 +574,8 @@ def _isnan(a: Tensor) -> Tensor:
 
 
 isnan = _make_elementwise_unary_reference(
-    _isnan, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
+    _isnan, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=torch.ops.aten.isnan  # prim/aten name mismatch
 )
 
 lgamma = _make_elementwise_unary_reference(
@@ -588,7 +600,8 @@ reciprocal = _make_elementwise_unary_reference(
 
 # TODO: round takes additional kwargs
 round = _make_elementwise_unary_reference(
-    prims.round, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.round, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=None  # TODO: this does need a decomp, but kwarg handling is needed
 )
 
 sign = _make_elementwise_unary_reference(
@@ -608,7 +621,8 @@ sqrt = _make_elementwise_unary_reference(
 )
 
 square = _make_elementwise_unary_reference(
-    prims.square, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
+    prims.square, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    aten_op=None  # CompositeImplicitAutograd
 )
 
 tan = _make_elementwise_unary_reference(
@@ -616,7 +630,7 @@ tan = _make_elementwise_unary_reference(
 )
 
 
-def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Callable:
+def _make_elementwise_binary_reference(prim: Callable, *, type_promotion, aten_op=infer_aten_op) -> Callable:
     def _ref(
         a: Union[Tensor, NumberType],
         b: Union[Tensor, NumberType],
@@ -650,6 +664,11 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Cal
             return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
 
         return result
+
+    if aten_op is infer_aten_op:
+        aten_op = getattr(torch.ops.aten, prim.__name__)
+    if aten_op is not None:
+        register_decomposition(aten_op)(_ref)
 
     return _ref
 
@@ -709,12 +728,13 @@ atan2 = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 bitwise_and = _make_elementwise_binary_reference(
-    prims.bitwise_and, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.bitwise_and, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_left_shift = _make_elementwise_binary_reference(
-    prims.shift_left, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.shift_left, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.bitwise_left_shift  # prim/aten name mismatch
 )
 
 # TODO: add docstring
@@ -724,7 +744,8 @@ bitwise_or = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 bitwise_right_shift = _make_elementwise_binary_reference(
-    prims.shift_right_arithmetic, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.shift_right_arithmetic, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.bitwise_right_shift  # prim/aten name mismatch
 )
 
 # TODO: add docstring
@@ -742,6 +763,7 @@ eq = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
+# NB: aten_op not registered because CompositeExplicitAutograd
 def float_power(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
@@ -810,12 +832,14 @@ lt = _make_elementwise_binary_reference(
 maximum = _make_elementwise_binary_reference(
     prims.max,
     type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.maximum,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 minimum = _make_elementwise_binary_reference(
     prims.min,
     type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.minimum,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
@@ -842,6 +866,7 @@ pow = _make_elementwise_binary_reference(
 # Sub is implemented specially because it has an alpha argument and
 #   is decomposed into multiple prims.
 # TODO: consider refactoring this with add impl
+@register_decomposition(torch.ops.aten.sub)
 def sub(
     a: Union[Tensor, NumberType],
     b: Union[Tensor, NumberType],
@@ -890,7 +915,8 @@ def sub(
 
 # TODO: add docstring
 true_divide = _make_elementwise_binary_reference(
-    prims.div, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    prims.div, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=None  # CompositeImplicitAutograd
 )
 
 #
@@ -899,6 +925,7 @@ true_divide = _make_elementwise_binary_reference(
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
+@register_decomposition(torch.ops.aten.where)
 def where(
     pred: Tensor,
     a: Optional[Tensor] = None,
@@ -1019,6 +1046,7 @@ def _reduction(
     return result
 
 
+# TODO: register decomp after stride logic is fixed
 def sum(
     a: Tensor,
     dim: Union[Optional[int], Optional[List[int]]] = None,

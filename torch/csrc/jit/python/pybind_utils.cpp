@@ -30,9 +30,28 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         // None gets converted to undefined Tensors
         return autograd::Variable();
       }
-      auto var = py::cast<autograd::Variable>(obj);
-      guardAgainstNamedTensor<autograd::Variable>(var);
-      return var;
+      if (THPVariable_Check(obj.ptr())) {
+        auto var = py::cast<autograd::Variable>(obj);
+        guardAgainstNamedTensor<autograd::Variable>(var);
+        return var;
+      } else {
+        at::Scalar scalar;
+        if (PyBool_Check(obj.ptr())) {
+          scalar = at::Scalar(THPUtils_unpackBool(obj.ptr()));
+        } else if (THPUtils_checkLong(obj.ptr())) {
+          scalar = at::Scalar(THPUtils_unpackLong(obj.ptr()));
+        } else if (PyComplex_Check(obj.ptr())) {
+          scalar = at::Scalar(THPUtils_unpackComplexDouble(obj.ptr()));
+        } else if (THPUtils_checkDouble(obj.ptr())) {
+          scalar = at::Scalar(THPUtils_unpackDouble(obj.ptr()));
+        } else {
+          // lol
+          py::cast<autograd::Variable>(obj);
+        }
+        at::Tensor tensor = scalar_to_tensor(scalar);
+        tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+        return tensor;
+      }
     }
     case TypeKind::StorageType:
       return py::cast<at::Storage>(obj);

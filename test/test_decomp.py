@@ -166,7 +166,8 @@ def op_assert_ref(test_case, op, orig, decomp, ref, args, kwargs):
 
 
 def op_assert_equal(test_case, op, orig, decomp, args, kwargs):
-    assert orig.dtype == decomp.dtype, f"Operation:  {op}"
+    test_case.assertEqual(
+        orig.dtype, decomp.dtype, f"Operation: {op}, orig.dtype: {orig.dtype}, decomp.dtype: {decomp.dtype}, {args}, {kwargs}")
     # Before adding an entry to this table, make sure your decomposition is right :)
     tol_table = {
         # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
