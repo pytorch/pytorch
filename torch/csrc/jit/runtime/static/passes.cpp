@@ -1192,5 +1192,42 @@ C10_UNUSED void RemoveUnnecessaryEmbeddingBagOutputs(
   fuse.runOnGraph(graph);
 }
 
+namespace {
+bool isNoOpSlice(Node* node) {
+  DCHECK(node->kind() == aten::slice);
+  auto step = toIValue(node->input(3));
+  if (!step.has_value() || step->toInt() != 1) {
+    return false;
+  }
+  auto start = toIValue(node->input(1));
+  if (!start.has_value() || (start->isInt() && start->toInt() != 0)) {
+    return false;
+  }
+  auto end = toIValue(node->input(2));
+  // Could also look at list length, but most models that have this pattern are
+  // just doing list[0:], so it's not needed for now.
+  return end.has_value() && end->isNone();
+}
+} // namespace
+
+void EliminateNoOpSlice(std::shared_ptr<Graph>& graph) {
+  DepthFirstGraphNodeIterator it(graph);
+  auto schema = torch::schema(
+      "aten::slice.t(t[] l, int? start=None, int? end=None, int step=1) -> t[]");
+  Node* node = nullptr;
+  std::vector<Node*> to_delete;
+  while ((node = it.next()) != nullptr) {
+    if (!node->matches(schema) || !isNoOpSlice(node)) {
+      continue;
+    }
+
+    node->output()->replaceAllUsesWith(node->input(0));
+    to_delete.push_back(node);
+  }
+  for (auto* node : to_delete) {
+    node->destroy();
+  }
+}
+
 } // namespace jit
 } // namespace torch
