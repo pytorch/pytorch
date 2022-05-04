@@ -35,7 +35,6 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/ir/irparser.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/torch.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -4009,10 +4008,6 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::sqrt, UnaryOpType::Sqrt, "sqrt"},
       OpTuple{at::tan, UnaryOpType::Tan, "tan"},
       OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
-      OpTuple{at::isfinite, UnaryOpType::IsFinite, "isfinite"},
-      OpTuple{at::isinf, UnaryOpType::IsInf, "isinf"},
-      OpTuple{at::isnan, UnaryOpType::IsNan, "isnan"},
-      OpTuple{at::isreal, UnaryOpType::IsReal, "isreal"},
   };
 
   // The following ops has no complex support in eager mode
@@ -4027,10 +4022,7 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
       OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
       OpTuple{at::erf, UnaryOpType::Erf, "erf"},
-      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"},
-      OpTuple{at::isneginf, UnaryOpType::IsNegInf, "isneginf"},
-      OpTuple{at::isposinf, UnaryOpType::IsPosInf, "isposinf"},
-  };
+      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"}};
 
   // Complex support for the following op is not working in nvFuser yet
   std::vector<OpTuple> ops_skip_complex{
@@ -21338,11 +21330,11 @@ class NVFuserMultithreadedTest : public ::testing::Test {
   bool was_enabled = false;
 
   void SetUp() override {
-    was_enabled = RegisterCudaFuseGraph::registerPass(true);
+    was_enabled = fuser::cuda::setEnabled(true);
   }
 
   void TearDown() override {
-    RegisterCudaFuseGraph::registerPass(was_enabled);
+    fuser::cuda::setEnabled(was_enabled);
   }
 };
 
