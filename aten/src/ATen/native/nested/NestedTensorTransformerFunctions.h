@@ -52,7 +52,6 @@ Tensor NestedTensor_from_padded_tensor_cpu(
 
 Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim);
 
-
 template <typename T>
 void remove_padding_kernelLauncher(
     const T* input,
@@ -71,6 +70,17 @@ void remove_padding_transform0213_kernelLauncher(
     const int* input_sizes,
     const int* output_sizes,
     int output_dim,
+    const int batch_size);
+
+template <typename T>
+void add_padding_kernelLauncher(
+    T* input,
+    T* output,
+    T padding_value,
+    const int* offsets,
+    const int* input_sizes,
+    int input_dim,
+    const std::vector<int64_t>& output_sizes,
     const int batch_size);
 } // namespace native
 } // namespace at

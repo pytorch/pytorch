@@ -1,11 +1,16 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
+#include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+#include <torch/csrc/jit/codegen/onednn/interface.h>
+#endif
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -88,6 +93,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
@@ -166,7 +172,7 @@ void initJITBindings(PyObject* module) {
             if (!n->maybeSchema()) {
               return c10::nullopt;
             }
-            return DecompositionGraphForSchema(n->schema());
+            return GetDecomposition(n->schema());
           })
       .def("_jit_pass_run_decompositions", RunDecompositions)
       // using Node* here instead of Schema because looking up the schema
@@ -181,6 +187,16 @@ void initJITBindings(PyObject* module) {
             } else {
               TORCH_INTERNAL_ASSERT(false, "Expected schema", n);
             }
+          })
+      .def(
+          "_jit_register_decomposition_for_schema",
+          [](const FunctionSchema& s, std::shared_ptr<Graph>& graph) {
+            // because this is invoked by python, the function schema *
+            // becomes different, and we need to find and reuse the
+            // one that is used for caching
+            auto op =
+                findOperatorFor(c10::OperatorName(s.name(), s.overload_name()));
+            RegisterDecomposition(op->schema(), graph);
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def(
@@ -650,6 +666,10 @@ void initJITBindings(PyObject* module) {
             return oldState;
           })
       .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
+#if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
+      .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
+      .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
+#endif
       .def(
           "_jit_nvfuser_set_comparison_callback",
           [](bool run_fallback, py::function fn) {
@@ -1614,6 +1634,7 @@ void initJITBindings(PyObject* module) {
   initJitBackendBindings(module);
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
+  initNvFuserPythonBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
