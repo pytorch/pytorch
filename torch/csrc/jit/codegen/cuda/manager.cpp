@@ -76,6 +76,14 @@ void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
   }
 }
 
+static std::unique_ptr<Code> createFallbackCode(const Node* fusion_node) {
+  auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
+  EraseShapeInformation(copied_graph);
+  enableAliasCopyNodes(copied_graph, copied_graph->block());
+  auto code = std::make_unique<Code>(copied_graph, "fallback_cuda_fuser");
+  return code;
+}
+
 // CudaFusionManager is not thread safe!
 // TODO: we should make the tradeoff here to use thread_local instead of global
 // singleton;
@@ -148,10 +156,7 @@ class CudaFusionManager {
       }
     }
 
-    auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
-    EraseShapeInformation(copied_graph);
-    enableAliasCopyNodes(copied_graph, copied_graph->block());
-    auto code = std::make_unique<Code>(copied_graph, "fallback_cuda_fuser");
+    std::unique_ptr<Code> code = createFallbackCode(fusion_node);
 
     std::lock_guard<std::mutex> guard(mutex_);
     auto it = fallback_cache_.insert({kernel_id, std::move(code)}).first;
@@ -240,9 +245,16 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
 
   // Fallback to use if anything goes wrong
   auto take_fallback = [&](Stack& stack) {
-    int32_t kernel_id = fusion_node->i(attr::cache_id);
-    auto fallback_code =
-        CudaFusionManager::getManager().getFallbackCode(kernel_id, fusion_node);
+    std::unique_ptr<Code> fallback_code_unique;
+    Code* fallback_code;
+    if (fusion_node->hasAttribute(attr::cache_id)) {
+      int32_t kernel_id = fusion_node->i(attr::cache_id);
+      fallback_code = CudaFusionManager::getManager().getFallbackCode(
+          kernel_id, fusion_node);
+    } else {
+      fallback_code_unique = createFallbackCode(fusion_node);
+      fallback_code = fallback_code_unique.get();
+    }
     InterpreterState{*fallback_code}.run(stack);
   };
 
