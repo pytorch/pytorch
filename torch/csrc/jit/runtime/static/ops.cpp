@@ -49,6 +49,35 @@ C10_DEFINE_bool(
 namespace at {
 namespace native {
 
+std::pair<at::DimVector, at::DimVector> computeRepeatOutputSizeAndStrides(const at::DimVector& sizes, const at::DimVector& strides, const at::Tensor& xtensor) {
+  auto dim = sizes.size();
+  DimVector new_size = sizes;
+  new_size.resize(2 * dim);
+  DimVector new_stride = strides;
+  new_stride.resize(2 * dim);
+
+  for (const auto i : c10::irange(xtensor.dim())) {
+    // some special handling to deal with allow dimension == 0 when self.dim() == 0
+    auto dimension = at::maybe_wrap_dim(i, dim, /*wrap_scalar=*/true);
+    auto size = xtensor.sizes()[i];
+    auto step = std::max<int64_t>(size, 1);
+
+    int64_t max_size = dim == 0 ? 1 : new_size[dimension];
+    TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
+                                  " is ", max_size, " but size is ", size);
+    TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
+
+    new_size[dim] = size;
+    new_stride[dim] = dim == 0 ? 1 : new_stride[dimension];
+
+    new_size[dimension] = (new_size[dimension] - size) / step + 1;
+    new_stride[dimension] = step * new_stride[dimension];
+
+    dim += 1;
+  }
+  return {std::move(new_size), std::move(new_stride)};
+}
+
 void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
   TORCH_CHECK(
       repeats.size() >= static_cast<size_t>(self.dim()),
@@ -77,15 +106,10 @@ void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
   }
 
   Tensor xtensor = at::native::expand(self, padded_size);
-  Tensor urtensor = at::native::alias(result);
-  for (const auto i : c10::irange(xtensor.dim())) {
-    // can't unfold with step 0, so make sure step is at least 1
-    // (it doesn't matter what it is in that case, because the size is 0).
-    urtensor = urtensor.unfold(
-        i, xtensor.size(i), std::max<int64_t>(xtensor.size(i), 1));
-  }
-
-  at::native::copy_(urtensor, xtensor.expand_as(urtensor));
+  at::DimVector strides(result.strides());
+  std::tie(target_size, strides) = computeRepeatOutputSizeAndStrides(target_size, strides, xtensor);
+  Tensor urtensor = at::cpu::as_strided(result, target_size, strides);
+  at::native::copy_(urtensor, at::native::expand(xtensor, target_size));
 }
 
 // copy version of view ops
