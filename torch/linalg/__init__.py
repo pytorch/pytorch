@@ -2222,7 +2222,7 @@ the output has the same batch dimensions.
              As such, different platforms, like SciPy, or inputs on different devices,
              may produce different valid decompositions.
 
-.. warning:: Gradient computations are only supported if the input matrix is full-rank.
+             Gradient computations are only supported if the input matrix is full-rank.
              If this condition is not met, no error will be thrown, but the gradient may not be finite.
              This is because the LU decomposition with pivoting is not differentiable at these points.
 
@@ -2296,6 +2296,93 @@ Returns:
 
 .. _LAPACK's getrf:
     https://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
+""")
+
+lu = _add_docstr(_linalg.linalg_lu, r"""
+lu(A, *, pivot=True, out=None) -> (Tensor, Tensor, Tensor)
+
+Computes the LU decomposition with partial pivoting of a matrix.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+the **LU decomposition with partial pivoting** of a matrix
+:math:`A \in \mathbb{K}^{m \times n}` if `k = min(m,n)`, is defined as
+
+.. math::
+
+    A = PLU\mathrlap{\qquad P \in \mathbb{K}^{m \times m}, L \in \mathbb{K}^{m \times k}, U \in \mathbb{K}^{k \times n}}
+
+where :math:`P` is a `permutation matrix`_, :math:`L` is lower triangular with ones on the diagonal
+and :math:`U` is upper triangular.
+
+If :attr:`pivot`\ `= False` and :attr:`A` is on GPU, then the **LU decomposition without pivoting** is computed
+
+.. math::
+
+    A = LU\mathrlap{\qquad L \in \mathbb{K}^{m \times k}, U \in \mathbb{K}^{k \times n}}
+
+When :attr:`pivot`\ `= False`, the returned matrix :attr:`P` will be empty.
+The LU decomposition without pivoting `may not exist`_ if any of the principal minors of :attr:`A` is singular.
+In this case, the output matrix may contain `inf` or `NaN`.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+.. seealso::
+
+        :func:`torch.linalg.solve` solves a system of linear equations using the LU decomposition
+        with partial pivoting.
+
+.. warning:: The LU decomposition is almost never unique, as often there are different permutation
+             matrices that can yield different LU decompositions.
+             As such, different platforms, like SciPy, or inputs on different devices,
+             may produce different valid decompositions.
+
+.. warning:: Gradient computations are only supported if the input matrix is full-rank.
+             If this condition is not met, no error will be thrown, but the gradient
+             may not be finite.
+             This is because the LU decomposition with pivoting is not differentiable at these points.
+
+Args:
+    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+    pivot (bool, optional): Controls whether to compute the LU decomposition with partial pivoting or
+        no pivoting. Default: `True`.
+
+Keyword args:
+    out (tuple, optional): output tuple of three tensors. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(P, L, U)`.
+
+Examples::
+
+    >>> A = torch.randn(3, 2)
+    >>> P, L, U = torch.linalg.lu(A)
+    >>> P
+    tensor([[0., 1., 0.],
+            [0., 0., 1.],
+            [1., 0., 0.]])
+    >>> L
+    tensor([[1.0000, 0.0000],
+            [0.5007, 1.0000],
+            [0.0633, 0.9755]])
+    >>> U
+    tensor([[0.3771, 0.0489],
+            [0.0000, 0.9644]])
+    >>> torch.dist(A, P @ L @ U)
+    tensor(5.9605e-08)
+
+    >>> A = torch.randn(2, 5, 7, device="cuda")
+    >>> P, L, U = torch.linalg.lu(A, pivot=False)
+    >>> P
+    tensor([], device='cuda:0')
+    >>> torch.dist(A, L @ U)
+    tensor(1.0376e-06, device='cuda:0')
+
+.. _permutation matrix:
+    https://en.wikipedia.org/wiki/Permutation_matrix
+.. _may not exist:
+    https://en.wikipedia.org/wiki/LU_decomposition#Definitions
 """)
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
