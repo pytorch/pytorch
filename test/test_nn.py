@@ -21326,6 +21326,40 @@ class TestStateDictHooks(TestCase):
             m.load_state_dict(state_dict)
             self.assertEqual(2, hook_called)
 
+    def test_load_state_dict_post_hook(self):
+        hook_called = 0
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.foo = torch.nn.Parameter(torch.rand(10))
+
+            def my_post_load_hook(self, module, incompatible_keys):
+                assert module is self
+                nonlocal hook_called
+                hook_called += 1
+
+        class MyModuleContainer(nn.Module):
+            def __init__(self, mod):
+                super().__init__()
+                self.mod = mod
+
+        nested = MyModule()
+        wrapped = MyModuleContainer(nested)
+        nested.register_load_state_dict_post_hook(
+            nested.my_post_load_hook,
+        )
+        wrapped.load_state_dict(wrapped.state_dict())
+        self.assertEqual(hook_called, 1)
+        return
+        nested._register_load_state_dict_post_hook(
+            nested.my_post_load_hook_with_module,
+            with_module=True
+        )
+        wrapped.load_state_dict(wrapped.state_dict())
+        # Since both hooks are called, incremented by 2
+        self.assertEqual(hook_called, 3)
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)
