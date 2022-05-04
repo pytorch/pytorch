@@ -956,19 +956,17 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     def test_onnx_fallthrough(self):
         # Test aten export of op with symbolic for aten
-        x = torch.randn(100, 128)
-        y = torch.randn(100, 128)
-        model = torch.nn.PairwiseDistance(p=2, eps=1e-6)
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.digamma(x)
 
-        graph, _, __ = self._model_to_graph(model, (x, y),
+        x = torch.randn(100, 128)
+        graph, _, __ = self._model_to_graph(Module(), (x, ),
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
-                                            input_names=["x", "y"],
-                                            dynamic_axes={"x": [0, 1], "y": [0, 1]})
+                                            input_names=["x"],
+                                            dynamic_axes={"x": [0, 1]})
         iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "aten::pairwise_distance")
+        self.assertEqual(next(iter).kind(), "aten::digamma")
 
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
     @skipIfUnsupportedMaxOpsetVersion(10)
