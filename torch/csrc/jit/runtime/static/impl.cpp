@@ -140,6 +140,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
+  EliminateNoOpSlice(graph);
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
@@ -1839,12 +1840,15 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
-      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
+      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_OP);
   if (!step_callbacks.empty()) {
     at::RecordFunction guard(std::move(step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     guard.needsInputs() ? guard.before(get_op_name(), inputs_ivalue_vec())
                         : guard.before(get_op_name());
+    if (has_out_variant()) {
+      guard._setStaticRuntimeOutVariant();
+    }
 
     fn_->run(this);
   } else {
