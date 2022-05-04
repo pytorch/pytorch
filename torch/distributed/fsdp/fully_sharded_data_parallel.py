@@ -1,6 +1,7 @@
 import contextlib
 import copy
 import functools
+import time
 import itertools
 import traceback
 import warnings
@@ -548,6 +549,7 @@ class FullyShardedDataParallel(nn.Module):
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
     ):
+        init_start = time.time()
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
         # Save the ignored modules and their parameters, including the
@@ -665,28 +667,39 @@ class FullyShardedDataParallel(nn.Module):
         # the same parameters.
         # Hack: move to compute device and back if it is CPU. In the future,
         # CPU modules will be moved to device_id if it is specified by user.
-        prev_device = next(module.parameters()).device
-        was_cpu = (prev_device == torch.device("cpu"))
+        try:
+            prev_device = next(module.parameters()).device
+            was_cpu = (prev_device == torch.device("cpu"))
+        except StopIteration:
+            # Wrapping FSDP instance with no params, so just set was_cpu = False
+            was_cpu = False
+        # was_cpu = False
         if was_cpu:
             warnings.warn(
                 f"Module is input on CPU, we are moving it to {self.compute_device}"
                 " to perform parameter verification, flattening, sharding, and will"
                 " move it back after."
             )
+            start = time.time()
             module = module.to(self.compute_device)
-        if params:
-            _verify_param_shape_across_processes(
-                process_group=self.process_group,
-                tensors=params,  # TODO: FSDP + DDP to verify buffers as well
-            )
-        _sync_params_and_buffers_functional(
-            process_group=self.process_group,
-            # TODO: buffer synchronization
-            module_states=[param.detach() for param in params],
-            # Same bucket size as used in DDP.
-            broadcast_bucket_size=int(250 * 1024 * 1024),
-            src=0,
-        )
+            torch.cuda.synchronize()
+            end = time.time()
+            print(f"took {end - start} to move the model")
+        # if params:
+        #     _verify_param_shape_across_processes(
+        #         process_group=self.process_group,
+        #         tensors=params,  # TODO: FSDP + DDP to verify buffers as well
+        #     )
+        # _sync_params_and_buffers_functional(
+        #     process_group=self.process_group,
+        #     # TODO: buffer synchronization
+        #     module_states=[param.detach() for param in params],
+        #     # Same bucket size as used in DDP.
+        #     broadcast_bucket_size=int(250 * 1024 * 1024),
+        #     src=0,
+        # )
+        print(" -- no comm --")
+        print(" -- moved it to GPU ---")
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
             module, param_list=params
         )
@@ -697,7 +710,15 @@ class FullyShardedDataParallel(nn.Module):
         else:
             self.params = []
 
+        _sync_params_and_buffers_functional(
+            process_group=self.process_group,
+            module_states=[p.detach() for p in self.params],
+            broadcast_bucket_size=int(250 * 1024 * 1024),
+            src=0
+        )
         # Shard module parameters in place
+        for p in self.params:
+            print(f"param device {p.device}")
         self._shard_parameters()
 
         # Make sure all parameters are sharded.
@@ -749,12 +770,19 @@ class FullyShardedDataParallel(nn.Module):
         if was_cpu:
             # _fsdp_wrapped_module took ownership of module and we deleted
             # module, so move _fsdp_wrapped_module back.
+            a = time.time()
             self._fsdp_wrapped_module = self._fsdp_wrapped_module.to(
                 prev_device
             )
+            torch.cuda.synchronize()
+            b = time.time()
+            print(f"took {b - a} to move the model back to CPU")
 
         # For validating execution order across ranks
         self._exec_order_data = _ExecOrderData()
+        init_end = time.time()
+        torch.cuda.synchronize()
+        print(f"FSDP init time: {init_end - init_start}")
 
     def _init_reshard_after_forward(self):
         if self.sharding_strategy == ShardingStrategy.FULL_SHARD:
