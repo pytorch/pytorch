@@ -4631,7 +4631,7 @@ Tensor linalg_vander(
 
   auto shape = x_.sizes().vec();
   const auto n = N.value_or(shape.back());
-  TORCH_CHECK(n >= 2, "N must be greater or equal to 2.");
+  TORCH_CHECK(n > 1, "N must be greater than 1.");
 
   // Append cumprod of the oher 0...n-1 powers
   shape.push_back(n - 1);
