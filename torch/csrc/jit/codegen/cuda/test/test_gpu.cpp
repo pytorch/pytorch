@@ -36,7 +36,6 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/ir/irparser.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/torch.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -22528,11 +22527,11 @@ class NVFuserMultithreadedTest : public ::testing::Test {
   bool was_enabled = false;
 
   void SetUp() override {
-    was_enabled = RegisterCudaFuseGraph::registerPass(true);
+    was_enabled = fuser::cuda::setEnabled(true);
   }
 
   void TearDown() override {
-    RegisterCudaFuseGraph::registerPass(was_enabled);
+    fuser::cuda::setEnabled(was_enabled);
   }
 };
 
