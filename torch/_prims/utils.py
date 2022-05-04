@@ -376,9 +376,20 @@ _complex_to_real_dtype_map = {
     torch.complex32: torch.float16,
 }
 
+_real_to_complex_dtype_map = {
+    torch.float16: torch.complex32,
+    torch.bfloat16: torch.complex64,
+    torch.float32: torch.complex64,
+    torch.float64: torch.complex128,
+}
+
 
 def corresponding_real_dtype(dtype: torch.dtype) -> torch.dtype:
     return _complex_to_real_dtype_map[dtype]
+
+
+def corresponding_complex_dtype(dtype: torch.dtype) -> torch.dtype:
+    return _real_to_complex_dtype_map[dtype]
 
 
 def dtype_to_type(dtype: torch.dtype) -> type:
@@ -444,21 +455,23 @@ def get_higher_type(a: type, b: type) -> type:
 #   are not ordered relative to each other, the next
 #   higher datatype
 def get_higher_dtype(
-    a: Union[torch.dtype, TensorLikeType, NumberType],
-    b: Union[torch.dtype, TensorLikeType, NumberType],
-) -> torch.dtype:
+    a: Optional[Union[torch.dtype, TensorLikeType, NumberType]],
+    b: Optional[Union[torch.dtype, TensorLikeType, NumberType]],
+) -> Optional[torch.dtype]:
     """
     Computes the "lowest" datatype that is weakly
     "higher" than both a and b.
     """
 
     # Type checking
-    assert isinstance(a, (torch.dtype, TensorLike, Number))
-    assert isinstance(b, (torch.dtype, TensorLike, Number))
+    assert a is None or isinstance(a, (torch.dtype, TensorLike, Number))
+    assert b is None or isinstance(b, (torch.dtype, TensorLike, Number))
 
     def _extract_dtype(
-        x: Union[torch.dtype, TensorLikeType, NumberType]
-    ) -> torch.dtype:
+        x: Optional[Union[torch.dtype, TensorLikeType, NumberType]]
+    ) -> Optional[torch.dtype]:
+        if x is None:
+            return None
         if isinstance(x, torch.dtype):
             return x
         if isinstance(x, TensorLike):
@@ -471,6 +484,12 @@ def get_higher_dtype(
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
+        return a
+
+    if a is None:
+        return b
+
+    if b is None:
         return a
 
     ordered_datatypes = (
