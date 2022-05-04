@@ -2,6 +2,7 @@
 
 #include <ATen/DimVector.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/strides.h>
 #include <ATen/core/Dimname.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -12,21 +13,6 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy-dtor")
 namespace at {
 
 class Tensor;
-
-inline DimVector contiguous_strides(IntArrayRef sizes) {
-  int64_t dims = sizes.size();
-  if (dims == 0) {
-    return {};
-  }
-
-  DimVector strides(dims);
-  strides[dims - 1] = 1;
-  for (auto i = dims - 2; i >= 0; i--) {
-    strides[i] = strides[i + 1] * sizes[i + 1];
-  }
-
-  return strides;
-}
 
 namespace impl {
 
@@ -92,7 +78,18 @@ struct TORCH_API MetaBase {
   // See: https://github.com/pytorch/pytorch/issues/69813
   // Whenever defining the output properties in the META function of a structured
   // kernel (what was usually done with `set_output`), use one of these 3 variants,
-  // instead.
+  // instead. In order to decide which variant to use, check the following
+  // decision tree:
+  //
+  // - Can the output tensor have arbitrary strides?
+  //     |
+  //     -- YES: `set_output_raw_strided`
+  //     |
+  //     -- NO: Should the output tensor strides be contiguous?
+  //         |
+  //         -- YES: `set_output_contiguous`
+  //         |
+  //         -- NO: `set_output_strided`
   //
   // Use this function whenever the kernel requires specific strides for the output.
   // If `strides` does not match the given output strides, proxy outputs will be
@@ -112,7 +109,7 @@ struct TORCH_API MetaBase {
   virtual void set_output_raw_strided(
       int64_t output_idx,
       IntArrayRef sizes,
-      IntArrayRef strides,
+      IntArrayRef strides_hint,
       TensorOptions options,
       DimnameList names = {}) {
     TORCH_INTERNAL_ASSERT(false, "set_output_strided not implemented.");
@@ -125,7 +122,7 @@ struct TORCH_API MetaBase {
       IntArrayRef sizes,
       TensorOptions options,
       DimnameList names = {}) {
-    auto strides = contiguous_strides(sizes);
+    auto strides = c10::contiguous_strides(sizes);
     set_output_strided(output_idx, sizes, strides, options, names);
   }
 
