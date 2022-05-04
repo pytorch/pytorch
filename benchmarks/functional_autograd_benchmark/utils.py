@@ -101,3 +101,10 @@ def from_markdown_table(data: str) -> TimingResultType:
         res[model][task] = (float(mean), float(var))
 
     return res
+
+def check_for_functorch():
+    try:
+        import functorch  # noqa: F401
+        return True
+    except ImportError:
+        return False
