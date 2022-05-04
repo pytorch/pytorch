@@ -1329,6 +1329,7 @@ class ReductionOpInfo(OpInfo):
         # Options from the OpInfo base class
         **kwargs,
     ):
+        self._original_reduction_args = locals().copy()
         assert nan_policy in (None, 'propagate', 'omit')
 
         # These are mutually exclusive options
@@ -1347,7 +1348,7 @@ class ReductionOpInfo(OpInfo):
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault('inplace_variant', None)
         kwargs.setdefault('sample_inputs_func', sample_inputs_func)
-        super(ReductionOpInfo, self).__init__(name, **kwargs)
+        super().__init__(name, **kwargs)
 
         self.identity = identity
         self.nan_policy = nan_policy
@@ -17540,6 +17541,27 @@ class OpInfoPythonRefInfo(OpInfo):
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
         super(OpInfoPythonRefInfo, self).__init__(**ukwargs)
 
+class ReductionPythonRefInfo(ReductionOpInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise unary operation.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        assert isinstance(self.torch_opinfo, ReductionOpInfo)
+
+        inherited = self.torch_opinfo._original_reduction_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
+
+        super().__init__(**ukwargs)
+
 class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
     '''
     An OpInfo for a Python reference of an elementwise unary operation.
@@ -17827,6 +17849,11 @@ python_ref_db = [
         "_refs.true_divide",
         torch_opinfo_name="true_divide",
     ),
+    ReductionPythonRefInfo(
+        "_refs.sum",
+        torch_opinfo_name="sum",
+        supports_out=True
+    )
 ]
 
 # Common operator groupings
