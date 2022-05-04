@@ -4548,6 +4548,7 @@ def foo(xyz):
             debug_files = filter(lambda f: f.endswith('.debug_pkl'), files)
             debug_files = (archive.open(f) for f in debug_files)
             debug_files = (pickle.load(f) for f in debug_files)
+            debug_files = (f[2] for f in debug_files)
             return list(debug_files)
 
         debug_files = debug_records_from_mod(ft3)
@@ -15083,6 +15084,22 @@ dedent """
         # print("rel. error: ")
         # print(jit_out / py_out - 1)
         self.assertEqual(jit_out, py_out, atol=5e-4, rtol=1e-4)
+
+    def test_torchscript_multi_head_attn_fast_path(self):
+        src_l = 3
+        bsz = 5
+        embed_size = 8
+        nhead = 2
+        multi_head_attn = torch.nn.MultiheadAttention(embed_size, nhead, batch_first=True)
+        multi_head_attn = multi_head_attn.eval()
+
+        query = key = value = torch.rand((bsz, src_l, embed_size))
+
+        with torch.no_grad():
+            py_out = multi_head_attn(query, key, value)
+            mha = torch.jit.script(multi_head_attn)
+            jit_out = mha(query, key, value)
+        torch.testing.assert_close(jit_out, py_out)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_scriptmodule_multi_head_attn_cuda(self):
