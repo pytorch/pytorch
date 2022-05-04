@@ -71,6 +71,60 @@ OverlapKind boundOverlap(Bound a, Bound b) {
   return PartialOverlap;
 }
 
+bool compareBound(
+    const Bound& a,
+    const Bound& b,
+    BoundCompareResult& cmp_result) {
+  if (a == b) {
+    cmp_result = BoundCompareResult::kEQ;
+    return true;
+  }
+
+  auto overlap_kind = boundOverlap(a, b);
+  if (overlap_kind == OverlapKind::PartialOverlap) {
+    return false;
+  }
+
+  if (overlap_kind == analysis::OverlapKind::NoOverlap) {
+    // NoOverlap
+    auto sub_expr = alloc<Sub>(a.end, b.start);
+    auto ret = IRSimplifier::simplify(sub_expr);
+    if (!ret->isConstant()) {
+      return false;
+    }
+
+    int diff = immediateAs<int>(ret);
+    TORCH_INTERNAL_ASSERT(diff != 0);
+    // CompareResult::kGT:
+    //   lhs = [5, 10] and rhs = [0, 4]
+    // CompareResult::kLT:
+    //   lhs = [5, 10] and rhs = [11, 15]
+    cmp_result = diff > 0 ? BoundCompareResult::kGT : BoundCompareResult::kLT;
+    return true;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      (overlap_kind == analysis::OverlapKind::Contains) ||
+      (overlap_kind == analysis::OverlapKind::ContainedOrEqual));
+  if (exprEquals(a.end, b.start)) {
+    // lhs = [5, 5] and rhs = [5, 10]
+    // lhs = [5, 10] and rhs = [10, 10]
+    cmp_result = BoundCompareResult::kLE;
+    return true;
+  } else if (exprEquals(a.start, b.end)) {
+    // lhs = [10, 10] and rhs = [5, 10]
+    // lhs = [5, 10] and rhs = [5, 5]
+    cmp_result = BoundCompareResult::kGE;
+    return true;
+  } else {
+    // lhs = [8, 8] and rhs = [5, 10]
+    // lhs = [5, 10] and rhs = [8, 8]
+    // lhs = [5, 10] and rhs = [6, 7]
+    // lhs = [6, 7] and rhs = [5, 10]
+    return false;
+  }
+}
+
 bool indexBoundsEquals(const IndexBounds& A, const IndexBounds& B) {
   if (A.size() != B.size()) {
     return false;

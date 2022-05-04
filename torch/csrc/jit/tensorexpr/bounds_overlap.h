@@ -11,6 +11,8 @@ namespace jit {
 namespace tensorexpr {
 namespace analysis {
 
+using BoundCompareResult = CompareSelectOperation;
+
 // A simple class containing the start and end of a range in a single dimension.
 struct TORCH_API Bound {
   ExprPtr start{nullptr};
@@ -60,6 +62,12 @@ enum OverlapKind { ContainedOrEqual, Contains, PartialOverlap, NoOverlap };
 // Returns the kind of overlap between Bound A and Bound A in a single
 // dimension.
 OverlapKind TORCH_API boundOverlap(Bound A, Bound B);
+
+// Return true if the logic as follows is always satisfied:
+//    (a < b) / (a <= b) / (a > b) / (a >= b) / (a == b) / (a != b)
+// Otherwise, it returns false.
+bool TORCH_API
+compareBound(const Bound& a, const Bound& b, BoundCompareResult& cmp_result);
 
 // A multi dimensional bound representing the bound of a set of indices.
 using IndexBounds = std::vector<Bound>;

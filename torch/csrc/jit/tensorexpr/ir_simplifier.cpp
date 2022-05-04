@@ -2939,21 +2939,21 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
   ExprPtr ret1 = v->ret_val1();
   ExprPtr ret2 = v->ret_val2();
 
-  auto simp_lhs = IRSimplifier::simplify(lhs->accept_mutator(this));
-  auto simp_rhs = IRSimplifier::simplify(rhs->accept_mutator(this));
-  auto simp_ret1 = IRSimplifier::simplify(ret1->accept_mutator(this));
-  auto simp_ret2 = IRSimplifier::simplify(ret2->accept_mutator(this));
+  auto simplified_lhs = IRSimplifier::simplify(lhs->accept_mutator(this));
+  auto simplified_rhs = IRSimplifier::simplify(rhs->accept_mutator(this));
+  auto simplified_ret1 = IRSimplifier::simplify(ret1->accept_mutator(this));
+  auto simplified_ret2 = IRSimplifier::simplify(ret2->accept_mutator(this));
 
   ExprPtr simplified_cmp_select_expr = nullptr;
-  if ((simp_lhs == lhs) && (simp_rhs == rhs) && (simp_ret1 == ret1) &&
-      (simp_ret2 == ret2)) {
+  if ((simplified_lhs == lhs) && (simplified_rhs == rhs) &&
+      (simplified_ret1 == ret1) && (simplified_ret2 == ret2)) {
     simplified_cmp_select_expr = v;
   } else {
     simplified_cmp_select_expr = alloc<CompareSelect>(
-        simp_lhs,
-        simp_rhs,
-        simp_ret1,
-        simp_ret2,
+        simplified_lhs,
+        simplified_rhs,
+        simplified_ret1,
+        simplified_ret2,
         v->compare_select_op(),
         v->bias());
   }
@@ -2962,96 +2962,10 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
       "(SimplifierUnderContext) after simplify: ",
       std::to_string(simplified_cmp_select_expr));
 
-  auto query_bound_info = [](const ExprPtr& expr_ptr,
-                             VarBoundInfo& var_bound_info,
-                             analysis::Bound& bound_info) -> bool {
-    VarPtr var_simp_lhs = nullptr;
-    if (expr_ptr->isConstant()) {
-      bound_info.start = expr_ptr;
-      bound_info.end = expr_ptr;
-      return true;
-    }
-
-    VarPtr var_key = to<Var>(expr_ptr);
-    if (var_key == nullptr) {
-      return false;
-    }
-
-    auto got = var_bound_info.find(var_key);
-    if (got == var_bound_info.end()) {
-      return false;
-    }
-
-    bound_info.start = got->second.first;
-    // TODO: Need to add the boundary information(close/open) of a range to
-    // Bound. Currently, the VarBoundInfo comes from for-loop statement while
-    // the end of the boundary is open. But we assume the start and end of a
-    // range are always close. Hence, we explicitly convert the open boundary to
-    // close.
-    //   [for-start, for-stop) => [for-start, for-stop -1]
-    bound_info.end = IRSimplifier::simplify(
-        alloc<Sub>(got->second.second, immLike(got->second.second, 1)));
-    return true;
-  };
-
-  using CompareResult = CompareSelectOperation;
-  auto solve_bound_relationship = [](const analysis::Bound& lhs_bound,
-                                     const analysis::Bound& rhs_bound,
-                                     CompareResult& cmp_res) {
-    if (lhs_bound == rhs_bound) {
-      cmp_res = CompareResult::kEQ;
-      return true;
-    }
-
-    auto overlap_kind = analysis::boundOverlap(lhs_bound, rhs_bound);
-    if (overlap_kind == analysis::OverlapKind::PartialOverlap) {
-      return false;
-    }
-
-    if (overlap_kind == analysis::OverlapKind::NoOverlap) {
-      // NoOverlap
-      auto sub_expr = alloc<Sub>(lhs_bound.end, rhs_bound.start);
-      auto ret = IRSimplifier::simplify(sub_expr);
-      if (!ret->isConstant()) {
-        return false;
-      }
-
-      int diff = immediateAs<int>(ret);
-      TORCH_INTERNAL_ASSERT(diff != 0);
-      // CompareResult::kGT:
-      //   lhs = [5, 10] and rhs = [0, 4]
-      // CompareResult::kLT:
-      //   lhs = [5, 10] and rhs = [11, 15]
-      cmp_res = diff > 0 ? CompareResult::kGT : CompareResult::kLT;
-      return true;
-    }
-
-    TORCH_INTERNAL_ASSERT(
-        (overlap_kind == analysis::OverlapKind::Contains) ||
-        (overlap_kind == analysis::OverlapKind::ContainedOrEqual));
-    if (exprEquals(lhs_bound.end, rhs_bound.start)) {
-      // lhs = [5, 5] and rhs = [5, 10]
-      // lhs = [5, 10] and rhs = [10, 10]
-      cmp_res = CompareResult::kLE;
-      return true;
-    } else if (exprEquals(lhs_bound.start, rhs_bound.end)) {
-      // lhs = [10, 10] and rhs = [5, 10]
-      // lhs = [5, 10] and rhs = [5, 5]
-      cmp_res = CompareResult::kGE;
-      return true;
-    } else {
-      // lhs = [8, 8] and rhs = [5, 10]
-      // lhs = [5, 10] and rhs = [8, 8]
-      // lhs = [5, 10] and rhs = [6, 7]
-      // lhs = [6, 7] and rhs = [5, 10]
-      return false;
-    }
-  };
-
   analysis::Bound lhs_bound;
   analysis::Bound rhs_bound;
-  auto lhs_has_bound = query_bound_info(simp_lhs, var_bound_info_, lhs_bound);
-  auto rhs_has_bound = query_bound_info(simp_rhs, var_bound_info_, rhs_bound);
+  auto lhs_has_bound = getBoundInfo(simplified_lhs, &lhs_bound);
+  auto rhs_has_bound = getBoundInfo(simplified_rhs, &rhs_bound);
   if (!lhs_has_bound || !rhs_has_bound) {
     GRAPH_DEBUG(
         "(SimplifierUnderContext) Final: ",
@@ -3059,8 +2973,8 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     return simplified_cmp_select_expr;
   }
 
-  CompareResult cmp_res = CompareResult::kEQ;
-  auto bound_solved = solve_bound_relationship(lhs_bound, rhs_bound, cmp_res);
+  analysis::BoundCompareResult cmp_res = analysis::BoundCompareResult::kEQ;
+  auto bound_solved = analysis::compareBound(lhs_bound, rhs_bound, cmp_res);
   if (!bound_solved) {
     GRAPH_DEBUG(
         "(SimplifierUnderContext) Final: ",
@@ -3068,53 +2982,70 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     return simplified_cmp_select_expr;
   }
 
-  ExprPtr ret_expr = nullptr;
-  // a > b
-  auto gt_true = (cmp_res == CompareResult::kGT);
-  // a >= b
-  auto ge_true =
-      (cmp_res == CompareResult::kGE || cmp_res == CompareResult::kGT ||
-       cmp_res == CompareResult::kEQ);
-  // a < b
-  auto lt_true = (cmp_res == CompareResult::kLT);
-  // a <= b
-  auto le_true =
-      (cmp_res == CompareResult::kLE || cmp_res == CompareResult::kLT ||
-       cmp_res == CompareResult::kEQ);
-  // a == b
-  auto eq_true = (cmp_res == CompareResult::kEQ);
-  // a != b
-  auto ne_true =
-      (cmp_res == CompareResult::kLT || cmp_res == CompareResult::kGT);
+  auto _not = [](const CompareSelectOperation& cmp_op) {
+    switch (cmp_op) {
+      case CompareSelectOperation::kGT:
+        return CompareSelectOperation::kLE;
+      case CompareSelectOperation::kGE:
+        return CompareSelectOperation::kLT;
+      case CompareSelectOperation::kLT:
+        return CompareSelectOperation::kGE;
+      case CompareSelectOperation::kLE:
+        return CompareSelectOperation::kGT;
+      case CompareSelectOperation::kNE:
+        return CompareSelectOperation::kEQ;
+      default:
+        TORCH_INTERNAL_ASSERT(cmp_op == CompareSelectOperation::kEQ)
+        return CompareSelectOperation::kNE;
+    }
+  };
 
-#define DEDUCE_RET_EXPR(true_cond, false_cond) \
-  ret_expr = true_cond ? simp_ret1             \
-                       : (false_cond ? simp_ret2 : simplified_cmp_select_expr)
+  auto _imply = [](const analysis::BoundCompareResult& cmp_res,
+                   const CompareSelectOperation& cmp_op) {
+    // a > b
+    auto gt_true = (cmp_res == analysis::BoundCompareResult::kGT);
+    // a >= b
+    auto ge_true =
+        (cmp_res == analysis::BoundCompareResult::kGE ||
+         cmp_res == analysis::BoundCompareResult::kGT ||
+         cmp_res == analysis::BoundCompareResult::kEQ);
+    // a < b
+    auto lt_true = (cmp_res == analysis::BoundCompareResult::kLT);
+    // a <= b
+    auto le_true =
+        (cmp_res == analysis::BoundCompareResult::kLE ||
+         cmp_res == analysis::BoundCompareResult::kLT ||
+         cmp_res == analysis::BoundCompareResult::kEQ);
+    // a == b
+    auto eq_true = (cmp_res == analysis::BoundCompareResult::kEQ);
+    // a != b
+    auto ne_true =
+        (cmp_res == analysis::BoundCompareResult::kLT ||
+         cmp_res == analysis::BoundCompareResult::kGT);
 
-  switch (v->compare_select_op()) {
-    case CompareSelectOperation::kGT:
-      DEDUCE_RET_EXPR(gt_true, le_true);
-      break;
-    case CompareSelectOperation::kGE:
-      DEDUCE_RET_EXPR(ge_true, lt_true);
-      break;
-    case CompareSelectOperation::kLT:
-      DEDUCE_RET_EXPR(lt_true, ge_true);
-      break;
-    case CompareSelectOperation::kLE:
-      DEDUCE_RET_EXPR(le_true, gt_true);
-      break;
-    case CompareSelectOperation::kNE:
-      DEDUCE_RET_EXPR(ne_true, eq_true);
-      break;
-    case CompareSelectOperation::kEQ:
-      DEDUCE_RET_EXPR(eq_true, ne_true);
-      break;
-    default:
-      TORCH_INTERNAL_ASSERT(false);
-      break;
-  }
+    switch (cmp_op) {
+      case CompareSelectOperation::kGT:
+        return gt_true;
+      case CompareSelectOperation::kGE:
+        return ge_true;
+      case CompareSelectOperation::kLT:
+        return lt_true;
+      case CompareSelectOperation::kLE:
+        return le_true;
+      case CompareSelectOperation::kNE:
+        return ne_true;
+      default:
+        TORCH_INTERNAL_ASSERT(cmp_op == CompareSelectOperation::kEQ)
+        return eq_true;
+    }
+  };
 
+  auto cmp_op = v->compare_select_op();
+  auto not_cmp_op = _not(cmp_op);
+  auto ret_expr = _imply(cmp_res, cmp_op)
+      ? simplified_ret1
+      : (_imply(cmp_res, not_cmp_op) ? simplified_ret2
+                                     : simplified_cmp_select_expr);
   GRAPH_DEBUG("(SimplifierUnderContext) Final: ", std::to_string(ret_expr));
   return ret_expr;
 }
@@ -3157,6 +3088,40 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
     return v;
   }
   return alloc<Mod>(lhs_new, rhs_new);
+}
+
+bool SimplifierUnderContext::getBoundInfo(
+    const ExprPtr& expr,
+    analysis::Bound* bound_info) {
+  if (expr == nullptr || bound_info == nullptr)
+    return false;
+
+  if (expr->isConstant()) {
+    bound_info->start = expr;
+    bound_info->end = expr;
+    return true;
+  }
+
+  VarPtr var_key = to<Var>(expr);
+  if (var_key == nullptr) {
+    return false;
+  }
+
+  auto got = var_bound_info_.find(var_key);
+  if (got == var_bound_info_.end()) {
+    return false;
+  }
+
+  bound_info->start = got->second.first;
+  // TODO: Need to add the boundary information(close/open) of a range to
+  // Bound. Currently, the VarBoundInfo comes from for-loop statement while
+  // the end of the boundary is open. But we assume the start and end of a
+  // range are always close. Hence, we explicitly convert the open boundary to
+  // close.
+  //   [for-start, for-stop) => [for-start, for-stop -1]
+  bound_info->end = IRSimplifier::simplify(
+      alloc<Sub>(got->second.second, immLike(got->second.second, 1)));
+  return true;
 }
 
 bool exprEquals(ExprPtr A, ExprPtr B) {
