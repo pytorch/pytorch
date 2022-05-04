@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
 from functools import reduce
-import threading
 
 import torch
 from torch.fx import Node
@@ -41,23 +40,7 @@ NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
 
 
-class TensorMeta_Meta(type):
-    def __init__(cls, *args, **kwargs):
-
-        _tls = threading.local()
-        cls._tls = _tls
-        cls._tls.ctx = None
-
-    @property
-    def ctx(cls):
-        return cls._tls.ctx
-
-    @ctx.setter
-    def ctx(cls, value):
-        cls._tls.ctx = value
-
-
-class TensorMeta(object, metaclass=TensorMeta_Meta):
+class TensorMeta(object):
     """
     Temporary helper class to model tensor metadata.
 
@@ -122,9 +105,6 @@ class TensorMeta(object, metaclass=TensorMeta_Meta):
     ):
         if kwargs is None:
             kwargs = {}
-
-        if cls.ctx is not None:
-            return cls.ctx.handle_torch_function(func, types, args, kwargs)
 
         if not hasattr(func, "meta"):
             raise ValueError("Callable {0} has no meta function!".format(func.__name__))
