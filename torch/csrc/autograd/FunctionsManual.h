@@ -358,9 +358,10 @@ Tensor lu_solve_jvp(
   const Tensor& LU_pivots
 );
 Tensor lu_unpack_backward(
-  const variable_list& grads,
-  const Tensor& LU_data,
-  bool unpack_data
+  const Tensor& L_grad,
+  const Tensor& U_grad,
+  const int64_t m,
+  const int64_t n
 );
 
 Tensor _det_lu_based_helper_backward(
@@ -380,23 +381,32 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
   const std::array<bool, 2>& grad_input_mask
 );
 
-Tensor lu_backward_base(
-  const variable_list& grads,
-  const Tensor& self,
+Tensor linalg_lu_backward(
+  const Tensor& L_grad,
+  const Tensor& U_grad,
   const Tensor& P,
   const Tensor& L,
-  const Tensor& U
-);
+  const Tensor& U,
+  const bool pivot);
+
+std::tuple<Tensor, Tensor> linalg_lu_jvp(
+  const Tensor& dA,
+  const Tensor& P,
+  const Tensor& L,
+  const Tensor& U,
+  const bool pivot);
+
 Tensor lu_factor_ex_backward(
   const Tensor& grad,
-  const Tensor& self,
   const Tensor& LU,
-  const Tensor& pivs
+  const Tensor& pivs,
+  const bool pivot
 );
 Tensor lu_factor_ex_jvp(
   const Tensor& dX,
   const Tensor& LU,
-  const Tensor& pivs
+  const Tensor& pivs,
+  const bool pivot
 );
 
 Tensor batch_norm_jvp(
