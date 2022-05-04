@@ -17232,7 +17232,6 @@ op_db: List[OpInfo] = [
         supports_out=False),
     OpInfo(
         "attn",
-        ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,

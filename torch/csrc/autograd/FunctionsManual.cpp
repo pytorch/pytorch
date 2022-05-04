@@ -2381,7 +2381,6 @@ std::tuple<Tensor, Tensor, Tensor> attn_backward(
   if (!grad_o.defined()) {
     grad_q = (grad_a.mul(tanh_x_2)).matmul(k);
     grad_k = (grad_a.mul(tanh_x_2)).transpose(0, 1).matmul(q);
-    grad_v = at::zeros_like(v);
   } else if (!grad_a.defined()) {
     auto partial_o_x = grad_o.matmul(v.transpose(0, 1)).mul(tanh_x_2);
     grad_q = partial_o_x.matmul(k);
