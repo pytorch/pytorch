@@ -21,8 +21,8 @@ const char* toString(BackendComponent t) {
       return "XPUBit";
     case BackendComponent::IPUBit:
       return "IPUBit";
-    case BackendComponent::MLCBit:
-      return "MLCBit";
+    case BackendComponent::MPSBit:
+      return "MPSBit";
     case BackendComponent::HPUBit:
       return "HPUBit";
     case BackendComponent::VEBit:
@@ -64,8 +64,8 @@ const char* toString(DispatchKey t) {
       return "XLA";
     case DispatchKey::Lazy:
       return "Lazy";
-    case DispatchKey::MLC:
-      return "MLC";
+    case DispatchKey::MPS:
+      return "MPS";
     case DispatchKey::HPU:
       return "HPU";
     case DispatchKey::Vulkan:
@@ -101,6 +101,10 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::NestedTensor:
       return "NestedTensor";
+    case DispatchKey::NestedTensorCPU:
+      return "NestedTensorCPU";
+    case DispatchKey::NestedTensorCUDA:
+      return "NestedTensorCUDA";
 
     case DispatchKey::Python:
       return "Python";
@@ -138,8 +142,8 @@ const char* toString(DispatchKey t) {
       return "AutogradXLA";
     case DispatchKey::AutogradLazy:
       return "AutogradLazy";
-    case DispatchKey::AutogradMLC:
-      return "AutogradMLC";
+    case DispatchKey::AutogradMPS:
+      return "AutogradMPS";
     case DispatchKey::AutogradHPU:
       return "AutogradHPU";
     case DispatchKey::AutogradPrivateUse1:
@@ -173,6 +177,9 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::AutocastCPU:
       return "AutocastCPU";
+
+    case DispatchKey::AutocastXPU:
+      return "AutocastXPU";
 
     case DispatchKey::Batched:
       return "Batched";
@@ -208,6 +215,12 @@ const char* toString(DispatchKey t) {
       return "FuncTorchVmapMode";
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";
+
+    // Out-of-core torchdistX dispatch keys
+    case DispatchKey::Fake:
+      return "Fake";
+    case DispatchKey::DeferredInit:
+      return "DeferredInit";
 
     case DispatchKey::Dense:
       return "Dense";
@@ -260,6 +273,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
       {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
+      {"Fake", c10::DispatchKey::Fake},
       {"Named", c10::DispatchKey::Named},
       {"Conjugate", c10::DispatchKey::Conjugate},
       {"Negative", c10::DispatchKey::Negative},
@@ -272,11 +286,13 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
+      {"AutocastXPU", c10::DispatchKey::AutocastXPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
       {"Batched", c10::DispatchKey::Batched},
       {"VmapMode", c10::DispatchKey::VmapMode},
+      {"DeferredInit", c10::DispatchKey::DeferredInit},
       {"FuncTorchGradWrapper", c10::DispatchKey::FuncTorchGradWrapper},
       {"FuncTorchDynamicLayerFrontMode",
        c10::DispatchKey::FuncTorchDynamicLayerFrontMode},
@@ -288,12 +304,14 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"CUDA", c10::DispatchKey::CUDA},
       {"HIP", c10::DispatchKey::HIP},
       {"XLA", c10::DispatchKey::XLA},
-      {"MLC", c10::DispatchKey::MLC},
+      {"MPS", c10::DispatchKey::MPS},
       {"XPU", c10::DispatchKey::XPU},
       {"IPU", c10::DispatchKey::IPU},
       {"HPU", c10::DispatchKey::HPU},
       {"Lazy", c10::DispatchKey::Lazy},
       {"NestedTensor", c10::DispatchKey::NestedTensor},
+      {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
+      {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
       {"PrivateUse2", c10::DispatchKey::PrivateUse2},
       {"PrivateUse3", c10::DispatchKey::PrivateUse3},
@@ -314,7 +332,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradLazy", c10::DispatchKey::AutogradLazy},
       {"AutogradIPU", c10::DispatchKey::AutogradIPU},
       {"AutogradXPU", c10::DispatchKey::AutogradXPU},
-      {"AutogradMLC", c10::DispatchKey::AutogradMLC},
+      {"AutogradMPS", c10::DispatchKey::AutogradMPS},
       {"AutogradHPU", c10::DispatchKey::AutogradHPU},
       {"AutogradPrivateUse1", c10::DispatchKey::AutogradPrivateUse1},
       {"AutogradPrivateUse2", c10::DispatchKey::AutogradPrivateUse2},
