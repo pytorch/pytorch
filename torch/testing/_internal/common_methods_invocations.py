@@ -16576,6 +16576,7 @@ op_db: List[OpInfo] = [
         'argmax',
         supports_multiple_dims=False,
         supports_autograd=False,
+        assert_jit_shape_analysis=True,
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
