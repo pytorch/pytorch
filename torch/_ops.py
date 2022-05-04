@@ -184,11 +184,17 @@ class _OpNamespace(types.ModuleType):
         # It is not a valid op_name when __file__ is passed in
         if op_name == '__file__':
             return 'torch.ops'
+
         # Get the op `my_namespace::my_op` if available. This will also check
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
         qualified_op_name = '{}::{}'.format(namespace_name, op_name)
-        op = torch._C._jit_get_operation(qualified_op_name)
+        try:
+            op = torch._C._jit_get_operation(qualified_op_name)
+        except RuntimeError as e:
+            # Turn this into AttributeError so getattr(obj, key, default)
+            # works (this is called by TorchScript with __origin__)
+            raise AttributeError(f"'_OpNamespace' object has no attribute '{op_name}'") from e
 
         # let the script frontend know that op is identical to the builtin op
         # with qualified_op_name
