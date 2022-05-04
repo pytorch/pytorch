@@ -10,6 +10,7 @@ from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symboli
 from torch.autograd import Variable, Function
 from torch.nn import Module, functional
 import torch.nn as nn
+import torch.nn.functional as F
 
 import itertools
 import io
@@ -19,6 +20,7 @@ import os
 import shutil
 import tempfile
 import torch.testing._internal.common_utils as common
+from torch.testing._internal.common_utils import skipIfCaffe2
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -26,14 +28,17 @@ import torch.testing._internal.common_utils as common
           --accept: accept onnx updates and overwrite models
 '''
 
+# Full diff for expect files
+import unittest
+unittest.TestCase.maxDiff = None
+
 _onnx_test = False  # flag to produce onnx test cases.
 _onnx_dep = True  # flag to import onnx package.
 
 
 def export_to_pbtxt(model, inputs, *args, **kwargs):
     return torch.onnx.export_to_pretty_string(
-        model, inputs, None, verbose=False, google_printer=True,
-        *args, **kwargs)
+        model, inputs, google_printer=True, *args, **kwargs)
 
 
 def export_to_pb(model, inputs, *args, **kwargs):
@@ -322,6 +327,7 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
 
+    @skipIfCaffe2
     def test_at_op(self):
         x = torch.randn(3, 4)
 
@@ -339,7 +345,8 @@ class TestOperators(TestCase):
             def forward(self, x):
                 return MyFun.apply(x)
 
-        self.assertONNX(MyModule(), x)
+        self.assertONNX(MyModule(), x,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_clip(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -588,6 +595,7 @@ class TestOperators(TestCase):
         self.assertONNX(nn.BatchNorm2d(128, affine=False, momentum=0.3), x,
                         keep_initializers_as_inputs=True)
 
+    @skipIfCaffe2
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
@@ -724,31 +732,32 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.cumsum(x, dim=1), x, opset_version=11)
 
-    def test_c2_op(self):
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super(MyModel, self).__init__()
-
-            def forward(self, scores, bbox_deltas, im_info, anchors):
-                a, b = torch.ops._caffe2.GenerateProposals(
-                    (scores), (bbox_deltas), (im_info), (anchors),
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
-                )
-                return a, b
-
-        model = MyModel()
-        A = 4
-        H = 10
-        W = 8
-        img_count = 3
-        scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
-        bbox_deltas = torch.linspace(0, 10, steps=img_count * 4 * A * H * W,
-                                     dtype=torch.float32)
-        bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
-        im_info = torch.ones(img_count, 3, dtype=torch.float32)
-        anchors = torch.ones(A, 4, dtype=torch.float32)
-        inputs = (scores, bbox_deltas, im_info, anchors)
-        self.assertONNX(model, inputs, custom_opsets={"org.pytorch._caffe2": 0})
+# Github Issue: https://github.com/pytorch/pytorch/issues/71095
+#    def test_c2_op(self):
+#        class MyModel(torch.nn.Module):
+#            def __init__(self):
+#                super(MyModel, self).__init__()
+#
+#            def forward(self, scores, bbox_deltas, im_info, anchors):
+#                a, b = torch.ops._caffe2.GenerateProposals(
+#                    (scores), (bbox_deltas), (im_info), (anchors),
+#                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
+#                )
+#                return a, b
+#
+#        model = MyModel()
+#        A = 4
+#        H = 10
+#        W = 8
+#        img_count = 3
+#        scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
+#        bbox_deltas = torch.linspace(0, 10, steps=img_count * 4 * A * H * W,
+#                                     dtype=torch.float32)
+#        bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
+#        im_info = torch.ones(img_count, 3, dtype=torch.float32)
+#        anchors = torch.ones(A, 4, dtype=torch.float32)
+#        inputs = (scores, bbox_deltas, im_info, anchors)
+#        self.assertONNX(model, inputs, custom_opsets={"org.pytorch._caffe2": 0})
 
     def test_dict(self):
         class MyModel(torch.nn.Module):
@@ -786,6 +795,7 @@ class TestOperators(TestCase):
         input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.assertONNX(BitshiftModel(), (input, input2), opset_version=11)
 
+    @skipIfCaffe2
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
@@ -915,6 +925,12 @@ class TestOperators(TestCase):
                         dynamic_axes={"input_1": {1: "dim_1"}, "input_2": {1: "dim_2"}},
                         opset_version=12)
 
+    def test_dynamic_axes_add_inputs_same_symbolic_shape(self):
+        m1 = torch.randn(2, 3, requires_grad=True)
+        self.assertONNX(lambda x: torch.add(x, x), (m1,), input_names=["input_1"],
+                        dynamic_axes={"input_1": {1: "dim_1"}},
+                        opset_version=12)
+
     def test_dynamic_axes_matmul(self):
         m1 = torch.randn(2, 2, 4, requires_grad=True)
         m2 = torch.randn(2, 4, 3, requires_grad=True)
@@ -947,7 +963,7 @@ class TestOperators(TestCase):
                 f'"sparse":{str(sparse).lower()}'
                 '}'
             )
-            output = g.op("com.microsoft::ATenOp", weight, indices, name_s='aten::embedding',
+            output = g.at("embedding", weight, indices,
                           custom_attributes_json_s=custom_attributes_json)
             return output
 
@@ -971,6 +987,7 @@ class TestOperators(TestCase):
         unregister_custom_op_symbolic('::embedding', _onnx_opset_version)
 
     # This is test_aten_embedding_1 with shape inference on custom symbolic aten::embedding.
+    @skipIfCaffe2
     def test_aten_embedding_2(self):
         _onnx_opset_version = 12
 
@@ -983,7 +1000,7 @@ class TestOperators(TestCase):
                 f'"sparse":{str(sparse).lower()}'
                 '}'
             )
-            output = g.op("com.microsoft::ATenOp", weight, indices, name_s='aten::embedding',
+            output = g.at("embedding", weight, indices,
                           custom_attributes_json_s=custom_attributes_json)
 
             # do shape inference and set it via setType
@@ -1009,9 +1026,46 @@ class TestOperators(TestCase):
         x = torch.ones(32, dtype=torch.long)
         y = torch.randn(1, 8)
         self.assertONNX(model, (x, y), opset_version=_onnx_opset_version, input_names=['input_1', 'input_2'],
-                        dynamic_axes={"input_1": {0: "dim_0"}, 'input_2': {0: "dim_1", 1: "dim_2"}})
+                        dynamic_axes={"input_1": {0: "dim_0"}, 'input_2': {0: "dim_1", 1: "dim_2"}},
+                        keep_initializers_as_inputs=False,
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
         unregister_custom_op_symbolic('::embedding', _onnx_opset_version)
+
+    # Without shapeValueMap, the onnx graph looks like:
+    # graph(%0 : Float(*, 1, 128, 1, strides=[128, 128, 1, 1], requires_grad=0, device=cpu)):
+    #   %2 : Long(4, strides=[1], device=cpu) = onnx::Shape(%0)
+    #   %4 : Long(device=cpu) = onnx::Constant[value={0}]()
+    #   %5 : Long(device=cpu) = onnx::Gather[axis=0](%2, %4)
+    #   %6 : Long(device=cpu) = onnx::Constant[value={1}]()
+    #   %7 : Long(device=cpu) = onnx::Constant[value={2}]()
+    #   %8 : Long(device=cpu) = onnx::Constant[value={-1}]()
+    #   %9 : int[] = prim::ListConstruct(%5, %6, %7, %8)
+    #   %10 : Float(*, *, *, *, strides=[128, 128, 64, 1], requires_grad=0, device=cpu) = onnx::Reshape(%0, %9)
+    #   ...
+    # With shapeValueMap, it becomes:
+    #   ...
+    #   %10 : Float(*, 1, 2, 64, strides=[128, 128, 64, 1], requires_grad=0, device=cpu) = onnx::Reshape(%0, %9)
+    #   ...
+    def test_shape_value_map(self):
+        class RSoftMax(torch.nn.Module):
+            def __init__(self, radix, cardinality):
+                super().__init__()
+                self.radix = radix
+                self.cardinality = cardinality
+
+            def forward(self, x):
+                batch = x.size(0)
+                x = x.view(batch, self.cardinality, self.radix, -1).transpose(1, 2)
+                x = F.softmax(x, dim=1)
+                x = x.reshape(batch, -1)
+                return x
+        radix = 2
+        cardinality = 1
+        x = torch.randn(10, 1, 128, 1)
+        self.assertONNX(RSoftMax(radix, cardinality), (x,),
+                        input_names=["x"],
+                        dynamic_axes={"x": {0: "dim_0"}})
 
 if __name__ == "__main__":
     no_onnx_dep_flag = "--no-onnx"

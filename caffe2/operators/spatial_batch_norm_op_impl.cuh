@@ -231,7 +231,6 @@ __global__ void ComputeXGradientNCHWCUDAKernel(
 template <typename T>
 __global__ void ComputeXGradientNHWCCUDAKernel(
     const int C,
-    const int HxW,
     const T* dY,
     const T* X,
     const T* alpha,
@@ -462,7 +461,7 @@ void SpatialBNGradientOp<CUDAContext>::ComputeXGradient(
         <<<dim3(N * HxW, M),
            CAFFE_CUDA_NUM_THREADS,
            0,
-           context_.cuda_stream()>>>(C, HxW, dY, X, alpha, beta, gamma, dX);
+           context_.cuda_stream()>>>(C, dY, X, alpha, beta, gamma, dX);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }

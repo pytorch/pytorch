@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/frontend/code_template.h>
+#include <ATen/code_template.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace jit {
@@ -14,7 +14,7 @@ not know how to handle int*_t integer types, so typedefs help it handle those
 cases*/
 
 #if defined(USE_ROCM)
-static auto type_declarations_template = CodeTemplate(R"(
+static auto type_declarations_template = at::jit::CodeTemplate(R"(
 ${RuntimeHeader}
 ${HalfHeader}
 ${BFloat16Header}
@@ -37,7 +37,7 @@ struct TensorInfo<T, 0> {
 };
 )");
 #else
-static auto type_declarations_template = CodeTemplate(R"(
+static auto type_declarations_template = at::jit::CodeTemplate(R"(
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int  int16_t;
@@ -169,7 +169,7 @@ constexpr auto rand_init = R"(
   Philox rnd(seed, idx, offset);
 )";
 
-static auto cuda_compilation_unit_template = CodeTemplate(R"(
+static auto cuda_compilation_unit_template = at::jit::CodeTemplate(R"(
 ${type_declarations}
 
 extern "C" __global__

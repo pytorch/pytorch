@@ -1,6 +1,18 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#endif
 
 #include <c10/util/MaybeOwned.h>
 

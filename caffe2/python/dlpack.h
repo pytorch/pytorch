@@ -13,7 +13,7 @@
 #endif
 
 /*! \brief The current version of dlpack */
-#define DLPACK_VERSION 020
+#define DLPACK_VERSION 60
 
 /*! \brief DLPACK_DLL prefix for windows */
 #ifdef _WIN32
@@ -33,18 +33,17 @@
 extern "C" {
 #endif
 /*!
- * \brief The device type in DLContext.
+ * \brief The device type in DLDevice.
  */
 typedef enum {
   /*! \brief CPU device */
   kDLCPU = 1,
   /*! \brief CUDA GPU device */
-  kDLGPU = 2,
+  kDLCUDA = 2,
   /*!
-   * \brief Pinned CUDA GPU device by cudaMallocHost
-   * \note kDLCPUPinned = kDLCPU | kDLGPU
+   * \brief Pinned CUDA CPU memory by cudaMallocHost
    */
-  kDLCPUPinned = 3,
+  kDLCUDAHost = 3,
   /*! \brief OpenCL devices. */
   kDLOpenCL = 4,
   /*! \brief Vulkan buffer for next generation graphics. */
@@ -56,31 +55,57 @@ typedef enum {
   /*! \brief ROCm GPUs for AMD GPUs */
   kDLROCM = 10,
   /*!
+   * \brief Pinned ROCm CPU memory allocated by hipMallocHost
+   */
+  kDLROCMHost = 11,
+  /*!
    * \brief Reserved extension device type,
    * used for quickly test extension device
    * The semantics can differ depending on the implementation.
    */
   kDLExtDev = 12,
+  /*!
+   * \brief CUDA managed/unified memory allocated by cudaMallocManaged
+   */
+  kDLCUDAManaged = 13,
 } DLDeviceType;
 
 /*!
- * \brief A Device context for Tensor and operator.
+ * \brief A Device for Tensor and operator.
  */
 typedef struct {
   /*! \brief The device type used in the device. */
   DLDeviceType device_type;
-  /*! \brief The device index */
+  /*!
+   * \brief The device index.
+   * For vanilla CPU memory, pinned memory, or managed memory, this is set to 0.
+   */
   int device_id;
-} DLContext;
+} DLDevice;
 
 /*!
  * \brief The type code options DLDataType.
  */
 typedef enum {
+  /*! \brief signed integer */
   kDLInt = 0U,
+  /*! \brief unsigned integer */
   kDLUInt = 1U,
+  /*! \brief IEEE floating point */
   kDLFloat = 2U,
+  /*!
+   * \brief Opaque handle type, reserved for testing purposes.
+   * Frameworks need to agree on the handle data type for the exchange to be
+   * well-defined.
+   */
+  kDLOpaqueHandle = 3U,
+  /*! \brief bfloat16 */
   kDLBfloat = 4U,
+  /*!
+   * \brief complex number
+   * (C/C++/Python layout: compact struct per complex number)
+   */
+  kDLComplex = 5U,
 } DLDataTypeCode;
 
 /*!
@@ -90,6 +115,7 @@ typedef enum {
  *   - float: type_code = 2, bits = 32, lanes=1
  *   - float4(vectorized 4 float): type_code = 2, bits = 32, lanes=4
  *   - int8: type_code = 0, bits = 8, lanes=1
+ *   - std::complex<float>: type_code = 5, bits = 64, lanes = 1
  */
 typedef struct {
   /*!
@@ -130,8 +156,8 @@ typedef struct {
    * \endcode
    */
   void* data;
-  /*! \brief The device context of the tensor */
-  DLContext ctx;
+  /*! \brief The device of the tensor */
+  DLDevice device;
   /*! \brief Number of dimensions */
   int ndim;
   /*! \brief The data type of the pointer*/

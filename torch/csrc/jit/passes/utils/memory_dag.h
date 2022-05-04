@@ -12,7 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 // Uses a compressed index representation for faster comparisons
 typedef c10::SparseBitVector<256> MemoryLocations;
@@ -23,7 +23,6 @@ struct Element;
 struct Value;
 class MemoryDAG;
 
-using TypePtr = std::shared_ptr<c10::Type>;
 using AliasTypeSet = std::vector<TypePtr>;
 
 /**
@@ -89,6 +88,8 @@ class TORCH_API MemoryDAG {
 
   // Does `a` hold reference to any memory that is stored in `b`, or vice versa?
   bool mayContainAlias(const Element* a, const Element* b) const;
+
+  bool mayContainAlias(const Element* a, const at::ArrayRef<Element*> b) const;
 
   bool mayContainAlias(
       const at::ArrayRef<Element*> a,

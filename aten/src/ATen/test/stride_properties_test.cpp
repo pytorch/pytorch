@@ -67,3 +67,12 @@ TEST(StridePropertiesTest, ZeroStrideIndicesEagerConsistencyTest) {
     ref_iter++;
   }
 }
+
+TEST(StridePropertiesTest, ExpandedStrideIndicesTest) {
+  // NOLINTNEXTLINE(performance-for-range-copy)
+  Tensor t = at::rand({1});
+  // note: expand with dimension of size 1 is tricky as stride is different
+  // depending on the order of the unsqueezed dimension.
+  t = t.expand({4, 4, 4});
+  EXPECT_TRUE(CheckStrideIndices(t, at::MemoryFormat::Contiguous));
+}

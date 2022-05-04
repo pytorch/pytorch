@@ -181,6 +181,11 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor expand_batching_rule_symint(const Tensor& self, SymIntArrayRef psize, bool implicit) {
+  return expand_batching_rule(self, expectIntArrayRef(psize), implicit);
+}
+
+
 std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
@@ -561,6 +566,15 @@ Tensor _new_zeros_with_same_feature_meta_batching_rule(
   checkBatchDimsAtFrontInLayout(self_physical_tensor.strides(), num_batch_dims);
   auto result = at::_new_zeros_with_same_feature_meta(self_physical_tensor, other, num_batch_dims);
   return self_physical_view.getPhysicalToLogicalMap().apply(result);
+}
+
+bool _has_same_storage_numel_batching_rule(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(isBatchedTensor(self) && !isBatchedTensor(other),
+    "Only the 'batched grad' use case is supported in PyTorch core.");
+  // The _has_same_storage_numel check is skipped if the tangent is a batched
+  // tensor because using as_strided to access storage locations not indexable
+  // by the input tensor is not supported in vmap
+  return true;
 }
 
 // What are the semantics of as_strided inside of vmap?
@@ -1060,6 +1074,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
   m.impl("_make_dual", _make_dual_batching_rule);
+  m.impl("_has_same_storage_numel", _has_same_storage_numel_batching_rule);
   m.impl("is_same_size", native::is_same_size);
   m.impl("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batching_rule);
 
@@ -1078,6 +1093,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
   m.impl("diagonal", diagonal_batching_rule);
   m.impl("expand", expand_batching_rule);
+  m.impl("expand.SymInt", expand_batching_rule_symint);
   m.impl("expand_as", native::expand_as); // composite wrt autograd
   m.impl("movedim.intlist", movedim_batching_rule);
   m.impl("movedim.int", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t)>(native::movedim)); // composite wrt autograd
@@ -1095,6 +1111,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
+  m.impl("split.sizes", split_with_sizes_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);

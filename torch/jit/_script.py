@@ -13,7 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict, List, Tuple, Union, Callable
+from typing import Any, Dict, List, Set, Tuple, Union, Callable
 
 
 import torch
@@ -55,6 +55,13 @@ Functionally equivalent to a :class:`ScriptModule`, but represents a single
 function and does not have any attributes or Parameters.
 """
 set_module(ScriptFunction, "torch.jit")
+
+# Throws an error if a jit function is pickled.
+# Helps to avoid Python crashes for Python versions 3.9.5 + when protocol 0 or 1 is given as an argument.
+def _reduce(cls):
+    raise pickle.PickleError("ScriptFunction cannot be pickled")
+
+ScriptFunction.__reduce__ = _reduce  # type: ignore[assignment]
 
 
 if _enabled:
@@ -242,7 +249,7 @@ class ScriptMeta(type):
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
                 cls._methods[k] = v
-            base_constants = getattr(base, "_constants_set", set())
+            base_constants: Set = getattr(base, "_constants_set", set())
             cls._constants_set = cls._constants_set.union(base_constants)
 
         # find all the script methods of the current class
@@ -410,7 +417,7 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__getattr__(attr)  # type: ignore[misc]
 
             if attr in self._props:
-                return self._props[attr].fget()
+                return self._props[attr].fget()  # type: ignore[call-arg, misc]
 
             return getattr(self._c, attr)
 
@@ -419,7 +426,7 @@ if _enabled:
                 return super(RecursiveScriptClass, self).__setattr__(attr, value)
 
             if attr in self._props:
-                return self._props[attr].fset(value)
+                return self._props[attr].fset(value)  # type: ignore[call-arg, misc]
 
             setattr(self._c, attr, value)
 
@@ -1298,8 +1305,12 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
-            obj = obj.__original_fn
+            obj = obj.__original_fn  # type: ignore[union-attr]
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+
+        # some functions are explicitly marked as not supported in script mode
+        if hasattr(obj, "__script_unsupported"):
+            raise RuntimeError("TorchScript error: " + obj.__script_unsupported)
 
         _check_directly_compile_overloaded(obj)
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)

@@ -1,17 +1,7 @@
-from cimodel.lib.conf_tree import ConfigNode, X
+from cimodel.lib.conf_tree import ConfigNode
 
 
 CONFIG_TREE_DATA = [
-    ("xenial", [
-        ("gcc", [
-            ("5.4", [  # All this subtree rebases to master and then build
-                ("3.6", [
-                    ("important", [X(True)]),
-                ]),
-            ]),
-            # TODO: bring back libtorch test
-        ]),
-    ]),
 ]
 
 
@@ -81,10 +71,10 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         next_nodes = {
             "asan": AsanConfigNode,
             "xla": XlaConfigNode,
-            "mlc": MLCConfigNode,
+            "mps": MPSConfigNode,
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
-            "noarch": NoarchConfigNode,
+            "crossref": CrossRefConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -126,12 +116,12 @@ class XlaConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
-class MLCConfigNode(TreeConfigNode):
+class MPSConfigNode(TreeConfigNode):
     def modify_label(self, label):
-        return "MLC=" + str(label)
+        return "MPS=" + str(label)
 
     def init2(self, node_name):
-        self.props["is_mlc"] = node_name
+        self.props["is_mps"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
@@ -181,9 +171,9 @@ class ParallelTBBConfigNode(TreeConfigNode):
         return ImportantConfigNode
 
 
-class NoarchConfigNode(TreeConfigNode):
+class CrossRefConfigNode(TreeConfigNode):
     def init2(self, node_name):
-        self.props["is_noarch"] = node_name
+        self.props["is_crossref"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

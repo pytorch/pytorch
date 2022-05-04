@@ -12,7 +12,8 @@ from torch import nn
 from torch.cuda.amp import autocast
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_utils import sandcastle_skip_if
@@ -382,7 +383,7 @@ class TestDataParallel(TestCase):
                 self.assertEqual(out.get_device(), dev_id[0])
                 self.assertEqual(out, expected_out)
                 for expected, param in zip(expected_grads, l.parameters()):
-                    self.assertEqual(param.grad, expected)
+                    self.assertEqual(param.grad.coalesce(), expected.coalesce())
 
         # Check for None device_ids
         l = l.cuda()
@@ -433,93 +434,6 @@ class TestDataParallel(TestCase):
         gpus = range(torch.cuda.device_count())
         output = dp.data_parallel(Net(), input, gpus)
         self.assertEqual(output, fn(input))
-
-    @sandcastle_skip_if(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_data_parallel_module(self, dtype=torch.float):
-        l = nn.Linear(10, 5).to("cuda", dtype)
-        i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i)
-        net = nn.DataParallel(l)
-        out = net(i)
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-    @sandcastle_skip_if(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_data_parallel_module_kwargs_only(self, dtype=torch.float):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l = l
-
-            def forward(self, input):
-                return self.l(input)
-
-        l = nn.Linear(10, 5).to("cuda", dtype)
-        i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i)
-        n = nn.DataParallel(Net())
-        out = n(input=i)
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-    @sandcastle_skip_if(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_data_parallel_module_kwargs_only_empty_list(self, dtype=torch.float):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l = l
-
-            def forward(self, input):
-                return self.l(input['data'])
-
-        l = nn.Linear(10, 5).to("cuda", dtype)
-        i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i)
-        n = nn.DataParallel(Net())
-        out = n(input={'data': i, 'unused': []})
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-    @sandcastle_skip_if(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_data_parallel_module_kwargs_only_empty_dict(self, dtype=torch.float):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l = l
-
-            def forward(self, input):
-                return self.l(input['data'])
-
-        l = nn.Linear(10, 5).to("cuda", dtype)
-        i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i)
-        n = nn.DataParallel(Net())
-        out = n(input={'data': i, 'unused': {}})
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-    @sandcastle_skip_if(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_data_parallel_module_kwargs_only_empty_tuple(self, dtype=torch.float):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l = l
-
-            def forward(self, input):
-                return self.l(input['data'])
-
-        l = nn.Linear(10, 5).to("cuda", dtype)
-        i = torch.randn(20, 10, device="cuda", dtype=dtype)
-        expected_out = l(i)
-        n = nn.DataParallel(Net())
-        out = n(input={'data': i, 'unused': ()})
-        self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
     @sandcastle_skip_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_module_zero_inputs(self):
@@ -757,13 +671,13 @@ class TestDataParallel(TestCase):
     @sandcastle_skip_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_strided_grad_layout(self):
         class ConvNet(nn.Module):
-            def __init__(self, layouts, dtypes):
+            def __init__(self, layouts, dtype_list):
                 super(ConvNet, self).__init__()
-                self.dtypes = dtypes
-                self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(memory_format=layouts[0], dtype=dtypes[0])
-                self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(memory_format=layouts[1], dtype=dtypes[1])
-                self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(memory_format=layouts[2], dtype=dtypes[2])
-                self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(memory_format=layouts[3], dtype=dtypes[3])
+                self.dtypes = dtype_list
+                self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(memory_format=layouts[0], dtype=dtype_list[0])
+                self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(memory_format=layouts[1], dtype=dtype_list[1])
+                self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(memory_format=layouts[2], dtype=dtype_list[2])
+                self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(memory_format=layouts[3], dtype=dtype_list[3])
 
             def forward(self, x):
                 x = x.to(self.dtypes[0])
@@ -786,10 +700,10 @@ class TestDataParallel(TestCase):
         device_ids = list(range(ndevs))
 
         with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
-            for formats, dtypes in product(layer_formats, layer_dtypes):
+            for formats, dtype_list in product(layer_formats, layer_dtypes):
                 model_msg = "formats = {} dtypes = {}".format(formats, dtypes)
                 try:
-                    m = ConvNet(formats, dtypes).cuda(device="cuda:0")
+                    m = ConvNet(formats, dtype_list).cuda(device="cuda:0")
                     m_dp = dp.DataParallel(deepcopy(m), device_ids=device_ids)
                     opt = torch.optim.SGD(m.parameters(), lr=0.1)
                     opt_dp = torch.optim.SGD(m_dp.parameters(), lr=0.1)
@@ -827,33 +741,141 @@ class TestDataParallel(TestCase):
     @sandcastle_skip_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parameter_list_dict_replica(self):
         class MyMod(torch.nn.Module):
-            def __init__(self, data):
+            def __init__(self, data, check_fn):
                 super(MyMod, self).__init__()
                 self.data = data
+                self.check_fn = check_fn
 
             def forward(self, inp):
+                self.check_fn(self)
                 return inp
 
         p1 = torch.nn.Parameter(torch.rand(10))
         p2 = torch.nn.Parameter(torch.rand(10))
-        module = MyMod(torch.nn.ParameterList([p1, p2])).cuda()
+        key0 = 0
+        key1 = 1
+
+        def check_fn(self_):
+            self.assertEqual(p1, self_.data[key0])
+            self.assertEqual(p2, self_.data[key1])
+            self.assertTrue(self_.data[key0].requires_grad)
+            self.assertTrue(self_.data[key1].requires_grad)
+            self.assertIsNotNone(self_.data[key0].grad_fn)
+            self.assertIsNotNone(self_.data[key1].grad_fn)
+
+        module = MyMod(torch.nn.ParameterList([p1, p2]), check_fn).cuda()
         model = dp.DataParallel(module)
         input = torch.randn((8, 8), device="cuda")
 
-        with self.assertWarnsRegex(
-                UserWarning,
-                r"nn\.ParameterList is being used with DataParallel but this"):
-            model(input)
+        # Runs the check_fn
+        model(input)
 
-        module = MyMod(torch.nn.ParameterDict({"0": p1, "1": p2})).cuda()
+        key0 = "0"
+        key1 = "1"
+        module = MyMod(torch.nn.ParameterDict({"0": p1, "1": p2}), check_fn).cuda()
         model = dp.DataParallel(module)
         input = torch.randn((8, 8), device="cuda")
 
-        with self.assertWarnsRegex(
-                UserWarning,
-                r"nn\.ParameterDict is being used with DataParallel but this"):
-            model(input)
+        # Runs the check_fn
+        model(input)
 
+
+class TestDataParallelDeviceType(TestCase):
+
+    @onlyCUDA
+    @skipMeta
+    @dtypes(torch.float, torch.double, torch.half)
+    def test_data_parallel_module(self, device, dtype):
+        l = nn.Linear(10, 5).to(device, dtype)
+        i = torch.randn(20, 10, device=device, dtype=dtype)
+        expected_out = l(i)
+        net = nn.DataParallel(l)
+        out = net(i)
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+    @onlyCUDA
+    @skipMeta
+    @dtypes(torch.float, torch.double, torch.half)
+    def test_data_parallel_module_kwargs_only(self, device, dtype):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input)
+
+        l = nn.Linear(10, 5).to(device, dtype)
+        i = torch.randn(20, 10, device=device, dtype=dtype)
+        expected_out = l(i)
+        n = nn.DataParallel(Net())
+        out = n(input=i)
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+    @onlyCUDA
+    @skipMeta
+    @dtypes(torch.float, torch.double, torch.half)
+    def test_data_parallel_module_kwargs_only_empty_list(self, device, dtype):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).to(device, dtype)
+        i = torch.randn(20, 10, device=device, dtype=dtype)
+        expected_out = l(i)
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': []})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+    @onlyCUDA
+    @skipMeta
+    @dtypes(torch.float, torch.double, torch.half)
+    def test_data_parallel_module_kwargs_only_empty_dict(self, device, dtype):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).to(device, dtype)
+        i = torch.randn(20, 10, device=device, dtype=dtype)
+        expected_out = l(i)
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': {}})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+    @onlyCUDA
+    @skipMeta
+    @dtypes(torch.float, torch.double, torch.half)
+    def test_data_parallel_module_kwargs_only_empty_tuple(self, device, dtype):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).to(device, dtype)
+        i = torch.randn(20, 10, device=device, dtype=dtype)
+        expected_out = l(i)
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': ()})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+
+instantiate_device_type_tests(TestDataParallelDeviceType, globals())
 
 if __name__ == '__main__':
     run_tests()

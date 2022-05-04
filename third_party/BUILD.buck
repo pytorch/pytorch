@@ -1,0 +1,14 @@
+cxx_library(
+    name = "fmt",
+    srcs = ['fmt/src/format.cc'],
+    deps = [],
+    compiler_flags = ['-w', '-Wno-error=format-zero-length', '-Wno-error=vla', '-Wno-incompatible-pointer-types-discards-qualifiers', '-Wno-unused-label', '-Wno-deprecated-declarations', '-Wno-implicit-function-declaration', '-Wno-error', '-Wno-non-pod-varargs', '-Wno-format-security', '-Wno-c++11-narrowing', '-Wno-ignored-attributes', '-Wno-return-std-move', '-Wno-shadow', '-Wno-sign-compare', '-Wno-switch', '-Wno-undef', '-Wno-uninitialized', '-Wno-unknown-pragmas', '-Wno-unknown-warning-option', '-Wno-unused-function', '-Wno-unused-local-typedef', '-Wno-unused-value', '-Wno-unused-variable', '-Wno-register', '-Wno-format', '-Wno-unused-lambda-capture', '-Wno-missing-braces', '-Wno-unused-parameter', '-Wno-unreachable-code', '-Wno-inconsistent-missing-destructor-override', '-Wno-implicit-fallthrough', '-Wno-ignored-qualifiers', '-Wno-pedantic', '-Wno-deprecated-copy', '-Wno-non-virtual-dtor', '-Wno-null-pointer-arithmetic', '-Wno-implicit-const-int-float-conversion', '-Wno-tautological-unsigned-enum-zero-compare', '-Wno-embedded-directive', '-Wno-int-conversion', '-Wno-nonnull', '-Wno-variadic-macros', '-Wno-zero-length-array', '-Wno-missing-prototypes', '-fno-exceptions', '-fno-rtti', '-Wno-braced-scalar-init', '-fvisibility-inlines-hidden'],
+    preferred_linkage = "static",
+    exported_preprocessor_flags = ['-DFMT_EXCEPTIONS=0'],
+    header_namespace = "third_party/fmt",
+    reexport_all_header_dependencies = True,
+    public_system_include_directories = ['fmt/include'],
+    raw_headers = glob(["fmt/include/fmt/*.h"]),
+    soname = "libthird-party_fmt_fmt.$(ext)",
+    visibility = ['PUBLIC'],
+)

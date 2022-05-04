@@ -6,11 +6,101 @@ from argparse import ArgumentParser
 from collections import defaultdict
 from typing import NamedTuple, Callable, List, Any
 
+try:
+    import functorch as ft
+    has_functorch = True
+    print(f"Found functorch: {ft.__version__}")
+except ImportError:
+    has_functorch = False
+
 import ppl_models
 import vision_models
 import audio_text_models
 
 from utils import to_markdown_table, TimingResultType, InputsType, GetterType, VType
+
+def get_task_func(task: str) -> Callable:
+    def hessian_fwdrev(model, inp, strict=None):
+        return functional.hessian(model, inp, strict=False, vectorize=True, outer_jacobian_strategy="forward-mode")
+
+    def hessian_revrev(model, inp, strict=None):
+        return functional.hessian(model, inp, strict=False, vectorize=True)
+
+    def jacfwd(model, inp, strict=None):
+        return functional.jacobian(model, inp, strict=False, vectorize=True, strategy="forward-mode")
+
+    def jacrev(model, inp, strict=None):
+        return functional.jacobian(model, inp, strict=False, vectorize=True)
+
+    if task == "hessian_fwdrev":
+        return hessian_fwdrev
+    elif task == "hessian_revrev":
+        return hessian_revrev
+    elif task == "jacfwd":
+        return jacfwd
+    elif task == "jacrev":
+        return jacrev
+    else:
+        return getattr(functional, task)
+
+def get_task_functorch(task: str) -> Callable:
+
+    @torch.no_grad()
+    def vjp(model, inp, v=None, strict=None):
+        assert v is not None
+        out, vjpfunc = ft.vjp(model, *inp)
+        return out, vjpfunc(v)
+
+    @torch.no_grad()
+    def jvp(model, inp, v=None, strict=None):
+        assert v is not None
+        return ft.jvp(model, inp, v)
+
+    @torch.no_grad()
+    def vhp(model, inp, v=None, strict=None):
+        assert v is not None
+        argnums = tuple(range(len(inp)))
+        _, vjpfunc, aux = ft.vjp(ft.grad_and_value(model, argnums), *inp, has_aux=True)
+        return aux, vjpfunc(v)
+
+    @torch.no_grad()
+    def hvp(model, inp, v=None, strict=None):
+        assert v is not None
+        argnums = tuple(range(len(inp)))
+        _, hvp_out, aux = ft.jvp(ft.grad_and_value(model, argnums), inp, v, has_aux=True)
+        return aux, hvp_out
+
+    @torch.no_grad()
+    def jacfwd(model, inp, v=None, strict=None):
+        argnums = tuple(range(len(inp)))
+        return ft.jacfwd(model, argnums)(*inp)
+
+    @torch.no_grad()
+    def jacrev(model, inp, v=None, strict=None):
+        argnums = tuple(range(len(inp)))
+        return ft.jacrev(model, argnums)(*inp)
+
+    @torch.no_grad()
+    def hessian(model, inp, v=None, strict=None):
+        argnums = tuple(range(len(inp)))
+        return ft.hessian(model, argnums=argnums)(*inp)
+
+    @torch.no_grad()
+    def hessian_fwdrev(model, inp, v=None, strict=None):
+        argnums = tuple(range(len(inp)))
+        return ft.jacfwd(ft.jacrev(model, argnums=argnums), argnums=argnums)(*inp)
+
+    @torch.no_grad()
+    def hessian_revrev(model, inp, v=None, strict=None):
+        argnums = tuple(range(len(inp)))
+        return ft.jacrev(ft.jacrev(model, argnums=argnums), argnums=argnums)(*inp)
+
+    if task in locals():
+        return locals()[task]
+    elif task == "jacobian":
+        raise RuntimeError("functorch has no equivalent of autograd.functional.jacobian with vectorize=False yet")
+    else:
+        raise RuntimeError(f"Unsupported task: {task}")
 
 # Listing of the different tasks
 FAST_TASKS_NO_DOUBLE_BACK = [
@@ -22,13 +112,17 @@ FAST_TASKS = FAST_TASKS_NO_DOUBLE_BACK + [
     "jvp",
 ]
 
-ALL_TASKS = FAST_TASKS + [
+ALL_TASKS_NON_VECTORIZED = FAST_TASKS + [
     "hvp",
     "jacobian",
     "hessian"
 ]
 
 DOUBLE_BACKWARD_TASKS = ["jvp", "hvp", "vhp", "hessian"]
+
+VECTORIZED_TASKS = ["hessian_fwdrev", "hessian_revrev", "jacfwd", "jacrev"]
+
+ALL_TASKS = ALL_TASKS_NON_VECTORIZED + VECTORIZED_TASKS
 
 # Model definition which contains:
 # - name: a string with the model name.
@@ -71,15 +165,32 @@ def get_v_for(model: Callable, inp: InputsType, task: str) -> VType:
 
     return v
 
-def run_once(model: Callable, inp: InputsType, task: str, v: VType) -> None:
-    func = getattr(functional, task)
+def run_once(model: Callable, inp: InputsType, task: str, v: VType, **kwargs) -> None:
+    func = get_task_func(task)
 
     if v is not None:
         res = func(model, inp, v=v, strict=True)
     else:
         res = func(model, inp, strict=True)
 
-def run_model(model_getter: GetterType, args: Any, task: str) -> List[float]:
+def run_once_functorch(model: Callable, inp: InputsType, task: str, v: VType, maybe_check_consistency=False) -> None:
+    func = get_task_functorch(task)
+
+    if v is not None:
+        res = func(model, inp, v=v, strict=True)
+    else:
+        res = func(model, inp, strict=True)
+
+    if maybe_check_consistency:
+        af_func = get_task_func(task)
+        if v is not None:
+            expected = af_func(model, inp, v=v, strict=True)
+        else:
+            expected = af_func(model, inp, strict=True)
+        atol = 1e-2 if task == "vhp" else 5e-3
+        torch.testing.assert_close(res, expected, rtol=1e-5, atol=atol, msg=f"Consistency fail for task '{task}'")
+
+def run_model(model_getter: GetterType, args: Any, task: str, run_once_fn: Callable = run_once) -> List[float]:
     if args.gpu == -1:
         device = torch.device("cpu")
 
@@ -93,14 +204,17 @@ def run_model(model_getter: GetterType, args: Any, task: str) -> List[float]:
     model, inp = model_getter(device)
 
     v = get_v_for(model, inp, task)
+
     # Warmup
-    run_once(model, inp, task, v)
+    # maybe_check_consistency=True checks for consistency between
+    # functorch vs autograd.functional and is done in run_once_functorch only
+    run_once_fn(model, inp, task, v, maybe_check_consistency=True)
 
     elapsed = []
     for it in range(args.num_iters):
         do_sync()
         start = time.time()
-        run_once(model, inp, task, v)
+        run_once_fn(model, inp, task, v)
         do_sync()
         elapsed.append(time.time() - start)
 
@@ -144,6 +258,18 @@ def main():
             mean, var = runtimes.mean(), runtimes.var()
             results[name][task] = (mean.item(), var.item())
             print("Results for model {} on task {}: {}s (var: {})".format(name, task, mean, var))
+
+            if has_functorch:
+                try:
+                    runtimes = run_model(model_getter, args, task, run_once_fn=run_once_functorch)
+                except RuntimeError as e:
+                    print(f"Failed model using Functorch: {name}, task: {task}, Error message: \n\t", e)
+                    continue
+
+                runtimes = torch.tensor(runtimes)
+                mean, var = runtimes.mean(), runtimes.var()
+                results[name][f"functorch {task}"] = (mean.item(), var.item())
+                print("Results for model {} on task {} using Functorch: {}s (var: {})".format(name, task, mean, var))
 
     if args.output:
         with open(args.output, "w") as f:

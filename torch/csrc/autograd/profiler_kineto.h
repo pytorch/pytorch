@@ -1,57 +1,15 @@
 #pragma once
 
-#include <torch/csrc/autograd/profiler_legacy.h>
 #include <string>
 #include <vector>
 
-#ifdef USE_KINETO
-// skip Kineto dependency on mobile
-// unless explicitly asked for.
-// When is it explicitly asked for?
-// KinetoEdgeCPUProfiler uses KinetoProfiler for cpu
-// event profiling. This has dependency on cpu only libkineto
-#if defined(C10_MOBILE) && !defined(EDGE_PROFILER_USE_KINETO)
-#undef USE_KINETO
-#endif
-#endif
-
-#ifdef USE_KINETO
-namespace libkineto {
-struct TraceActivity;
-class ActivityTraceInterface;
-}
-#endif
+#include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/kineto_shim.h>
+#include <torch/csrc/profiler/util.h>
 
 namespace torch {
 namespace autograd {
 namespace profiler {
-
-enum class C10_API_ENUM ActivityType {
-  CPU = 0,
-  CUDA, // CUDA kernels, runtime
-  NUM_KINETO_ACTIVITIES, // must be the last one
-};
-
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct KinetoObserverContext : public at::ObserverContext {
-  int64_t startUs;
-  int64_t endUS;
-  uint64_t correlationId;
-  uint64_t startThreadId;
-  uint64_t endThreadId;
-  c10::optional<std::vector<std::vector<int64_t>>> shapes;
-  c10::optional<std::vector<std::string>> dtypes;
-  int64_t sequenceNr;
-  uint64_t fwdThreadId;
-  uint8_t recFunScope;
-  c10::optional<std::vector<std::string>> stack;
-  c10::optional<std::vector<std::string>> module_hierarchy;
-  // Extra arguments for computing op flops
-  c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
-  CUDAEventStub cuda_event_start_ = nullptr;
-  CUDAEventStub cuda_event_end_ = nullptr;
-  int64_t debug_handle;
-};
 
 struct TORCH_API KinetoEvent {
   uint64_t startThreadId() const {
@@ -305,8 +263,8 @@ struct TORCH_API KinetoEvent {
   int64_t debug_handle_{-1};
   std::string backend_;
 
-  CUDAEventStub cuda_event_start_ = nullptr;
-  CUDAEventStub cuda_event_end_ = nullptr;
+  torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
+  torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;
 };
 
 // Consolidating events returned directly from Kineto
@@ -314,14 +272,10 @@ struct TORCH_API KinetoEvent {
 // memory allocation events)
 struct TORCH_API ProfilerResult {
   ProfilerResult();
-#ifdef USE_KINETO
   ProfilerResult(
       uint64_t start_time,
       std::vector<KinetoEvent> events,
-      std::unique_ptr<libkineto::ActivityTraceInterface> trace);
-#else
-  ProfilerResult(std::vector<KinetoEvent> events);
-#endif // USE_KINETO
+      torch::profiler::impl::kineto::ActivityTraceWrapper trace);
   ~ProfilerResult();
 
   uint64_t trace_start_us() const {
@@ -332,17 +286,12 @@ struct TORCH_API ProfilerResult {
     return events_;
   }
 
-#ifdef USE_KINETO
   void save(const std::string& path);
-#endif // USE_KINETO
 
  private:
   uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
-#ifdef USE_KINETO
-  std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
-  bool saved_ = false;
-#endif // USE_KINETO
+  torch::profiler::impl::kineto::ActivityTraceWrapper trace_;
 };
 
 /*
@@ -375,8 +324,8 @@ TORCH_API void reportBackendEventToActiveKinetoProfiler(
     const std::string& backend_name);
 
 TORCH_API void enableProfiler(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities,
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities,
     const std::unordered_set<at::RecordScope>& scopes = {});
 
 /*
@@ -396,20 +345,16 @@ TORCH_API void enableProfiler(
  * and generates stack trace and module hierarchy information, once profiling is done.
  */
 TORCH_API void enableProfilerWithEventPostProcess(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities,
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities,
     std::function<void(std::vector<KinetoEvent>&)>&& cb,
     const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
 TORCH_API void prepareProfiler(
-    const ProfilerConfig& config,
-    const std::set<ActivityType>& activities);
-
-TORCH_API void addMetadataJson(
-    const std::string& key, const std::string& value);
-
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities);
 
 namespace python_tracer {
 

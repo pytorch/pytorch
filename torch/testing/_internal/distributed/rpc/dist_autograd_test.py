@@ -1224,6 +1224,48 @@ class TensorPipeAgentDistAutogradTest(CommonDistAutogradTest):
             True
         )
 
+    @dist_init
+    def test_embedding_bag_with_no_grad_tensors(self):
+        dst = self._next_rank()
+        remote_embedding = rpc.remote(
+            worker_name(dst),
+            torch.nn.EmbeddingBag,
+            args=(16, 16),
+            kwargs={"mode": "sum", "sparse": True},
+        )
+        local_embedding = torch.nn.EmbeddingBag(16, 16, mode="sum", sparse=True)
+
+        input = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
+        # requires_grad = True to record send/recv functions
+        per_sample_weights = torch.rand((8), requires_grad=True)
+        offsets = torch.LongTensor([0, 4])
+
+        local_res = local_embedding(input, offsets, per_sample_weights)
+
+        # Run backward twice.
+        torch.autograd.backward([local_res.sum()], retain_graph=True)
+        torch.autograd.backward([local_res.sum()])
+        local_grad = local_embedding.weight.grad
+
+        with dist_autograd.context() as context_id:
+            res = rpc.rpc_sync(
+                worker_name(dst),
+                DistAutogradTest._call_remote_embedding,
+                args=(remote_embedding, input, offsets, per_sample_weights),
+            )
+
+            # Run backward twice to test accumulation of sparse gradients.
+            dist_autograd.backward(context_id, [res.sum()], retain_graph=True)
+            dist_autograd.backward(context_id, [res.sum()])
+
+            remote_grad = rpc.rpc_sync(
+                worker_name(dst),
+                DistAutogradTest._get_grad,
+                args=(remote_embedding, context_id),
+            )
+
+            self.assertEqual(local_grad, remote_grad)
+
 
 class DistAutogradTest(CommonDistAutogradTest):
     @dist_init
@@ -2012,48 +2054,6 @@ class DistAutogradTest(CommonDistAutogradTest):
         embedding = embedding_rref.local_value()
         grad_map = dist_autograd.get_gradients(context_id)
         return grad_map[embedding.weight]
-
-    @dist_init
-    def test_embedding_bag_with_no_grad_tensors(self):
-        dst = self._next_rank()
-        remote_embedding = rpc.remote(
-            worker_name(dst),
-            torch.nn.EmbeddingBag,
-            args=(16, 16),
-            kwargs={"mode": "sum", "sparse": True},
-        )
-        local_embedding = torch.nn.EmbeddingBag(16, 16, mode="sum", sparse=True)
-
-        input = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
-        # requires_grad = True to record send/recv functions
-        per_sample_weights = torch.rand((8), requires_grad=True)
-        offsets = torch.LongTensor([0, 4])
-
-        local_res = local_embedding(input, offsets, per_sample_weights)
-
-        # Run backward twice.
-        torch.autograd.backward([local_res.sum()], retain_graph=True)
-        torch.autograd.backward([local_res.sum()])
-        local_grad = local_embedding.weight.grad
-
-        with dist_autograd.context() as context_id:
-            res = rpc.rpc_sync(
-                worker_name(dst),
-                DistAutogradTest._call_remote_embedding,
-                args=(remote_embedding, input, offsets, per_sample_weights),
-            )
-
-            # Run backward twice to test accumulation of sparse gradients.
-            dist_autograd.backward(context_id, [res.sum()], retain_graph=True)
-            dist_autograd.backward(context_id, [res.sum()])
-
-            remote_grad = rpc.rpc_sync(
-                worker_name(dst),
-                DistAutogradTest._get_grad,
-                args=(remote_embedding, context_id),
-            )
-
-            self.assertEqual(local_grad, remote_grad)
 
     @classmethod
     def _mixed_requires_grad_operaton(cls, t1, t2):

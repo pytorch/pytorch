@@ -9,6 +9,7 @@ from torch.nn import Module
 import onnx
 
 import io
+import itertools
 
 from torch.onnx.symbolic_helper import _export_onnx_opset_version
 from torch.onnx import producer_name, producer_version
@@ -283,12 +284,12 @@ class TestONNXOpset(TestCase):
                  {"op_name" : "Unsqueeze"},
                  {"op_name" : "Unsqueeze"},
                  {"op_name" : "Concat"},
-                 {"op_name" : "Constant"},
                  {"op_name" : "Cast"},
                  {"op_name" : "Shape"},
                  {"op_name" : "Slice"},
                  {"op_name" : "Cast"},
                  {"op_name" : "Div"},
+                 {"op_name" : "Constant"},
                  {"op_name" : "Concat"},
                  {"op_name" : "Upsample",
                   "attributes" :
@@ -306,7 +307,6 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Unsqueeze"},
                   {"op_name" : "Unsqueeze"},
                   {"op_name" : "Concat"},
-                  {"op_name" : "Constant"},
                   {"op_name" : "Cast"},
                   {"op_name" : "Shape"},
                   {"op_name" : "Constant"},
@@ -315,6 +315,7 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Slice"},
                   {"op_name" : "Cast"},
                   {"op_name" : "Div"},
+                  {"op_name" : "Constant"},
                   {"op_name" : "Concat"},
                   {"op_name" : "Resize",
                    "attributes" :
@@ -325,23 +326,23 @@ class TestONNXOpset(TestCase):
         check_onnx_opsets_operator(MyModel(), x, ops, opset_versions=[9, 10],
                                    input_names=["x"], dynamic_axes={"x": [0, 1, 2, 3]})
 
-        ops_9 = [{"op_name" : "Constant"},
-                 {"op_name" : "Shape"},
+        ops_9 = [{"op_name" : "Shape"},
                  {"op_name" : "Slice"},
                  {"op_name" : "Cast"},
                  {"op_name" : "Div"},
+                 {"op_name" : "Constant"},
                  {"op_name" : "Concat"},
                  {"op_name" : "Upsample",
                   "attributes" :
                   [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
-        ops_10 = [{"op_name" : "Constant"},
-                  {"op_name" : "Shape"},
+        ops_10 = [{"op_name" : "Shape"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Slice"},
                   {"op_name" : "Cast"},
                   {"op_name" : "Div"},
+                  {"op_name" : "Constant"},
                   {"op_name" : "Concat"},
                   {"op_name" : "Resize"}]
 
@@ -368,6 +369,30 @@ class TestONNXOpset(TestCase):
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.randn(20, 16, 50)
         check_onnx_opsets_operator(MyDynamicModel(), x, ops, opset_versions=[9, 10])
+
+    def test_grid_sample(self):
+        n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
+        ops = {16: [{"op_name": "GridSample"}]}
+
+        class MyModule(Module):
+            def forward(self, x, grid, mode, padding_mode, align_corers):
+                return torch.nn.functional.grid_sample(x, grid, mode, padding_mode, align_corners)
+
+        for mode, padding_mode, align_corners in itertools.product(
+            ("bilinear", "nearest", "bicubic"),
+            ("zeros", "border", "reflection"),
+            (True, False),
+        ):
+
+            args = (
+                torch.randn(n, c, h_in, w_in),  # x
+                torch.randn(n, h_out, w_out, 2),  # grid,
+                mode,
+                padding_mode,
+                align_corners,
+            )
+            check_onnx_opsets_operator(MyModule(), args, ops, opset_versions=[16], training=torch.onnx.TrainingMode.TRAINING)
+            check_onnx_opsets_operator(MyModule(), args, ops, opset_versions=[16], training=torch.onnx.TrainingMode.EVAL)
 
 
 if __name__ == "__main__":

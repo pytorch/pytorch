@@ -1,0 +1,194 @@
+name: linux-test
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      test-matrix:
+        required: true
+        type: string
+        description: JSON description of what test configs to run.
+      docker-image:
+        required: true
+        type: string
+        description: Docker image to run in.
+
+env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
+  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  test:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    steps:
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull docker image
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ inputs.docker-image }}
+
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
+      - name: Test
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
+          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
+          DOCKER_IMAGE: ${{ inputs.docker-image }}
+          XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
+          XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+        timeout-minutes: 240
+        run: |
+          set -x
+
+          if [[ $TEST_CONFIG == 'multigpu' ]]; then
+            TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.jenkins/caffe2/test.sh
+          else
+            TEST_COMMAND=.jenkins/pytorch/test.sh
+          fi
+
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+          export COMMIT_MESSAGES
+
+          # detached container should get cleaned up by teardown_ec2_linux
+          # TODO: Stop building test binaries as part of the build phase
+          # Used for GPU_FLAG since that doesn't play nice
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e GITHUB_ACTIONS \
+            -e IN_CI \
+            -e IS_GHA \
+            -e BRANCH \
+            -e SHA1 \
+            -e AWS_DEFAULT_REGION \
+            -e IN_WHEEL_TEST \
+            -e SHARD_NUMBER \
+            -e JOB_BASE_NAME \
+            -e TEST_CONFIG \
+            -e NUM_TEST_SHARDS \
+            -e PR_BODY \
+            -e COMMIT_MESSAGES \
+            -e PYTORCH_RETRY_TEST_CASES \
+            -e PR_LABELS \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SCCACHE_BUCKET \
+            -e XLA_CUDA \
+            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --ulimit stack=10485760:83886080 \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --ipc=host \
+            --shm-size="${SHM_SIZE}" \
+            --tty \
+            --detach \
+            --name="${container_name}" \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${TEST_COMMAND}"
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@master
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
+        if: always()
+        with:
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Store Core dumps on S3
+        uses: seemethere/upload-artifact-s3@v4
+        if: failure()
+        with:
+          name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          retention-days: 14
+          if-no-files-found: ignore
+          path: ./**/core.[1-9]*
+
+      - name: Upload test statistics
+        if: always()
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+        shell: bash
+        run: |
+          set -x
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install boto3==1.19.12
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+
+      - name: Teardown Linux
+        uses: ./.github/actions/teardown-linux
+        if: always()

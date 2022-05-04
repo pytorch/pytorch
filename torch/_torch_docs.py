@@ -213,6 +213,18 @@ arccosh(input, *, out=None) -> Tensor
 Alias for :func:`torch.acosh`.
 """)
 
+add_docstr(torch.index_add, r"""
+index_add(input, dim, index, source, *, alpha=1, out=None) -> Tensor
+
+See :meth:`~Tensor.index_add_` for function description.
+""")
+
+add_docstr(torch.index_copy, r"""
+index_copy(input, dim, index, source, *, out=None) -> Tensor
+
+See :meth:`~Tensor.index_add_` for function description.
+""")
+
 add_docstr(torch.add, r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
 
@@ -987,60 +999,68 @@ add_docstr(torch.asarray,
            r"""
 asarray(obj, *, dtype=None, device=None, copy=None, requires_grad=False) -> Tensor
 
-Converts :attr:`obj` into a tensor, sharing data and preserving autograd history
-if possible.
+Converts :attr:`obj` to a tensor.
 
 :attr:`obj` can be one of:
 
 1. a tensor
 2. a NumPy array
 3. a DLPack capsule
-4. a Python object that implements the buffer protocol
-5. a Python sequence
+4. an object that implements Python's buffer protocol
+5. a scalar
+6. a sequence of scalars
 
-For each of the mentioned options, in order, this functions will assume :attr:`obj`
-is of that type and try, first, sharing memory. Only then, it will make a copy (if
-necessary).
+When :attr:`obj` is a tensor, NumPy array, or DLPack capsule the returned tensor will,
+by default, not require a gradient, have the same datatype as :attr:`obj`, be on the
+same device, and share memory with it. These properties can be controlled with the
+:attr:`dtype`, :attr:`device`, :attr:`copy`, and :attr:`requires_grad` keyword arguments.
+If the returned tensor is of a different datatype, on a different device, or a copy is
+requested then it will not share its memory with :attr:`obj`. If :attr:`requires_grad`
+is ``True`` then the returned tensor will require a gradient, and if :attr:`obj` is
+also a tensor with an autograd history then the returned tensor will have the same history.
 
-The dtype of the result tensor is inferred from the input object, except when
-object is (4): an object that implements the buffer protocol (see :func:`torch.frombuffer`).
-In that case, the buffer is interpreted as an array of bytes, which are grouped
-according to the size of the given :attr:`dtype` or the global default
-(see :func:`torch.set_default_tensor_type`) if `None` is given.
+When :attr:`obj` is not a tensor, NumPy Array, or DLPack capsule but implements Python's
+buffer protocol then the buffer is interpreted as an array of bytes grouped according to
+the size of the datatype passed to the :attr:`dtype` keyword argument. (If no datatype is
+passed then the default floating point datatype is used, instead.) The returned tensor
+will have the specified datatype (or default floating point datatype if none is specified)
+and, by default, be on the CPU device and share memory with the buffer.
 
-For example: NumPy arrays also implement the buffer protocol. However, since NumPy
-arrays have higher priority than objects implementing the buffer protocol, this function
-will handle them as NumPy arrays. In other words, it will infer its dtype as if using
-``torch.from_numpy`` (instead of ``torch.frombuffer``).
+When :attr:`obj` is none of the above but a scalar or sequence of scalars then the
+returned tensor will, by default, infer its datatype from the scalar values, be on the
+CPU device, and not share its memory.
 
 .. seealso::
-    :func:`torch.as_tensor` tries to avoid copies for tensors and NumPy arrays.
-    :func:`torch.tensor` always copies the data from the input object.
-    :func:`torch.from_numpy` creates a tensor that shares its memory with a NumPy array.
-    :func:`torch.frombuffer` creates a tensor that shares its memory with an object
-    that implements the buffer protocol.
-    :func:`torch.utils.dlpack.from_dlpack` creates a tensor that shares its memory
-    with the object represented in the dlpack.
+    :func:`torch.tensor` creates a tensor that always copies the data from the input object.
+
+    :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
+
+    :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
+           implement the buffer protocol.
+
+    :func:`torch.from_dlpack` creates a tensor that always shares memory from
+           DLPack capsules.
 
 Args:
-    obj (object): a Python object that satisfies, at least, one of the five options
-           mentioned above.
+    obj (object): a tensor, NumPy array, DLPack Capsule, object that implements Python's
+           buffer protocol, scalar, or sequence of scalars.
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-           Default: if ``None``, it will be inferred from :attr:`obj`.
-    copy (bool, optional): flags whether the object memory should be copied or not.
-           If ``None``, then the result tensor shares memory with the Python object
-           whenever possible. If ``True``, then the object memory is copied. If ``False``,
-           then the object memory is shared. If the object memory cannot be shared
-           and this flag is ``False``, then an error is thrown.
-    device (:class:`torch.device`, optional): the device of the constructed tensor.
-           If `None`, then the device of :attr:`obj` is used. Else, it either copies
-           the data, if :attr:`obj` lives in a different device, or it shares the
-           memory, if :attr:`obj` lives in the same device.
-    requires_grad (bool, optional): If autograd should record operations on the
-           returned tensor. However, if this flag is ``False`` and the input object
-           is a non-leaf :class:`Tensor`, this function will call :func:`torch.Tensor.detach`.
+    dtype (:class:`torch.dtype`, optional): the datatype of the returned tensor.
+           Default: ``None``, which causes the datatype of the returned tensor to be
+           inferred from :attr:`obj`.
+    copy (bool, optional): controls whether the returned tensor shares memory with :attr:`obj`.
+           Default: ``None``, which causes the returned tensor to share memory with :attr:`obj`
+           whenever possible. If ``True`` then the returned tensor does not share its memory.
+           If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
+           error is thrown if it cannot.
+    device (:class:`torch.device`, optional): the device of the returned tensor.
+           Default: ``None``, which causes the device of :attr:`obj` to be used.
+    requires_grad (bool, optional): whether the returned tensor requires grad.
+           Default: ``False``, which causes the returned tensor not to require a gradient.
+           If ``True``, then the returned tensor will require a gradient, and if :attr:`obj`
+           is also a tensor with an autograd history then the returned tensor will have
+           the same history.
 
 Example::
 
@@ -1769,7 +1789,7 @@ depthwise according to :attr:`indices_or_sections`. Each split is a view of
 :attr:`input`.
 
 This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=2)
-(the split dimension is 1), except that if :attr:`indices_or_sections` is an integer
+(the split dimension is 2), except that if :attr:`indices_or_sections` is an integer
 it must evenly divide the split dimension or a runtime error will be thrown.
 
 This function is based on NumPy's :func:`numpy.dsplit`.
@@ -2223,7 +2243,7 @@ Example::
     tensor([[ 2.4112, -0.7486,  1.4551],
             [-0.7486,  1.3544,  0.1294],
             [ 1.4551,  0.1294,  1.6724]])
-    >>> a = torch.randn(3, 2, 2)
+    >>> a = torch.randn(3, 2, 2) # Example for batched input
     >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
     >>> l = torch.cholesky(a)
     >>> z = l @ l.mT
@@ -2272,7 +2292,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.cholesky(a)
+    >>> u = torch.linalg.cholesky(a)
     >>> a
     tensor([[ 0.7747, -1.9549,  1.3086],
             [-1.9549,  6.7546, -5.4114],
@@ -2311,10 +2331,15 @@ triangular such that the returned tensor is
 .. math::
     inv = (u^T u)^{{-1}}
 
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :math:`A` is a batch of matrices then the output has the same batch dimensions.
+
 Args:
-    input (Tensor): the input 2-D tensor :math:`u`, a upper or lower triangular
-           Cholesky factor
-    upper (bool, optional): whether to return a lower (default) or upper triangular matrix
+    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)`,
+                consisting of symmetric positive-definite matrices
+                where :math:`*` is zero or more batch dimensions.
+    upper (bool, optional): flag that indicates whether to return a
+                upper or lower triangular matrix. Default: False
 
 Keyword args:
     out (Tensor, optional): the output tensor for `inv`
@@ -2323,7 +2348,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) + 1e-05 * torch.eye(3) # make symmetric positive definite
-    >>> u = torch.cholesky(a)
+    >>> u = torch.linalg.cholesky(a)
     >>> a
     tensor([[  0.9935,  -0.6353,   1.5806],
             [ -0.6353,   0.8769,  -1.7183],
@@ -2336,6 +2361,12 @@ Example::
     tensor([[ 1.9314,  1.2251, -0.0889],
             [ 1.2251,  2.4439,  0.2122],
             [-0.0889,  0.2122,  0.1412]])
+    >>> a = torch.randn(3, 2, 2) # Example for batched input
+    >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
+    >>> l = torch.linalg.cholesky(a)
+    >>> z = l @ l.mT
+    >>> torch.dist(z, a)
+    tensor(3.5894e-07)
 """)
 
 add_docstr(torch.clone, r"""
@@ -3713,10 +3744,15 @@ add_docstr(torch.fmod,
            r"""
 fmod(input, other, *, out=None) -> Tensor
 
-Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-for floating point tensors, and the modulus operation for integer tensors. The result
-has the same sign as the dividend :attr:`input` and its absolute value
+Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_ entrywise.
+The result has the same sign as the dividend :attr:`input` and its absolute value
 is less than that of :attr:`other`.
+
+This function may be defined in terms of :func:`torch.div` as
+
+.. code:: python
+
+    torch.fmod(a, b) == a - a.div(b, rounding_mode="trunc") * b
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -3732,6 +3768,11 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
    Complex inputs are not supported. In some cases, it is not mathematically
    possible to satisfy the definition of a modulo operation with complex numbers.
 
+.. seealso::
+
+    :func:`torch.remainder` which implements Python's modulus operator.
+    This one is defined using division rounding down the result.
+
 Args:
     input (Tensor): the dividend
     other (Tensor or Scalar): the divisor
@@ -3746,11 +3787,6 @@ Example::
     >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
-.. seealso::
-
-    :func:`torch.remainder` which is similar to :func:`torch.fmod` except that if the sign
-    of the modulus is different than the sign of the divisor :attr:`other` then the divisor
-    is added to the modulus.
 """.format(**common_args))
 
 add_docstr(torch.frac,
@@ -4490,6 +4526,98 @@ Example::
     (tensor([ 0.,  0.9524,  0.3810,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
 """.format(**common_args))
 
+add_docstr(torch.histogramdd,
+           r"""
+histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
+
+Computes a multi-dimensional histogram of the values in a tensor.
+
+Interprets the elements of an input tensor whose innermost dimension has size N
+as a collection of N-dimensional points. Maps each of the points into a set of
+N-dimensional bins and returns the number of points (or total weight) in each bin.
+
+:attr:`input` must be a tensor with at least 2 dimensions.
+If input has shape (M, N), each of its M rows defines a point in N-dimensional space.
+If input has three or more dimensions, all but the last dimension are flattened.
+
+Each dimension is independently associated with its own strictly increasing sequence
+of bin edges. Bin edges may be specified explicitly by passing a sequence of 1D
+tensors. Alternatively, bin edges may be constructed automatically by passing a
+sequence of integers specifying the number of equal-width bins in each dimension.
+
+For each N-dimensional point in input:
+    - Each of its coordinates is binned independently among the bin edges
+        corresponding to its dimension
+    - Binning results are combined to identify the N-dimensional bin (if any)
+        into which the point falls
+    - If the point falls into a bin, the bin's count (or total weight) is incremented
+    - Points which do not fall into any bin do not contribute to the output
+
+:attr:`bins` can be a sequence of N 1D tensors, a sequence of N ints, or a single int.
+
+If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the N sequences
+of bin edges. Each 1D tensor should contain a strictly increasing sequence with at
+least one element. A sequence of K bin edges defines K-1 bins, explicitly specifying
+the left and right edges of all bins. Every bin is exclusive of its left edge. Only
+the rightmost bin is inclusive of its right edge.
+
+If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width bins
+in each dimension. By default, the leftmost and rightmost bin edges in each dimension
+are determined by the minimum and maximum elements of the input tensor in the
+corresponding dimension. The :attr:`range` argument can be provided to manually
+specify the leftmost and rightmost bin edges in each dimension.
+
+If :attr:`bins` is an int, it specifies the number of equal-width bins for all dimensions.
+
+.. note::
+    See also :func:`torch.histogram`, which specifically computes 1D histograms.
+    While :func:`torch.histogramdd` infers the dimensionality of its bins and
+    binned values from the shape of :attr:`input`, :func:`torch.histogram`
+    accepts and flattens :attr:`input` of any shape.
+
+Args:
+    {input}
+    bins: Tensor[], int[], or int.
+            If Tensor[], defines the sequences of bin edges.
+            If int[], defines the number of equal-width bins in each dimension.
+            If int, defines the number of equal-width bins for all dimensions.
+Keyword args:
+    range (sequence of float): Defines the leftmost and rightmost bin edges
+                                in each dimension.
+    weight (Tensor): By default, each value in the input has weight 1. If a weight
+                        tensor is passed, each N-dimensional coordinate in input
+                        contributes its associated weight towards its bin's result.
+                        The weight tensor should have the same shape as the :attr:`input`
+                        tensor excluding its innermost dimension N.
+    density (bool): If False (default), the result will contain the count (or total weight)
+                    in each bin. If True, each count (weight) is divided by the total count
+                    (total weight), then divided by the volume of its associated bin.
+Returns:
+    hist (Tensor): N-dimensional Tensor containing the values of the histogram.
+    bin_edges(Tensor[]): sequence of N 1D Tensors containing the bin edges.
+
+Example::
+    >>> torch.histogramdd(torch.tensor([[0., 1.], [1., 0.], [2., 0.], [2., 2.]]), bins=[3, 3],
+    ...                   weight=torch.tensor([1., 2., 4., 8.]))
+        torch.return_types.histogramdd(
+            hist=tensor([[0., 1., 0.],
+                         [2., 0., 0.],
+                         [4., 0., 8.]]),
+            bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
+                       tensor([0.0000, 0.6667, 1.3333, 2.0000])))
+
+    >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=[2, 2],
+    ...                   range=[0., 1., 0., 1.], density=True)
+        torch.return_types.histogramdd(
+           hist=tensor([[2., 0.],
+                        [0., 2.]]),
+           bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
+                      tensor([0.0000, 0.5000, 1.0000])))
+
+""")
+# TODO: Fix via https://github.com/pytorch/pytorch/issues/75798
+torch.histogramdd.__module__ = "torch"
+
 add_docstr(torch.hypot,
            r"""
 hypot(input, other, *, out=None) -> Tensor
@@ -5117,13 +5245,7 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
     \text{end})
 """ + """
 
-.. warning::
-    Not providing a value for :attr:`steps` is deprecated. For backwards
-    compatibility, not providing a value for :attr:`steps` will create a tensor
-    with 100 elements. Note that this behavior is not reflected in the
-    documented function signature and should not be relied on. In a future
-    PyTorch release, failing to provide a value for :attr:`steps` will throw a
-    runtime error.
+From PyTorch 1.11 linspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
     start (float): the starting value for the set of points
@@ -5453,13 +5575,8 @@ with base :attr:`base`. That is, the values are:
     \text{base}^{\text{end}})
 """ + """
 
-.. warning::
-    Not providing a value for :attr:`steps` is deprecated. For backwards
-    compatibility, not providing a value for :attr:`steps` will create a tensor
-    with 100 elements. Note that this behavior is not reflected in the
-    documented function signature and should not be relied on. In a future
-    PyTorch release, failing to provide a value for :attr:`steps` will throw a
-    runtime error.
+
+From PyTorch 1.11 logspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
     start (float): the starting value for the set of points
@@ -6289,16 +6406,20 @@ Example::
 """.format(**single_dim_common))
 
 add_docstr(torch.quantile, r"""
-quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
+quantile(input, q, dim=None, keepdim=False, *, interpolation='linear', out=None) -> Tensor
 
-Computes the q-th quantiles of each row of the :attr:`input` tensor
-along the dimension :attr:`dim`.
+Computes the q-th quantiles of each row of the :attr:`input` tensor along the dimension :attr:`dim`.
 
 To compute the quantile, we map q in [0, 1] to the range of indices [0, n] to find the location
 of the quantile in the sorted input. If the quantile lies between two data points ``a < b`` with
-indices ``i`` and ``j`` in the sorted order, result is computed using linear interpolation as follows:
+indices ``i`` and ``j`` in the sorted order, result is computed according to the given
+:attr:`interpolation` method as follows:
 
-``a + (b - a) * fraction``, where ``fraction`` is the fractional part of the computed quantile index.
+- ``linear``: ``a + (b - a) * fraction``, where ``fraction`` is the fractional part of the computed quantile index.
+- ``lower``: ``a``.
+- ``higher``: ``b``.
+- ``nearest``: ``a`` or ``b``, whichever's index is closer to the computed quantile index (rounding down for .5 fractions).
+- ``midpoint``: ``(a + b) / 2``.
 
 If :attr:`q` is a 1D tensor, the first dimension of the output represents the quantiles and has size
 equal to the size of :attr:`q`, the remaining dimensions are what remains from the reduction.
@@ -6313,6 +6434,9 @@ Args:
     {keepdim}
 
 Keyword arguments:
+    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+                            Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
+                            Default is ``linear``.
     {out}
 
 Example::
@@ -6336,10 +6460,22 @@ Example::
     >>> a = torch.arange(4.)
     >>> a
     tensor([0., 1., 2., 3.])
+    >>> torch.quantile(a, 0.6, interpolation='linear')
+    tensor(1.8000)
+    >>> torch.quantile(a, 0.6, interpolation='lower')
+    tensor(1.)
+    >>> torch.quantile(a, 0.6, interpolation='higher')
+    tensor(2.)
+    >>> torch.quantile(a, 0.6, interpolation='midpoint')
+    tensor(1.5000)
+    >>> torch.quantile(a, 0.6, interpolation='nearest')
+    tensor(2.)
+    >>> torch.quantile(a, 0.4, interpolation='nearest')
+    tensor(1.)
 """.format(**single_dim_common))
 
 add_docstr(torch.nanquantile, r"""
-nanquantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
+nanquantile(input, q, dim=None, keepdim=False, *, interpolation='linear', out=None) -> Tensor
 
 This is a variant of :func:`torch.quantile` that "ignores" ``NaN`` values,
 computing the quantiles :attr:`q` as if ``NaN`` values in :attr:`input` did
@@ -6353,6 +6489,9 @@ Args:
     {keepdim}
 
 Keyword arguments:
+    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+                            Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
+                            Default is ``linear``.
     {out}
 
 Example::
@@ -8276,10 +8415,16 @@ add_docstr(torch.remainder,
            r"""
 remainder(input, other, *, out=None) -> Tensor
 
-Like :func:`torch.fmod` this applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-for floating point tensors and the modulus operation for integer tensors.
-Unlike :func:`torch.fmod`, however, if the sign of the modulus is different
-than the sign of the divisor :attr:`other` then the divisor is added to the modulus.
+Computes
+`Python's modulus operation <https://docs.python.org/3/reference/expressions.html#binary-arithmetic-operations>`_
+entrywise.  The result has the same sign as the divisor :attr:`other` and its absolute value
+is less than that of :attr:`other`.
+
+It may also be defined in terms of :func:`torch.div` as
+
+.. code:: python
+
+    torch.remainder(a, b) == a - a.div(b, rounding_mode="floor") * b
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -8289,12 +8434,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     possible to satisfy the definition of a modulo operation with complex numbers.
     See :func:`torch.fmod` for how division by zero is handled.
 
-.. note::
-    This op, like NumPy's `remainder <https://numpy.org/doc/stable/reference/generated/numpy.remainder.html>`_,
-    is equivalent to Python's modulus operation, and different from Python's
-    `math.remainder <https://docs.python.org/dev/library/math.html#math.remainder>`_ and
-    C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_ which implement
-    the IEEE remainder.
+.. seealso::
+
+    :func:`torch.fmod` which implements C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_.
+    This one is defined in terms of division rounding towards zero.
 
 Args:
     input (Tensor or Scalar): the dividend
@@ -8309,12 +8452,6 @@ Example::
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
     >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([ -0.5000, -1.0000,  0.0000, -0.5000, -1.0000 ])
-
-.. seealso::
-
-    :func:`torch.fmod` which just computes the modulus for integer inputs and
-    applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-    for floating point inputs.
 """.format(**common_args))
 
 add_docstr(torch.renorm,
@@ -8411,26 +8548,53 @@ row_stack(tensors, *, out=None) -> Tensor
 Alias of :func:`torch.vstack`.
 """)
 
-add_docstr(torch.round,
-           r"""
-round(input, *, out=None) -> Tensor
+add_docstr(torch.round, r"""
+round(input, *, decimals=0, out=None) -> Tensor
 
-Returns a new tensor with each of the elements of :attr:`input` rounded
-to the closest integer.
+Rounds elements of :attr:`input` to the nearest integer.
+
+.. note::
+    This function implements the "round half to even" to
+    break ties when a number is equidistant from two
+    integers (e.g. `round(2.5)` is 2).
+
+    When the :attr:\`decimals\` argument is specified the
+    algorithm used is similar to NumPy's `around`. This
+    algorithm is fast but inexact and it can easily
+    overflow for low precision dtypes.
+    Eg. `round(tensor([10000], dtype=torch.float16), decimals=3)` is `inf`.
+
+.. seealso::
+    :func:`torch.ceil`, which rounds up.
+    :func:`torch.floor`, which rounds down.
+    :func:`torch.trunc`, which rounds towards zero.
 
 Args:
     {input}
+    decimals (int): Number of decimal places to round to (default: 0).
+        If decimals is negative, it specifies the number of positions
+        to the left of the decimal point.
 
 Keyword args:
     {out}
 
 Example::
 
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.9920,  0.6077,  0.9734, -1.0362])
-    >>> torch.round(a)
-    tensor([ 1.,  1.,  1., -1.])
+    >>> torch.round(torch.tensor((4.7, -2.3, 9.1, -7.7)))
+    tensor([ 5.,  -2.,  9., -8.])
+
+    >>> # Values equidistant from two integers are rounded towards the
+    >>> #   the nearest even value (zero is treated as even)
+    >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
+    tensor([-0., 0., 2., 2.])
+
+    >>> # A positive decimals argument rounds to the to that decimal place
+    >>> torch.round(torch.tensor([0.1234567]), decimals=3)
+    tensor([0.1230])
+
+    >>> # A negative decimals argument rounds to the left of the decimal
+    >>> torch.round(torch.tensor([1200.1234567]), decimals=-3)
+    tensor([1000.])
 """.format(**common_args))
 
 add_docstr(torch.rsqrt,
@@ -8472,6 +8636,12 @@ scatter_add(input, dim, index, src) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
 
+add_docstr(torch.scatter_reduce, r"""
+scatter_reduce(input, dim, index, src, reduce, *, include_self=True) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_reduce_`
+""")
+
 add_docstr(torch.select,
            r"""
 select(input, dim, index) -> Tensor
@@ -8480,7 +8650,7 @@ Slices the :attr:`input` tensor along the selected dimension at the given index.
 This function returns a view of the original tensor with the given dimension removed.
 
 Args:
-    {input} (Tensor)
+    {input}
     dim (int): the dimension to slice
     index (int): the index to select with
 
@@ -8489,7 +8659,7 @@ Args:
     :meth:`select` is equivalent to slicing. For example,
     ``tensor.select(0, index)`` is equivalent to ``tensor[index]`` and
     ``tensor.select(2, index)`` is equivalent to ``tensor[:,:,index]``.
-""")
+""".format(**common_args))
 
 add_docstr(torch.select_scatter,
            r"""
@@ -8500,7 +8670,7 @@ This function returns a tensor with fresh storage; it does not create a view.
 
 
 Args:
-    {input} (Tensor)
+    {input}
     src (Tensor): The tensor to embed into :attr:`input`
     dim (int): the dimension to insert the slice into.
     index (int): the index to select with
@@ -8518,7 +8688,7 @@ Example::
     >>> a.select_scatter(b, 0, 0)
     tensor([[1., 1.],
             [0., 0.]])
-""")
+""".format(**common_args))
 
 add_docstr(torch.slice_scatter,
            r"""
@@ -8530,7 +8700,7 @@ This function returns a tensor with fresh storage; it does not create a view.
 
 
 Args:
-    {input} (Tensor)
+    {input}
     src (Tensor): The tensor to embed into :attr:`input`
     dim (int): the dimension to insert the slice into
     start (Optional[int]): the start index of where to insert the slice
@@ -8561,7 +8731,7 @@ Example::
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.]])
-""")
+""".format(**common_args))
 
 add_docstr(torch.set_flush_denormal,
            r"""
@@ -8881,6 +9051,68 @@ Example::
             [-0.0881,  0.4370,  0.2275,  1.0284]])
 """.format(**common_args))
 
+add_docstr(torch.sparse_compressed_tensor,
+           r"""
+sparse_compressed_tensor(compressed_indices, plain_indices, values, size=None,
+                         *, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a :ref:`sparse tensor in Compressed Sparse format - CSR,
+CSC, BSR, or BSC - <sparse-csr-docs>` with specified values at the
+given :attr:`compressed_indices` and :attr:`plain_indices`. Sparse
+matrix multiplication operations in Compressed Sparse format are
+typically faster than that for sparse tensors in COO format. Make you
+have a look at :ref:`the note on the data type of the indices
+<sparse-csr-docs>`.
+
+Args:
+    compressed_indices (array_like): One-dimensional array of size
+        size[cdim] + 1 where cdim is 0 or 1 depending on the layout.
+        The last element is the number of non-zeros. This tensor
+        encodes the index in values and plain_indices depending on
+        where the given compressed dimension (row or column)
+        starts. Each successive number in the tensor subtracted by the
+        number before it denotes the number of elements in a given
+        compressed dimension.
+    plain_indices (array_like): Plain dimension (column or row)
+        co-ordinates of each element in values. Strictly one
+        dimensional tensor with the same length as values.
+    values (array_list): Initial values for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, scalar, and other types.  For block
+        sparse formats, the dimensionality of values must be two plus
+        the dimensionality of plain_indices.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the
+        sparse tensor. If not provided, the size will be inferred as
+        the minimum size big enough to hold all non-zero elements.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of
+        returned tensor.  Default: if None, infers data type from
+        :attr:`values`.
+    layout (:class:`torch.layout`, required): the desired layout of
+        returned tensor: :attr:`torch.sparse_csr`,
+        :attr:`torch.sparse_csc`, :attr:`torch.sparse_bsr`, or
+        :attr:`torch.sparse_bsc`.
+    device (:class:`torch.device`, optional): the desired device of
+        returned tensor.  Default: if None, uses the current device
+        for the default tensor type (see
+        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        the CPU for CPU tensor types and the current CUDA device for
+        CUDA tensor types.
+    {requires_grad}
+
+Example::
+    >>> compressed_indices = [0, 2, 4]
+    >>> plain_indices = [0, 1, 0, 1]
+    >>> values = [1, 2, 3, 4]
+    >>> torch.sparse_compressed_tensor(torch.tensor(compressed_indices, dtype=torch.int64),
+    ...                                torch.tensor(plain_indices, dtype=torch.int64),
+    ...                                torch.tensor(values), dtype=torch.double, layout=torch.sparse_csr)
+    tensor(crow_indices=tensor([0, 2, 4]),
+           col_indices=tensor([0, 1, 0, 1]),
+           values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+           dtype=torch.float64, layout=torch.sparse_csr)
+""".format(**factory_common_args))
+
 add_docstr(torch.sparse_csr_tensor,
            r"""
 sparse_csr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
@@ -8891,27 +9123,34 @@ in CSR format are typically faster than that for sparse tensors in COO format. M
 at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
 
 Args:
-    crow_indices (array_like): One-dimensional array of size size[0] + 1. The last element
-        is the number of non-zeros. This tensor encodes the index in values and col_indices
-        depending on where the given row starts. Each successive number in the tensor
-        subtracted by the number before it denotes the number of elements in a given row.
-    col_indices (array_like): Column co-ordinates of each element in values. Strictly one
-        dimensional tensor with the same length as values.
-    values (array_list): Initial values for the tensor. Can be a list, tuple, NumPy ``ndarray``, scalar,
-        and other types.
-    size (list, tuple, :class:`torch.Size`, optional): Size of the sparse tensor. If not provided, the
-        size will be inferred as the minimum size big enough to hold all non-zero elements.
+    crow_indices (array_like): One-dimensional array of size size[0] + 1.
+        The last element is the number of non-zeros. This tensor
+        encodes the index in values and col_indices depending on where
+        the given row starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of
+        elements in a given row.
+    col_indices (array_like): Column co-ordinates of each element in
+        values. Strictly one dimensional tensor with the same length
+        as values.
+    values (array_list): Initial values for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, scalar, and other types.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the
+        sparse tensor. If not provided, the size will be inferred as
+        the minimum size big enough to hold all non-zero elements.
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if None, infers data type from :attr:`values`.
-    device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
-        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
-        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    dtype (:class:`torch.dtype`, optional): the desired data type of
+        returned tensor.  Default: if None, infers data type from
+        :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of
+        returned tensor.  Default: if None, uses the current device
+        for the default tensor type (see
+        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        the CPU for CPU tensor types and the current CUDA device for
+        CUDA tensor types.
     {requires_grad}
 
-Example ::
+Example::
     >>> crow_indices = [0, 2, 4]
     >>> col_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -8922,6 +9161,173 @@ Example ::
            col_indices=tensor([0, 1, 0, 1]),
            values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
            dtype=torch.float64, layout=torch.sparse_csr)
+""".format(**factory_common_args))
+
+add_docstr(torch.sparse_csc_tensor,
+           r"""
+sparse_csc_tensor(ccol_indices, row_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a :ref:`sparse tensor in CSC (Compressed Sparse Column)
+<sparse-csr-docs>` with specified values at the given
+:attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
+multiplication operations in CSC format are typically faster than that
+for sparse tensors in COO format. Make you have a look at :ref:`the
+note on the data type of the indices <sparse-csr-docs>`.
+
+Args:
+    ccol_indices (array_like): One-dimensional array of size size[1] + 1.
+        The last element is the number of non-zeros. This tensor
+        encodes the index in values and row_indices depending on where
+        the given column starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of
+        elements in a given column.
+    row_indices (array_like): Row co-ordinates of each element in
+        values. Strictly one dimensional tensor with the same length
+        as values.
+    values (array_list): Initial values for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, scalar, and other types.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the
+        sparse tensor. If not provided, the size will be inferred as
+        the minimum size big enough to hold all non-zero elements.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of
+        returned tensor.  Default: if None, infers data type from
+        :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of
+        returned tensor.  Default: if None, uses the current device
+        for the default tensor type (see
+        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        the CPU for CPU tensor types and the current CUDA device for
+        CUDA tensor types.
+    {requires_grad}
+
+Example::
+    >>> ccol_indices = [0, 2, 4]
+    >>> row_indices = [0, 1, 0, 1]
+    >>> values = [1, 2, 3, 4]
+    >>> torch.sparse_csc_tensor(torch.tensor(ccol_indices, dtype=torch.int64),
+    ...                         torch.tensor(row_indices, dtype=torch.int64),
+    ...                         torch.tensor(values), dtype=torch.double)
+    tensor(ccol_indices=tensor([0, 2, 4]),
+           row_indices=tensor([0, 1, 0, 1]),
+           values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+           dtype=torch.float64, layout=torch.sparse_csc)
+""".format(**factory_common_args))
+
+add_docstr(torch.sparse_bsr_tensor,
+           r"""
+sparse_bsr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row))
+<sparse-csr-docs>` with specified 2-dimensional blocks at the given
+:attr:`crow_indices` and :attr:`col_indices`. Sparse matrix
+multiplication operations in BSR format are typically faster than that
+for sparse tensors in COO format. Make you have a look at :ref:`the
+note on the data type of the indices <sparse-csr-docs>`.
+
+Args:
+    crow_indices (array_like): One-dimensional array of size size[0] +
+        1. The last element is the number of non-zeros. This tensor
+        encodes the index in values and col_indices depending on where
+        the given row starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of
+        blocks in a given row.
+    col_indices (array_like): Column co-ordinates of each block in
+        values. Strictly one dimensional tensor with the same length
+        as values.
+    values (array_list): Initial values for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, scalar, and other types. The
+        dimensionality of values must be two plus the dimensionality
+        of col_indices.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the
+        sparse tensor. If not provided, the size will be inferred as
+        the minimum size big enough to hold all non-zero blocks.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of
+        returned tensor.  Default: if None, infers data type from
+        :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of
+        returned tensor.  Default: if None, uses the current device
+        for the default tensor type (see
+        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        the CPU for CPU tensor types and the current CUDA device for
+        CUDA tensor types.
+    {requires_grad}
+
+Example::
+    >>> crow_indices = [0, 1, 2]
+    >>> col_indices = [0, 1]
+    >>> values = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+    >>> torch.sparse_bsr_tensor(torch.tensor(crow_indices, dtype=torch.int64),
+    ...                         torch.tensor(col_indices, dtype=torch.int64),
+    ...                         torch.tensor(values), dtype=torch.double)
+    tensor(crow_indices=tensor([0, 1, 2]),
+           col_indices=tensor([0, 1]),
+           values=tensor([[[1., 2.],
+                           [3., 4.]],
+
+                          [[5., 6.],
+                           [7., 8.]]]), size=(2, 2), nnz=2, dtype=torch.float64,
+           layout=torch.sparse_bsr)
+""".format(**factory_common_args))
+
+add_docstr(torch.sparse_bsc_tensor,
+           r"""
+sparse_bsc_tensor(ccol_indices, row_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a :ref:`sparse tensor in BSC (Block Compressed Sparse
+Column)) <sparse-csr-docs>` with specified 2-dimensional blocks at the
+given :attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
+multiplication operations in BSC format are typically faster than that
+for sparse tensors in COO format. Make you have a look at :ref:`the
+note on the data type of the indices <sparse-csr-docs>`.
+
+Args:
+    ccol_indices (array_like): One-dimensional array of size size[1] +
+        1. The last element is the number of non-zeros. This tensor
+        encodes the index in values and row_indices depending on where
+        the given column starts. Each successive number in the tensor
+        subtracted by the number before it denotes the number of
+        elements in a given column.
+    row_indices (array_like): Row co-ordinates of each element in
+        values. Strictly one dimensional tensor with the same length
+        as values.
+    values (array_list): Initial blocks for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, and other types. The dimensionality
+        of values must be two plus the dimensionality of row_indices.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the
+        sparse tensor. If not provided, the size will be inferred as
+        the minimum size big enough to hold all non-zero blocks.
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of
+        returned tensor.  Default: if None, infers data type from
+        :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of
+        returned tensor.  Default: if None, uses the current device
+        for the default tensor type (see
+        :func:`torch.set_default_tensor_type`). :attr:`device` will be
+        the CPU for CPU tensor types and the current CUDA device for
+        CUDA tensor types.
+    {requires_grad}
+
+Example::
+    >>> ccol_indices = [0, 1, 2]
+    >>> row_indices = [0, 1]
+    >>> values = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+    >>> torch.sparse_bsc_tensor(torch.tensor(ccol_indices, dtype=torch.int64),
+    ...                         torch.tensor(row_indices, dtype=torch.int64),
+    ...                         torch.tensor(values), dtype=torch.double)
+    tensor(ccol_indices=tensor([0, 1, 2]),
+           row_indices=tensor([0, 1]),
+           values=tensor([[[1., 2.],
+                           [3., 4.]],
+
+                          [[5., 6.],
+                           [7., 8.]]]), size=(2, 2), nnz=2, dtype=torch.float64,
+           layout=torch.sparse_bsc)
 """.format(**factory_common_args))
 
 add_docstr(torch.sparse_coo_tensor,
@@ -9351,7 +9757,7 @@ always be real-valued, even if :attr:`input` is complex.
 
     .. code:: python
 
-        S = torch.svdvals(A)
+        S = torch.linalg.svdvals(A)
 
 .. note:: Differences with :func:`torch.linalg.svd`:
 
@@ -9672,10 +10078,10 @@ add_docstr(torch.roll,
            r"""
 roll(input, shifts, dims=None) -> Tensor
 
-Roll the tensor along the given dimension(s). Elements that are shifted beyond the
-last position are re-introduced at the first position. If a dimension is not
-specified, the tensor will be flattened before rolling and then restored
-to the original shape.
+Roll the tensor :attr:`input` along the given dimension(s). Elements that are
+shifted beyond the last position are re-introduced at the first position. If
+:attr:`dims` is `None`, the tensor will be flattened before rolling and then
+restored to the original shape.
 
 Args:
     {input}
@@ -9693,6 +10099,11 @@ Example::
             [3, 4],
             [5, 6],
             [7, 8]])
+    >>> torch.roll(x, 1)
+    tensor([[8, 1],
+            [2, 3],
+            [4, 5],
+            [6, 7]])
     >>> torch.roll(x, 1, 0)
     tensor([[7, 8],
             [1, 2],
@@ -9913,9 +10324,13 @@ transpose(input, dim0, dim1) -> Tensor
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
 
-The resulting :attr:`out` tensor shares its underlying storage with the
-:attr:`input` tensor, so changing the content of one would change the content
-of the other.
+If :attr:`input` is a strided tensor then the resulting :attr:`out`
+tensor shares its underlying storage with the :attr:`input` tensor, so
+changing the content of one would change the content of the other.
+
+If :attr:`input` is a :ref:`sparse tensor <sparse-docs>` then the
+resulting :attr:`out` tensor *does not* share the underlying storage
+with the :attr:`input` tensor.
 
 Args:
     {input}
@@ -9955,6 +10370,19 @@ If the diagonal of :attr:`A` contains zeros or elements that are very close to z
 the result may contain `NaN` s.
 
 Supports input of float, double, cfloat and cdouble data types.
+
+.. warning::
+
+    :func:`torch.triangular_solve` is deprecated in favor of :func:`torch.linalg.solve_triangular`
+    and will be removed in a future PyTorch release.
+    :func:`torch.linalg.solve_triangular` has its arguments reversed and does not return a
+    copy of one of the inputs.
+
+    ``X = torch.triangular_solve(B, A).solution`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.solve_triangular(A, B)
 
 Args:
     b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
@@ -10668,12 +11096,6 @@ The operation is defined as:
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
-.. note::
-    Currently valid scalar and tensor combination are
-    1. Scalar of floating dtype and torch.double
-    2. Scalar of integral dtype and torch.long
-    3. Scalar of complex dtype and torch.complex128
-
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
     x (Tensor or Scalar): value (if :attr:`x` is a scalar) or values selected at indices
@@ -10728,7 +11150,7 @@ Calculates log determinant of a square matrix or batches of square matrices.
     Backward through :meth:`logdet` internally uses SVD results when :attr:`input`
     is not invertible. In this case, double backward through :meth:`logdet` will
     be unstable in when :attr:`input` doesn't have distinct singular values. See
-    :meth:`~torch.svd` for details.
+    :func:`torch.linalg.svd` for details.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
@@ -11423,6 +11845,34 @@ Example::
        quantization_scheme=torch.per_tensor_affine, scale=0.10, zero_point=10)
 """)
 
+add_docstr(torch.quantize_per_tensor_dynamic,
+           r"""
+quantize_per_tensor_dynamic(input, dtype, reduce_range) -> Tensor
+
+Converts a float tensor to a quantized tensor with scale and zero_point calculated
+dynamically based on the input.
+
+Arguments:
+    input (Tensor): float tensor or list of tensors to quantize
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+        Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``
+    reduce_range (bool): a flag to indicate whether to reduce the range of quantized
+    data by 1 bit, it's required to avoid instruction overflow for some hardwares
+
+Returns:
+    Tensor: A newly (dynamically) quantized tensor
+
+Example::
+
+    >>> t = torch.quantize_per_tensor_dynamic(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.quint8, False)
+    >>> print(t)
+    tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=0.011764705882352941,
+           zero_point=85)
+    >>> t.int_repr()
+    tensor([  0,  85, 170, 255], dtype=torch.uint8)
+""")
+
 add_docstr(torch.quantize_per_channel,
            r"""
 quantize_per_channel(input, scales, zero_points, axis, dtype) -> Tensor
@@ -11834,4 +12284,142 @@ Example::
     >>> torch.bucketize(v, boundaries, right=True)
     tensor([[2, 3, 5],
             [2, 3, 5]])
+""")
+
+add_docstr(torch.view_as_real_copy,
+           r"""
+Performs the same operation as :func:`torch.view_as_real`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.view_as_complex_copy,
+           r"""
+Performs the same operation as :func:`torch.view_as_complex`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.as_strided_copy,
+           r"""
+Performs the same operation as :func:`torch.as_strided`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.diagonal_copy,
+           r"""
+Performs the same operation as :func:`torch.diagonal`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.expand_copy,
+           r"""
+Performs the same operation as :func:`torch.expand`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.permute_copy,
+           r"""
+Performs the same operation as :func:`torch.permute`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.select_copy,
+           r"""
+Performs the same operation as :func:`torch.select`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.detach_copy,
+           r"""
+Performs the same operation as :func:`torch.detach`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.slice_copy,
+           r"""
+Performs the same operation as :func:`torch.slice`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.split_copy,
+           r"""
+Performs the same operation as :func:`torch.split`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.split_with_sizes_copy,
+           r"""
+Performs the same operation as :func:`torch.split_with_sizes`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.squeeze_copy,
+           r"""
+Performs the same operation as :func:`torch.squeeze`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.t_copy,
+           r"""
+Performs the same operation as :func:`torch.t`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.transpose_copy,
+           r"""
+Performs the same operation as :func:`torch.transpose`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.unsqueeze_copy,
+           r"""
+Performs the same operation as :func:`torch.unsqueeze`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.indices_copy,
+           r"""
+Performs the same operation as :func:`torch.indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.values_copy,
+           r"""
+Performs the same operation as :func:`torch.values`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.crow_indices_copy,
+           r"""
+Performs the same operation as :func:`torch.crow_indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.col_indices_copy,
+           r"""
+Performs the same operation as :func:`torch.col_indices`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.unbind_copy,
+           r"""
+Performs the same operation as :func:`torch.unbind`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.view_copy,
+           r"""
+Performs the same operation as :func:`torch.view`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.unfold_copy,
+           r"""
+Performs the same operation as :func:`torch.unfold`, but all output tensors
+are freshly created instead of aliasing the input.
+""")
+
+add_docstr(torch.alias_copy,
+           r"""
+Performs the same operation as :func:`torch.alias`, but all output tensors
+are freshly created instead of aliasing the input.
 """)

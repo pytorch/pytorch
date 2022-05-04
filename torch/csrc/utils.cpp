@@ -6,7 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/DynamicTypes.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <algorithm>
 #include <cstdarg>
@@ -177,13 +177,6 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
 }
 
 template<>
-void THPPointer<THTensor>::free() {
-  if (ptr) {
-    THTensor_free(LIBRARY_STATE ptr);
-  }
-}
-
-template<>
 void THPPointer<THPStorage>::free() {
   if (ptr)
     Py_DECREF(ptr);
@@ -196,6 +189,26 @@ void storage_copy(at::Storage dst, at::Storage src, bool non_blocking) {
   auto src_options = c10::TensorOptions().device(src.device()).dtype(at::kByte);
   auto src_t = at::empty({0}, {}, src_options).set_(src);
   dst_t.copy_(src_t, non_blocking);
+}
+
+void storage_fill(at::Storage self, uint8_t value) {
+  auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
+  auto self_t = at::empty({0}, {}, options).set_(self);
+  self_t.fill_(value);
+}
+
+void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value) {
+  TORCH_CHECK((idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())), "out of bounds");
+  auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
+  auto self_t = at::empty({0}, {}, options).set_(self);
+  self_t[idx].fill_(value);
+}
+
+uint8_t storage_get(at::Storage self, ptrdiff_t idx) {
+  TORCH_CHECK((idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())), "out of bounds");
+  auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
+  auto self_t = at::empty({0}, {}, options).set_(self);
+  return self_t[idx].item<uint8_t>();
 }
 
 template class THPPointer<THPStorage>;

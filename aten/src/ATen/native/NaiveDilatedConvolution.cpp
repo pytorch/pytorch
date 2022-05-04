@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/DilatedConvolutionUtils.h>
 #include <ATen/native/im2col.h>
@@ -6,12 +7,10 @@
 #include <ATen/Utils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-
 #include <tuple>
 
 namespace at {
 namespace native {
-
 namespace {
 
 // hyper-volume to column, CPU
@@ -201,7 +200,8 @@ void slow_conv_dilated_all_cpu_template(
   std::vector<int64_t> dims(dim);
   std::iota(dims.begin(), dims.end(), 1);
 
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "slow_conv_dilated<>", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Long, at::ScalarType::BFloat16, input.scalar_type(), "slow_conv_dilated<>", [&] {
     // For each elt in batch, do:
     for (const auto elt : c10::irange(batchSize)) {
       // Matrix multiply per output:
@@ -276,12 +276,12 @@ void slow_conv_dilated_all_cpu_template(
             /*     m=*/columns.size(1),
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(0),
-            /* alpha=*/1,
+            /* alpha=*/static_cast<scalar_t>(1),
             /*     A=*/columns.data_ptr<scalar_t>(),
             /*   lda=*/columns.size(1),
             /*     B=*/weight.data_ptr<scalar_t>(),
             /*   ldb=*/columns.size(0),
-            /*  beta=*/1,
+            /*  beta=*/static_cast<scalar_t>(1),
             /*     C=*/output_n.data_ptr<scalar_t>(),
             /*   ldc=*/columns.size(1));
 
@@ -320,12 +320,12 @@ void slow_conv_dilated_all_cpu_template(
             /*     m=*/columns.size(1),
             /*     n=*/columns.size(0),
             /*     k=*/nOutputPlane,
-            /* alpha=*/1,
+            /* alpha=*/static_cast<scalar_t>(1),
             /*     A=*/grad_output_n.data_ptr<scalar_t>(),
             /*   lda=*/columns.size(1),
             /*     B=*/weight.data_ptr<scalar_t>(),
             /*   ldb=*/columns.size(0),
-            /*  beta=*/0,
+            /*  beta=*/static_cast<scalar_t>(0),
             /*     C=*/columns.data_ptr<scalar_t>(),
             /*   ldc=*/columns.size(1));
         // Unpack columns back into input:
@@ -385,12 +385,12 @@ void slow_conv_dilated_all_cpu_template(
             /*     m=*/columns.size(0),
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(1),
-            /* alpha=*/scale,
+            /* alpha=*/static_cast<scalar_t>(scale),
             /*     A=*/columns.data_ptr<scalar_t>(),
             /*   lda=*/columns.size(1),
             /*     B=*/grad_output_n.data_ptr<scalar_t>(),
             /*   ldb=*/columns.size(1),
-            /*  beta=*/1,
+            /*  beta=*/static_cast<scalar_t>(1),
             /*     C=*/grad_weight.data_ptr<scalar_t>(),
             /*   ldc=*/columns.size(0));
       }
@@ -482,6 +482,57 @@ Tensor slow_conv_dilated2d_cpu(
   return output;
 }
 
+Tensor slow_conv_dilated3d_cpu(
+    const Tensor& input,
+    const Tensor& weight,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef stride_size,
+    IntArrayRef pad_size,
+    IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  Tensor undefined;
+  internal::slow_conv_dilated_shape_check<3>(
+      input,
+      weight,
+      bias,
+      undefined,
+      kernel_size,
+      stride_size,
+      pad_size,
+      dilation_size);
+  auto is_batch = input.dim() == 5;
+  auto options = input.options();
+  // calculate output tensor size
+  auto output_size = internal::get_output_size<3>(
+      input, weight, kernel_size, stride_size, pad_size, dilation_size);
+  // template function assumes batched tensors.  unsqueeze(0) will
+  // insert batch dimension without affecting the original tensor.
+  const Tensor input_ =
+      (is_batch ? input.contiguous() : input.contiguous().unsqueeze(0));
+  const Tensor weight_ = weight.contiguous();
+  const Tensor bias_ = (bias.defined() ? bias.contiguous() : undefined);
+  Tensor output = at::empty(output_size, options);
+  Tensor output_ = (is_batch ? output : output.unsqueeze(0));
+
+  slow_conv_dilated_all_cpu_template<3>(
+      output,
+      input_,
+      weight_,
+      bias_,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      kernel_size,
+      stride_size,
+      pad_size,
+      dilation_size);
+  return output;
+}
+
 std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
@@ -535,57 +586,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
       pad_size,
       dilation_size);
   return std::tie(grad_input, grad_weight, grad_bias);
-}
-
-Tensor slow_conv_dilated3d_cpu(
-    const Tensor& input,
-    const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
-    IntArrayRef stride_size,
-    IntArrayRef pad_size,
-    IntArrayRef dilation_size) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  Tensor undefined;
-  internal::slow_conv_dilated_shape_check<3>(
-      input,
-      weight,
-      bias,
-      undefined,
-      kernel_size,
-      stride_size,
-      pad_size,
-      dilation_size);
-  auto is_batch = input.dim() == 5;
-  auto options = input.options();
-  // calculate output tensor size
-  auto output_size = internal::get_output_size<3>(
-      input, weight, kernel_size, stride_size, pad_size, dilation_size);
-  // template function assumes batched tensors.  unsqueeze(0) will
-  // insert batch dimension without affecting the original tensor.
-  const Tensor input_ =
-      (is_batch ? input.contiguous() : input.contiguous().unsqueeze(0));
-  const Tensor weight_ = weight.contiguous();
-  const Tensor bias_ = (bias.defined() ? bias.contiguous() : undefined);
-  Tensor output = at::empty(output_size, options);
-  Tensor output_ = (is_batch ? output : output.unsqueeze(0));
-
-  slow_conv_dilated_all_cpu_template<3>(
-      output,
-      input_,
-      weight_,
-      bias_,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      kernel_size,
-      stride_size,
-      pad_size,
-      dilation_size);
-  return output;
 }
 
 std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
@@ -642,6 +642,9 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
       dilation_size);
   return std::tie(grad_input, grad_weight, grad_bias);
 }
+
+REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated2d_backward_stub, &slow_conv_dilated2d_backward_cpu);
+REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated3d_backward_stub, &slow_conv_dilated3d_backward_cpu);
 
 } // namespace native
 } // namespace at

@@ -15,7 +15,7 @@ from torch.autograd import Variable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import skipIfNoLapack
+from torch.testing._internal.common_utils import skipIfNoLapack, skipIfCaffe2, skipIfNoCaffe2
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -68,6 +68,24 @@ class TestExportModes(JitTestCase):
         x = torch.ones(3)
         torch.onnx._export(foo, (x,), f)
 
+    @skipIfNoCaffe2
+    @skipIfNoLapack
+    def test_caffe2_aten_fallback(self):
+        class ModelWithAtenNotONNXOp(nn.Module):
+            def forward(self, x, y):
+                abcd = x + y
+                defg = torch.linalg.qr(abcd)
+                return defg
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+        torch.onnx.export_to_pretty_string(
+            ModelWithAtenNotONNXOp(), (x, y),
+            add_node_names=False,
+            do_constant_folding=False,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
+
+    @skipIfCaffe2
     @skipIfNoLapack
     def test_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):
@@ -79,10 +97,12 @@ class TestExportModes(JitTestCase):
         x = torch.rand(3, 4)
         y = torch.rand(3, 4)
         torch.onnx.export_to_pretty_string(
-            ModelWithAtenNotONNXOp(), (x, y), None,
+            ModelWithAtenNotONNXOp(), (x, y),
             add_node_names=False,
             do_constant_folding=False,
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
+            # support for linalg.qr was added in later op set versions.
+            opset_version=9)
 
     # torch.fmod is using to test ONNX_ATEN.
     # If you plan to remove fmod from aten, or found this test failed.
@@ -95,7 +115,7 @@ class TestExportModes(JitTestCase):
         x = torch.randn(3, 4, dtype=torch.float32)
         y = torch.randn(3, 4, dtype=torch.float32)
         torch.onnx.export_to_pretty_string(
-            ModelWithAtenFmod(), (x, y), None,
+            ModelWithAtenFmod(), (x, y),
             add_node_names=False,
             do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN)

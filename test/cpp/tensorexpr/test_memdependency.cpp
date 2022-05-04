@@ -274,7 +274,7 @@ TEST(MemDependency, BoundSubtractMultiDim) {
     if (x.size() != y.size()) {
       return false;
     }
-    for (auto i = 0; i < x.size(); ++i) {
+    for (auto i = 0U; i < x.size(); ++i) {
       if (!indexBoundsEquals(x[i], y[i])) {
         return false;
       }
@@ -338,7 +338,7 @@ TEST(MemDependency, BoundSubtractMultiDimSymbolic) {
     if (x.size() != y.size()) {
       return false;
     }
-    for (auto i = 0; i < x.size(); ++i) {
+    for (auto i = 0U; i < x.size(); ++i) {
       if (!indexBoundsEquals(x[i], y[i])) {
         return false;
       }
@@ -543,8 +543,7 @@ TEST(MemDependency, MemDependencyCheckerLoopReduce) {
    */
 
   StorePtr aInit = Store::make(a, {0}, 0);
-  ExprHandle reduce =
-      ExprHandle(Sum()(a.node(), ExprHandle(1), {x.node()}, {x.node()}));
+  ExprHandle reduce = Sum()(a, 1, {x}, {x});
   StorePtr aReduce = Store::make(a, {0}, reduce);
   StmtPtr loop = For::make(x, 0, 10, aReduce);
   StorePtr bStore = Store::make(b, {0}, Load::make(a, {0}));
@@ -2697,13 +2696,13 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
   BufHandle b_buf("b", {5, 6}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
-      {{4, "m"}, {5, "n"}, {6, "k"}},
+      {4, 5, 6},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
       });
   Tensor d = Compute(
       "d",
-      {{4, "m"}, {5, "n"}, {6, "k"}},
+      {4, 5, 6},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return c.load(m, n, k) + 1;
       });
@@ -2742,13 +2741,13 @@ TEST(MemDependency, MemDependencyCheckerComputeInline) {
   BufHandle b_buf("b", {5, 6}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
-      {{4, "m"}, {5, "n"}, {6, "k"}},
+      {4, 5, 6},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
       });
   Tensor d = Compute(
       "d",
-      {{4, "m"}, {5, "n"}, {6, "k"}},
+      {4, 5, 6},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return c.load(m, n, k) + 1;
       });
@@ -2777,7 +2776,7 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
   BufHandle b_buf("b", {5, 6}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
-      {{4, "m"}, {5, "n"}, {6, "k"}},
+      {4, 5, 6},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
       });
@@ -2823,7 +2822,7 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
   BufHandle b_buf("b", {5, 6}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
-      {{4, "m"}, {5, "n"}, {6, "k"}},
+      {4, 5, 6},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n) + b_buf.load(n, k);
       });
@@ -2889,11 +2888,11 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
 
   Tensor c = Compute(
       "scale",
-      {{2, "l2"}, {3, "n1"}, {6, "m1"}},
+      {2, 3, 6},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  Tensor d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {6, "m1"}});
+  Tensor d = Reduce("sum", {2}, Sum(), c, {3, 6});
   LoopNest l({d}, {c, d});
 
   MemDependencyChecker analyzer({a.node(), b.node()}, {d.buf()});
@@ -2925,12 +2924,12 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
   BufHandle BP("B", {K, N}, kFloat);
   Tensor CT = Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       Sum(),
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
         return AP.load(m, k) * BP.load(k, n);
       },
-      {{K, "K"}});
+      {K});
   LoopNest loop({CT});
 
   {
@@ -3021,10 +3020,11 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
   }
 
   loop.prepareForCodegen();
+  SimpleIREvaluator cg(loop.root_stmt(), {AP, BP, CT});
 
   // now check lowered dependency graph.
   {
-    StmtPtr stmt = IRSimplifier::simplify(loop.root_stmt());
+    StmtPtr stmt = IRSimplifier::simplify(cg.stmt());
     stmt->accept(&analyzer_lowered);
 
     // Lowering will change the dimensionality of all bounds due to index

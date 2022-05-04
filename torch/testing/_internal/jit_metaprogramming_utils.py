@@ -1,7 +1,5 @@
 # Torch
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
-from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
-    unpack_variables
 import torch.nn.functional as F
 import torch
 import torch.cuda
@@ -11,6 +9,7 @@ import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 from torch.testing._internal.common_utils import is_iterable_of_tensors
 
+import collections
 from copy import deepcopy
 from typing import List, Union
 import math  # noqa: F401
@@ -24,6 +23,69 @@ torch.set_default_dtype(torch.double)
 L = 20
 M = 10
 S = 5
+
+
+def unpack_variables(args):
+    if isinstance(args, tuple):
+        return tuple(unpack_variables(elem) for elem in args)
+    else:
+        return args
+
+class dont_convert(tuple):
+    pass
+
+non_differentiable = collections.namedtuple('non_differentiable', ['tensor'])
+
+def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
+    if not isinstance(call_args, tuple):
+        call_args = (call_args,)
+
+    def map_arg(arg):
+        def maybe_non_contig(tensor):
+            if not non_contiguous or tensor.numel() < 2:
+                return tensor.clone()
+
+            return noncontiguous_like(tensor)
+
+        def conjugate(tensor):
+            return tensor.conj()
+
+        if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
+            return arg
+        elif isinstance(arg, tuple) and len(arg) == 0:
+            var = conjugate(torch.randn((), dtype=dtype, device=device))
+            var.requires_grad = requires_grad
+            return var
+        elif isinstance(arg, tuple) and not isinstance(arg[0], torch.Tensor):
+            return conjugate(maybe_non_contig(torch.randn(*arg, dtype=dtype, device=device))).requires_grad_(requires_grad)
+        # double check casting
+        elif isinstance(arg, non_differentiable):
+            if isinstance(arg.tensor, torch.Tensor):
+                if arg.tensor.dtype == torch.float:
+                    return maybe_non_contig(arg.tensor.to(dtype=torch.double, device=device))
+                if arg.tensor.dtype == torch.cfloat:
+                    return conjugate(maybe_non_contig(arg.tensor.to(dtype=torch.cdouble, device=device)))
+                return conjugate(maybe_non_contig(arg.tensor.to(device=device)))
+            return conjugate(maybe_non_contig(arg.tensor.to(device=device)))
+        elif isinstance(arg, torch.Tensor):
+            if arg.dtype == torch.float:
+                arg = arg.double()
+            if arg.dtype == torch.cfloat:
+                arg = arg.to(torch.cdouble)
+            if arg.is_complex() != dtype.is_complex:
+                raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
+                                   "which is not supported for now")
+            # NOTE: We do clone() after detach() here because we need to be able to change size/storage of v afterwards
+            v = conjugate(maybe_non_contig(arg)).detach().to(device=device).clone()
+            v.requires_grad = requires_grad and (v.is_floating_point() or v.is_complex())
+            return v
+        elif callable(arg):
+            return map_arg(arg(dtype=dtype, device=device))
+        else:
+            return arg
+    args_out = tuple(map_arg(arg) for arg in call_args)
+    kwargs_out = {k: map_arg(v) for k, v in call_kwargs.items()} if call_kwargs else {}
+    return args_out, kwargs_out
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
@@ -71,7 +133,9 @@ nn_functional_tests = [
     ('dropout', (S, S, S), (0.5,), '', (True, 'aten::native_dropout')),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
-    ('dropout3d', (S, S, S), (0.5,)),
+    ('dropout2d', (S, S, S, S), (0.5,), 'batched'),
+    ('dropout3d', (S, S, S, S), (0.5,)),
+    ('dropout3d', (S, S, S, S, S), (0.5,), 'batched'),
     ('feature_alpha_dropout', (S, S, S), (0.5,)),
     ('threshold', (S, S, S), (0.1, 2.), '', (True,)),
     ('threshold', (S, S, S), (0.1, 2., True), 'inplace'),
@@ -347,24 +411,39 @@ def create_script_fn(self, method_name, func_type):
 # applied, and all tensor arguments remain.
 # used to trace functions when some arguments are not tensors
 def partial_apply_nontensors(fn, args, **kwargs):
-    source = ['t' if (isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)) else 's' for arg in args]
+    def _is_tensor_input(arg):
+        return isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)
+
+    source = ['t' if _is_tensor_input(arg) else 's' for arg in args]
 
     def new_fn(*tensors_):
         tensors = iter(tensors_)
         return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
 
-    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor) or is_iterable_of_tensors(arg)]
+    tensor_args = [arg for arg in args if _is_tensor_input(arg)]
+    nontensor_args = [arg for arg in args if not _is_tensor_input(arg)]
+
+    return new_fn, tensor_args, nontensor_args
 
 # create a trace function from input fn
-def create_traced_fn(self, fn):
+def create_traced_fn(self, fn, cache_traced_fn=False):
     def traced_fn(*inputs, **kwargs):
-        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         # `check_trace` is set to False because check_trace is run with @no_grad
         # Also, `check_against_reference` already does all the checks
         # against python function
-        traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
-        self.assertExportImport(traced.graph, inputs_tensors)
-        output = traced(*inputs_tensors)
+        fn_tensors, inputs_tensors, inputs_nontensors = partial_apply_nontensors(fn, inputs, **kwargs)
+        if not cache_traced_fn or not hasattr(traced_fn, 'traced'):
+            traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
+            self.assertExportImport(traced.graph, inputs_tensors)
+            output = traced(*inputs_tensors)
+            if cache_traced_fn:
+                traced_fn.traced = traced
+                traced_fn.inputs_nontensors = inputs_nontensors
+        else:
+            # Guard to check that nontensor inputs are the same as during tracing
+            self.assertEqual(inputs_nontensors, traced_fn.inputs_nontensors)
+            output = traced_fn.traced(*inputs_tensors)
+            traced = traced_fn.traced
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)  # type: ignore[attr-defined]
         traced_fn.graph = traced.graph  # type: ignore[attr-defined]
