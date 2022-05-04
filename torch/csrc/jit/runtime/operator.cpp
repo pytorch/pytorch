@@ -6,10 +6,10 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
 
+#include <jit/ir/ir.h>
 #include <queue>
 #include <utility>
 #include <vector>
-#include "jit/ir/ir.h"
 
 namespace torch {
 namespace jit {

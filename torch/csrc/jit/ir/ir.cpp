@@ -21,7 +21,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
-#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -52,7 +51,10 @@ std::string getNodesModuleHierarchy(const Node& n) {
 namespace {
 
 std::mutex fused_symbol_lock;
-std::unordered_set<Symbol> fused_symbol_kinds = {prim::TensorExprGroup, prim::TensorExprDynamicGroup, prim::CudaFusionGroup};
+std::unordered_set<Symbol> fused_symbol_kinds = {
+    prim::TensorExprGroup,
+    prim::TensorExprDynamicGroup,
+    prim::CudaFusionGroup};
 
 // Constants relating to maintaining the topological index of nodes.
 //
