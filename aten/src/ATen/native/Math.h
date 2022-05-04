@@ -2178,7 +2178,8 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 }
 
 template<typename T>
-static inline C10_HOST_DEVICE T airy_ai(T x) {
+static inline C10_HOST_DEVICE typename std::enable_if<std::is_floating_point<T>::value, T>::type
+airy_ai(T x) {
     static T AN[8] = {
             +3.46538101525629032477e-01,
             +1.20075952739645805542e+01,
@@ -2339,7 +2340,8 @@ static inline C10_HOST_DEVICE T airy_ai(T x) {
 }
 
 template<typename T>
-static inline C10_HOST_DEVICE T airy_bi(T x) {
+static inline C10_HOST_DEVICE typename std::enable_if<std::is_floating_point<T>::value, T>::type
+airy_bi(T x) {
     static T AN[8] = {
             +3.46538101525629032477e-01,
             +1.20075952739645805542e+01,
