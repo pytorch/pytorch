@@ -32,10 +32,4 @@ jobs:
           FORCE: "false"
           ON_GREEN: "true"
         run: |
-          if [ -n "${FORCE}" ]; then
-            python3 .github/scripts/trymerge.py --force "${PR_NUM}"
-          elif [ -n "${ON_GREEN}" ]; then
-            python3 .github/scripts/trymerge.py --on-green "${PR_NUM}"
-          else
-            python3 .github/scripts/trymerge.py "${PR_NUM}"
-          fi
+          python3 .github/scripts/trymerge.py --on-green "${PR_NUM}"
