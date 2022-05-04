@@ -745,15 +745,6 @@ class TestReductions(TestCase):
             use_integral=False)
 
     @onlyCPU
-    def test_mean_int(self, device):
-        a = make_tensor((3, 4, 5), dtype=torch.int64, device=device)
-
-        # Can't compute mean of integral tensors.
-        with self.assertRaisesRegex(RuntimeError, r"mean\(\): at least one of .* Got \(i\) Long and \(ii\) None"):
-            a.mean()
-
-
-    @onlyCPU
     def test_mean_int_with_optdtype(self, device):
         a = make_tensor((3, 4, 5), dtype=torch.int64, device=device)
 
@@ -761,10 +752,6 @@ class TestReductions(TestCase):
         # is internally cast.
         a_float = a.to(torch.float32)
         self.assertEqual(a_float.mean(), a.mean(dtype=torch.float32))
-
-        # Error if desired output dtype mismatches
-        with self.assertRaisesRegex(RuntimeError, r".* out tensor to have dtype double, but got float instead"):
-            torch.mean(a, [], dtype=torch.float64, out=a_float)
 
     # TODO: update this and tests that use it to handle device properly
     def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
