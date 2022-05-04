@@ -2027,7 +2027,8 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
         )
         for m, in test_cases:
             m.eval()
-            self._test_extract_weights(m, results_len=1)
+            example_inputs = (torch.randn(1, 3, 5, 5),)
+            self._test_extract_weights(m, example_inputs, results_len=1)
 
     @skipIfNoFBGEMM
     def test_compare_weights_linear(self):
