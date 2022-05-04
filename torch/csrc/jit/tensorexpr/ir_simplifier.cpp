@@ -3029,24 +3029,23 @@ ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
     TORCH_INTERNAL_ASSERT(
         (overlap_kind == analysis::OverlapKind::Contains) ||
         (overlap_kind == analysis::OverlapKind::ContainedOrEqual));
-    TORCH_INTERNAL_ASSERT(
-        exprEquals(lhs_bound.start, lhs_bound.end) ||
-        exprEquals(rhs_bound.start, rhs_bound.end));
     if (exprEquals(lhs_bound.end, rhs_bound.start)) {
       // lhs = [5, 5] and rhs = [5, 10]
       // lhs = [5, 10] and rhs = [10, 10]
       cmp_res = CompareResult::kLE;
+      return true;
     } else if (exprEquals(lhs_bound.start, rhs_bound.end)) {
       // lhs = [10, 10] and rhs = [5, 10]
       // lhs = [5, 10] and rhs = [5, 5]
       cmp_res = CompareResult::kGE;
+      return true;
     } else {
       // lhs = [8, 8] and rhs = [5, 10]
       // lhs = [5, 10] and rhs = [8, 8]
+      // lhs = [5, 10] and rhs = [6, 7]
+      // lhs = [6, 7] and rhs = [5, 10]
       return false;
     }
-
-    return (cmp_res == CompareResult::kLE) || (cmp_res == CompareResult::kGE);
   };
 
   analysis::Bound lhs_bound;
