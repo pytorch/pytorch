@@ -24,6 +24,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   storage_ = functional_storage;
   storage_access_should_throw_ = false;
   key_set_ = c10::DispatchKeySet(c10::DispatchKey::Functionalize) | value_.key_set();
+  // All of the keys corresponding to functorch transforms should not be copied over.
+  // Functorch transforms all have their own wrapper tensors (e.g. BatchedTensorImpl) which expect
+  // to participate in the functorch transforms.
+  key_set_ = key_set_ - c10::functorch_transforms_ks;
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -242,8 +246,8 @@ c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optio
   }
   return outputs;
 }
-c10::List<Tensor> to_functional_tensor(ITensorListRef t_list) {
-  c10::List<Tensor> outputs;
+std::vector<Tensor> to_functional_tensor(ITensorListRef t_list) {
+  std::vector<Tensor> outputs(t_list.size());
   outputs.reserve(t_list.size());
   for (const auto& tensor : t_list) {
     outputs.push_back(to_functional_tensor(tensor));
@@ -273,9 +277,8 @@ std::vector<Tensor> from_functional_tensor(TensorList t_list) {
   }
   return outputs;
 }
-c10::List<Tensor> from_functional_tensor(ITensorListRef t_list) {
-  c10::List<Tensor> outputs;
-  outputs.reserve(t_list.size());
+std::vector<Tensor> from_functional_tensor(ITensorListRef t_list) {
+  std::vector<Tensor> outputs(t_list.size());
   for (const auto& tensor : t_list) {
     outputs.push_back(from_functional_tensor(tensor));
   }
@@ -325,6 +328,31 @@ void sync(IOptTensorListRef t_list) {
     if (tensor.has_value()) {
       sync(*tensor);
     }
+  }
+}
+
+void replace_(const Tensor& functional_tensor, const Tensor& other) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
+  unsafeGetFunctionalWrapper(functional_tensor)->replace_(other);
+}
+
+void replace_(const ITensorListRef functional_tensor, ITensorListRef other) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
+  auto it_functional_tensor = functional_tensor.begin();
+  auto it_other = other.begin();
+  for (const auto i : c10::irange(functional_tensor.size())) {
+      replace_(*it_functional_tensor++, *it_other++);
+  }
+}
+
+void commit_update(const Tensor& functional_tensor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(functional_tensor));
+  unsafeGetFunctionalWrapper(functional_tensor)->commit_update();
+}
+
+void commit_update(ITensorListRef functional_tensor) {
+  for (const auto& t : functional_tensor) {
+    commit_update(t);
   }
 }
 
