@@ -11753,9 +11753,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_masked_select,
-           skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-           ),
            error_inputs_func=error_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
