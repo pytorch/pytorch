@@ -127,25 +127,6 @@ __device__ void loadLocalToGlobal(
       }
       break;
     }
-    case 12: {
-      uint3 const& data = *reinterpret_cast<uint3*>(from);
-      if (is_volatile) {
-        asm volatile(
-            "st.volatile.global.v3.s32 [%0], {%1,%2,%3};" ::"l"(
-                (typename MaybeVolatile<uint3, is_volatile>::type*)to),
-            "r"(data.x),
-            "r"(data.y),
-            "r"(data.z));
-      } else {
-        asm volatile(
-            "st.global.cs.v3.s32 [%0], {%1,%2,%3};" ::"l"(
-                (typename MaybeVolatile<uint3, is_volatile>::type*)to),
-            "r"(data.x),
-            "r"(data.y),
-            "r"(data.z));
-      }
-      break;
-    }
     case 16: {
       uint4 const& data = *reinterpret_cast<uint4*>(from);
       if (is_volatile) {
@@ -192,20 +173,6 @@ __device__ void loadGlobalToLocal(
         asm volatile("ld.global.cs.v2.s32 {%0,%1}, [%2];"
                      : "=r"(data.x), "=r"(data.y)
                      : "l"((uint2*)from));
-      }
-      break;
-    }
-    case 12: {
-      if (is_volatile) {
-        uint3& data = *reinterpret_cast<uint3*>(to);
-        asm volatile("ld.volatile.global.v3.s32 {%0,%1,%2}, [%3];"
-                     : "=r"(data.x), "=r"(data.y), "=r"(data.z)
-                     : "l"((uint3*)from));
-      } else {
-        uint3& data = *reinterpret_cast<uint3*>(to);
-        asm volatile("ld.global.cs.v3.s32 {%0,%1,%2}, [%3];"
-                     : "=r"(data.x), "=r"(data.y), "=r"(data.z)
-                     : "l"((uint3*)from));
       }
       break;
     }
