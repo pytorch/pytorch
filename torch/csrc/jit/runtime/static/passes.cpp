@@ -1229,5 +1229,20 @@ void EliminateNoOpSlice(std::shared_ptr<Graph>& graph) {
   }
 }
 
+void QuantizedLinearReluFusion(std::shared_ptr<Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%input, %packed_params):
+        %x : Tensor = quantized::linear_dynamic_fp16(%input, %packed_params)
+        %y : Tensor = aten::relu(%x)
+        return (%y))IR";
+  std::string fused_pattern = R"IR(
+    graph(%input, %packed_params):
+        %x : Tensor = quantized::linear_relu_dynamic_fp16(%input, %packed_params)
+        return (%x))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+}
+
 } // namespace jit
 } // namespace torch

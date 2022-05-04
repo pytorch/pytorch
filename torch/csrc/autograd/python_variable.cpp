@@ -1840,7 +1840,7 @@ void concrete_dispatch_fn(
   // Parse the name into namespace and name (no overload_name)
   // TODO: put this into the library
   const auto& qualified_name = op.operator_name().name;
-  const auto& overload_name = op.schema().overload_name();
+  const auto& overload_name = schema.overload_name();
   auto pos = qualified_name.find("::");
   TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
   // Make me some null terminated strings
