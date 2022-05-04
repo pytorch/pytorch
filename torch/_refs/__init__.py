@@ -2,15 +2,23 @@ import torch
 
 import torch._prims as prims
 import torch._prims.utils as utils
-from torch._prims import TensorLike as TensorLike
-from torch._prims.utils import DimsType, TensorLikeType
+from torch._prims.utils import (
+    DimsType,
+    TensorLike,
+    TensorLikeType,
+    DimsSequenceType,
+    TensorSequenceType,
+    Number,
+    NumberType,
+)
+
 
 from functools import reduce
 from enum import Enum
-from numbers import Number, Complex
-from typing import Sequence, Optional, Union, Callable, List
+from typing import Sequence, Optional, Union, Callable, List, Tuple
 import operator
 import warnings
+import math
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -112,6 +120,14 @@ all = [
     # Reduction ops
     #
     "sum",  # TODO: add opinfo
+    #
+    # View & Shape Ops
+    #
+    "cat",
+    "permute",
+    "transpose",
+    "swap_axes",  # alias for transpose
+    "tensor_split",
 ]
 
 Tensor = torch.Tensor
@@ -330,7 +346,8 @@ def broadcast(*args):
 def _convert_dtype(*args, dtype: torch.dtype):
     def _convert(x):
         if isinstance(x, TensorLike):
-            return prims.convert_element_type(x, dtype)
+            if x.dtype != dtype:
+                return prims.convert_element_type(x, dtype)
         elif isinstance(x, Number):
             typ = utils.dtype_to_type(dtype)
             return typ(x)
@@ -516,8 +533,8 @@ tan = _make_elementwise_unary_reference(
 
 def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Callable:
     def _ref(
-        a: Union[Tensor, Number],
-        b: Union[Tensor, Number],
+        a: Union[Tensor, NumberType],
+        b: Union[Tensor, NumberType],
         *,
         out: Optional[Tensor] = None
     ) -> Tensor:
@@ -555,10 +572,10 @@ def _make_elementwise_binary_reference(prim: Callable, *, type_promotion) -> Cal
 # Add is implemented specially because it has an alpha argument and
 #   is decomposed into multiple prims
 def add(
-    a: Union[Tensor, Number],
-    b: Union[Tensor, Number],
+    a: Union[Tensor, NumberType],
+    b: Union[Tensor, NumberType],
     *,
-    alpha: Optional[Number] = None,
+    alpha: Optional[NumberType] = None,
     out: Optional[Tensor] = None
 ):
     """
@@ -641,8 +658,8 @@ eq = _make_elementwise_binary_reference(
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
 def float_power(
-    a: Union[TensorLikeType, Number],
-    b: Union[TensorLikeType, Number],
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
     out: Optional[TensorLikeType] = None,
 ) -> Tensor:
 
@@ -705,12 +722,14 @@ lt = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 maximum = _make_elementwise_binary_reference(
-    prims.max, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.max,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 minimum = _make_elementwise_binary_reference(
-    prims.min, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    prims.min,
+    type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
@@ -738,10 +757,10 @@ pow = _make_elementwise_binary_reference(
 #   is decomposed into multiple prims.
 # TODO: consider refactoring this with add impl
 def sub(
-    a: Union[Tensor, Number],
-    b: Union[Tensor, Number],
+    a: Union[Tensor, NumberType],
+    b: Union[Tensor, NumberType],
     *,
-    alpha: Optional[Number] = None,
+    alpha: Optional[NumberType] = None,
     out: Optional[Tensor] = None
 ):
     """
@@ -933,3 +952,123 @@ def sum(
         out=out,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
     )
+
+
+def cat(
+    tensors: TensorSequenceType, dim: int = 0, out: TensorLikeType = None
+) -> TensorLikeType:
+    if len(tensors) == 0:
+        msg = "cat expects at least one tensor, but received zero!"
+        raise ValueError(msg)
+
+    _dim = utils.canonicalize_dims(tensors[0].ndim, dim)
+    dtype, _ = _elementwise_dtypes(
+        *tensors, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+    _tensors = _convert_dtype(*tensors, dtype=dtype)
+    result = prims.concatenate(_tensors, _dim)
+
+    if out is not None:
+        out = _maybe_resize_out(out, result.shape)
+        return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
+
+    return result
+
+
+def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+    _permutation = utils.canonicalize_dims(a.ndim, dims)
+    return prims.transpose(a, _permutation)
+
+
+# Note: does not work with TensorMetas because of data-dependent control-flow
+def tensor_split(
+    a: TensorLikeType,
+    indices_or_sections: Union[Tensor, DimsType],
+    dim: int = 0,
+) -> Tuple[TensorLikeType, ...]:
+    _dim = utils.canonicalize_idx(a.ndim, dim)
+    if a.ndim == 0:
+        msg = "tensor_split: received a rank zero tensor, but expected a tensor of rank one or greater!"
+        raise ValueError(msg)
+
+    # If indices_or_sections is a tensor, it must be a CPU Long tensor
+    if isinstance(indices_or_sections, TensorLike):
+        if indices_or_sections.device != torch.device("cpu"):
+            msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {0}".format(
+                indices_or_sections.device
+            )
+            raise ValueError(msg)
+        if indices_or_sections.dtype != torch.long:
+            msg = "tensor_split: if indices_or_sections is a tensor it must have long dtype, "
+            " but received one with dtype {0}".format(indices_or_sections.dtype)
+            raise ValueError(msg)
+
+    # Case 0 -- indices_or_sections is an integer or a scalar tensor n and a is split along dim into n parts of equal-ish length
+    if isinstance(indices_or_sections, int) or (
+        isinstance(indices_or_sections, TensorLike) and indices_or_sections.ndim == 0
+    ):
+        sections: int = (
+            indices_or_sections  # type: ignore[assignment]
+            if isinstance(indices_or_sections, Number)
+            else indices_or_sections.item()
+        )
+
+        if sections <= 0:
+            msg = "tensor_split: number of sections must be greater than 0, but was {0}".format(
+                sections
+            )
+            raise ValueError(msg)
+
+        splits = []
+        dim_size = a.shape[_dim]
+        min_split_size = math.floor(dim_size / sections)
+        num_splits_one_extra = dim_size % sections
+        start_idx = 0
+        for split_idx in range(sections):
+            split_size = (
+                min_split_size + 1
+                if (split_idx < num_splits_one_extra)
+                else min_split_size
+            )
+            s = prims.slice_in_dim(a, start_idx, start_idx + split_size, axis=_dim)
+            splits.append(s)
+            start_idx = start_idx + split_size
+
+        return tuple(splits)
+    # Case 1 -- indices_or_sections is a sequence of integers or a 1D tensor describing the splits
+    else:
+        indices = indices_or_sections
+        if isinstance(indices_or_sections, TensorLike):
+            if indices_or_sections.ndim != 1:
+                msg = "tensor_split: non-scalar indices_or_sections tensors must have only one dimension, "
+                "but received a tensor with {0} dimensions".format(
+                    indices_or_sections.ndim
+                )
+                raise ValueError(msg)
+
+            indices = indices_or_sections.tolist()
+
+        splits = []
+        start_idx = 0
+        for x in indices:
+            splits.append(prims.slice_in_dim(a, start_idx, x, axis=_dim))
+            start_idx = x
+        splits.append(prims.slice_in_dim(a, start_idx, a.shape[_dim], axis=_dim))
+        return tuple(splits)
+
+
+def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
+    _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
+
+    if a.ndim <= 1:
+        return a
+
+    _permutation = list(range(0, a.ndim))
+    _permutation[_dim0] = _dim1
+    _permutation[_dim1] = _dim0
+    return prims.transpose(a, _permutation)
+
+
+# Aliases for transpose
+swap_axes = transpose
