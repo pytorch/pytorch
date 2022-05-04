@@ -400,7 +400,6 @@ class TestFFT(TestCase):
             x = torch.randn(65, device=device, dtype=dtype)
             R = torch.fft.hfft(x)
         else:
-            # cuFFT supports powers of 2 for half and complex half precision
             R = torch.fft.hfft(t)
         self.assertEqual(R.dtype, PROMOTION_MAP_C2R[dtype])
 
