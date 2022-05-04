@@ -29,9 +29,10 @@ class TestPythonRegistration(TestCase):
 
         # RuntimeError: impl("aten::neg", ...):
         # Explicitly provided namespace (aten) in operator name does not match ...
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "operator name does not match namespace"):
             my_lib3 = torch.library.extend_library("foo")
             my_lib3.impl(torch.ops.aten.neg.default, my_neg, "AutogradCPU")
+            my_lib3.remove()
 
         # Example 2
         def my_mul(*args, **kwargs):
@@ -80,9 +81,10 @@ class TestPythonRegistration(TestCase):
         def my_sum(*args, **kwargs):
             return args[0]
         my_lib1 = torch.library.extend_library("aten", "CPU")
+
         # RuntimeError: Explicitly provided dispatch key (Conjugate) is
         # inconsistent with the dispatch key of the enclosing TORCH_LIBRARY_IMPL block
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "inconsistent with the dispatch key"):
             my_lib1.impl('sum', my_sum, "Conjugate")
         my_lib1.impl('aten::sum', my_sum)
         x = torch.tensor([1, 2])
