@@ -9465,10 +9465,6 @@ def generate_std_var_kwargs(t: torch.Tensor, **kwargs):
         numel = torch.tensor(t.shape)[kwargs.get('dim')].prod()
         yield ((), {'correction': numel // 2})
 
-def generate_mean_kwargs(*args, **kwargs):
-    kw = {"dim": tuple()} if "dim" not in kwargs else {}
-    yield (tuple(), kw)
-
 def error_inputs_mean(op_info, device, **kwargs):
     err_msg1 = (r"mean\(\): at least one of \(i\) the input dtype and "
                 r"\(ii\) the desired output dtype should be either floating point or complex. "
@@ -17073,13 +17069,16 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=True,
         assert_jit_shape_analysis=True,
+        promotes_int_to_float=True,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.mean),
         error_inputs_func=error_inputs_mean,
-        generate_args_kwargs=generate_mean_kwargs,
         skips=(
-            # FIXME: CUDA implementation does not check for safe casting.
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='cuda'),
+            # FIXME: mean needs 'dim' parameter when using the 'out' overload.
+            # Adding it with 'generate_args_kwargs' does not work, since these also get passed
+            # onto the reference implementations.
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),
             # FIXME: mean does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: mean reduces all dimensions when dim=[]
