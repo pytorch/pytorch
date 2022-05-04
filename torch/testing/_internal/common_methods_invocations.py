@@ -26,6 +26,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, skipCUDAIf, precisionOverride,
+     skipCPUIfNoMklSparse,
      toleranceOverride, tol, has_cusolver)
 from torch.testing._internal.common_cuda import (
     CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
@@ -10741,8 +10742,8 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
-               onlyCUDA,
-               skipCUDAIf(_get_torch_cuda_version() < (11, 3), "cusparseSDDMM was added in 11.2.1"), ],
+               skipCUDAIf(_get_torch_cuda_version() < (11, 3), "cusparseSDDMM was added in 11.2.1"),
+               skipCPUIfNoMklSparse, ],
            skips=(
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
