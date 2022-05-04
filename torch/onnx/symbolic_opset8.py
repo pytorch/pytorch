@@ -1,17 +1,18 @@
+import warnings
+
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
-
 from torch.onnx.symbolic_helper import (
-    parse_args,
-    _unimplemented,
+    ScalarType,
     _block_list_in_opset,
     _try_get_scalar_type,
-    ScalarType,
+    _unimplemented,
+    parse_args,
 )
-from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore[attr-defined]
-
-import warnings
+from torch.onnx.symbolic_opset9 import (
+    _cast_Float,  # type: ignore[attr-defined]
+)
 
 # Note [ONNX operators that are added/updated from opset 8 to opset 9]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

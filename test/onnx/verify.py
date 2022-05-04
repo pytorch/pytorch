@@ -1,14 +1,13 @@
-import torch
-import torch.jit
-import torch.onnx
+import difflib
+import io
 
+import numpy as np
 import onnx
 import onnx.helper
 
-import numpy as np
-
-import difflib
-import io
+import torch
+import torch.jit
+import torch.onnx
 
 
 def colonize(msg, sep=": "):

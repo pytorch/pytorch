@@ -1,15 +1,18 @@
 # Owner(s): ["module: onnx"]
 
 import unittest
+
 import onnxruntime  # noqa: F401
-import torch
-
-from torch.cuda.amp import autocast
-
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
-from test_pytorch_common import skipIfNoCuda, skipIfNoBFloat16Cuda
-
+from test_pytorch_common import (
+    skipIfNoBFloat16Cuda,
+    skipIfNoCuda,
+    skipIfUnsupportedMinOpsetVersion,
+    skipScriptTest,
+)
 from test_pytorch_onnx_onnxruntime import TestONNXRuntime
+
+import torch
+from torch.cuda.amp import autocast
 
 
 class TestONNXRuntime_cuda(unittest.TestCase):

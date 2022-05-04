@@ -1,9 +1,7 @@
-from torch.onnx.symbolic_helper import _block_list_in_opset
-
-import torch.onnx.symbolic_opset9 as sym_opset9
-
 import warnings
 
+import torch.onnx.symbolic_opset9 as sym_opset9
+from torch.onnx.symbolic_helper import _block_list_in_opset
 
 # Note [ONNX operators that are added/updated from opset 7 to opset 8]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

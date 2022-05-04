@@ -2,7 +2,6 @@
 
 import os
 
-
 onnx_model_dir = os.path.join(
     os.path.dirname(os.path.realpath(__file__)),
     os.pardir,

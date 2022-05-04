@@ -1,10 +1,11 @@
 # The model is from here:
 #   https://github.com/pytorch/examples/blob/master/word_language_model/model.py
 
+from typing import Optional, Tuple
+
 import torch
 import torch.nn as nn
 from torch import Tensor
-from typing import Tuple, Optional
 
 
 class RNNModel(nn.Module):

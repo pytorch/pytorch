@@ -1,11 +1,15 @@
+import warnings
+from sys import maxsize
+
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
-from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
-from sys import maxsize
-from torch.onnx.symbolic_opset9 import permute, _reshape_from_tensor
-import warnings
-
+from torch.onnx.symbolic_helper import _parse_arg, _unimplemented, parse_args
+from torch.onnx.symbolic_opset9 import _reshape_from_tensor, permute
+from torch.onnx.utils import (
+    _add_block,
+    _add_input_to_block,
+    _add_output_to_block,
+)
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -143,7 +147,7 @@ def cross_entropy_loss(
 
 @parse_args("v", "v", "v", "v", "i")
 def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduction):
-    from torch.onnx.symbolic_opset9 import sigmoid, log, sub, neg, mul, add
+    from torch.onnx.symbolic_opset9 import add, log, mul, neg, sigmoid, sub
 
     p = g.op("Constant", value_t=torch.tensor([1]))
     sig_x = sigmoid(g, input)

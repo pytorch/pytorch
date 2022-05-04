@@ -1,9 +1,10 @@
 import io
-import torch.onnx
-import onnx
-from caffe2.python.onnx.backend import Caffe2Backend
-from caffe2.python.core import BlobReference, Net
 
+import onnx
+
+import torch.onnx
+from caffe2.python.core import BlobReference, Net
+from caffe2.python.onnx.backend import Caffe2Backend
 
 _next_idx = 0
 # Clone net takes a dict instead of a lambda

@@ -1,16 +1,15 @@
 # Owner(s): ["module: onnx"]
 
 import unittest
-import torch
-import torch.utils.cpp_extension
-
-import onnx
-import caffe2.python.onnx.backend as c2
 
 import numpy as np
-
+import onnx
 from test_pytorch_onnx_caffe2 import do_export
 from test_pytorch_onnx_onnxruntime import run_model_test
+
+import caffe2.python.onnx.backend as c2
+import torch
+import torch.utils.cpp_extension
 from torch.onnx.symbolic_helper import _unimplemented
 
 

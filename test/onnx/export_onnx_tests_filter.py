@@ -1,12 +1,13 @@
 import argparse
 import glob
-import onnx.backend.test
 import os
 import shutil
-from test_caffe2_common import run_generated_test
-import google.protobuf.text_format
-import test_onnx_common
 import traceback
+
+import google.protobuf.text_format
+import onnx.backend.test
+import test_onnx_common
+from test_caffe2_common import run_generated_test
 
 from torch.testing._internal.common_device_type import get_all_device_types
 

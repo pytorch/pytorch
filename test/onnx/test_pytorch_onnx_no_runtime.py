@@ -4,17 +4,17 @@
 
 import io
 import unittest
+from typing import Optional, Type
 
 import onnx
+
 import torch
+from torch import Tensor
+from torch.onnx import symbolic_helper
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch import Tensor
-from torch.onnx import symbolic_helper
-
-from typing import Optional, Type
 
 
 class TestOptionalOutput(unittest.TestCase):

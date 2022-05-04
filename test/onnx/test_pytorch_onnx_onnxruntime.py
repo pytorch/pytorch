@@ -1,60 +1,58 @@
 # Owner(s): ["module: onnx"]
 
-import unittest
-import onnxruntime
-import torch
-import torchvision
-
-import numpy as np
+import copy
 import io
 import itertools
-import copy
 import os
 import random
+import unittest
+from collections import OrderedDict
+from typing import Dict, List, Optional, Tuple, Union
 
 import model_defs.word_language_model as word_language_model
+import numpy as np
 import onnx
-
-import torch.nn.functional as F
-from torch.nn.utils import rnn as rnn_utils
+import onnxruntime
+import torchvision
 from model_defs.lstm_flattening_result import (
-    LstmFlatteningResultWithSeqLength,
     LstmFlatteningResultWithoutSeqLength,
+    LstmFlatteningResultWithSeqLength,
 )
 from model_defs.rnn_model_with_packed_sequence import (
     RnnModelWithPackedSequence,
-    RnnModelWithPackedSequenceWithState,
     RnnModelWithPackedSequenceWithoutState,
+    RnnModelWithPackedSequenceWithState,
 )
 from test_pytorch_common import (
+    BATCH_SIZE,
+    RNN_BATCH_SIZE,
+    RNN_HIDDEN_SIZE,
+    RNN_INPUT_SIZE,
+    RNN_SEQUENCE_LENGTH,
+    skipIfNoLapack,
+    skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
-    skipIfNoLapack,
     skipScriptTest,
-    skipIfUnsupportedMaxOpsetVersion,
 )
-from test_pytorch_common import BATCH_SIZE
-from test_pytorch_common import (
-    RNN_BATCH_SIZE,
-    RNN_SEQUENCE_LENGTH,
-    RNN_INPUT_SIZE,
-    RNN_HIDDEN_SIZE,
-)
-from typing import List, Tuple, Optional, Dict, Union
-from torch import Tensor
-
 from torchvision import ops
+from torchvision.models.detection.faster_rcnn import (
+    FastRCNNPredictor,
+    TwoMLPHead,
+)
 from torchvision.models.detection.image_list import ImageList
-from torchvision.models.detection.transform import GeneralizedRCNNTransform
+from torchvision.models.detection.roi_heads import RoIHeads
 from torchvision.models.detection.rpn import (
     AnchorGenerator,
-    RPNHead,
     RegionProposalNetwork,
+    RPNHead,
 )
-from torchvision.models.detection.roi_heads import RoIHeads
-from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
-from collections import OrderedDict
+from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
+import torch
+import torch.nn.functional as F
+from torch import Tensor
+from torch.nn.utils import rnn as rnn_utils
 from torch.nn.utils.rnn import PackedSequence
 from torch.onnx import (
     CheckerError,
@@ -63,7 +61,6 @@ from torch.onnx import (
 )
 from torch.onnx.symbolic_helper import _unimplemented
 from torch.onnx.utils import unpack_quantized_tensor
-
 
 _ORT_PROVIDERS = ["CPUExecutionProvider"]
 
@@ -781,6 +778,7 @@ class _TestONNXRuntime:
 
     def get_image(self, rel_path: str, size: Tuple[int, int]) -> Tensor:
         import os
+
         from PIL import Image
         from torchvision import transforms
 
@@ -931,7 +929,9 @@ class _TestONNXRuntime:
     def test_heatmaps_to_keypoints(self):
         maps = torch.rand(10, 1, 26, 26)
         rois = torch.rand(10, 4)
-        from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
+        from torchvision.models.detection.roi_heads import (
+            heatmaps_to_keypoints,
+        )
 
         out = heatmaps_to_keypoints(maps, rois)
         jit_trace = torch.jit.trace(heatmaps_to_keypoints, (maps, rois))
@@ -942,7 +942,9 @@ class _TestONNXRuntime:
 
         maps2 = torch.rand(20, 2, 21, 21)
         rois2 = torch.rand(20, 4)
-        from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
+        from torchvision.models.detection.roi_heads import (
+            heatmaps_to_keypoints,
+        )
 
         out2 = heatmaps_to_keypoints(maps2, rois2)
         out_trace2 = jit_trace(maps2, rois2)
@@ -9847,7 +9849,7 @@ class _TestONNXRuntime:
 
     @skipScriptTest()  # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1253950
     def test_transformer_encoder(self):
-        from torch.nn import TransformerEncoderLayer, TransformerEncoder
+        from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
         class MyModule(torch.nn.Module):
             def __init__(self, ninp, nhead, nhid, dropout, nlayers):

@@ -1,16 +1,16 @@
-from torch.autograd import Variable
-from onnx import numpy_helper
-
 import io
-import onnx
 import os
 import shutil
-import torch
 import traceback
 
+import onnx
 import test_onnx_common
-from torch.testing._internal.common_nn import module_tests
+from onnx import numpy_helper
 from test_nn import new_module_tests
+
+import torch
+from torch.autograd import Variable
+from torch.testing._internal.common_nn import module_tests
 
 
 # Take a test case (a dict) as input, return the test name.

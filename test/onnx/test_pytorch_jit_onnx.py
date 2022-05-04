@@ -1,8 +1,10 @@
 # Owner(s): ["module: onnx"]
-import torch
-import onnxruntime
 import unittest
-from test_pytorch_onnx_onnxruntime import run_ort, ort_compare_with_pytorch
+
+import onnxruntime
+from test_pytorch_onnx_onnxruntime import ort_compare_with_pytorch, run_ort
+
+import torch
 from torch._C import parse_ir
 
 
@@ -15,7 +17,10 @@ def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
     It also does not interact with actual PyTorch modules nor
     PyTorch tensor inputs.
     """
-    from torch.onnx.symbolic_helper import _set_onnx_shape_inference, _set_opset_version
+    from torch.onnx.symbolic_helper import (
+        _set_onnx_shape_inference,
+        _set_opset_version,
+    )
     from torch.onnx.utils import _optimize_graph
 
     # Shape inference is required because some ops' symbolic functions

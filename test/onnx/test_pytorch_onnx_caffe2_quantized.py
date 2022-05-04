@@ -1,14 +1,15 @@
 # Owner(s): ["module: unknown"]
 
-import numpy as np
+import io
 import unittest
-import torch.onnx
+
+import numpy as np
+import onnx
+
+import caffe2.python.onnx.backend as c2
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import io
-
-import onnx
-import caffe2.python.onnx.backend as c2
+import torch.onnx
 
 
 class TestQuantizedOps(unittest.TestCase):

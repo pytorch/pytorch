@@ -1,39 +1,38 @@
 # Owner(s): ["module: onnx"]
 
-from test_pytorch_common import TestCase, run_tests
+import copy
+import io
+import unittest
+
+import onnx
+import torchvision
+from autograd_helper import CustomFunction as CustomFunction2
+from test_pytorch_common import (
+    TestCase,
+    run_tests,
+    skipIfNoCuda,
+    skipIfUnsupportedMaxOpsetVersion,
+    skipIfUnsupportedMinOpsetVersion,
+)
+from verify import verify
 
 import torch
 import torch.onnx
+import torch.utils.cpp_extension
 from torch.onnx import (
-    utils,
     OperatorExportTypes,
     TrainingMode,
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
+    utils,
 )
 from torch.onnx.symbolic_helper import (
-    _set_opset_version,
-    _set_operator_export_type,
     _set_onnx_shape_inference,
+    _set_operator_export_type,
+    _set_opset_version,
     _unpack_list,
     parse_args,
 )
-import torch.utils.cpp_extension
-from autograd_helper import CustomFunction as CustomFunction2
-from test_pytorch_common import (
-    skipIfUnsupportedMinOpsetVersion,
-    skipIfUnsupportedMaxOpsetVersion,
-    skipIfNoCuda,
-)
-from verify import verify
-
-import torchvision
-
-import onnx
-
-import io
-import copy
-import unittest
 
 skip = unittest.skip
 

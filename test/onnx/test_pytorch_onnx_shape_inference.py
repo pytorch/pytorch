@@ -1,14 +1,16 @@
 # Owner(s): ["module: onnx"]
 
 import unittest
-import torch
+
 import numpy as np
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
+
+import torch
 from torch.onnx.symbolic_helper import (
-    _set_onnx_shape_inference,
     _onnx_main_opset,
+    _set_onnx_shape_inference,
     _set_opset_version,
 )
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
 
 
 def expect_tensor(scalar_type, shape=None):

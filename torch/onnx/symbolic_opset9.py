@@ -1,33 +1,27 @@
 # -*- coding: utf-8 -*-
 
+import math
+import warnings
+from functools import partial, wraps
+from sys import maxsize as maxsize
+from typing import Optional
+
 import torch
-from torch._C import ListType, OptionalType
-from torch.nn.modules.utils import _single, _pair, _triple
-
 import torch.onnx
-
+import torch.onnx.symbolic_helper as sym_help
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
-from functools import partial
-from functools import wraps
-
-import torch.onnx.symbolic_helper as sym_help
+from torch._C import ListType, OptionalType
+from torch.nn.modules.utils import _pair, _single, _triple
 from torch.onnx.symbolic_helper import (
-    parse_args,
+    ScalarType,
     _parse_arg,
     _unimplemented,
-    ScalarType,
-    quantized_args,
     args_have_same_dtype,
+    parse_args,
+    quantized_args,
 )
-
-from typing import Optional
-from sys import maxsize as maxsize
-
-import math
-import warnings
-
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py

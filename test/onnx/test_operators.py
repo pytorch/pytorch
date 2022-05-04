@@ -1,37 +1,40 @@
 # Owner(s): ["module: onnx"]
 
-from test_pytorch_common import (
-    TestCase,
-    run_tests,
-    flatten,
-    skipIfNoLapack,
-    BATCH_SIZE,
-    RNN_SEQUENCE_LENGTH,
-    RNN_INPUT_SIZE,
-    RNN_HIDDEN_SIZE,
-)
-
-import torch
-import torch.onnx
-from torch.onnx.symbolic_helper import (
-    parse_args,
-    _get_tensor_dim_size,
-    _get_tensor_sizes,
-)
-from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
-from torch.autograd import Variable, Function
-from torch.nn import Module, functional
-import torch.nn as nn
-import torch.nn.functional as F
-
-import itertools
-import io
-import inspect
 import glob
+import inspect
+import io
+import itertools
 import os
 import shutil
 import tempfile
+
+from test_pytorch_common import (
+    BATCH_SIZE,
+    RNN_HIDDEN_SIZE,
+    RNN_INPUT_SIZE,
+    RNN_SEQUENCE_LENGTH,
+    TestCase,
+    flatten,
+    run_tests,
+    skipIfNoLapack,
+)
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.onnx
 import torch.testing._internal.common_utils as common
+from torch.autograd import Function, Variable
+from torch.nn import Module, functional
+from torch.onnx import (
+    register_custom_op_symbolic,
+    unregister_custom_op_symbolic,
+)
+from torch.onnx.symbolic_helper import (
+    _get_tensor_dim_size,
+    _get_tensor_sizes,
+    parse_args,
+)
 from torch.testing._internal.common_utils import skipIfCaffe2
 
 """Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]

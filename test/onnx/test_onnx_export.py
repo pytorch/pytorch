@@ -3,17 +3,16 @@
 import io
 import os
 import sys
+from typing import Callable
 from unittest.mock import patch
 
 import onnx
-import torch
-from typing import Callable
-
 from test_pytorch_common import TestCase
-from torch.onnx.symbolic_helper import _onnx_unsupported
-from torch.onnx import OperatorExportTypes, symbolic_registry
-from torch.testing._internal.common_utils import skipIfCaffe2, custom_op
 
+import torch
+from torch.onnx import OperatorExportTypes, symbolic_registry
+from torch.onnx.symbolic_helper import _onnx_unsupported
+from torch.testing._internal.common_utils import custom_op, skipIfCaffe2
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

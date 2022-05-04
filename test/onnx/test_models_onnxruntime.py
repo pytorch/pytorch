@@ -1,10 +1,11 @@
 # Owner(s): ["module: onnx"]
 
 import unittest
-import onnxruntime  # noqa: F401
 
+import onnxruntime  # noqa: F401
 from test_models import TestModels
 from test_pytorch_onnx_onnxruntime import run_model_test
+
 import torch
 
 
