@@ -1051,7 +1051,6 @@ def amin(
     dim: Union[Optional[int], Optional[List[int]]] = None,
     keepdim: bool = False,
     *,
-    dtype=None,
     out: Optional[Tensor] = None
 ):
     # reduces over all dimensions if dim=() is passed
@@ -1062,7 +1061,7 @@ def amin(
         prims.amin,
         dims=dim,
         keepdims=keepdim,
-        dtype=dtype,
+        dtype=None,
         out=out,
         has_identity=False,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
@@ -1073,7 +1072,6 @@ def amax(
     dim: Union[Optional[int], Optional[List[int]]] = None,
     keepdim: bool = False,
     *,
-    dtype=None,
     out: Optional[Tensor] = None
 ):
     # reduces over all dimensions if dim=() is passed
@@ -1084,7 +1082,7 @@ def amax(
         prims.amax,
         dims=dim,
         keepdims=keepdim,
-        dtype=dtype,
+        dtype=None,
         out=out,
         has_identity=False,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
