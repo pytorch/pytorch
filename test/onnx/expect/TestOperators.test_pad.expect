@@ -161,7 +161,7 @@ graph {
     }
   }
   node {
-    input: "input"
+    input: "onnx::Pad_0"
     input: "onnx::Pad_22"
     output: "23"
     name: "Pad_13"
@@ -186,7 +186,7 @@ graph {
     raw_data: "\002\000\000\000\000\000\000\000\003\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000"
   }
   input {
-    name: "input"
+    name: "onnx::Pad_0"
     type {
       tensor_type {
         elem_type: 1

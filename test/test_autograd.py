@@ -2931,16 +2931,16 @@ class TestAutograd(TestCase):
         foo_event = [event for event in function_events if "foo" in event.name][0]
         self.assertEqual(foo_event.count, 1)
 
-    def test_record_function_legacy(self):
+    def test_record_function_new_signatures(self):
         # Test the new _record_function ops work
         # Note: Remove once record_function uses these directly
         x = torch.randn(10, 10)
         with profile(use_kineto=kineto_available()) as p:
-            handle = torch.ops.profiler._record_function_enter("bar", None)
+            record = torch.ops.profiler._record_function_enter_new("bar", None)
             try:
                 y = x * 2 + 4
             finally:
-                torch.ops.profiler._record_function_exit(handle)
+                torch.ops.profiler._record_function_exit(record)
 
         function_events = p.function_events
         foo_event = [event for event in function_events if "bar" in event.name][0]
@@ -6679,9 +6679,10 @@ class TestAutogradForwardMode(TestCase):
                 if func.overloadpacket == torch.ops.aten.alias:
                     counter[0] += 1
 
-                    # Make sure autograd is not disabled here
-                    foo = torch.rand(1, requires_grad=True)
-                    self.assertIsNotNone(foo.exp().grad_fn)
+                    # Make sure we can re-enable autograd here
+                    with torch.overrides.enable_reentrant_dispatch():
+                        foo = torch.rand(1, requires_grad=True)
+                        self.assertIsNotNone(foo.exp().grad_fn)
 
                 with no_dispatch():
                     return func(*args, **kwargs)
