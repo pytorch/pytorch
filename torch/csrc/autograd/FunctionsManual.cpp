@@ -2370,17 +2370,30 @@ std::tuple<Tensor, Tensor, Tensor> attn_backward(
     const Tensor& k,
     const Tensor& v,
     const Tensor& a) {
-  if (!grad_o.defined() || !grad_a.defined()) {
-    return std::tuple<Tensor, Tensor, Tensor>{Tensor(), Tensor(), Tensor()};
-  }
-  auto tanh_x_2 = (1- a.square());
-  auto partial_o_x = grad_o.matmul(v.transpose(0,1)).mul(tanh_x_2);
-  auto grad_q =
-      partial_o_x.matmul(k) + (grad_a.mul(tanh_x_2)).matmul(k);
-  auto grad_k = partial_o_x.transpose(0,1).matmul(q) +
-      (grad_a.mul(tanh_x_2)).transpose(0,1).matmul(q);
-  auto grad_v = a.transpose(0,1).matmul(grad_o);
+  auto grad_q = Tensor();
+  auto grad_k = Tensor();
+  auto grad_v = Tensor();
 
+  if (!grad_o.defined() && !grad_a.defined()) {
+    return std::tuple<Tensor, Tensor, Tensor>{grad_q, grad_k, grad_v};
+  }
+  auto tanh_x_2 = (1 - a.square());
+  if (!grad_o.defined()) {
+    grad_q = (grad_a.mul(tanh_x_2)).matmul(k);
+    grad_k = (grad_a.mul(tanh_x_2)).transpose(0, 1).matmul(q);
+    grad_v = at::zeros_like(v);
+  } else if (!grad_a.defined()) {
+    auto partial_o_x = grad_o.matmul(v.transpose(0, 1)).mul(tanh_x_2);
+    grad_q = partial_o_x.matmul(k);
+    grad_k = partial_o_x.transpose(0, 1).matmul(q);
+    grad_v = a.transpose(0, 1).matmul(grad_o);
+  } else {
+    auto partial_o_x = grad_o.matmul(v.transpose(0, 1)).mul(tanh_x_2);
+    grad_q = partial_o_x.matmul(k) + (grad_a.mul(tanh_x_2)).matmul(k);
+    grad_k = partial_o_x.transpose(0, 1).matmul(q) +
+        (grad_a.mul(tanh_x_2)).transpose(0, 1).matmul(q);
+    grad_v = a.transpose(0, 1).matmul(grad_o);
+  }
   return std::tuple<Tensor, Tensor, Tensor>{grad_q, grad_k, grad_v};
 }
 
