@@ -977,7 +977,7 @@ class PositiveDefiniteTransform(LowerCholeskyTransform):
     """
     Transform from unconstrained matrices to positive-definite matrices.
     """
-    codomain = constraints.positive_definite
+    codomain = constraints.positive_definite  # type: ignore
 
     def __eq__(self, other):
         return isinstance(other, PositiveDefiniteTransform)
