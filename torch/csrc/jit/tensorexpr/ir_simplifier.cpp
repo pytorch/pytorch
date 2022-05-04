@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
@@ -2910,6 +2911,149 @@ ExprPtr SimplifierUnderContext::mutate(DivPtr v) {
   return alloc<Div>(lhs_new, rhs_new);
 }
 
+ExprPtr SimplifierUnderContext::mutate(IfThenElsePtr v) {
+  ExprPtr condition = v->condition();
+  ExprPtr true_val = v->true_value();
+  ExprPtr false_val = v->false_value();
+
+  auto simplified_condition =
+      IRSimplifier::simplify(condition->accept_mutator(this));
+  auto simplified_true_val =
+      IRSimplifier::simplify(true_val->accept_mutator(this));
+  auto simplified_false_val =
+      IRSimplifier::simplify(false_val->accept_mutator(this));
+  if (simplified_condition->isConstant()) {
+    return immediateAs<int>(simplified_condition) ? simplified_true_val
+                                                  : simplified_false_val;
+  }
+
+  bool nothing_changed = (simplified_condition == condition) &&
+      (simplified_true_val == true_val) && (simplified_false_val == false_val);
+  return nothing_changed
+      ? v
+      : alloc<IfThenElse>(
+            simplified_condition, simplified_true_val, simplified_false_val);
+}
+
+ExprPtr SimplifierUnderContext::mutate(CompareSelectPtr v) {
+  GRAPH_DEBUG("(SimplifierUnderContext) Original: ", std::to_string(v));
+
+  ExprPtr lhs = v->lhs();
+  ExprPtr rhs = v->rhs();
+  ExprPtr ret1 = v->ret_val1();
+  ExprPtr ret2 = v->ret_val2();
+
+  auto simplified_lhs = IRSimplifier::simplify(lhs->accept_mutator(this));
+  auto simplified_rhs = IRSimplifier::simplify(rhs->accept_mutator(this));
+  auto simplified_ret1 = IRSimplifier::simplify(ret1->accept_mutator(this));
+  auto simplified_ret2 = IRSimplifier::simplify(ret2->accept_mutator(this));
+
+  ExprPtr simplified_cmp_select_expr = nullptr;
+  if ((simplified_lhs == lhs) && (simplified_rhs == rhs) &&
+      (simplified_ret1 == ret1) && (simplified_ret2 == ret2)) {
+    simplified_cmp_select_expr = v;
+  } else {
+    simplified_cmp_select_expr = alloc<CompareSelect>(
+        simplified_lhs,
+        simplified_rhs,
+        simplified_ret1,
+        simplified_ret2,
+        v->compare_select_op(),
+        v->bias());
+  }
+
+  GRAPH_DEBUG(
+      "(SimplifierUnderContext) after simplify: ",
+      std::to_string(simplified_cmp_select_expr));
+
+  analysis::Bound lhs_bound;
+  analysis::Bound rhs_bound;
+  auto lhs_has_bound = getBoundInfo(simplified_lhs, &lhs_bound);
+  auto rhs_has_bound = getBoundInfo(simplified_rhs, &rhs_bound);
+  if (!lhs_has_bound || !rhs_has_bound) {
+    GRAPH_DEBUG(
+        "(SimplifierUnderContext) Final: ",
+        std::to_string(simplified_cmp_select_expr));
+    return simplified_cmp_select_expr;
+  }
+
+  analysis::BoundCompareResult cmp_res = analysis::BoundCompareResult::kEQ;
+  auto bound_solved = analysis::compareBound(lhs_bound, rhs_bound, cmp_res);
+  if (!bound_solved) {
+    GRAPH_DEBUG(
+        "(SimplifierUnderContext) Final: ",
+        std::to_string(simplified_cmp_select_expr));
+    return simplified_cmp_select_expr;
+  }
+
+  auto _not = [](const CompareSelectOperation& cmp_op) {
+    switch (cmp_op) {
+      case CompareSelectOperation::kGT:
+        return CompareSelectOperation::kLE;
+      case CompareSelectOperation::kGE:
+        return CompareSelectOperation::kLT;
+      case CompareSelectOperation::kLT:
+        return CompareSelectOperation::kGE;
+      case CompareSelectOperation::kLE:
+        return CompareSelectOperation::kGT;
+      case CompareSelectOperation::kNE:
+        return CompareSelectOperation::kEQ;
+      default:
+        TORCH_INTERNAL_ASSERT(cmp_op == CompareSelectOperation::kEQ)
+        return CompareSelectOperation::kNE;
+    }
+  };
+
+  auto _imply = [](const analysis::BoundCompareResult& cmp_res,
+                   const CompareSelectOperation& cmp_op) {
+    // a > b
+    auto gt_true = (cmp_res == analysis::BoundCompareResult::kGT);
+    // a >= b
+    auto ge_true =
+        (cmp_res == analysis::BoundCompareResult::kGE ||
+         cmp_res == analysis::BoundCompareResult::kGT ||
+         cmp_res == analysis::BoundCompareResult::kEQ);
+    // a < b
+    auto lt_true = (cmp_res == analysis::BoundCompareResult::kLT);
+    // a <= b
+    auto le_true =
+        (cmp_res == analysis::BoundCompareResult::kLE ||
+         cmp_res == analysis::BoundCompareResult::kLT ||
+         cmp_res == analysis::BoundCompareResult::kEQ);
+    // a == b
+    auto eq_true = (cmp_res == analysis::BoundCompareResult::kEQ);
+    // a != b
+    auto ne_true =
+        (cmp_res == analysis::BoundCompareResult::kLT ||
+         cmp_res == analysis::BoundCompareResult::kGT);
+
+    switch (cmp_op) {
+      case CompareSelectOperation::kGT:
+        return gt_true;
+      case CompareSelectOperation::kGE:
+        return ge_true;
+      case CompareSelectOperation::kLT:
+        return lt_true;
+      case CompareSelectOperation::kLE:
+        return le_true;
+      case CompareSelectOperation::kNE:
+        return ne_true;
+      default:
+        TORCH_INTERNAL_ASSERT(cmp_op == CompareSelectOperation::kEQ)
+        return eq_true;
+    }
+  };
+
+  auto cmp_op = v->compare_select_op();
+  auto not_cmp_op = _not(cmp_op);
+  auto ret_expr = _imply(cmp_res, cmp_op)
+      ? simplified_ret1
+      : (_imply(cmp_res, not_cmp_op) ? simplified_ret2
+                                     : simplified_cmp_select_expr);
+  GRAPH_DEBUG("(SimplifierUnderContext) Final: ", std::to_string(ret_expr));
+  return ret_expr;
+}
+
 ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
   ExprPtr lhs = v->lhs();
   ExprPtr rhs = v->rhs();
@@ -2948,6 +3092,40 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
     return v;
   }
   return alloc<Mod>(lhs_new, rhs_new);
+}
+
+bool SimplifierUnderContext::getBoundInfo(
+    const ExprPtr& expr,
+    analysis::Bound* bound_info) {
+  if (expr == nullptr || bound_info == nullptr)
+    return false;
+
+  if (expr->isConstant()) {
+    bound_info->start = expr;
+    bound_info->end = expr;
+    return true;
+  }
+
+  VarPtr var_key = to<Var>(expr);
+  if (var_key == nullptr) {
+    return false;
+  }
+
+  auto got = var_bound_info_.find(var_key);
+  if (got == var_bound_info_.end()) {
+    return false;
+  }
+
+  bound_info->start = got->second.first;
+  // TODO: Need to add the boundary information(close/open) of a range to
+  // Bound. Currently, the VarBoundInfo comes from for-loop statement while
+  // the end of the boundary is open. But we assume the start and end of a
+  // range are always close. Hence, we explicitly convert the open boundary to
+  // close.
+  //   [for-start, for-stop) => [for-start, for-stop -1]
+  bound_info->end = IRSimplifier::simplify(
+      alloc<Sub>(got->second.second, immLike(got->second.second, 1)));
+  return true;
 }
 
 bool exprEquals(ExprPtr A, ExprPtr B) {

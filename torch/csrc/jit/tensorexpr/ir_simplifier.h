@@ -373,6 +373,10 @@ class MinTerm : public ExprNode<MinTerm> {
 
 // Context-sensitive IR simplification
 using VarBoundInfo = std::unordered_map<VarPtr, std::pair<ExprPtr, ExprPtr>>;
+namespace analysis {
+class Bound;
+};
+
 class TORCH_API SimplifierUnderContext : public IRMutator {
  public:
   ~SimplifierUnderContext() override = default;
@@ -381,6 +385,11 @@ class TORCH_API SimplifierUnderContext : public IRMutator {
 
   ExprPtr mutate(DivPtr v) override;
   ExprPtr mutate(ModPtr v) override;
+  ExprPtr mutate(CompareSelectPtr v) override;
+  ExprPtr mutate(IfThenElsePtr v) override;
+
+ protected:
+  bool getBoundInfo(const ExprPtr& expr, analysis::Bound* bound_info);
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

@@ -4438,7 +4438,7 @@ TEST(LoopNest, OptimizeConditionalsMultipleStoresInOneLoop) {
       R"IR(
 # CHECK: for (int i = 0; i < 5
 # CHECK-NEXT: A[i] = B[i]
-# CHECK-NEXT: B[i] = IfThenElse(i<30 ? 1 : 0, C[i], D[i])
+# CHECK-NEXT: B[i] = C[i]
 # CHECK: for (int i = 0; i < 45
 # CHECK-NEXT: A[i + 5] = C[i]
 # CHECK-NEXT: B[i + 5] = IfThenElse(i + 5<30 ? 1 : 0, C[i + 5], D[i + 5])
