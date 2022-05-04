@@ -467,6 +467,30 @@ bool isinf(bool x) {
   return false;
 }
 
+bool isfinite(int64_t x) {
+  return true;
+}
+
+bool isfinite(int x) {
+  return true;
+}
+
+bool isfinite(short x) {
+  return true;
+}
+
+bool isfinite(char x) {
+  return true;
+}
+
+bool isfinite(unsigned char x) {
+  return true;
+}
+
+bool isfinite(bool x) {
+  return true;
+}
+
 ////////////////////////////////////////////////////////////
 //                        End TODO                        //
 ////////////////////////////////////////////////////////////
