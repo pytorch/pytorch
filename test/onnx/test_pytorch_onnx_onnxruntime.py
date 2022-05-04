@@ -9183,6 +9183,7 @@ class _TestONNXRuntime:
                       dynamic_axes={"size": [0, 1]},
                       test_with_inputs=[(boxes, size), (boxes, size_2)])
 
+    @skipIfUnsupportedMaxOpsetVersion(15)  # TODO: Opset 16 RoiAlign result mismatch
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
@@ -9190,6 +9191,7 @@ class _TestONNXRuntime:
         model = ops.RoIAlign((5, 5), 1., 2)
         self.run_test(model, (x, single_roi))
 
+    @skipIfUnsupportedMaxOpsetVersion(15)  # TODO: Opset 16 RoiAlign result mismatch
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align_aligned(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
@@ -9295,6 +9297,7 @@ class _TestONNXRuntime:
                       test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
+    @skipIfUnsupportedMaxOpsetVersion(15)  # TODO: Opset 16 RoiAlign result mismatch
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_multi_scale_roi_align(self):
@@ -10986,6 +10989,33 @@ class _TestONNXRuntime:
         self.run_test(Module(False), x, rtol=1e-3, atol=1e-6)
         self.run_test(Module(True), x, rtol=1e-3, atol=1e-6)
 
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_grid_sample(self):
+        n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
+
+        class GridSampleModule(torch.nn.Module):
+
+            def __init__(self, mode, padding_mode, align_corners) -> None:
+                super().__init__()
+                self.mode, self.padding_mode, self.align_corners = mode, padding_mode, align_corners
+
+            def forward(self, input, grid):
+                return torch.nn.functional.grid_sample(input, grid, self.mode, self.padding_mode, self.align_corners)
+
+        for mode, padding_mode, align_corners in itertools.product(
+            ("bilinear", "nearest", "bicubic"),
+            ("zeros", "border", "reflection"),
+            (True, False),
+        ):
+            atol_rtol = {}
+            if (mode, padding_mode) == ("bicubic", "border"):
+                if align_corners:
+                    atol_rtol.update({"atol": 0.3, "rtol": 0.4})
+                else:
+                    atol_rtol.update({"atol": 0.02, "rtol": 0.02})
+            input, grid = torch.randn(n, c, h_in, w_in), torch.randn(n, h_out, w_out, 2)
+            self.run_test(GridSampleModule(mode, padding_mode, align_corners), (input, grid), **atol_rtol)
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
@@ -11122,6 +11152,8 @@ TestONNXRuntime_opset13 = MakeTestCase(13, keep_initializers_as_inputs=False)
 TestONNXRuntime_opset14 = MakeTestCase(14, keep_initializers_as_inputs=False)
 
 TestONNXRuntime_opset15 = MakeTestCase(15, keep_initializers_as_inputs=False)
+
+TestONNXRuntime_opset16 = MakeTestCase(16, keep_initializers_as_inputs=False)
 
 
 if __name__ == "__main__":
