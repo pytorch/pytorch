@@ -10,8 +10,8 @@ from torch.ao.quantization.observer import (
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
     FixedQParamsObserver,
-    default_affine_fixed_qparams_observer,
-    default_symmetric_fixed_qparams_observer,
+    default_fixed_qparams_range_0to1_observer,
+    default_fixed_qparams_range_neg1to1_observer,
     _with_args,
 )
 import re
@@ -352,8 +352,15 @@ default_dynamic_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMax
 Default dynamic fake_quant for activations.
 """
 
-default_symmetric_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(observer=default_symmetric_fixed_qparams_observer)
-default_affine_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(observer=default_affine_fixed_qparams_observer)
+default_fixed_qparams_range_neg1to1_fake_quant = (
+    FixedQParamsFakeQuantize.with_args(observer=default_fixed_qparams_range_neg1to1_observer)
+)
+default_fixed_qparams_range_0to1_fake_quant = (
+    FixedQParamsFakeQuantize.with_args(observer=default_fixed_qparams_range_0to1_observer)
+)
+# TODO: the following 2 variables are kept for backwards compatibility; remove after a few releases
+default_symmetric_fixed_qparams_fake_quant = default_fixed_qparams_range_neg1to1_fake_quant
+default_affine_fixed_qparams_fake_quant = default_fixed_qparams_range_0to1_fake_quant
 
 default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                                quant_min=-128,
