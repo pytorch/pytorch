@@ -29,7 +29,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed.utils import (
     _verify_param_shape_across_processes,
-    _sync_params_and_buffers,
+    _sync_params_and_buffers_functional,
 )
 import torch.nn as nn
 import torch.nn.functional as F
@@ -675,13 +675,13 @@ class FullyShardedDataParallel(nn.Module):
                 process_group=self.process_group,
                 tensors=params,  # TODO: FSDP + DDP to verify buffers as well
             )
-        _sync_params_and_buffers(
-            module=module,
+        _sync_params_and_buffers_functional(
             process_group=self.process_group,
+            # TODO: buffer synchronization
+            module_states=[param.detach() for param in params],
             # Same bucket size as used in DDP.
             broadcast_bucket_size=int(250 * 1024 * 1024),
             src=0,
-            params_and_buffers_to_ignore=ignored_params,
         )
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
             module, param_list=params

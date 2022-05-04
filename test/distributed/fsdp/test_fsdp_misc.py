@@ -43,7 +43,11 @@ class TestFSDPMisc(FSDPTest):
         return dist.distributed_c10d._get_default_group()
 
     @skip_if_lt_x_gpu(2)
-    def test_fsdp_diff_num_params(self):
+    def test_fsdp_diff_param_shape(self):
+        # create nccl group with small timeout
+        os.environ["NCCL_BLOCKING_WAIT"] = "1"
+        nccl_pg = dist.new_group(backend="nccl", timeout=timedelta(seconds=10))
+
         class DiffNumParams(nn.Module):
             def __init__(self, rank):
                 super().__init__()
@@ -51,19 +55,6 @@ class TestFSDPMisc(FSDPTest):
                 self.lin = torch.nn.Linear(10, 10, bias=False)
                 if rank != 0:
                     self.lin2 = torch.nn.Linear(10, 10, bias=False)
-
-        m = DiffNumParams(self.rank)
-        with self.assertRaisesRegex(
-            RuntimeError, "expects same model across all ranks"
-        ):
-            FSDP(m)
-        dist.barrier()
-
-    @skip_if_lt_x_gpu(2)
-    def test_fsdp_diff_param_shape(self):
-        # create nccl group with small timeout
-        os.environ["NCCL_BLOCKING_WAIT"] = "1"
-        nccl_pg = dist.new_group(backend="nccl", timeout=timedelta(seconds=10))
 
         class DiffShapeParams(nn.Module):
             def __init__(self, rank):

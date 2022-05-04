@@ -25,6 +25,19 @@ def _sync_params_and_buffers(
         if name not in params_and_buffers_to_ignore:
             module_states.append(buffer.detach())
 
+    _sync_params_and_buffers_functional(
+        process_group,
+        module_states,
+        broadcast_bucket_size,
+        src
+    )
+
+def _sync_params_and_buffers_functional(
+    process_group,
+    module_states,
+    broadcast_bucket_size,
+    src
+):
     if len(module_states) > 0:
         dist._broadcast_coalesced(
             process_group, module_states, broadcast_bucket_size, src
