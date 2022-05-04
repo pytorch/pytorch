@@ -73,8 +73,8 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
   // comparing devices only involves comparing the type and index (two integers), we
   // can move this to a DEBUG only assert. Until then this confirms and maintains a
   // crucial invariance.
-  TORCH_CHECK(values.device() == crow_indices.device(), "Values and crow_indices need to be on the same device.");
-  TORCH_CHECK(values.device() == col_indices.device(), "Values and col_indices need to be on the same device.");
+  TORCH_CHECK(values_.device() == crow_indices_.device(), "Values and crow_indices need to be on the same device.");
+  TORCH_CHECK(values_.device() == col_indices_.device(), "Values and col_indices need to be on the same device.");
 }
 
 const char* SparseCsrTensorImpl::tensorimpl_type_name() const {
@@ -140,6 +140,8 @@ void SparseCsrTensorImpl::set_member_tensors(
 
   sizes_and_strides_.set_sizes(size);
   refresh_numel();
+  TORCH_CHECK(values_.device() == crow_indices_.device(), "Values and crow_indices need to be on the same device.");
+  TORCH_CHECK(values_.device() == col_indices_.device(), "Values and col_indices need to be on the same device.");
 }
 
 IntArrayRef SparseCsrTensorImpl::strides() const {
