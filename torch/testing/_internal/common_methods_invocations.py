@@ -7559,7 +7559,6 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, **kwargs
         ((S, S), 0, [0, 1, 2, 2], False),
         # test when lengths do not sum to dim size
         ((M, S, S), 0, [1, 2, 0, 6, 0], True),
-        # ((), 0, zero.clone().detach(), True),
     )
 
     reductions = ["max", "mean", "min", "sum", "prod"]
