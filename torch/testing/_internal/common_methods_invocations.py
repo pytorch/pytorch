@@ -16217,6 +16217,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,  # jiterator ops doesn't have backward defined
         decorators=[
             onlyCUDA,
+            skipCUDAIfRocm,
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
@@ -16241,6 +16242,8 @@ op_db: List[OpInfo] = [
                          dtypes=[torch.bool]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                          dtypes=[torch.bool]),
+            # Expected failure: torch.jiterator_unary is not a valid op
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
         )
     ),
     BinaryUfuncInfo(
@@ -16254,7 +16257,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
         supports_rhs_python_scalar=False,
-        decorators=[onlyCUDA],
+        decorators=[onlyCUDA, skipCUDAIfRocm],
         skips=(
             # Jiterator ops doesn't support neg or conj view
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -16262,6 +16265,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
             # Jiterator ops doesn't have composite rule
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
+            # Expected failure: torch.jiterator_binary is not a valid op
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
         )
     ),
     OpInfo(
@@ -16274,7 +16279,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_jiterator, num_inputs=4, alpha=3.14, beta=-4.20),
         supports_out=False,
         supports_autograd=False,  # jiterator ops doesn't have backward defined
-        decorators=[onlyCUDA],
+        decorators=[onlyCUDA, skipCUDAIfRocm],
         skips=(
             # Jiterator ops doesn't support neg or conj view
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -16282,6 +16287,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
             # Jiterator ops doesn't have composite rule
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
+            # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
         )
     ),
     # `torch.norm` has multiple code paths depending on the value of `p`.
