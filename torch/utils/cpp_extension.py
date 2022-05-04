@@ -1840,6 +1840,7 @@ def _import_module_from_library(module_name, path, is_python_module):
     if is_python_module:
         # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
         spec = importlib.util.spec_from_file_location(module_name, filepath)
+        assert spec is not None
         module = importlib.util.module_from_spec(spec)
         assert isinstance(spec.loader, importlib.abc.Loader)
         spec.loader.exec_module(module)
