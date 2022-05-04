@@ -277,6 +277,9 @@ namespace c10 {
   _(onnx, Range)                     \
   _(onnx, Tile)                      \
   _(onnx, Where)                     \
+  _(onnx, Optional)                  \
+  _(onnx, OptionalGetElement)        \
+  _(onnx, OptionalHasElement)        \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
