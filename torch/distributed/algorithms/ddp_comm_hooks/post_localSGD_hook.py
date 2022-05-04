@@ -44,8 +44,8 @@ class PostLocalSGDState(object):
         # The group used for all-reducing gradients locally.
         self.subgroup = subgroup
         self.start_localSGD_iter = start_localSGD_iter
-        # All reduce gradients locally since iteration `start_localSGD_iter`.
-        # This may help with the convergence efficiency at the cost of additional intra-subgroup communication.
+        # Allreduce gradients locally since iteration `start_localSGD_iter`.
+        # This may help with the convergence efficiency at the cost of relatively cheap intra-subgroup communication.
         self.post_local_gradient_allreduce = post_local_gradient_allreduce
         # Iteration/step in the training loop.
         self.iter = 0
