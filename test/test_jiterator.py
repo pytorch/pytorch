@@ -23,8 +23,8 @@ def ref_fn(x, y, alpha=1, beta=1):
 class TestPythonJiterator(TestCase):
     @skipCUDAIfRocm
     @parametrize("shape_strides", [
-        (([3, 3], [3, 1]), ([3, 3], [3, 1])),  # contiguous
-        (([3, 3], [1, 3]), ([3, 1], [1, 2])),  # non-contiguous
+        # (([3, 3], [3, 1]), ([3, 3], [3, 1])),  # contiguous
+        (([3, 3], [1, 3]), ([3, 1], [1, 3])),  # non-contiguous
     ])
     @dtypes(*product(all_types_and_complex_and(torch.half, torch.bfloat16),
                      all_types_and_complex_and(torch.half, torch.bfloat16)))

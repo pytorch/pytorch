@@ -8,7 +8,7 @@
 
 #include <iostream>
 #include <utility>
-
+#include <chrono>
 namespace at {
 namespace native {
 
@@ -53,6 +53,10 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
   if (!fn_ptr->function) {
     const std::lock_guard<std::mutex> lock{_jiterator_mutex};
     if (!fn_ptr->function) { // cache miss!
+
+      std::cout<< "\nvector at::cuda::jit::generate_code begins\n";
+      std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
       // Generates program
       auto code = at::cuda::jit::generate_code(nTensors, f, name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
@@ -60,6 +64,10 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
                                                extra_args_types,
                                                vectorized, vec_size);
+
+      std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+      std::cout << "vector at::cuda::jit::generate_code time = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
+
       std::string kernel_name = vectorized ? name + "_vectorized" + std::to_string(vec_size) : name;
 
       // Acquires the program
@@ -146,11 +154,19 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
   if (!fn_ptr->function) {
     const std::lock_guard<std::mutex> lock{_jiterator_mutex};
     if (!fn_ptr->function) {
+
+      std::cout<< "\nunrolled at::cuda::jit::generate_code begins\n";
+      std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
       auto code = at::cuda::jit::generate_code(nTensors, f, name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                contiguous, dynamic_casting,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
                                                extra_args_types);
+
+      std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+      std::cout << "unrolled at::cuda::jit::generate_code time = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
+
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
     }
   }
@@ -173,7 +189,16 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
     // since 7 slots are already filled in `args`
     args[i + 7] = const_cast<void*>(extra_args[i].data_ptr());
   }
+
+  {
+  std::cout<< "\nunrolled launch_jitted_pwise_function begins\n";
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
   at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.get(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
+
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+  std::cout << "unrolled launch_jitted_pwise_function time = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
+  }
 }
 
 void jitted_gpu_kernel_dynamic_impl(
