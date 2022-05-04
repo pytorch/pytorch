@@ -10,9 +10,7 @@ from torch.onnx.symbolic_helper import (
     _unimplemented,
     parse_args,
 )
-from torch.onnx.symbolic_opset9 import (
-    _cast_Float,  # type: ignore[attr-defined]
-)
+from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore[attr-defined]
 
 # Note [ONNX operators that are added/updated from opset 8 to opset 9]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

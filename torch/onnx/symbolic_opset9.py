@@ -4849,8 +4849,8 @@ class Prim:
                 ):
                     b_in.setType(inputs[i + 1].type())
             torch._C._jit_pass_onnx_block(
-                b, new_block, operator_export_type, env, False
-            )  # type:ignore[arg-type]
+                b, new_block, operator_export_type, env, False  # type:ignore[arg-type]
+            )
         new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
             new_node, opset_version
         )
@@ -4909,7 +4909,7 @@ class Prim:
             env = torch._C._jit_pass_onnx_block(
                 current_b,
                 block,
-                operator_export_type,
+                operator_export_type,  # type:ignore[arg-type]
                 env,  # type:ignore[arg-type]
                 True,
             )
@@ -4936,8 +4936,12 @@ class Prim:
             for b in n.blocks():
                 new_block = new_node.addBlock()
                 torch._C._jit_pass_onnx_block(
-                    b, new_block, operator_export_type, env, False
-                )  # type:ignore[arg-type]
+                    b,
+                    new_block,
+                    operator_export_type,  # type:ignore[arg-type]
+                    env,
+                    False,
+                )
             new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
                 new_node, opset_version
             )

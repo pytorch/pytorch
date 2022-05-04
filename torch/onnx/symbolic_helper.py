@@ -934,13 +934,9 @@ def _unbind_helper(g, self, dim, _outputs):
     if _export_onnx_opset_version < 11:
         from torch.onnx.symbolic_opset9 import unbind
     elif _export_onnx_opset_version <= 12:
-        from torch.onnx.symbolic_opset11 import (
-            unbind,  # type: ignore[no-redef]
-        )
+        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
     else:
-        from torch.onnx.symbolic_opset13 import (
-            unbind,  # type: ignore[no-redef]
-        )
+        from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
     return unbind(g, self, dim, _outputs)
 
 
@@ -949,9 +945,7 @@ def _scatter_helper(g, self, dim, index, src):
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import (
-            scatter,  # type: ignore[no-redef]
-        )
+        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
     return scatter(g, self, dim, index, src)
 
 
@@ -998,9 +992,7 @@ def _arange_helper(g, *args):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import arange
     else:
-        from torch.onnx.symbolic_opset11 import (
-            arange,  # type: ignore[no-redef]
-        )
+        from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
     return arange(g, *args)
 
 
@@ -1023,9 +1015,7 @@ def _index_fill_reshape_helper(g, self, dim, index):
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import (
-            scatter,  # type: ignore[no-redef]
-        )
+        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
 
     if self.type().dim() is None:
         return _unimplemented("index_fill", "input rank not accesible")
