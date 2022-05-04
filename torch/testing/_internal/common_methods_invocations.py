@@ -4033,9 +4033,9 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
 
     # Error Inputs for zero-dim tensors, when 'dim' arg is not provided.
     shape = (S, 0, S)
-    err_msg_amax_amin = "Specify the reduction dim with the 'dim' argument."
+    err_msg_amax_amin = "reduction"
     err_msg_aminmax = "cannot compute aminmax over an empty dimension as the operation has no identity"
-    if op_info.name in ['amax', 'amin']:
+    if op_info.name in ['amax', 'amin', '_refs.amax', '_refs.amin']:
         yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_regex=err_msg_amax_amin)
     elif op_info.name in ['aminmax']:
         yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_regex=err_msg_aminmax)
@@ -4049,9 +4049,9 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
                      error_regex=err_msg1)
 
     # Error Inputs for repeated 'dim'
-    if op_info.name in ['amax', 'amin']:
+    if op_info.name in ['amax', 'amin', '_refs.amax', '_refs.amin']:
         dims = [(0, 0), (0, -4)]
-        err_msg2 = "dim 0 appears multiple times in the list of dims"
+        err_msg2 = "in the list of dims"
         x = torch.randn(S, S, S, S, device=device)
         for dim in dims:
             yield ErrorInput(SampleInput(x, kwargs={'dim': dim}), error_regex=err_msg2)
@@ -4065,7 +4065,7 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
     err_msg_amax_amin2 = "Expected the dtype for input and out to match"
     err_msg_aminmax2 = "Expected out tensor to have dtype float, but got double instead"
 
-    if op_info.name in ['amax', 'amin']:
+    if op_info.name in ['amax', 'amin', '_refs.amax', '_refs.amin']:
         yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': illegal_values}),
                          error_regex=err_msg_amax_amin2)
     elif op_info.name in ['aminmax']:
@@ -4073,9 +4073,11 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
                          error_regex=err_msg_aminmax2)
 
     # Error Inputs for functions to raise an error on specified zero'd dimension as reduction dim
-    err_msg3 = "Expected reduction dim 1 to have non-zero size"
+    err_msg3 = "reduction"
+    # FIXME: eager and ref impl throw different types of errors
+    error_type = IndexError if 'refs' not in op_info.name else RuntimeError
     yield ErrorInput(SampleInput(torch.rand(shape, device=device), kwargs={'dim': 1}),
-                     error_type=IndexError, error_regex=err_msg3)
+                     error_type=error_type, error_regex=err_msg3)
 
 def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
     test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
@@ -16611,7 +16613,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amax),
         skips=(
-            # FIXME: sum reduces all dimensions when dim=[]
+            # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         ),
@@ -16623,7 +16625,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amin),
         skips=(
-            # FIXME: sum reduces all dimensions when dim=[]
+            # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         ),
@@ -17946,7 +17948,18 @@ python_ref_db = [
         "_refs.sum",
         torch_opinfo_name="sum",
         supports_out=True
+    ),
+
+    ReductionPythonRefInfo(
+        "_refs.amin",
+        torch_opinfo_name="amin",
+    ),
+
+    ReductionPythonRefInfo(
+        "_refs.amax",
+        torch_opinfo_name="amax",
     )
+
 ]
 
 # Common operator groupings

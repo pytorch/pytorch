@@ -675,5 +675,6 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
     if dims is None:
         return tuple(range(len(shape)))
     dims = tuple(canonicalize_idx(len(shape), idx) for idx in dims)
-    assert len(dims) == len(set(dims)), "duplicate value in dims"
+    if len(dims) != len(set(dims)):
+        raise RuntimeError("duplicate value in the list of dims")
     return dims

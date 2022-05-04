@@ -357,7 +357,7 @@ class TestCommon(TestCase):
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    @ops([op for op in ops_and_refs if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
         for ei in error_inputs:

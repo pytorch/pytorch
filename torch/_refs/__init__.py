@@ -23,7 +23,7 @@ import math
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
 
-all = [
+__all__ = [
     #
     # Elementwise Unary References
     #
@@ -119,7 +119,9 @@ all = [
     #
     # Reduction ops
     #
-    "sum",  # TODO: add opinfo
+    "sum",
+    "amax",
+    "amin",
     #
     # View & Shape Ops
     #
@@ -982,10 +984,9 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = all(a.shape[i] for i in range(a.ndim) if i in dims)  # type: ignore[operator]
-        assert (
-            valid_shape
-        ), "reducing over zero-size dimension for reduction operation without identity"
+        valid_shape = all(a.shape[i] for i in range(a.ndim) if i in dims)
+        if not valid_shape:
+            raise RuntimeError("reducing over zero-size dimension for reduction operation without identity")
     # even though some reductions, like amin or amax, don't strictly require type promotion,
     # all the math ops (including comparisons) are still defined only for a computation type,
     # so promotion will still happen. We are doing it explicitly here
@@ -1003,12 +1004,12 @@ def _reduction(
             if output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.SAME:
                 if out.dtype != a.dtype:
                     raise RuntimeError(
-                        "out dtype and output type of reduction must match"
+                        "Expected the dtype for input and out to match"
                     )
             elif output_dtype_kind == REDUCTION_OUTPUT_TYPE_KIND.ALWAYS_BOOL:
                 if out.dtype != torch.bool:
                     raise RuntimeError(
-                        "out dtype and output type of reduction must match"
+                        "Expected the dtype for input and out to match"
                     )
         out = _maybe_resize_out(out, result.shape)
         return copy_to(out, result, allow_cross_device=False)  # type: ignore[arg-type]
@@ -1032,7 +1033,7 @@ def sum(
             dtype = torch.int64
         else:
             dtype = a.dtype
-    # sum reduces over all dimensions if dim=() is passed
+    # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
     return _reduction(
@@ -1042,6 +1043,50 @@ def sum(
         keepdims=keepdim,
         dtype=dtype,
         out=out,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    )
+
+def amin(
+    a: Tensor,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    dtype=None,
+    out: Optional[Tensor] = None
+):
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+    return _reduction(
+        a,
+        prims.amin,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=dtype,
+        out=out,
+        has_identity=False,
+        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+    )
+
+def amax(
+    a: Tensor,
+    dim: Union[Optional[int], Optional[List[int]]] = None,
+    keepdim: bool = False,
+    *,
+    dtype=None,
+    out: Optional[Tensor] = None
+):
+    # reduces over all dimensions if dim=() is passed
+    if dim == () or dim == []:
+        dim = None
+    return _reduction(
+        a,
+        prims.amax,
+        dims=dim,
+        keepdims=keepdim,
+        dtype=dtype,
+        out=out,
+        has_identity=False,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
     )
 
