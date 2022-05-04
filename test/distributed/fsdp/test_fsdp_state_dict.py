@@ -453,23 +453,32 @@ class TestFSDPStateDict(FSDPTest):
         }
         fsdp_model = FSDP(model, ignored_modules=ignored_modules)
         with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
-            sd = fsdp_model.state_dict()
+            sd1 = fsdp_model.state_dict()
         with FSDP.summon_full_params(fsdp_model):
             fsdp_params = deepcopy(list(fsdp_model.parameters()))
         # Check that the ignored parameters are not cloned
         for tensor, tensor_name in ignored_tensor_to_tensor_name.items():
-            self.assertTrue(tensor_name in sd)
-            self.assertEqual(tensor.data_ptr(), sd[tensor_name].data_ptr())
+            self.assertTrue(tensor_name in sd1)
+            self.assertEqual(tensor.data_ptr(), sd1[tensor_name].data_ptr())
         # Check that the state dict can be loaded into a non-wrapped version of
         # the model
         nonwrapped_model = Model(wrap_fsdp=False, register_buffer=True).cuda()
         for param in nonwrapped_model.parameters():
             with torch.no_grad():
                 param.zero_()
-        nonwrapped_model.load_state_dict(sd)
+        nonwrapped_model.load_state_dict(sd1)
         local_params = list(nonwrapped_model.parameters())
         for fsdp_param, local_param in zip(fsdp_params, local_params):
             self.assertEqual(fsdp_param, local_param)
+        # Check that if we save a state dict again, the ignored parameters and
+        # buffers still have the same data pointer
+        with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
+            sd2 = fsdp_model.state_dict()
+        for tensor, tensor_name in ignored_tensor_to_tensor_name.items():
+            self.assertTrue(tensor_name in sd1)  # check again just in case
+            self.assertTrue(tensor_name in sd2)
+            self.assertEqual(tensor.data_ptr(), sd2[tensor_name].data_ptr())
+            self.assertEqual(sd1[tensor_name].data_ptr(), sd2[tensor_name].data_ptr())
 
 
 instantiate_parametrized_tests(TestFSDPStateDict)

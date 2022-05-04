@@ -39,12 +39,6 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
-from .flatten_params_wrapper import (
-    FLAT_PARAM,
-    FPW_MODULE,
-    FlatParameter,
-    FlattenParamsWrapper,
-)
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
@@ -55,7 +49,13 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _unflatten_optim_state,
 )
-from ._utils import _apply_to_tensors, _replace_by_prefix
+from ._utils import _apply_to_modules, _apply_to_tensors, _replace_by_prefix
+from .flatten_params_wrapper import (
+    FLAT_PARAM,
+    FPW_MODULE,
+    FlatParameter,
+    FlattenParamsWrapper,
+)
 from .wrap import _recursive_wrap
 
 if TYPE_CHECKING:
@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 
 _TORCHDISTX_AVAIL = True
 try:
-    from torchdistx import fake, deferred_init
+    from torchdistx import deferred_init, fake
 except ImportError:
     _TORCHDISTX_AVAIL = False
 
@@ -486,10 +486,10 @@ class FullyShardedDataParallel(nn.Module):
             accuracy during model training. If ``None``, no mixed precision is applied.
             (Default: ``None``)
         ignored_modules (Optional[Iterable[torch.nn.Module]]): Modules whose
-            own parameters and child modules' parameters are ignored by this
-            instance. None of the modules directly in ``ignored_modules``
-            should be :class:`FullyShardedDataParallel` instances, and any
-            child modules that are already-constructed
+            own parameters and child modules' parameters and buffers are
+            ignored by this instance. None of the modules directly in
+            ``ignored_modules`` should be :class:`FullyShardedDataParallel`
+            instances, and any child modules that are already-constructed
             :class:`FullyShardedDataParallel` instances will not be ignored if
             they are nested under this instance. This argument may be used to
             avoid sharding specific parameters when using an
@@ -784,9 +784,7 @@ class FullyShardedDataParallel(nn.Module):
         wrapping occurs, which means that we cannot start a module walk from
         ``self`` as in this method.
         """
-        ignored_named_tensors = set()
-
-        def f(ignored_named_tensors, module: torch.nn.Module, prefix: str):
+        def module_fn(module, prefix, ignored_named_tensors, ignored_modules):
             if module in ignored_modules:
                 assert not isinstance(module, FullyShardedDataParallel) and \
                     not isinstance(module, FlattenParamsWrapper), \
@@ -795,14 +793,14 @@ class FullyShardedDataParallel(nn.Module):
                 for param_name, param in named_tensor_fn(module):
                     prefixed_param_name = clean_param_name(prefix + param_name)
                     ignored_named_tensors.add((prefixed_param_name, param))
-            for submodule_name, submodule in module.named_children():
-                if submodule is not None:
-                    new_prefix = prefix + submodule_name + "."
-                    f(ignored_named_tensors, submodule, new_prefix)
 
-        # We must recurse from `self` to get the fully prefixed names
-        f(ignored_named_tensors, self, "")
-        return ignored_named_tensors
+        def return_fn(ignored_named_tensors, *args):
+            return ignored_named_tensors
+
+        ignored_named_tensors = set()
+        return _apply_to_modules(
+            self, module_fn, return_fn, ignored_named_tensors, ignored_modules,
+        )
 
     def _get_ignored_named_parameters(self) -> Set[Tuple[str, torch.Tensor]]:
         """Returns the named parameters of the modules in ``ignored_modules``,
@@ -3422,8 +3420,6 @@ def _get_param_to_unflat_param_names(
         model (torch.nn.Module): Root module (which may or may not be a
             :class:`FullyShardedDataParallel` instance).
     """
-    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
-
     def _clean_param_name(prefix, param_info):
         """This replicates the parameter name cleaning logic in model state
         dict but avoids gathering any parameters."""
@@ -3432,9 +3428,7 @@ def _get_param_to_unflat_param_names(
         )
         return name
 
-    def f(param_to_unflat_param_names, module: torch.nn.Module, prefix: str):
-        # For FSDP modules, only add the entry when considering the contained
-        # `FlattenParamsWrapper` to avoid duplication
+    def module_fn(module, prefix, param_to_unflat_param_names):
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
                 prefixed_param_names = [
@@ -3447,13 +3441,13 @@ def _get_param_to_unflat_param_names(
                 if not is_shared_param:
                     param_to_unflat_param_names[param] = prefixed_param_names
 
-        for submodule_name, submodule in module.named_children():
-            if submodule is not None:
-                new_prefix = prefix + submodule_name + "."
-                f(param_to_unflat_param_names, submodule, new_prefix)
+    def return_fn(param_to_unflat_param_names):
+        return param_to_unflat_param_names
 
-    f(param_to_unflat_param_names, model, "")
-    return param_to_unflat_param_names
+    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
+    return _apply_to_modules(
+        model, module_fn, return_fn, param_to_unflat_param_names,
+    )
 
 
 def _get_param_to_param_name(
