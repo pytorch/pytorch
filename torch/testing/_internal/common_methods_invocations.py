@@ -903,7 +903,7 @@ class OpInfo(object):
 
     def __str__(self):
         class_name = self.__class__.__name__
-        indent = (len(class_name) + 1) * ' '
+        indent = (len(class_name) + 1) * " "
 
         field_list = [(f.name, getattr(self, f.name)) for f in fields(self) if f.repr]
 
@@ -913,12 +913,12 @@ class OpInfo(object):
 
             # 80 is the max_width, if the len is over it we split the args over multiple lines
             if len(field_str) >= 80:
-                max_indent = (len(f[0]) + 3) * ' '
-                field_str = f",\n{indent + max_indent}".join(field_str.split(','))
+                max_indent = (len(f[0]) + 3) * " "
+                field_str = f",\n{indent + max_indent}".join(field_str.split(","))
 
             fields_str.append(field_str)
 
-        fields_str = f',\n{indent}'.join(fields_str)
+        fields_str = f",\n{indent}".join(fields_str)
         return f"{class_name}({fields_str})"
 
     def get_op(self):
