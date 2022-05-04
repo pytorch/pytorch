@@ -3,6 +3,7 @@
 import tempfile
 import torch
 from copy import deepcopy
+from torch.library import Library
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, no_dispatch
@@ -15,8 +16,8 @@ from functools import partial
 class TestPythonRegistration(TestCase):
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
-        my_lib1 = torch.library.extend_library("aten")
-        my_lib2 = torch.library.extend_library("aten")
+        my_lib1 = Library("aten", "IMPL")
+        my_lib2 = Library("aten", "IMPL")
 
         # Example 1
         def my_neg(*args, **kwargs):
@@ -31,9 +32,9 @@ class TestPythonRegistration(TestCase):
         # RuntimeError: impl("aten::neg", ...):
         # Explicitly provided namespace (aten) in operator name does not match ...
         with self.assertRaisesRegex(RuntimeError, "operator name does not match namespace"):
-            my_lib3 = torch.library.extend_library("foo")
+            my_lib3 = Library("foo", "IMPL")
             my_lib3.impl(torch.ops.aten.neg.default, my_neg, "AutogradCPU")
-            my_lib3.remove()
+            del my_lib3
 
         # Example 2
         def my_mul(*args, **kwargs):
@@ -50,12 +51,12 @@ class TestPythonRegistration(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'already a kernel registered from python'):
             my_lib2.impl(torch.ops.aten.mul.Tensor, my_mul, "ZeroTensor")
 
-        my_lib1.remove()
+        del my_lib1
 
         # Validate that lib2 is not affected by removing lib1
         self.assertFalse(torch.mul(x, y)._is_zerotensor())
 
-        my_lib2.remove()
+        del my_lib2
 
         # Validate that the old behavior is restored for neg and mul
         self.assertFalse(torch.neg(x).is_neg())
@@ -69,19 +70,19 @@ class TestPythonRegistration(TestCase):
             run[0] = True
             return args[0]
 
-        my_lib1 = torch.library.extend_library("aten")
+        my_lib1 = Library("aten", "IMPL")
         my_lib1.impl('aten::sum', my_sum, "CPU")
         x = torch.tensor([1, 2])
         self.assertEqual(torch.sum(x), x)
         self.assertTrue(run[0])
-        my_lib1.remove()
+        del my_lib1
         # Validate that the old behavior is restored for sum
         self.assertEqual(torch.sum(x), torch.tensor(3))
 
     def test_extend_library_with_dispatch_key_arg(self):
         def my_sum(*args, **kwargs):
             return args[0]
-        my_lib1 = torch.library.extend_library("aten", "CPU")
+        my_lib1 = Library("aten", "IMPL", dispatch_key="CPU")
 
         # RuntimeError: Explicitly provided dispatch key (Conjugate) is
         # inconsistent with the dispatch key of the enclosing TORCH_LIBRARY_IMPL block
@@ -90,7 +91,7 @@ class TestPythonRegistration(TestCase):
         my_lib1.impl('aten::sum', my_sum)
         x = torch.tensor([1, 2])
         self.assertEqual(torch.sum(x), x)
-        my_lib1.remove()
+        del my_lib1
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
