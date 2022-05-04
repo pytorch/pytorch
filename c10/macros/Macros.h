@@ -1,5 +1,6 @@
 #ifndef C10_MACROS_MACROS_H_
 #define C10_MACROS_MACROS_H_
+#include <cassert>
 
 /* Main entry for c10/macros.
  *

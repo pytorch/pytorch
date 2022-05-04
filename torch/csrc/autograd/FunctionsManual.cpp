@@ -3783,7 +3783,7 @@ Tensor fft_r2c_backward(const Tensor& grad, IntArrayRef dim, int64_t normalizati
   new_grad_shape[last_dim] = last_dim_size;
 
   const auto zero_length = last_dim_size - grad.size(dim.back());
-  auto complex_full_grad = zero_length > 0 ? at::zeros(new_grad_shape, grad.options()) : grad;
+  auto complex_full_grad = zero_length > 0 ? grad.new_zeros(new_grad_shape) : grad;
   if (zero_length > 0) {
     complex_full_grad.slice(last_dim, 0, half_sizes[last_dim]).copy_(grad);
   }
@@ -4753,13 +4753,21 @@ Tensor linalg_solve_jvp(
   at::NoTF32Guard disable_tf32;
   // For left=True (left=False is analogous)
   // dX = A^{-1}(dB - dAX)
-  const bool vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
-  // This case is disallowed in the forward as A.shape = (*, 1, 1)
+
+  // [NumPy compat] Case where the rhs is a vector.
+  // We denote with an underscore vectors that have been converted to matrices by `unsqueeze(-1)`
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, X);
+  const auto vector_to_matrix = [vector_case](const Tensor& X) { return vector_case ? X.unsqueeze(-1) : X; };
+  const auto matrix_to_vector = [vector_case](const Tensor& X) { return vector_case ? X.squeeze(-1) : X; };
+
+  // This case is disallowed in the primal operation as A.shape = (*, 1, 1)
   TORCH_INTERNAL_ASSERT(left || !vector_case);
-  auto X_ = vector_case ? X.unsqueeze(-1) : X;
-  auto R = left ? dA.matmul(X_) : X_.matmul(dA);
-  R = vector_case ? R.squeeze(-1) : R;
-  return at::linalg_lu_solve(LU, pivots, dB - R, left, /*adjoint*/use_A_T);
+
+  auto X_ = vector_to_matrix(X);
+  auto dB_ = vector_to_matrix(dB);
+  auto R_ = left ? dA.matmul(X_) : X_.matmul(dA);
+  auto dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left, /*adjoint*/use_A_T);
+  return matrix_to_vector(dX_);
 }
 
 std::tuple<Tensor, Tensor> linalg_solve_backward(
@@ -4778,27 +4786,29 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
   if (!gX.defined() || (!A_requires_grad && !B_requires_grad)) {
     return {};
   }
-  auto LU_ = LU;
-  auto pivots_ = pivots;
+
+  // [NumPy compat] Case where the rhs is a vector.
+  // We denote with an underscore vectors that have been converted to matrices by `unsqueeze(-1)`
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, X);
+  const auto vector_to_matrix = [vector_case](const Tensor& X) { return vector_case ? X.unsqueeze(-1) : X; };
+  const auto matrix_to_vector = [vector_case](const Tensor& X) { return vector_case ? X.squeeze(-1) : X; };
+
   // If the user is going to compute higher order gradients, then we need to recompute the LU and the pivots
-  Tensor gB;
+  Tensor gB_;
   if (at::GradMode::is_enabled()) {
-    gB = at::linalg_solve(A.mH(), gX, left);
+    gB_ = at::linalg_solve(A.mH(), vector_to_matrix(gX), left);
   } else {
     const auto use_A_T = A.is_contiguous() && !A.is_complex();
-    gB = at::linalg_lu_solve(LU, pivots, gX, left, /*adjoint*/!use_A_T);
+    gB_ = at::linalg_lu_solve(LU, pivots, vector_to_matrix(gX), left, /*adjoint*/!use_A_T);
   }
 
-  if (!A_requires_grad) {
-    return std::make_tuple(Tensor{}, gB);
-  } else {
-    const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, X);
-    auto gB_ = vector_case ? gB.unsqueeze(-1) : gB;
-    auto X_ = vector_case ? X.unsqueeze(-1) : X;
-    auto gA = left ? -gB_.matmul(X_.mH()) : -X_.mH().matmul(gB_);
-    return std::make_tuple(vector_case ? gA.squeeze(-1) : gA,
-                           B_requires_grad ? gB : Tensor{});
+  Tensor gA_;
+  if (A_requires_grad) {
+    auto X_ = vector_to_matrix(X);
+    gA_ = left ? -gB_.matmul(X_.mH()) : -X_.mH().matmul(gB_);
   }
+  return std::make_tuple(A_requires_grad ? matrix_to_vector(gA_) : Tensor{},
+                         B_requires_grad ? matrix_to_vector(gB_) : Tensor{});
 }
 
 Tensor solve_jvp(
