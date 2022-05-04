@@ -220,7 +220,7 @@ Tensor isfinite(const Tensor& self) {
 
   // Note: a complex value is finite iff both parts are finite
   if (self.is_complex()) {
-    return at::isfinite(self.abs());
+    return at::isfinite(at::real(self)).__iand__(at::isfinite(at::imag(self)));
   }
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "isfinite", [&]() {
