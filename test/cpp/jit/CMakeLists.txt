@@ -75,6 +75,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_lite_trainer.cpp
   ${JIT_TEST_ROOT}/test_memory_dag.cpp
   ${JIT_TEST_ROOT}/test_misc.cpp
+  ${JIT_TEST_ROOT}/test_profiling_pass.cpp
   ${JIT_TEST_ROOT}/test_mobile_type_parser.cpp
   ${JIT_TEST_ROOT}/test_module_api.cpp
   ${JIT_TEST_ROOT}/test_peephole_optimize.cpp

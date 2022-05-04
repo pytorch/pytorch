@@ -1624,6 +1624,9 @@ TORCH_API std::vector<Node*> findAllNodes(
     Symbol kind,
     bool recurse);
 
+TORCH_API void RegisterFusionSubgraphKind(Symbol k);
+TORCH_API bool IsFusionSubgraphKind(Symbol k);
+
 struct TORCH_API OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
   std::vector<std::shared_ptr<Operator>> getOps() const;

@@ -9,6 +9,7 @@
 #include <queue>
 #include <utility>
 #include <vector>
+#include "jit/ir/ir.h"
 
 namespace torch {
 namespace jit {
@@ -268,7 +269,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   };
 
   return handled.count(sym) || unneeded.count(sym) ||
-      !required_namespaces.count(sym.ns());
+      !required_namespaces.count(sym.ns()) || IsFusionSubgraphKind(sym);
 }
 
 } // anonymous namespace
@@ -350,7 +351,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
 void registerOperator(Operator&& op) {
   if (op.schema().is_varret()) {
     Symbol s = Symbol::fromQualString(op.schema().name());
-    if (!printerHasSpecialCaseFor(s)) {
+    if (!printerHasSpecialCaseFor(s) && !IsFusionSubgraphKind(s)) {
       AT_ERROR(
           "Missing special case in python printer for non-schematized"
           " operator ",

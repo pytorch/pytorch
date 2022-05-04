@@ -19,9 +19,8 @@ bool canRunWithAutograd(Node* node) {
       return false;
     }
   }
-  return kind != prim::FusionGroup && kind != prim::CudaFusionGroup &&
-      kind != prim::TypeCheck && kind != prim::TensorExprGroup &&
-      kind != prim::CudaFusionGuard && (kind.is_aten() || kind.is_prim());
+  return kind != prim::FusionGroup &&
+      kind != prim::TypeCheck && kind != prim::CudaFusionGuard && (kind.is_aten() || kind.is_prim()) && !IsFusionSubgraphKind(kind);
 }
 
 namespace {

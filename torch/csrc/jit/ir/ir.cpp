@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -49,6 +50,9 @@ std::string getNodesModuleHierarchy(const Node& n) {
 } // namespace utils
 
 namespace {
+
+std::mutex fused_symbol_lock;
+std::unordered_set<Symbol> fused_symbol_kinds = {prim::TensorExprGroup, prim::TensorExprDynamicGroup, prim::CudaFusionGroup};
 
 // Constants relating to maintaining the topological index of nodes.
 //
@@ -1211,24 +1215,6 @@ bool Node::hasSideEffects() const {
     return false;
   }
 
-  if (kind_.is_prim() || kind_.is_aten() || kind_.is_cuda()) {
-    // TODO There is nothing in the system that relies on aten:: and prim::
-    // ops using AliasAnalysisKind::FROM_SCHEMA,
-    // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, or
-    // AliasAnalysisKind::CONSERVATIVE but this is the intended behavior for all
-    // current ops and a good error check. We can consider lifting this
-    // constraint later if we have a use case for it.
-    TORCH_INTERNAL_ASSERT(
-        op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
-            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA ||
-            op->aliasAnalysisKind() == AliasAnalysisKind::CONSERVATIVE,
-        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE"
-        ", AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::CONSERVATIVE but ",
-        kind_.toDisplayString(),
-        " has ",
-        toString(op->aliasAnalysisKind()));
-  }
-
   switch (op->aliasAnalysisKind()) {
     case AliasAnalysisKind::PURE_FUNCTION:
     case AliasAnalysisKind::FROM_SCHEMA:
@@ -2315,6 +2301,15 @@ bool Node::isMemberOf(const OperatorSet& os) const {
     }
   }
   return false;
+}
+
+void RegisterFusionSubgraphKind(Symbol kind) {
+  std::lock_guard<std::mutex> lock(fused_symbol_lock);
+  fused_symbol_kinds.insert(kind);
+}
+bool IsFusionSubgraphKind(Symbol kind) {
+  std::lock_guard<std::mutex> lock(fused_symbol_lock);
+  return fused_symbol_kinds.count(kind) != 0;
 }
 
 } // namespace jit
