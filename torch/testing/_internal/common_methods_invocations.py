@@ -10372,7 +10372,11 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                     always_returns_bool=True,
                     supports_autograd=False,
-                    sample_inputs_func=sample_inputs_comparison_ops),
+                    sample_inputs_func=sample_inputs_comparison_ops,
+                    skips=(
+                        # https://github.com/pytorch/pytorch/issues/76805
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                    )),
     BinaryUfuncInfo('fmax',
                     op=torch.fmax,
                     dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -13583,7 +13587,11 @@ op_db: List[OpInfo] = [
                     aliases=('not_equal',),
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                     always_returns_bool=True,
-                    supports_autograd=False,),
+                    supports_autograd=False,
+                    skips=(
+                        # https://github.com/pytorch/pytorch/issues/76805
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                    )),
     OpInfo('narrow',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
@@ -13950,6 +13958,8 @@ op_db: List[OpInfo] = [
                     lhs_make_tensor_kwargs={'exclude_zero': True},
                     supports_out=False,
                     skips=(
+                        # https://github.com/pytorch/pytorch/issues/76806
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
                     ),
@@ -17561,6 +17571,10 @@ def _inherit_constructor_args(name, op, inherited, overrides):
         del kwargs['self']
     if '__class__' in kwargs:
         del kwargs['__class__']
+    if 'skips' in kwargs:
+        del kwargs['skips']
+    if 'decorators' in kwargs:
+        del kwargs['decorators']
 
     # Overrides metadata
     kwargs.update(common_kwargs)
@@ -17819,6 +17833,10 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.float_power",
         torch_opinfo_name="float_power",
+        skips=(
+            # Test doesn't account for float -> double type promotion
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
@@ -17903,9 +17921,9 @@ python_ref_db = [
             # torch function issue:
             # ValueError: Callable cat has no meta function!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_meta_functions'),
-            # torch.cat can't handle chalf or cdouble type promotion properly
+            # eager torch.cat incorrectly throws an error for a chalf x double x half type promotion case
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf, torch.cfloat))
+                         dtypes=(torch.chalf,)),
         )
     ),
     PythonRefInfo(
@@ -17938,6 +17956,7 @@ python_ref_db = [
 ops_and_refs = op_db + python_ref_db
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
+binary_ufuncs_and_refs = tuple(op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo))
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
