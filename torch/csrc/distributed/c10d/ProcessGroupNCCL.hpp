@@ -49,7 +49,7 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 // internal comm streams
 // Instead, it stashes live references to those tensors until after
 // user-facing streams are synced with comm streams.
-// See non_outputs_stashed_for_allocator_safety_ below.
+// See stashed_for_allocator_safety_ below.
 constexpr const char* NCCL_AVOID_RECORD_STREAMS = "NCCL_AVOID_RECORD_STREAMS";
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
@@ -231,9 +231,9 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
     // By keeping these refs (as well as outputs_) alive until after the
     // collective's work rejoins the user-facing streams, we achieve
     // caching allocator safety without any recordStream calls.
-    // For in-place collectives, refs stashed here may alias outputs_,
+    // For in-place collectives, some refs stashed here may alias outputs_,
     // but that doesn't do any harm.
-    std::shared_ptr<std::vector<at::Tensor>> non_outputs_stashed_for_allocator_safety_;
+    std::shared_ptr<std::vector<at::Tensor>> stashed_for_allocator_safety_;
 
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
