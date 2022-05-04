@@ -146,7 +146,7 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-focal-cuda11.3-py3.7-gcc7)
+  pytorch-linux-focal-cuda11.3-cudnn8-py3-gcc7)
     CUDA_VERSION=11.3.0
     CUDNN_VERSION=8
     TENSORRT_VERSION=8.0.1.6
