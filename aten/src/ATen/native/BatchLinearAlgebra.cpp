@@ -4854,4 +4854,28 @@ Tensor linalg_solve_triangular(
   return out;
 }
 
+Tensor linalg_vander(
+    const Tensor& x,
+    c10::optional<int64_t> N) {
+  auto t = x.scalar_type();
+  TORCH_CHECK(t == ScalarType::Float ||
+              t == ScalarType::Double ||
+              t == ScalarType::ComplexFloat ||
+              t == ScalarType::ComplexDouble ||
+              isIntegralType(t),
+              "linalg.vander supports floating point, complex, and integer tensors, but got ", t);
+  const auto x_ = x.dim() == 0 ? x.unsqueeze(-1) : x;
+
+  auto shape = x_.sizes().vec();
+  const auto n = N.value_or(shape.back());
+  TORCH_CHECK(n > 1, "N must be greater than 1.");
+
+  // Append cumprod of the oher 0...n-1 powers
+  shape.push_back(n - 1);
+  auto result = at::cumprod(x_.unsqueeze(-1).expand(shape), -1);
+  // The row of ones
+  shape.back() = 1LL;
+  auto ones =  result.new_ones(shape);
+  return at::cat({ones, result}, /*dim=*/ -1);
+}
 }}  // namespace at::native
