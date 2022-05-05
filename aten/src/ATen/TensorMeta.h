@@ -81,7 +81,8 @@ struct TORCH_API MetaBase {
   // instead. In order to decide which variant to use, check the following
   // decision tree:
   //
-  // - Can the output tensor have arbitrary strides?
+  // - Can the kernel you are going to implement support output tensors
+  //   with arbitrary strides?
   //     |
   //     -- YES: `set_output_raw_strided`
   //     |
