@@ -9,6 +9,7 @@ def func_name_base_str(g: NativeFunctionsGroup) -> str:
 
 is_hand_written_ops_ = frozenset(
     (
+        "abs",
         "add",
         "addmm",
         "all",
@@ -16,12 +17,18 @@ is_hand_written_ops_ = frozenset(
         "argmin",
         "bmm",
         "clamp",
+        "clamp_min",
         "cumsum",
         "div",
         "fmod",
+        "index_select",
         "leaky_relu",
+        "linear",
         "log",
+        "matmul",
         "mul",
+        "narrow_copy",
+        "nonzero",
         "pow",
         "remainder",
         "sigmoid",
@@ -39,6 +46,140 @@ def is_hand_written(g: NativeFunctionsGroup) -> bool:
 
 def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> None:
     assert index == 0 or index == 1
+    if op_name == "addr":
+        if index == 0:
+            arg_map["self"] = "at::rand({6, 6})"
+            arg_map["vec1"] = "at::rand({6})"
+            arg_map["vec2"] = "at::rand({6})"
+        else:
+            arg_map["self"] = "at::rand({22, 22})"
+            arg_map["vec1"] = "at::rand({22})"
+            arg_map["vec2"] = "at::rand({22})"
+        return
+    if op_name == "mv":
+        if index == 0:
+            arg_map["self"] = "at::rand({6, 6})"
+            arg_map["vec"] = "at::rand({6})"
+        else:
+            arg_map["self"] = "at::rand({22, 22})"
+            arg_map["vec"] = "at::rand({22})"
+        return
+    if op_name == "addbmm":
+        if index == 0:
+            arg_map["self"] = "at::rand({6, 6})"
+        else:
+            arg_map["self"] = "at::rand({22, 22})"
+        return
+    if op_name == "cross":
+        if index == 0:
+            arg_map["self"] = "at::rand({3, 3, 3})"
+            arg_map["other"] = "at::rand({3, 3, 3})"
+        else:
+            arg_map["self"] = "at::rand({22, 3, 22})"
+            arg_map["other"] = "at::rand({22, 3, 22})"
+        return
+    if op_name == "take":
+        if index == 0:
+            arg_map["index"] = "at::randint(0, 216, {20}, torch::kInt64)"
+        else:
+            arg_map["index"] = "at::randint(0, 1000, {100}, torch::kInt64)"
+        return
+    if op_name == "take_along_dim":
+        if index == 0:
+            arg_map["indices"] = "at::argsort(self0, 1)"
+        else:
+            arg_map["indices"] = "at::argsort(self1, 1)"
+        return
+    if op_name == "masked_select":
+        if index == 0:
+            arg_map["mask"] = "at::randn({6, 6, 6}) > 0.5"
+        else:
+            arg_map["mask"] = "at::rand({22, 22, 22}) > 0.5"
+        return
+    if op_name == "orgqr":
+        if index == 0:
+            arg_map["input2"] = "at::rand({6, 6})"
+        else:
+            arg_map["input2"] = "at::rand({22, 22})"
+        return
+    if op_name == "ormqr":
+        if index == 0:
+            arg_map["input2"] = "at::rand({6, 6})"
+        else:
+            arg_map["input2"] = "at::rand({22, 22})"
+        return
+    if op_name == "quantile":
+        if index == 0:
+            arg_map["q"] = "at::rand({6})"
+            arg_map["interpolation"] = '"linear"'
+        else:
+            arg_map["q"] = "at::rand({22})"
+            arg_map["interpolation"] = '"linear"'
+        return
+    if op_name == "nanquantile":
+        if index == 0:
+            arg_map["q"] = "at::rand({6})"
+            arg_map["interpolation"] = '"linear"'
+        else:
+            arg_map["q"] = "at::rand({22})"
+            arg_map["interpolation"] = '"linear"'
+        return
+    if op_name == "multi_margin_loss":
+        if index == 0:
+            arg_map["self"] = "at::rand({6, 6})"
+            arg_map["target"] = "at::randint(6, {6}, torch::kInt64)"
+            arg_map["weight"] = "at::rand({6})"
+        else:
+            arg_map["self"] = "at::rand({22, 22})"
+            arg_map["target"] = "at::randint(22, {22}, torch::kInt64)"
+            arg_map["weight"] = "at::rand({22})"
+        return
+    if op_name == "multilabel_margin_loss":
+        if index == 0:
+            arg_map["self"] = "at::rand({6, 6})"
+            arg_map["target"] = "at::randint(6, {6, 6}, torch::kInt64)"
+        else:
+            arg_map["self"] = "at::rand({22, 22})"
+            arg_map["target"] = "at::randint(22, {22, 22}, torch::kInt64)"
+        return
+    if op_name == "nll_loss":
+        if index == 0:
+            arg_map["self"] = "at::rand({6, 6})"
+            arg_map["target"] = "at::randint(6, {6}, torch::kInt64)"
+            arg_map["weight"] = "at::rand({6})"
+        else:
+            arg_map["self"] = "at::rand({22, 22})"
+            arg_map["target"] = "at::randint(22, {22}, torch::kInt64)"
+            arg_map["weight"] = "at::rand({22})"
+        return
+    if op_name == "nll_loss2d":
+        if index == 0:
+            arg_map["self"] = "at::rand({6, 6, 6, 6})"
+            arg_map["target"] = "at::randint(6, {6, 6, 6}, torch::kInt64)"
+            arg_map["weight"] = "at::rand({6})"
+        else:
+            arg_map["self"] = "at::rand({22, 22, 22, 22})"
+            arg_map["target"] = "at::randint(22, {22, 22, 22}, torch::kInt64)"
+            arg_map["weight"] = "at::rand({22})"
+        return
+    if op_name in (
+        "fft_fft",
+        "fft_ifft",
+        "fft_rfft",
+        "fft_irfft",
+        "fft_hfft",
+        "fft_ihfft",
+    ):
+        arg_map["norm"] = '"forward"'
+        return
+    if op_name == "linalg_tensorinv":
+        if index == 0:
+            arg_map["self"] = "at::rand({6, 6, 6, 6})"
+            arg_map["ind"] = "2"
+        else:
+            arg_map["self"] = "at::rand({22, 22, 22, 22})"
+            arg_map["ind"] = "2"
+        return
     if op_name == "addmv":
         if index == 0:
             arg_map["self"] = "at::rand({2})"
@@ -170,6 +311,13 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
             arg_map["src"] = "at::randint(1, 100, {5,5,5}, torch::kInt64)"
         if "reduce" in arg_map:
             arg_map["reduce"] = '"sum"' if op_name == "_scatter_reduce" else '"add"'
+        return
+    if op_name == "scatter_reduce":
+        arg_map["reduce"] = '"mean"'
+        if index == 0:
+            arg_map["index"] = "at::randint(6, {6, 6, 6}, torch::kInt64)"
+        else:
+            arg_map["index"] = "at::randint(22, {22, 22, 22}, torch::kInt64)"
         return
     if op_name == "special_zeta":
         if index == 0:
