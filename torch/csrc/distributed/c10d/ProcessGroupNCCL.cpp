@@ -1725,7 +1725,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
   return allreduce_impl(tensors, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast_impl(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
   check_gpu_tensors_different_devices(tensors);

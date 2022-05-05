@@ -226,7 +226,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
     return options_;
   }
 
-  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast_impl(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 

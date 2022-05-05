@@ -929,7 +929,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
 } // namespace
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast_impl(
     std::vector<at::Tensor>& inputs,
     const BroadcastOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
